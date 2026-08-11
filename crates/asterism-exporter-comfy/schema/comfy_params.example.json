@@ -1,0 +1,27 @@
+{
+  "endpoint": "http://127.0.0.1:8188",
+  "workflow": {
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 12345,
+        "steps": 30,
+        "cfg": 6.5,
+        "sampler_name": "dpmpp_2m",
+        "scheduler": "karras",
+        "denoise": 0.6
+      }
+    },
+    "10": {
+      "class_type": "LoadImage",
+      "inputs": { "image": "<will be substituted with input asset locator>" }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": { "filename_prefix": "album" }
+    }
+  },
+  "output_dir": "/optional/absolute/path",
+  "input_slot": "10",
+  "poll_interval_ms": 2000
+}

@@ -1,0 +1,29 @@
+{
+  "dispatch_id": "01000000-0000-7000-a000-000000000001",
+  "selection_id": "01000000-0000-7000-b000-000000000002",
+  "persona_id": "0a0000e5-4f01-70a1-9b0c-000000000001",
+  "action": "img2img",
+  "exporter_slug": "comfy",
+  "params": {
+    "endpoint": "http://127.0.0.1:8188",
+    "workflow": { "9": { "class_type": "SaveImage", "inputs": { "filename_prefix": "album" } } },
+    "input_slot": "10"
+  },
+  "inputs": [
+    {
+      "id": "8a5b1c9d-7e0f-4a11-a2b3-c4d5e6f70801",
+      "persona_id": "0a0000e5-4f01-70a1-9b0c-000000000001",
+      "modality": "image",
+      "occurred_at_ms": 1789085600000,
+      "cover": null,
+      "labels": ["photo", "09"],
+      "file_size_bytes": 4404019,
+      "source_locator": "/private/tmp/album/stress-import/09/big_0999.jpg",
+      "group_ids": ["01000000-0000-7000-8000-000000000009"],
+      "created_at_ms": 1785856577000,
+      "updated_at_ms": 1789085612000,
+      "has_note": false,
+      "has_thread": false
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[package]
+name = "asterism-importer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Unified Asterism import CLI"
+publish = false
+
+[[bin]]
+name = "asterism-import"
+path = "src/main.rs"
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+asterism-importer-cc = { path = "../asterism-importer-cc" }
+asterism-importer-image = { path = "../asterism-importer-image" }
+asterism-importer-video = { path = "../asterism-importer-video" }
+asterism-importer-audio = { path = "../asterism-importer-audio" }
+asterism-importer-persona-journal = { path = "../asterism-importer-persona-journal" }
+asterism-importer-tape = { path = "../asterism-importer-tape" }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

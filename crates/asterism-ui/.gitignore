@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.pnpm-debug.log
+.vite/
+
+# We ship this crate on npm (see workspace journal 2026-07-17: pnpm 11
+# script-approval gate can't be worked around with onlyBuiltDependencies).
+# pnpm-lock.yaml / pnpm-workspace.yaml are byproducts of an ad-hoc
+# `pnpm install` attempt and should never enter git.
+pnpm-lock.yaml
+pnpm-workspace.yaml

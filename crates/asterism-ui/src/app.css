@@ -1,0 +1,9 @@
+/* Global styles for Album UI */
+
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}

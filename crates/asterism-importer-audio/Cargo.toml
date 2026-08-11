@@ -1,0 +1,21 @@
+[package]
+name        = "asterism-importer-audio"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Audio importer for Asterism (MP3 / M4A / WAV / FLAC / OGG via lofty)"
+publish     = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+
+serde_json = { workspace = true }
+chrono     = { workspace = true }
+lofty      = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,44 @@
+{
+  "spec": "asterism_agent_harvest",
+  "spec_version": "1.0",
+  "service": "character.ai",
+  "service_user_id": "user-abc123",
+  "harvested_at": "2026-07-18T12:34:56Z",
+  "characters": [
+    {
+      "id": "seraphina-xyz",
+      "name": "Seraphina",
+      "description": "A gentle healer in a forest glade.",
+      "avatar_uri": null,
+      "extra": {}
+    }
+  ],
+  "conversations": [
+    {
+      "id": "conv-abc",
+      "character_id": "seraphina-xyz",
+      "title": "First encounter",
+      "started_at": "2026-01-01T00:00:00Z",
+      "messages": [
+        {
+          "id": "m1",
+          "role": "user",
+          "body": "hello",
+          "timestamp": "2026-01-01T00:00:01Z",
+          "parent_id": null,
+          "extra": {}
+        },
+        {
+          "id": "m2",
+          "role": "assistant",
+          "body": "welcome, traveler",
+          "timestamp": "2026-01-01T00:00:05Z",
+          "parent_id": "m1",
+          "extra": {}
+        }
+      ],
+      "extra": {}
+    }
+  ],
+  "extra": {}
+}

@@ -1,0 +1,15 @@
+{
+  "output_dir": "/absolute/path/to/dispatch",
+  "mode": "instruction",
+  "filename_template": "{{dispatch_id}}.json",
+  "modality": "image",
+  "labels": ["archive"],
+  "instruction": {
+    "workflow": "sd15/img2img/v3",
+    "prompt": "photo studio portrait, warm rim light",
+    "negative_prompt": "blurry, low res",
+    "steps": 30,
+    "cfg": 6.5,
+    "seed": null
+  }
+}

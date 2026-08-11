@@ -1,0 +1,108 @@
+[package]
+name        = "asterism-infra"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Outbound adapter for Asterism — rusqlite-isle / FS / apalis-sqlite JobStore impl"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-core         = { path = "../asterism-core" }
+asterism-contract     = { path = "../asterism-contract" }
+asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+# The dimension backfill measures through the same code the importers
+# measure through — that is the reason the crate was split out of them.
+# Both features, because the walk meets stills and clips in one table.
+asterism-media-probe  = { path = "../asterism-media-probe", features = ["image", "video"] }
+
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+
+# Filesystem + media pipeline (declared for the imminent thumbnail /
+# EXIF work; not yet used in code).
+walkdir      = { workspace = true }
+notify       = { workspace = true }
+image        = { workspace = true }
+rayon        = { workspace = true }
+kamadak-exif = { workspace = true }
+color-thief  = { workspace = true }
+
+# Job engine: apalis + the apalis-sql SQLite backend (sqlx 0.8 =
+# libsqlite3-sys 0.30, aligned with the `rusqlite-isle` 0.3 line — see
+# the workspace `Cargo.toml` for the rationale).
+apalis     = { workspace = true }
+apalis-sql = { workspace = true }
+
+# SQLite access: `rusqlite-isle` provides a thread-isolated actor with
+# cancellation and an optional reader pool. `rusqlite` is depended on
+# directly so closures can call its API (isle does not re-export it).
+rusqlite-isle = { workspace = true }
+rusqlite      = { workspace = true }
+
+# Session snapshot: rkyv archived Vec + memmap-backed zero-copy read.
+# `list_sessions` drops the SQL aggregate in favour of a single
+# precomputed-snapshot lookup, taking seconds down to the microsecond
+# band. Details in `sqlite/session_view.rs`.
+rkyv      = { workspace = true }
+bytecheck = { workspace = true }
+memmap2   = { workspace = true }
+
+# Full-text search: Tantivy on-disk index + Lindera Japanese tokenizer.
+# Full-body BM25 index; disk footprint at ~1 KB body per asset is
+# 0.1-0.2 MB * 100k = ~20 MB [estimated]. The IPADIC dictionary is
+# embedded into the crate at first build (~50 MB extra compile
+# artifact, no runtime download).
+tantivy = { workspace = true }
+lindera = { workspace = true }
+lindera-tantivy = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+# Fixture builder for the PNG-shaped test corpus used by the walker /
+# fingerprint / job-handler tests. Same rationale as the sibling dev-dep
+# in `asterism-importer-sdk`: building PNGs by hand is the chunk-boundary
+# arithmetic these tests just stopped doing.
+pngmeta  = { version = "0.2.1", features = ["test-util"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# ImageIO fast path for `thumb_gen` — uses Apple's ImageIO framework
+# (backed by the M-series HW JPEG decoder where available) instead of
+# the pure-Rust `image` crate, keeping CPU load off the wave-decode
+# path so other work on the box stays responsive.
+objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFNumber", "CFURL", "CFData"] }
+objc2-core-graphics = { version = "0.3", features = ["CGImage"] }
+objc2-image-io = { version = "0.3", features = [
+    "objc2-core-graphics",
+    "CGImageSource",
+    "CGImageDestination",
+] }
+# Video frame extraction for `thumb_gen`. Neither ImageIO above nor the
+# `image` crate can decode a video, so a video asset would have no
+# thumbnail at all; AVFoundation's `AVAssetImageGenerator` pulls one
+# frame as a `CGImage`, which the ImageIO encoder above then turns into
+# the same JPEG blob shape every other thumbnail uses. The call is
+# synchronous, so it fits the existing `spawn_blocking` decode path.
+# macOS-only by construction — see `thumb_video` for what other
+# platforms do instead.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSURL", "NSValue", "NSString"] }
+objc2-core-media = { version = "0.3", features = ["CMTime"] }
+objc2-av-foundation = { version = "0.3", features = [
+    "objc2-core-media",
+    "AVAsset",
+    "AVAssetImageGenerator",
+] }

@@ -1,0 +1,30 @@
+[package]
+name        = "asterism-dispatch-sdk"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "SDK for building Asterism outbound Exporters — dispatch/poll/harvest trait + Derived shape (mirror of asterism-importer-sdk on the OUT side)"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+# The SDK sits atop the contract crate (mirror of importer-sdk's
+# layering). Every shared boundary type — DerivedDto, AssetCardDto
+# used as DispatchContext.inputs, and so on — lives in the leaf
+# contract crate so the SDK never needs an asterism-core dep and
+# the core never needs a dispatch-sdk dep. The old direct-to-core
+# attempt caused a cyclic package dependency.
+asterism-contract = { path = "../asterism-contract" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+uuid        = { workspace = true }

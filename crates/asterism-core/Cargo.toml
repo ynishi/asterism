@@ -1,0 +1,74 @@
+[package]
+name        = "asterism-core"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Domain + Application layer for Asterism — Persona aggregate root + JobRunner + Repository trait"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-contract     = { path = "../asterism-contract" }
+# The core no longer depends on `asterism-dispatch-sdk`. Both sides
+# reach each other through the leaf contract crate instead: the SDK
+# once tried to depend on the core directly, and since the core
+# depended on the SDK that closed a package cycle. Moving `DerivedDto`
+# down into `asterism-contract` opened it — the wire type crosses the
+# core / SDK boundary as `asterism_contract::dto::DerivedDto` now, and
+# neither crate needs the other. The SDK-side half of this note is in
+# `asterism-dispatch-sdk/Cargo.toml`.
+
+# Diagnostics only. The core emits no output of its own — it records
+# through `tracing`, and the process that hosts it decides where those
+# records land (stderr, the `diag_log` table, both). That indirection is
+# what lets the application layer report a discarded value without
+# taking a dependency on `asterism-infra`.
+tracing     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+sha2        = { workspace = true }
+base64      = { workspace = true }
+
+# `pngmeta` used to be here, for the PNG chunk walk in
+# `domain::content_region`. Both left together: the walk is a container
+# parser, one implementation per format, and it now sits behind
+# `domain::probe::ArtefactProbe` with the byte-level framing in
+# `asterism-media-probe` (which took the dependency, and the note that
+# went with it) and the region definition in `asterism-infra`'s probe
+# adapter. What stayed is the vocabulary — the markers, the three
+# outcomes, the canonical rendering — none of which reads a byte.
+#
+# `sha2` stays, and it is one of the two external crates the domain
+# layer takes for a measurement: what SHA-256 of these bytes is has one
+# right answer that this repo has no reason to re-derive. `base64` is
+# the other, on the same terms — RFC 4648 has one definition and no
+# per-container variance, which is the property that put `pngmeta` on
+# the far side of this line and keeps both of these on this one.
+# `domain::series` reads it for `Decode::Base64Json`, and it is already
+# in the workspace's build graph via `asterism-importer-sdk`, so
+# nothing new compiles.
+
+# Grid sort collation — see `domain::sort_eval`.
+icu_collator    = { workspace = true }
+icu_locale_core = { workspace = true }
+
+# External integrations are reintroduced from `asterism-server` or the
+# importer / exporter crates, not from this crate — the domain layer
+# stays free of their transitive dependencies.
+# persona-pack     = { workspace = true }
+# persona-journal  = { workspace = true }
+# persona-wire     = { workspace = true }
+# mini-app-mcp     = { workspace = true }
+# outline-mcp-core = { workspace = true }
+# agent-block-core = { workspace = true }

@@ -1,0 +1,86 @@
+[package]
+name        = "asterism-media-probe"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Header-only media measurement for Asterism — coded pixel dimensions, duration and codec, read from bytes"
+publish = false
+
+# Two callers that must not disagree, so the measurement lives in one
+# place: the importers read it at ingest, and the server reads it again
+# when it backfills a row that predates the columns. A second
+# implementation on the server side would mean the same column carries
+# a value measured two ways, told apart by nothing.
+#
+# Feature-gated per medium so neither importer pays for the other's
+# parsers — `asterism-importer-image` has no use for an MP4 reader.
+# The server takes both. `dep:` prefixes keep the optional dependencies
+# from also becoming implicit features, so the two names below are the
+# whole public surface.
+[features]
+default = []
+image = [
+    "dep:kamadak-exif",
+    "dep:imagesize",
+    "dep:image",
+    "dep:chrono",
+    "dep:pngmeta",
+    "dep:base64",
+]
+video = ["dep:mp4parse", "dep:matroska"]
+
+[dependencies]
+kamadak-exif = { workspace = true, optional = true }
+
+# `exif_tags` renders two of EXIF's types as base64: `undefined`, which
+# is how a maker note arrives, and the two float types the specification
+# assigns to no tag. Taken from the workspace rather than written here,
+# because `asterism-core::domain::material_meta_raw` fixes one answer in
+# this workspace to what base64 means — the standard alphabet with
+# canonical padding — and a second implementation beside it is a second
+# answer that nothing would compare. Nothing new enters the build: two
+# other members already take the same line.
+base64       = { workspace = true, optional = true }
+image        = { workspace = true, optional = true }
+chrono       = { workspace = true, optional = true }
+imagesize    = { version = "0.14", optional = true }
+mp4parse     = { version = "0.17", optional = true }
+matroska     = { version = "0.30", optional = true }
+
+# PNG chunk framing for `png`. It arrived here with the walk it frames,
+# out of `asterism-core`, where the same line stood on the same terms as
+# `sha2`: it answers a question with one right answer that this repo has
+# no reason to re-derive — where one chunk ends and the next begins.
+# What is done *with* the chunks stays with whichever caller has an
+# opinion about them; only the boundaries come from outside.
+#
+# `inflate` is not asked for here. It decompresses `zTXt` / `iTXt`, and
+# neither `png::chunks` nor `png::text_fields` decodes either, so a
+# decompressor would be decoding bytes that are then thrown away. The
+# text layer is where the feature belongs, and the importer crates turn
+# it on.
+#
+# That is a statement about what this crate *requires*, not about what
+# gets linked. Cargo unifies features across a workspace build, so
+# `cargo build --workspace` compiles one `pngmeta` with `inflate` on and
+# this crate links it — measured with
+# `cargo tree --workspace -i pngmeta -e features`, which lists the
+# feature, against `cargo tree -p asterism-media-probe -i pngmeta -e
+# features`, which lists only `default`. What keeps a compression bomb
+# out of this module is therefore not this line: it is that the module
+# walks chunks and never calls the text layer at all. The line still
+# earns its place — it keeps the crate buildable on its own without a
+# decompressor, and it says which layer owns the decision — but it is
+# not a boundary, and reading it as one would be reading a build
+# artefact as an invariant.
+pngmeta      = { version = "0.2.1", optional = true }
+
+[dev-dependencies]
+# Fixture construction: the header cases encode an image of a known size
+# and assert the probe reads that size back. Not an optional dependency
+# — the tests always need an encoder, whatever features are on.
+image = { workspace = true }

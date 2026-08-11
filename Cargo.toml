@@ -1,0 +1,183 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/asterism-core",
+    "crates/asterism-infra",
+    "crates/asterism-contract",
+    "crates/asterism-server",
+    "crates/asterism-importer-sdk",
+    "crates/asterism-importer",
+    "crates/asterism-media-probe",
+    "crates/asterism-dispatch-sdk",
+    "crates/asterism-exporter-comfy",
+    "crates/asterism-exporter-file",
+    "crates/asterism-exporter-http",
+    "crates/asterism-importer-cc",
+    "crates/asterism-importer-persona-journal",
+    "crates/asterism-importer-tape",
+    "crates/asterism-importer-image",
+    "crates/asterism-importer-video",
+    "crates/asterism-importer-audio",
+    "crates/asterism-ui/src-tauri",
+    "crates/asterism-benchgen",
+]
+
+[workspace.package]
+authors       = ["Yutaka Nishimura <ytk.nishimura@gmail.com>"]
+license       = "MIT OR Apache-2.0"
+repository    = "https://github.com/ynishi/asterism"
+homepage      = "https://github.com/ynishi/asterism"
+documentation = "https://github.com/ynishi/asterism"
+description   = "Persona/Char/Memory grid UI — local-first Asterism for personal AI companion footprints"
+version       = "0.0.0"
+edition       = "2024"
+
+[workspace.dependencies]
+# --- External integrations (kept commented out until reintroduced) ---
+# The following crates were part of an earlier skeleton and were removed
+# while the domain layer was rebuilt. Reintroduce them one by one as the
+# corresponding integration surface lands.
+# persona-pack     = "0.5"
+# persona-journal  = "0.4"
+# persona-wire     = "0.14"
+# mini-app-mcp     = "0.16"
+# outline-mcp-core = "0.11"
+# agent-block-core = "0.30"
+# journal-mcp      = "0.6"
+
+# --- Tauri v2 (asterism-ui) ---
+# `tauri-plugin-sql` is intentionally not used: SQLite access is unified
+# under `rusqlite-isle`, and the plugin's `libsqlite3-sys` version does
+# not coexist with `rusqlite 0.37` under a single `links = "sqlite3"`.
+tauri = "2"
+
+# --- asterism-server: HTTP API ---
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+# `ReaderStream` — the adapter that turns an open `tokio::fs::File` into
+# the byte stream `axum::body::Body::from_stream` takes. Serving an
+# asset's original by reading it into a `Bytes` first would make the
+# largest allocation in the process proportional to the largest video in
+# the library.
+tokio-util = { version = "0.7", features = ["io"] }
+
+# --- Common ---
+# `tracing` is the one diagnostic channel: call sites emit through it,
+# a fmt Layer writes to stderr (RUST_LOG-controlled), and the
+# `asterism-infra` DiagLog Layer persists records to the `diag_log`
+# table. `log` stays only as the bridge crate other libraries emit
+# through (`tracing-log` picks those up).
+log                = "0.4"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+tokio       = { version = "1", features = ["full"] }
+anyhow      = "1"
+thiserror   = "2"
+async-trait = "0.1"
+uuid        = { version = "1", features = ["v7", "serde"] }
+chrono      = { version = "0.4", features = ["serde"] }
+sha2        = "0.10"
+# Base64. Declared here for the reason `reqwest` is: two crates read the
+# *same* payloads — `asterism-importer-sdk`'s PNG chunk reader decodes a
+# character card's `ccv3`, and `asterism-core`'s `domain::series` decodes
+# it again to derive a series key — so what "standard base64" accepts has
+# to be one answer. Pinned separately, a major bump on one side would
+# move that boundary for one reader and not the other, and the symptom
+# would be a key that stops being derived for cards the importer still
+# accepts.
+base64      = "0.22"
+# HTTP client. Declared at the workspace level so the four crates that
+# already pinned this exact line by hand (server / importer-sdk / the two
+# exporters) and `asterism-benchgen`'s `load-file` loader cannot drift
+# into two reqwest builds — one TLS backend, one linked copy.
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# --- asterism-core: string collation ---
+# The grid sort is a two-sided contract (`domain::sort_eval` +
+# `asterism-ui/src/lib/sort/card-cmp.ts`) and its order is frozen into
+# `asset_bucket.position`, so both halves must agree on how strings
+# compare. The UI half is ICU via `Intl.Collator`; this is the Rust
+# half. `compiled_data` (default) bakes CLDR in, so there is no data
+# file to ship or locate at runtime.
+icu_collator    = "2.2"
+icu_locale_core = "2.2"
+
+# --- asterism-contract: TypeScript / MCP schema bridge ---
+schema-bridge = "0.4"
+# JSON Schema derive for the MCP tool inputs. Optional on the contract
+# crate (feature `json-schema`) so the TS-bindings path stays free of
+# it; `rmcp` integrates with schemars 1.x for `Parameters<T>` schemas.
+schemars = "1"
+
+# --- asterism-server: MCP transport ---
+# Official MCP Rust SDK. `transport-streamable-http-server` is the tower
+# service nested under `/mcp` on the same axum router as the HTTP API;
+# `transport-io` is the stdio pair behind `asterism-server mcp`; the
+# client features are what that stdio proxy uses to forward requests to
+# the running app's `/mcp` (see `mcp_proxy` — the proxy must start with
+# no backend up, so the connection is made lazily per access).
+rmcp = { version = "3", features = [
+    "transport-streamable-http-server",
+    "transport-io",
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
+
+# --- asterism-infra: SQLite access ---
+# `rusqlite-isle` publishes separate release lines per `libsqlite3-sys`
+# cluster (0.2 = 0.28 / 0.3 = 0.30 / 0.4 = 0.35 — see the crate's
+# CHANGELOG). Asterism coexists with `apalis-sql` (sqlx 0.8 =
+# libsqlite3-sys 0.30), so we pin the 0.3 line to keep a single copy of
+# `sqlite3` linked (verified by `cargo tree`).
+rusqlite-isle = { version = "0.3", features = ["tokio", "pool"] }
+rusqlite      = { version = "0.32", features = ["bundled", "uuid"] }
+
+# --- asterism-infra: filesystem + media pipeline (future work) ---
+walkdir      = "2"
+notify       = "8"
+image        = "0.25"
+rayon        = "1"
+kamadak-exif = "0.6"
+# Dominant-color / palette extraction. Runs on the decoded thumbnail
+# buffer inside `thumb_gen` so the extra cost is amortised — no
+# separate image decode.
+color-thief  = "0.2"
+
+# --- asterism-benchgen: seeded synthetic corpus ---
+# The bench corpus is defined by its seed, not by the files it happens to
+# have produced: `rand_chacha`'s ChaCha20 is reproducible across platforms
+# and versions of the crate, so `SpecStream::new(seed)` is the identity of
+# a corpus and the manifest only records what that identity realised.
+# `rand` alone would not do — its thread/OS generators are explicitly not
+# reproducible.
+rand        = "0.9"
+rand_chacha = "0.9"
+
+# --- asterism-infra: job engine ---
+apalis     = { version = "0.7", features = ["limit"] }
+apalis-sql = { version = "0.7", features = ["sqlite", "tokio-comp"] }
+
+# --- asterism-infra: session snapshot (rkyv zero-copy over mmap) ---
+# The datastore is effectively immutable: writes happen per rebuild,
+# and queries do a zero-copy read via rkyv `archived_root` over memmap,
+# leaving caching to the kernel. Details in the `sqlite/session_view.rs`
+# module doc. `bytecheck` is pinned explicitly as a peer dep on the
+# matching line (rkyv 0.7 → bytecheck 0.6) because rkyv 0.7's
+# `validation` feature requires the CheckBytes derive to resolve at the
+# top-level crate.
+rkyv      = { version = "0.7", features = ["validation"] }
+bytecheck = "0.6"
+memmap2   = "0.9"
+
+# --- asterism-infra: full-text search index (Tantivy + Lindera) ---
+# Full-body BM25 index with Lindera Japanese morphological analysis and
+# a Porter stemmer (English) on a single tokenizer chain, persisted to a
+# disk index (`~/.asterism/tantivy/`). It is a durability channel
+# separate from the SQLite tx; on crash the `index_rebuild` job
+# reconstructs it. Details in the `asterism-infra/src/search/` module
+# doc.
+tantivy = "0.25"
+lindera = "4"
+lindera-tantivy = { version = "4", features = ["embed-ipadic"] }

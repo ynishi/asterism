@@ -1,0 +1,27 @@
+# Rust build artifact
+target
+.ryo
+
+# Local scratch: task workspace, git worktrees, AI CLI state
+workspace
+.worktrees
+.claude
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.metadata_cache/
+
+# Tauri (asterism-ui) generated
+crates/asterism-ui/dist/
+crates/asterism-ui/gen/
+.mcp.json
+
+# Coexisting AI CLI scratch (codex CLI local state / AGENTS.md sidecar)
+.codex/
+AGENTS.md
+
+logs
+

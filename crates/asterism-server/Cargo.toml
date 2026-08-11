@@ -1,0 +1,84 @@
+[package]
+name = "asterism-server"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Local API server for Asterism — HTTP (axum) + MCP dual transport over asterism-core"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+name = "asterism_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asterism-server"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"
+# The route e2e drives the real router through `oneshot` rather than
+# binding a port: a handler reached by the wrong method or extractor is a
+# defect no service-level test can see.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+# e2e tests that drive the dispatch seam directly need the typed id
+# (`DispatchService::reify` takes `&DispatchId`, since its production
+# caller is the runner, which already holds one).
+uuid = { workspace = true }
+# The Re-In round-trip e2e drives the *real* importer half in-process:
+# `run_import` (scan → parse → POST /asterism/assets/add-batch) plus the
+# image parser whose `<locator>.meta.json` probe is what declares
+# `derived_from: sidecar`. Test-only — the server does not depend on any
+# importer at runtime (importers are separate binaries that talk HTTP).
+asterism-importer-sdk   = { path = "../asterism-importer-sdk" }
+asterism-importer-image = { path = "../asterism-importer-image" }
+# The tag-admin e2e asks `asset_tag` directly (over a second isle on the
+# same db file) whether a delete left orphan links — both HTTP reads join
+# through `tag`, so they cannot see an orphan once the tag row is gone.
+rusqlite = { workspace = true }
+
+[dependencies]
+asterism-core           = { path = "../asterism-core" }
+asterism-infra          = { path = "../asterism-infra" }
+asterism-contract       = { path = "../asterism-contract", features = ["json-schema"] }
+asterism-dispatch-sdk   = { path = "../asterism-dispatch-sdk" }
+asterism-exporter-comfy = { path = "../asterism-exporter-comfy" }
+asterism-exporter-file  = { path = "../asterism-exporter-file" }
+asterism-exporter-http  = { path = "../asterism-exporter-http" }
+
+# Needed at the composition root to express the trash retention period
+# the AssetService takes as an argument.
+chrono      = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+tracing     = { workspace = true }
+
+axum = { workspace = true }
+clap = { workspace = true }
+# Streams an asset's original off disk into the response body
+# (`GET /asterism/assets/{id}/file`).
+tokio-util = { workspace = true }
+
+# MCP transport: rmcp exposes the curated tool set in `src/mcp.rs` over
+# two transports — streamable-http nested at `/mcp` on the same axum
+# router as the HTTP API, and stdio behind `asterism-server mcp`. Tool
+# input schemas are generated from the same `asterism-contract` DTOs
+# that back HTTP and Tauri IPC (contract feature `json-schema`).
+rmcp     = { workspace = true }
+schemars = { workspace = true }
+
+# The stdio proxy's own probes (GET /asterism/health, POST
+# /asterism/admin/shutdown) — plain HTTP, outside the MCP wire. Same
+# feature shape as the exporter crates so one reqwest is linked.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Future LLM-backed tools call `agent-block-core` indirectly (out of this
+# crate's dependency graph) to keep the surface small.
+# agent-block-core = { workspace = true }

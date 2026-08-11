@@ -1,0 +1,20 @@
+{
+  "id": "8a5b1c9d-7e0f-4a11-a2b3-c4d5e6f70801",
+  "persona_id": "0a0000e5-4f01-70a1-9b0c-000000000001",
+  "modality": "image",
+  "occurred_at_ms": 1789085600000,
+  "cover": "photo studio portrait — big_0999",
+  "labels": ["photo", "09", "jpg", "0001"],
+  "file_size_bytes": 4404019,
+  "source_locator": "/private/tmp/album/stress-import/09/big_0999.jpg",
+  "group_ids": [
+    "01000000-0000-7000-8000-000000000009",
+    "01000000-0000-7000-8000-00000000000d"
+  ],
+  "created_at_ms": 1785856577000,
+  "updated_at_ms": 1789085612000,
+  "rating": 4,
+  "palette": ["#3a2c1b", "#b58a5a", "#e9d8b3", "#8f6a3e", "#1a1108"],
+  "has_note": true,
+  "has_thread": true
+}

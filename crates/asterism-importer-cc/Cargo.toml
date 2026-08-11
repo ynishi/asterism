@@ -1,0 +1,18 @@
+[package]
+name        = "asterism-importer-cc"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Asterism importer for Claude Code session logs (~/.claude/projects/*.jsonl)"
+# Not published to crates.io.
+publish     = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+
+serde_json  = { workspace = true }
+chrono      = { workspace = true }

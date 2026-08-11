@@ -1,0 +1,83 @@
+[package]
+name        = "asterism-ui"
+description = "Tauri v2 desktop UI for Asterism — dense grid + hover constellation burst"
+# Not published to crates.io.
+publish     = false
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+repository.workspace = true
+homepage.workspace   = true
+
+[lib]
+name       = "asterism_ui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "asterism-ui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build    = { version = "2", features = [] }
+asterism-contract = { path = "../../asterism-contract" }
+schema-bridge  = { workspace = true }
+
+[dependencies]
+asterism-core           = { path = "../../asterism-core" }
+asterism-infra          = { path = "../../asterism-infra" }
+asterism-contract       = { path = "../../asterism-contract" }
+asterism-dispatch-sdk   = { path = "../../asterism-dispatch-sdk" }
+asterism-server         = { path = "../../asterism-server" }
+asterism-exporter-comfy = { path = "../../asterism-exporter-comfy" }
+asterism-exporter-file  = { path = "../../asterism-exporter-file" }
+asterism-exporter-http  = { path = "../../asterism-exporter-http" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+chrono      = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+
+tauri            = { workspace = true, features = ["protocol-asset"] }
+# `tauri-plugin-log` removed: it only installed in debug builds, so a
+# bundled app produced no diagnostics at all. `asterism_infra::diag`
+# installs one subscriber for every build and also persists to
+# `diag_log`.
+
+# Loopback HTTP serve inside the UI process (headless-arch C'): the UI
+# holds the single core and serves `asterism_server::http::router`.
+axum = { workspace = true }
+
+tracing = { workspace = true }
+
+# WebDriver surface for the e2e suite (`just ui-e2e`). macOS ships no
+# WKWebView driver, so `tauri-driver` cannot reach this app and the W3C
+# server has to run inside it. `-wdio-webdriver` is that server (port
+# 4445); `-wdio` adds the backend half the specs use —
+# `browser.tauri.execute()`, IPC mocking, backend log capture.
+#
+# Behind a feature, not `[target.'cfg(debug_assertions)'.dependencies]`
+# as upstream suggests. Cargo resolves target-cfg tables against the
+# *target spec*, which carries no `debug_assertions` — the table is
+# always active, so it gates nothing. Measured 2026-07-31: with the
+# upstream form, a `--release` binary still carried the plugins' ACL
+# strings (`wdio:allow-execute`, `plugin:wdio|execute`). The `#[cfg]`
+# on the `init()` call kept the server from starting, but "release
+# cannot link this" was not true.
+#
+# A feature is opt-in at the command line, so the default `cargo build`
+# — including `just dogfood-build`, which produces the app that holds
+# real data — never pulls it in. `just ui-e2e` passes `--features wdio`.
+[features]
+wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+
+[dependencies.tauri-plugin-wdio]
+version  = "1"
+optional = true
+
+[dependencies.tauri-plugin-wdio-webdriver]
+version  = "1"
+optional = true

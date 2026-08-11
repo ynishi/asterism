@@ -1,0 +1,52 @@
+[package]
+name        = "asterism-importer-sdk"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "SDK for building Asterism importers — scanner / parser traits, HTTP client, progress helpers"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-contract = { path = "../asterism-contract" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+walkdir      = { workspace = true }
+notify       = { workspace = true }
+rusqlite     = { workspace = true }
+futures      = "0.3"
+tokio-stream = "0.1"
+reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid         = { version = "1", features = ["v5"] }
+base64       = { workspace = true }
+
+# PNG chunk framing for `card::png_chunk`. Only the `card` module takes
+# it: the `png_text` extractor layer still works from a decoded `&str`,
+# so adapters that never touch PNG do not inherit a binary walker.
+#
+# `inflate` is on here and off in `asterism-core` for opposite reasons.
+# `core::domain::content_region` excludes compressed text from the
+# region, so decoding it would be work thrown away. This module reads
+# text and nothing else: without the feature a single `zTXt` chunk
+# anywhere in a card PNG is an `Error::CompressionUnsupported` instead
+# of a chunk we can read, and a card stored that way would be
+# unreadable for no reason other than the flag.
+pngmeta      = { version = "0.2.1", features = ["inflate"] }
+
+[dev-dependencies]
+# Fixture builder for the chunk-level tests (valid PNGs, duplicate
+# keywords, `zTXt`, deliberately truncated files). Building those by
+# hand is the chunk-boundary arithmetic this crate just stopped doing —
+# writing it again in the tests would put it back.
+pngmeta      = { version = "0.2.1", features = ["test-util"] }

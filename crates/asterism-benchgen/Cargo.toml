@@ -1,0 +1,48 @@
+[package]
+name = "asterism-benchgen"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Seeded synthetic corpus generator for Asterism grid/import benchmarks"
+publish = false
+
+[[bin]]
+name = "asterism-benchgen"
+path = "src/main.rs"
+
+[dependencies]
+# The metadata tier writes through the same repository ports the app
+# writes through, so a schema change reaches the seeder as a compile
+# error instead of as a corpus that quietly stops resembling the
+# product's own rows (see `seed_meta` module doc).
+asterism-core     = { path = "../asterism-core" }
+asterism-infra    = { path = "../asterism-infra" }
+# The file tier posts to the running server, so its request bodies are
+# the wire types themselves — a renamed field is a compile error rather
+# than a silently ignored JSON key.
+asterism-contract = { path = "../asterism-contract" }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+image = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rayon = { workspace = true }
+# `AsyncIsle` is what the repository adapters are built on; the seeder
+# opens the connection and owns the driver's lifetime.
+rusqlite-isle = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+# The importer SDK's `ApiClient` covers add-batch and health but none of
+# the tag / group / meta / trash verbs `load-file` needs, so this is a
+# sibling client on the same crate and the same feature set rather than
+# a second HTTP stack in the workspace.
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

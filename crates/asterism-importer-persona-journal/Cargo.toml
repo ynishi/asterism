@@ -1,0 +1,17 @@
+[package]
+name        = "asterism-importer-persona-journal"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Asterism importer for persona-journal EventLog SQLite (~/.persona-journal/<persona>/_journal.db)"
+publish     = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+
+serde_json  = { workspace = true }
+chrono      = { workspace = true }

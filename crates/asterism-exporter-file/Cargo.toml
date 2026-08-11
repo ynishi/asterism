@@ -1,0 +1,27 @@
+[package]
+name        = "asterism-exporter-file"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Generic filesystem exporter for Asterism — copy / symlink / reference Selection inputs into an output directory (mirror of asterism-importer-image on the OUT side)"
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-contract     = { path = "../asterism-contract" }
+asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+
+[dev-dependencies]
+tokio    = { workspace = true }
+tempfile = "3"

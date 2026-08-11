@@ -1,0 +1,224 @@
+//! Build script — invokes the Tauri build and regenerates the shared
+//! TypeScript bindings.
+//!
+//! Every Command / Query / Response DTO **the UI consumes** is rendered
+//! to `../src/bindings.ts` via `schema-bridge`. Hand-written TypeScript
+//! types are avoided so the two sides never drift apart.
+//!
+//! The list below is explicit, not exhaustive, and nothing checks it
+//! against `asterism-contract`. Two deliberate omissions today, both of
+//! the same shape — a surface the UI does not reach:
+//!
+//! - the diagnostics *read* types (`ListDiagQuery` / `DiagDto`) derive
+//!   `SchemaBridge` but stay out, because reading `/asterism/diag` is
+//!   HTTP-only and the UI never consumes it. The *write* command
+//!   (`RecordDiagCommand`) is in: the webview is itself a diagnostic
+//!   source (`lib/diag.ts`);
+//! - the series Strategy types (`SeriesStrategyDto` and its three
+//!   commands) stay out for the same reason. Registering a rule is an
+//!   HTTP / MCP surface for the agent driving an importer, and the UI
+//!   has no screen for it — the eventual UI is about promoting one
+//!   series to a real Group, which is a different shape from editing
+//!   a rule.
+
+use asterism_contract::command::{
+    AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
+    AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
+    AttachTagBatchResult, AttachTagCommand, CancelJobCommand, CreateDirCommand,
+    CreateDispatchCommand, CreateGroupCommand, CreateModalityCommand, CreateQueryGroupCommand,
+    CreateSavedQueryCommand, CreateThreadCommand, DeclareAssetMetaCommand,
+    DeclareProvenanceCommand, DeleteAssetCommentCommand, DeleteDirCommand,
+    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
+    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSavedQueryCommand,
+    DeleteSessionCommand, DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult,
+    DetachTagCommand, DispatchRunCommand, EditAssetCommentCommand, EditMaterialMarkCommand,
+    EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MoveDirCommand, MoveGroupToDirCommand,
+    PasteImageImportCommand, PatchSessionMetadataCommand, PostAssetCommentCommand,
+    PostMaterialMarkCommand, PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult,
+    PromoteTagToGroupCommand, PromoteTagToGroupResult, PromoteVolatileSelectionCommand,
+    PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand, RebuildEdgesCommand,
+    RecordDiagCommand, RecordEventCommand, RedispatchCommand, RegisterPersonaCommand,
+    RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand, RenameSavedQueryCommand,
+    RenameSessionCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
+    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand, SetPersonaProfileCommand,
+    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
+    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand,
+};
+use asterism_contract::dto::{
+    AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto,
+    AssetIndexEntryDto, AssetIndexPageDto, AssetPageDto, AssetTextDto, ConstellationItemDto,
+    DirDto, DispatchDto, DuplicateAxis, DuplicateConflictDto, DuplicateGroupDto,
+    DuplicateReportDto, DuplicateResolutionDto, EdgeDto, EventDto, GroupDto, GroupLinkDto,
+    GroupSummaryDto, JobDto, JobKindSnapshotDto, JobsSnapshotDto, LineageEdgeDto, LineageNodeDto,
+    LineageViewDto, MaterialMarkDto, MergeAssetsDto, MergeRefusalDto, MergeTotalsDto,
+    MergeWarningDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
+    PersonaThemeDto, ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
+    SavedQueryDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto,
+    TagCountDto, TagDto, ThreadAnchorDto, ThreadDto, VideoPreviewDto,
+};
+use asterism_contract::query::{
+    GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery, RandomAssetsQuery,
+    SearchAssetsQuery,
+};
+use schema_bridge::{SchemaBridge as _, export_types};
+
+fn main() {
+    export_types!(
+        "../src/bindings.ts",
+        // Command
+        RegisterPersonaCommand,
+        ArchivePersonaCommand,
+        TrashPersonaCommand,
+        RestorePersonaCommand,
+        PurgePersonaCommand,
+        AddAssetCommand,
+        AddAssetBatchCommand,
+        AddAssetBatchResult,
+        UpdateAssetMetaCommand,
+        UpdateAssetMetaBatchCommand,
+        UpdateAssetMetaBatchResult,
+        TrashAssetCommand,
+        RestoreAssetCommand,
+        PurgeAssetCommand,
+        // `EmptyTrashCommand` carries no fields, so it has no
+        // `SchemaBridge` derive to export; the UI sends `{}` and only
+        // needs the result type.
+        EmptyTrashResult,
+        DeclareProvenanceCommand,
+        DeclareAssetMetaCommand,
+        RebuildEdgesCommand,
+        CancelJobCommand,
+        CreateGroupCommand,
+        TrashGroupCommand,
+        RestoreGroupCommand,
+        PurgeGroupCommand,
+        AddAssetToGroupCommand,
+        RemoveAssetFromGroupCommand,
+        ReorderGroupAssetsCommand,
+        RenameGroupCommand,
+        MoveGroupToDirCommand,
+        LinkGroupCommand,
+        UnlinkGroupCommand,
+        ReorderGroupChildrenCommand,
+        CreateDirCommand,
+        RenameDirCommand,
+        MoveDirCommand,
+        DeleteDirCommand,
+        SetPersonaThemeCommand,
+        DeletePersonaThemeCommand,
+        SetPersonaProfileCommand,
+        DeletePersonaProfileCommand,
+        CreateModalityCommand,
+        UpdateModalityCommand,
+        DeleteModalityCommand,
+        SetSettingCommand,
+        ResetSettingCommand,
+        RenameSessionCommand,
+        PatchSessionMetadataCommand,
+        DeleteSessionCommand,
+        PasteImageImportCommand,
+        ReorderPersonasCommand,
+        AttachTagCommand,
+        DetachTagCommand,
+        AttachTagBatchCommand,
+        AttachTagBatchResult,
+        DetachTagBatchCommand,
+        DetachTagBatchResult,
+        PromoteTagToGroupCommand,
+        PromoteTagToGroupResult,
+        CreateDispatchCommand,
+        PromoteSnapshotToGroupCommand,
+        PromoteSnapshotToGroupResult,
+        PromoteVolatileSelectionCommand,
+        CreateQueryGroupCommand,
+        UpdateQueryGroupQueryCommand,
+        DispatchRunCommand,
+        RedispatchCommand,
+        CreateSavedQueryCommand,
+        RenameSavedQueryCommand,
+        DeleteSavedQueryCommand,
+        PostAssetCommentCommand,
+        EditAssetCommentCommand,
+        DeleteAssetCommentCommand,
+        PostMaterialMarkCommand,
+        EditMaterialMarkCommand,
+        DeleteMaterialMarkCommand,
+        RecordEventCommand,
+        RecordDiagCommand,
+        ResolveDuplicateConflictCommand,
+        MergeAssetsCommand,
+        // Query
+        ListAssetsQuery,
+        SearchAssetsQuery,
+        RandomAssetsQuery,
+        GetAssetDetailQuery,
+        GetJobStatusQuery,
+        ListEventsQuery,
+        // Response
+        PersonaDto,
+        PersonaThemeDto,
+        PersonaProfileDto,
+        AssetCardDto,
+        AssetPageDto,
+        RetrievedPageDto,
+        RetrievedIdsDto,
+        SampledPageDto,
+        AssetIndexEntryDto,
+        AssetIndexPageDto,
+        AssetDto,
+        TagDto,
+        TagCountDto,
+        SessionDto,
+        SessionPageDto,
+        GroupDto,
+        GroupSummaryDto,
+        DirDto,
+        GroupLinkDto,
+        AssetTextDto,
+        EdgeDto,
+        ConstellationItemDto,
+        ProvenanceViewDto,
+        LineageNodeDto,
+        LineageEdgeDto,
+        LineageViewDto,
+        AssetDetailDto,
+        JobDto,
+        JobKindSnapshotDto,
+        JobsSnapshotDto,
+        SnapshotDto,
+        DispatchDto,
+        SavedQueryDto,
+        AssetCountEntryDto,
+        DuplicateAxis,
+        DuplicateGroupDto,
+        DuplicateReportDto,
+        DuplicateConflictDto,
+        DuplicateResolutionDto,
+        MergeAssetsDto,
+        MergeRefusalDto,
+        MergeWarningDto,
+        MergeTotalsDto,
+        ModalityDefDto,
+        SettingLayerDto,
+        SettingDto,
+        AssetCommentDto,
+        MaterialMarkDto,
+        EventDto,
+        VideoPreviewDto,
+        // App-level Threads.
+        CreateThreadCommand,
+        ArchiveThreadCommand,
+        DeleteThreadCommand,
+        AppendMessageCommand,
+        DeleteMessageCommand,
+        ThreadDto,
+        ThreadAnchorDto,
+        MessageDto,
+        MessageRefDto,
+    )
+    .expect("failed to export TS bindings from asterism-contract");
+    tauri_build::build()
+}

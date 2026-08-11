@@ -1,0 +1,24 @@
+[package]
+name        = "asterism-exporter-http"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Schema-driven HTTP exporter for Asterism — caller supplies dispatch / poll / harvest JSON schema (mirror of asterism-importer-sqlite on the OUT side)"
+publish     = false
+
+[lib]
+
+[dependencies]
+asterism-contract     = { path = "../asterism-contract" }
+asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

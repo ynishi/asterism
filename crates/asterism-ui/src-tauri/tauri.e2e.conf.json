@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Asterism E2E",
+  "identifier": "dev.ynishi.asterism.e2e",
+  "app": {
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "wdio",
+          "description": "WebDriver surface for the e2e suite. Declared inline rather than as a file under capabilities/ because tauri-build parses every file in that directory regardless of which capabilities the config selects — and these permissions name plugins that only exist under the `wdio` cargo feature, so the file alone breaks every ordinary build.",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "wdio:default",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "externalBin": [
+      "../../../target/ffmpeg-sidecar/ffmpeg"
+    ]
+  }
+}

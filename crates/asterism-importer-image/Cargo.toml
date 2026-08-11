@@ -1,0 +1,39 @@
+[package]
+name        = "asterism-importer-image"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Image importer for Asterism — walks a photo directory, extracts EXIF, emits Footprint::Image"
+publish = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+# The measurement itself (EXIF read + header fallback) lives here, not
+# in this crate, because the server has to reach the same answer when it
+# backfills a row that predates the columns — and it cannot call an
+# importer, which is a separate process. See that crate's docs.
+asterism-media-probe  = { path = "../asterism-media-probe", features = ["image"] }
+chrono     = { workspace = true }
+serde_json = { workspace = true }
+# No PNG chunk reader here: the text inside an image is that image's
+# metadata, and the server reads it off the artefact's bytes in the
+# `material_hash` job (`asterism-core::domain::material_meta`). This
+# crate used `pngmeta` only to build the note rows that model removed.
+
+[dev-dependencies]
+# Sidecar detection is a filesystem question, so its test needs a real
+# directory to put a `.meta.json` next to.
+tempfile = "3"
+# Fixture *construction* only — the cases below encode a PNG / JPEG of a
+# known size and then assert what the parser reports back. Measuring is
+# `asterism-media-probe`'s job and this crate no longer links `image`
+# for it; a test that builds its own input still needs an encoder.
+image        = { workspace = true }
+# PNG fixtures, including malformed ones: the truncated file that
+# separates "broken" from "no text" is only worth asserting on if the
+# fixture is built by the same crate that has to reject it.
+pngmeta      = { version = "0.2.1", features = ["test-util"] }

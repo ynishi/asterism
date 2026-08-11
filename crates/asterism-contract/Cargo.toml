@@ -1,0 +1,38 @@
+[package]
+name        = "asterism-contract"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Command / Query DTO for Asterism — schema-bridge derive (TS bindings source of truth)"
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Needed by DerivedDto.occurred_at (moved here from asterism-dispatch-sdk
+# so the SDK can drop its self-defined Derived and the core can consume
+# the shared shape without pulling the SDK).
+chrono     = { workspace = true }
+# Needed by `digest` — the notation `AddAssetCommand::declared_content_hash`
+# is written in, moved here on the same terms chrono was: the importer SDK
+# depends on this crate and nothing else of Asterism's, so a digest it may
+# state has to be spellable from here, and the core consumes the shared
+# notation (re-exporting it) rather than either side keeping a second copy.
+sha2       = { workspace = true }
+
+# Generates TypeScript bindings from the DTOs defined here.
+schema-bridge = { workspace = true }
+
+# JSON Schema derive for the shapes the MCP transport exposes as tool
+# inputs. Optional: the TS-bindings consumers (ui build.rs) never need
+# it, so only `asterism-server` turns the feature on.
+schemars = { workspace = true, optional = true }
+
+[features]
+json-schema = ["dep:schemars"]

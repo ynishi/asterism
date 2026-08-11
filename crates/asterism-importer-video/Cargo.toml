@@ -1,0 +1,27 @@
+[package]
+name        = "asterism-importer-video"
+autobins    = false
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Video importer for Asterism (MP4 / MOV via mp4parse; WebM / MKV via matroska)"
+publish     = false
+
+[dependencies]
+asterism-importer-sdk = { path = "../asterism-importer-sdk" }
+# The container probes live here, not in this crate, because the server
+# has to reach the same answer when it backfills a row that predates the
+# dimension columns — and it cannot call an importer, which is a
+# separate process. See that crate's docs.
+asterism-media-probe  = { path = "../asterism-media-probe", features = ["video"] }
+
+serde_json = { workspace = true }
+chrono     = { workspace = true }
+mp4parse   = "0.17"
+matroska   = "0.30"
+
+[dev-dependencies]
+tempfile = "3"

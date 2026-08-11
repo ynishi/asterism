@@ -1,0 +1,43 @@
+{
+  "endpoint": "https://backend.example.com",
+  "dispatch": {
+    "method": "POST",
+    "path": "/jobs",
+    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
+    "body_template": {
+      "workflow": "img2img",
+      "input_url": "{{input[0].source_locator}}",
+      "prompt": "{{params.extras.prompt}}",
+      "client_id": "{{dispatch_id}}"
+    },
+    "handle_from": "$.job_id"
+  },
+  "poll": {
+    "method": "GET",
+    "path": "/jobs/{{handle}}",
+    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
+    "done_when": { "path": "$.status", "equals": "succeeded" },
+    "failed_when": {
+      "path": "$.status",
+      "equals": "failed",
+      "message_path": "$.error"
+    },
+    "progress_message_path": "$.progress_message"
+  },
+  "harvest": {
+    "method": "GET",
+    "path": "/jobs/{{handle}}/results",
+    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
+    "items_path": "$.outputs[*]",
+    "map": {
+      "modality": "image",
+      "locator": "{{item.url}}",
+      "cover_hint": "{{item.caption?}}",
+      "labels_static": ["batch:{{dispatch_id}}"]
+    }
+  },
+  "extras": {
+    "api_key": "put-your-token-here",
+    "prompt": "photo studio portrait"
+  }
+}
