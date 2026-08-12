@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Material layers, and the chapters an import brings in** (#1) — a
+  material now carries layers: an origin (`imported` / `user` / `machine`),
+  a role (`structure` / `annotation`), a default flag and an order. Chapters
+  declared by a container are read by a `ChapterScan` job (the bundled
+  ffmpeg's `ffmetadata` output, one parser for every format instead of one
+  per container) into an imported structure layer, which re-probing replaces
+  wholesale. A user keeps their own chapter set in a separate layer beside
+  the file's and switches between them; editing one never alters the other,
+  and the server refuses writes into an imported layer. Existing time-based
+  comments become the asset's annotation layer via a total backfill
+  (migration V78). The UI's untyped `extra.chapters` reader — dead code
+  whose producer never existed — is deleted in favour of a typed chapter
+  panel on both the video and audio branches, and an empty imported layer
+  ("the file declares no chapters") renders distinctly from no layer at all
+  ("never scanned"). MCP gains a read-only `material_layers` tool.
+
 - **CI** (`.github/workflows/check.yml`) — `just check` runs on every pull
   request and on push to `main`, so whether the gates pass is something the
   repository states rather than a claim about whoever last ran the recipe.
