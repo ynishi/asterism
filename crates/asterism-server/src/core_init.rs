@@ -21,9 +21,9 @@ use std::sync::{Arc, OnceLock};
 use asterism_core::DomainError;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialMarkService,
-    ModalityService, PersonaService, QueryGroupService, SeriesStrategyService, SessionService,
-    SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
+    SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::application_support::{
     DispatchRunnerService, QueryGroupRefreshService, RetentionService, SupportServices,
@@ -179,6 +179,12 @@ pub struct CoreCtx {
     /// content (today a point or interval on its playback timeline),
     /// as opposed to the comment thread on the Asset as a whole.
     pub material_mark_service: Arc<MaterialMarkService>,
+    /// The bands of marks over an Asset's material — which reading of
+    /// the content a surface shows, which one a person may edit, and
+    /// the chapters inside a structure band. Selected by both
+    /// `ServerCtx::from_core` (HTTP + MCP) and `AppState` (Tauri IPC),
+    /// so all three doors reach the same rows.
+    pub material_layer_service: Arc<MaterialLayerService>,
     /// App-level Threads container (both UI and HTTP writes land on
     /// the same rows through this service).
     pub thread_service: Arc<ThreadService>,
@@ -310,6 +316,16 @@ pub async fn init_core_with(
     let material_marks = Arc::new(sqlite::repo::SqliteMaterialMarkRepository::new(
         isle.clone(),
     ));
+    // The bands those marks belong to. Held by two services: the layer
+    // service, which is what a person opens and chooses between, and
+    // the mark service, which resolves the default band a post lands in
+    // without the caller naming one. Both over the same isle, which is
+    // what makes "the band this post went into" and "the bands this
+    // asset has" the same answer.
+    let material_layers = Arc::new(sqlite::repo::SqliteMaterialLayerRepository::new(
+        isle.clone(),
+    ));
+    let chapter_marks = Arc::new(sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()));
     // Series axis. Two readers now: the job engine derives keys through
     // `JobDeps`, and `SeriesStrategyService` registers and edits the
     // rules it derives them under. Both hold the same adapter over the
@@ -478,6 +494,11 @@ pub async fn init_core_with(
                     retention_service: retention_cell.clone(),
                     series: series.clone(),
                     observations: observations.clone(),
+                    // The same two adapters the layer service holds, so
+                    // a band a job writes and a band a person opens are
+                    // rows in one table rather than two readings of it.
+                    material_layers: (*material_layers).clone(),
+                    chapter_marks: (*chapter_marks).clone(),
                     previews_dir: previews_dir.clone(),
                 },
                 job_concurrency,
@@ -630,6 +651,45 @@ pub async fn init_core_with(
                 "could not enqueue the startup dimension backfill"
             );
         }
+        // The chapter walk rides the same trigger, for the reason the
+        // two above it do: every video and audio file imported before
+        // `material_layer` existed carries a chapter list nothing has
+        // read, and the ingest fan-out only fires for files arriving
+        // from now on. Without a pass over the rest, a library that is
+        // simply sitting there shows chapters on nothing.
+        //
+        // It stops the way the dimension walk stops rather than the way
+        // the hash walk does: its predicate is "no imported structure
+        // band", and a completed reading always leaves one — including
+        // for a file that declares no chapters, which is filed as an
+        // empty band. So a start on an already-read library costs one
+        // query.
+        //
+        // Same dedupe against the durable queue, for the same reason:
+        // a chained page that survived the restart plus a fresh
+        // `cursor: null` walk would spawn an ffmpeg per file twice.
+        let chapter_walk_already_queued = job_queue_arc
+            .has_pending_batch(JobKind::ChapterScan)
+            .await
+            .unwrap_or(false);
+        if chapter_walk_already_queued {
+            tracing::info!(
+                event = "diag.chapter_scan.startup_skipped",
+                "chapter backfill walk already queued; not starting a second one"
+            );
+        } else if let Err(err) = job_queue_arc
+            .enqueue(
+                JobKind::ChapterScan,
+                serde_json::json!({ "batch": true, "cursor": null }),
+            )
+            .await
+        {
+            tracing::warn!(
+                event = "diag.chapter_scan.enqueue_failed",
+                error = %err,
+                "could not enqueue the startup chapter backfill"
+            );
+        }
         // The series walk rides the same trigger, and it is the one that
         // has to be here rather than merely benefits from it: its
         // population is `(material, rule)` pairs with no row, and a rule
@@ -778,8 +838,14 @@ pub async fn init_core_with(
         )),
         material_mark_service: Arc::new(MaterialMarkService::new(
             material_marks,
-            assets_arc,
+            material_layers.clone(),
+            assets_arc.clone(),
             personas.clone(),
+        )),
+        material_layer_service: Arc::new(MaterialLayerService::new(
+            material_layers,
+            chapter_marks,
+            assets_arc,
         )),
         thread_service: Arc::new(ThreadService::new(threads, personas)),
         exporter_registry,

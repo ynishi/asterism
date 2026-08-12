@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use asterism_core::DomainError;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialMarkService,
-    ModalityService, PersonaService, QueryGroupService, SessionService, SnapshotService,
-    ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SessionService,
+    SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
@@ -67,6 +67,10 @@ pub struct AppState {
     /// content carries (today a point or interval on the playback
     /// timeline), as opposed to the thread on the Asset as a whole.
     pub material_mark_service: Arc<MaterialMarkService>,
+    /// The bands those marks sit in — which reading of the material a
+    /// panel shows, which one the person may edit, and the chapters
+    /// inside a structure band.
+    pub material_layer_service: Arc<MaterialLayerService>,
     /// App-level Threads container — UI writes flow through this
     /// service; the HTTP surface (Claude Code / agents) writes to
     /// the same rows via `ServerCtx::thread_service`, since both
@@ -148,6 +152,7 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         exporter_registry: core.exporter_registry,
         asset_comment_service: core.asset_comment_service,
         material_mark_service: core.material_mark_service,
+        material_layer_service: core.material_layer_service,
         thread_service: core.thread_service,
         jobs_pool: core.jobs_pool,
         telemetry: core.telemetry,

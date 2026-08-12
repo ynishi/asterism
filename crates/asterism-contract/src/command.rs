@@ -1620,6 +1620,141 @@ pub struct DeleteMaterialMarkCommand {
     pub mark_id: String,
 }
 
+/// Opens a band over an Asset's material that the person owns.
+///
+/// The band is always `origin = "user"`, and the command has no field
+/// for that: the other two origins name producers — the material itself
+/// and a job — and neither of them arrives through a command. A caller
+/// asking for an imported band is asking for the file to be read again,
+/// which is a different verb on a different surface.
+///
+/// The new band is never the default. Moving the flag as a side effect
+/// of creation would leave a caller that wanted a second band with the
+/// first one no longer shown; [`SetDefaultMaterialLayerCommand`] is how
+/// a caller says it meant that.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct CreateMaterialLayerCommand {
+    /// Asset whose material the band is over.
+    pub asset_id: String,
+    /// Which of the asset's originals. `None` is the primary one — the
+    /// axis `duration_ms` measures — which is what every surface marks
+    /// today. It is a field rather than a constant so that the day a
+    /// surface addresses a second original, the caller says which
+    /// rather than the server assuming.
+    pub material_ord: Option<u32>,
+    /// `"structure"` (holds chapters) or `"annotation"` (holds marks).
+    pub role: String,
+    /// Display order within `(asset_id, material_ord, role)`. The
+    /// caller's to choose, as a chapter's `ord` is: the order bands are
+    /// offered in is a property of the surface offering them, not
+    /// something the server can derive.
+    pub ord: u32,
+}
+
+/// Chooses the band a surface shows, and the one a new mark lands in.
+///
+/// Open to every origin, unlike the write verbs: choosing to read the
+/// file's own chapter list rather than one's own is not an edit to
+/// either. The refusal that does apply is the model's — an annotation
+/// band that is not the user's cannot be the default, because a new note
+/// would land in a band nobody may write to.
+///
+/// The call changes **two** rows (the flag moves off whichever band held
+/// it), so a caller that displays bands re-reads the asset's list rather
+/// than patching one entry.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct SetDefaultMaterialLayerCommand {
+    /// Band to show.
+    pub layer_id: String,
+}
+
+/// Deletes a band the person owns, with everything in it.
+///
+/// Refuses an imported or machine band rather than deleting one: those
+/// are reproduced by running their producer again, so the removal would
+/// last until the next re-read and then silently undo itself. A verb
+/// whose effect ends when something unrelated happens is worse than no
+/// verb.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeleteMaterialLayerCommand {
+    /// Target band.
+    pub layer_id: String,
+}
+
+/// Adds a section to a structure band the person owns.
+///
+/// `start_ms` is the position on the playback timeline; `end_ms` is the
+/// exclusive end, and omitting it declares a section with no stated end
+/// (the shape MP4's `chpl` produces) rather than one running to the end
+/// of the media. `label` may be empty — plenty of containers declare
+/// untitled sections, and this verb accepts what an import accepts.
+///
+/// Refused against an imported or machine band (not the caller's to
+/// write into) and against an annotation band (which holds notes, not
+/// sections — post a material mark instead).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PostChapterMarkCommand {
+    /// Band to write into.
+    pub layer_id: String,
+    /// Start of the section, in milliseconds from the presentation
+    /// origin. Negative values are rejected.
+    pub start_ms: i64,
+    /// Exclusive end. `None` states no end; a value no greater than
+    /// `start_ms` is rejected.
+    pub end_ms: Option<i64>,
+    /// Section title. May be empty.
+    pub label: String,
+    /// Reading order within the band.
+    pub ord: u32,
+}
+
+/// Rewrites one section of a structure band the person owns.
+///
+/// Unlike [`EditMaterialMarkCommand`], which rewords without moving,
+/// this verb **can** move a section: the reason a person opens a band of
+/// their own is usually that the file's divisions are in the wrong
+/// places, so correcting a position is the ordinary case rather than a
+/// second act.
+///
+/// The band is named as well as the chapter, matching the
+/// `(asset_id, mark_id)` pair on the mark face: the ownership guard is a
+/// fact about the parent, and naming it is what lets a caller's own band
+/// id fail to reach into another band's row.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct EditChapterMarkCommand {
+    /// Band the chapter is in.
+    pub layer_id: String,
+    /// Target chapter.
+    pub chapter_id: String,
+    /// New title. May be empty.
+    pub label: String,
+    /// New start position. **`None` leaves the section where it is**,
+    /// and is the only way to say so — `end_ms` below is read only when
+    /// this is present, which keeps "do not move it" and "make it a
+    /// section with no stated end" two different requests rather than
+    /// one absent field.
+    pub start_ms: Option<i64>,
+    /// New exclusive end, read only when `start_ms` is present. `None`
+    /// there states a section with no end.
+    pub end_ms: Option<i64>,
+    /// New reading order. `None` leaves it alone.
+    pub ord: Option<u32>,
+}
+
+/// Removes one section from a structure band the person owns.
+///
+/// Not idempotent, deliberately, where [`DeleteMaterialMarkCommand`] is:
+/// a chapter is named by `(layer_id, chapter_id)`, so an id that is not
+/// in that band is refused rather than treated as already-gone — without
+/// that a caller could not tell "removed" from "was never yours".
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeleteChapterMarkCommand {
+    /// Band the chapter is in.
+    pub layer_id: String,
+    /// Target chapter.
+    pub chapter_id: String,
+}
+
 /// Creates a Thread anchored to the given axis.
 ///
 /// `anchor_kind`:

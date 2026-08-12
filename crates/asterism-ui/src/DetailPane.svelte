@@ -22,12 +22,18 @@
   // comment thread's notes *about* the asset) are `MaterialMarks.svelte`
   // and own themselves; this pane only hands down the asset id, its
   // `duration_ms`, and the live media element the marks are read from
-  // and seek through.
+  // and seek through. `MaterialChapters.svelte` is the other band over
+  // that timeline — how the material is *divided*, and by whom — and
+  // takes the same three props for the same reasons. It replaced a chip
+  // strip this pane built out of `extra.chapters`, a blob that could not
+  // say whether the file had declared those sections or somebody had
+  // written them; nothing here reads `extra.chapters` any more.
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import AlbumMetaSection from "./AlbumMetaSection.svelte";
   import { readAlbumMeta } from "./lib/album-meta";
+  import MaterialChapters from "./MaterialChapters.svelte";
   import MaterialMarks from "./MaterialMarks.svelte";
   import {
     fmtBytes,
@@ -63,7 +69,6 @@
     VideoPreviewDto,
   } from "./bindings";
 
-  type Chapter = { startMs: number; title: string };
   type DetailSnap = {
     detail: AssetDetailDto;
     groupIds: string[];
@@ -254,19 +259,6 @@
     return modalityCatalog.isTerminal(modality) ? "term" : null;
   }
 
-  function extractChapters(extra: Record<string, unknown>): Chapter[] {
-    const raw = (extra.chapters ?? extra.chapter_marks) as unknown;
-    if (!Array.isArray(raw)) return [];
-    const out: Chapter[] = [];
-    for (const r of raw as Record<string, unknown>[]) {
-      const startMs = Number(r.start_ms ?? r.startMs ?? r.start ?? 0);
-      if (!Number.isFinite(startMs) || startMs < 0) continue;
-      const title = String(r.title ?? r.name ?? "chapter");
-      out.push({ startMs, title });
-    }
-    return out;
-  }
-
   async function decodeAudioPeaks(url: string): Promise<Float32Array> {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`fetch ${resp.status}`);
@@ -296,12 +288,19 @@
     return peaks;
   }
 
+  // Envelope + playhead only. The chapter ticks this used to draw came
+  // from `extra.chapters` and are now `MaterialChapters`' own ruler:
+  // chapters belong to a band that says who declared them, the band is
+  // that component's state, and drawing it here would mean handing a
+  // child's rows back up to its parent to paint. The DOM ruler also
+  // reaches the video branch, which has no canvas at all — decoding a
+  // whole video for peaks OOMs the webview. The material's duration went
+  // with the ticks: an envelope is drawn per peak and a playhead per
+  // fraction, and neither asks how long the material runs.
   function drawWaveform(
     canvas: HTMLCanvasElement,
     peaks: Float32Array,
     progress: number,
-    chapters: Chapter[],
-    durationMs: number,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -325,13 +324,6 @@
       ctx.fillStyle = played ? "#7dd3fc" : "rgba(255,255,255,0.32)";
       ctx.fillRect(i * barW, mid - barH / 2, Math.max(1, barW - 1), barH);
     }
-    if (chapters.length > 0 && durationMs > 0) {
-      ctx.fillStyle = "rgba(250, 204, 21, 0.65)";
-      for (const c of chapters) {
-        const x = (c.startMs / durationMs) * w;
-        if (x >= 0 && x <= w) ctx.fillRect(x, 0, 1, h);
-      }
-    }
     // playhead on top
     if (progress > 0 && progress <= 1) {
       ctx.fillStyle = "#f472b6";
@@ -354,9 +346,6 @@
     audioEl.currentTime = ratio * audioDurationSec;
   }
 
-  let audioChapters = $derived<Chapter[]>(
-    detail ? extractChapters(parseExtra(detail.asset)) : [],
-  );
 
   // Fire the decode when detail flips to a fresh audio asset.
   $effect(() => {
@@ -403,16 +392,10 @@
     })();
   });
 
-  // Redraw whenever peaks / progress / chapters / canvas mount changes.
+  // Redraw whenever peaks / progress / canvas mount changes.
   $effect(() => {
     if (!waveformCanvas || !waveformPeaks || !detail) return;
-    drawWaveform(
-      waveformCanvas,
-      waveformPeaks,
-      audioProgress,
-      audioChapters,
-      detail.asset.duration_ms ?? audioDurationSec * 1000,
-    );
+    drawWaveform(waveformCanvas, waveformPeaks, audioProgress);
   });
 
   // -------------------------------------------------------------------
@@ -1430,6 +1413,11 @@
                   Preparing a playable preview… (transcoding)
                 </p>
               {/if}
+              <MaterialChapters
+                assetId={detail.asset.id}
+                durationMs={detail.asset.duration_ms}
+                media={videoEl}
+              />
               <MaterialMarks
                 assetId={detail.asset.id}
                 durationMs={detail.asset.duration_ms}
@@ -1439,11 +1427,12 @@
           {:else if detailKind === "audio"}
             <div class="detail-media detail-media-audio">
               <!-- Envelope preview drawn from OfflineAudioContext-
-                   decoded peaks. Click to seek. Chapter ticks
-                   land on top when `extra.chapters` carries a
-                   start_ms + title list. Native <audio controls>
+                   decoded peaks. Click to seek. Native <audio controls>
                    stays underneath so scrub / volume / play still
-                   work when the waveform is unavailable. -->
+                   work when the waveform is unavailable. Chapters are
+                   `MaterialChapters` below, on their own ruler — they
+                   are rows in a band that names who declared them, not
+                   ticks this canvas can read off the asset. -->
               <div class="waveform-wrap">
                 {#if waveformPeaks}
                   <canvas
@@ -1460,25 +1449,6 @@
                 {:else}
                   <div class="waveform-placeholder dim">no waveform</div>
                 {/if}
-                {#if audioChapters.length > 0}
-                  <ul class="chapter-list">
-                    {#each audioChapters as ch, i (i)}
-                      <li>
-                        <button
-                          type="button"
-                          onclick={() => {
-                            if (audioEl) audioEl.currentTime = ch.startMs / 1000;
-                          }}
-                        >
-                          <span class="chapter-time">
-                            {fmtDurationMs(ch.startMs)}
-                          </span>
-                          <span class="chapter-title">{ch.title}</span>
-                        </button>
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
               </div>
               <audio
                 controls
@@ -1488,6 +1458,11 @@
                 onloadedmetadata={onAudioTimeUpdate}
                 src={convertFileSrc(detail.asset.locator)}
               ></audio>
+              <MaterialChapters
+                assetId={detail.asset.id}
+                durationMs={detail.asset.duration_ms}
+                media={audioEl}
+              />
               <MaterialMarks
                 assetId={detail.asset.id}
                 durationMs={detail.asset.duration_ms}
@@ -2296,34 +2271,6 @@
   .waveform-placeholder.dim {
     color: rgba(255, 255, 255, 0.35);
   }
-  .chapter-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-  }
-  .chapter-list li button {
-    background: rgba(250, 204, 21, 0.12);
-    border: 1px solid rgba(250, 204, 21, 0.4);
-    border-radius: 999px;
-    padding: 0.15rem 0.55rem;
-    font-size: 0.75rem;
-    color: #4a3908;
-    cursor: pointer;
-    display: inline-flex;
-    gap: 0.35rem;
-  }
-  .chapter-list li button:hover {
-    background: rgba(250, 204, 21, 0.24);
-  }
-  .chapter-time {
-    font-family: "SF Mono", ui-monospace, monospace;
-    font-size: 0.7rem;
-    color: #6b571a;
-  }
-
   /* -----------------------------------------------------------------
    * Text mode + render modes
    * ----------------------------------------------------------------- */

@@ -1395,6 +1395,17 @@ pub struct AssetCommentDto {
 /// `body` / `author_kind` / `author_persona_id` / `created_at_ms` /
 /// `edited_at_ms` deliberately carry the same names and types as on
 /// [`AssetCommentDto`]: one note vocabulary, spelled once.
+///
+/// **The band the mark sits in is not on this shape.** Every mark
+/// belongs to a [`MaterialLayerDto`] — an annotation band, resolved for
+/// the caller when the mark is placed — but no surface asks which one:
+/// a person clicking a timeline is answering "where", not "in which of
+/// my passes over this file", and the marks read back through
+/// `list_material_marks` are the asset's, not one band's. Adding
+/// `layer_id` here would be putting a field on the wire (and into the
+/// generated bindings, which are tracked) before anything reads it, and
+/// a field nobody reads is one nobody notices going wrong. It arrives
+/// when a surface offers a second annotation band to choose between.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct MaterialMarkDto {
     /// Mark id (UUID hyphenated).
@@ -1426,6 +1437,114 @@ pub struct MaterialMarkDto {
     pub created_at_ms: i64,
     /// Last edit timestamp (unix epoch ms); `None` while untouched.
     pub edited_at_ms: Option<i64>,
+}
+
+/// One band of marks over an Asset's material — which reading of the
+/// content this is, and who produced it.
+///
+/// `origin` is `"imported"` (read out of the material itself: the
+/// chapter list the container declares), `"user"` (written by the person
+/// running Asterism) or `"machine"` (derived by a job). It is the axis
+/// that decides whether a band may be edited: the write verbs accept
+/// `"user"` and refuse the other two, because an imported band is
+/// replaced by reading the file again and a machine band by running its
+/// job again, so a hand edit into either is lost at the next run.
+///
+/// `role` is `"structure"` (a reading of how the material is divided —
+/// holds [`ChapterMarkDto`]) or `"annotation"` (notes fastened to
+/// positions — holds [`MaterialMarkDto`]). The two hold different rows,
+/// so a chapter verb aimed at an annotation band is refused rather than
+/// silently writing something that band's readers cannot see.
+///
+/// **No display name.** A band is described by what it *is* —
+/// `(origin, role)` — and a surface renders that pair. A stored caption
+/// beside it would be a second answer to one question, and the caption
+/// is the one that would drift.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MaterialLayerDto {
+    /// Layer id (UUID hyphenated).
+    pub id: String,
+    /// Asset whose material the band is over.
+    pub asset_id: String,
+    /// Which of that asset's originals the band is over. `0` is the
+    /// primary one — the axis `duration_ms` measures and the player
+    /// reports positions on.
+    pub material_ord: u32,
+    /// `"imported"` / `"user"` / `"machine"`.
+    pub origin: String,
+    /// `"structure"` / `"annotation"`.
+    pub role: String,
+    /// Whether this is the band a surface shows, and the one a new mark
+    /// lands in, when the caller names no other. At most one per
+    /// `(asset_id, material_ord, role)`.
+    pub is_default: bool,
+    /// Display order within `(asset_id, material_ord, role)`.
+    pub ord: u32,
+}
+
+/// One named section of a material — an entry in a chapter list.
+///
+/// Not a [`MaterialMarkDto`]. A mark is a note fastened to a position
+/// ("look at this"); a chapter is a claim about how the material is
+/// *divided* ("this section starts here"). Two differences follow from
+/// that and are visible on this shape:
+///
+/// - **`start_ms` is not optional and there is no `anchor_kind`.** A
+///   chapter is a section of a playback timeline by construction, where
+///   a mark names the coordinate space it is anchored in and leaves the
+///   columns of the other spaces empty.
+/// - **`label` may be empty, and `end_ms` may be absent.** Both are
+///   ordinary container output: MP4's `chpl` declares start times only
+///   (a chapter ends where the next begins, which is a fact about other
+///   rows), and plenty of files declare untitled sections. Refusing
+///   either would mean an import drops a section the file really has or
+///   invents a title for it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ChapterMarkDto {
+    /// Chapter id (UUID hyphenated). **Not stable across a re-read of
+    /// the material**: replacing an imported band's contents mints new
+    /// rows, so a consumer that has to remember one section keys on
+    /// `(layer_id, ord)` rather than on this.
+    pub id: String,
+    /// Band the chapter belongs to. Always a `"structure"` band.
+    pub layer_id: String,
+    /// Start of the section on the playback timeline, in milliseconds
+    /// from the presentation origin.
+    pub start_ms: i64,
+    /// Exclusive end of the section. `None` means the file stated no
+    /// end — the section starts here and the next one's start is where
+    /// it stops.
+    pub end_ms: Option<i64>,
+    /// The section's title as the container declares it. **Empty is
+    /// legal.**
+    pub label: String,
+    /// Reading order within the band. Carried rather than derived from
+    /// `start_ms`, because a container is free to declare its sections
+    /// in an order of its own and the list a person reads is the one
+    /// the file states.
+    pub ord: u32,
+}
+
+/// One band together with the chapters in it — what an asset-level read
+/// of the layer model returns per band.
+///
+/// Bundled rather than left to a second call per band because the
+/// surface that shows a chapter list needs both halves at once (the
+/// bands to choose between, and the contents of the chosen one), and an
+/// asset carries single-digit bands: the round trips saved are the point
+/// and the payload is the same rows either way.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MaterialLayerViewDto {
+    /// The band itself.
+    pub layer: MaterialLayerDto,
+    /// The sections in it, in reading order. **Always empty for an
+    /// `"annotation"` band** — those hold notes, which are read through
+    /// the material-marks route. An empty list on a `"structure"` band
+    /// is a different statement: the band exists and declares no
+    /// sections (a file that was read and turned out to have none),
+    /// which is not the same as the asset having no band at all (never
+    /// read).
+    pub chapters: Vec<ChapterMarkDto>,
 }
 
 /// Thread anchor — what a `ThreadDto` hangs off of.

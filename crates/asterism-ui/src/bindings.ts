@@ -148,6 +148,18 @@ export type EditMaterialMarkCommand = { asset_id: string; mark_id: string; body:
 
 export type DeleteMaterialMarkCommand = { mark_id: string; };
 
+export type CreateMaterialLayerCommand = { asset_id: string; material_ord: number | null; role: string; ord: number; };
+
+export type SetDefaultMaterialLayerCommand = { layer_id: string; };
+
+export type DeleteMaterialLayerCommand = { layer_id: string; };
+
+export type PostChapterMarkCommand = { layer_id: string; start_ms: number; end_ms: number | null; label: string; ord: number; };
+
+export type EditChapterMarkCommand = { layer_id: string; chapter_id: string; label: string; start_ms: number | null; end_ms: number | null; ord: number | null; };
+
+export type DeleteChapterMarkCommand = { layer_id: string; chapter_id: string; };
+
 export type RecordEventCommand = { kind: string; persona_id: string | null; duration_ms: number | null; payload_json: string | null; };
 
 export type RecordDiagCommand = { level: string; event: string; message: string; attrs_json: string | null; };
@@ -263,6 +275,12 @@ export type SettingDto = { key: string; kind: string; value_json: string; source
 export type AssetCommentDto = { id: string; asset_id: string; author_kind: string; author_persona_id: string | null; body: string; created_at_ms: number; edited_at_ms: number | null; };
 
 export type MaterialMarkDto = { id: string; asset_id: string; anchor_kind: string; start_ms: number | null; end_ms: number | null; author_kind: string; author_persona_id: string | null; body: string; created_at_ms: number; edited_at_ms: number | null; };
+
+export type MaterialLayerDto = { id: string; asset_id: string; material_ord: number; origin: string; role: string; is_default: boolean; ord: number; };
+
+export type ChapterMarkDto = { id: string; layer_id: string; start_ms: number; end_ms: number | null; label: string; ord: number; };
+
+export type MaterialLayerViewDto = { layer: { id: string; asset_id: string; material_ord: number; origin: string; role: string; is_default: boolean; ord: number; }; chapters: { id: string; layer_id: string; start_ms: number; end_ms: number | null; label: string; ord: number; }[]; };
 
 export type EventDto = { id: string; kind: string; occurred_at_ms: number; persona_id: string | null; duration_ms: number | null; payload_json: string | null; };
 

@@ -60,7 +60,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::asset_comment::CommentAuthor;
-use crate::domain::value::{AssetId, MaterialMarkId};
+use crate::domain::value::{AssetId, MaterialLayerId, MaterialMarkId};
 use crate::error::DomainError;
 
 /// Largest millisecond value that survives storage. The column is a
@@ -199,6 +199,26 @@ pub struct MaterialMark {
     pub id: MaterialMarkId,
     /// Asset whose material the mark points into.
     pub asset_id: AssetId,
+    /// Band the mark belongs to — a
+    /// [`MaterialLayer`](crate::domain::material_layer) with role
+    /// `Annotation`.
+    ///
+    /// Mandatory, not `Option`. A nullable column meaning "the default
+    /// band" would put the same fact in two shapes — NULL and a row
+    /// pointing at the default layer — and every reader would have to
+    /// know both; that implied-semantics drift is the thing layers
+    /// exist to remove. The service resolves the default band (creating
+    /// one if the asset has none) before it constructs a mark, so a
+    /// caller that names no layer still gets a real one.
+    ///
+    /// `asset_id` stays beside it rather than being reached through the
+    /// layer: the anchor is measured against *this asset's* playback
+    /// timeline, and the listing that reads it (`ORDER BY start_ms`
+    /// over one asset, index-backed) is a per-asset question. Keeping
+    /// both means the two can disagree — a mark whose layer belongs to
+    /// another asset — which is a rule about another row and so is the
+    /// schema's, not this type's (V78 doc comment in `migrations.rs`).
+    pub layer_id: MaterialLayerId,
     /// Where in that material it points.
     pub anchor: MaterialAnchor,
     /// Free-form body. Non-empty after trimming — refused at
@@ -216,6 +236,7 @@ impl MaterialMark {
     /// Places a new mark. Refuses a body that is empty after trimming.
     pub fn new(
         asset_id: AssetId,
+        layer_id: MaterialLayerId,
         anchor: MaterialAnchor,
         author: CommentAuthor,
         body: impl Into<String>,
@@ -226,6 +247,7 @@ impl MaterialMark {
         Ok(Self {
             id: MaterialMarkId::new(),
             asset_id,
+            layer_id,
             anchor,
             body,
             author,
@@ -250,9 +272,20 @@ impl MaterialMark {
     /// Failures are `Validation` — the caller (an adapter) is expected
     /// to restate them as `Infra`, since a row like this being present
     /// is an infrastructure fact, not a caller error.
+    // Long by construction, and it crossed clippy's threshold when
+    // `layer_id` landed: the list is the row's columns, and the two
+    // ways of shortening it both cost more than the length. Grouping
+    // them into a parameter struct would put a second name on the same
+    // shape; handing some in through public fields afterwards is what
+    // routing every row through this constructor exists to stop.
+    // Same call as `Asset::from_persisted` and
+    // `DispatchJob::from_persisted`, which carry this allow for the
+    // same reason.
+    #[allow(clippy::too_many_arguments)]
     pub fn rehydrate(
         id: MaterialMarkId,
         asset_id: AssetId,
+        layer_id: MaterialLayerId,
         anchor: MaterialAnchor,
         author: CommentAuthor,
         body: String,
@@ -262,6 +295,7 @@ impl MaterialMark {
         let mark = Self {
             id,
             asset_id,
+            layer_id,
             anchor,
             body,
             author,
@@ -382,9 +416,11 @@ mod tests {
     #[test]
     fn rejects_empty_body() {
         let asset = AssetId::new();
+        let layer = MaterialLayerId::new();
         let anchor = MaterialAnchor::Temporal(TimelineSpan::new(0, None).unwrap());
         let now = Utc::now();
-        let place = |body: &str| MaterialMark::new(asset, anchor, CommentAuthor::User, body, now);
+        let place =
+            |body: &str| MaterialMark::new(asset, layer, anchor, CommentAuthor::User, body, now);
         assert!(place("").is_err());
         assert!(place("   ").is_err(), "spaces");
         assert!(place("\t").is_err(), "a tab — SQL trim() keeps this one");
@@ -403,6 +439,7 @@ mod tests {
     fn rehydrate_rejects_rows_the_constructor_would_refuse() {
         let id = MaterialMarkId::new();
         let asset = AssetId::new();
+        let layer = MaterialLayerId::new();
         let anchor = MaterialAnchor::Temporal(TimelineSpan::new(0, Some(5)).unwrap());
         let created = DateTime::from_timestamp_millis(2_000).unwrap();
         let earlier = DateTime::from_timestamp_millis(1_000).unwrap();
@@ -411,6 +448,7 @@ mod tests {
             MaterialMark::rehydrate(
                 id,
                 asset,
+                layer,
                 anchor,
                 CommentAuthor::User,
                 "\t".into(),
@@ -424,6 +462,7 @@ mod tests {
             MaterialMark::rehydrate(
                 id,
                 asset,
+                layer,
                 anchor,
                 CommentAuthor::User,
                 "ok".into(),
@@ -437,6 +476,7 @@ mod tests {
             MaterialMark::rehydrate(
                 id,
                 asset,
+                layer,
                 anchor,
                 CommentAuthor::User,
                 "ok".into(),

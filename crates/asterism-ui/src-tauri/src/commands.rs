@@ -14,33 +14,35 @@ use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
     AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, CreateDirCommand,
-    CreateDispatchCommand, CreateGroupCommand, CreateModalityCommand, CreateQueryGroupCommand,
-    CreateSnapshotCommand, CreateThreadCommand, DeleteAssetCommentCommand, DeleteDirCommand,
+    CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
+    CreateQueryGroupCommand, CreateSnapshotCommand, CreateThreadCommand, DeleteAssetCommentCommand,
+    DeleteChapterMarkCommand, DeleteDirCommand, DeleteMaterialLayerCommand,
     DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
     DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSessionCommand,
     DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
-    DispatchRunCommand, EditAssetCommentCommand, EditMaterialMarkCommand, EmptyTrashCommand,
-    EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand, MoveDirCommand,
-    MoveGroupToDirCommand, PasteImageImportCommand, PatchSessionMetadataCommand,
-    PostAssetCommentCommand, PostMaterialMarkCommand, PromoteSnapshotToGroupCommand,
-    PromoteSnapshotToGroupResult, PromoteTagToGroupCommand, PromoteTagToGroupResult,
-    PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand,
-    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
-    RenameGroupCommand, RenameSessionCommand, ReorderGroupAssetsCommand,
+    DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
+    EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
+    MoveDirCommand, MoveGroupToDirCommand, PasteImageImportCommand, PatchSessionMetadataCommand,
+    PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
+    PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
+    PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
+    PurgePersonaCommand, RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand,
+    RenameDirCommand, RenameGroupCommand, RenameSessionCommand, ReorderGroupAssetsCommand,
     ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
     ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
-    RestorePersonaCommand, SetPersonaProfileCommand, SetPersonaThemeCommand, SetSettingCommand,
-    TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand, UnlinkGroupCommand,
-    UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult, UpdateAssetMetaCommand,
-    UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
+    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
+    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetPageDto,
-    AssetTextDto, ConstellationItemDto, DirDto, DispatchDto, DuplicateConflictDto,
+    AssetTextDto, ChapterMarkDto, ConstellationItemDto, DirDto, DispatchDto, DuplicateConflictDto,
     DuplicateReportDto, DuplicateResolutionDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto,
-    MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, RetrievedPageDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto,
-    TagCountDto, TagDto, ThreadDto,
+    MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto,
+    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, RetrievedPageDto, SessionDto,
+    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::domain::attribution::AttributionContext;
@@ -1818,6 +1820,129 @@ pub async fn delete_material_mark(
     state
         .material_mark_service
         .delete(command, &AttributionContext::owner_surface())
+        .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bands over an Asset's material, and the chapters in one.
+//
+// A layer says where a set of marks came from: the material's own
+// declaration, a person's reading of it, or a job's. The panel that shows
+// a chapter list reads them all at once and edits exactly one of them —
+// the person's — because the other two are reproduced by running their
+// producer again, so an edit into either is lost at the next run.
+// ---------------------------------------------------------------------------
+
+/// Lists every band over `asset_id`'s material, each with the chapters
+/// in it, in display order.
+///
+/// One call rather than one per band: the panel needs the bands to choose
+/// between and the contents of the chosen one at the same moment. An
+/// annotation band's `chapters` is always empty — those hold notes, read
+/// through `list_material_marks`.
+#[tauri::command]
+pub async fn list_material_layers(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<Vec<MaterialLayerViewDto>, UiError> {
+    Ok(state.material_layer_service.list_views(&asset_id).await?)
+}
+
+/// Lists the sections in one band, in the reading order the band states
+/// (which need not be the timeline's). What a panel re-reads after
+/// editing a single band.
+#[tauri::command]
+pub async fn list_chapter_marks(
+    state: State<'_, AppState>,
+    layer_id: String,
+) -> Result<Vec<ChapterMarkDto>, UiError> {
+    Ok(state
+        .material_layer_service
+        .list_chapter_marks(&layer_id)
+        .await?)
+}
+
+/// Opens a band the person owns. Never the default — see
+/// [`SetDefaultMaterialLayerCommand`] for moving that flag.
+#[tauri::command]
+pub async fn create_material_layer(
+    state: State<'_, AppState>,
+    command: CreateMaterialLayerCommand,
+) -> Result<MaterialLayerDto, UiError> {
+    Ok(state
+        .material_layer_service
+        .create_layer(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Chooses the band the panel shows, and the one a new mark lands in.
+///
+/// Returns nothing: the flag moves off whichever band held it, so the
+/// caller re-reads the asset's bands rather than patching one entry.
+#[tauri::command]
+pub async fn set_default_material_layer(
+    state: State<'_, AppState>,
+    command: SetDefaultMaterialLayerCommand,
+) -> Result<(), UiError> {
+    state
+        .material_layer_service
+        .set_default_layer(command, &AttributionContext::owner_surface())
+        .await?;
+    Ok(())
+}
+
+/// Deletes a band the person owns, with everything in it. Refuses an
+/// imported or machine band.
+#[tauri::command]
+pub async fn delete_material_layer(
+    state: State<'_, AppState>,
+    command: DeleteMaterialLayerCommand,
+) -> Result<(), UiError> {
+    state
+        .material_layer_service
+        .delete_layer(command, &AttributionContext::owner_surface())
+        .await?;
+    Ok(())
+}
+
+/// Adds a section to a band the person owns.
+#[tauri::command]
+pub async fn post_chapter_mark(
+    state: State<'_, AppState>,
+    command: PostChapterMarkCommand,
+) -> Result<ChapterMarkDto, UiError> {
+    Ok(state
+        .material_layer_service
+        .post_chapter_mark(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Retitles a section and, unlike the mark face, may move it: the reason
+/// a person keeps a band of their own is usually that the file's
+/// divisions are in the wrong places.
+#[tauri::command]
+pub async fn edit_chapter_mark(
+    state: State<'_, AppState>,
+    command: EditChapterMarkCommand,
+) -> Result<ChapterMarkDto, UiError> {
+    Ok(state
+        .material_layer_service
+        .edit_chapter_mark(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Removes one section. **Not** idempotent, unlike deleting a mark: a
+/// chapter is named by `(layer_id, chapter_id)`, so an id that is not in
+/// that band is a refusal rather than a no-op.
+#[tauri::command]
+pub async fn delete_chapter_mark(
+    state: State<'_, AppState>,
+    command: DeleteChapterMarkCommand,
+) -> Result<(), UiError> {
+    state
+        .material_layer_service
+        .delete_chapter_mark(command, &AttributionContext::owner_surface())
         .await?;
     Ok(())
 }

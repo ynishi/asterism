@@ -27,6 +27,7 @@
 //! `plan_edges`). `asset_add`, `persona_import`, and `index_rebuild` are
 //! future work.
 
+pub mod chapter_ffmetadata;
 pub mod handlers;
 pub mod preview_ffmpeg;
 pub mod thumb_ffmpeg;
@@ -162,6 +163,22 @@ pub struct JobDeps {
     /// unlike the services above it needs nothing but the isle, which
     /// exists before the queue does.
     pub observations: crate::observe::ObservationStore,
+    /// The bands of marks over a material, and the chapters inside one
+    /// — the two ports `chapter_scan` hands to
+    /// `application_support::replace_imported_chapters`.
+    ///
+    /// Both, because that function resolves the imported band through
+    /// the first and replaces its contents through the second, and
+    /// splitting the pair would let a caller hold one without the other
+    /// — which is a caller that can name a band it cannot fill.
+    ///
+    /// Held by concrete type like the repositories above, for the same
+    /// reason: no other implementation is wanted here, and the port
+    /// exists for the direction of the dependency rather than to make
+    /// this field polymorphic.
+    pub material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository,
+    /// See [`material_layers`](Self::material_layers).
+    pub chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository,
     /// Where `preview_gen` writes video preview renditions
     /// (`<profile>/previews/`). Passed explicitly rather than resolved
     /// from the active profile so a test that sandboxes the database
@@ -429,6 +446,7 @@ async fn handle_asterism_job(
         Ok(JobKind::SeriesDerive) => (handlers::series_derive(&env, &job.payload).await, false),
         Ok(JobKind::AssetFold) => (handlers::asset_fold(&env, &job.payload).await, false),
         Ok(JobKind::PreviewGen) => (handlers::preview_gen(&env, &job.payload).await, false),
+        Ok(JobKind::ChapterScan) => (handlers::chapter_scan(&env, &job.payload).await, false),
         Ok(JobKind::TrashPurge) => match env.deps.retention_service.get() {
             Some(_) => (handlers::trash_purge(&env, &job.payload).await, false),
             // Same shape as `DispatchRun` above — an unbound cell means
@@ -749,6 +767,10 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
+    // The two layer ports, in scope so the chapter tests can read back
+    // what a handler wrote through them.
+    use asterism_core::domain::repository::{ChapterMarkRepository, MaterialLayerRepository};
+
     /// Test emitter that records every payload it sees.
     struct RecordingEmitter {
         records: Mutex<Vec<(String, Progress)>>,
@@ -826,7 +848,11 @@ mod tests {
                 // sweep, and an unbound cell degrades to "no sweep".
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
-                observations: crate::observe::ObservationStore::new(isle),
+                observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
@@ -1154,6 +1180,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
@@ -1283,6 +1313,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -1442,6 +1476,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -1625,6 +1663,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -1808,6 +1850,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -1894,6 +1940,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -1976,6 +2026,10 @@ mod tests {
                 retention_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
             },
             queue: open_queue(pool).await.unwrap(),
@@ -2583,5 +2637,200 @@ mod tests {
                 .as_deref()
                 .is_some_and(|k| k.starts_with("sk1-sha256:"))
         );
+    }
+
+    // ---- chapter bands ---------------------------------------------
+
+    /// A material pointing at a real file on disk, at `ord = 0`.
+    ///
+    /// Seeded through SQL rather than through `AssetService` for the
+    /// reason its neighbours are: what is under test is a handler over
+    /// stored rows, and routing the fixture through the ingest path
+    /// would put that path's own enqueues in the queue this test reads.
+    async fn seed_material_at(
+        isle: &rusqlite_isle::AsyncIsle,
+        persona: uuid::Uuid,
+        path: &std::path::Path,
+        mime: &str,
+    ) -> uuid::Uuid {
+        let aid = uuid::Uuid::now_v7();
+        let path = path.to_string_lossy().to_string();
+        let mime = mime.to_string();
+        isle.call(move |conn| {
+            let stored = crate::sqlite::stored_locator(&path);
+            conn.execute(
+                "INSERT INTO asset (id, persona_id, source_kind, source_locator,
+                                    modality, labels, occurred_at, created_at, updated_at)
+                 VALUES (?1, ?2, 'fs', ?3, 'tape', '[]', 0, 0, 0)",
+                rusqlite::params![aid, persona, stored],
+            )?;
+            conn.execute(
+                "INSERT INTO material (asset_id, ord, locator, mime, created_at, updated_at)
+                 VALUES (?1, 0, ?2, ?3, 0, 0)",
+                rusqlite::params![aid, stored, mime],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        aid
+    }
+
+    /// The handler end to end: a real container on disk, read by a real
+    /// ffmpeg, filed into the imported band by the ports `JobDeps`
+    /// carries.
+    ///
+    /// The reading itself is covered against the same fixture in
+    /// `tests/chapter_scan_job.rs`; what only this test can reach is the
+    /// wiring — that the handler resolves the two layer ports off
+    /// `JobDeps`, hands them to the intake, and reports what landed.
+    /// Wiring one of those fields to the wrong isle would leave every
+    /// assertion in that file passing.
+    #[tokio::test]
+    async fn chapter_scan_files_the_sections_a_real_container_declares() {
+        let bin = crate::jobs::thumb_ffmpeg::ffmpeg_binary();
+        assert!(
+            bin.is_some(),
+            "ffmpeg is required for this test: brew install ffmpeg (or set $ASTERISM_FFMPEG)"
+        );
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../asterism-importer-video/tests/fixtures/chaptered.mkv");
+        assert!(
+            fixture.is_file(),
+            "{} is missing — run `python3 scripts/gen-test-fixtures.py`",
+            fixture.display()
+        );
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let search_dir = tempfile::tempdir().unwrap();
+        let env = series_job_env(&isle, pool, search_dir.path()).await;
+        let persona = seed_persona(&isle).await;
+        let aid = seed_material_at(&isle, persona, &fixture, "video/x-matroska").await;
+
+        let message =
+            handlers::chapter_scan(&env, &serde_json::json!({"asset_id": aid.to_string()}))
+                .await
+                .unwrap();
+        assert!(
+            message.contains("filed=1") && message.contains("sections=3"),
+            "the message states what the file declared: {message}"
+        );
+        assert!(
+            message.contains("refused=0") && message.contains("unreadable=0"),
+            "nothing in the fixture is unrepresentable: {message}"
+        );
+
+        let layers = crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone());
+        let chapters = crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone());
+        let bands = layers
+            .list_by_asset(&asterism_core::domain::value::AssetId::from_uuid(aid))
+            .await
+            .unwrap();
+        let band = bands
+            .iter()
+            .find(|l| {
+                l.origin == asterism_core::domain::material_layer::LayerOrigin::Imported
+                    && l.role == asterism_core::domain::material_layer::LayerRole::Structure
+            })
+            .expect("the reading opened an imported structure band");
+        assert!(
+            band.is_default,
+            "the file's own division is the best answer until a person says otherwise"
+        );
+        let stored = chapters.list_by_layer(&band.id).await.unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .map(|c| (c.span.start_ms(), c.label.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "Opening"), (2_000, ""), (4_000, "Finale")],
+            "the nanosecond timestamps the container declares arrive as milliseconds"
+        );
+    }
+
+    /// A material with no timeline never reaches an ffmpeg, and gets no
+    /// band.
+    ///
+    /// The eligibility rule is stated in three places — the ingest
+    /// enqueue, the backfill's SQL, and the handler — and this is the
+    /// one that has to hold whatever the other two let through: a
+    /// `chapter_scan` aimed at a still by hand is still a `chapter_scan`
+    /// that must not open the file.
+    #[tokio::test]
+    async fn chapter_scan_leaves_a_material_with_no_timeline_alone() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let search_dir = tempfile::tempdir().unwrap();
+        let env = series_job_env(&isle, pool, search_dir.path()).await;
+        let persona = seed_persona(&isle).await;
+        let aid = seed_material_at(
+            &isle,
+            persona,
+            std::path::Path::new("/library/plate.png"),
+            "image/png",
+        )
+        .await;
+
+        let message =
+            handlers::chapter_scan(&env, &serde_json::json!({"asset_id": aid.to_string()}))
+                .await
+                .unwrap();
+        assert!(
+            message.contains("not_timed=1") && message.contains("filed=0"),
+            "a still is declined rather than read: {message}"
+        );
+        let layers = crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone());
+        assert!(
+            layers
+                .list_by_asset(&asterism_core::domain::value::AssetId::from_uuid(aid))
+                .await
+                .unwrap()
+                .is_empty(),
+            "declining to read is not a reading, so it opens no band"
+        );
+    }
+
+    /// An asset that is gone between enqueue and worker is a message,
+    /// not an error — the same judgement every other per-asset handler
+    /// records, and the reason a purge during an import wave does not
+    /// fill the queue with failures.
+    #[tokio::test]
+    async fn chapter_scan_answers_a_vanished_asset_with_a_message() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let search_dir = tempfile::tempdir().unwrap();
+        let env = series_job_env(&isle, pool, search_dir.path()).await;
+
+        let message = handlers::chapter_scan(
+            &env,
+            &serde_json::json!({"asset_id": uuid::Uuid::now_v7().to_string()}),
+        )
+        .await
+        .unwrap();
+        assert!(message.contains("gone"), "{message}");
+    }
+
+    /// A backfill page over an empty library ends the walk instead of
+    /// chaining, which is what keeps a start on a read library at one
+    /// query.
+    #[tokio::test]
+    async fn a_chapter_backfill_with_nothing_left_does_not_chain() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let search_dir = tempfile::tempdir().unwrap();
+        let env = series_job_env(&isle, pool.clone(), search_dir.path()).await;
+
+        let message = handlers::chapter_scan(&env, &serde_json::json!({"batch": true}))
+            .await
+            .unwrap();
+        assert!(message.contains("nothing left to read"), "{message}");
+        let queued: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM Jobs WHERE json_extract(job, '$.kind') = 'chapter_scan'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(queued, 0, "a short page is the end of the walk");
     }
 }

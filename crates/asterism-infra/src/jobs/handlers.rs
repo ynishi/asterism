@@ -1367,6 +1367,287 @@ async fn probe_dims(locator: &SourceLocator) -> DimsProbe {
     }
 }
 
+/// Page size for one `chapter_scan` backfill pass.
+///
+/// Sized like the fingerprint walk's rather than the duplicate re-scan's,
+/// because the unit of work is the same kind of thing: an external
+/// process against a file on disk. Reading `-f ffmetadata` costs a demux
+/// of the container header rather than a pass over its frames, so a page
+/// is cheaper than a page of hashing — but it is still fifty spawns, and
+/// the page exists to hand the worker back, not to drain the backlog.
+const CHAPTER_SCAN_PAGE: u32 = 50;
+
+/// What one material's chapter reading came to.
+enum ChapterOutcome {
+    /// The imported band was written. `sections` is what landed in it,
+    /// `refused` how many the file declared that could not be
+    /// represented (see `chapter_ffmetadata`).
+    ///
+    /// **Zero sections is a normal `Filed`**, and filing it is what
+    /// takes the material out of the backfill walk — see
+    /// [`JobKind::ChapterScan`](asterism_core::domain::job::JobKind::ChapterScan)
+    /// on the band being the stamp.
+    Filed { sections: usize, refused: usize },
+    /// The material has no playback timeline, so there is nothing a
+    /// chapter could divide. No band, and none wanted.
+    NotTimed,
+    /// Nothing was learned about the file. No band, so the material
+    /// stays in the walk for a later pass.
+    Unreadable,
+}
+
+/// Reads one material's declared chapter list and files it.
+///
+/// Eligibility is re-asked here through
+/// [`MimeType::carries_chapters`] rather than trusted from the caller:
+/// the per-asset route walks an entity and the backfill route walks a
+/// SQL `LIKE`, and the handler is where the two have to mean the same
+/// thing.
+///
+/// # A locator with no local bytes files an empty band
+///
+/// The same judgement `probe_dims` records for the same shape of row: a
+/// container record or a remote locator names no place bytes will ever
+/// appear, so "nothing to read" is a permanent answer rather than a
+/// deferred one, and filing it is what keeps the walk from re-offering
+/// the row on every pass. It is the one case where an empty band means
+/// "there was nothing to read" instead of "the file declares nothing",
+/// and the two are indistinguishable to a reader — which is acceptable
+/// because both mean the same thing to a surface: no chapters.
+async fn scan_material_chapters(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    ord: u32,
+    locator: &SourceLocator,
+    mime: Option<&MimeType>,
+) -> ChapterOutcome {
+    if !mime.is_some_and(MimeType::carries_chapters) {
+        return ChapterOutcome::NotTimed;
+    }
+    let reading = match locator.local_path().map(|p| p.to_path_buf()) {
+        None => crate::jobs::chapter_ffmetadata::ChapterReading::default(),
+        Some(path) => {
+            // Blocking process spawn and pipe read, off the async
+            // worker — the same shape the frame grab beside it uses.
+            let probe = tokio::task::spawn_blocking(move || {
+                crate::jobs::chapter_ffmetadata::read_chapters(&path.to_string_lossy())
+            })
+            .await;
+            match probe {
+                Ok(crate::jobs::chapter_ffmetadata::ChapterProbe::Read(reading)) => reading,
+                Ok(crate::jobs::chapter_ffmetadata::ChapterProbe::Unreadable(why)) => {
+                    tracing::warn!(
+                        event = "diag.chapter_scan.unreadable",
+                        locator = %locator.to_display(),
+                        detail = %why,
+                        "chapter_scan left the material for a later pass"
+                    );
+                    return ChapterOutcome::Unreadable;
+                }
+                // The blocking task died rather than answered, so
+                // nothing is known about the file and nothing is
+                // recorded about it.
+                Err(join) => {
+                    tracing::warn!(
+                        event = "diag.chapter_scan.join_failed",
+                        locator = %locator.to_display(),
+                        error = %join,
+                        "chapter_scan probe did not complete"
+                    );
+                    return ChapterOutcome::Unreadable;
+                }
+            }
+        }
+    };
+    for why in &reading.refused {
+        tracing::info!(
+            event = "diag.chapter_scan.section_refused",
+            locator = %locator.to_display(),
+            detail = %why,
+            "a declared section could not be represented on the timeline"
+        );
+    }
+    // The single door into an imported band (`chapter_intake`): it
+    // resolves the layer, replaces the contents atomically, and leaves
+    // a person's own bands alone. A failure here writes nothing, which
+    // is why it reports `Unreadable` — no band means the material is
+    // still in the walk, so the page that failed is retried rather than
+    // silently recorded as chapterless.
+    match asterism_core::application_support::replace_imported_chapters(
+        &env.deps.material_layers,
+        &env.deps.chapter_marks,
+        asset_id,
+        ord,
+        &reading.chapters,
+    )
+    .await
+    {
+        Ok(_) => ChapterOutcome::Filed {
+            sections: reading.chapters.len(),
+            refused: reading.refused.len(),
+        },
+        Err(err) => {
+            tracing::warn!(
+                event = "diag.chapter_scan.write_failed",
+                locator = %locator.to_display(),
+                error = %err,
+                "the imported chapter band was not written"
+            );
+            ChapterOutcome::Unreadable
+        }
+    }
+}
+
+/// Running totals for one `chapter_scan` run, in the shape its message
+/// is built from.
+#[derive(Default)]
+struct ChapterTally {
+    filed: usize,
+    sections: usize,
+    refused: usize,
+    not_timed: usize,
+    unreadable: usize,
+}
+
+impl ChapterTally {
+    fn absorb(&mut self, outcome: ChapterOutcome) {
+        match outcome {
+            ChapterOutcome::Filed { sections, refused } => {
+                self.filed += 1;
+                self.sections += sections;
+                self.refused += refused;
+            }
+            ChapterOutcome::NotTimed => self.not_timed += 1,
+            ChapterOutcome::Unreadable => self.unreadable += 1,
+        }
+    }
+
+    fn report(&self) -> String {
+        format!(
+            "filed={} sections={} refused={} not_timed={} unreadable={}",
+            self.filed, self.sections, self.refused, self.not_timed, self.unreadable
+        )
+    }
+}
+
+/// Reads a container's own chapter list into its imported structure
+/// band.
+///
+/// Payload is either `{ "asset_id": <uuid> }` (one asset, from the
+/// ingest fan-out) or `{ "batch": true, "cursor": {…} }` (the walk over
+/// materials no reading has reached yet).
+///
+/// Failures are per-material and never fatal, for the reason the
+/// fingerprint job gives: a file that has moved leaves its band
+/// unwritten, which reads downstream as "not scanned yet" rather than
+/// as "declares nothing", and returning `Err` for one of them would
+/// abandon the rest of the page.
+pub async fn chapter_scan(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return chapter_scan_batch(env, payload).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    let mut tally = ChapterTally::default();
+    for material in &asset.materials {
+        tally.absorb(
+            scan_material_chapters(
+                env,
+                &asset.id,
+                material.ord,
+                &material.locator,
+                material.mime.as_ref(),
+            )
+            .await,
+        );
+    }
+    Ok(format!("chapter_scan: {}", tally.report()))
+}
+
+/// One page of the walk over materials that have no imported structure
+/// band yet.
+///
+/// Chain-enqueues the next page while pages come back full, the same
+/// shape as the fingerprint and dimension walks — and it stops for good
+/// rather than merely stopping early, because a completed reading always
+/// leaves the band its predicate selects on the absence of.
+async fn chapter_scan_batch(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    // The composite `(asset_id, ord)` key the scan orders by. Only the
+    // object shape is accepted: unlike the fingerprint walk, this job
+    // has never shipped a bare-uuid cursor, so there is no durable queue
+    // row anywhere carrying one.
+    let cursor: Option<(AssetId, u32)> = match payload.get("cursor") {
+        Some(serde_json::Value::Object(o)) => {
+            let id = o
+                .get("asset_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .map(AssetId::from_uuid);
+            let ord = o.get("ord").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            id.map(|id| (id, ord))
+        }
+        _ => None,
+    };
+    let page = env
+        .deps
+        .assets
+        .scan_chapter_scan_candidates(
+            cursor.as_ref().map(|(id, ord)| (id, *ord)),
+            CHAPTER_SCAN_PAGE,
+        )
+        .await?;
+    if page.is_empty() {
+        return Ok("chapter_scan pass: nothing left to read".into());
+    }
+    let last = page
+        .last()
+        .map(|m| (m.asset_id, m.ord))
+        .expect("page is non-empty");
+    let full = page.len() as u32 == CHAPTER_SCAN_PAGE;
+    let mut tally = ChapterTally::default();
+    for item in page {
+        tally.absorb(
+            scan_material_chapters(
+                env,
+                &item.asset_id,
+                item.ord,
+                &item.locator,
+                item.mime.as_ref(),
+            )
+            .await,
+        );
+    }
+    // Chain only on a full page. "Nothing was filed" is not a stop
+    // condition — a page of unreadable files would end the walk while
+    // leaving every one of them unanswered — but "nothing was scanned"
+    // is, and unlike the hashing walk this one really does empty: the
+    // rows that could be read leave the predicate on the way past.
+    if full {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::ChapterScan,
+                serde_json::json!({
+                    "batch": true,
+                    "cursor": { "asset_id": last.0.to_string(), "ord": last.1 },
+                }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "chapter_scan pass: {} next_cursor={}#{} more={full}",
+        tally.report(),
+        last.0,
+        last.1
+    ))
+}
+
 /// Whether one material ended up with a fingerprint.
 enum HashOutcome {
     Hashed {

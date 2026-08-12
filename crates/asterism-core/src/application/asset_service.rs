@@ -1327,6 +1327,27 @@ impl AssetService {
             .jobs
             .enqueue_with_priority(JobKind::MaterialHash, payload.clone(), -10)
             .await;
+        // Chapters are a container's own statement about how its content
+        // is divided, so the job is enqueued only for the families that
+        // have a playback timeline to divide — the same shape as the
+        // index and thumbnail decisions above, asking the format before
+        // spending a job on it. The handler asks again through the same
+        // predicate, so the two cannot disagree about what is eligible.
+        //
+        // Below the default priority for the reason the fingerprint is:
+        // reading chapters spawns an external process per material, and
+        // during an import wave the grid filling in is what the person
+        // is watching. Nothing waits on the answer.
+        if asset
+            .materials
+            .iter()
+            .any(|m| m.mime.as_ref().is_some_and(MimeType::carries_chapters))
+        {
+            let _ = self
+                .jobs
+                .enqueue_with_priority(JobKind::ChapterScan, payload.clone(), -10)
+                .await;
+        }
         // Image thumbs are cached ahead of time for the sizes that the
         // grid actually paints. Larger sizes (detail overlay 512 px,
         // fullscreen 1024 px) are generated on demand at open time so

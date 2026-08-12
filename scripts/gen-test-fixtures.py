@@ -45,6 +45,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import zlib
 from pathlib import Path
 
@@ -72,6 +73,8 @@ EXPECTED = [
     VIDEO_DIR / "testsrc.mp4",
     VIDEO_DIR / "testsrc.mov",
     VIDEO_DIR / "testsrc.webm",
+    VIDEO_DIR / "chaptered.mkv",
+    AUDIO_DIR / "chaptered.m4a",
     CARD_DIR / "character-card-lyra.png",
 ]
 
@@ -175,6 +178,91 @@ def gen_video() -> None:
     ffmpeg("-f", "lavfi", "-i", "testsrc=size=640x360:rate=25:duration=10",
            "-c:v", "libvpx-vp9", "-b:v", "200k", "-deadline", "realtime",
            "-cpu-used", "8", str(VIDEO_DIR / "testsrc.webm"))
+
+
+# --------------------------------------------------------------------
+# Chaptered media — the only fixtures that carry a chapter list.
+#
+# `chapter_scan` reads a container's declared chapters through
+# `ffmpeg -f ffmetadata`, and every other fixture in this file is a
+# negative case for it: none of them declare any. These two are the
+# positive one, in the two container families that spell chapters
+# differently — Matroska stores a `Chapters` segment with explicit start
+# and end times, MP4 a chapter track whose entries carry starts and take
+# their ends from the next entry.
+#
+# Chapters are baked by handing ffmpeg an ffmetadata document as a
+# second input and mapping its chapters onto the output. `-map_chapters`
+# is given explicitly even though ffmpeg would pick input 1 by default
+# (it copies from the first input that has any): the default depends on
+# neither input growing chapters later, which is not a property a
+# fixture should rest on.
+#
+# **The timings below are managed twice** — here, and in the Rust tests
+# that assert them (`asterism-infra/tests/chapter_scan_job.rs`). That is
+# the same deliberate duplication the header notes for dimensions and
+# durations: a fixture whose numbers are read out of the fixture proves
+# nothing.
+# --------------------------------------------------------------------
+
+# Matroska: three sections over six seconds, the middle one untitled.
+# The untitled one is not filler — an empty label is a shape
+# `ChapterMark` documents itself as accepting, and without a fixture
+# that has one the "a file may declare a section without naming it"
+# path is only ever exercised by a hand-written string.
+MKV_CHAPTERS = [(0, 2000, "Opening"), (2000, 4000, ""), (4000, 6000, "Finale")]
+
+# MP4: two sections over the same six seconds. Fewer, because what this
+# file is for is the other container's spelling rather than a second
+# copy of the same assertions.
+M4A_CHAPTERS = [(0, 3000, "Side A"), (3000, 6000, "Side B")]
+
+CHAPTERED_SECONDS = 6
+
+
+def ffmetadata(chapters: list[tuple[int, int, str]]) -> str:
+    """An ffmetadata document declaring `chapters`, in milliseconds.
+
+    `TIMEBASE=1/1000` makes the numbers here milliseconds outright, so
+    the constants above read as what the tests assert rather than as
+    ticks of some container's clock.
+    """
+    out = [";FFMETADATA1", "title=Chaptered fixture"]
+    for start, end, title in chapters:
+        out += ["[CHAPTER]", "TIMEBASE=1/1000", f"START={start}", f"END={end}"]
+        # An empty `title=` line and no line at all are both ways to say
+        # "untitled"; omitting it is what a muxer does, so that is what
+        # this writes.
+        if title:
+            out.append(f"title={title}")
+    return "\n".join(out) + "\n"
+
+
+def gen_chaptered() -> None:
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+    # The ffmetadata document is input to ffmpeg, not a fixture, and it
+    # goes to a temporary directory rather than beside the outputs. The
+    # unlink at the end of this function used to be the only thing
+    # removing it, so any ffmpeg failure in between left a stray
+    # `_chapters.txt` inside a *tracked* fixtures directory — where the
+    # next `git add -A` would sweep it into a commit as though it were
+    # one of the generated files. `TemporaryDirectory` removes it on the
+    # way out of the `with` block whether or not the encode succeeded.
+    with tempfile.TemporaryDirectory(prefix="asterism-fixtures-") as scratch:
+        meta = Path(scratch) / "chapters.txt"
+
+        meta.write_text(ffmetadata(MKV_CHAPTERS), encoding="utf-8")
+        ffmpeg("-f", "lavfi", "-i", f"testsrc=size=320x240:rate=25:duration={CHAPTERED_SECONDS}",
+               "-i", str(meta), "-map", "0", "-map_metadata", "1", "-map_chapters", "1",
+               "-c:v", "libx264", "-pix_fmt", "yuv420p", str(VIDEO_DIR / "chaptered.mkv"))
+
+        meta.write_text(ffmetadata(M4A_CHAPTERS), encoding="utf-8")
+        ffmpeg("-f", "lavfi",
+               "-i", f"sine=frequency=440:sample_rate=44100:duration={CHAPTERED_SECONDS}",
+               "-i", str(meta), "-map", "0", "-map_metadata", "1", "-map_chapters", "1",
+               "-c:a", "aac", "-b:a", "64k", str(AUDIO_DIR / "chaptered.m4a"))
 
 
 # --------------------------------------------------------------------
@@ -375,6 +463,7 @@ def main() -> int:
     gen_audio()
     gen_images()
     gen_video()
+    gen_chaptered()
     gen_card()
 
     for p in EXPECTED:

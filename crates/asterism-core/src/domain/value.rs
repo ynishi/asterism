@@ -125,6 +125,21 @@ define_uuid_id!(
     MaterialMarkId
 );
 define_uuid_id!(
+    /// Surrogate id for a `MaterialLayer` — one band of marks over an
+    /// Asset's material (the imported chapter list, a user's own pass
+    /// over it, a machine's). Layers are ordered by their `ord` column
+    /// rather than by mint time, so the v7 timestamp carries no meaning
+    /// here beyond being a stable tie-break.
+    MaterialLayerId
+);
+define_uuid_id!(
+    /// Surrogate id for a `ChapterMark` — one entry in a structure
+    /// layer's chapter list. Ordering is by the layer's own `ord` and
+    /// then by position on the timeline, so the v7 timestamp is again a
+    /// tie-break and not the reading order.
+    ChapterMarkId
+);
+define_uuid_id!(
     /// Surrogate id for a `DuplicateConflict` — one raised "are these
     /// two the same thing?" question. Surrogate rather than the pair
     /// itself because the pair is the *unique key* and an id is what a
@@ -768,6 +783,23 @@ impl MimeType {
     /// moment one gains a format.
     pub fn needs_video_preview(&self) -> bool {
         matches!(self, Self::Video(f) if f.webview_cannot_play())
+    }
+
+    /// Whether a container of these bytes can declare a chapter list.
+    ///
+    /// Video and audio, and the boundary is not about which containers
+    /// happen to implement the feature: a chapter divides a **playback
+    /// timeline**, and these are the two families that have one. A PDF
+    /// has an outline and a PNG has nothing, and neither division is
+    /// addressed by
+    /// [`TimelineSpan`](crate::domain::material_mark::TimelineSpan).
+    ///
+    /// Read by the `ChapterScan` enqueue and by the handler that picks
+    /// the job up, so the two agree by construction — the property the
+    /// thumbnail path had to be rewritten to get, after enqueue and
+    /// handler carried separate copies of the same rule.
+    pub fn carries_chapters(&self) -> bool {
+        matches!(self, Self::Video(_) | Self::Audio(_))
     }
 }
 
