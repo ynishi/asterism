@@ -80,6 +80,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workspace scaffolding — `Cargo.toml` metadata, README, and this
   changelog.
 
+### Fixed
+
+- **The e2e suite is now type-checked** (`asterism-ui`) — the specs and
+  both WebdriverIO configs sat outside every tsconfig, so `just ui-check`
+  reported zero errors over ~4200 lines it never read, and the test
+  runner erased their types rather than checking them. A second config
+  (`tsconfig.e2e.json`, run as `check:e2e`) covers them without putting
+  `describe` / `it` / `browser` in scope for application code. The seven
+  diagnostics it surfaced on its first run are fixed: `await $$(…)` now
+  goes through `getElements()`, and both configs take `tauri:options`
+  and `browser.tauri` from the service's own `TauriCapabilities` instead
+  of a local cast.
+
 ### Boundaries
 
 - **Data layout**: user data is isolated per local profile rather than
