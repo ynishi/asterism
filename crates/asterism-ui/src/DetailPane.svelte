@@ -24,6 +24,7 @@
   // `duration_ms`, and the live media element the marks are read from
   // and seek through.
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+  import { mutate } from "./lib/mutate";
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import AlbumMetaSection from "./AlbumMetaSection.svelte";
@@ -1015,14 +1016,21 @@
   async function toggleAssetInGroup(assetId: string, groupId: string) {
     try {
       if (detailGroupIds.has(groupId)) {
-        await invoke("remove_asset_from_group", {
-          command: { asset_id: assetId, group_id: groupId },
-        });
+        await mutate(
+          "remove_asset_from_group",
+          { command: { asset_id: assetId, group_id: groupId } },
+          "remove this from the group",
+        );
         detailGroupIds.delete(groupId);
       } else {
-        await invoke("add_asset_to_group", {
-          command: { asset_id: assetId, group_id: groupId },
-        });
+        // Both arms of the toggle go through `mutate`: one gesture, one
+        // control, and a refusal that appeared on the way out but not on
+        // the way in would be the harder half to explain.
+        await mutate(
+          "add_asset_to_group",
+          { command: { asset_id: assetId, group_id: groupId } },
+          "add this to the group",
+        );
         detailGroupIds.add(groupId);
       }
       detailCacheInvalidate(assetId);
@@ -1275,9 +1283,11 @@
   async function deleteComment(commentId: string) {
     if (!detail) return;
     try {
-      await invoke("delete_asset_comment", {
-        command: { comment_id: commentId },
-      });
+      await mutate(
+        "delete_asset_comment",
+        { command: { comment_id: commentId } },
+        "delete this comment",
+      );
       assetComments = assetComments.filter((c) => c.id !== commentId);
     } catch (err) {
       console.warn("delete_asset_comment failed", err);

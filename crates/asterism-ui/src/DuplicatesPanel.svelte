@@ -140,7 +140,8 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { AssetCardDto, DuplicateConflictDto, DuplicateGroupDto } from "./bindings";
   import MergeDialog from "./MergeDialog.svelte";
-  import { api } from "./lib/api";
+  import { mutate } from "./lib/mutate";
+  import { summariseBulk } from "./lib/bulk-status";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { mergeDialog } from "./lib/stores/merge-dialog.svelte";
   import {
@@ -305,12 +306,28 @@
     try {
       for (const member of group.members) {
         if (member.id === keepId) continue;
-        await api("trash_asset", { command: { asset_id: member.id } });
+        await mutate(
+          "trash_asset",
+          { command: { asset_id: member.id } },
+          "move this to the trash",
+        );
         trashed.push(member.id);
       }
       resolved.add(key);
-    } catch (err) {
-      error = `trash failed: ${(err as { message?: string })?.message ?? err}`;
+    } catch {
+      // `mutate` has the reason on screen. What is left for this panel
+      // is the count, which the refusal cannot give: the loop stops at
+      // the first one refused, so some members left the live set and
+      // the rest did not.
+      // The same helper `App.svelte` uses. It was a hand-kept copy for
+      // two rounds and diverged in both directions — once the copy was
+      // right and the original wrong, once the reverse — which is what
+      // moved it into `lib/`.
+      const asked = group.members.length - 1;
+      error = summariseBulk(trashed.length, asked, {
+        verb: "moved",
+        into: "to trash",
+      });
     } finally {
       busy = null;
       // Both run even on a partial failure: rows really did leave the
