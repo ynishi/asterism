@@ -70,6 +70,7 @@
     UpdateQueryGroupQueryCommand,
   } from "./bindings";
   import { invoke } from "@tauri-apps/api/core";
+  import { mutate } from "./lib/mutate";
   import { SvelteSet } from "svelte/reactivity";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
@@ -279,7 +280,7 @@
   /// (`restore_group`) that has no sidebar affordance yet.
   async function trashGroup(id: string) {
     try {
-      await invoke("trash_group", { command: { group_id: id } });
+      await mutate("trash_group", { command: { group_id: id } }, "trash this group");
       // Drop the filter if the trashed group was active.
       activeFilter.removeGroup(id);
       await groupCatalog.loadCounts(activeFilter.activePersona);
@@ -311,13 +312,17 @@
 
   async function deleteDir(id: string) {
     try {
-      await invoke("delete_dir", { command: { dir_id: id } });
+      await mutate("delete_dir", { command: { dir_id: id } }, "delete this folder");
       expandedDirs.delete(id);
       dirError = "";
       await groupCatalog.loadDirs(activeFilter.activePersona);
-    } catch (error) {
-      // Typically "dir is not empty" — surface it inline.
-      dirError = String((error as { message?: string })?.message ?? error);
+    } catch {
+      // Deliberately silent here: `mutate` has already put the refusal
+      // on screen. Typically "dir is not empty — move or delete its
+      // contents first", which is a refused *operation*, not a field
+      // the user can correct in place. `dirError` keeps the other
+      // half — "name required" belongs beside the input it is about,
+      // and the form's own failures stay there.
     }
   }
 
@@ -442,13 +447,18 @@
   // nested row now carries its own way out.
   async function unlinkGroup(parentId: string, childId: string) {
     try {
-      await invoke("unlink_group", {
-        command: { parent_group_id: parentId, child_group_id: childId },
-      });
+      await mutate(
+        "unlink_group",
+        { command: { parent_group_id: parentId, child_group_id: childId } },
+        "unlink these groups",
+      );
       await groupCatalog.loadLinks(activeFilter.activePersona);
       dirError = "";
-    } catch (error) {
-      dirError = String((error as { message?: string })?.message ?? error);
+    } catch {
+      // Same reasoning as `deleteDir`: `mutate` has the refusal on
+      // screen, and this is an operation rather than a field. It is
+      // also the same verb `App.svelte` calls, which now says the same
+      // thing on both paths.
     }
   }
 
@@ -590,8 +600,14 @@
 {/snippet}
 
 {#snippet dirNode(dir: DirDto, depth: number)}
+  <!-- `data-dir-id` is on the row as well as on the `.dir-name` button
+       below (where the drag router reads it) so the row itself is
+       addressable: `e2e/refusal.spec.ts` has to read what a dir
+       discloses and then click that same row's ✕, and without an id on
+       the `li` both of those go through `:has()`. -->
   <li
     class="group-row dir-row"
+    data-dir-id={dir.id}
     style="--depth: {depth}"
     class:drop-target-group={cardDrag.isOver("dir", dir.id)}
   >

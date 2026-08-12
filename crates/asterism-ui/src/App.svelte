@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { mutate } from "./lib/mutate";
+  import { summariseBulk } from "./lib/bulk-status";
   import { untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
@@ -970,18 +972,29 @@
    * grid on every single restore; the row is gone from this side either
    * way, so removing it locally is both faster and truthful.
    */
-  async function restoreAsset(assetId: string) {
+  /** @returns whether the asset was actually restored. */
+  async function restoreAsset(assetId: string): Promise<boolean> {
     try {
-      await invoke("restore_asset", { command: { asset_id: assetId } });
+      await mutate(
+        "restore_asset",
+        { command: { asset_id: assetId } },
+        "restore this from the trash",
+      );
       assetPageCatalog.dropItem(assetId);
       // The row is gone from this side, so it must not keep counting
       // toward the selection bar — a following bulk action would send a
       // dead id.
       gridSelection.selectedIds.delete(assetId);
       status = "restored";
+      return true;
     } catch (err) {
+      // The reason is already on screen — `mutate` put it there — so the
+      // status line does not repeat it. What a caller needs from here is
+      // whether it happened: a bulk loop that counted a refusal as a
+      // success would write "restored 5" over the refusal saying
+      // otherwise.
       console.warn("restore_asset failed", err);
-      status = `restore failed: ${(err as { message?: string })?.message ?? err}`;
+      return false;
     }
   }
 
@@ -990,18 +1003,26 @@
    * `purgeFromCard`, which owns the confirm and the selection
    * expansion; this is the per-id half.
    */
-  async function purgeOne(assetId: string) {
+  /** @returns whether the asset was actually purged. */
+  async function purgeOne(assetId: string): Promise<boolean> {
     try {
-      await invoke("purge_asset", { command: { asset_id: assetId } });
+      await mutate(
+        "purge_asset",
+        { command: { asset_id: assetId } },
+        "delete this permanently",
+      );
       assetPageCatalog.dropItem(assetId);
       // The row is gone from this side, so it must not keep counting
       // toward the selection bar — a following bulk action would send a
       // dead id.
       gridSelection.selectedIds.delete(assetId);
       status = "deleted forever";
+      return true;
     } catch (err) {
+      // Same as `restoreAsset`: the refusal is on screen, and the
+      // caller is told what happened rather than being left to assume.
       console.warn("purge_asset failed", err);
-      status = `delete failed: ${(err as { message?: string })?.message ?? err}`;
+      return false;
     }
   }
 
@@ -1213,9 +1234,11 @@
 
   async function unlinkGroups(parentId: string, childId: string) {
     try {
-      await invoke("unlink_group", {
-        command: { parent_group_id: parentId, child_group_id: childId },
-      });
+      await mutate(
+        "unlink_group",
+        { command: { parent_group_id: parentId, child_group_id: childId } },
+        "unlink these groups",
+      );
       await loadGroupLinks();
       await loadAssets();
     } catch (error) {
@@ -3192,13 +3215,33 @@
     const ids = gridSelection.selectedIds.has(assetId)
       ? Array.from(gridSelection.selectedIds)
       : [assetId];
+    const added: string[] = [];
     try {
       for (const id of ids) {
-        await invoke("add_asset_to_group", {
-          command: { asset_id: id, group_id: groupId },
-        });
+        await mutate(
+          "add_asset_to_group",
+          { command: { asset_id: id, group_id: groupId } },
+          "add this to the group",
+        );
+        added.push(id);
         assetPageCatalog.invalidateDetail(id);
       }
+    } catch (err) {
+      // Was `JSON.stringify(err)` in the status line — a raw object
+      // where a sentence belongs. `mutate` carries the reason now; this
+      // side owes only the count, since the loop stops at the first
+      // refusal and the rest of the selection never left.
+      console.warn("add to group failed", err);
+    }
+    // Outside the `try`, for the same reason as `trashFromCard`: when
+    // the loop stops half way, the ids before the refusal really did
+    // join the group, and a status line claiming so beside a sidebar
+    // count and a grid that still show the old state would be the
+    // interface disagreeing with itself. Safe on the same terms, over
+    // two functions rather than one: `loadCounts` is Resource-backed
+    // and `loadAssets` goes through `assetPageCatalog.loadPage`, which
+    // reports through a boolean and `.error` rather than throwing.
+    if (added.length > 0) {
       await groupCatalog.loadCounts(activeFilter.activePersona);
       // If the destination is the active filter the new members have to
       // appear, which the key-skip cache would otherwise hide.
@@ -3206,11 +3249,11 @@
         assetPageCatalog.invalidateKey();
         await loadAssets();
       }
-      status = ids.length === 1 ? "added to group" : `added ${ids.length} to group`;
-    } catch (err) {
-      console.warn("add to group failed", err);
-      status = `group add error: ${JSON.stringify(err)}`;
     }
+    status = summariseBulk(added.length, ids.length, {
+      verb: "added",
+      into: "to the group",
+    });
   }
 
   /**
@@ -3254,7 +3297,7 @@
     const trashed: string[] = [];
     try {
       for (const id of ids) {
-        await invoke("trash_asset", { command: { asset_id: id } });
+        await mutate("trash_asset", { command: { asset_id: id } }, "move this to the trash");
         trashed.push(id);
         // The row left the live side: remove it locally rather than
         // repainting the whole grid (same reasoning as restoreAsset),
@@ -3263,13 +3306,29 @@
         assetPageCatalog.dropItem(id);
         gridSelection.selectedIds.delete(id);
       }
-      // Live-side tallies shifted — refresh the sidebar counts.
-      await loadSidebarCounts();
-      status = ids.length === 1 ? "moved to trash" : `moved ${ids.length} to trash`;
     } catch (err) {
+      // The reason is on screen already (`mutate`); repeating it in the
+      // status line would put the same sentence in two places, in two
+      // wordings. What the status line owes the user here is the part
+      // the refusal cannot say: how much of what they asked for
+      // actually happened. The loop stops at the first refusal, so
+      // `trashed` is exactly that.
       console.warn("trash_asset failed", err);
-      status = `trash failed: ${(err as { message?: string })?.message ?? err}`;
     }
+    if (trashed.length > 0) {
+      // Live-side tallies shifted — refresh the sidebar counts. Outside
+      // the `try` on purpose, so a partial trash still updates them;
+      // safe because count loads go through `Resource.load`, which
+      // catches and returns false rather than throwing
+      // (`lib/stores/_resource.svelte.ts:60-66`). A count path that
+      // bypassed `Resource` would skip the status line and the Undo
+      // offer below.
+      await loadSidebarCounts();
+    }
+    status = summariseBulk(trashed.length, ids.length, {
+      verb: "moved",
+      into: "to trash",
+    });
     if (trashed.length > 0) {
       undoToastCatalog.show({
         message:
@@ -3295,14 +3354,16 @@
    * rows come back on the live side, and leave the trash one).
    */
   async function undoTrash(ids: string[]) {
+    let restored = 0;
     for (const id of ids) {
-      await restoreAsset(id);
+      if (await restoreAsset(id)) restored += 1;
     }
     assetPageCatalog.invalidateKey();
     await loadAssets();
     await loadSidebarCounts();
-    status = ids.length === 1 ? "restored" : `restored ${ids.length}`;
+    status = summariseBulk(restored, ids.length, { verb: "restored" });
   }
+
 
   /**
    * Restores a set of assets and refreshes the sidebar afterwards —
@@ -3315,13 +3376,18 @@
    */
   async function restoreMany(ids: string[]) {
     if (ids.length === 0) return;
+    let restored = 0;
     for (const id of ids) {
-      await restoreAsset(id);
+      if (await restoreAsset(id)) restored += 1;
     }
     // Both sides of the trash shifted — the counts follow whichever
     // one the grid is showing.
     await loadSidebarCounts();
-    if (ids.length > 1) status = `restored ${ids.length}`;
+    // A partial result is worth saying even for one id, where
+    // `restoreAsset` has already written "restored" optimistically.
+    if (ids.length > 1 || restored !== ids.length) {
+      status = summariseBulk(restored, ids.length, { verb: "restored" });
+    }
   }
 
   /**
@@ -3354,12 +3420,20 @@
       danger: true,
     });
     if (!ok) return;
+    let purged = 0;
     for (const id of ids) {
-      await purgeOne(id);
+      if (await purgeOne(id)) purged += 1;
     }
     // Same one-refresh-per-flow rule as `restoreMany`.
     await loadSidebarCounts();
-    if (ids.length > 1) status = `deleted ${ids.length} forever`;
+    if (ids.length > 1 || purged !== ids.length) {
+      // "forever" survives the partial branch: a half-finished purge is
+      // exactly where the user needs to know that what did go is gone.
+      status = summariseBulk(purged, ids.length, {
+        verb: "deleted",
+        qualifier: "forever",
+      });
+    }
   }
 
   async function purgeFromCard(assetId: string) {
@@ -3395,7 +3469,11 @@
     });
     if (!ok) return;
     try {
-      const result = await invoke<EmptyTrashResult>("empty_trash", { command: {} });
+      const result = await mutate<EmptyTrashResult>(
+        "empty_trash",
+        { command: {} },
+        "empty the trash",
+      );
       // Nothing that was on screen still exists, so nothing may stay
       // in the selection either.
       gridSelection.selectedIds.clear();
@@ -3407,8 +3485,12 @@
           ? `emptied trash (${result.purged}) — ${result.skipped} could not be deleted`
           : `emptied trash (${result.purged})`;
     } catch (err) {
+      // No status line for the reason: `mutate` has it. The sweep may
+      // have taken part of the trash before it stopped, so this says
+      // what is certain — it did not finish — rather than a count it
+      // cannot know until the reload below lands.
       console.warn("empty_trash failed", err);
-      status = `empty trash failed: ${(err as { message?: string })?.message ?? err}`;
+      status = "the trash was not fully emptied";
       // The sweep may have taken some of them before it stopped; the
       // grid on screen no longer describes the trash either way.
       assetPageCatalog.invalidateKey();

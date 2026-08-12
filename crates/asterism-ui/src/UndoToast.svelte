@@ -20,6 +20,39 @@
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
 </script>
 
+{#if undoToastCatalog.refusal !== null}
+  {@const refusal = undoToastCatalog.refusal}
+  <!-- `role="alert"` and `aria-live="assertive"`, unlike the two below:
+       this one reports that something the user asked for did not
+       happen, which is worth interrupting a screen reader for. Still
+       not `alertdialog` — it steals no focus and blocks nothing. -->
+  <div
+    class="refusal-toast"
+    class:stacked-one={undoToastCatalog.toast !== null ||
+      dispatchCatalog.status !== null}
+    class:stacked-two={undoToastCatalog.toast !== null &&
+      dispatchCatalog.status !== null}
+    role="alert"
+    aria-live="assertive"
+  >
+    <div class="refusal-toast-text">
+      <span class="refusal-toast-message">{refusal.message}</span>
+      {#if refusal.detail !== null}
+        <span class="refusal-toast-detail">{refusal.detail}</span>
+      {/if}
+    </div>
+    <!-- Named apart from the Undo toast's dismiss below: the two can be
+         on screen together, and "Dismiss" twice gives a screen-reader
+         user no way to tell which one they are on. -->
+    <button
+      type="button"
+      class="undo-toast-dismiss"
+      aria-label="Dismiss this message"
+      onclick={() => undoToastCatalog.dismissRefusal()}
+    >✕</button>
+  </div>
+{/if}
+
 {#if undoToastCatalog.toast !== null}
   {@const toast = undoToastCatalog.toast}
   <div
@@ -73,6 +106,56 @@
   }
   .undo-toast.stacked {
     bottom: 8.5rem;
+  }
+
+  /* Same family again, and the same shelf when alone. It climbs one row
+     per occupied slot below it rather than claiming a fixed row: a
+     refusal is the least frequent of the three, and a permanent gap
+     reserved for it would read as the mid-air float the undo slot was
+     moved off in the 2026-08-01 feedback.
+
+     Same width as its siblings, and taller when it needs to be. Those
+     two carry a phrase the user can finish reading in the second before
+     it fades; this one carries a sentence the backend wrote, has no
+     fade, and is the only one whose text the user may need to read
+     twice. So the message wraps here instead of being clipped with an
+     ellipsis, which is exactly what a truncated reason would deserve to
+     be called. */
+  .refusal-toast {
+    position: fixed;
+    bottom: 5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.6rem 0.6rem 0.6rem 1rem;
+    background: #33202a;
+    color: #ffe9ef;
+    border-left: 3px solid #ff6f8f;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    box-shadow: 0 6px 18px rgba(23, 22, 42, 0.3);
+    z-index: 47;
+    max-width: 60ch;
+  }
+  .refusal-toast.stacked-one {
+    bottom: 8.5rem;
+  }
+  .refusal-toast.stacked-two {
+    bottom: 12rem;
+  }
+  .refusal-toast-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .refusal-toast-message {
+    font-weight: 600;
+  }
+  .refusal-toast-detail {
+    color: #e0b8c4;
+    font-size: 0.8rem;
   }
   .undo-toast-message {
     white-space: nowrap;

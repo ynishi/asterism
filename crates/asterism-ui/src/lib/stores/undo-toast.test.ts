@@ -76,3 +76,58 @@ describe("undoToastCatalog", () => {
     expect(runs).toBe(0);
   });
 });
+
+// The refusal slot. Its whole point is the two ways it is *not* the
+// Undo slot: it does not expire, and it does not share a lifetime with
+// the offer sitting next to it.
+describe("undoToastCatalog.refusal", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    undoToastCatalog.dismiss();
+    undoToastCatalog.dismissRefusal();
+  });
+
+  afterEach(() => {
+    undoToastCatalog.dismiss();
+    undoToastCatalog.dismissRefusal();
+    vi.useRealTimers();
+  });
+
+  it("carries the message and the backend's reason", () => {
+    undoToastCatalog.refuse("Could not trash this.", "referenced by a snapshot");
+    expect(undoToastCatalog.refusal).toEqual({
+      message: "Could not trash this.",
+      detail: "referenced by a snapshot",
+    });
+  });
+
+  it("stays on screen after the Undo window would have closed", () => {
+    undoToastCatalog.refuse("Could not trash this.");
+    // Far past the 8 s an Undo offer gets. A refusal has no deadline to
+    // answer, and the user who looked away is the one it is for.
+    vi.advanceTimersByTime(60_000);
+    expect(undoToastCatalog.refusal).not.toBeNull();
+  });
+
+  it("survives the Undo toast being taken down", () => {
+    undoToastCatalog.refuse("Could not trash this.");
+    undoToastCatalog.show({ message: "Moved to Trash", onAction: () => {} });
+    undoToastCatalog.dismiss();
+    expect(undoToastCatalog.refusal).not.toBeNull();
+    expect(undoToastCatalog.toast).toBeNull();
+  });
+
+  it("does not take the Undo toast down with it", () => {
+    undoToastCatalog.show({ message: "Moved to Trash", onAction: () => {} });
+    undoToastCatalog.refuse("Could not trash the next one.");
+    undoToastCatalog.dismissRefusal();
+    expect(undoToastCatalog.refusal).toBeNull();
+    expect(undoToastCatalog.toast).not.toBeNull();
+  });
+
+  it("keeps the newest refusal", () => {
+    undoToastCatalog.refuse("first", "a");
+    undoToastCatalog.refuse("second", "b");
+    expect(undoToastCatalog.refusal?.message).toBe("second");
+  });
+});
