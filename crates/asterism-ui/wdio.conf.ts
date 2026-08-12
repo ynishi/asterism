@@ -22,6 +22,7 @@
 // never Dogfood. An e2e suite that clicked through the User's real
 // library would be a data-loss bug wearing a test's clothes.
 
+import type { TauriCapabilities } from "@wdio/tauri-service";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -56,7 +57,34 @@ const appBinary = path.join(repoRoot, "target/debug/asterism-ui");
 // src/server/handlers/window.rs:61 and :113].
 const WINDOW_LABEL = "main";
 
-export const config: WebdriverIO.Config = {
+// # Why `capabilities` carries its own type
+//
+// Two of the three keys below are invisible to a plain
+// `WebdriverIO.Config`. `WebdriverIO.Capabilities` knows
+// `wdio:tauriServiceOptions` but types it as the *base* option set,
+// which has no `env` — the extended one, the interface the service
+// itself reads, adds it [measured 2026-08-12, @wdio/tauri-service 1.1.0
+// dist/esm/types.d.ts `TauriServiceOptions extends
+// BaseTauriServiceOptions`, spread into the spawn environment at
+// dist/esm/index.js:1626]. And `tauri:options` is not on the global
+// interface at all, so the literal fails an excess-property check
+// (TS2353) against `RequestedStandaloneCapabilities`
+// [@wdio/types/build/Capabilities.d.ts:88].
+//
+// `TauriCapabilities` is the service's own answer to both. Importing it
+// has a second effect that is easy to miss and load-bearing: it is what
+// puts `browser.tauri` in scope below. That declaration lives in a
+// `declare global` block in `@wdio/native-types`, which the service
+// pulls in with a bare `import '@wdio/native-types'`
+// [dist/esm/index.d.ts:1] — and listing the service by *name* in
+// `services` is a runtime lookup the compiler cannot follow, so before
+// this import nothing here loaded it.
+//
+// None of this was visible until `tsconfig.e2e.json` existed: no config
+// named this file, so nothing type-checked it.
+export const config: WebdriverIO.Config & {
+  capabilities: TauriCapabilities[];
+} = {
   runner: "local",
   specs: ["./e2e/**/*.spec.ts"],
   maxInstances: 1,
@@ -161,13 +189,12 @@ export const config: WebdriverIO.Config = {
   // back into its ceilings. The `console.warn` below is the only
   // notice, so correlate it with a suite that suddenly takes minutes.
   beforeSuite: async () => {
-    // The service augments the browser object at runtime but ships no
-    // ambient declaration for it, so name the one method we call.
-    const tauri = (
-      browser as unknown as {
-        tauri?: { switchWindow(label: string): Promise<void> };
-      }
-    ).tauri;
+    // Declared non-optional (see the capabilities note above for how
+    // that declaration gets here), but only true after the service's
+    // `before` has run — which is the whole reason this hook is
+    // `beforeSuite`. The guard below is checking that ordering held,
+    // so the type has to admit `undefined` for it to mean anything.
+    const tauri: WebdriverIO.Browser["tauri"] | undefined = browser.tauri;
     try {
       if (!tauri) {
         throw new Error("browser.tauri is missing (service before() hook)");

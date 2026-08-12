@@ -37,6 +37,7 @@
 // re-evaluates this module and would otherwise mint a second
 // timestamp.
 
+import type { TauriCapabilities } from "@wdio/tauri-service";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -82,7 +83,14 @@ const perJumpMs =
 const mochaTimeoutMs =
   (Number.isFinite(jumps) && jumps > 0 ? jumps : 200) * perJumpMs + 15 * 60_000;
 
-export const config: WebdriverIO.Config = {
+// `TauriCapabilities`, and not the inferred capability type, for the
+// reasons `wdio.conf.ts` sets out above its own `config`: the service's
+// interface is the one that knows `tauri:options` and the `env` key
+// below, and importing it is also what puts `browser.tauri` in scope
+// for the `beforeSuite` further down.
+export const config: WebdriverIO.Config & {
+  capabilities: TauriCapabilities[];
+} = {
   runner: "local",
   specs: ["./e2e-bench/**/*.spec.ts"],
   maxInstances: 1,
@@ -156,11 +164,10 @@ export const config: WebdriverIO.Config = {
   // command is reporting latency for a run it perturbed, so the
   // `console.warn` matters more here than the wall clock does.
   beforeSuite: async () => {
-    const tauri = (
-      browser as unknown as {
-        tauri?: { switchWindow(label: string): Promise<void> };
-      }
-    ).tauri;
+    // Declared non-optional; absent until the service's `before` has
+    // run, which is what the guard is here to catch. Same note as
+    // `wdio.conf.ts`.
+    const tauri: WebdriverIO.Browser["tauri"] | undefined = browser.tauri;
     try {
       if (!tauri) {
         throw new Error("browser.tauri is missing (service before() hook)");
