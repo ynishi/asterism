@@ -14,7 +14,24 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    // Empty on purpose, and not the same thing as omitting the key:
+    // omitted, TypeScript loads *every* package under
+    // `node_modules/@types`, and `@wdio/mocha-framework` drags
+    // `@types/mocha` in transitively. That put `describe` / `it` /
+    // `before` in scope for every Svelte component — a test-runner
+    // global visible to application code, which is exactly what
+    // `tsconfig.e2e.json` exists to prevent on the other side
+    // [measured 2026-08-12: with the key omitted, a `describe(...)` in
+    // `src/lib/dev/thumb-perf.ts` type-checks; with it empty, the same
+    // line is TS2304].
+    //
+    // Nothing in `src/` wanted those types. The 24 unit tests here
+    // import `describe` / `it` / `expect` from `vitest` by name, and
+    // `vite/client` and `svelte` arrive through the triple-slash
+    // references in `src/vite-env.d.ts` rather than through this list.
+    // Add a name here only for a type package `src/` genuinely needs.
+    "types": []
   },
   "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"],
   "references": [{ "path": "./tsconfig.node.json" }]

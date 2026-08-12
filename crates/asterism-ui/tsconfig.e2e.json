@@ -1,0 +1,66 @@
+// TypeScript diagnostics for the test-runner half of the frontend.
+//
+// The e2e specs and the two WebdriverIO configs used to sit outside
+// every tsconfig in this package: `tsconfig.json` includes `src/**`
+// only, `tsconfig.node.json` includes `vite.config.ts` only, and
+// nothing named `e2e/`, `e2e-bench/`, `wdio.conf.ts` or
+// `wdio.bench.conf.ts`. `just ui-e2e` does not close that gap — the
+// runner hands the specs to tsx/esbuild, which erases types without
+// checking them. So `just ui-check` reported zero errors over ~4200
+// lines it had never looked at, and the first run under this config
+// turned up seven real diagnostics in four files [measured 2026-08-12].
+//
+// # Why a second config rather than a wider `include`
+//
+// Adding `e2e/**` to `tsconfig.json` would pull `describe` / `it` /
+// `browser` into scope for all of `src/**`, because the `types` below
+// are ambient: application code could then reference a test-runner
+// global and still type-check. Two configs keep the two global
+// environments apart, which is the property worth protecting — a
+// stray `browser` in a Svelte component has to stay an error.
+//
+// Both halves run under `npm run check` (see package.json `check:app`
+// and `check:e2e`), so `just ui-check` fails on a type error in a spec.
+//
+// # `types`
+//
+// Explicit, because the two environments differ and the difference is
+// the point. `@wdio/globals/types` supplies `$` / `$$` / `browser`,
+// `@wdio/mocha-framework` the BDD globals, `expect-webdriverio` the
+// matchers. `vite/client` is here for one reason: e2e-bench imports
+// `../src/lib/dev/thumb-perf`, which reads `import.meta.env`. Under
+// `tsconfig.json` that resolves through `src/vite-env.d.ts`, which this
+// config does not include — so without `vite/client` the import fails
+// with TS2339 on a file that is perfectly correct. Scoping the fix here
+// keeps it out of `src/`, where nothing is wrong.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "types": [
+      "node",
+      "vite/client",
+      "@wdio/globals/types",
+      "@wdio/mocha-framework",
+      "expect-webdriverio"
+    ]
+  },
+  "include": [
+    "e2e/**/*.ts",
+    "e2e-bench/**/*.ts",
+    "wdio.conf.ts",
+    "wdio.bench.conf.ts"
+  ]
+}

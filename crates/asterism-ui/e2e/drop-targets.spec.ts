@@ -26,8 +26,30 @@
 // 4px-threshold pointer gesture through WebDriver to re-check a
 // database write would be the slowest possible way to ask a question
 // already answered.
+//
+// # Why every `$$` here goes through `getElements()`
+//
+// It is the same value either way at runtime: `$$` hands back a Proxy
+// that forwards `then` to the underlying promise, so awaiting it
+// resolves to a real `ElementArray` [measured 2026-08-12,
+// @wdio/utils/build/index.js:922 `PROMISE_METHODS`, forwarded at
+// :1063-1065]. The *type* stopped following in webdriverio 9:
+// `ChainablePromiseArray` declares `length: Promise<number>` and
+// `[n: number]: ChainablePromiseElement` and no longer extends
+// `Promise<ElementArray>` [webdriverio/build/types.d.ts:92-121], so
+// `Awaited<>` leaves the chainable in place.
+//
+// Awaiting directly therefore made the `dirs.length === 0` fallback
+// below read as a comparison with no overlap (TS2367) and `trash[0]`
+// as unassignable to `WebdriverIO.Element` (TS2345). Both are artefacts
+// of the declaration rather than dead code — the fallback branch runs,
+// on a profile with no dirs — and both went unseen until
+// `tsconfig.e2e.json` first pointed a compiler at this file.
+// `getElements()` is declared `Promise<WebdriverIO.ElementArray>`
+// [same file], so the awaited value is finally the one the runtime was
+// producing all along.
 
-import { browser, $, $$ } from "@wdio/globals";
+import { $, $$ } from "@wdio/globals";
 
 /** The two attributes the drag router reads, for one element. */
 async function dropTarget(el: WebdriverIO.Element) {
@@ -45,7 +67,7 @@ describe("drop targets", () => {
   });
 
   it("advertises every modality row that accepts a card", async () => {
-    const rows = await $$("aside.sidebar li");
+    const rows = await $$("aside.sidebar li").getElements();
     expect(rows.length).toBeGreaterThan(0);
 
     // `$$` resolves to a wdio ElementArray, not a plain Array — its
@@ -69,7 +91,7 @@ describe("drop targets", () => {
     // `ModalityList.accepts()` withholds the attribute rather than
     // refusing the drop later, so the row must never light up. Asserted
     // by absence, which is exactly what the router sees.
-    const rows = await $$("aside.sidebar li");
+    const rows = await $$("aside.sidebar li").getElements();
     for (const row of rows) {
       const label = (await row.getText()).trim();
       if (!label.startsWith("Unclassified")) continue;
@@ -79,11 +101,11 @@ describe("drop targets", () => {
   });
 
   it("gives dir rows a drop kind, including the Root row", async () => {
-    const dirs = await $$("aside.sidebar .dir-row");
+    const dirs = await $$("aside.sidebar .dir-row").getElements();
     if (dirs.length === 0) {
       // No dirs in this profile: the Root row still has to be a target,
       // since it is how a Group gets filed back to the top level.
-      const roots = await $$('[data-drop-kind="dir"]');
+      const roots = await $$('[data-drop-kind="dir"]').getElements();
       expect(roots.length).toBeGreaterThan(0);
       return;
     }
@@ -100,7 +122,9 @@ describe("drop targets", () => {
     // (a trashed card is not re-trashable), but flipping the view
     // toggle here would leave state behind for the other specs —
     // the positive half is the wiring the issue was about.
-    const trash = await $$('aside.sidebar [data-drop-kind="trash"]');
+    const trash = await $$(
+      'aside.sidebar [data-drop-kind="trash"]',
+    ).getElements();
     expect(trash.length).toBe(1);
     const t = await dropTarget(trash[0]);
     expect(t.id).not.toBe(null);
@@ -113,7 +137,9 @@ describe("drop targets", () => {
     // reversed). The default view satisfies none of them, so no card
     // may carry the attribute. This is the negative half of the gate
     // the Rust side checks positively.
-    const cards = await $$('.grid-wrapper [data-drop-kind="card"]');
+    const cards = await $$(
+      '.grid-wrapper [data-drop-kind="card"]',
+    ).getElements();
     expect(cards.length).toBe(0);
   });
 });
