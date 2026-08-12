@@ -276,7 +276,7 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 
 # Run all Rust and frontend checks.
 [group('check')]
-check: rust-fmt-check rust-clippy rust-test ui-test ui-check ui-build
+check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build
 
 # Fail when any Rust file is not rustfmt-clean.
 #
@@ -321,6 +321,64 @@ rust-fmt-check:
 [group('allow-agent')]
 rust-clippy:
     cargo clippy --workspace --all-targets -- -D warnings
+
+# Fail when the committed TypeScript bindings no longer match the contract.
+#
+# `crates/asterism-ui/src/bindings.ts` is generated *and* tracked:
+# `src-tauri/build.rs` rewrites it from the `asterism-contract` types,
+# and git carries a copy so that anything reading the frontend does not
+# have to build Rust first. Nothing compared the two until this recipe.
+# The gap is quiet by construction — whoever changes a contract type
+# gets the regenerated file as a side effect of a cargo command, and if
+# they do not commit it, every developer keeps building from a copy
+# regenerated on their own machine while the repository's falls behind.
+#
+# The `touch` is what makes this a check rather than a coin flip.
+# `tauri_build::build()` emits `cargo:rerun-if-changed` for
+# `tauri.conf.json` and `capabilities/`, and a script that emits any
+# `rerun-if` directive loses cargo's default of re-running whenever
+# anything in the package changes — the rule `asterism-server/build.rs`
+# states in its own words. In a warm tree with neither of those touched
+# and no contract change to relink the script, `cargo check` would run
+# no build script at all: `bindings.ts` would not be rewritten, the diff
+# below would compare the committed file against itself, and this recipe
+# would report a match it never computed. A gate that passes without
+# checking is worse than no gate. Touching the script forces the run,
+# and an mtime is not something git sees.
+#
+# Compared against `HEAD` rather than the index because the question is
+# whether the copy this repository carries is stale. Staging a
+# regenerated file does not answer that, so a staged-but-uncommitted fix
+# still fails here — correctly, since nothing is committed yet.
+#
+# Deliberately fails instead of staging the regenerated file. A gate that
+# edits the tree turns a verdict into a side effect, and the next reader
+# cannot tell which of the two happened.
+#
+# This is the one `allow-agent` recipe that writes a file git tracks —
+# the frontend three confine their output to the ignored `dist/`, and
+# `rust-fmt-check` goes out of its way to use `--check`. It carries the
+# annotation on the group's other stated reason rather than that one: an
+# agent that cannot run it can only report that it did not check.
+[group('check')]
+[group('allow-agent')]
+bindings-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ project_root }}"
+    bindings="crates/asterism-ui/src/bindings.ts"
+    touch crates/asterism-ui/src-tauri/build.rs
+    cargo check -p asterism-ui >/dev/null
+    if ! git diff --quiet HEAD -- "$bindings"; then
+        echo "$bindings differs from what asterism-contract generates." >&2
+        echo >&2
+        git --no-pager diff HEAD -- "$bindings" >&2
+        echo >&2
+        echo "Resolve by committing the regenerated file:" >&2
+        echo "    git add $bindings && git commit" >&2
+        exit 1
+    fi
+    echo "$bindings matches the contract"
 
 # Run the Rust workspace tests, keeping the whole output.
 #
