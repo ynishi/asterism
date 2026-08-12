@@ -92,6 +92,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`rust-test` no longer depends on the caller's colour setting** — the
+  recipe counts cargo's `Running` / `Doc-tests` lines against the
+  `test result:` lines to prove that every launched binary reported a
+  result, and both patterns are anchored at the start of the line.
+  Coloured output puts an escape sequence there, so the count came back
+  0 launched against 81 reported and the check failed over a suite that
+  was 1191 passed / 0 failed. It fixes `CARGO_TERM_COLOR=never` for
+  itself now, rather than parsing a shape its caller's terminal can
+  change.
+
 - **The e2e suite is now type-checked** (`asterism-ui`) — the specs and
   both WebdriverIO configs sat outside every tsconfig, so `just ui-check`
   reported zero errors over ~4200 lines it never read, and the test
