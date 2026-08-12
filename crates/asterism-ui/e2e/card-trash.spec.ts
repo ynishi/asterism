@@ -167,7 +167,7 @@ const TRASH_VIEW_TOGGLE = 'aside.sidebar button[title^="Show trashed items"]';
 
 /** One driver round-trip. Sized for a *taxed* command, so it is
  *  generous for the `execute` calls that make up most of the file. */
-const DRIVER_MS: number = "fifteen seconds";
+const DRIVER_MS = 15_000;
 /** Something already on screen has to be found. */
 const PRESENT_MS = 15_000;
 /** The grid has to change after a backend round-trip: a row leaves,
