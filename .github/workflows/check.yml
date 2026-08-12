@@ -61,21 +61,6 @@ jobs:
     # was meant to produce.
     timeout-minutes: 90
 
-    env:
-      # `rust-test` proves that every launched test binary reported a result
-      # by counting cargo's `Running` / `Doc-tests` lines against the
-      # `test result:` lines (`Justfile:353-379`) — the check that exists
-      # because a binary killed mid-run subtracts its passed tests from every
-      # sum in silence. Its patterns are anchored at the start of the line,
-      # and cargo emits those two lines in colour here, so the escape
-      # sequence sits where the anchor expects a space: the first run on this
-      # branch counted 0 launched against 81 reported and failed with
-      # `MISSING: -81` while the suite underneath was 1191 passed / 0 failed.
-      # Colour off restores the shape the recipe reads. The recipe reading a
-      # shape that a terminal setting can change is a separate problem, and
-      # not one this workflow should fix by editing a gate.
-      CARGO_TERM_COLOR: never
-
     steps:
       - uses: actions/checkout@v7
 

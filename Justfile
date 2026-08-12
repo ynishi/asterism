@@ -344,6 +344,17 @@ rust-clippy:
 rust-test: rust-fmt-check
     #!/usr/bin/env bash
     set -uo pipefail
+    # Point 3 above reads cargo's own output, so the output has to stay
+    # plain. Coloured, `   Running` arrives as `ESC[1mESC[92m   Running`
+    # and the anchored patterns below match nothing: the count comes back
+    # 0 launched against a full set of reported binaries, and the check
+    # fails over a suite that passed. That is what the first CI run on
+    # this repository did — 0 / 81 under `1191 passed / 0 failed` — but
+    # nothing about it was specific to CI: any terminal that turns colour
+    # on for a pipe, or a `CARGO_TERM_COLOR=always` in someone's
+    # environment, reaches the same place. The recipe owns the shape it
+    # parses.
+    export CARGO_TERM_COLOR=never
     log_dir="{{ project_root }}/workspace/test-logs"
     mkdir -p "$log_dir"
     log="$log_dir/rust-test-$(date +%Y%m%d-%H%M%S).log"
