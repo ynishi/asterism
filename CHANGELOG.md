@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI** (`.github/workflows/check.yml`) — `just check` runs on every pull
+  request and on push to `main`, so whether the gates pass is something the
+  repository states rather than a claim about whoever last ran the recipe.
+  The workflow invokes the recipe instead of restating its six gates, so the
+  local gate and CI cannot drift apart. One macOS job for now, which is the
+  simple and expensive answer; splitting the portable crates onto Linux is a
+  decision left to a measurement. `ui-e2e` (needs a real window) and
+  `collation-jsc` (needs macOS's `jsc`) stay out, and the workflow says so
+  rather than leaving it to be inferred.
+
 - **MCP transport** (`asterism-server`) — the third adapter over the
   same application services. A curated nine-tool vocabulary
   (`asset_search` / `asset_list` / `asset_get` / `asset_add` /
@@ -81,6 +91,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changelog.
 
 ### Fixed
+
+- **`rust-test` no longer depends on the caller's colour setting** — the
+  recipe counts cargo's `Running` / `Doc-tests` lines against the
+  `test result:` lines to prove that every launched binary reported a
+  result, and both patterns are anchored at the start of the line.
+  Coloured output puts an escape sequence there, so the count came back
+  0 launched against 81 reported and the check failed over a suite that
+  was 1191 passed / 0 failed. It fixes `CARGO_TERM_COLOR=never` for
+  itself now, rather than parsing a shape its caller's terminal can
+  change.
 
 - **The e2e suite is now type-checked** (`asterism-ui`) — the specs and
   both WebdriverIO configs sat outside every tsconfig, so `just ui-check`

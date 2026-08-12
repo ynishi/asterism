@@ -1,0 +1,124 @@
+# The gates, run where the repository can state their result.
+#
+# `just check` is the definition of green (`Justfile:279`) and this
+# workflow's job is to run it, not to restate it. That is why the six
+# recipes are one step rather than six: splitting them would buy per-gate
+# timing in the run summary and pay for it with a copy of `check`'s
+# composition living here, where a recipe added to `check` later would
+# silently not be picked up. `just` names the recipe that failed in its own
+# error line, so a failing gate is still identifiable without the split.
+#
+# What this does **not** cover, stated here rather than left to be inferred
+# from its absence:
+#
+#   - `just ui-e2e` (`Justfile:446`) builds a second Tauri binary with the
+#     `wdio` feature and drives a real window. It is out of `check` for that
+#     reason and out of here until someone has established that a hosted
+#     runner can give it a window and that the minutes are worth it. Until
+#     then the drag surface and the sidebar markup are covered locally or
+#     not at all.
+#   - `just collation-jsc` (`Justfile:475`) runs the collation corpus
+#     through JavaScriptCore. It exits 0 with a skip notice where `jsc` is
+#     missing, so on any runner but macOS it would contribute a green step
+#     that checked nothing. Run it locally when sort order or the corpus
+#     changes.
+
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# On a pull request, a newer push makes the older run's answer irrelevant.
+# On `main` it does not: two merges in quick succession would cancel the
+# first commit's run and leave that commit with no verdict, which is the
+# gap this workflow exists to close.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Everything on macOS: the simple answer and the expensive one. The
+    # workspace is not uniformly portable — `crates/asterism-ui/src-tauri`
+    # wants a webview toolkit, and the two recipes above want macOS outright
+    # — so the alternative is a Linux job for the portable crates plus a
+    # macOS job for the rest. That is cheaper, introduces a second platform
+    # whose failures nobody sees locally, and carries a detail worth pricing
+    # in before anyone commits to it: `Justfile:1` sets `zsh` as just's
+    # shell, which Ubuntu runners do not preinstall. Worth deciding against
+    # a measurement, which is what this job exists to produce first.
+    runs-on: macos-latest
+    # Generous on purpose. The first run has no cache by definition and
+    # compiles the workspace twice over — `clippy --all-targets`, then the
+    # test build — with tantivy and a Lindera dictionary among the
+    # dependencies. That run is also the measurement the split decision
+    # above is waiting on, so a timeout that kills it destroys the thing it
+    # was meant to produce.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # There is no `rust-toolchain.toml`, so this follows stable and the
+      # toolchain moves under the workflow. Deliberate, for now: clippy had
+      # never run against this workspace until 2026-08-02, when a bump to
+      # clippy 1.95 surfaced 46 violations across 26 files at once
+      # (`Justfile:301-306`). A CI that follows stable meets the next bump on
+      # the day it lands, in a run nobody had to remember to start. The cost
+      # belongs in the record too: a red run is then not always about the
+      # change that triggered it. Pin here and in `[workspace.package]` if
+      # that cost outgrows the coverage.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Caches `~/.cargo` and the dependency half of `target/`. The
+      # workspace's own crates are deliberately not cached by this action,
+      # so all 19 are recompiled and re-linted on every run — the verdict is
+      # recomputed, not replayed. What the cache does hide is anything that
+      # only appears when dependencies are built fresh; the sidecar resource
+      # error of 2026-08-03/04 was that shape, and a run here would not see
+      # it.
+      - uses: Swatinem/rust-cache@v2
+
+      # Three tests hard-require an ffmpeg binary and panic when it is
+      # missing, deliberately: "this repo's fixture tests fail loudly rather
+      # than skip silently, because a skipped gate reads as a passed one"
+      # (`crates/asterism-infra/src/jobs/thumb_ffmpeg.rs:225-229`). The
+      # runner image ships no ffmpeg, so without this step every run is red
+      # on a missing dependency rather than on the change under review. The
+      # `ffmpeg-sidecar` recipe is not the answer here — it writes to
+      # `target/ffmpeg-sidecar/`, which is not one of the locations
+      # `ffmpeg_binary()` searches, and it is minutes of source build. Both
+      # this and `$ASTERISM_FFMPEG` are what the test's own panic message
+      # tells you to do.
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      # Nothing pins Node in the repository (no `.nvmrc`, no `engines`), and
+      # the machine this was written on runs 21, which is past end of life.
+      # 22 is the nearest LTS line above it. If CI and local drift far enough
+      # to matter, the fix is an `.nvmrc` both sides read, not a second guess
+      # here.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/asterism-ui/package-lock.json
+
+      - uses: extractions/setup-just@v4
+
+      # No recipe installs frontend dependencies: every `ui-*` recipe assumes
+      # a populated `node_modules`, the same assumption a fresh worktree
+      # breaks locally.
+      - name: npm ci
+        working-directory: crates/asterism-ui
+        run: npm ci
+
+      - name: just check
+        run: just check
