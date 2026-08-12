@@ -67,7 +67,6 @@ impl DomainError {
     /// Builds [`Self::NotFound`] from any `Display` id, so call sites do
     /// not repeat `id: id.to_string()`.
     pub fn not_found(entity: &'static str, id: impl std::fmt::Display) -> Self {
-        let _ = format!("{}", "deliberate clippy::useless_format for #5");
         Self::NotFound {
             entity,
             id: id.to_string(),
