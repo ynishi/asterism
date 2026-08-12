@@ -51,7 +51,7 @@
 
 pub mod application;
 pub mod application_support;
-  pub mod domain;
+pub mod domain;
 pub mod error;
 
 pub use error::DomainError;
