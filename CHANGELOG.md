@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The series key no longer borrows its canonical form from a
+  dependency** (#14) — `series::render` hashes a `serde_json::Value`
+  parsed out of a container, and was taking its nested key order from
+  whichever map type `serde_json`'s feature flags selected. A new
+  `series::canonical_value` sorts every object's keys recursively before
+  the bytes are rendered, so the digest is a function of the document
+  rather than of how it was typed: a JSON object is an unordered
+  collection (RFC 8259), and two containers carrying the same fields in a
+  different order carry the same document. Arrays keep their order, since
+  a JSON array *is* ordered. Byte output is unchanged and no stored key
+  moves.
+
+  `serde_json`'s `preserve_order` is now declared in the workspace
+  `Cargo.toml` with its reasoning rather than arriving as a side effect of
+  `c2pa` (which requires it). The old test that asserted sorted output and
+  warned in prose that this rested on a default has a sibling asserting
+  the property itself, plus the negative case; both fail by name if the
+  sort is removed, which is the point — the function reads like a no-op
+  and will invite deletion.
+
 ### Added
+
+- **AI-disclosure provenance: the vocabulary, the emitters and the signer**
+  (#14) — a new `asterism-provenance` crate holds what an exported file
+  says about where it came from, as values: the IPTC digital source type
+  (five terms, closed, refusing anything the vocabulary does not define),
+  the XMP packet carrying `Iptc4xmpExt:DigitalSourceType` and the four AI
+  properties IPTC added in Photo Metadata Standard 2025.1, that packet
+  written into a PNG `iTXt` chunk or a JPEG `APP1` segment as a byte
+  transform, and the C2PA manifest definition built from the same record
+  so the two cannot disagree. `asterism-infra::provenance` is the adapter
+  that puts them into a file and signs the manifest through `c2pa`,
+  covering MP4 and MOV as well as stills — signing after the encode,
+  which is the only point at which it is possible.
+
+  Two decisions are worth stating. **XMP is written before the manifest is
+  signed**: the hard binding covers the packet, so the reverse order
+  invalidates the signature, and a test signs a file, edits its packet and
+  asserts the binding then fails. **A signing identity is configuration**:
+  the IPTC/XMP disclosure is written with or without one, a manifest only
+  with, and the C2PA test certificates are refused by name rather than
+  used as a fallback — a manifest signed by them validates as untrusted,
+  which claims a provenance a reader rejects.
+
+  Not yet wired to the export path, and no re-apply verb; both are the
+  rest of #14. Unsigned video carries no disclosure at all, because the
+  XMP half has no BMFF spelling here, and the writer reports that rather
+  than a success it did not have.
 
 - **Material layers, and the chapters an import brings in** (#1) — a
   material now carries layers: an origin (`imported` / `user` / `machine`),
