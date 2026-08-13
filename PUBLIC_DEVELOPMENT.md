@@ -221,7 +221,7 @@ implementation.
 
 ```text
 Private evidence
-    -> public-safe issue or RFC draft
+    -> public-safe issue draft
     -> public implementation issue
     -> public-safe local task
     -> code / pull request
@@ -250,11 +250,22 @@ reclassifying it.
 
 ## Role of each public artifact
 
-- **Discussion or RFC:** explore the problem, alternatives, and trade-offs.
-- **Issue:** record the accepted change, scope, and acceptance criteria.
+- **Issue:** explore the problem, alternatives, and trade-offs, and record the
+  accepted change, scope, and acceptance criteria.
 - **Pull request and commit:** record the implementation delta and chronology.
 - **Code documentation:** state the current contract, invariants, rationale,
   examples, compatibility notes, and migration path.
+
+There is no separate discussion venue. Exploration belongs in the issue next to
+the change it argues for, and what is still unsettled stays there in an `Open`
+section rather than moving somewhere else to be resolved. Reading an issue
+should not require finding the conversation that preceded it.
+
+An issue covering more than one change becomes an umbrella: it holds the
+analysis and the unsettled questions, and implementation issues are split off
+from it as they are picked up, each carrying its own scope and verification.
+This keeps the reasoning in one place instead of repeating it in every child,
+and the umbrella's `Open` section is what the next split is chosen from.
 
 Public work should be understandable from these artifacts without access to an
 internal system. Internal references may preserve additional lineage, but they
