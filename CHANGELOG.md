@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The workspace says what its digests actually rest on, and the signed
+  manifest stops claiming a version it does not have** (#14) — the
+  `preserve_order` comment in the workspace `Cargo.toml` asserted two
+  things that are not true. It said `c2pa` requires the feature: `c2pa`
+  does declare it in its own manifest, which is why it is unconditionally
+  on, but it does not depend on the semantic — verification re-hashes the
+  bytes read out of the file rather than re-serialising a parsed model,
+  and the default assertion kind routes through a CBOR map that sorts,
+  discarding the author's key order before anything is encoded. And it
+  said the digests were safe because they are built from a struct and
+  never parsed, which is not a discharge at all: `serde_json::to_value`
+  produces a `Map` too, so a value that never met a parser is still an
+  `IndexMap` under the feature.
+
+  The comment now names the four stored forms that are hashed or compared
+  byte for byte — `material_meta::render`, `series::render`,
+  `source_locator::to_storage` and `snapshot_hash` — with what makes each
+  one independent of the line, since the reasons differ and only one of
+  them is "it sorts". It also states why the line is there at all: what
+  this workspace writes back out is somebody else's document, and handing
+  it back with the keys re-sorted is an edit nobody asked for.
+
+  `domain::content_hash` gains the rule a digest added beside them owes.
+  A digest either **selects** bytes the artefact already carries or
+  **re-renders** them, and it has to say which, because the two fail in
+  opposite directions: re-rendering too widely reports two different
+  artefacts as one and duplicate resolution folds them, while selecting
+  too narrowly only misses a match. Re-rendering additionally owes its
+  canonical form in full — naming a published scheme is not enough, as
+  the rules for numbers and for duplicate keys are what decide the
+  answers — and a versioned tag, because a shipped definition cannot be
+  edited without changing what every value stored under it meant.
+
+  Neither of the two disclosures claims a build version any more.
+  `claim_generator_info` carries a name and nothing else — the
+  specification requires only the name, every crate here inherits the
+  same `0.0.0`, and a version string identical on every build ever made
+  tells a reader nothing while sounding like it tells them something, in
+  a document that cannot be corrected after signing. The XMP packet's
+  `x:xmptk` drops it too, for that reason and one more: those bytes go
+  inside the C2PA hard binding, and the toolkit string was the only
+  thing in the packet not read off the record, so a version bump
+  re-rendered an unchanged record into different bytes. The module doc
+  had already promised the packet is a function of the record and
+  nothing else; now it is.
+
+  Both tests were weaker than they read. The manifest one compared the
+  emitted field against the same `env!("CARGO_PKG_VERSION")` the code
+  used, so it passed at any value; it now asserts the field is absent.
+  The packet one compared two renderings inside one build, which cannot
+  see a difference that moves both sides together; it now pins the
+  toolkit attribute literally.
+
 - **The series key no longer borrows its canonical form from a
   dependency** (#14) — `series::render` hashes a `serde_json::Value`
   parsed out of a container, and was taking its nested key order from
@@ -23,11 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `serde_json`'s `preserve_order` is now declared in the workspace
   `Cargo.toml` with its reasoning rather than arriving as a side effect of
-  `c2pa` (which requires it). The old test that asserted sorted output and
-  warned in prose that this rested on a default has a sibling asserting
-  the property itself, plus the negative case; both fail by name if the
-  sort is removed, which is the point — the function reads like a no-op
-  and will invite deletion.
+  `c2pa`. The old test that asserted sorted output and warned in prose
+  that this rested on a default has a sibling asserting the property
+  itself, plus the negative case; both fail by name if the sort is
+  removed, which is the point — the function reads like a no-op and will
+  invite deletion.
 
 ### Added
 
