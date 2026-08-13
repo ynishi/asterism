@@ -73,10 +73,12 @@
 
 pub mod embed;
 pub mod manifest;
+pub mod outcome;
 pub mod record;
 pub mod source_type;
 pub mod xmp;
 
 pub use embed::{Container, EmbedError};
+pub use outcome::Stamped;
 pub use record::DisclosureRecord;
 pub use source_type::{DigitalSourceType, UnknownSourceType};

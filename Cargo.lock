@@ -334,6 +334,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "asterism-contract",
+ "asterism-provenance",
  "async-trait",
  "base64 0.22.1",
  "chrono",

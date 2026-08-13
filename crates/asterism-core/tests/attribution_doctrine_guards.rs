@@ -362,6 +362,20 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// inconvenience to be managed: a new entry is a new verb that writes
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
+    // ---- provenance_service
+    (
+        "provenance_service::record_for",
+        "read — assembles what an asset discloses out of rows it only reads",
+    ),
+    (
+        "provenance_service::apply_to",
+        "writes a file, not a row — the artefact it stamps is outside the \
+         library (an export's copy, or something returned from downstream), \
+         and no aggregate here changes. What made the asset is the \
+         attribution this would carry, and that is already recorded on the \
+         asset; re-stating it as the author of the stamping would attribute \
+         the file to whoever re-applied a disclosure they did not make",
+    ),
     // ---- asset_service: reads
     ("asset_service::list", "read — one page of the grid"),
     ("asset_service::list_index", "read — the light index page"),

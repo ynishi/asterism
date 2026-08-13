@@ -68,7 +68,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use asterism_provenance::record::DisclosureRecord;
-use asterism_provenance::{embed, manifest};
+use asterism_provenance::{Stamped, embed, manifest};
 
 /// A container this module can write provenance into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,37 +169,6 @@ pub enum ProvenanceError {
     /// this build refuses to sign with.
     #[error("signing identity: {0}")]
     Identity(String),
-}
-
-/// What [`ProvenanceWriter::apply`] actually did.
-///
-/// Every field is an outcome rather than an intention, because the two
-/// halves fail independently and a caller that recorded "provenance
-/// applied" would be recording something no file necessarily has. The
-/// dropped-prompt flag is here for the same reason: afterwards, a file
-/// whose prompt was too large for a JPEG segment and a file that never
-/// had a prompt are indistinguishable, so the difference has to be
-/// reported at the moment it happens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Stamped {
-    /// An XMP packet was written.
-    pub xmp_written: bool,
-    /// A signed C2PA manifest was written.
-    pub manifest_written: bool,
-    /// The prompt was dropped to fit the packet into a JPEG segment.
-    pub prompt_dropped: bool,
-}
-
-impl Stamped {
-    /// Whether the file carries a machine-readable mark of any kind.
-    ///
-    /// The question the obligation asks. Deliberately not "did
-    /// everything succeed": one mark is a disclosure, and reporting a
-    /// partial application as a failure would push a caller towards
-    /// treating a marked file as unmarked.
-    pub fn discloses(&self) -> bool {
-        self.xmp_written || self.manifest_written
-    }
 }
 
 /// The certificate and key a manifest is signed with.
@@ -344,7 +313,11 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// process from settings and shared.
 #[derive(Debug, Default)]
 pub struct ProvenanceWriter {
-    identity: Option<SigningIdentity>,
+    /// Behind an `Arc` so the port impl can hand a copy to a blocking
+    /// task without duplicating key material on every call — a signing
+    /// identity holds a private key, and the fewer copies of it exist in
+    /// the process at once, the better.
+    identity: Option<std::sync::Arc<SigningIdentity>>,
 }
 
 impl ProvenanceWriter {
@@ -360,7 +333,7 @@ impl ProvenanceWriter {
     /// A writer that also signs.
     pub fn signed_with(identity: SigningIdentity) -> Self {
         Self {
-            identity: Some(identity),
+            identity: Some(std::sync::Arc::new(identity)),
         }
     }
 
@@ -472,6 +445,44 @@ impl ProvenanceWriter {
             replace(path, &bytes).map_err(io)?;
         }
         Ok(outcome)
+    }
+}
+
+#[async_trait::async_trait]
+impl asterism_core::application::provenance_service::ProvenanceWriter for ProvenanceWriter {
+    /// Adapts the writer to the core's port.
+    ///
+    /// Two things happen at this boundary and both are deliberate.
+    ///
+    /// The work runs on a blocking thread. Applying a record reads a
+    /// file, may sign it, and writes it back — for a video that is
+    /// hundreds of megabytes of synchronous I/O and a hash over all of
+    /// it, which is exactly the shape that stalls an async runtime's
+    /// worker for the duration.
+    ///
+    /// And every failure collapses to one `DomainError`. The core has
+    /// no vocabulary for a JUMBF box or an APP1 segment and should not
+    /// grow one; what it can act on is that the file was not stamped
+    /// and why, in words. The typed variants stay on this side for the
+    /// caller that is in this crate.
+    async fn apply(
+        &self,
+        path: &std::path::Path,
+        record: &DisclosureRecord,
+    ) -> Result<Stamped, asterism_core::error::DomainError> {
+        let path = path.to_path_buf();
+        let record = record.clone();
+        let writer = ProvenanceWriter {
+            identity: self.identity.clone(),
+        };
+        tokio::task::spawn_blocking(move || writer.apply(&path, &record))
+            .await
+            .map_err(|e| {
+                asterism_core::error::DomainError::Infra(anyhow::anyhow!(
+                    "provenance task did not finish: {e}"
+                ))
+            })?
+            .map_err(|e| asterism_core::error::DomainError::Infra(anyhow::anyhow!("{e}")))
     }
 }
 

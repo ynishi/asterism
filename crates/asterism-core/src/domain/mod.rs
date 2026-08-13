@@ -107,6 +107,7 @@ pub mod constellation;
 pub mod content_hash;
 pub mod content_region;
 pub mod dir;
+pub mod disclosure;
 pub mod dispatch;
 pub mod duplicate_conflict;
 pub mod edge;
