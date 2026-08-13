@@ -18,6 +18,11 @@
 //!   check).
 //! - [`dispatch_runner_service`] — the runner-side half of the
 //!   outbound dispatch state machine (`DispatchRun` job).
+//! - [`chapter_intake`] — what a fresh reading of a material's chapter
+//!   list means for the rows: the imported layer's contents are
+//!   replaced wholesale, and a person's own layer is untouched.
+//!   Functions rather than a service, same reasoning as
+//!   [`duplicate_detection`].
 //! - [`duplicate_detection`] — what a freshly written fingerprint means
 //!   for the corpus (`material_hash` job). Functions rather than a
 //!   service, for the reason its own module doc gives: the handler
@@ -34,6 +39,7 @@
 //! which has transport-fronted callers of its own). The dependency
 //! runs support → application and never back.
 
+pub mod chapter_intake;
 pub mod dispatch_runner_service;
 pub mod duplicate_detection;
 pub mod query_group_refresh_service;
@@ -41,6 +47,7 @@ pub mod retention_service;
 
 use std::sync::Arc;
 
+pub use chapter_intake::{ScannedChapter, replace_imported_chapters};
 pub use dispatch_runner_service::DispatchRunnerService;
 pub use duplicate_detection::{
     Detection, DetectionOrigin, DetectionPorts, detect_duplicate, fold_excluded_by,

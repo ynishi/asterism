@@ -108,6 +108,14 @@ pub struct MaterialMarksParams {
     pub asset_id: String,
 }
 
+/// `material_layers` input.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct MaterialLayersParams {
+    /// Asset whose material to read the bands of.
+    pub asset_id: String,
+}
+
 /// `catalog_overview` input.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -341,6 +349,24 @@ impl AsterismMcp {
     }
 
     #[tool(
+        description = "Read how an asset's material is divided, and by whom. Returns every band of marks over the material, each with the chapters in it. `origin` says who produced the band: \"imported\" is the container's own declaration (an MP4 `chpl`, a Matroska Chapters segment), \"user\" is the person's own reading of the same material, \"machine\" is a job's. `role` is \"structure\" (holds the chapters returned beside it) or \"annotation\" (holds notes — read those with `material_marks`; `chapters` is always empty here). `is_default` is the band a surface shows. Each chapter carries `start_ms`, an optional exclusive `end_ms` (absent = the file stated no end, so the section runs to the next one's start), a `label` that may legitimately be empty, and `ord`, the reading order the band states — which need not be the timeline's. **Chapter ids are not stable across a re-read of the material**: reading the file again replaces an imported band's rows wholesale, so key on (`layer_id`, `ord`) rather than on `id`. An asset with no bands has never been read for chapters; a structure band with an empty list was read and declares none."
+    )]
+    async fn material_layers(
+        &self,
+        Parameters(params): Parameters<MaterialLayersParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .ctx
+            .material_layer_service
+            .list_views(&params.asset_id)
+            .await
+        {
+            Ok(views) => ok_json(&views),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
         description = "Discover the filter vocabulary in one call: personas (with display names), modality asset counts, tag counts, and user-curated groups. Use the returned ids/slugs as `asset_list` / `asset_search` filter values."
     )]
     async fn catalog_overview(
@@ -500,7 +526,17 @@ loopback HTTP on the same port.
    about the asset. Today's anchor is `"temporal"` (`start_ms`, plus an
    exclusive `end_ms` for an interval) and needs a time-bearing asset;
    marks read back in the material's order, earliest position first.
-8. `duplicate_conflicts` / `duplicate_conflict_resolve` — the pairs of
+8. `material_layers` — how the material is divided, and by whom. Every
+   band of marks over the content, each with its chapters: `origin`
+   separates the container's own declaration (`imported`) from a
+   person's reading of it (`user`) and a job's (`machine`), so "the
+   chapters this file ships with" and "the chapters someone corrected"
+   are two answers rather than one. Read-only here on purpose — the
+   write verbs correct a person's own reading of a file, which is an
+   act with a person in the middle of it, and the desktop app and the
+   HTTP surface (`/asterism/material-layers`,
+   `/asterism/chapter-marks`) are where it happens.
+9. `duplicate_conflicts` / `duplicate_conflict_resolve` — the pairs of
    assets that agreed on one fingerprint axis and that nobody has ruled
    on yet, and the verb that answers one. **Each row names its axis**,
    and they claim different things: `artefact` is every byte of the
@@ -513,7 +549,7 @@ loopback HTTP on the same port.
    in place of the other row and does not come back; `kept` says they
    are two separate things and leaves both rows alone. A pair is asked
    about once: whichever answer is given, it is not raised again.
-9. `dispatch_get` — one outbound dispatch's persisted state.
+10. `dispatch_get` — one outbound dispatch's persisted state.
 
 ## Beyond the tool set
 

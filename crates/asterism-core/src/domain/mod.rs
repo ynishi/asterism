@@ -14,12 +14,22 @@
 //!   UI chrome (wallpaper asset reference).
 //! - [`asset`]        — `Asset` entity, the `AssetCard` read projection, and
 //!   `AssetQuery`.
+//! - [`material_layer`] — `MaterialLayer`: one band of marks over a
+//!   material, carrying who produced it (`LayerOrigin`: imported from
+//!   the file / written by the user / derived by a job) and what it
+//!   holds (`LayerRole`: structure or annotation). What makes
+//!   "re-read the file" able to replace the file's own reading without
+//!   touching a person's.
 //! - [`material_mark`] — `MaterialMark`: a note fastened to a point in
 //!   an asset's *material* (the coordinate space its content carries).
 //!   `MaterialAnchor` names which space and where — today the playback
 //!   timeline (an instant or a half-open interval), tomorrow a
 //!   rectangle on an image plane. Distinct from a comment on the asset
-//!   as a whole.
+//!   as a whole. Belongs to an `Annotation` layer.
+//! - [`chapter_mark`] — `ChapterMark`: one named section of a material,
+//!   as the container declares it. Belongs to a `Structure` layer.
+//!   Shares `TimelineSpan` with `material_mark` and nothing else — a
+//!   note points *at* a position, a chapter states a *division*.
 //! - [`attribution`]  — the attribution doctrine: `Author` /
 //!   `OperatorRef` / `AttributionChannel` (who a record is by, which
 //!   agent operated on their behalf, and through which channel that
@@ -91,6 +101,7 @@ pub mod app_setting;
 pub mod asset;
 pub mod asset_comment;
 pub mod attribution;
+pub mod chapter_mark;
 pub mod color;
 pub mod constellation;
 pub mod content_hash;
@@ -103,6 +114,7 @@ pub mod group;
 pub mod instance;
 pub mod job;
 pub mod material;
+pub mod material_layer;
 pub mod material_mark;
 pub mod material_meta;
 pub mod material_meta_raw;

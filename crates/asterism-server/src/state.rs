@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialMarkService,
-    ModalityService, PersonaService, QueryGroupService, SeriesStrategyService, SessionService,
-    SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
+    SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
 
@@ -59,6 +59,11 @@ pub struct ServerCtx {
     /// content rather than a note on the catalogue entry. Same rows the
     /// UI's four Tauri commands write.
     pub material_mark_service: Arc<MaterialMarkService>,
+    /// The bands of marks over an Asset's material — which reading of
+    /// the content a surface shows, which one a person may edit, and
+    /// the chapters inside a structure band. Same rows the UI's eight
+    /// Tauri commands write.
+    pub material_layer_service: Arc<MaterialLayerService>,
     /// App-level Threads container — receives both UI (human) and
     /// HTTP (Claude Code / agents) writes on the same rows.
     pub thread_service: Arc<ThreadService>,
@@ -109,6 +114,7 @@ impl ServerCtx {
             session_service: core.session_service.clone(),
             asset_comment_service: core.asset_comment_service.clone(),
             material_mark_service: core.material_mark_service.clone(),
+            material_layer_service: core.material_layer_service.clone(),
             thread_service: core.thread_service.clone(),
             exporter_registry: core.exporter_registry.clone(),
             jobs_pool: core.jobs_pool.clone(),

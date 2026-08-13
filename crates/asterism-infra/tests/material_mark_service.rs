@@ -23,13 +23,17 @@ use asterism_contract::command::{
 use asterism_core::application::MaterialMarkService;
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
+use asterism_core::domain::material_layer::{LayerOrigin, LayerRole};
 use asterism_core::domain::persona::Persona;
-use asterism_core::domain::repository::{AssetRepository, PersonaRepository};
+use asterism_core::domain::repository::{
+    AssetRepository, MaterialLayerRepository, PersonaRepository,
+};
 use asterism_core::domain::value::{AssetId, Modality, PersonaId, SourceKind, SourceRef};
 use asterism_core::error::DomainError;
 use asterism_infra::sqlite::open_and_migrate_in_memory;
 use asterism_infra::sqlite::repo::{
-    SqliteAssetRepository, SqliteMaterialMarkRepository, SqlitePersonaRepository,
+    SqliteAssetRepository, SqliteMaterialLayerRepository, SqliteMaterialMarkRepository,
+    SqlitePersonaRepository,
 };
 use chrono::Utc;
 use rusqlite_isle::AsyncIsleDriver;
@@ -48,6 +52,11 @@ struct Fixture {
     service: MaterialMarkService,
     assets: Arc<SqliteAssetRepository>,
     personas: Arc<SqlitePersonaRepository>,
+    /// Held so the layer assertions can read the bands the service
+    /// created behind the post — the whole point of the lazy default
+    /// is that no caller names one, so nothing else in these fixtures
+    /// would ever see it.
+    layers: Arc<SqliteMaterialLayerRepository>,
     driver: AsyncIsleDriver,
 }
 
@@ -57,11 +66,14 @@ impl Fixture {
         let assets = Arc::new(SqliteAssetRepository::new(isle.clone()));
         let personas = Arc::new(SqlitePersonaRepository::new(isle.clone()));
         let marks = Arc::new(SqliteMaterialMarkRepository::new(isle.clone()));
-        let service = MaterialMarkService::new(marks, assets.clone(), personas.clone());
+        let layers = Arc::new(SqliteMaterialLayerRepository::new(isle.clone()));
+        let service =
+            MaterialMarkService::new(marks, layers.clone(), assets.clone(), personas.clone());
         Self {
             service,
             assets,
             personas,
+            layers,
             driver,
         }
     }
@@ -450,6 +462,103 @@ async fn delete_removes_one_mark_and_is_idempotent() {
         .delete(command, &unattributed())
         .await
         .expect("deleting a mark that is already gone is a no-op");
+
+    fx.close().await;
+}
+
+/// A post names no layer, and lands in one anyway: the asset's default
+/// annotation band, created on the first mark it ever receives.
+///
+/// Three claims, and each is one a plausible implementation gets wrong.
+/// That the band is created lazily — an asset nobody has marked carries
+/// no row, which is what keeps a hundred-thousand-image library from
+/// carrying a hundred thousand empty bands. That the *second* post
+/// reuses it rather than opening another, which is the difference
+/// between a default and a per-mark band. And that the band is the
+/// user's: `layer_id` is `NOT NULL`, so something has to be chosen, and
+/// an imported or machine-owned choice would put every note in a band
+/// the immutability guard forbids writing to.
+#[tokio::test]
+async fn post_creates_the_default_annotation_band_once_and_reuses_it() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let asset = fx.seed_asset(persona, Some(30_000)).await;
+
+    assert!(
+        fx.layers.list_by_asset(&asset).await.unwrap().is_empty(),
+        "an asset nobody has marked carries no bands"
+    );
+
+    fx.service
+        .post(post_at(asset, Some(1_000), None), &unattributed())
+        .await
+        .unwrap();
+    let bands = fx.layers.list_by_asset(&asset).await.unwrap();
+    assert_eq!(bands.len(), 1, "the first mark opens exactly one band");
+    let band = &bands[0];
+    assert_eq!(
+        band.origin,
+        LayerOrigin::User,
+        "notes land in the user's own"
+    );
+    assert_eq!(band.role, LayerRole::Annotation);
+    assert!(
+        band.is_default,
+        "and it is the one an unnamed post resolves"
+    );
+    assert_eq!(band.material_ord, 0, "the primary original");
+
+    fx.service
+        .post(post_at(asset, Some(2_000), None), &unattributed())
+        .await
+        .unwrap();
+    let after = fx.layers.list_by_asset(&asset).await.unwrap();
+    assert_eq!(
+        after, bands,
+        "the second mark joins the band rather than opening another"
+    );
+    assert_eq!(
+        fx.service
+            .list_by_asset(&asset.to_string())
+            .await
+            .unwrap()
+            .len(),
+        2,
+        "and both marks are there"
+    );
+
+    fx.close().await;
+}
+
+/// A post that is going to be refused leaves no band behind.
+///
+/// The band is resolved after the anchor and the author are checked,
+/// and this is what that ordering is for: an asset with no timeline can
+/// never carry a mark, so a band opened on the way to refusing one
+/// would be a row that nothing will ever write into and nothing will
+/// ever clean up. The accepted post beside it is what keeps the
+/// assertion from passing with the whole resolution step deleted.
+#[tokio::test]
+async fn a_refused_post_opens_no_band() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let timed = fx.seed_asset(persona, Some(30_000)).await;
+    let untimed = fx.seed_asset(persona, None).await;
+
+    fx.service
+        .post(post_at(timed, Some(1_500), None), &unattributed())
+        .await
+        .expect("an asset with a duration has a timeline to mark");
+    assert_eq!(fx.layers.list_by_asset(&timed).await.unwrap().len(), 1);
+
+    fx.service
+        .post(post_at(untimed, Some(1_500), None), &unattributed())
+        .await
+        .expect_err("an asset with no duration has no timeline to mark");
+    assert!(
+        fx.layers.list_by_asset(&untimed).await.unwrap().is_empty(),
+        "the refused post must not have left a band on the way out"
+    );
 
     fx.close().await;
 }

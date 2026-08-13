@@ -245,6 +245,7 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "dispatch_get",
             "duplicate_conflict_resolve",
             "duplicate_conflicts",
+            "material_layers",
             "material_mark_add",
             "material_marks",
         ],

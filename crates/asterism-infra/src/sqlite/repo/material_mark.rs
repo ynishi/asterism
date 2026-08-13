@@ -3,7 +3,7 @@
 use asterism_core::domain::asset_comment::CommentAuthor;
 use asterism_core::domain::material_mark::{MaterialAnchor, MaterialMark, TimelineSpan};
 use asterism_core::domain::repository::MaterialMarkRepository;
-use asterism_core::domain::value::{AssetId, MaterialMarkId, PersonaId};
+use asterism_core::domain::value::{AssetId, MaterialLayerId, MaterialMarkId, PersonaId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -44,6 +44,7 @@ fn to_stored_ms(value: u64, column: &str) -> Result<i64, DomainError> {
 struct MarkRow {
     id: Uuid,
     asset_id: Uuid,
+    layer_id: Uuid,
     anchor_kind: String,
     start_ms: Option<i64>,
     end_ms: Option<i64>,
@@ -55,21 +56,22 @@ struct MarkRow {
 }
 
 impl MarkRow {
-    const COLUMNS: &'static str = "id, asset_id, anchor_kind, start_ms, end_ms, body, \
+    const COLUMNS: &'static str = "id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body, \
          author_kind, author_persona_id, created_at, edited_at";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
             id: row.get(0)?,
             asset_id: row.get(1)?,
-            anchor_kind: row.get(2)?,
-            start_ms: row.get(3)?,
-            end_ms: row.get(4)?,
-            body: row.get(5)?,
-            author_kind: row.get(6)?,
-            author_persona_id: row.get(7)?,
-            created_at: row.get(8)?,
-            edited_at: row.get(9)?,
+            layer_id: row.get(2)?,
+            anchor_kind: row.get(3)?,
+            start_ms: row.get(4)?,
+            end_ms: row.get(5)?,
+            body: row.get(6)?,
+            author_kind: row.get(7)?,
+            author_persona_id: row.get(8)?,
+            created_at: row.get(9)?,
+            edited_at: row.get(10)?,
         })
     }
 
@@ -137,6 +139,7 @@ impl MarkRow {
         MaterialMark::rehydrate(
             MaterialMarkId::from_uuid(id),
             AssetId::from_uuid(self.asset_id),
+            MaterialLayerId::from_uuid(self.layer_id),
             anchor,
             author,
             self.body,
@@ -167,6 +170,7 @@ impl MaterialMarkRepository for SqliteMaterialMarkRepository {
         mark.validate()?;
         let id = *mark.id.as_uuid();
         let asset_id = *mark.asset_id.as_uuid();
+        let layer_id = *mark.layer_id.as_uuid();
         let anchor_kind = mark.anchor.kind_slug().to_string();
         // One arm per anchor kind, so a variant added to
         // `MaterialAnchor` fails to compile here rather than storing a
@@ -188,10 +192,11 @@ impl MaterialMarkRepository for SqliteMaterialMarkRepository {
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO material_mark
-                         (id, asset_id, anchor_kind, start_ms, end_ms, body, author_kind,
-                          author_persona_id, created_at, edited_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                         (id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body,
+                          author_kind, author_persona_id, created_at, edited_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                      ON CONFLICT(id) DO UPDATE SET
+                         layer_id = excluded.layer_id,
                          anchor_kind = excluded.anchor_kind,
                          start_ms = excluded.start_ms,
                          end_ms = excluded.end_ms,
@@ -200,6 +205,7 @@ impl MaterialMarkRepository for SqliteMaterialMarkRepository {
                     params![
                         id,
                         asset_id,
+                        layer_id,
                         anchor_kind,
                         start_ms,
                         end_ms,
@@ -253,7 +259,8 @@ impl MaterialMarkRepository for SqliteMaterialMarkRepository {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
-    use asterism_core::domain::repository::PersonaRepository;
+    use asterism_core::domain::material_layer::{LayerOrigin, LayerRole, MaterialLayer};
+    use asterism_core::domain::repository::{MaterialLayerRepository, PersonaRepository};
     use chrono::{DateTime, Utc};
 
     /// Seeds one persona. `pack_id` is UNIQUE, so it is derived from
@@ -274,8 +281,13 @@ mod tests {
         PersonaId::from_uuid(pid)
     }
 
-    /// Seeds one video asset under `persona`.
-    async fn seed_asset(isle: &AsyncIsle, persona: PersonaId) -> AssetId {
+    /// Seeds one video asset under `persona`, with the default
+    /// annotation band its marks belong to.
+    ///
+    /// The two are returned together because a mark cannot exist
+    /// without a band: `layer_id` is `NOT NULL`, so an asset with no
+    /// layer is an asset nothing can be marked on.
+    async fn seed_asset(isle: &AsyncIsle, persona: PersonaId) -> (AssetId, MaterialLayerId) {
         let aid = Uuid::now_v7();
         let owner = *persona.as_uuid();
         let locator = format!("v-{aid}.mp4");
@@ -290,7 +302,24 @@ mod tests {
         })
         .await
         .unwrap();
-        AssetId::from_uuid(aid)
+        let asset = AssetId::from_uuid(aid);
+        (asset, seed_layer(isle, asset).await)
+    }
+
+    /// The band every mark in these fixtures belongs to: the asset's
+    /// default annotation layer, which is what the service would have
+    /// created on the first post.
+    ///
+    /// Written over the layer adapter rather than over raw SQL so that
+    /// the shape these fixtures assume is the shape the production path
+    /// produces — a hand-written `INSERT` here would keep passing after
+    /// the two disagreed.
+    async fn seed_layer(isle: &AsyncIsle, asset: AssetId) -> MaterialLayerId {
+        let layers = crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone());
+        let layer = MaterialLayer::new(asset, 0, LayerOrigin::User, LayerRole::Annotation, true, 0)
+            .unwrap();
+        layers.save(&layer).await.unwrap();
+        layer.id
     }
 
     /// A mark with an id chosen by hand.
@@ -311,6 +340,7 @@ mod tests {
     fn mark_with(
         first_byte: u8,
         asset: AssetId,
+        layer: MaterialLayerId,
         start_ms: u64,
         end_ms: Option<u64>,
     ) -> MaterialMark {
@@ -318,6 +348,7 @@ mod tests {
         let placed_at = DateTime::from_timestamp_millis(1_700_000_000_000).unwrap();
         let mut mark = MaterialMark::new(
             asset,
+            layer,
             anchor,
             CommentAuthor::User,
             format!("mark {first_byte:#04x} at {start_ms}"),
@@ -347,10 +378,10 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
-        let instant = mark_with(0x11, asset, 1_000, None);
-        let interval = mark_with(0x22, asset, 2_000, Some(4_500));
+        let instant = mark_with(0x11, asset, layer, 1_000, None);
+        let interval = mark_with(0x22, asset, layer, 2_000, Some(4_500));
         repo.save(&instant).await.unwrap();
         repo.save(&interval).await.unwrap();
 
@@ -390,9 +421,9 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
-        repo.save(&mark_with(0x11, asset, 1_000, None))
+        repo.save(&mark_with(0x11, asset, layer, 1_000, None))
             .await
             .unwrap();
 
@@ -424,6 +455,7 @@ mod tests {
         MarkRow {
             id: Uuid::now_v7(),
             asset_id: Uuid::now_v7(),
+            layer_id: Uuid::now_v7(),
             anchor_kind: anchor_kind.into(),
             start_ms,
             end_ms: None,
@@ -484,9 +516,9 @@ mod tests {
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let owner = seed_persona(&isle).await;
         let author = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, owner).await;
+        let (asset, layer) = seed_asset(&isle, owner).await;
 
-        let mut mark = mark_with(0x11, asset, 500, None);
+        let mut mark = mark_with(0x11, asset, layer, 500, None);
         mark.author = CommentAuthor::Persona { persona_id: author };
         repo.save(&mark).await.unwrap();
 
@@ -515,16 +547,16 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
         // Descending position, ascending id.
-        repo.save(&mark_with(0x11, asset, 3_000, None))
+        repo.save(&mark_with(0x11, asset, layer, 3_000, None))
             .await
             .unwrap();
-        repo.save(&mark_with(0x22, asset, 2_000, Some(2_500)))
+        repo.save(&mark_with(0x22, asset, layer, 2_000, Some(2_500)))
             .await
             .unwrap();
-        repo.save(&mark_with(0x33, asset, 1_000, None))
+        repo.save(&mark_with(0x33, asset, layer, 1_000, None))
             .await
             .unwrap();
 
@@ -577,10 +609,10 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
-        let low = mark_with(0x11, asset, 7_000, None);
-        let high = mark_with(0x22, asset, 7_000, Some(7_100));
+        let low = mark_with(0x11, asset, layer, 7_000, None);
+        let high = mark_with(0x22, asset, layer, 7_000, Some(7_100));
         // Arrival order is the reverse of the expected order.
         repo.save(&high).await.unwrap();
         repo.save(&low).await.unwrap();
@@ -618,9 +650,9 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
-        let placed = mark_with(0x11, asset, 1_000, None);
+        let placed = mark_with(0x11, asset, layer, 1_000, None);
         repo.save(&placed).await.unwrap();
 
         let mut blanked = placed.clone();
@@ -655,9 +687,9 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
-        let placed = mark_with(0x11, asset, 1_000, None);
+        let placed = mark_with(0x11, asset, layer, 1_000, None);
         repo.save(&placed).await.unwrap();
 
         let mut backdated = placed.clone();
@@ -691,16 +723,17 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
         let aid = *asset.as_uuid();
+        let lid = *layer.as_uuid();
         isle.call(move |conn| {
             conn.execute(
                 "INSERT INTO material_mark
-                     (id, asset_id, anchor_kind, start_ms, end_ms, body, author_kind,
+                     (id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body, author_kind,
                       author_persona_id, created_at)
-                 VALUES (?1, ?2, 'temporal', 100, NULL, char(9), 'user', NULL, 0)",
-                params![Uuid::now_v7(), aid],
+                 VALUES (?1, ?2, ?3, 'temporal', 100, NULL, char(9), 'user', NULL, 0)",
+                params![Uuid::now_v7(), aid, lid],
             )?;
             Ok(())
         })
@@ -724,16 +757,17 @@ mod tests {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, persona).await;
+        let (asset, layer) = seed_asset(&isle, persona).await;
 
         let aid = *asset.as_uuid();
+        let lid = *layer.as_uuid();
         isle.call(move |conn| {
             conn.execute(
                 "INSERT INTO material_mark
-                     (id, asset_id, anchor_kind, start_ms, end_ms, body, author_kind,
+                     (id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body, author_kind,
                       author_persona_id, created_at, edited_at)
-                 VALUES (?1, ?2, 'temporal', 100, NULL, 'here', 'user', NULL, 5000, 4000)",
-                params![Uuid::now_v7(), aid],
+                 VALUES (?1, ?2, ?3, 'temporal', 100, NULL, 'here', 'user', NULL, 5000, 4000)",
+                params![Uuid::now_v7(), aid, lid],
             )?;
             Ok(())
         })
@@ -768,11 +802,11 @@ mod tests {
         let repo = SqliteMaterialMarkRepository::new(isle.clone());
         let owner = seed_persona(&isle).await;
         let author = seed_persona(&isle).await;
-        let asset = seed_asset(&isle, owner).await;
+        let (asset, layer) = seed_asset(&isle, owner).await;
 
-        let mut by_author = mark_with(0x11, asset, 1_000, None);
+        let mut by_author = mark_with(0x11, asset, layer, 1_000, None);
         by_author.author = CommentAuthor::Persona { persona_id: author };
-        let by_user = mark_with(0x22, asset, 2_000, None);
+        let by_user = mark_with(0x22, asset, layer, 2_000, None);
         repo.save(&by_author).await.unwrap();
         repo.save(&by_user).await.unwrap();
 

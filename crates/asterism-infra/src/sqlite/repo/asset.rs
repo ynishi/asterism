@@ -21,9 +21,9 @@ use asterism_core::domain::duplicate_conflict::{
 use asterism_core::domain::material::Material;
 use asterism_core::domain::merge_plan::MergePlan;
 use asterism_core::domain::repository::{
-    AssetRepository, DimsCandidate, DimsProbe, DimsScope, DimsWritePolicy, DuplicateGroup,
-    FingerprintedMaterial, FoldOutcome, FoldRefusal, FoldReport, MaterialFingerprint, MergeOutcome,
-    SourceLookupScope, UnhashedMaterial,
+    AssetRepository, ChapterScanCandidate, DimsCandidate, DimsProbe, DimsScope, DimsWritePolicy,
+    DuplicateGroup, FingerprintedMaterial, FoldOutcome, FoldRefusal, FoldReport,
+    MaterialFingerprint, MergeOutcome, SourceLookupScope, UnhashedMaterial,
 };
 use asterism_core::domain::session::{Session, SessionMetadata};
 use asterism_core::domain::source_locator::SourceLocator;
@@ -4268,6 +4268,87 @@ impl AssetRepository for SqliteAssetRepository {
                         locator: SourceLocator::try_from(locator.as_str())?,
                         // Same parse as the entity's boundary, so the two
                         // fingerprint passes cannot disagree about format.
+                        mime: mime.as_deref().map(MimeType::parse),
+                    })
+                },
+            )
+            .collect()
+    }
+
+    async fn scan_chapter_scan_candidates(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<ChapterScanCandidate>, DomainError> {
+        let cursor = after.map(|(id, ord)| (*id.as_uuid(), i64::from(ord)));
+        let limit = i64::from(limit);
+        let rows: Vec<(Uuid, i64, String, Option<String>)> = self
+            .isle
+            .call(move |conn| {
+                // The mime prefixes are the SQL spelling of
+                // `MimeType::carries_chapters`, and the only place the
+                // two are apart: this predicate has to run inside the
+                // query or the walk reads the whole table. The handler
+                // re-asks through the real predicate on every row it is
+                // handed, so a drift here narrows the page rather than
+                // letting a PNG reach an ffmpeg.
+                //
+                // The trash side is included for the reason the
+                // fingerprint walk includes it: a trashed asset can be
+                // restored, and reading its chapters later costs the
+                // same as reading them now.
+                //
+                // `NOT EXISTS` over the imported structure band is the
+                // stamp — see `JobKind::ChapterScan`. It is a correlated
+                // subquery rather than a `LEFT JOIN … IS NULL` so the
+                // planner can stop at the first matching band row
+                // (`idx_material_layer_asset` covers
+                // `(asset_id, material_ord, role)`).
+                let sql = "SELECT m.asset_id, m.ord, m.locator, m.mime \
+                             FROM material m \
+                            WHERE (m.mime LIKE 'video/%' OR m.mime LIKE 'audio/%') \
+                              AND NOT EXISTS ( \
+                                    SELECT 1 FROM material_layer l \
+                                     WHERE l.asset_id     = m.asset_id \
+                                       AND l.material_ord = m.ord \
+                                       AND l.role         = 'structure' \
+                                       AND l.origin       = 'imported') \
+                              {CURSOR} \
+                            ORDER BY m.asset_id, m.ord \
+                            LIMIT ?1";
+                match cursor {
+                    None => {
+                        let mut stmt = conn.prepare(&sql.replace("{CURSOR}", ""))?;
+                        stmt.query_map(params![limit], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                    Some((uuid, ord)) => {
+                        let mut stmt = conn.prepare(&sql.replace(
+                            "{CURSOR}",
+                            "AND (m.asset_id > ?2 OR (m.asset_id = ?2 AND m.ord > ?3))",
+                        ))?;
+                        stmt.query_map(params![limit, uuid, ord], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                }
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(
+                |(asset_id, ord, locator, mime): (_, i64, String, Option<String>)| {
+                    Ok(ChapterScanCandidate {
+                        asset_id: AssetId::from_uuid(asset_id),
+                        ord: ord.max(0) as u32,
+                        // Crosses the same boundary the entity path
+                        // crosses, for the reason the fingerprint walk
+                        // states: the two routes into one reader must
+                        // not hand it two readings of one artefact.
+                        locator: SourceLocator::try_from(locator.as_str())?,
                         mime: mime.as_deref().map(MimeType::parse),
                     })
                 },

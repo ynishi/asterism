@@ -265,6 +265,54 @@ pub enum JobKind {
     /// import fan-out (a transcode reads and re-encodes every frame,
     /// which is far too heavy to pay speculatively for a whole wave).
     PreviewGen,
+    /// Reads a container's own chapter list into the imported structure
+    /// layer of each material that can carry one.
+    ///
+    /// Two payload shapes, the same split
+    /// [`MaterialHash`](Self::MaterialHash) uses:
+    ///
+    /// - `{ "asset_id": "<uuid>" }` — one asset's materials, enqueued by
+    ///   the ingest fan-out for the video and audio it imports.
+    /// - `{ "batch": true, "cursor": {"asset_id": …, "ord": …} }` — a
+    ///   walk over the materials no reading has reached yet,
+    ///   chain-enqueued while pages come back full.
+    ///
+    /// # The band is the stamp
+    ///
+    /// The walk selects materials with **no imported structure layer**,
+    /// and a completed run always leaves one — including for a file that
+    /// declares no chapters at all, which is recorded as an *empty* band
+    /// rather than as no band (see
+    /// [`replace_imported_chapters`](crate::application_support::replace_imported_chapters)).
+    /// So the predicate empties the way
+    /// [`AssetDims`](Self::AssetDims)'s `unlooked` scope does, and for
+    /// the same reason: a material is offered once, whatever came back.
+    /// Selecting on "has no chapters" instead would re-offer every
+    /// chapterless clip on every pass, and each offer spawns an ffmpeg.
+    ///
+    /// No separate stamp column, unlike `dims_probed_at`, because there
+    /// is a row here to carry the fact: the band exists or it does not.
+    /// A column would be a second answer to a question the table
+    /// already answers.
+    ///
+    /// A file that could not be read is the deliberate exception:
+    /// nothing is written, so the material stays in the walk. Leaving a
+    /// band behind for a file nobody managed to open would record
+    /// "scanned, declares nothing" about bytes that were never seen —
+    /// answering a temporary question (an unmounted volume, a file mid-
+    /// move) permanently, which is the judgement
+    /// [`AssetDims`](Self::AssetDims) also records.
+    ///
+    /// # Why this is not a mode of [`AssetDims`](Self::AssetDims)
+    ///
+    /// Both open files, so the split is not about I/O. It is that they
+    /// write different aggregates under different rules: a dimension is
+    /// a column on the asset, overwritten in place, while a chapter list
+    /// is a band of rows whose contents are replaced wholesale and whose
+    /// neighbours — the bands a person wrote — must not move. One
+    /// handler over both would be one retry policy over two kinds of
+    /// loss.
+    ChapterScan,
 }
 
 impl JobKind {
@@ -289,6 +337,7 @@ impl JobKind {
             Self::ObservationSweep => "observation_sweep",
             Self::SeriesDerive => "series_derive",
             Self::PreviewGen => "preview_gen",
+            Self::ChapterScan => "chapter_scan",
         }
     }
 
@@ -313,6 +362,7 @@ impl JobKind {
             "observation_sweep" => Ok(Self::ObservationSweep),
             "series_derive" => Ok(Self::SeriesDerive),
             "preview_gen" => Ok(Self::PreviewGen),
+            "chapter_scan" => Ok(Self::ChapterScan),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

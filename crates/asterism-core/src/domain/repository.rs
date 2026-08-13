@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::app_setting::{AppSetting, SettingKey};
 use crate::domain::asset::{Asset, AssetCard, AssetQuery};
 use crate::domain::asset_comment::AssetComment;
+use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::dir::Dir;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
@@ -19,6 +20,7 @@ use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
+use crate::domain::material_layer::{LayerRole, MaterialLayer};
 use crate::domain::material_mark::MaterialMark;
 use crate::domain::merge_plan::MergePlan;
 use crate::domain::modality::{ModalityDef, ModalityView};
@@ -32,9 +34,10 @@ use crate::domain::source_locator::SourceLocator;
 use crate::domain::tag::{Tag, TagCount, TagMergeOutcome};
 use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
-    AssetCommentId, AssetId, DirId, DispatchId, DuplicateConflictId, ExternalSessionKey, GroupId,
-    MaterialMarkId, MessageId, MimeType, Modality, PackId, Page, PersonaId, Progress, SessionId,
-    SnapshotId, SourceKind, StrategyId, TagId, ThreadId,
+    AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
+    ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
+    PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
+    ThreadId,
 };
 use crate::error::DomainError;
 
@@ -536,6 +539,34 @@ pub struct UnhashedMaterial {
     /// a second implementation of `guess_mime`, and the day the two
     /// disagreed the same file would fingerprint differently depending
     /// on which pass reached it first.
+    pub mime: Option<MimeType>,
+}
+
+/// One material no chapter reading has reached yet — the unit the
+/// `ChapterScan` backfill walks.
+///
+/// The same three fields [`UnhashedMaterial`] carries and for the same
+/// reasons: the locator is what gets opened, the `(asset_id, ord)` key
+/// is what the resulting band is filed under, and the `mime` travels
+/// with the row because the walk has no entity to read it off.
+///
+/// A separate type rather than a reuse of that one, because the two
+/// select different populations under predicates that will not stay
+/// parallel — and a shared struct is the shape in which a change to one
+/// walk silently becomes a change to the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChapterScanCandidate {
+    /// Owning asset.
+    pub asset_id: AssetId,
+    /// Position within that asset (`0` = primary original).
+    pub ord: u32,
+    /// Where the bytes are.
+    pub locator: SourceLocator,
+    /// What the row believes the format is. Carried even though the
+    /// scan already filtered on it, so the handler decides eligibility
+    /// through
+    /// [`MimeType::carries_chapters`](crate::domain::value::MimeType::carries_chapters)
+    /// on both routes rather than trusting one caller's filter.
     pub mime: Option<MimeType>,
 }
 
@@ -1340,6 +1371,37 @@ pub trait AssetRepository: Send + Sync {
         after: Option<&AssetId>,
         limit: u32,
     ) -> Result<Vec<DimsCandidate>, DomainError>;
+
+    /// Materials that can declare chapters and have no imported
+    /// structure layer yet, oldest asset first, at most `limit` of them
+    /// — the `ChapterScan` backfill's page.
+    ///
+    /// Ordered and cursored by the composite `(asset_id, ord)` key, the
+    /// same shape and for the same reason as
+    /// [`scan_unhashed_materials`](Self::scan_unhashed_materials): an
+    /// `asset_id`-only cursor would skip the remaining materials of an
+    /// asset a page boundary cut through.
+    ///
+    /// # Two predicates, and the second is why this is on this port
+    ///
+    /// "Can declare chapters" is the material's `mime`; "has no imported
+    /// structure layer" is the absence of a `material_layer` row. The
+    /// second is what makes the walk terminate — a completed reading
+    /// always leaves that row, so a material is offered once — and it is
+    /// stated here, in SQL, rather than by filtering a full walk in the
+    /// handler: the handler's version of the filter would still have
+    /// paid for a full table walk on every start, and a walk that
+    /// re-offers the whole library is a walk that re-opens it.
+    ///
+    /// Kept beside its two sibling walks rather than on the layer port
+    /// because the row it yields is a material's, and because a caller
+    /// looking for "how does a backfill find its work" should find all
+    /// three answers in one place.
+    async fn scan_chapter_scan_candidates(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<ChapterScanCandidate>, DomainError>;
 
     /// Records the outcome of one dimension probe.
     ///
@@ -2969,6 +3031,133 @@ pub trait MaterialMarkRepository: Send + Sync {
 
     /// Deletes one mark. Idempotent — a missing id is a no-op.
     async fn delete(&self, id: &MaterialMarkId) -> Result<(), DomainError>;
+}
+
+/// Persistence port for [`MaterialLayer`] — the bands of marks over an
+/// Asset's material.
+///
+/// Four verbs, and the fourth is the one worth explaining.
+/// [`set_default`](MaterialLayerRepository::set_default) is not
+/// `save` called twice: at most one layer per
+/// `(asset_id, material_ord, role)` may carry the flag, so moving it
+/// means clearing the old holder and setting the new one, and a caller
+/// doing that through two `save`s gets a window where the pair is
+/// briefly both — which the schema's partial unique index aborts on —
+/// or briefly neither, which the lazy-creation path in the service
+/// reads as "this asset has no band" and answers by making a second
+/// one. One statement, one transaction, adapter's problem.
+///
+/// No `find_default` verb. The default is one row of
+/// [`list_by_asset`](MaterialLayerRepository::list_by_asset)'s answer,
+/// and an asset carries a handful of layers, not thousands; a dedicated
+/// lookup would be a second statement that can disagree with the
+/// listing about which band is current.
+#[async_trait]
+pub trait MaterialLayerRepository: Send + Sync {
+    /// Persists a layer, replacing the row on the same id.
+    ///
+    /// Does **not** move the default flag between rows: writing
+    /// `is_default = true` here on a second layer of the same
+    /// `(asset_id, material_ord, role)` is refused by the unique index.
+    /// [`Self::set_default`] is the verb that moves it.
+    async fn save(&self, layer: &MaterialLayer) -> Result<(), DomainError>;
+
+    /// Fetches one layer by id. `None` when no row carries it.
+    async fn find(&self, id: &MaterialLayerId) -> Result<Option<MaterialLayer>, DomainError>;
+
+    /// Fetches every band over `asset_id`'s materials, ordered by
+    /// `(material_ord, role, ord, id)` — the display order, with `id`
+    /// as the tie-break so the answer is total.
+    ///
+    /// Every material of the asset in one answer, rather than a
+    /// `(asset, ord)` fetch: an asset carries one original in practice
+    /// and a handful at most, and the caller that renders a switch
+    /// wants the whole set anyway.
+    async fn list_by_asset(&self, asset_id: &AssetId) -> Result<Vec<MaterialLayer>, DomainError>;
+
+    /// Makes `id` the default band for its own
+    /// `(asset_id, material_ord, role)`, clearing whichever row held it
+    /// before — in one transaction (see the trait doc).
+    ///
+    /// `NotFound` when no layer carries `id`. Idempotent: naming the
+    /// row that already holds the flag leaves it holding the flag.
+    async fn set_default(&self, id: &MaterialLayerId) -> Result<(), DomainError>;
+
+    /// Deletes a layer and everything in it (`ON DELETE CASCADE`
+    /// reaches both `chapter_mark` and `material_mark`). Idempotent —
+    /// a missing id is a no-op.
+    ///
+    /// Deliberately blunt: the marks in a band are the band, so there
+    /// is no state in which deleting one and keeping the other is the
+    /// answer. Whether a *particular* band may be deleted at all —
+    /// an imported one, the last default — is the service's rule, in
+    /// the same place the rest of the origin guard lives.
+    async fn delete(&self, id: &MaterialLayerId) -> Result<(), DomainError>;
+}
+
+/// Persistence port for [`ChapterMark`] — the sections a structure
+/// layer declares.
+///
+/// The verbs are the mark port's three plus
+/// [`replace_layer_content`](ChapterMarkRepository::replace_layer_content),
+/// which is what re-reading a file does. That one exists as a port verb
+/// rather than as "delete the layer's rows, then save each" because the
+/// two are not the same operation: the second leaves a window in which
+/// the file's chapter list is empty — visible to any concurrent read,
+/// and permanent if the process dies mid-way, with nothing left to
+/// re-derive it from until the next probe. Replacement is atomic or it
+/// is a data-loss path with extra steps.
+#[async_trait]
+pub trait ChapterMarkRepository: Send + Sync {
+    /// Persists one chapter, replacing the row on the same id (so an
+    /// edit reuses this path).
+    async fn save(&self, chapter: &ChapterMark) -> Result<(), DomainError>;
+
+    /// Fetches a layer's chapters in reading order (`ord` ascending,
+    /// then `start_ms`, then `id`).
+    ///
+    /// `ord` leads because it is the order the container declared, and
+    /// a container may declare its sections out of timeline order;
+    /// `start_ms` and `id` follow so that the answer is total even when
+    /// a writer left every `ord` at zero.
+    async fn list_by_layer(
+        &self,
+        layer_id: &MaterialLayerId,
+    ) -> Result<Vec<ChapterMark>, DomainError>;
+
+    /// Deletes one chapter. Idempotent — a missing id is a no-op.
+    async fn delete(&self, id: &ChapterMarkId) -> Result<(), DomainError>;
+
+    /// Replaces everything in `layer_id` with `chapters`, atomically
+    /// (see the trait doc). An empty slice is a legal argument and
+    /// means "this material declares no chapters" — the answer a
+    /// re-probe of a file that had them and no longer does must be able
+    /// to record.
+    ///
+    /// Refuses a chapter whose `layer_id` is not the one named, rather
+    /// than silently rehoming it: the argument would otherwise be two
+    /// disagreeing statements of where the rows go.
+    async fn replace_layer_content(
+        &self,
+        layer_id: &MaterialLayerId,
+        chapters: &[ChapterMark],
+    ) -> Result<(), DomainError>;
+}
+
+/// The `(asset, material, role)` triple a layer lookup is scoped by.
+///
+/// Carried as a value rather than as three positional arguments because
+/// the first two are both ordinals of the same shape and the third is
+/// what tells "the chapter bands" from "the note bands" — a call site
+/// that transposes them compiles either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayerScope {
+    /// Asset whose material the bands are over.
+    pub asset_id: AssetId,
+    /// Which of that asset's originals (`0` = the primary one).
+    pub material_ord: u32,
+    /// Which kind of band.
+    pub role: LayerRole,
 }
 
 /// One `(material, rule)` pair nothing has answered yet — the unit the

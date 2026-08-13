@@ -5345,6 +5345,311 @@ ALTER TABLE series_strategy_new RENAME TO series_strategy;
     )
 }
 
+/// Version 77 → 78: marks belong to a **layer**, and a material's own
+/// chapter list has somewhere to live.
+///
+/// # The problem
+///
+/// A material can be read more than once by more than one hand. The
+/// container declares chapters; a person disagrees and writes their
+/// own; a job derives a third set. Until now all three would have been
+/// the same rows on the same table, distinguishable only by whoever
+/// wrote last — so "read the file again" either destroyed a person's
+/// work or duplicated the file's, and nothing could answer "which of
+/// these did I write?".
+///
+/// `material_layer` is that answer as data: `origin` says who produced
+/// the band, `role` says what it holds. `chapter_mark` is the aggregate
+/// a `'structure'` band holds, and `material_mark` gains the
+/// `layer_id` that puts every existing mark into an `'annotation'` one.
+///
+/// # `material_layer`
+///
+/// - **The only foreign key is `asset(id)`.** The band is over one
+///   original, named by `(asset_id, material_ord)` — the same pair
+///   `material` is keyed by — and a composite `REFERENCES material
+///   (asset_id, ord)` is deliberately *not* declared. Two reasons, and
+///   the second is the load-bearing one. `material_mark` already
+///   references the asset directly for the same shape (V60/V66), and
+///   nothing guarantees that an asset carrying marks also carries a
+///   `material` row at `ord = 0`: V37 wrote those rows only for
+///   `role = 'item'` assets and only from the data it had, so a
+///   composite FK would make the backfill below partial, and a partial
+///   backfill against a `NOT NULL` column is a migration that fails on
+///   somebody's library rather than on this developer's. The
+///   consequence is stated rather than hidden: a layer can name a
+///   `material_ord` no material row carries, and reading one back
+///   yields a band over an original that is not there.
+/// - **`is_default` is unique per `(asset_id, material_ord, role)`**,
+///   enforced by a partial unique index. This is the rule the domain
+///   deliberately does not hold: a value object cannot check a fact
+///   about other rows, and a service that read them would be racing
+///   between its read and its write. The index makes the second writer
+///   lose loudly, which is what
+///   `application::material_layer_service::default_annotation_layer`
+///   answers by re-reading.
+/// - **An `'imported'` band is unique per `(asset_id, material_ord,
+///   role)`**, by a second partial unique index. `origin` is in the
+///   key, not the predicate, so a person may keep as many bands of
+///   their own over one material as they like — what the index forbids
+///   is a *second copy of the file's own list*, which is not a band
+///   somebody made but the same fact read twice. The way to get one is
+///   two scans of one asset overlapping:
+///   `material_layer_service::imported_structure_layer` looks for the
+///   band and opens one if there is none, so two jobs that both look
+///   before either writes both find nothing. Without the index the
+///   loser's chapters land in a duplicate band that nothing ever reads
+///   again and no verb removes; with it, the second insert fails and
+///   that function's `Err` arm re-reads and finds the winner's band —
+///   the same recovery `default_annotation_layer` already performs.
+///   The alternative was a lock, which would be a bigger promise made
+///   in a place that cannot keep it.
+/// - **`CHECK (role <> 'annotation' OR is_default = 0 OR origin =
+///   'user')`** mirrors `MaterialLayer::validate`. A new mark lands in
+///   the default annotation band without naming it, so if that band
+///   could be imported or machine-owned, every note would be written
+///   into a band the immutability rule forbids writing to — refused by
+///   the guard, or accepted and then deleted by the next re-probe.
+///   Unlike the `body` rule on `material_mark`, this one *can* be
+///   stated in SQL exactly (it compares closed slug sets, not Unicode),
+///   so it is stated in both places.
+/// - **`origin` and `role` are closed `CHECK (… IN (…))` sets**, so the
+///   vocabulary is in the schema and not only in the Rust enums.
+///   SQLite cannot alter a `CHECK` in place, so a fourth origin means
+///   rebuilding this table. Pre-release that costs a batch, and the
+///   same trade V66 recorded for `anchor_kind`.
+/// - No name column. A band is described by `(origin, role)` and a
+///   surface renders that pair; a stored caption would be a second
+///   answer to one question, and the one that drifts.
+///
+/// # `chapter_mark`
+///
+/// - **`label` carries no non-empty `CHECK`, and unlike
+///   `material_mark.body` it carries no domain rule either.** A mark's
+///   body is the whole content of something a person chose to write, so
+///   a blank one says nothing; a chapter's label is container metadata,
+///   and files legitimately declare untitled sections (an MP4 `chpl`
+///   entry with an empty string, a Matroska `ChapterAtom` with no
+///   `ChapterDisplay`). Refusing those would make an import either drop
+///   a section the file really has or invent a title for it.
+/// - **`end_ms` is nullable**: MP4's `chpl` declares start times only,
+///   and the end of a section is the start of the next one — a fact
+///   about other rows, so not something a single chapter can be
+///   required to carry. `start_ms` is `NOT NULL` here, unlike on
+///   `material_mark`, because there is one coordinate space a chapter
+///   can be in and it is the timeline.
+/// - `ON DELETE CASCADE` from the layer: the sections in a band *are*
+///   the band, so there is no state in which keeping one without the
+///   other is the answer.
+///
+/// # The `material_mark` rebuild, and why the backfill cannot lose a row
+///
+/// `layer_id` is `NOT NULL` — a nullable column meaning "the default
+/// band" would put one fact in two shapes, which is the drift this
+/// whole step exists to remove. So every existing mark needs a band,
+/// and the loop below mints one default annotation layer
+/// (`origin = 'user'`, `is_default = 1`) per asset that has marks.
+/// Assets with no marks get nothing: a library of a hundred thousand
+/// images does not carry a hundred thousand empty bands to make one
+/// code path shorter.
+///
+/// The copy joins with `LEFT JOIN` rather than `JOIN`, against a
+/// `NOT NULL` column, **on purpose**. An inner join would answer a
+/// missed asset by silently dropping its marks; the outer join answers
+/// it by writing `NULL` into a column that refuses one, which aborts
+/// the migration with the rows still in the old table. A backfill bug
+/// that fails is recoverable; one that deletes is not.
+///
+/// `idx_material_mark_layer_start` has no `SELECT` reader yet — the
+/// port lists marks by asset, not by band — and it is not there in
+/// anticipation of one. Its reader is the `ON DELETE CASCADE` from
+/// `material_layer`: SQLite implements a cascade as a search of the
+/// child table for the parent key, so with no index on `layer_id` the
+/// leading column, deleting one band scans every mark in the library.
+/// A band is deleted by a person clicking once, and the cost of that
+/// click would grow with the whole collection rather than with the band
+/// being removed. The `start_ms` on the tail costs nothing here and is
+/// the order a per-band listing would want on the day one is written.
+///
+/// # Why a `Step::App`
+///
+/// The backfill mints UUIDs, which SQL cannot do (compare
+/// `v29_materialise_session_composites`), and the step drops a table
+/// that has children. `Step::App` toggles `foreign_keys` off around its
+/// transaction, so `DROP TABLE material_mark` does not fire the
+/// author-side cascade, and the rename re-points nothing that needs
+/// re-pointing — with foreign keys off SQLite leaves `REFERENCES`
+/// clauses alone and the renamed table arrives under exactly the name
+/// they already use.
+///
+/// # Measured
+///
+/// `EXPLAIN QUERY PLAN` over the DDL below (SQLite 3.43.2, 2026-08-13
+/// — the same build V66's note was taken against), for the two
+/// statements the new adapters issue:
+///
+/// ```text
+/// SELECT … FROM material_layer WHERE asset_id = ?
+///   ORDER BY material_ord, role, ord, id
+/// -> SEARCH material_layer USING INDEX idx_material_layer_asset (asset_id=?)
+///    USE TEMP B-TREE FOR RIGHT PART OF ORDER BY
+///
+/// SELECT … FROM chapter_mark WHERE layer_id = ? ORDER BY ord, start_ms, id
+/// -> SEARCH chapter_mark USING INDEX idx_chapter_mark_layer_ord (layer_id=?)
+///    USE TEMP B-TREE FOR RIGHT PART OF ORDER BY
+/// ```
+///
+/// Both indexes serve the filter and the leading sort terms; the `, id`
+/// tie-break is a real sorter in each case, exactly as V66 recorded for
+/// `material_mark`. Worth knowing before anyone reads "index-backed" as
+/// "already ordered" — and the tie-break is not decoration: `id` is the
+/// PRIMARY KEY, so ordering on it makes the result total instead of
+/// leaving equal sort keys to the scan.
+///
+/// # Carried forward from V66
+///
+/// V66 left a note for the second anchor kind: a `'spatial'` row would
+/// have `start_ms IS NULL`, SQLite sorts NULL first, so such rows would
+/// head every `ORDER BY start_ms` listing. This step rebuilds the table
+/// and **does not settle it** — `anchor_kind` is still `'temporal'`
+/// alone, so there is still no row for the question to apply to, and
+/// answering it now would mean choosing a listing order for a
+/// coordinate space nobody has written. The note stands, unchanged, and
+/// belongs to whichever migration adds the second kind. What this step
+/// does change is where the question will be asked: a listing is now
+/// per layer as well as per asset, so the answer has a band to be
+/// scoped to.
+const V78_LAYER_TABLES: &str = r#"
+CREATE TABLE material_layer (
+    id           BLOB PRIMARY KEY,
+    asset_id     BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    material_ord INTEGER NOT NULL DEFAULT 0,
+    origin       TEXT NOT NULL CHECK (origin IN ('imported', 'user', 'machine')),
+    role         TEXT NOT NULL CHECK (role IN ('structure', 'annotation')),
+    is_default   INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
+    ord          INTEGER NOT NULL DEFAULT 0,
+    CHECK (material_ord >= 0),
+    CHECK (ord >= 0),
+    CHECK (role <> 'annotation' OR is_default = 0 OR origin = 'user')
+) STRICT;
+
+CREATE UNIQUE INDEX idx_material_layer_one_default
+    ON material_layer(asset_id, material_ord, role)
+ WHERE is_default = 1;
+
+CREATE UNIQUE INDEX idx_material_layer_one_imported
+    ON material_layer(asset_id, material_ord, role)
+ WHERE origin = 'imported';
+
+CREATE INDEX idx_material_layer_asset
+    ON material_layer(asset_id, material_ord, role, ord);
+
+CREATE TABLE chapter_mark (
+    id       BLOB PRIMARY KEY,
+    layer_id BLOB NOT NULL REFERENCES material_layer(id) ON DELETE CASCADE,
+    start_ms INTEGER NOT NULL CHECK (start_ms >= 0),
+    end_ms   INTEGER,
+    label    TEXT NOT NULL,
+    ord      INTEGER NOT NULL DEFAULT 0 CHECK (ord >= 0),
+    CHECK (end_ms IS NULL OR end_ms > start_ms)
+) STRICT;
+
+CREATE INDEX idx_chapter_mark_layer_ord
+    ON chapter_mark(layer_id, ord, start_ms);
+"#;
+
+/// The `material_mark` rebuild half of V78 (see the doc on
+/// [`V78_LAYER_TABLES`]). Runs after the backfill loop has minted the
+/// bands this copy joins against.
+const V78_MARK_REBUILD: &str = r#"
+CREATE TABLE material_mark_new (
+    id                BLOB PRIMARY KEY,
+    asset_id          BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    layer_id          BLOB NOT NULL REFERENCES material_layer(id) ON DELETE CASCADE,
+    anchor_kind       TEXT NOT NULL CHECK (anchor_kind IN ('temporal')),
+    start_ms          INTEGER,
+    end_ms            INTEGER,
+    body              TEXT NOT NULL,
+    author_kind       TEXT NOT NULL CHECK (author_kind IN ('user', 'persona')),
+    author_persona_id BLOB REFERENCES persona(id) ON DELETE CASCADE,
+    created_at        INTEGER NOT NULL,
+    edited_at         INTEGER,
+    CHECK (
+        (author_kind = 'user'    AND author_persona_id IS NULL)
+     OR (author_kind = 'persona' AND author_persona_id IS NOT NULL)
+    ),
+    CHECK (anchor_kind <> 'temporal' OR start_ms IS NOT NULL),
+    CHECK (start_ms IS NULL OR start_ms >= 0),
+    CHECK (end_ms IS NULL OR end_ms > start_ms)
+) STRICT;
+
+INSERT INTO material_mark_new
+    (id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body,
+     author_kind, author_persona_id, created_at, edited_at)
+SELECT m.id, m.asset_id, l.id, m.anchor_kind, m.start_ms, m.end_ms, m.body,
+       m.author_kind, m.author_persona_id, m.created_at, m.edited_at
+  FROM material_mark m
+  LEFT JOIN material_layer l
+         ON l.asset_id     = m.asset_id
+        AND l.material_ord = 0
+        AND l.role         = 'annotation'
+        AND l.is_default   = 1;
+
+DROP TABLE material_mark;
+ALTER TABLE material_mark_new RENAME TO material_mark;
+
+CREATE INDEX idx_material_mark_asset_start
+    ON material_mark(asset_id, start_ms);
+CREATE INDEX idx_material_mark_layer_start
+    ON material_mark(layer_id, start_ms);
+"#;
+
+/// Applies V78: the two new tables, one default annotation band per
+/// asset that already carries marks, and the `material_mark` rebuild
+/// that fastens the existing rows to it.
+fn v78_material_layers(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V78_LAYER_TABLES)?;
+
+    // One band per asset that has marks — collected first rather than
+    // inserted from a cursor, because the `INSERT` writes to a table
+    // the `SELECT` would otherwise be reading through in the same
+    // statement.
+    let marked: Vec<Uuid> = {
+        let mut stmt = tx.prepare("SELECT DISTINCT asset_id FROM material_mark")?;
+        stmt.query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    for asset_id in marked {
+        tx.execute(
+            "INSERT INTO material_layer
+                 (id, asset_id, material_ord, origin, role, is_default, ord)
+             VALUES (?1, ?2, 0, 'user', 'annotation', 1, 0)",
+            params![Uuid::now_v7(), asset_id],
+        )?;
+    }
+
+    tx.execute_batch(V78_MARK_REBUILD)?;
+
+    // Guard: unlike the rebuilds above, this step *synthesises* rows
+    // that carry a foreign key, so it can manufacture an orphan rather
+    // than merely carry one over. The loop takes its asset ids from
+    // `material_mark` and writes them into `material_layer.asset_id`,
+    // which references `asset(id)` — and with foreign keys off for the
+    // whole App step, an id no asset carries is inserted without
+    // complaint. A mark left behind by a cascade that did not finish is
+    // enough to reach it: the loop would mint that mark a band over an
+    // asset that is not there, and commit it.
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v78: foreign_key_check reported violations after the rebuild".into()),
+        ));
+    }
+    Ok(())
+}
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -5425,6 +5730,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V75_MATERIAL_META_RAW),
     Step::Sql(V76_CLEAR_STALE_JPEG_META_MARKER),
     Step::App(v77_series_strategy_admits_the_exif_decoder),
+    Step::App(v78_material_layers),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -8852,6 +9158,18 @@ mod tests {
         )
         .unwrap();
         let asset = seed_asset(&conn, owner);
+        // Since V78 a mark belongs to a band, so the fixture opens the
+        // one the service would have opened on the first post. The
+        // CHECKs under test are still V66's; this is the row they now
+        // hang off.
+        let layer = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO material_layer \
+                 (id, asset_id, material_ord, origin, role, is_default, ord) \
+             VALUES (?1, ?2, 0, 'user', 'annotation', 1, 0)",
+            params![layer, asset],
+        )
+        .unwrap();
 
         let insert = |id: Uuid,
                       anchor: &str,
@@ -8861,10 +9179,10 @@ mod tests {
                       pid: Option<Uuid>| {
             conn.execute(
                 "INSERT INTO material_mark \
-                     (id, asset_id, anchor_kind, start_ms, end_ms, body, author_kind, \
+                     (id, asset_id, layer_id, anchor_kind, start_ms, end_ms, body, author_kind, \
                       author_persona_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'here', ?6, ?7, 0)",
-                params![id, asset, anchor, start, end, kind, pid],
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'here', ?7, ?8, 0)",
+                params![id, asset, layer, anchor, start, end, kind, pid],
             )
         };
 
@@ -9866,6 +10184,224 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, LATEST_VERSION);
+    }
+
+    /// V78 gives every already-marked asset a band and fastens its
+    /// marks to it — and gives an unmarked asset nothing.
+    ///
+    /// Seeded at V77 in the shape that version's `material_mark`
+    /// actually has (no `layer_id` column), so the assertions are about
+    /// the step rather than about a fixture written against the new
+    /// schema. Two assets on purpose: one with marks, one without. With
+    /// only the first, a backfill that opened a band for *every* asset
+    /// would pass — and on a real library that is a hundred thousand
+    /// empty rows.
+    ///
+    /// The two marks on one asset are the other half: they have to end
+    /// up in the *same* band, not one each, which is what makes it a
+    /// default rather than a per-mark wrapper.
+    #[test]
+    fn v78_gives_every_marked_asset_one_band_and_keeps_its_marks() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 77).unwrap();
+        let persona = seed_persona(&conn);
+        let marked = seed_asset(&conn, persona);
+        let untouched = seed_asset(&conn, persona);
+
+        let first = Uuid::now_v7();
+        let second = Uuid::now_v7();
+        for (id, start) in [(first, 1_000_i64), (second, 5_000)] {
+            conn.execute(
+                "INSERT INTO material_mark (id, asset_id, anchor_kind, start_ms, end_ms, \
+                                            body, author_kind, author_persona_id, created_at) \
+                 VALUES (?1, ?2, 'temporal', ?3, NULL, 'here', 'user', NULL, 0)",
+                params![id, marked, start],
+            )
+            .unwrap();
+        }
+
+        migrate_to(&mut conn, 78).unwrap();
+
+        let bands: Vec<(Uuid, Uuid, i64, String, String, i64, i64)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, asset_id, material_ord, origin, role, is_default, ord \
+                       FROM material_layer",
+                )
+                .unwrap();
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        };
+        assert_eq!(bands.len(), 1, "one band, and only for the marked asset");
+        let (band_id, band_asset, material_ord, origin, role, is_default, ord) = bands[0].clone();
+        assert_eq!(band_asset, marked);
+        assert_eq!(material_ord, 0);
+        assert_eq!(
+            (origin.as_str(), role.as_str()),
+            ("user", "annotation"),
+            "a band a person will write notes into has to be theirs to write into"
+        );
+        assert_eq!((is_default, ord), (1, 0));
+
+        let placed: Vec<(Uuid, Uuid, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, layer_id, start_ms FROM material_mark ORDER BY start_ms")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            placed,
+            vec![(first, band_id, 1_000), (second, band_id, 5_000)],
+            "both marks survive the rebuild, in the one band"
+        );
+
+        // Nothing was opened for the asset that had no marks.
+        let for_untouched: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM material_layer WHERE asset_id = ?1",
+                params![untouched],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(for_untouched, 0);
+
+        // The column the whole step exists for refuses a mark with no
+        // band — the property `NOT NULL` is carrying, asserted rather
+        // than assumed from the DDL text.
+        assert!(
+            conn.execute(
+                "INSERT INTO material_mark (id, asset_id, layer_id, anchor_kind, start_ms, \
+                                            body, author_kind, created_at) \
+                 VALUES (?1, ?2, NULL, 'temporal', 0, 'orphan', 'user', 0)",
+                params![Uuid::now_v7(), marked],
+            )
+            .is_err(),
+            "a mark that belongs to no band is the state layers exist to remove"
+        );
+    }
+
+    /// V78 refuses a second default band on one `(asset, material,
+    /// role)`, and refuses a default annotation band that is not the
+    /// user's.
+    ///
+    /// Both rules are cross-checked in Rust as well — the first in the
+    /// service, the second in `MaterialLayer::validate` — so what is
+    /// asserted here is that the *schema* holds them: a row arriving by
+    /// a route that skips the domain (a hand-written `INSERT`, a future
+    /// migration) is refused by the database itself.
+    ///
+    /// The legal rows are inserted first in each pair. Without them the
+    /// test would pass against a schema that refused every insert.
+    #[test]
+    fn v78_holds_the_two_rules_the_domain_cannot_hold_alone() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let band = |origin: &str, role: &str, is_default: i64, material_ord: i64| {
+            conn.execute(
+                "INSERT INTO material_layer \
+                     (id, asset_id, material_ord, origin, role, is_default, ord) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                params![
+                    Uuid::now_v7(),
+                    asset,
+                    material_ord,
+                    origin,
+                    role,
+                    is_default
+                ],
+            )
+        };
+
+        band("imported", "structure", 1, 0).expect("the file's own list may be the default");
+        band("user", "annotation", 1, 0).expect("so may the user's own notes — a different role");
+        band("user", "structure", 0, 0).expect("a second structure band that is not the default");
+        band("imported", "structure", 1, 1)
+            .expect("and a default over a *second* material is a different triple");
+
+        assert!(
+            band("user", "structure", 1, 0).is_err(),
+            "two default structure bands over one material is the state the index forbids"
+        );
+        assert!(
+            band("imported", "annotation", 1, 1).is_err(),
+            "a note lands in the default annotation band, so it cannot be one nobody may write to"
+        );
+        band("imported", "annotation", 0, 1)
+            .expect("the same band is fine as long as it is not the default");
+    }
+
+    /// V78 admits one `'imported'` band per `(asset, material, role)`
+    /// and refuses the second — while leaving the user's own bands
+    /// uncounted.
+    ///
+    /// This is the rule that makes two concurrent scans of one asset
+    /// safe. `imported_structure_layer` looks for the band before it
+    /// opens one, so two jobs interleaved between that read and that
+    /// write both decide to open it; the index is what turns the
+    /// loser's write into an error it recovers from by re-reading,
+    /// instead of a duplicate band that nothing reads and no verb
+    /// removes. Asserted here rather than in the service, because a
+    /// service test cannot produce the interleaving — the schema is
+    /// where the property actually lives.
+    ///
+    /// The user rows go in *after* the refusal on purpose: they are
+    /// what shows the index is keyed on `origin` rather than simply
+    /// forbidding a second structure band.
+    #[test]
+    fn v78_admits_one_imported_band_per_material_and_role() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let band = |origin: &str, role: &str, is_default: i64, material_ord: i64| {
+            conn.execute(
+                "INSERT INTO material_layer \
+                     (id, asset_id, material_ord, origin, role, is_default, ord) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                params![
+                    Uuid::now_v7(),
+                    asset,
+                    material_ord,
+                    origin,
+                    role,
+                    is_default
+                ],
+            )
+        };
+
+        band("imported", "structure", 1, 0).expect("the file's own chapter list");
+        assert!(
+            band("imported", "structure", 0, 0).is_err(),
+            "a second copy of the file's own list is the duplicate two racing scans would leave"
+        );
+
+        // Same origin, but a different triple in each case.
+        band("imported", "annotation", 0, 0).expect("a different role is a different band");
+        band("imported", "structure", 0, 1).expect("and so is a second material");
+
+        // The person may keep as many passes of their own as they like:
+        // those are bands somebody made, not one fact read twice.
+        band("user", "structure", 0, 0).expect("the user's own chapters");
+        band("user", "structure", 0, 0).expect("and a second pass over the same material");
     }
 
     /// Teeth: every step is named for the version it produces.

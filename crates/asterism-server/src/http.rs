@@ -15,38 +15,41 @@ use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
     AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, CreateDirCommand,
-    CreateDispatchCommand, CreateGroupCommand, CreateModalityCommand, CreateQueryGroupCommand,
-    CreateSeriesStrategyCommand, CreateSnapshotCommand, CreateThreadCommand,
-    DeclareAssetMetaCommand, DeclareProvenanceCommand, DeleteAssetCommentCommand, DeleteDirCommand,
-    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
-    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSeriesStrategyCommand,
-    DeleteSessionCommand, DeleteTagCommand, DeleteTagResult, DeleteThreadCommand,
-    DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand, DispatchRunCommand,
-    EditAssetCommentCommand, EditMaterialMarkCommand, EmptyTrashCommand, EmptyTrashResult,
-    LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand, MergeTagsCommand, MergeTagsResult,
-    MoveDirCommand, MoveGroupToDirCommand, OrganizeByLocationCommand, OrganizeByLocationResult,
-    PatchSessionMetadataCommand, PostAssetCommentCommand, PostMaterialMarkCommand,
+    CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
+    CreateQueryGroupCommand, CreateSeriesStrategyCommand, CreateSnapshotCommand,
+    CreateThreadCommand, DeclareAssetMetaCommand, DeclareProvenanceCommand,
+    DeleteAssetCommentCommand, DeleteChapterMarkCommand, DeleteDirCommand,
+    DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
+    DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
+    DeleteSeriesStrategyCommand, DeleteSessionCommand, DeleteTagCommand, DeleteTagResult,
+    DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
+    DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
+    EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
+    MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand,
+    OrganizeByLocationCommand, OrganizeByLocationResult, PatchSessionMetadataCommand,
+    PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
     PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
     PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
     PurgePersonaCommand, RecordDiagCommand, RecordEventCommand, RedispatchCommand,
     RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
     RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
     ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
-    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand, SetPersonaProfileCommand,
-    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
-    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
-    AssetPageDto, AssetTextDto, ConstellationItemDto, DiagDto, DirDto, DispatchDto,
+    AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto, DirDto, DispatchDto,
     DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto, EventDto, GroupDto,
-    GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialMarkDto, MergeAssetsDto,
-    MessageDto, ModalityDefDto, ObservationDto, PerfDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
-    SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto,
-    ThreadDto, VideoPreviewDto,
+    GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
+    MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
+    ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
+    RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
+    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto, VideoPreviewDto,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -256,6 +259,29 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             "/asterism/material-marks/delete",
             post(delete_material_mark),
         )
+        // The bands those marks sit in, and the chapters inside a
+        // structure band. The asset-level GET carries each band's
+        // chapters with it; the per-band GET is what a surface re-reads
+        // after editing one, and neither is derivable from the other
+        // without a round trip the caller did not ask for.
+        .route(
+            "/asterism/assets/{id}/material-layers",
+            get(list_material_layers).post(create_material_layer),
+        )
+        .route(
+            "/asterism/material-layers/set-default",
+            post(set_default_material_layer),
+        )
+        .route(
+            "/asterism/material-layers/delete",
+            post(delete_material_layer),
+        )
+        .route(
+            "/asterism/material-layers/{id}/chapter-marks",
+            get(list_chapter_marks).post(post_chapter_mark),
+        )
+        .route("/asterism/chapter-marks/edit", post(edit_chapter_mark))
+        .route("/asterism/chapter-marks/delete", post(delete_chapter_mark))
         .route("/asterism/assets/{id}/rebuild-edges", post(rebuild_edges))
         .route(
             "/asterism/assets/{id}/video-preview",
@@ -2740,6 +2766,132 @@ async fn delete_material_mark(
 ) -> ApiResult<serde_json::Value> {
     ctx.material_mark_service
         .delete(command, &asserted(None, None, None)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// -----------------------------------------------------------------
+// Bands over an Asset's material, and the chapters in one.
+//
+// A layer says where a set of marks came from: the material's own
+// declaration, a person's reading of it, or a job's. The write routes
+// below accept the person's bands and refuse the other two, because
+// those are reproduced by running their producer again — an edit into
+// one is lost at the next run, and a delete undoes itself.
+// -----------------------------------------------------------------
+
+/// `GET /asterism/assets/{id}/material-layers` — every band over the
+/// asset's material, each carrying the chapters in it.
+///
+/// One call rather than one per band: the surface that shows a chapter
+/// list needs the bands to choose between and the contents of the chosen
+/// one at the same moment, and an asset carries single-digit bands. An
+/// annotation band's `chapters` is always empty — those hold notes, read
+/// through `/material-marks` above.
+async fn list_material_layers(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<MaterialLayerViewDto>> {
+    Ok(Json(ctx.material_layer_service.list_views(&id).await?))
+}
+
+/// `POST /asterism/assets/{id}/material-layers` — opens a band the
+/// person owns.
+///
+/// The URL path is authoritative for `asset_id`, as on the mark route: a
+/// body naming a different asset is overwritten rather than honoured.
+async fn create_material_layer(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(mut command): Json<CreateMaterialLayerCommand>,
+) -> ApiResult<MaterialLayerDto> {
+    command.asset_id = id;
+    Ok(Json(
+        ctx.material_layer_service
+            .create_layer(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `POST /asterism/material-layers/set-default` — chooses the band a
+/// surface shows, and the one a new mark lands in.
+///
+/// Answers with a flag rather than a row because the call changes two of
+/// them: the caller re-reads the asset's bands rather than patching the
+/// one it named.
+async fn set_default_material_layer(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<SetDefaultMaterialLayerCommand>,
+) -> ApiResult<serde_json::Value> {
+    ctx.material_layer_service
+        .set_default_layer(command, &asserted(None, None, None)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "updated": true })))
+}
+
+/// `POST /asterism/material-layers/delete` — removes a band the person
+/// owns, with everything in it. Refuses an imported or machine band.
+async fn delete_material_layer(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<DeleteMaterialLayerCommand>,
+) -> ApiResult<serde_json::Value> {
+    ctx.material_layer_service
+        .delete_layer(command, &asserted(None, None, None)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+/// `GET /asterism/material-layers/{id}/chapter-marks` — the sections in
+/// one band, in the reading order the band states (which need not be the
+/// timeline's).
+async fn list_chapter_marks(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ChapterMarkDto>> {
+    Ok(Json(
+        ctx.material_layer_service.list_chapter_marks(&id).await?,
+    ))
+}
+
+/// `POST /asterism/material-layers/{id}/chapter-marks` — adds one
+/// section. The URL path is authoritative for `layer_id`.
+async fn post_chapter_mark(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(mut command): Json<PostChapterMarkCommand>,
+) -> ApiResult<ChapterMarkDto> {
+    command.layer_id = id;
+    Ok(Json(
+        ctx.material_layer_service
+            .post_chapter_mark(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `POST /asterism/chapter-marks/edit` — retitles a section and, unlike
+/// the mark face, may move it: a person opens a band of their own
+/// because the file's divisions are in the wrong places.
+async fn edit_chapter_mark(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<EditChapterMarkCommand>,
+) -> ApiResult<ChapterMarkDto> {
+    Ok(Json(
+        ctx.material_layer_service
+            .edit_chapter_mark(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `POST /asterism/chapter-marks/delete` — removes one section. **Not**
+/// idempotent, unlike the mark route: a chapter is named by
+/// `(layer_id, chapter_id)`, so an id that is not in that band is a
+/// refusal rather than a no-op.
+async fn delete_chapter_mark(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<DeleteChapterMarkCommand>,
+) -> ApiResult<serde_json::Value> {
+    ctx.material_layer_service
+        .delete_chapter_mark(command, &asserted(None, None, None)?)
         .await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }

@@ -512,6 +512,23 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "material_mark_service::list_by_asset",
         "read — the marks in an asset's material",
     ),
+    (
+        "material_layer_service::list_by_asset",
+        "read — the bands of marks over an asset's material",
+    ),
+    (
+        "material_layer_service::list_chapters",
+        "read — the sections one band declares",
+    ),
+    (
+        "material_layer_service::list_views",
+        "read — the same bands as `list_by_asset`, each with its \
+         sections, shaped for the wire",
+    ),
+    (
+        "material_layer_service::list_chapter_marks",
+        "read — `list_chapters` shaped for the wire",
+    ),
     ("persona_service::list", "read — persona listing"),
     ("persona_service::get_theme", "read — one persona's theme"),
     (
@@ -552,6 +569,19 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "derived write — materialises the membership a saved query \
          already implies. The rows belong to the query, not to whoever \
          happened to trigger the refresh",
+    ),
+    (
+        "material_layer_service::default_annotation_layer",
+        "derived write — opens the band a note is about to land in, not \
+         the note. A layer row carries no author column of its own; the \
+         record being attributed is the mark, and `material_mark_service::\
+         post` takes the context for it",
+    ),
+    (
+        "material_layer_service::imported_structure_layer",
+        "derived write — opens the band a reading of the material lands \
+         in. The band belongs to the file, not to whoever triggered the \
+         read, which is the same reason the chapters in it carry no author",
     ),
 ];
 
@@ -725,7 +755,7 @@ fn the_application_layer_keeps_no_synchronous_public_verbs() {
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 73;
+const TAURI_MUTATION_COMMANDS: usize = 79;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

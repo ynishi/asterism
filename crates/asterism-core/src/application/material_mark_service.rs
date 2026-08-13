@@ -32,17 +32,22 @@ use chrono::Utc;
 
 use crate::application::mapping::{
     material_mark_to_dto, parse_asset_id, parse_material_mark_id, parse_persona_id,
+    parse_timeline_span,
 };
+use crate::application::material_layer_service::{MARKED_MATERIAL_ORD, default_annotation_layer};
 use crate::domain::asset::Asset;
 use crate::domain::asset_comment::CommentAuthor;
 use crate::domain::attribution::AttributionContext;
-use crate::domain::material_mark::{MaterialAnchor, MaterialMark, TimelineSpan};
-use crate::domain::repository::{AssetRepository, MaterialMarkRepository, PersonaRepository};
+use crate::domain::material_mark::{MaterialAnchor, MaterialMark};
+use crate::domain::repository::{
+    AssetRepository, MaterialLayerRepository, MaterialMarkRepository, PersonaRepository,
+};
 use crate::error::DomainError;
 
 /// Application-layer surface for [`MaterialMark`].
 pub struct MaterialMarkService {
     marks: Arc<dyn MaterialMarkRepository>,
+    layers: Arc<dyn MaterialLayerRepository>,
     assets: Arc<dyn AssetRepository>,
     personas: Arc<dyn PersonaRepository>,
 }
@@ -51,11 +56,13 @@ impl MaterialMarkService {
     /// Wires the service around its ports.
     pub fn new(
         marks: Arc<dyn MaterialMarkRepository>,
+        layers: Arc<dyn MaterialLayerRepository>,
         assets: Arc<dyn AssetRepository>,
         personas: Arc<dyn PersonaRepository>,
     ) -> Self {
         Self {
             marks,
+            layers,
             assets,
             personas,
         }
@@ -67,6 +74,19 @@ impl MaterialMarkService {
     /// whether a mark can be placed at all depends on what the material
     /// offers, and the temporal anchor's precondition
     /// (`asset.duration_ms`) is on the row.
+    ///
+    /// The command names no layer, and is not expected to: a person
+    /// clicking a position on a timeline is answering "where", not "in
+    /// which of my passes over this material". So the band is resolved
+    /// here — the asset's default annotation layer, created on the
+    /// first mark it ever receives
+    /// ([`default_annotation_layer`]). The mark's `layer_id` is
+    /// mandatory, so this is not an optional enrichment step: a post
+    /// that could not resolve a band would have nothing to store.
+    ///
+    /// Resolved **after** the anchor and the author are checked, so a
+    /// post that is going to be refused does not leave a band behind on
+    /// an asset that still has no marks.
     pub async fn post(
         &self,
         command: PostMaterialMarkCommand,
@@ -80,7 +100,9 @@ impl MaterialMarkService {
             .ok_or(DomainError::AssetNotFound(asset_id))?;
         let anchor = build_anchor(&asset, &command)?;
         let author = self.decode_author(&command).await?;
-        let mark = MaterialMark::new(asset_id, anchor, author, command.body, Utc::now())?;
+        let layer =
+            default_annotation_layer(self.layers.as_ref(), &asset_id, MARKED_MATERIAL_ORD).await?;
+        let mark = MaterialMark::new(asset_id, layer.id, anchor, author, command.body, Utc::now())?;
         self.marks.save(&mark).await?;
         Ok(material_mark_to_dto(&mark))
     }
@@ -97,6 +119,33 @@ impl MaterialMarkService {
     ///
     /// The anchor is left alone — this verb rewords a mark, it does not
     /// move one.
+    ///
+    /// # No origin guard, and what has to change before one is owed
+    ///
+    /// The chapter verbs next door run
+    /// [`require_user_owned`](crate::application::material_layer_service)
+    /// on the band before writing; this one does not, and the reason is
+    /// that today it cannot reach a band the check would refuse.
+    /// [`Self::post`] is the only writer of `material_mark`, it always
+    /// resolves the band through
+    /// [`default_annotation_layer`], and that function mints
+    /// `origin = User`. The schema holds the same fact independently —
+    /// `CHECK (role <> 'annotation' OR is_default = 0 OR origin =
+    /// 'user')` — so a default annotation band that is *not* the user's
+    /// cannot be stored at all, by this path or any other. Every mark
+    /// therefore sits in a user-owned band, and a guard here would be a
+    /// branch no input reaches, which is a branch no test can cover.
+    ///
+    /// It stops being unreachable the moment a mark can land somewhere
+    /// else: a command that names its band, an importer that reads
+    /// notes out of a file into an `Imported` one, a job deriving them
+    /// into a `Machine` one. Any of those makes an imported note
+    /// editable in place — and an imported band's contents are replaced
+    /// by re-reading the material, so the edit would survive until the
+    /// next probe and then vanish without the person being told. Add
+    /// the `require_user_owned` call to this verb and to
+    /// [`Self::delete`] in the same change that adds the second writer,
+    /// not after.
     pub async fn edit(
         &self,
         command: EditMaterialMarkCommand,
@@ -126,6 +175,15 @@ impl MaterialMarkService {
     }
 
     /// Deletes a mark.
+    ///
+    /// No origin guard, for the reason [`Self::edit`] sets out at
+    /// length: every mark is in the asset's default annotation band,
+    /// which both `default_annotation_layer` and the schema's
+    /// `CHECK` force to be the user's. This verb is the weaker case of
+    /// the two — it does not even read the mark, so a guard would cost
+    /// a fetch to check a condition nothing can currently fail — but it
+    /// owes the same call as soon as a mark can belong to a band the
+    /// person does not own.
     pub async fn delete(
         &self,
         command: DeleteMaterialMarkCommand,
@@ -196,33 +254,18 @@ fn build_anchor(
             let start_ms = command.start_ms.ok_or_else(|| {
                 DomainError::Validation("anchor_kind = temporal requires start_ms".into())
             })?;
-            let start_ms = to_domain_ms(start_ms, "start_ms")?;
-            let end_ms = command
-                .end_ms
-                .map(|value| to_domain_ms(value, "end_ms"))
-                .transpose()?;
-            // Emptiness, inversion and the storable range are
-            // `TimelineSpan`'s to refuse, not restated here.
-            Ok(MaterialAnchor::Temporal(TimelineSpan::new(
-                start_ms, end_ms,
+            // The lift onto the domain's unsigned axis — and the
+            // refusals `TimelineSpan` owns — are `parse_timeline_span`'s,
+            // shared with the chapter face so the two callers that place
+            // something on this timeline cannot disagree about what a
+            // wire millisecond means.
+            Ok(MaterialAnchor::Temporal(parse_timeline_span(
+                start_ms,
+                command.end_ms,
             )?))
         }
         other => Err(DomainError::Validation(format!(
             "unknown anchor_kind: {other:?}"
         ))),
     }
-}
-
-/// Lifts a wire millisecond onto the domain's unsigned axis.
-///
-/// The wire carries `i64` because that is what the storage column and
-/// every other timestamp on the contract are; the axis starts at the
-/// presentation origin and does not run backwards from it, so a negative
-/// value is a caller error rather than a position before the start.
-fn to_domain_ms(value: i64, field: &str) -> Result<u64, DomainError> {
-    u64::try_from(value).map_err(|_| {
-        DomainError::Validation(format!(
-            "{field} = {value} is before the start of the timeline"
-        ))
-    })
 }

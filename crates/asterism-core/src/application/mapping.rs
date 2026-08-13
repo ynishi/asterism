@@ -6,11 +6,11 @@
 //! so on) live in `asterism-contract`'s crate docs.
 
 use asterism_contract::dto::{
-    AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, DirDto, DispatchDto,
-    EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, MaterialMarkDto, MessageDto, MessageRefDto,
-    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, SeriesStrategyDto, SessionDto,
-    SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto,
-    ThreadDto,
+    AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, ChapterMarkDto, DirDto,
+    DispatchDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, MaterialLayerDto,
+    MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
+    PersonaThemeDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
+    SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
 };
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
@@ -19,11 +19,13 @@ use uuid::Uuid;
 use crate::domain::app_setting::EffectiveSetting;
 use crate::domain::asset::{Asset, AssetCard, AssetQuery, TrashFilter, UNCLASSIFIED_MODALITY};
 use crate::domain::asset_comment::AssetComment;
+use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::color::ColorBucket;
 use crate::domain::dir::Dir;
 use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::ConstellationEdge;
 use crate::domain::group::{Group, GroupLink, GroupSummary};
+use crate::domain::material_layer::{LayerRole, MaterialLayer};
 use crate::domain::material_mark::{MaterialAnchor, MaterialMark};
 use crate::domain::modality::ModalityView;
 use crate::domain::persona::Persona;
@@ -37,8 +39,9 @@ use crate::domain::snapshot::Snapshot;
 use crate::domain::tag::{Tag, TagCount};
 use crate::domain::thread::{EntityRef, Message, Thread, ThreadAnchor};
 use crate::domain::value::{
-    AssetCommentId, AssetId, DirId, DispatchId, GroupId, Label, MaterialMarkId, MessageId,
-    MimeType, Modality, Page, PersonaId, SnapshotId, TagId, ThreadId, Viewer, Visibility,
+    AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, GroupId, Label, MaterialLayerId,
+    MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, SnapshotId, TagId, ThreadId,
+    Viewer, Visibility,
 };
 use crate::error::DomainError;
 
@@ -786,6 +789,63 @@ pub fn parse_material_mark_id(value: &str) -> Result<MaterialMarkId, DomainError
     Ok(MaterialMarkId::from_uuid(parse_uuid(value, "mark_id")?))
 }
 
+/// Parses the wire representation of a material-layer id.
+pub fn parse_material_layer_id(value: &str) -> Result<MaterialLayerId, DomainError> {
+    Ok(MaterialLayerId::from_uuid(parse_uuid(value, "layer_id")?))
+}
+
+/// Parses the wire representation of a chapter-mark id.
+pub fn parse_chapter_mark_id(value: &str) -> Result<ChapterMarkId, DomainError> {
+    Ok(ChapterMarkId::from_uuid(parse_uuid(value, "chapter_id")?))
+}
+
+/// Parses the wire spelling of a layer role.
+///
+/// A slug this build has no variant for is a **caller** error here, where
+/// the same slug read out of a row is an infrastructure one — which is
+/// why [`LayerRole::from_slug`] returns `Option` and each of its two
+/// callers says so in its own words rather than one restating the other.
+pub fn parse_layer_role(slug: &str) -> Result<LayerRole, DomainError> {
+    LayerRole::from_slug(slug).ok_or_else(|| {
+        DomainError::Validation(format!(
+            "unknown layer role: {slug:?} (expected \"structure\" or \"annotation\")"
+        ))
+    })
+}
+
+/// Lifts a wire `(start_ms, end_ms)` pair onto the domain's timeline.
+///
+/// The wire carries `i64` because that is what the storage columns and
+/// every other timestamp on the contract are; the axis starts at the
+/// presentation origin and does not run backwards from it, so a negative
+/// value is a caller error rather than a position before the start.
+///
+/// Emptiness, inversion and the storable range are
+/// [`TimelineSpan::new`](crate::domain::material_mark::TimelineSpan::new)'s
+/// to refuse and are not restated here. Written once for both callers
+/// that place something on that axis — a mark's temporal anchor and a
+/// chapter's section — so the two cannot disagree about what a wire
+/// millisecond means.
+pub fn parse_timeline_span(
+    start_ms: i64,
+    end_ms: Option<i64>,
+) -> Result<crate::domain::material_mark::TimelineSpan, DomainError> {
+    let start = parse_timeline_ms(start_ms, "start_ms")?;
+    let end = end_ms
+        .map(|value| parse_timeline_ms(value, "end_ms"))
+        .transpose()?;
+    crate::domain::material_mark::TimelineSpan::new(start, end)
+}
+
+/// One end of a span, lifted onto the domain's unsigned axis.
+fn parse_timeline_ms(value: i64, field: &str) -> Result<u64, DomainError> {
+    u64::try_from(value).map_err(|_| {
+        DomainError::Validation(format!(
+            "{field} = {value} is before the start of the timeline"
+        ))
+    })
+}
+
 /// Parses the wire representation of a thread id.
 pub fn parse_thread_id(value: &str) -> Result<ThreadId, DomainError> {
     Ok(ThreadId::from_uuid(parse_uuid(value, "thread_id")?))
@@ -943,6 +1003,43 @@ pub fn material_mark_to_dto(mark: &MaterialMark) -> MaterialMarkDto {
         body: mark.body.clone(),
         created_at_ms: mark.created_at.timestamp_millis(),
         edited_at_ms: mark.edited_at.as_ref().map(|t| t.timestamp_millis()),
+    }
+}
+
+/// Converts a `MaterialLayer` domain entity to its wire DTO.
+///
+/// `origin` and `role` take their spelling from the domain
+/// ([`LayerOrigin::slug`](crate::domain::material_layer::LayerOrigin::slug)
+/// / [`LayerRole::slug`]) rather than from a match here, for the reason
+/// [`material_mark_to_dto`] gives about anchor kinds: the wire, the
+/// column and the schema's `CHECK` are then unable to end up with two
+/// spellings of one value.
+pub fn material_layer_to_dto(layer: &MaterialLayer) -> MaterialLayerDto {
+    MaterialLayerDto {
+        id: layer.id.to_string(),
+        asset_id: layer.asset_id.to_string(),
+        material_ord: layer.material_ord,
+        origin: layer.origin.slug().to_string(),
+        role: layer.role.slug().to_string(),
+        is_default: layer.is_default,
+        ord: layer.ord,
+    }
+}
+
+/// Converts a `ChapterMark` domain entity to its wire DTO.
+///
+/// The span is not flattened behind an `anchor_kind` the way a mark's
+/// anchor is: a chapter carries a [`TimelineSpan`](crate::domain::material_mark::TimelineSpan)
+/// by type rather than one variant of a coordinate-space enum, so
+/// `start_ms` is always there and there is no kind to name.
+pub fn chapter_mark_to_dto(chapter: &ChapterMark) -> ChapterMarkDto {
+    ChapterMarkDto {
+        id: chapter.id.to_string(),
+        layer_id: chapter.layer_id.to_string(),
+        start_ms: wire_ms(chapter.span.start_ms()),
+        end_ms: chapter.span.end_ms().map(wire_ms),
+        label: chapter.label.clone(),
+        ord: chapter.ord,
     }
 }
 
