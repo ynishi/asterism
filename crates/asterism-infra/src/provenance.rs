@@ -157,6 +157,48 @@ pub enum ProvenanceError {
         /// The underlying failure.
         source: embed::EmbedError,
     },
+    /// A packet was written and this crate's own reader could not find
+    /// it again.
+    ///
+    /// Not a fact about the record — a record with nothing to disclose
+    /// produces no packet and never reaches here. It says the writer
+    /// emitted something the reader does not recognise, which is a
+    /// defect in one of the two halves and has to surface as one.
+    ///
+    /// It was previously folded into
+    /// [`Stamped::prompt_dropped`](asterism_provenance::outcome::Stamped):
+    /// a file carrying no readable disclosure at all was reported as a
+    /// successful stamp that had merely shortened the prompt, and — when
+    /// the record had no prompt to shorten — as an unqualified success.
+    ///
+    /// Nothing is known to reach it today. The one producer that was
+    /// found is fixed (`asterism-provenance`'s JPEG writer put the
+    /// packet after `EOI` for a file with no scan, where the reader
+    /// cannot see it), and the two halves otherwise agree on where a
+    /// packet goes. It stays as the guard that says so, because what
+    /// makes it unreachable is an agreement between two modules rather
+    /// than anything the compiler holds.
+    #[error("wrote an XMP packet into {path} and could not read it back")]
+    XmpUnreadable {
+        /// File the packet was written into.
+        path: PathBuf,
+    },
+    /// The manifest definition this build produces is not one `c2pa`
+    /// accepts.
+    ///
+    /// Separate from [`Self::Sign`] because it happens strictly before
+    /// signing: the certificate and key have already loaded, and nothing
+    /// has been offered to the signer. Reported as
+    /// [`Self::Identity`] it read as `signing identity: …`, which sends
+    /// whoever is holding the log to their certificate configuration for
+    /// a defect in this crate's record-to-JSON mapping.
+    #[error("building the manifest definition for {path}: {source}")]
+    Definition {
+        /// File the manifest was for.
+        path: PathBuf,
+        /// The underlying failure.
+        source: serde_json::Error,
+    },
     /// The manifest could not be built or signed.
     #[error("signing a manifest for {path}: {source}")]
     Sign {
@@ -386,11 +428,25 @@ impl ProvenanceWriter {
                 // result back is how this side learns that happened —
                 // the alternative is re-deriving the decision here,
                 // which would be a second place it could differ.
-                outcome.prompt_dropped = record.prompt.is_some()
-                    && !embed::read_xmp(&bytes)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|packet| packet.contains("AIPromptInformation"));
+                //
+                // The read has three outcomes and only one of them is
+                // that. A packet that fails to parse, or that the reader
+                // cannot find at all, says the write produced something
+                // this crate does not recognise — a defect, not a fact
+                // about the record — so those two are errors. Folding
+                // all three into the flag (which `.ok().flatten()` did)
+                // reported "the mark landed, the prompt did not" about a
+                // file that had neither.
+                let written = embed::read_xmp(&bytes)
+                    .map_err(|source| ProvenanceError::Xmp {
+                        path: path.to_path_buf(),
+                        source,
+                    })?
+                    .ok_or_else(|| ProvenanceError::XmpUnreadable {
+                        path: path.to_path_buf(),
+                    })?;
+                outcome.prompt_dropped =
+                    record.prompt.is_some() && !written.contains("AIPromptInformation");
                 outcome.xmp_written = true;
                 staged = Some(bytes);
             }
@@ -409,36 +465,104 @@ impl ProvenanceWriter {
             // fetched.
             let mut builder = c2pa::Builder::default();
             builder.definition =
-                serde_json::from_value(manifest::definition(record)).map_err(|e| {
-                    ProvenanceError::Identity(format!(
-                        "manifest definition is not one c2pa accepts: {e}"
-                    ))
+                serde_json::from_value(manifest::definition(record)).map_err(|source| {
+                    ProvenanceError::Definition {
+                        path: path.to_path_buf(),
+                        source,
+                    }
                 })?;
 
-            let mut signed = Cursor::new(Vec::new());
-            let signing = match &staged {
-                // Sign over the XMP-stamped bytes: the hard binding
-                // covers the packet, so signing the original and then
-                // writing the packet would invalidate what was signed.
-                Some(bytes) => {
-                    let mut source = Cursor::new(bytes.as_slice());
-                    builder.sign(signer.as_ref(), container.mime(), &mut source, &mut signed)
-                }
-                // Nothing staged: either the container takes no packet
-                // (video) or there was nothing to disclose in one.
-                // Stream from the file so a large video is not read into
-                // memory whole.
-                None => {
-                    let mut source = std::fs::File::open(path).map_err(io)?;
-                    builder.sign(signer.as_ref(), container.mime(), &mut source, &mut signed)
-                }
-            };
-            signing.map_err(|source| ProvenanceError::Sign {
-                path: path.to_path_buf(),
-                source: Box::new(source),
-            })?;
+            // The signed output goes straight into the temporary the
+            // rename will move, rather than into a `Vec` handed to
+            // `replace` afterwards. That buffer held the whole signed
+            // asset — for a video, the file plus its manifest, resident
+            // at once — which is the half of the old comment on the
+            // streaming branch below that was not true: the source
+            // streamed and the destination did not.
+            //
+            // Opened read-write, not `File::create`. `Builder::sign`
+            // takes `W: Write + Read + Seek`, and the `Read` is not
+            // decorative — the BMFF handler re-reads box headers out of
+            // the destination to adjust offsets. `File::create` gives a
+            // write-only descriptor, which today's signing happens not
+            // to read from, and a version of `c2pa` that did would fail
+            // with `EBADF` on the video path only.
+            //
+            // The temporary is now visible for the whole signing
+            // operation rather than for the length of one `write`. An
+            // importer scanning the export directory can see it growing;
+            // that is the cost of not holding the asset in memory, and
+            // the extension is the same one the short-lived version
+            // used.
+            let temporary = temporary_for(path);
+            let signing = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&temporary)
+                .map_err(|e| ProvenanceError::Io {
+                    // The target, not the temporary: the temporary is
+                    // removed below, so naming it would hand the reader
+                    // a filename that no longer exists.
+                    path: path.to_path_buf(),
+                    source: e,
+                })
+                .and_then(|mut destination| match &staged {
+                    // Sign over the XMP-stamped bytes: the hard binding
+                    // covers the packet, so signing the original and
+                    // then writing the packet would invalidate what was
+                    // signed. These are already in memory — the packet
+                    // was written into them — so there is nothing to
+                    // stream from.
+                    Some(bytes) => {
+                        let mut source = Cursor::new(bytes.as_slice());
+                        builder
+                            .sign(
+                                signer.as_ref(),
+                                container.mime(),
+                                &mut source,
+                                &mut destination,
+                            )
+                            .map_err(|failure| ProvenanceError::Sign {
+                                path: path.to_path_buf(),
+                                source: Box::new(failure),
+                            })
+                    }
+                    // Nothing staged: either the container takes no
+                    // packet (video) or there was nothing to disclose in
+                    // one. Stream from the file, so neither end of a
+                    // large video is read into memory whole.
+                    None => std::fs::File::open(path)
+                        .map_err(|e| ProvenanceError::Io {
+                            path: path.to_path_buf(),
+                            source: e,
+                        })
+                        .and_then(|mut source| {
+                            builder
+                                .sign(
+                                    signer.as_ref(),
+                                    container.mime(),
+                                    &mut source,
+                                    &mut destination,
+                                )
+                                .map_err(|failure| ProvenanceError::Sign {
+                                    path: path.to_path_buf(),
+                                    source: Box::new(failure),
+                                })
+                        }),
+                });
+            if let Err(e) = signing {
+                // Same reasoning as `commit`'s: a `.c2pa-partial` left
+                // in an export directory an importer is watching turns
+                // one failure into a second artefact.
+                let _ = std::fs::remove_file(&temporary);
+                return Err(e);
+            }
+            commit(&temporary, path).map_err(io)?;
             outcome.manifest_written = true;
-            staged = Some(signed.into_inner());
+            // The file on disk is already the finished one.
+            staged = None;
         }
 
         if let Some(bytes) = staged {
@@ -486,34 +610,63 @@ impl asterism_core::application::provenance_service::ProvenanceWriter for Proven
     }
 }
 
-/// Reads at most `n` leading bytes.
+/// Reads the first `n` bytes, or the whole file when it is shorter.
+///
+/// `take` and `read_to_end` rather than one `read`, which is permitted
+/// to return fewer bytes than the buffer holds without being at end of
+/// file. On a local regular file it does not — the short return needs a
+/// filesystem whose `read` legitimately gives partial counts, which is
+/// NFS, SMB and FUSE, i.e. every network-mounted library. Eleven bytes
+/// back instead of twelve made `Container::sniff` fail its `ftyp` test
+/// and the caller report a perfectly good MP4 as a container this build
+/// does not write into.
 fn read_head(path: &Path, n: usize) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
-    let mut file = std::fs::File::open(path)?;
-    let mut head = vec![0u8; n];
-    let read = file.read(&mut head)?;
-    head.truncate(read);
+    let file = std::fs::File::open(path)?;
+    let mut head = Vec::with_capacity(n);
+    file.take(n as u64).read_to_end(&mut head)?;
     Ok(head)
 }
 
-/// Replaces `path`'s contents through a sibling temporary and a rename.
+/// The sibling temporary a rewrite is staged in.
 ///
 /// Same directory as the target so the rename stays within one
 /// filesystem — across a mount boundary `rename` fails with `EXDEV`,
 /// and the fallback (copy, then delete) is exactly the non-atomic
 /// behaviour this is here to avoid.
-fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let temporary = path.with_extension(match path.extension().and_then(|e| e.to_str()) {
+fn temporary_for(path: &Path) -> PathBuf {
+    path.with_extension(match path.extension().and_then(|e| e.to_str()) {
         Some(ext) => format!("{ext}.c2pa-partial"),
         None => "c2pa-partial".to_string(),
-    });
-    std::fs::write(&temporary, bytes)?;
-    match std::fs::rename(&temporary, path) {
+    })
+}
+
+/// Moves a finished temporary over its target.
+fn commit(temporary: &Path, path: &Path) -> std::io::Result<()> {
+    match std::fs::rename(temporary, path) {
         Ok(()) => Ok(()),
         Err(e) => {
-            // The temporary is this function's litter, and leaving it
+            // The temporary is this module's litter, and leaving it
             // beside a file an importer may be watching turns one
             // failure into a second artefact.
+            let _ = std::fs::remove_file(temporary);
+            Err(e)
+        }
+    }
+}
+
+/// Replaces `path`'s contents through a sibling temporary and a rename.
+///
+/// Sibling for the reason [`temporary_for`] gives. A failed write clears
+/// the temporary as a failed rename does: `fs::write` can fail with the
+/// file already created and partly filled, and the old shape returned
+/// straight out of that, leaving exactly the litter [`commit`] exists to
+/// avoid.
+fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary = temporary_for(path);
+    match std::fs::write(&temporary, bytes) {
+        Ok(()) => commit(&temporary, path),
+        Err(e) => {
             let _ = std::fs::remove_file(&temporary);
             Err(e)
         }
@@ -750,6 +903,95 @@ mod tests {
             .filter(|name| name.contains("c2pa-partial"))
             .collect();
         assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    /// The signing path stages in a temporary too, and has to clean up
+    /// after itself — including when the signing is what fails.
+    ///
+    /// The sibling above covers the unsigned path, and only its success
+    /// route. Signing writes its output straight into the temporary now
+    /// rather than into a buffer handed to `replace`, so it owns a
+    /// second creation site for the same litter, and the interesting
+    /// half of it is the failure: a temporary is created *before*
+    /// anything can go wrong, so a signing error that returned without
+    /// removing it would leave one behind for good.
+    ///
+    /// The failure is arranged with bytes that pass the container sniff
+    /// and then fail the container handler — a PNG signature followed by
+    /// nothing a PNG parser accepts. The record discloses nothing, so no
+    /// packet is staged and the streaming branch is the one taken.
+    #[test]
+    fn a_failed_signing_removes_its_temporary_and_leaves_the_file_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        let original = b"\x89PNG\r\n\x1a\nnot a chunk anybody can walk";
+        std::fs::write(&path, original).unwrap();
+
+        let outcome = ProvenanceWriter::signed_with(throwaway_identity())
+            .apply(&path, &DisclosureRecord::for_asset("asset-1"));
+        assert!(
+            matches!(outcome, Err(ProvenanceError::Sign { .. })),
+            "expected the container handler to refuse these bytes: {outcome:?}"
+        );
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "the original is untouched when signing fails"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("c2pa-partial"))
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    /// The success route of the same path.
+    #[test]
+    fn signing_leaves_no_partial_file_beside_the_original_either() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+
+        ProvenanceWriter::signed_with(throwaway_identity())
+            .apply(&path, &record())
+            .unwrap();
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("c2pa-partial"))
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    /// A file shorter than the sniff window reads as what it holds.
+    ///
+    /// The head read used one `read`, which is allowed to return fewer
+    /// bytes than asked for without being at end of file — on NFS, SMB
+    /// and FUSE it does, and eleven bytes instead of twelve made
+    /// `Container::sniff` fail its `ftyp` test and the caller report a
+    /// good MP4 as unsupported. That filesystem behaviour cannot be
+    /// reproduced here; what can is the other short case, and both are
+    /// answered by the same `take` + `read_to_end`.
+    #[test]
+    fn a_file_shorter_than_the_sniff_window_reads_as_what_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stub");
+        std::fs::write(&path, b"\x89PNG").unwrap();
+        assert_eq!(read_head(&path, 12).unwrap(), b"\x89PNG");
+
+        let empty = dir.path().join("empty");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(read_head(&empty, 12).unwrap().is_empty());
+
+        // And a file longer than the window stops at it.
+        let long = dir.path().join("long");
+        std::fs::write(&long, vec![0xABu8; 64]).unwrap();
+        assert_eq!(read_head(&long, 12).unwrap().len(), 12);
     }
 
     #[test]
