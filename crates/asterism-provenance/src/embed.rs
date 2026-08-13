@@ -13,11 +13,23 @@
 //! and neither says which one wins. Readers disagree in practice, so a
 //! file with two packets has a disclosure that depends on who opens it —
 //! the failure mode being that a stale `digitalSourceType` shadows a
-//! corrected one. Every writer here removes the existing packet before
-//! adding its own, and the tests pin that a twice-stamped file has
-//! exactly one.
+//! corrected one. Every writer here removes *every* packet it can see
+//! before adding its own, and the tests pin that a file arriving with
+//! two leaves with one.
+//!
+//! What a writer can see is what its walk covers: a PNG chunk after
+//! `IEND`, or a JPEG `APP1` after the scan, is neither collected nor
+//! dropped. Those positions are also outside what [`read_xmp`] reads,
+//! so no reader of this crate can be shown one — the promise is about
+//! the part of the file both halves agree on rather than about every
+//! byte present.
 //!
 //! # Where the packet goes
+//!
+//! Positions below are where a *new* packet lands. A file that already
+//! carries one keeps it where it is: the first packet is replaced in
+//! place, so a re-stamped file's chunk order does not drift with every
+//! export.
 //!
 //! PNG: an `iTXt` chunk before the first `IDAT`. The chunk is
 //! uncompressed — the compression flag exists, and the packet is small
@@ -26,9 +38,15 @@
 //!
 //! JPEG: an `APP1` segment before the first non-`APPn` marker, so it
 //! lands after a JFIF `APP0` and after an EXIF `APP1` rather than
-//! displacing either. The one hard limit in this module is here — a JPEG
-//! segment carries at most 65,533 bytes and a generator prompt can be
-//! larger than that on its own; see [`EmbedError::PacketTooLarge`] and
+//! displacing either. A metadata-only file that reaches `EOI` without
+//! any such marker takes the position before the `EOI`, so the segment
+//! is inside the image either way. (A *truncated* file has no `EOI`
+//! either, and is refused as malformed rather than written into.) The
+//! one hard
+//! limit in this module is here — a JPEG segment carries at most 65,533
+//! bytes, of which the 29-byte XMP identifier is one part, so a packet
+//! has [`JPEG_MAX_PACKET`] and a generator prompt can be larger than
+//! that on its own; see [`EmbedError::PacketTooLarge`] and
 //! [`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential).
 
 use crate::xmp;
@@ -52,7 +70,12 @@ pub enum EmbedError {
     UnsupportedContainer,
     /// The container's own framing did not hold up — a chunk or segment
     /// length that runs past the end of the file, a PNG that never
-    /// reaches `IEND`, a JPEG that never reaches its first scan.
+    /// reaches `IEND`, a JPEG that ends before either a scan or an
+    /// end-of-image marker.
+    ///
+    /// A JPEG that reaches `EOI` without a scan is **not** this: it is a
+    /// complete file with no picture in it, it is written into like any
+    /// other, and the packet goes before the `EOI`.
     ///
     /// Two files out of a 4,601-image corpus already do this with no
     /// attacker anywhere near them (`asterism-media-probe::png` module
@@ -213,17 +236,26 @@ mod png {
         String::from_utf8(text.to_vec()).ok()
     }
 
-    /// Byte ranges of the chunks a walk found: where an existing XMP
-    /// chunk sits, and where a new one would go.
+    /// Byte ranges of the chunks a walk found: where the existing XMP
+    /// chunks sit, and where a new one would go.
     struct Layout {
-        existing: Option<std::ops::Range<usize>>,
+        /// Every XMP `iTXt`, in file order.
+        ///
+        /// A `Vec` rather than the first match, because the container
+        /// permits several and the module's whole position is that a
+        /// file must not leave with more than one. Recording only the
+        /// first was enough to replace what this crate had written —
+        /// which is the only case its own fixtures could produce — and
+        /// left a packet from another tool sitting behind the corrected
+        /// one.
+        existing: Vec<std::ops::Range<usize>>,
         before_first_idat: Option<usize>,
         end_of_walk: Option<usize>,
     }
 
     fn layout(bytes: &[u8]) -> Result<Layout, EmbedError> {
         let mut found = Layout {
-            existing: None,
+            existing: Vec::new(),
             before_first_idat: None,
             end_of_walk: None,
         };
@@ -238,9 +270,8 @@ mod png {
             })?;
             let range = span.range();
             let (start, end) = (range.start as usize, range.end as usize);
-            if span.kind == pngmeta::ChunkType::ITXT && is_xmp(payload) && found.existing.is_none()
-            {
-                found.existing = Some(start..end);
+            if span.kind == pngmeta::ChunkType::ITXT && is_xmp(payload) {
+                found.existing.push(start..end);
             }
             if span.kind == pngmeta::ChunkType::IDAT && found.before_first_idat.is_none() {
                 found.before_first_idat = Some(start);
@@ -257,14 +288,23 @@ mod png {
         let found = layout(bytes)?;
         let new_chunk = chunk(packet);
 
-        // Replacing in place keeps the packet where the previous writer
-        // put it, which keeps a re-stamped file's chunk order stable
-        // across repeated exports.
-        if let Some(range) = found.existing {
+        // The first one is replaced where it stands, which keeps a
+        // re-stamped file's chunk order stable across repeated exports.
+        // Any further one is dropped: the file may not leave with two,
+        // and the ranges arrive in file order and cannot overlap, so
+        // walking them with a cursor copies everything between them
+        // untouched.
+        if !found.existing.is_empty() {
             let mut out = Vec::with_capacity(bytes.len() + new_chunk.len());
-            out.extend_from_slice(&bytes[..range.start]);
-            out.extend_from_slice(&new_chunk);
-            out.extend_from_slice(&bytes[range.end..]);
+            let mut cursor = 0;
+            for (nth, range) in found.existing.iter().enumerate() {
+                out.extend_from_slice(&bytes[cursor..range.start]);
+                if nth == 0 {
+                    out.extend_from_slice(&new_chunk);
+                }
+                cursor = range.end;
+            }
+            out.extend_from_slice(&bytes[cursor..]);
             return Ok(out);
         }
 
@@ -357,8 +397,22 @@ mod jpeg {
         payload: std::ops::Range<usize>,
     }
 
-    /// Walks segments from `SOI` up to and including the first `SOS`.
-    fn segments(bytes: &[u8]) -> Result<Vec<Segment>, EmbedError> {
+    /// What the walk found: the segments, and where it stopped when it
+    /// stopped at an `EOI` rather than at a scan.
+    struct Walk {
+        segments: Vec<Segment>,
+        /// Offset of the `0xFF` introducing the `EOI` the walk ended on.
+        ///
+        /// `None` when the walk ended at `SOS` instead, in which case
+        /// that scan is in `segments` and is itself a non-`APPn` marker
+        /// to insert before. Exactly one of the two is always available,
+        /// because those are the only two ways the walk returns `Ok`.
+        end_of_walk: Option<usize>,
+    }
+
+    /// Walks segments from `SOI` up to and including the first `SOS`, or
+    /// to an `EOI` if the file reaches one without a scan.
+    fn walk(bytes: &[u8]) -> Result<Walk, EmbedError> {
         let malformed = |detail: &str| EmbedError::Malformed {
             container: Container::Jpeg,
             detail: detail.to_string(),
@@ -379,7 +433,10 @@ mod jpeg {
                 .get(pos + 1)
                 .ok_or_else(|| malformed("a marker byte with nothing after it"))?;
             if marker == EOI {
-                return Ok(out);
+                return Ok(Walk {
+                    segments: out,
+                    end_of_walk: Some(pos),
+                });
             }
             let length_at = pos + 2;
             let length = bytes
@@ -402,7 +459,10 @@ mod jpeg {
                 payload: length_at + 2..end,
             });
             if marker == SOS {
-                return Ok(out);
+                return Ok(Walk {
+                    segments: out,
+                    end_of_walk: None,
+                });
             }
             pos = end;
         }
@@ -442,13 +502,29 @@ mod jpeg {
         // build a smaller record, which does not depend on anything the
         // walk would find.
         let new_segment = segment(packet)?;
-        let found = segments(bytes)?;
+        let found = walk(bytes)?;
 
-        if let Some(existing) = found.iter().find(|s| is_xmp(s, bytes)) {
+        // The first XMP segment is replaced where it stands; any further
+        // one is dropped, for the reason in the module doc. The walk
+        // yields them in file order and they cannot overlap, so a cursor
+        // copies everything between them untouched.
+        let existing: Vec<_> = found
+            .segments
+            .iter()
+            .filter(|s| is_xmp(s, bytes))
+            .map(|s| s.start..s.end)
+            .collect();
+        if !existing.is_empty() {
             let mut out = Vec::with_capacity(bytes.len() + new_segment.len());
-            out.extend_from_slice(&bytes[..existing.start]);
-            out.extend_from_slice(&new_segment);
-            out.extend_from_slice(&bytes[existing.end..]);
+            let mut cursor = 0;
+            for (nth, range) in existing.iter().enumerate() {
+                out.extend_from_slice(&bytes[cursor..range.start]);
+                if nth == 0 {
+                    out.extend_from_slice(&new_segment);
+                }
+                cursor = range.end;
+            }
+            out.extend_from_slice(&bytes[cursor..]);
             return Ok(out);
         }
 
@@ -456,11 +532,31 @@ mod jpeg {
         // EXIF `APP1` — and before whatever the first non-`APPn` marker
         // is. Inserting at the very front instead would put XMP ahead of
         // JFIF, which readers tolerate but which no encoder produces.
+        //
+        // A file whose walk reached `EOI` without meeting any non-`APPn`
+        // marker has no such position, and the packet goes before the
+        // `EOI` — the same answer the PNG side gives a file with no
+        // `IDAT`. Falling back to the end of the file instead put the
+        // segment *after* `EOI`, outside the image structure entirely,
+        // where this module's own reader could not find it again while
+        // the caller recorded a successful write.
         let insert_at = found
+            .segments
             .iter()
             .find(|s| !(APP0..=APP15).contains(&s.marker))
             .map(|s| s.start)
-            .unwrap_or(bytes.len());
+            .or(found.end_of_walk)
+            // Unreachable as `walk` is written: it returns `Ok` at an
+            // `EOI`, which sets `end_of_walk`, or at a `SOS`, which is
+            // itself a non-`APPn` marker the `find` above cannot miss.
+            // Kept as an error rather than an `expect` because what
+            // makes it unreachable is a property of that function, and
+            // the two are far enough apart that a later edit could take
+            // it away without anything here noticing.
+            .ok_or_else(|| EmbedError::Malformed {
+                container: Container::Jpeg,
+                detail: "no scan and no end-of-image: nowhere to put a segment".into(),
+            })?;
         let mut out = Vec::with_capacity(bytes.len() + new_segment.len());
         out.extend_from_slice(&bytes[..insert_at]);
         out.extend_from_slice(&new_segment);
@@ -469,8 +565,8 @@ mod jpeg {
     }
 
     pub(super) fn read(bytes: &[u8]) -> Result<Option<String>, EmbedError> {
-        let found = segments(bytes)?;
-        let Some(segment) = found.iter().find(|s| is_xmp(s, bytes)) else {
+        let found = walk(bytes)?;
+        let Some(segment) = found.segments.iter().find(|s| is_xmp(s, bytes)) else {
             return Ok(None);
         };
         let payload = &bytes[segment.payload.clone()];
@@ -526,22 +622,14 @@ mod tests {
     /// IEND. Hand-built rather than encoded, so the test does not depend
     /// on an encoder's chunk choices.
     fn png_fixture() -> Vec<u8> {
-        fn chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
-            let mut out = Vec::new();
-            out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-            out.extend_from_slice(kind);
-            out.extend_from_slice(payload);
-            let mut hasher = crc32fast::Hasher::new();
-            hasher.update(kind);
-            hasher.update(payload);
-            out.extend_from_slice(&hasher.finalize().to_be_bytes());
-            out
-        }
         let mut png = PNG_SIGNATURE.to_vec();
         // 1×1, 8-bit greyscale.
-        png.extend_from_slice(&chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
-        png.extend_from_slice(&chunk(b"IDAT", &[0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02]));
-        png.extend_from_slice(&chunk(b"IEND", &[]));
+        png.extend_from_slice(&chunk_of(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+        png.extend_from_slice(&chunk_of(
+            b"IDAT",
+            &[0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02],
+        ));
+        png.extend_from_slice(&chunk_of(b"IEND", &[]));
         png
     }
 
@@ -567,6 +655,118 @@ mod tests {
         jpeg.extend_from_slice(&[0x12, 0xFF, 0x00, 0x34]);
         jpeg.extend_from_slice(&[0xFF, 0xD9]);
         jpeg
+    }
+
+    /// One XMP `iTXt` chunk, laid out by hand.
+    ///
+    /// Hand-built for the reason [`png_fixture`] is — so a fixture does
+    /// not depend on the code it exists to test. Calling the writer's
+    /// own `chunk` here would leave the two agreeing on a misreading of
+    /// the `iTXt` field layout, which `pngmeta` does not validate.
+    fn xmp_itxt(packet: &str) -> Vec<u8> {
+        // keyword \0 compression-flag compression-method
+        // language-tag \0 translated-keyword \0 text
+        let mut payload = b"XML:com.adobe.xmp".to_vec();
+        payload.extend_from_slice(&[0, 0, 0, 0, 0]);
+        payload.extend_from_slice(packet.as_bytes());
+        chunk_of(b"iTXt", &payload)
+    }
+
+    /// One XMP `APP1` segment, laid out by hand, for the same reason.
+    fn xmp_app1(packet: &str) -> Vec<u8> {
+        let identifier = b"http://ns.adobe.com/xap/1.0/\0";
+        let mut out = vec![0xFF, 0xE1];
+        let payload_len = identifier.len() + packet.len();
+        out.extend_from_slice(&((payload_len + 2) as u16).to_be_bytes());
+        out.extend_from_slice(identifier);
+        out.extend_from_slice(packet.as_bytes());
+        out
+    }
+
+    /// A PNG that arrives already carrying two XMP packets, as one from
+    /// another tool can.
+    ///
+    /// The two packets are **not** adjacent, and one ordinary chunk
+    /// precedes them both. Adjacent packets would make the fixture blind
+    /// to two things the writer promises: that the bytes between two
+    /// packets are copied through, and that the surviving packet stays
+    /// where the previous writer put it rather than moving to wherever a
+    /// fresh insertion would land.
+    fn png_with_two_packets() -> Vec<u8> {
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend_from_slice(&chunk_of(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+        png.extend_from_slice(&chunk_of(b"tEXt", b"before\0a chunk ahead of both packets"));
+        png.extend_from_slice(&xmp_itxt("<x:xmpmeta>first-stale</x:xmpmeta>"));
+        png.extend_from_slice(&chunk_of(b"tEXt", b"between\0a chunk between the packets"));
+        png.extend_from_slice(&xmp_itxt("<x:xmpmeta>second-stale</x:xmpmeta>"));
+        png.extend_from_slice(&chunk_of(
+            b"IDAT",
+            &[0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02],
+        ));
+        png.extend_from_slice(&chunk_of(b"IEND", &[]));
+        png
+    }
+
+    /// The JPEG equivalent, laid out the same way: a segment ahead of
+    /// both packets and one between them.
+    fn jpeg_with_two_packets() -> Vec<u8> {
+        /// A comment segment, standing in for whatever else a file
+        /// carries between its metadata.
+        fn com(text: &[u8]) -> Vec<u8> {
+            let mut out = vec![0xFF, 0xFE];
+            out.extend_from_slice(&((text.len() + 2) as u16).to_be_bytes());
+            out.extend_from_slice(text);
+            out
+        }
+        let mut jpeg = vec![0xFF, 0xD8];
+        let app0_payload = b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0";
+        jpeg.extend_from_slice(&[0xFF, 0xE0]);
+        jpeg.extend_from_slice(&((app0_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(app0_payload);
+        jpeg.extend_from_slice(&xmp_app1("<x:xmpmeta>first-stale</x:xmpmeta>"));
+        jpeg.extend_from_slice(&com(b"a segment between the packets"));
+        jpeg.extend_from_slice(&xmp_app1("<x:xmpmeta>second-stale</x:xmpmeta>"));
+        let dqt_payload = [0u8; 65];
+        jpeg.extend_from_slice(&[0xFF, 0xDB]);
+        jpeg.extend_from_slice(&((dqt_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(&dqt_payload);
+        let sos_payload = [0u8; 10];
+        jpeg.extend_from_slice(&[0xFF, 0xDA]);
+        jpeg.extend_from_slice(&((sos_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(&sos_payload);
+        jpeg.extend_from_slice(&[0x12, 0xFF, 0x00, 0x34]);
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        jpeg
+    }
+
+    /// A JPEG that carries application segments and then ends, with no
+    /// frame and no scan — a metadata-only file.
+    ///
+    /// Not a *truncated* one: a truncated file has no `EOI` either, and
+    /// the walk refuses it as malformed. This one is complete and simply
+    /// has no picture in it.
+    fn jpeg_with_no_scan() -> Vec<u8> {
+        let mut jpeg = vec![0xFF, 0xD8];
+        let app0_payload = b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0";
+        jpeg.extend_from_slice(&[0xFF, 0xE0]);
+        jpeg.extend_from_slice(&((app0_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(app0_payload);
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        jpeg
+    }
+
+    /// One PNG chunk, the way an encoder writes it. Shared by the
+    /// fixtures rather than nested inside one of them.
+    fn chunk_of(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(payload);
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(kind);
+        hasher.update(payload);
+        out.extend_from_slice(&hasher.finalize().to_be_bytes());
+        out
     }
 
     fn record() -> DisclosureRecord {
@@ -640,6 +840,96 @@ mod tests {
                 "exactly one packet survives a re-stamp"
             );
         }
+    }
+
+    /// The packet budget is the segment's payload less the identifier.
+    ///
+    /// Pinned as a number because the number is what the docs quote to a
+    /// caller deciding how long a prompt to allow, and three of them
+    /// quoted 65,533 — the *segment's* payload — while the writer
+    /// enforced 65,504. A packet between the two was refused by a limit
+    /// the documentation did not have.
+    #[test]
+    fn the_jpeg_packet_budget_is_the_segment_less_the_identifier() {
+        // The literal, not the arithmetic: spelling the subtraction out
+        // here would restate the constant's own definition and fail only
+        // when this line already has.
+        assert_eq!(JPEG_MAX_PACKET, 65_504);
+    }
+
+    /// A file that arrives with two packets leaves with one.
+    ///
+    /// The sibling above cannot reach this: its input was written by
+    /// this module, which never leaves two behind, so it re-tested the
+    /// one-packet path under a name that reads like it covered both.
+    /// The stale packet is what the module doc is about — a
+    /// `digitalSourceType` a reader might prefer over the corrected one,
+    /// with nothing in the file saying which wins.
+    #[test]
+    fn a_packet_another_tool_left_behind_is_removed_not_shadowed() {
+        // One closing tag per packet, so the count is the packet count.
+        for original in [png_with_two_packets(), jpeg_with_two_packets()] {
+            assert_eq!(
+                count(&original, b"</x:xmpmeta>"),
+                2,
+                "the fixture has to start with the shape under test"
+            );
+
+            let stamped = stamp(&original, &record()).unwrap().unwrap();
+
+            assert_eq!(
+                count(&stamped, b"</x:xmpmeta>"),
+                1,
+                "one packet leaves, not the new one in front of the survivor"
+            );
+            assert_eq!(count(&stamped, b"-stale"), 0, "the old packets are gone");
+            let packet = read_xmp(&stamped).unwrap().expect("a packet came back");
+            assert!(packet.contains("trainedAlgorithmicMedia"));
+
+            // What sat between the two packets is copied through, and
+            // the surviving packet stays where the first one was rather
+            // than moving to where a fresh insertion would land. Both
+            // are invisible when the packets are adjacent, which is what
+            // the first version of this fixture got wrong.
+            let between =
+                find(&stamped, b"between the packets").expect("the filler is still in the file");
+            let new_packet = find(&stamped, b"trainedAlgorithmicMedia").expect("the new packet");
+            assert!(
+                new_packet < between,
+                "the packet is at {new_packet} and the filler at {between}: the survivor moved"
+            );
+            let ahead = find(&stamped, b"ahead of both packets")
+                .or_else(|| find(&stamped, b"JFIF"))
+                .expect("the chunk ahead of both packets");
+            assert!(ahead < new_packet, "what preceded both packets still does");
+        }
+    }
+
+    /// A JPEG with no scan keeps its packet inside the image.
+    ///
+    /// The insertion point used to fall back to the end of the file when
+    /// the walk met no non-`APPn` marker, which put the segment after
+    /// `EOI` — outside the structure, where this module's own reader
+    /// returns `None` while the caller records a successful write. A
+    /// metadata-only JPEG is an ordinary thing to find in a library, so
+    /// this is a real file rather than an adversarial one.
+    #[test]
+    fn a_jpeg_that_never_reaches_a_scan_still_gets_a_readable_packet() {
+        let original = jpeg_with_no_scan();
+        let stamped = stamp(&original, &record()).unwrap().unwrap();
+
+        let packet = read_xmp(&stamped)
+            .unwrap()
+            .expect("the packet has to be findable by the reader that wrote it");
+        assert!(packet.contains("trainedAlgorithmicMedia"));
+
+        let xmp = find(&stamped, b"http://ns.adobe.com/xap/1.0/").expect("the segment is there");
+        let eoi = stamped.len() - 2;
+        assert!(
+            xmp < eoi,
+            "the segment sits at {xmp} and EOI at {eoi}: a segment after EOI is not in the image"
+        );
+        assert_eq!(&stamped[eoi..], &[0xFF, 0xD9], "EOI stays last");
     }
 
     #[test]

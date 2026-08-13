@@ -40,9 +40,17 @@
 //! none, and marks the packet read-only (`<?xpacket end="r"?>`)
 //! accordingly. In-place rewriting is not something that can happen to a
 //! signed file anyway — any edit breaks the binding — and JPEG's APP1
-//! segment has 65,533 bytes for the whole packet, which is a budget a
-//! generator prompt can exhaust on its own. Spending part of it on
-//! padding for an update path that cannot exist would be paying twice.
+//! segment leaves the packet 65,504 bytes, which is a budget a generator
+//! prompt can exhaust on its own. Spending part of it on padding for an
+//! update path that cannot exist would be paying twice.
+//!
+//! (65,533 is the segment's payload, not the packet's: the 29-byte
+//! `http://ns.adobe.com/xap/1.0/\0` identifier is inside it and has to
+//! be paid first. The figure is
+//! [`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET), which is
+//! what the writer enforces and what
+//! [`EmbedError::PacketTooLarge`](crate::embed::EmbedError::PacketTooLarge)
+//! reports.)
 
 use crate::record::DisclosureRecord;
 

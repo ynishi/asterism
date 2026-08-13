@@ -169,11 +169,19 @@ impl DisclosureRecord {
 
     /// The same record with everything but the obligation dropped.
     ///
-    /// JPEG's XMP packet has to fit one APP1 segment (65,533 bytes of
-    /// payload), and a ComfyUI prompt can be larger than that on its
-    /// own. The ExtendedXMP mechanism exists for the overflow and is not
-    /// implemented here, so the fallback is to write less rather than to
-    /// write a split packet a reader may not reassemble.
+    /// JPEG's XMP packet has to fit one APP1 segment, which leaves it
+    /// [`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET) bytes —
+    /// 65,504, the segment's 65,533-byte payload less the 29-byte XMP
+    /// identifier that has to go in front of it. A ComfyUI prompt can be
+    /// larger than that on its own. The ExtendedXMP mechanism exists for
+    /// the overflow and is not implemented here, so the fallback is to
+    /// write less rather than to write a split packet a reader may not
+    /// reassemble.
+    ///
+    /// The constant rather than a number repeated here: this doc is what
+    /// a caller reads when deciding how long a prompt to allow, and it
+    /// said 65,533 while the writer enforced 65,504 — a packet in
+    /// between was refused by a limit the documentation did not have.
     ///
     /// What survives is the digital source type and the system that
     /// produced the file. That ordering is not a guess about what
