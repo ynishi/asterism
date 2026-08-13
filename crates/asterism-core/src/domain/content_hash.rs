@@ -29,6 +29,41 @@
 //! prefixed value lets a later pHash / embedding land beside this one
 //! and lets a reader tell at a glance which kind of "same" a row is
 //! claiming.
+//!
+//! # Select or re-render: a new digest has to say which
+//!
+//! Every digest in this workspace has to be a function of content
+//! rather than of the way somebody happened to write that content
+//! down, and there are only two routes to it.
+//!
+//! A digest that **selects** feeds the artefact's own bytes to the
+//! hash — a byte range, a chunk, a string exactly as the container
+//! stated it — and inherits its stability from the file. A digest that
+//! **re-renders** parses the artefact and serialises the result. That
+//! buys insensitivity to formatting, and pays for it by taking the
+//! serialiser's habits into the definition: key order, number spelling,
+//! string escaping, and what to do about a duplicate key all become
+//! part of what the value means.
+//!
+//! Neither route is wrong, and neither is free. What is wrong is
+//! leaving the choice unsaid, because the two fail in opposite
+//! directions and the directions do not cost the same. A re-rendering
+//! digest that widens an equivalence too far reports two different
+//! artefacts as one, and duplicate resolution acts on that by folding
+//! them — a wrong answer that destroys. A selecting digest that is too
+//! narrow only fails to notice a match, which costs a row.
+//!
+//! So a digest that lands here owes three things: which of the two it
+//! is; the canonical form written out in full if it re-renders — naming
+//! a published scheme is not enough on its own, because the rule for
+//! numbers and the rule for duplicate keys are the parts that decide
+//! the answers; and a versioned tag, because a definition that has been
+//! stored cannot be edited afterwards without changing what every value
+//! written under it meant. [`META_DIGEST_PREFIX`] is that trade being
+//! made deliberately for the meta axis: it selects, because
+//! re-rendering a ComfyUI `parameters` blob would put a serialiser's
+//! number formatting between two files the container itself calls
+//! identical.
 
 use crate::domain::content_region::UNSUPPORTED_PREFIX;
 use crate::domain::duplicate_conflict::DuplicateAxis;

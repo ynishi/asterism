@@ -968,14 +968,12 @@ fn render(selection: &BTreeMap<Vec<String>, Selected>) -> String {
 /// It reads like dead code: `serde_json::Map` is a `BTreeMap` by
 /// default, so a value round-tripped through it comes out sorted anyway
 /// and this function looks like it is sorting what is already sorted.
-/// **That default is off in this workspace.** `c2pa` requires
-/// `serde_json/preserve_order` (it hashes assertion bytes, so an
-/// author's key order has to survive a round trip), Cargo unifies
-/// features across a workspace build, and the feature is therefore on
-/// for every crate here — see the workspace `Cargo.toml`, where it is
-/// declared deliberately rather than inherited. With it on,
-/// `serde_json::Map` is an `IndexMap` and a parsed object re-serialises
-/// in *the order the container's author wrote it*.
+/// **That default is off in this workspace.** `serde_json/preserve_order`
+/// is declared in the workspace `Cargo.toml` — where the reasoning is —
+/// and Cargo unifies features across a build, so it is on for every
+/// crate here. With it on, `serde_json::Map` is an `IndexMap` and a
+/// parsed object re-serialises in *the order the container's author
+/// wrote it*.
 ///
 /// So without this call, [`render`] would hash key order, and:
 ///
@@ -1002,9 +1000,9 @@ fn render(selection: &BTreeMap<Vec<String>, Selected>) -> String {
 /// documents differing in element order are two different documents,
 /// and collapsing them would merge materials that are not the same.
 ///
-/// If `c2pa` is ever dropped and the feature goes with it, this function
-/// still must not be removed: it is what makes the property true
-/// independently, and the property is what
+/// If the feature is ever dropped, this function still must not be
+/// removed: it is what makes the property true independently, and the
+/// property is what
 /// `the_key_is_the_same_whatever_order_the_container_wrote_its_keys_in`
 /// tests. Deleting it would make that test pass for a reason nobody
 /// chose.
