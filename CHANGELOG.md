@@ -53,10 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used as a fallback — a manifest signed by them validates as untrusted,
   which claims a provenance a reader rejects.
 
-  Not yet wired to the export path, and no re-apply verb; both are the
-  rest of #14. Unsigned video carries no disclosure at all, because the
-  XMP half has no BMFF spelling here, and the writer reports that rather
-  than a success it did not have.
+  `domain::disclosure` is the judgement that feeds them, and it is pure:
+  which IPTC term is true of an artefact, given the container metadata a
+  probe stored and the `derived_from` edges the library recorded. Terms
+  are asserted on evidence something wrote, and an artefact nothing
+  established gets no term rather than one meaning "unknown".
+  `compositeWithTrainedAlgorithmicMedia` turns on whether a recorded
+  parent is itself synthetic, which the child's own metadata cannot say.
+  `application::provenance_service` does the reads and owns the port,
+  looking at no file metadata at all — which is what lets a file that came
+  back from a downstream conversion with its manifest stripped be handed
+  to `apply_to` and get the same disclosure again.
+
+  Not yet wired to the export path, and not exposed over HTTP or IPC;
+  both are the rest of #14. Unsigned video carries no disclosure at all,
+  because the XMP half has no BMFF spelling here, and the writer reports
+  that rather than a success it did not have.
 
 - **Material layers, and the chapters an import brings in** (#1) — a
   material now carries layers: an origin (`imported` / `user` / `machine`),
