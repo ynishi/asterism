@@ -8,6 +8,7 @@ members = [
     "crates/asterism-importer-sdk",
     "crates/asterism-importer",
     "crates/asterism-media-probe",
+    "crates/asterism-provenance",
     "crates/asterism-dispatch-sdk",
     "crates/asterism-exporter-comfy",
     "crates/asterism-exporter-file",
@@ -71,7 +72,30 @@ log                = "0.4"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
+# `preserve_order` makes `serde_json::Map` an `IndexMap`: a parsed object
+# keeps the key order the document was written in, instead of being
+# re-sorted on the way back out.
+#
+# Declared here rather than inherited. `c2pa` requires the feature — it
+# hashes assertion bytes, so an author's key order has to survive a round
+# trip — and Cargo unifies features across a workspace build, so the
+# feature is on whether or not this line exists. That is precisely why it
+# exists: an ordering semantic that arrives as a side effect of somebody
+# else's dependency is one that silently reverses on the day that
+# dependency is dropped, and the reversal would be invisible in the diff
+# that dropped it. Stating it here makes it this workspace's decision,
+# and makes removing it a decision too.
+#
+# What must **not** rest on this line is any digest. A JSON object is an
+# unordered collection of name/value pairs (RFC 8259), so a hash over
+# "what the container carried" has to be a function of the content and
+# not of the key order whoever wrote it happened to use — with the
+# feature or without it. The two digests in the domain each secure that
+# for themselves: `material_meta::render` serialises a
+# `BTreeMap<String, String>` and never parses, and `series::render`
+# sorts through `series::canonical_value` before rendering. Neither
+# reads this line, and neither may be rewritten to.
+serde_json  = { version = "1", features = ["preserve_order"] }
 tokio       = { version = "1", features = ["full"] }
 anyhow      = "1"
 thiserror   = "2"
@@ -154,6 +178,37 @@ color-thief  = "0.2"
 # reproducible.
 rand        = "0.9"
 rand_chacha = "0.9"
+
+# --- asterism-infra: C2PA signing ---
+# The CAI reference SDK, and the only realistic way to produce a
+# manifest: a C2PA claim is COSE-signed CBOR wrapped in JUMBF, embedded
+# per container (APP11 for JPEG, a chunk for PNG, a box for MP4/MOV),
+# with a hard binding computed over byte ranges the format decides. That
+# is a specification-sized problem, not a serialisation one.
+#
+# Confined to `asterism-infra::provenance`. Everything that decides *what
+# is asserted* lives in `asterism-provenance`, which does not take this
+# dependency and can therefore be tested on a machine with no
+# cryptography backend and no certificate.
+#
+# `default-features = false` drops two defaults that are wrong here:
+#
+# - `openssl` — a vendored C build, replaced by `rust_native_crypto` so
+#   this workspace keeps one toolchain and no system library to locate.
+#   Exactly one of the two must be on.
+# - `default_http` — four HTTP client backends, pulled in for fetching
+#   remote manifests and timestamps. This workspace already pins one
+#   `reqwest` line deliberately (see above), and a local-first exporter
+#   has no business reaching the network while it signs. A timestamp
+#   authority is configuration; if one is ever configured, the feature
+#   comes back with a comment saying which client it added.
+#
+# `file_io` is what `create_signer::from_files` needs — the certificate
+# and key arrive as paths from settings.
+c2pa = { version = "0.90", default-features = false, features = [
+    "rust_native_crypto",
+    "file_io",
+] }
 
 # --- asterism-infra: job engine ---
 apalis     = { version = "0.7", features = ["limit"] }
