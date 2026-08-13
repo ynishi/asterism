@@ -222,6 +222,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The XMP writer does the two things its module doc promises** (#14) —
+  both were promised in prose and neither was done, and in both cases the
+  reason nothing caught it is that no fixture could reach the shape.
+
+  **A packet another tool left behind is now removed rather than
+  shadowed.** The doc's position is that a file must never leave with two
+  packets, because readers disagree about which one wins and the failure
+  mode is a stale `digitalSourceType` shadowing a corrected one. Both
+  writers recorded only the *first* packet and copied any later one
+  through untouched. The walks collect every XMP chunk or segment now,
+  replace the first where it stands — which keeps a re-stamped file's
+  chunk order stable — and drop the rest. The test that claimed to cover
+  this reached its "twice-stamped" input by calling the writer twice, so
+  its input had exactly one packet by construction and it re-tested the
+  one-packet path under a name that read like it covered both. The new
+  fixtures are hand-built rather than produced by the writer, on the
+  habit the neighbouring fixtures already state, and they place an
+  ordinary chunk ahead of both packets and another between them — with
+  the packets adjacent, neither "the bytes between two packets survive"
+  nor "the survivor stays where it was" is observable.
+
+  **A JPEG with no scan keeps its packet inside the image.** The
+  insertion point is "before the first non-`APPn` marker", and a
+  metadata-only file that reaches `EOI` without meeting one fell back to
+  the end of the file. That put the `APP1` *after* `EOI`, outside the
+  structure, where the module's own reader returns `None` while
+  `asterism-infra` records `xmp_written = true`: an export that reported
+  success and carried no readable disclosure at all. The walk now brings
+  the `EOI` offset back and the packet goes before it, which is the same
+  answer the PNG side already gave a file with no `IDAT`. A *truncated*
+  JPEG is a different thing and is still refused as malformed — it has
+  no `EOI` either.
+
+  Both fixes were checked against the behaviour they replace: reverting
+  either one fails its new test by name, and the thirteen `embed` tests
+  that predate this change pass under both.
+
+- **The documented JPEG packet limit was the segment's, not the
+  packet's** (#14) — three docs quoted 65,533 bytes, including the one a
+  caller reads when deciding how long a prompt to allow. That is the
+  segment's payload; the packet gets 65,504, because the 29-byte
+  `http://ns.adobe.com/xap/1.0/` identifier is inside the payload and is
+  paid first. A packet between the two figures was refused by a limit the
+  documentation did not have, and the caller learned about it only
+  through the silent fallback to the reduced record. The docs now point
+  at `JPEG_MAX_PACKET`, which is what the writer enforces and what
+  `PacketTooLarge` reports, and a test pins the arithmetic.
+
 - **A refused operation says so on screen** (`asterism-ui`) — asking
   Asterism to do something it then refused could leave no trace: the
   failure went to the browser console and the interface carried on,
