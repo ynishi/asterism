@@ -96,7 +96,18 @@ pub fn render(record: &DisclosureRecord) -> Option<String> {
     // `x:xmptk` names the toolkit that wrote the packet. It is
     // documentation for whoever opens the file, not an identifier
     // anything resolves.
-    let toolkit = concat!("asterism ", env!("CARGO_PKG_VERSION"));
+    //
+    // The name without a version, for two reasons that happen to agree.
+    // The build version here would be the same `0.0.0` every crate in
+    // this workspace carries, so it would say the same thing in every
+    // file ever written — and these bytes go inside the C2PA hard
+    // binding, which makes it the same uncorrectable claim the manifest
+    // declines to make in `claim_generator_info`. It would also be the
+    // one thing in this packet that is not read off the record, which
+    // the module doc says nothing here may be: two stamps of one
+    // unchanged record would render different bytes across a version
+    // bump, for a difference nobody stated.
+    let toolkit = "asterism";
     Some(format!(
         "<?xpacket begin=\"\u{feff}\" id=\"{PACKET_ID}\"?>\n\
          <x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"{toolkit}\">\n\
@@ -277,5 +288,18 @@ mod tests {
         // the first stops verifying against the second.
         let record = full_record();
         assert_eq!(render(&record), render(&record.clone()));
+
+        // Comparing two renderings inside one build cannot see the way
+        // this property was actually broken: the toolkit string carried
+        // `env!("CARGO_PKG_VERSION")`, so the packet was a function of
+        // the record *and the build*, and both sides of the equality
+        // above moved together across a version bump. The attribute is
+        // pinned literally instead, since that is the input from
+        // outside the record that was there.
+        assert!(
+            render(&record).unwrap().contains(r#"x:xmptk="asterism""#),
+            "the toolkit string is the one thing here not read off the \
+             record, so it may not carry anything that varies"
+        );
     }
 }

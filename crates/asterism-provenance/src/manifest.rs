@@ -118,9 +118,21 @@ pub fn definition(record: &DisclosureRecord) -> Value {
     if let Some(title) = &record.title {
         definition.insert("title".into(), json!(title));
     }
+    // Name only. The specification requires `name` and makes `version`
+    // optional, and every crate in this workspace inherits the same
+    // `0.0.0` — so emitting it would put a version string into a signed,
+    // uncorrectable document that every build ever made also carries,
+    // which tells a reader nothing and tells them it confidently. The
+    // SDK writes its own version into this same entry regardless, so
+    // omitting ours does not leave a reader with no build information at
+    // all. The field comes back when releases start carrying a number
+    // that distinguishes them.
+    //
+    // `xmp::render` declines the same claim in `x:xmptk`, for the same
+    // reason plus one of its own.
     definition.insert(
         "claim_generator_info".into(),
-        json!([{ "name": "asterism", "version": env!("CARGO_PKG_VERSION") }]),
+        json!([{ "name": "asterism" }]),
     );
     definition.insert("assertions".into(), json!(assertions));
     Value::Object(definition)
@@ -210,13 +222,25 @@ mod tests {
         assert!(!rendered.contains("1girl"));
     }
 
+    /// The generator names itself and does not claim a version.
+    ///
+    /// The version assertion this replaced compared the emitted field
+    /// against `env!("CARGO_PKG_VERSION")`, which is the same expression
+    /// the code under test used — so it passed at any value, including
+    /// the `0.0.0` every crate in this workspace carries. A test that
+    /// cannot fail is not what was wanted; what was wanted is that the
+    /// manifest does not assert a build identity it does not have.
     #[test]
-    fn the_generator_names_this_build() {
+    fn the_generator_names_itself_without_claiming_a_version() {
         let definition = definition(&DisclosureRecord::for_asset("asset-1"));
-        assert_eq!(definition["claim_generator_info"][0]["name"], "asterism");
-        assert_eq!(
-            definition["claim_generator_info"][0]["version"],
-            env!("CARGO_PKG_VERSION")
+        let info = definition["claim_generator_info"][0]
+            .as_object()
+            .expect("claim_generator_info holds one generator map");
+        assert_eq!(info["name"], "asterism");
+        assert!(
+            !info.contains_key("version"),
+            "a signed document may not carry a version string that every \
+             build shares: {info:?}"
         );
     }
 }
