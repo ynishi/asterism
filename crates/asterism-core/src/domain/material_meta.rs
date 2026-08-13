@@ -44,6 +44,15 @@
 //! enforces it — the map is `BTreeMap<String, String>` end to end, and
 //! there is no `from_str` anywhere on this path.
 //!
+//! That rule is also what makes this digest independent of
+//! `serde_json`'s `preserve_order` feature, which this workspace runs
+//! with (workspace `Cargo.toml`): the feature changes how a parsed
+//! `serde_json::Map` re-serialises, and nothing on this path is one. The
+//! sibling axis has to establish the same property by sorting, because
+//! it selects by path and therefore must parse
+//! ([`series::canonical_value`](crate::domain::series)). Changing this
+//! map to a `Value` would quietly move every stored digest.
+//!
 //! If that proves too strict — the same workflow re-saved by a tool
 //! that reformats — the answer is a **new prefix**, and it is written
 //! down beside the prefix itself
