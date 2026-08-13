@@ -259,6 +259,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   either one fails its new test by name, and the thirteen `embed` tests
   that predate this change pass under both.
 
+- **Five things the provenance writer said about itself that were not so**
+  (#14) — all in `asterism-infra`, all found by reading the code against
+  its own comments.
+
+  **A failed read-back is no longer reported as a shortened prompt.**
+  `Stamped::prompt_dropped` exists to record that a JPEG segment could
+  not hold the packet, so the reduced record was written instead — a fact
+  that cannot be recovered from the file afterwards, which is why it is
+  reported at all. It was derived by reading the stamped bytes back and
+  asking whether the prompt survived, through `.ok().flatten()`, which
+  gave the same `true` to three different outcomes: the honest fallback,
+  a packet the reader could not find, and a file that would not parse.
+  The last two say the writer produced something this crate does not
+  recognise, which is a defect rather than a fact about the record, and
+  they are errors now — `XmpUnreadable` for the one that has no
+  underlying failure to carry. Nothing is known to reach that variant
+  today: its one producer was the JPEG writer putting the packet where
+  the reader could not see it, fixed above. It is the guard that says
+  the two halves have to agree, not a case in the field.
+
+  **A manifest that could not be built no longer blames the
+  certificate.** A definition `c2pa` refuses came back as
+  `ProvenanceError::Identity`, which renders `signing identity: …` — so
+  a mapping defect in this crate sent whoever was reading the log to
+  their key configuration. It happens strictly before signing, with the
+  certificate already loaded, and now has its own variant.
+
+  **The container sniff survives a short read.** `read_head` used one
+  `read`, which is allowed to return fewer bytes than the buffer holds
+  without being at end of file. Local regular files do not do this;
+  NFS, SMB and FUSE do, which is to say every network-mounted library.
+  Eleven bytes back instead of twelve made the `ftyp` test fail and a
+  perfectly good MP4 report as a container this build does not write
+  into.
+
+  **The signed output streams to disk instead of being held whole.** The
+  comment on the video path said it streams "so a large video is not read
+  into memory whole", and the source did — but the destination was a
+  `Cursor<Vec<u8>>` collected with `into_inner()`, so a 2 GB MOV was
+  fully resident at the moment of collection, and the still path held two
+  buffers at once. `Builder::sign` takes any `Write + Read + Seek`
+  destination, so it writes into the sibling temporary the rename will
+  move, and `replace` was split into the pieces that path needs. The
+  temporary is opened read-write rather than through `File::create`,
+  which gives a write-only descriptor: today's signing happens not to
+  read its destination, but the `Read` in that bound is there because
+  the BMFF handler re-reads box headers to adjust offsets, and relying
+  on it staying unexercised would fail on video and nowhere else. What
+  this costs is that the temporary is visible for the length of the
+  signing rather than for the length of one write.
+
+  **A failed write clears its temporary too.** Splitting `replace`
+  surfaced that its own error route returned straight out of a failed
+  `fs::write`, which can leave the file created and partly filled —
+  exactly the litter beside a watched export directory that the rename
+  path already took care to avoid. Both routes clear it now, and a test
+  covers the signing path's failure route rather than only its success.
+
 - **The documented JPEG packet limit was the segment's, not the
   packet's** (#14) — three docs quoted 65,533 bytes, including the one a
   caller reads when deciding how long a prompt to allow. That is the
