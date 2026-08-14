@@ -1887,6 +1887,13 @@ pub struct CreateDispatchCommand {
     /// codebase does not have yet, and the exporter cannot answer it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
+    /// Pursuit to file this round under. `None` mints a fresh pursuit
+    /// server-side (always-mint: work cannot happen outside a pursuit,
+    /// there is no detached state). Continuation is explicit — the
+    /// server never infers it from snapshot overlap — so a surface
+    /// that wants rounds to correlate has to thread this id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
 }
 
 /// Runs a dispatch from a live source: the input is **either** a Group
@@ -1918,6 +1925,10 @@ pub struct DispatchRunCommand {
     /// downstream stamping as [`CreateDispatchCommand::operator_ai`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
+    /// Pursuit to file this round under — same contract as
+    /// [`CreateDispatchCommand::pursuit_id`] (`None` mints).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
 }
 
 /// Re-runs a finished dispatch with the same frozen input, exporter,
@@ -1928,6 +1939,13 @@ pub struct DispatchRunCommand {
 pub struct RedispatchCommand {
     /// The dispatch to re-run.
     pub dispatch_id: String,
+    /// Pursuit to file the re-run under. `None` continues the prior
+    /// dispatch's pursuit — not an inference: the caller named the
+    /// prior round literally, and a re-run is a new round of the same
+    /// line of work (the new-patchset-on-the-same-change shape).
+    /// Supply an id to file it elsewhere instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
 }
 
 /// Creates a Query Group — a Group whose membership is the

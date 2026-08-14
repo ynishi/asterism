@@ -168,6 +168,11 @@
       "docs": "Transcodes a webview-unplayable video into its preview rendition\n(`super::preview_ffmpeg`). Payload: `{ \"asset_id\": <uuid> }`.\n\nIdempotent: an existing rendition is a completed job. On failure a\n`.failed` marker carrying the reason is written beside the target\nso the status endpoint answers \"failed: why\" instead of keeping\nthe pane on a spinner forever; the marker is cleared before every\nfresh attempt so a retry starts clean."
     },
     {
+      "path": "asterism_infra::jobs::handlers::provenance_stamp",
+      "kind": "function",
+      "docs": "Writes the AI disclosure into a file this library produced.\n\nEnqueued by [`stamp_after_hash`] once the artefact's metadata has\nlanded — see there for why this cannot happen when the export\nfinishes, and why it is confined to artefacts a dispatch made.\n\n# Why a failure here is not a failed job\n\nA stamp that does not land leaves an artefact that exists and is not\nmarked. The file is fine; what is missing is a statement about it,\nand the statement can be made again — the disclosure is derived from\nstored rows, so re-running this job re-derives it. Failing the job\nwould put a retry loop around a file rewrite and would put an export\nthat produced exactly what it was asked for into a red state over\nmetadata.\n\nThe two halves of a disclosure fail independently and the outcome\nsays which landed, so a partial result is reported as one rather\nthan collapsed into success or failure."
+    },
+    {
       "path": "asterism_infra::jobs::handlers::query_group_refresh",
       "kind": "function",
       "docs": "Re-evaluates every Query Group under one persona. Payload:\n`{ \"persona_id\": \"<uuid>\" }`. Failures per group are collected\nand surfaced in the completion message but do not fail the job\n(one corrupt rule must not stop the other groups' refresh)."
@@ -635,7 +640,7 @@
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard",
       "kind": "module",
-      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`] and\n[`super::dispatch`], at the point where the values about to be bound\nare visible as the columns themselves."
+      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`], [`super::dispatch`]\nand [`super::pursuit`] (all three pursuit-family tables), at the\npoint where the values about to be bound are visible as the columns\nthemselves."
     },
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard::assert_channel_recorded",
@@ -761,6 +766,16 @@
       "path": "asterism_infra::sqlite::repo::persona_theme::SqlitePersonaThemeRepository",
       "kind": "struct",
       "docs": "SQLite adapter for `PersonaThemeRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::pursuit",
+      "kind": "module",
+      "docs": "SQLite adapter for the `PursuitRepository` port (#29).\n\nThree tables, one concern: `pursuit` (thin, immutable, insert-only),\n`pursuit_event` (append-only lifecycle facts), and `pursuit_restamp`\n(the recorded repair verb). The one multi-table write — restamp —\nruns in a single transaction here, because \"the move is recorded\"\nand \"the stamp moved\" must not be separable facts."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::pursuit::SqlitePursuitRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `PursuitRepository`."
     },
     {
       "path": "asterism_infra::sqlite::repo::query_group",

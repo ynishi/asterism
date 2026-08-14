@@ -609,6 +609,7 @@ the private design notes.
 - [`domain::probe`](domain__probe.md): `probe` — the port a format's identity measurement is written
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
+- [`domain::pursuit`](domain__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
@@ -653,8 +654,10 @@ source a write records from: services do not read the command's own
 `author_kind` / `author_subject` / `operator_ai` fields.
 
 Most services here take that argument without persisting it: the
-attribution columns exist on `asset` and `dispatch_job` alone, and
-adding a third table is out of scope. Receiving
+attribution columns exist on `asset`, `dispatch_job`, and the
+pursuit family (V79 — forge events are actor-carrying by design,
+#29) alone, and adding another table is a design decision, not a
+wiring step. Receiving
 it is still the point — the argument is what makes a new mutation,
 or a new caller of an old one, name the channel it arrived through
 before it compiles, so recording operations later is a wiring change
@@ -941,6 +944,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `parse_message_ref` — Parses one wire `MessageRefDto` chip into an [`EntityRef`].
 - `parse_ms` — Parses a unix-epoch-milliseconds timestamp from the wire (returns a
 - `parse_persona_id` — Parses the wire representation of a persona id.
+- `parse_pursuit_id` — Parses the wire representation of a pursuit id.
 - `parse_snapshot_id` — Parses the wire representation of a snapshot id.
 - `parse_tag_id` — Parses the wire representation of a tag id.
 - `parse_thread_anchor` — Parses a `(anchor_kind, anchor_id)` wire pair into a
@@ -1861,7 +1865,9 @@ question and [`merge_plan`] a person's ruling over a whole set.
 **The record layer.** [`snapshot`] freezes an ordered asset set —
 content-addressed, a git-tree analogue, fingerprinted by
 [`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
-a freeze; [`provenance`] is the declared origin a re-ingested artefact
+a freeze; [`pursuit`] is the minted unit of work those invocations are
+stamped with — the line of rounds and verdicts toward one intent;
+[`provenance`] is the declared origin a re-ingested artefact
 carries back, and [`disclosure`] its outbound counterpart — the pure
 judgement of which IPTC digital-source term the recorded evidence
 makes true of an artefact on its way out; [`edge`] holds typed
@@ -1915,11 +1921,23 @@ cross-module view.
    origin story. Every statement of *where it came from* lives on the
    referencing event (`dispatch_job.source_group_id` /
    `source_query_json`), never on the snapshot itself (`migrations.rs`,
-   `v19_selection_model`).
+   `v19_selection_model`). Extends to pursuits: a pursuit carries
+   intent (`title`, `note`) and lineage of work (`parent_id`) but never
+   content — what happened lives on the stamped events, and the one
+   materialised set (the close product) is itself a frozen snapshot
+   the event refers to.
 4. **Attribution answers "whose write is this" and stops there.** The
    `(author, operator, via)` triple is about the write; where an
    artefact came from is [`provenance`]'s question. The two vocabularies
    do not mix.
+5. **The unit of work is minted, never derived.** Content identity
+   changes whenever work is redone, so correlation by ancestry alone
+   cannot express succession, rejection, or abandonment. A [`pursuit`]
+   is identified by a minted id stamped on its events, work cannot
+   happen outside one (a dispatch without a pursuit gets one minted in
+   the same request; a mint stranded by a failed dispatch write is the
+   legal pre-created-empty state, not debris), and everything else
+   about it — standing, membership, rollups — is projection.
 
 ## Aggregate boundaries
 
@@ -2637,6 +2655,10 @@ Aggregate root for a single outbound job's whole lifecycle
 
 - `DispatchJob` — One dispatch invocation.
 - `DispatchState` — Lifecycle state persisted with the dispatch job.
+
+## Constants
+
+- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
 
 
 <!-- asterism_core/domain__duplicate_conflict.md -->
@@ -3479,6 +3501,58 @@ no caller asserts it:
 - `PUSHED` — Claim pushed with the ingest payload by the caller.
 
 
+<!-- asterism_core/domain__pursuit.md -->
+# asterism-core::domain::pursuit
+
+`Pursuit` — the minted unit of work: one line of generation and
+curation toward an intent, identified by a minted id that its events
+are stamped with (#29, design on #21).
+
+Content ancestry cannot express this unit: round N+1 built from the
+same sources with a new prompt shares no derivation edge with round
+N's outputs, rejected rounds have no descendants, and abandonment has
+no ancestry expression at all. So the identity is minted up front —
+the convergent form of every surviving forge (Gerrit's Change-Id,
+Jujutsu's change id, Radicle's COB ids) — and everything else about
+the pursuit is a projection over the stamped events.
+
+# Shape
+
+- [`Pursuit`] is a thin, immutable row: identity, persona, optional
+  parent, optional human label. No status column, no members.
+- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
+  **standing is derived on read** by [`standing`] — latest event by
+  `(created_at, id)` wins, no row means open. A repeat close is a new
+  fact, not an error.
+- [`PursuitRestamp`] records a move of a stamped event between
+  pursuits — the repair verb for mis-filed correlation. The stamped
+  column holds the current filing; the restamp row holds the move.
+
+# Invariants (service-enforced, entity-checked where local)
+
+- A stamped event's persona equals its pursuit's persona; `parent_id`
+  never crosses personas; a parent exists before its child. These are
+  cross-aggregate and live in the application service, like the
+  persona cascade.
+- `snapshot_id` may only accompany `closed_satisfied` (checked here):
+  it is the kept set frozen at close. `None` on a `closed_satisfied`
+  is a defined state — "concluded with nothing kept" — because an
+  empty snapshot is domain-rejected.
+
+## Functions
+
+- `standing` — Derives standing from a pursuit's events: latest by
+
+## Types
+
+- `Pursuit` — The minted unit of work. Thin and immutable: identity plus intent
+- `PursuitEvent` — One lifecycle fact about a pursuit.
+- `PursuitEventKind` — The closed set of lifecycle facts. One-way: no event edits another,
+- `PursuitRestamp` — One recorded move of a stamped event between pursuits — the repair
+- `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
+- `RestampSubject` — What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
+
+
 <!-- asterism_core/domain__query_group_eval.md -->
 # asterism-core::domain::query_group_eval
 
@@ -3616,6 +3690,7 @@ projection instead of full `Asset` entities.
 - `PersonaRepository` — Persistence port for [`Persona`].
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
+- `PursuitRepository` — Persistence port for the pursuit family (#29): the minted unit of
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
@@ -4276,6 +4351,9 @@ Design notes:
 - `PersonaId` — Surrogate id for `Persona`. The natural key (external pack id) is
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
+- `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
+- `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
+- `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
@@ -6635,6 +6713,7 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
+- [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29).
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
@@ -6816,6 +6895,7 @@ for later modalities.
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `observation_sweep` — Expires observations past their stream's declared retention.
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
+- `provenance_stamp` — Writes the AI disclosure into a file this library produced.
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:
 - `series_derive` — Derives `material_series` keys — applies every registered
 - `session_rebuild` — Session reconciliation stub — the precomputed rkyv snapshot was
@@ -8339,9 +8419,10 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`] and
-[`super::dispatch`], at the point where the values about to be bound
-are visible as the columns themselves.
+Called by the row builders in [`super::asset`], [`super::dispatch`]
+and [`super::pursuit`] (all three pursuit-family tables), at the
+point where the values about to be bound are visible as the columns
+themselves.
 
 ## Functions
 
@@ -8500,6 +8581,22 @@ SQLite adapter for the `PersonaThemeRepository` port.
 ## Types
 
 - `SqlitePersonaThemeRepository` — SQLite adapter for `PersonaThemeRepository` (uses a writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__pursuit.md -->
+# asterism-infra::sqlite::repo::pursuit
+
+SQLite adapter for the `PursuitRepository` port (#29).
+
+Three tables, one concern: `pursuit` (thin, immutable, insert-only),
+`pursuit_event` (append-only lifecycle facts), and `pursuit_restamp`
+(the recorded repair verb). The one multi-table write — restamp —
+runs in a single transaction here, because "the move is recorded"
+and "the stamp moved" must not be separable facts.
+
+## Types
+
+- `SqlitePursuitRepository` — SQLite adapter for `PursuitRepository`.
 
 
 <!-- asterism_infra/sqlite__repo__query_group.md -->

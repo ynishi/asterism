@@ -312,6 +312,7 @@ pub async fn init_core_with(
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
     let observations = asterism_infra::observe::ObservationStore::new(isle.clone());
     let dispatches = Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone()));
+    let pursuits = Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone()));
     let query_groups = Arc::new(sqlite::repo::query_group::SqliteQueryGroupRepository::new(
         isle.clone(),
     ));
@@ -760,6 +761,7 @@ pub async fn init_core_with(
         groups_arc.clone(),
         query_groups.clone(),
         query_group_service.clone(),
+        pursuits.clone(),
     ));
 
     // Register the built-in exporters (`comfy` / `file` / `http`).

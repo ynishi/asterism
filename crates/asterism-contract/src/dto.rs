@@ -1246,6 +1246,10 @@ pub struct DispatchDto {
     pub snapshot_id: String,
     /// Persona bucket.
     pub persona_id: String,
+    /// Pursuit this round is filed under (#29). `None` only on rows
+    /// that predate the stamp's backfill invariant; moved only by the
+    /// restamp verb, never by a state save.
+    pub pursuit_id: Option<String>,
     /// Exporter slug (`comfy` / `gemini` / `vdsl` / `alc-sd-bake`).
     pub exporter_slug: String,
     /// Action string handed to the exporter (`img2img` / `txt2img` /

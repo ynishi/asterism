@@ -173,6 +173,29 @@ define_uuid_id!(
     /// happen to derive the same key from being read as one grouping.
     StrategyId
 );
+define_uuid_id!(
+    /// Surrogate id for a `Pursuit` — the minted unit of work that
+    /// dispatches and judgments are stamped with (#29). Minted, never
+    /// derived from content: content identity changes whenever work is
+    /// redone, so succession, rejection, and abandonment need an id
+    /// that survives rework. UUID v7 so `(created_at, id)` totally
+    /// orders rows minted in the same instant.
+    PursuitId
+);
+define_uuid_id!(
+    /// Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
+    /// about a pursuit (close / reopen). The v7 timestamp is the
+    /// tie-break that makes "latest event" total when two events share
+    /// a `created_at`.
+    PursuitEventId
+);
+define_uuid_id!(
+    /// Surrogate id for a `PursuitRestamp` — one recorded move of a
+    /// stamped event between pursuits (the repair verb for broken
+    /// correlation, #29). The row is the fact of the move; the stamped
+    /// column holds only the current filing.
+    PursuitRestampId
+);
 /// Declares a non-empty text newtype (returns `Validation` if the value is
 /// blank after trimming).
 macro_rules! define_text_vo {

@@ -96,6 +96,7 @@ async fn export_through_file(
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
+                pursuit_id: None,
             },
             &unattributed(),
         )

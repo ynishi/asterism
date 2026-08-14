@@ -33,11 +33,17 @@ use asterism_contract::dto::DispatchDto;
 use chrono::Utc;
 
 use crate::application::attribution_intake::refuse_assertion_from_owner_surface;
-use crate::application::mapping::{dispatch_to_dto, parse_dispatch_id, parse_snapshot_id};
+use crate::application::mapping::{
+    dispatch_to_dto, parse_dispatch_id, parse_pursuit_id, parse_snapshot_id,
+};
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::job::JobKind;
-use crate::domain::repository::{DispatchRepository, JobQueue, SnapshotRepository};
+use crate::domain::pursuit::Pursuit;
+use crate::domain::repository::{
+    DispatchRepository, JobQueue, PursuitRepository, SnapshotRepository,
+};
+use crate::domain::value::{PersonaId, PursuitId};
 use crate::error::DomainError;
 
 /// Outbound-dispatch use-case service.
@@ -51,10 +57,14 @@ pub struct DispatchService {
     groups: Arc<dyn crate::domain::repository::GroupRepository>,
     query_groups: Arc<dyn crate::domain::repository::QueryGroupRepository>,
     query_group_service: Arc<crate::application::query_group_service::QueryGroupService>,
+    /// The mint half of always-mint (#29): every start verb stamps a
+    /// pursuit, minting one when the caller supplied none.
+    pursuits: Arc<dyn PursuitRepository>,
 }
 
 impl DispatchService {
     /// Wires the service around its ports.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         snapshots: Arc<dyn SnapshotRepository>,
         dispatches: Arc<dyn DispatchRepository>,
@@ -62,6 +72,7 @@ impl DispatchService {
         groups: Arc<dyn crate::domain::repository::GroupRepository>,
         query_groups: Arc<dyn crate::domain::repository::QueryGroupRepository>,
         query_group_service: Arc<crate::application::query_group_service::QueryGroupService>,
+        pursuits: Arc<dyn PursuitRepository>,
     ) -> Self {
         Self {
             snapshots,
@@ -70,6 +81,50 @@ impl DispatchService {
             groups,
             query_groups,
             query_group_service,
+            pursuits,
+        }
+    }
+
+    /// Resolves the pursuit a new round files under: the supplied id
+    /// (validated to exist in the caller's persona — continuation is
+    /// explicit, never inferred, and never crosses personas), or a
+    /// fresh anonymous pursuit minted here (always-mint: work cannot
+    /// happen outside a pursuit, there is no detached state).
+    ///
+    /// The mint and the dispatch write are two repository calls, not
+    /// one transaction — deliberately. If the dispatch write fails
+    /// after the mint, what remains is an empty anonymous pursuit,
+    /// which is exactly the pre-created / stranded state the model
+    /// already defines as an honest record (repairable by restamp,
+    /// closable as abandoned). A cross-aggregate transaction would buy
+    /// nothing but coupling.
+    async fn resolve_pursuit(
+        &self,
+        supplied: Option<&str>,
+        persona_id: PersonaId,
+        now: chrono::DateTime<chrono::Utc>,
+        attribution: &AttributionContext,
+    ) -> Result<PursuitId, DomainError> {
+        match supplied {
+            Some(wire) => {
+                let id = parse_pursuit_id(wire)?;
+                let pursuit = self
+                    .pursuits
+                    .find(&id)
+                    .await?
+                    .ok_or_else(|| DomainError::not_found("pursuit", wire))?;
+                if pursuit.persona_id != persona_id {
+                    return Err(DomainError::Validation(
+                        "pursuit belongs to a different persona".into(),
+                    ));
+                }
+                Ok(id)
+            }
+            None => {
+                let minted = Pursuit::new(persona_id, None, None, None, now, attribution);
+                self.pursuits.create(&minted).await?;
+                Ok(minted.id)
+            }
         }
     }
 
@@ -168,7 +223,7 @@ impl DispatchService {
         let now = Utc::now();
         let snapshot = crate::domain::snapshot::Snapshot::new(persona_id, member_ids, now)?;
         let stored = self.snapshots.create_or_reuse(&snapshot).await?;
-        let job = DispatchJob::new(
+        let mut job = DispatchJob::new(
             stored.id,
             persona_id,
             command.exporter_slug,
@@ -178,6 +233,14 @@ impl DispatchService {
             attribution,
         )?
         .with_source(source_group_id, source_query_json);
+        // Minted only after the job passed its own validation: a bad
+        // slug is a refused request, and a refused request should not
+        // strand an empty pursuit (a strand is legal, but it is the
+        // price of a *failed write*, not of a typo).
+        job.pursuit_id = Some(
+            self.resolve_pursuit(command.pursuit_id.as_deref(), persona_id, now, attribution)
+                .await?,
+        );
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }
@@ -196,13 +259,14 @@ impl DispatchService {
             .find(&did)
             .await?
             .ok_or_else(|| DomainError::not_found("dispatch", &command.dispatch_id))?;
-        let job = DispatchJob::new(
+        let now = Utc::now();
+        let mut job = DispatchJob::new(
             prior.snapshot_id,
             prior.persona_id,
             prior.exporter_slug.clone(),
             prior.action.clone(),
             prior.params.clone(),
-            Utc::now(),
+            now,
             // The frozen input, exporter, action and params are what the
             // re-run repeats; the earlier run's attribution is not among
             // them. Whoever started that run did not start this one, and
@@ -212,6 +276,26 @@ impl DispatchService {
             attribution,
         )?
         .with_source(prior.source_group_id, prior.source_query_json.clone());
+        // The pursuit *is* inherited where the attribution above is
+        // not: the caller named the prior round literally, and a re-run
+        // is a new round of the same line of work (a new patchset on
+        // the same change) — an explicit reference, not the
+        // membership-overlap inference the model forbids. A prior from
+        // before the stamp invariant can still be NULL; then the
+        // re-run mints, as any unstamped work does.
+        job.pursuit_id = match command.pursuit_id.as_deref() {
+            Some(wire) => Some(
+                self.resolve_pursuit(Some(wire), prior.persona_id, now, attribution)
+                    .await?,
+            ),
+            None => match prior.pursuit_id {
+                Some(inherited) => Some(inherited),
+                None => Some(
+                    self.resolve_pursuit(None, prior.persona_id, now, attribution)
+                        .await?,
+                ),
+            },
+        };
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }
@@ -249,15 +333,26 @@ impl DispatchService {
                 .map_err(|e| DomainError::Validation(format!("invalid params_json: {e}")))?
         };
 
-        let job = DispatchJob::new(
+        let now = Utc::now();
+        let mut job = DispatchJob::new(
             snapshot.id,
             snapshot.persona_id,
             command.exporter_slug,
             command.action,
             params,
-            Utc::now(),
+            now,
             attribution,
         )?;
+        // Post-validation mint, as in `run`: a typo does not strand.
+        job.pursuit_id = Some(
+            self.resolve_pursuit(
+                command.pursuit_id.as_deref(),
+                snapshot.persona_id,
+                now,
+                attribution,
+            )
+            .await?,
+        );
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }

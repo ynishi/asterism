@@ -24,8 +24,10 @@
 //! `author_kind` / `author_subject` / `operator_ai` fields.
 //!
 //! Most services here take that argument without persisting it: the
-//! attribution columns exist on `asset` and `dispatch_job` alone, and
-//! adding a third table is out of scope. Receiving
+//! attribution columns exist on `asset`, `dispatch_job`, and the
+//! pursuit family (V79 — forge events are actor-carrying by design,
+//! #29) alone, and adding another table is a design decision, not a
+//! wiring step. Receiving
 //! it is still the point — the argument is what makes a new mutation,
 //! or a new caller of an old one, name the channel it arrived through
 //! before it compiles, so recording operations later is a wiring change

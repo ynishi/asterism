@@ -110,6 +110,7 @@ the private design notes.
 - [`domain::probe`](domain__probe.md): `probe` — the port a format's identity measurement is written
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
+- [`domain::pursuit`](domain__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented

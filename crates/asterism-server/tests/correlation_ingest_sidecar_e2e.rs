@@ -130,6 +130,7 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
+                pursuit_id: None,
             },
             &unattributed(),
         )

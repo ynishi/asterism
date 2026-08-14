@@ -285,6 +285,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
                 })
                 .to_string(),
                 operator_ai: None,
+                pursuit_id: None,
             },
             &unattributed(),
         )
