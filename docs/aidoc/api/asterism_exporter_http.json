@@ -1,0 +1,56 @@
+{
+  "crate": "asterism-exporter-http",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_exporter_http::DispatchSchema",
+      "kind": "struct",
+      "docs": "Schema for the `POST /prompt`-shaped submit call."
+    },
+    {
+      "path": "asterism_exporter_http::HarvestMap",
+      "kind": "struct",
+      "docs": "How the harvest phase turns each response item into a\n[`Derived`]."
+    },
+    {
+      "path": "asterism_exporter_http::HarvestSchema",
+      "kind": "struct",
+      "docs": "Schema for the `GET /result/{id}`-shaped harvest call."
+    },
+    {
+      "path": "asterism_exporter_http::HttpDispatchParams",
+      "kind": "struct",
+      "docs": "Params schema for [`SLUG`] dispatch calls."
+    },
+    {
+      "path": "asterism_exporter_http::HttpExporter",
+      "kind": "struct",
+      "docs": "HTTP-backed schema-driven [`Exporter`]."
+    },
+    {
+      "path": "asterism_exporter_http::MatchRule",
+      "kind": "struct",
+      "docs": "Predicate against a poll-response value.\n\nOnly equality is supported today. Numeric range checks would\nwiden the grammar without materially expanding coverage."
+    },
+    {
+      "path": "asterism_exporter_http::PollSchema",
+      "kind": "struct",
+      "docs": "Schema for the `GET /status/{id}`-shaped poll call."
+    },
+    {
+      "path": "asterism_exporter_http::SCHEMA_NAME",
+      "kind": "constant",
+      "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:http:params`)."
+    },
+    {
+      "path": "asterism_exporter_http::SLUG",
+      "kind": "constant",
+      "docs": "Slug the registry uses for this exporter."
+    },
+    {
+      "path": "asterism_exporter_http::params_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`HttpDispatchParams`] — streamed by\n`asterism-server schema print exporter:http:params`."
+    }
+  ]
+}

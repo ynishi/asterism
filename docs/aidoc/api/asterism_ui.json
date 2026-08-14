@@ -1,0 +1,706 @@
+{
+  "crate": "asterism-ui",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_ui::commands",
+      "kind": "module",
+      "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation here names its attribution channel explicitly —\n[`AttributionContext::owner_surface`]. This is the owner's own\noperation surface (the desktop app's IPC), so the owner-ness is a\nproperty of the surface rather than a guess about the caller, and the\ncommands carry no attribution fields for it to read. The argument is\nrequired by the service signatures, so a new mutation cannot be added\nhere without choosing."
+    },
+    {
+      "path": "asterism_ui::commands::active_profile",
+      "kind": "function",
+      "docs": "Returns the active local data profile for persistent UI chrome."
+    },
+    {
+      "path": "asterism_ui::commands::add_asset",
+      "kind": "function",
+      "docs": "Ingests an asset (entry point for the asset-add pipeline)."
+    },
+    {
+      "path": "asterism_ui::commands::add_asset_batch",
+      "kind": "function",
+      "docs": "Ingests a batch of assets (bulk form of `add_asset`)."
+    },
+    {
+      "path": "asterism_ui::commands::add_asset_to_group",
+      "kind": "function",
+      "docs": "Idempotent add of an asset to a Group."
+    },
+    {
+      "path": "asterism_ui::commands::append_thread_message",
+      "kind": "function",
+      "docs": "Appends one Message. UI-side callers pass `author_kind = \"human\"`."
+    },
+    {
+      "path": "asterism_ui::commands::archive_persona",
+      "kind": "function",
+      "docs": "Toggles a persona's archive flag."
+    },
+    {
+      "path": "asterism_ui::commands::archive_thread",
+      "kind": "function",
+      "docs": "Toggles the archived flag."
+    },
+    {
+      "path": "asterism_ui::commands::asset_constellation",
+      "kind": "function",
+      "docs": "Returns the fully-resolved hover-burst payload — each edge with\nthe card it lands on, already filtered by viewer visibility."
+    },
+    {
+      "path": "asterism_ui::commands::asset_declare_meta",
+      "kind": "function",
+      "docs": "Records — or removes — one AlbumMeta statement on an asset: the\ncommand twin of `POST /asterism/assets/{id}/album-meta`.\n\nThe statement's own `operator_ai` travels on the command and is a\ndifferent subject from who the asset is by, which is why the\nattribution handed to the service is still the owner surface. Saying\nsomething about a row is not authoring it."
+    },
+    {
+      "path": "asterism_ui::commands::asset_declare_provenance",
+      "kind": "function",
+      "docs": "Declares (or repairs) an asset's origin after the fact — the\ncommand twin of `POST /asterism/assets/{id}/provenance`. Same\n`derived_from` vocabulary as ingest; an unresolvable claim is\nrecorded on `extra._trace`, not rejected."
+    },
+    {
+      "path": "asterism_ui::commands::asset_detail",
+      "kind": "function",
+      "docs": "Detail view (asset + attached tags + constellation edges)."
+    },
+    {
+      "path": "asterism_ui::commands::asset_edges",
+      "kind": "function",
+      "docs": "Returns the top-`limit` edges (by weight) for hover-burst\nrendering."
+    },
+    {
+      "path": "asterism_ui::commands::asset_lineage",
+      "kind": "function",
+      "docs": "Walks the whole `derived_from` chain around the asset, not just\nits immediate neighbours — the read side of correlation ingest.\n\n`depth` is hops in each direction (clamped server-side); the\nresponse says whether it had to stop early, and carries the\ndispatch ids the chain passed through as its backbone."
+    },
+    {
+      "path": "asterism_ui::commands::asset_provenance",
+      "kind": "function",
+      "docs": "Returns the 1-hop `derived_from` lineage around the asset —\nancestors (Selection inputs this asset was derived from) and\ndescendants (assets later derived from this one). Powers the\ndetail-pane Provenance section."
+    },
+    {
+      "path": "asterism_ui::commands::asset_texts",
+      "kind": "function",
+      "docs": "Resolves the full source text of each asset (session Reader\nview). Unreadable sources come back as `text = None` so the UI\ncan fall back to the stored cover snippet."
+    },
+    {
+      "path": "asterism_ui::commands::asset_video_preview",
+      "kind": "function",
+      "docs": "Where a video's transcoded preview rendition stands — the command\ntwin of `GET /asterism/assets/{id}/video-preview`. The first call\nfor a missing rendition enqueues the transcode; the pane polls\nwhile `pending`."
+    },
+    {
+      "path": "asterism_ui::commands::attach_tag",
+      "kind": "function",
+      "docs": "Attaches a tag to an asset by name (creates the tag row on first\nuse). Idempotent on both the row and the m:n link."
+    },
+    {
+      "path": "asterism_ui::commands::attach_tag_batch",
+      "kind": "function",
+      "docs": "Attaches one tag to many assets in one call (grid multi-select)."
+    },
+    {
+      "path": "asterism_ui::commands::batch_group_membership",
+      "kind": "function",
+      "docs": "Bulk attach / detach of asset↔group pairs. Returns\n`[attached, detached]` written-row counts."
+    },
+    {
+      "path": "asterism_ui::commands::create_dir",
+      "kind": "function",
+      "docs": "Creates a Dir under the given persona."
+    },
+    {
+      "path": "asterism_ui::commands::create_dispatch",
+      "kind": "function",
+      "docs": "Kicks off one exporter run against a Selection. The apalis\n`DispatchRun` job picks it up on the next tick; the UI polls\n[`get_dispatch`] until the state is terminal."
+    },
+    {
+      "path": "asterism_ui::commands::create_group",
+      "kind": "function",
+      "docs": "Creates a Group under the given persona."
+    },
+    {
+      "path": "asterism_ui::commands::create_material_layer",
+      "kind": "function",
+      "docs": "Opens a band the person owns. Never the default — see\n[`SetDefaultMaterialLayerCommand`] for moving that flag."
+    },
+    {
+      "path": "asterism_ui::commands::create_modality",
+      "kind": "function",
+      "docs": "Registers a new modality master row."
+    },
+    {
+      "path": "asterism_ui::commands::create_query_group",
+      "kind": "function",
+      "docs": "\"Save as Group\": mints a `kind='query'` Group from a `query_json`\nv1 rule and evaluates it synchronously once."
+    },
+    {
+      "path": "asterism_ui::commands::create_snapshot",
+      "kind": "function",
+      "docs": "Freezes a picked asset list into a Snapshot and stops there\n(content-hash deduped).\n\nThe freeze half of `promote_volatile_selection` without the promote.\nBoth other Snapshot-consuming commands (`create_dispatch`,\n`get_snapshot`) take a snapshot id, and until this existed the only\nway to obtain one was to also create a Group — so \"keep this exact\nset for now\" had to go through a side effect nobody asked for."
+    },
+    {
+      "path": "asterism_ui::commands::create_thread",
+      "kind": "function",
+      "docs": "Creates a Thread."
+    },
+    {
+      "path": "asterism_ui::commands::delete_asset_comment",
+      "kind": "function",
+      "docs": "Deletes a comment. Idempotent."
+    },
+    {
+      "path": "asterism_ui::commands::delete_chapter_mark",
+      "kind": "function",
+      "docs": "Removes one section. **Not** idempotent, unlike deleting a mark: a\nchapter is named by `(layer_id, chapter_id)`, so an id that is not in\nthat band is a refusal rather than a no-op."
+    },
+    {
+      "path": "asterism_ui::commands::delete_dir",
+      "kind": "function",
+      "docs": "Deletes an **empty** Dir."
+    },
+    {
+      "path": "asterism_ui::commands::delete_material_layer",
+      "kind": "function",
+      "docs": "Deletes a band the person owns, with everything in it. Refuses an\nimported or machine band."
+    },
+    {
+      "path": "asterism_ui::commands::delete_material_mark",
+      "kind": "function",
+      "docs": "Deletes a mark. Idempotent."
+    },
+    {
+      "path": "asterism_ui::commands::delete_modality",
+      "kind": "function",
+      "docs": "Deletes a modality master row — only when no asset carries the slug\n(`409 Conflict` otherwise; hide it instead)."
+    },
+    {
+      "path": "asterism_ui::commands::delete_persona_profile",
+      "kind": "function",
+      "docs": "Removes the persona profile row entirely."
+    },
+    {
+      "path": "asterism_ui::commands::delete_persona_theme",
+      "kind": "function",
+      "docs": "Removes the persona theme row entirely (reverts to defaults)."
+    },
+    {
+      "path": "asterism_ui::commands::delete_session",
+      "kind": "function",
+      "docs": "Deletes a Session — only when no `asset` row still references\nit (`409 Conflict` otherwise). Mirror of the Modality delete\nguard; the UI disables the tile's ✕ button when\n`message_count > 0` so this error only surfaces under a race."
+    },
+    {
+      "path": "asterism_ui::commands::delete_thread",
+      "kind": "function",
+      "docs": "Deletes a Thread (cascades to messages)."
+    },
+    {
+      "path": "asterism_ui::commands::delete_thread_message",
+      "kind": "function",
+      "docs": "Deletes one Message (misfire correction)."
+    },
+    {
+      "path": "asterism_ui::commands::detach_tag",
+      "kind": "function",
+      "docs": "Removes a tag from an asset. Idempotent — a missing link is a\nno-op; the tag row is left in place for other assets."
+    },
+    {
+      "path": "asterism_ui::commands::detach_tag_batch",
+      "kind": "function",
+      "docs": "Detaches one tag from many assets in one call."
+    },
+    {
+      "path": "asterism_ui::commands::dispatch_run",
+      "kind": "function",
+      "docs": "Live-source dispatch (`dispatch_run`): freezes a Group (query\ngroups are refreshed first) or a volatile selection into a deduped\nSnapshot, stamps the provenance, and enqueues the run."
+    },
+    {
+      "path": "asterism_ui::commands::edit_asset_comment",
+      "kind": "function",
+      "docs": "Rewrites the body of an existing comment (stamps `edited_at`)."
+    },
+    {
+      "path": "asterism_ui::commands::edit_chapter_mark",
+      "kind": "function",
+      "docs": "Retitles a section and, unlike the mark face, may move it: the reason\na person keeps a band of their own is usually that the file's\ndivisions are in the wrong places."
+    },
+    {
+      "path": "asterism_ui::commands::edit_material_mark",
+      "kind": "function",
+      "docs": "Rewrites the body of an existing mark (stamps `edited_at`). The\nanchor is left where it is — this verb rewords a mark, it does not\nmove one."
+    },
+    {
+      "path": "asterism_ui::commands::empty_trash",
+      "kind": "function",
+      "docs": "Permanently deletes every asset in the trash. Irreversible, and\ndeliberately unfiltered — see `EmptyTrashCommand`."
+    },
+    {
+      "path": "asterism_ui::commands::get_asset_thumb",
+      "kind": "function",
+      "docs": "Returns the cached JPEG bytes of a thumbnail for `asset_id` at\n`size_px`, or `None` when the pair is not cached yet (`cover_gen`\nor the importer has not written one). The Svelte side wraps the\nbytes in a `Blob` and hands the URL to `<img src>`."
+    },
+    {
+      "path": "asterism_ui::commands::get_asset_thumbs",
+      "kind": "function",
+      "docs": "The same thing for a whole screenful: cached JPEG bytes for each of\n`asset_ids` at `size_px`, **in the order asked**, `None` where the\npair is not cached yet.\n\nThe grid paints tens of tiles per scroll, and asking per tile made\nthat tens of IPC round trips per scroll — measured at 8,263 single\nfetches across 1,000 jumps, with p95 reaching 10.4 s once the blob\ncache stopped absorbing the repeats [measured 2026-08-05,\nbench-scroll-v3]. One call per screenful is the shape the caller\nactually has.\n\nMisses still enqueue `thumb_gen`, one job per missing pair — the\njobs are per asset by nature, so batching the read does not batch\nthose."
+    },
+    {
+      "path": "asterism_ui::commands::get_dispatch",
+      "kind": "function",
+      "docs": "Fetches a dispatch job by id — used by the poll loop that drives\nthe progress badge."
+    },
+    {
+      "path": "asterism_ui::commands::get_persona_profile",
+      "kind": "function",
+      "docs": "Fetches the persona's identity signal (avatar / bio / role).\n`None` means no profile row is set."
+    },
+    {
+      "path": "asterism_ui::commands::get_persona_theme",
+      "kind": "function",
+      "docs": "Fetches the persona's UI chrome (wallpaper reference). `None`\nmeans no custom theme is set."
+    },
+    {
+      "path": "asterism_ui::commands::get_session",
+      "kind": "function",
+      "docs": "Fetches one Session by surrogate id (`None` when absent). Used\nby SessionsView after an inline edit to re-hydrate the tile\nwithout a full `list_sessions` round-trip. Contract:\n[`SessionService::get`](asterism_core::application::SessionService::get)."
+    },
+    {
+      "path": "asterism_ui::commands::get_snapshot",
+      "kind": "function",
+      "docs": "Snapshot view metadata (`snapshot_get`): the freeze's id,\ncontent hash, and frozen member ids."
+    },
+    {
+      "path": "asterism_ui::commands::get_thread",
+      "kind": "function",
+      "docs": "Fetches one Thread by id."
+    },
+    {
+      "path": "asterism_ui::commands::groups_of_asset",
+      "kind": "function",
+      "docs": "Which Groups the asset already sits in — powers the \"already\nadded\" state on the detail-overlay dropdown."
+    },
+    {
+      "path": "asterism_ui::commands::hydrate_cards",
+      "kind": "function",
+      "docs": "Batch-hydrates cards by id. Companion to `list_asset_index` —\nthe frontend calls this for the ~40 rows the VList is about\nto paint plus a small prefetch window. Ids that don't exist\nor are hidden from the viewer drop out of the response."
+    },
+    {
+      "path": "asterism_ui::commands::jobs_stats",
+      "kind": "function",
+      "docs": "Snapshot of the apalis `Jobs` table used by the UI progress\nbanner. Polled every few seconds by the front-end. Mapped to the\ncontract wire form so the shape reaches `bindings.ts` through\nschema-bridge (the infra type stays off the contract layer)."
+    },
+    {
+      "path": "asterism_ui::commands::link_group",
+      "kind": "function",
+      "docs": "Connects a Group into another Group (cycle- / persona-guarded)."
+    },
+    {
+      "path": "asterism_ui::commands::list_asset_comments",
+      "kind": "function",
+      "docs": "Lists every comment on `asset_id` in chronological order."
+    },
+    {
+      "path": "asterism_ui::commands::list_asset_index",
+      "kind": "function",
+      "docs": "Index-only grid listing for 6-figure result sets. Returns\n`AssetIndex` projections — no cover text / source locator /\nfile size — so the frontend can eager-load the full ordering\nand virtualised scroll without paying the card-serialisation\ncost. The visible viewport is hydrated separately via\n`hydrate_cards`."
+    },
+    {
+      "path": "asterism_ui::commands::list_assets",
+      "kind": "function",
+      "docs": "Lists assets for the grid (returns `AssetCard` projections)."
+    },
+    {
+      "path": "asterism_ui::commands::list_chapter_marks",
+      "kind": "function",
+      "docs": "Lists the sections in one band, in the reading order the band states\n(which need not be the timeline's). What a panel re-reads after\nediting a single band."
+    },
+    {
+      "path": "asterism_ui::commands::list_color_asset_counts",
+      "kind": "function",
+      "docs": "Sidebar COLOR facet counts — `(bucket, count)` per palette swatch\n(`red` / `blue` / `white` / …) carried by a top-level asset, in\nswatch order, optionally persona-scoped. Swatches nothing carries\nare omitted."
+    },
+    {
+      "path": "asterism_ui::commands::list_dirs",
+      "kind": "function",
+      "docs": "Sidebar Dir tree (flat `parent_id` list; the UI assembles it)."
+    },
+    {
+      "path": "asterism_ui::commands::list_dispatch",
+      "kind": "function",
+      "docs": "Lists dispatch jobs with the same predicate surface as the HTTP\nlist endpoint — the UI renders a per-persona history panel."
+    },
+    {
+      "path": "asterism_ui::commands::list_duplicate_conflicts",
+      "kind": "function",
+      "docs": "The duplicate questions still waiting on a person, newest first,\nboth sides hydrated as cards.\n\nDistinct from `list_duplicate_groups`, which keeps reporting a pair\nthat has been ruled to be two separate things: this is the panel's\nwork list."
+    },
+    {
+      "path": "asterism_ui::commands::list_duplicate_groups",
+      "kind": "function",
+      "docs": "Duplicate report — sets of live assets sharing a fingerprint on\n`axis` (`\"artefact\"` by default, `\"content\"` for the bytes that\ndecide the decoded result), optionally persona-scoped.\n\nBoth counts ride along so the panel never has to present an empty\nreport as a clean bill of health: `unhashed_count` is \"still\nlooking\", `unwalked_count` is \"the content axis has no reading of\nthese files, because the migration that fills the column in could not\nopen their originals\"."
+    },
+    {
+      "path": "asterism_ui::commands::list_events",
+      "kind": "function",
+      "docs": "Newest-first telemetry listing (kind / time-window filters). Feeds\nlocal usage summaries; the HTTP twin serves agent-side aggregation."
+    },
+    {
+      "path": "asterism_ui::commands::list_exporters",
+      "kind": "function",
+      "docs": "Registered exporter slugs — the action bar renders one row per\nentry. Empty vector means the current build shipped no exporters."
+    },
+    {
+      "path": "asterism_ui::commands::list_format_asset_counts",
+      "kind": "function",
+      "docs": "Sidebar FORMAT facet counts (asset-model v4) — `(format, count)`\nper mime top-level type (`image` / `video` / `audio` / `text`) on\ntop-level assets' primary materials, optionally persona-scoped."
+    },
+    {
+      "path": "asterism_ui::commands::list_group_links",
+      "kind": "function",
+      "docs": "Every Group-in-Group connection in scope — the UI builds the\nnesting graph (child bands, descendant filter expansion) from it."
+    },
+    {
+      "path": "asterism_ui::commands::list_groups",
+      "kind": "function",
+      "docs": "Sidebar Groups section."
+    },
+    {
+      "path": "asterism_ui::commands::list_material_layers",
+      "kind": "function",
+      "docs": "Lists every band over `asset_id`'s material, each with the chapters\nin it, in display order.\n\nOne call rather than one per band: the panel needs the bands to choose\nbetween and the contents of the chosen one at the same moment. An\nannotation band's `chapters` is always empty — those hold notes, read\nthrough `list_material_marks`."
+    },
+    {
+      "path": "asterism_ui::commands::list_material_marks",
+      "kind": "function",
+      "docs": "Lists every mark in `asset_id`'s material, in the material's own\norder (`start_ms` ascending, ties broken by id)."
+    },
+    {
+      "path": "asterism_ui::commands::list_modalities",
+      "kind": "function",
+      "docs": "Modality master listing — one row per registered modality (hidden\nincluded), ordered by `sort_order` then `slug`, each carrying its\nlive asset count. Drives the sidebar axis + `slug → kind` catalog."
+    },
+    {
+      "path": "asterism_ui::commands::list_modality_asset_counts",
+      "kind": "function",
+      "docs": "Sidebar Modality counts — `(modality_slug, asset_count)`, optionally\nscoped to one persona (`None` = cross-persona total)."
+    },
+    {
+      "path": "asterism_ui::commands::list_persona_asset_counts",
+      "kind": "function",
+      "docs": "Sidebar Persona counts — `(persona_id, asset_count)` per persona\nthat owns at least one asset. Ordered by count DESC then uuid ASC."
+    },
+    {
+      "path": "asterism_ui::commands::list_personas",
+      "kind": "function",
+      "docs": "Lists every persona (used to render the sidebar)."
+    },
+    {
+      "path": "asterism_ui::commands::list_sessions",
+      "kind": "function",
+      "docs": "Sessions view — one row per `session_id` in the query scope.\nSame `ListAssetsQuery` shape as the Messages view; the UI wires\nits view-mode toggle to swap `list_assets` ↔ `list_sessions`."
+    },
+    {
+      "path": "asterism_ui::commands::list_settings",
+      "kind": "function",
+      "docs": "Every known application setting, resolved through code default →\nenvironment variable → stored row (last wins). Each row reports the\nlayer that supplied it (`source`), the whole chain it came from\n(`layers`), and the registry metadata, so the settings panel can\nrender a control and show where its value came from without a\nsecond call."
+    },
+    {
+      "path": "asterism_ui::commands::list_snapshots_containing",
+      "kind": "function",
+      "docs": "Reverse lookup — every Snapshot whose asset_ids list contains this\nasset (P5). Renders on the detail panel as \"included in these\nfreezes\" chips."
+    },
+    {
+      "path": "asterism_ui::commands::list_tag_counts",
+      "kind": "function",
+      "docs": "Sidebar Tags section — every tag paired with the number of\ndistinct assets attached to it. `persona_id` restricts the count\nto that persona's assets so the sidebar tracks the active persona\nfilter; pass `None` for a global count."
+    },
+    {
+      "path": "asterism_ui::commands::list_thread_messages",
+      "kind": "function",
+      "docs": "Lists the Messages of a Thread."
+    },
+    {
+      "path": "asterism_ui::commands::list_threads",
+      "kind": "function",
+      "docs": "Lists Threads under the given anchor, freshest first. Archived\nThreads are excluded unless `include_archived` is `true`."
+    },
+    {
+      "path": "asterism_ui::commands::merge_assets",
+      "kind": "function",
+      "docs": "The manual merge verb: a person's ruling that a set of rows is one\nthing, carried out. Not scoped to the queue — the caller declares\nthe whole set (keeper + discards + the members they saw on screen)\nand the verb folds the discards into the keeper.\n\n`command.dry_run: true` returns a preview and writes nothing;\n`false` commits the fold. Both branches return the same\n[`MergeAssetsDto`] shape (a run following a preview reads the\nanswer back on it); [`MergeAssetsDto::committed`] tells them apart.\n`refusals` and `warnings` ride on the response — a refused pair is\nnot an error but a decision the caller has to re-make, and a\nwarning is what a rule was protecting before the caller confirms."
+    },
+    {
+      "path": "asterism_ui::commands::merge_groups",
+      "kind": "function",
+      "docs": "Merges one manual group into another and deletes the source\n(duplicate-group consolidation). Returns the number of\nmembers moved."
+    },
+    {
+      "path": "asterism_ui::commands::move_dir",
+      "kind": "function",
+      "docs": "Re-parents a Dir (`None` = to the root); cycle-guarded."
+    },
+    {
+      "path": "asterism_ui::commands::move_group_to_dir",
+      "kind": "function",
+      "docs": "Files a Group under a Dir (`None` = back to the root)."
+    },
+    {
+      "path": "asterism_ui::commands::paste_image_import",
+      "kind": "function",
+      "docs": "Writes a clipboard-pasted image blob to\n`~/Pictures/Asterism/pasted/paste-<ts>.<ext>` and dispatches\n`add_asset` for it. The MIME-type hint picks the extension; the\ndownstream pipeline still sniffs the actual container so a\nslightly-wrong `image/webp` label does not stop cover_gen /\nthumb_gen from producing previews."
+    },
+    {
+      "path": "asterism_ui::commands::patch_session_metadata",
+      "kind": "function",
+      "docs": "Partially updates a Session's metadata (`title` / `note` /\n`cover_hint`). Each `null` field is left unchanged. Use\n[`rename_session`] to clear the title back to null."
+    },
+    {
+      "path": "asterism_ui::commands::post_asset_comment",
+      "kind": "function",
+      "docs": "Posts a new comment. See [`PostAssetCommentCommand`] for the\nauthor_kind / author_persona_id semantics."
+    },
+    {
+      "path": "asterism_ui::commands::post_chapter_mark",
+      "kind": "function",
+      "docs": "Adds a section to a band the person owns."
+    },
+    {
+      "path": "asterism_ui::commands::post_material_mark",
+      "kind": "function",
+      "docs": "Places a new mark. See [`PostMaterialMarkCommand`] for the anchor and\nauthor_kind / author_persona_id semantics."
+    },
+    {
+      "path": "asterism_ui::commands::promote_snapshot_to_group",
+      "kind": "function",
+      "docs": "Promotes a Snapshot into a hand-owned Group (mirror of\n`PromoteTagToGroup`): bulk-attaches every member in frozen order\nand stamps `origin_snapshot_id` as the Group's birth record."
+    },
+    {
+      "path": "asterism_ui::commands::promote_tag_to_group",
+      "kind": "function",
+      "docs": "Snapshots every asset carrying a tag into a newly-created Group.\nThe tag itself is left alone; the promotion is a one-shot copy\n(see `AssetService::promote_tag_to_group` for the rationale)."
+    },
+    {
+      "path": "asterism_ui::commands::promote_volatile_selection",
+      "kind": "function",
+      "docs": "Fuses freeze + promote for the grid's volatile pick (W5-d):\nmints a Snapshot from the picked ids (content-hash deduped)\nand promotes it into a hand-owned Group in one step — the\nright-click \"Group-ify selection\" entry, no pre-existing Snapshot\nneeded."
+    },
+    {
+      "path": "asterism_ui::commands::purge_asset",
+      "kind": "function",
+      "docs": "Permanently deletes an already-trashed asset. Conflicts when the\nasset is still live — trash it first."
+    },
+    {
+      "path": "asterism_ui::commands::purge_group",
+      "kind": "function",
+      "docs": "Permanently deletes an already-trashed Group (cascades the m:n\nrows). Conflicts when the Group is still live."
+    },
+    {
+      "path": "asterism_ui::commands::purge_persona",
+      "kind": "function",
+      "docs": "Permanently deletes an already-trashed persona and everything it\nholds. Conflicts when the persona is still live."
+    },
+    {
+      "path": "asterism_ui::commands::random_assets",
+      "kind": "function",
+      "docs": "A random handful out of the current filter — the sidebar's\n\"🎲 Random\".\n\nThe grid shows the picks in place of its listing, so nothing about\nthe answer is a page: it cannot be scrolled past `k`, and asking\nagain answers differently. That is the feature.\n\n**Not exposed over MCP on purpose.** The picks exist to give a person\nsomething to look at when they do not know what they are looking for;\nan agent asking for assets under a filter wants `asset_list`, which\nenumerates, counts, and can be paged."
+    },
+    {
+      "path": "asterism_ui::commands::rebuild_edges",
+      "kind": "function",
+      "docs": "Enqueues an incremental constellation-edge rebuild for the asset.\nReturns the engine's task id."
+    },
+    {
+      "path": "asterism_ui::commands::rebuild_sessions",
+      "kind": "function",
+      "docs": "Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot\nwas retired in the Session 1st-class migration, so the handler\nis a no-op today; the tauri command stays for wire compatibility\nso a future reconciliation pass has a caller-visible entry\npoint (progress emits via the shared `job:progress:{id}` channel)."
+    },
+    {
+      "path": "asterism_ui::commands::record_diag",
+      "kind": "function",
+      "docs": "Appends one webview-origin diagnostic to `diag_log` — the capture\nhalf lives in `lib/diag.ts` (console/error hooks), the persistence\nhalf in the shared tracing subscriber. Fire-and-forget on the UI\nside, like `record_event`. Stateless: the re-emit helper writes\nthrough the process-global subscriber, not a service handle."
+    },
+    {
+      "path": "asterism_ui::commands::record_event",
+      "kind": "function",
+      "docs": "Appends one telemetry event to the local `event_log`. Fire-and-\nforget on the UI side (a lost event is preferable to a blocked\ninteraction)."
+    },
+    {
+      "path": "asterism_ui::commands::redispatch",
+      "kind": "function",
+      "docs": "Re-runs a finished dispatch with the same frozen input (P2)."
+    },
+    {
+      "path": "asterism_ui::commands::register_persona",
+      "kind": "function",
+      "docs": "Registers a new persona."
+    },
+    {
+      "path": "asterism_ui::commands::rehome_dropped_path",
+      "kind": "function",
+      "docs": "Rehomes a dropped path into `~/Pictures/Asterism/dropped/`\nwhen it lives under a volatile TEMP dir (macOS screenshot\nstash lands in `/private/var/folders/…/TemporaryItems/`, and\nscreenshots dragged out of the preview thumbnail vanish once\nthe preview closes — a stale locator would then break every\ndownstream read). The copy also drops the path into the Tauri\n`assetProtocol` scope so `convertFileSrc` works for full-window\nimage playback. Returns the durable path; the frontend feeds it\nstraight into `add_asset`."
+    },
+    {
+      "path": "asterism_ui::commands::remove_asset_from_group",
+      "kind": "function",
+      "docs": "Idempotent remove of an asset from a Group."
+    },
+    {
+      "path": "asterism_ui::commands::rename_dir",
+      "kind": "function",
+      "docs": "Renames a Dir."
+    },
+    {
+      "path": "asterism_ui::commands::rename_group",
+      "kind": "function",
+      "docs": "Renames a Group."
+    },
+    {
+      "path": "asterism_ui::commands::rename_session",
+      "kind": "function",
+      "docs": "Renames a Session (title-only write). Passing `title: null`\nclears the title back to the untitled state — this is the sole\npath that expresses NULL because\n[`patch_session_metadata`] treats per-field `null` as \"leave\nunchanged\"."
+    },
+    {
+      "path": "asterism_ui::commands::reorder_group_assets",
+      "kind": "function",
+      "docs": "Rewrites the front-to-back order of a Group's assets after a drag."
+    },
+    {
+      "path": "asterism_ui::commands::reorder_group_children",
+      "kind": "function",
+      "docs": "Rewrites the order of a Group's child groups."
+    },
+    {
+      "path": "asterism_ui::commands::reorder_personas",
+      "kind": "function",
+      "docs": "Rewrites `display_order` across a persona slice."
+    },
+    {
+      "path": "asterism_ui::commands::reset_setting",
+      "kind": "function",
+      "docs": "Clears one setting override and returns the value that now applies.\nIdempotent — resetting a key that was never overridden succeeds.\n\nLike [`set_setting`], the response is the *resolved* value — here,\nthe layer directly beneath the row just removed: `\"env\"` when the\nkey's variable is exported and usable, `\"default\"` otherwise.\nClearing the stored row does not clear the environment."
+    },
+    {
+      "path": "asterism_ui::commands::resolve_duplicate_conflict",
+      "kind": "function",
+      "docs": "Answers one duplicate question — `folded` (queues the fold onto\n`keeper_id`, which must be one of the pair) or `kept` (both rows\nstay). Refused when the row was already answered or when either\nside has since been folded away or trashed."
+    },
+    {
+      "path": "asterism_ui::commands::restore_asset",
+      "kind": "function",
+      "docs": "Returns a trashed asset to the live set."
+    },
+    {
+      "path": "asterism_ui::commands::restore_group",
+      "kind": "function",
+      "docs": "Returns a trashed Group to the sidebar."
+    },
+    {
+      "path": "asterism_ui::commands::restore_persona",
+      "kind": "function",
+      "docs": "Returns a trashed persona and the assets that went with it."
+    },
+    {
+      "path": "asterism_ui::commands::search_asset_ids",
+      "kind": "function",
+      "docs": "The same retrieval as `search_assets`, reduced to the rank order.\n\nFeeds the grid's `✦ Relevance` sort: the page itself comes from the\nexact (Query-side) read, and this only says which of those rows the\nretriever considers the better match. The ids are an ordering hint,\nnot a membership answer.\n\n**Not exposed over MCP on purpose.** An agent asking about relevance\nalready has `asset_search`, which hands back ranked cards; an\nids-only reply would only be useful to something that is already\npainting a grid it fetched by other means."
+    },
+    {
+      "path": "asterism_ui::commands::search_assets",
+      "kind": "function",
+      "docs": "Full-text / fuzzy search."
+    },
+    {
+      "path": "asterism_ui::commands::set_default_material_layer",
+      "kind": "function",
+      "docs": "Chooses the band the panel shows, and the one a new mark lands in.\n\nReturns nothing: the flag moves off whichever band held it, so the\ncaller re-reads the asset's bands rather than patching one entry."
+    },
+    {
+      "path": "asterism_ui::commands::set_persona_profile",
+      "kind": "function",
+      "docs": "Upserts the persona's identity signal."
+    },
+    {
+      "path": "asterism_ui::commands::set_persona_theme",
+      "kind": "function",
+      "docs": "Sets (or clears) the wallpaper for a persona."
+    },
+    {
+      "path": "asterism_ui::commands::set_setting",
+      "kind": "function",
+      "docs": "Stores one setting override and returns the value that now applies.\n\nA successful write always resolves to `source: \"stored\"` — nothing\noutranks the user's choice. The resolved row is returned rather than\nthe input so the caller also gets the refreshed `layers` chain.\nRejects a value that does not match the key's declared kind or falls\noutside its range, and an unknown key."
+    },
+    {
+      "path": "asterism_ui::commands::snapshot_members",
+      "kind": "function",
+      "docs": "Snapshot view members (`snapshot_members`): renderable cards\nin frozen `position` order (later-deleted assets are absent)."
+    },
+    {
+      "path": "asterism_ui::commands::trash_asset",
+      "kind": "function",
+      "docs": "Moves an asset to the trash (reversible)."
+    },
+    {
+      "path": "asterism_ui::commands::trash_group",
+      "kind": "function",
+      "docs": "Moves a Group to the trash (reversible; membership and drag order\nsurvive, member assets are untouched)."
+    },
+    {
+      "path": "asterism_ui::commands::trash_persona",
+      "kind": "function",
+      "docs": "Moves a persona and every asset it holds to the trash (reversible)."
+    },
+    {
+      "path": "asterism_ui::commands::unlink_group",
+      "kind": "function",
+      "docs": "Removes a Group-in-Group connection."
+    },
+    {
+      "path": "asterism_ui::commands::update_asset_meta",
+      "kind": "function",
+      "docs": "Partially updates an asset's metadata."
+    },
+    {
+      "path": "asterism_ui::commands::update_asset_meta_batch",
+      "kind": "function",
+      "docs": "Partially updates metadata for multiple assets in one call."
+    },
+    {
+      "path": "asterism_ui::commands::update_modality",
+      "kind": "function",
+      "docs": "Partially updates a modality master row (each omitted field is left\nunchanged). Used by drag-reorder (`sort_order`) and the settings UI."
+    },
+    {
+      "path": "asterism_ui::commands::update_query_group_query",
+      "kind": "function",
+      "docs": "\"Update query\": validates + persists a replacement rule (rejecting\ndependency cycles) and re-evaluates the membership."
+    },
+    {
+      "path": "asterism_ui::error",
+      "kind": "module",
+      "docs": "`UiError` — error type crossed by Tauri command handlers.\n\nTauri commands must return `Result<T, E>` where `E: Serialize`\n(`anyhow` will not do). We use a `serde` tagged enum\n(`{ kind, message }`) so the TypeScript side can pattern-match on the\nvariant."
+    },
+    {
+      "path": "asterism_ui::error::UiError",
+      "kind": "enum",
+      "docs": "Error returned to the frontend from every Tauri command."
+    },
+    {
+      "path": "asterism_ui::run",
+      "kind": "function",
+      "docs": "Tauri v2 app entrypoint (mobile-ready).\n\nThe setup hook initialises the whole backend (open the SQLite isle,\nrun migrations, start the job engine, wire up services), manages the\nresulting `AppState`, opens the desktop window (unless `--headless`),\nand spawns the loopback HTTP server that mirrors the Tauri command\nsurface. Command handlers stay thin — one per use-case call — and\nlive in the `commands` module."
+    },
+    {
+      "path": "asterism_ui::state",
+      "kind": "module",
+      "docs": "`AppState` — service DI + backend initialisation.\n\nTauri's own `State` container gives us `Arc`-style sharing, so this\nstruct just holds `Arc<Service>` fields and does not wrap again. The\nheavy lifting is delegated to the shared `asterism_server::core_init`\n(`Full` mode: read-write tantivy index + job worker); this module only\nadapts the returned `CoreCtx` into `AppState` and supplies the Tauri\nprogress emitter."
+    },
+    {
+      "path": "asterism_ui::state::AppState",
+      "kind": "struct",
+      "docs": "Bundle of services registered as Tauri state.\n\nNote: no isle handle here. The precomputed session snapshot is\nrebuilt through `AssetService::rebuild_sessions` (which enqueues\na `SessionRebuild` job); the store's SQLite handle lives inside\nthe store itself."
+    },
+    {
+      "path": "asterism_ui::state::init",
+      "kind": "function",
+      "docs": "Initialises the whole backend and returns both the Tauri `AppState`\nand the HTTP [`ServerCtx`]. Invoked from the Tauri setup hook. Opens\nthe shared core in `Full` mode (this process is the single tantivy\nwriter and runs the job worker).\n\nBoth context structs are built from the same `CoreCtx` so the UI and\nthe loopback HTTP surface it serves share one service graph and one\njob worker. Neither wrapper constructs a service of its own: one\nbuilt here rather than in `init_core` would be reachable from this\ntransport only, which is how the comment thread spent four commands\nwith no HTTP route. All fields are `Arc`/`Clone`, so the bundle is\nassembled by cloning the handles before `AppState` takes ownership of\nthe originals."
+    }
+  ]
+}

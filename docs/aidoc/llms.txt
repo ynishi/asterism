@@ -1,0 +1,249 @@
+# asterism
+
+> `asterism-benchgen` — the seeded corpus behind the grid/import benches.
+
+## asterism-benchgen 0.0.0
+
+- [asterism-benchgen overview](asterism_benchgen/index.md): `asterism-benchgen` — the seeded corpus behind the grid/import benches.
+
+## asterism-contract 0.0.0
+
+- [asterism-contract overview](asterism_contract/index.md): # asterism-contract — Command / Query / Response DTOs
+- [asterism-contract::command](asterism_contract/command.md): Command DTOs — inputs for state-changing operations.
+- [asterism-contract::digest](asterism_contract/digest.md): The notation a digest is written in — the `sha256:` tag, and the
+- [asterism-contract::dto](asterism_contract/dto.md): Response DTOs — outputs shared between the application services, the
+- [asterism-contract::query](asterism_contract/query.md): Query DTOs — inputs for read-side operations.
+- [asterism-contract::query_group](asterism_contract/query_group.md): Query Group `query_json` — the persisted rule of a query-backed Group.
+- [asterism-contract::sidecar](asterism_contract/sidecar.md): The shape of an exported artefact's `<file>.meta.json` sidecar.
+- [asterism-contract::sort](asterism_contract/sort.md): Sort specification DTO — the wire form of the grid's sort axis.
+
+## asterism-core 0.0.0
+
+- [asterism-core overview](asterism_core/index.md): # asterism-core — Domain + Application layer
+- [asterism-core::application](asterism_core/application.md): Application layer — use-case services.
+- [asterism-core::application::app_setting_service](asterism_core/application__app_setting_service.md): `AppSettingService` — use cases for application settings.
+- [asterism-core::application::asset_comment_service](asterism_core/application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
+- [asterism-core::application::asset_service](asterism_core/application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
+- [asterism-core::application::dispatch_service](asterism_core/application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [asterism-core::application::fold_redirect](asterism_core/application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
+- [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
+- [asterism-core::application::material_layer_service](asterism_core/application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
+- [asterism-core::application::material_mark_service](asterism_core/application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
+- [asterism-core::application::modality_service](asterism_core/application__modality_service.md): `ModalityService` — use cases for the Modality master.
+- [asterism-core::application::persona_service](asterism_core/application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
+- [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
+- [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
+- [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
+- [asterism-core::application::session_service](asterism_core/application__session_service.md): `SessionService` — use cases for the Session 1st-class entity.
+- [asterism-core::application::snapshot_service](asterism_core/application__snapshot_service.md): `SnapshotService` — application surface for the immutable `Snapshot`
+- [asterism-core::application::sort_context](asterism_core/application__sort_context.md): Assembles the [`SortContext`] the sort evaluator needs, sourcing every
+- [asterism-core::application::thread_service](asterism_core/application__thread_service.md): `ThreadService` — application-layer surface for `Thread` and its
+- [asterism-core::application::thumb_service](asterism_core/application__thumb_service.md): `ThumbService` — pre-generated thumbnail cache use cases.
+- [asterism-core::application_support](asterism_core/application_support.md): Application **support** layer — use cases no transport adapter
+- [asterism-core::application_support::chapter_intake](asterism_core/application_support__chapter_intake.md): What a fresh reading of a material's chapter list means for the
+- [asterism-core::application_support::dispatch_runner_service](asterism_core/application_support__dispatch_runner_service.md): `DispatchRunnerService` — the runner-side half of the outbound
+- [asterism-core::application_support::duplicate_detection](asterism_core/application_support__duplicate_detection.md): Duplicate detection — what happens the moment a fingerprint lands on
+- [asterism-core::application_support::query_group_refresh_service](asterism_core/application_support__query_group_refresh_service.md): `QueryGroupRefreshService` — bulk Query Group re-evaluation.
+- [asterism-core::application_support::retention_service](asterism_core/application_support__retention_service.md): `RetentionService` — the trash retention sweep.
+- [asterism-core::domain](asterism_core/domain.md): Domain layer — entities, value objects, and repository ports.
+- [asterism-core::domain::album_meta](asterism_core/domain__album_meta.md): AlbumMeta — what a person or an agent *says about* an asset, in
+- [asterism-core::domain::app_setting](asterism_core/domain__app_setting.md): Application settings — the closed key registry and its stored
+- [asterism-core::domain::asset](asterism_core/domain__asset.md): `Asset` — an aggregate root for a single footprint, plus the read
+- [asterism-core::domain::asset_comment](asterism_core/domain__asset_comment.md): `AssetComment` — a thread of short notes attached to an Asset.
+- [asterism-core::domain::attribution](asterism_core/domain__attribution.md): Attribution — *who* a record is by, *what* operated on their behalf,
+- [asterism-core::domain::chapter_mark](asterism_core/domain__chapter_mark.md): `ChapterMark` — one entry in a chapter list: a named section of an
+- [asterism-core::domain::color](asterism_core/domain__color.md): `ColorBucket` — the closed set of colours the palette facet filters
+- [asterism-core::domain::constellation](asterism_core/domain__constellation.md): Constellation edge planning — pure domain logic that decides how a
+- [asterism-core::domain::content_hash](asterism_core/domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
+- [asterism-core::domain::content_region](asterism_core/domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
+- [asterism-core::domain::dir](asterism_core/domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
+- [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
+- [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
+- [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
+- [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
+- [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
+- [asterism-core::domain::material](asterism_core/domain__material.md): `Material` — the physical-original layer of an asset (asset-model v4).
+- [asterism-core::domain::material_layer](asterism_core/domain__material_layer.md): `MaterialLayer` — one band of marks over an Asset's material, and
+- [asterism-core::domain::material_mark](asterism_core/domain__material_mark.md): `MaterialMark` — a mark placed into an Asset's **material**: the
+- [asterism-core::domain::material_meta](asterism_core/domain__material_meta.md): `material_meta` — the canonical form the metadata a container
+- [asterism-core::domain::material_meta_raw](asterism_core/domain__material_meta_raw.md): `material_meta_raw` — the container's metadata bytes, kept verbatim,
+- [asterism-core::domain::merge_plan](asterism_core/domain__merge_plan.md): `MergePlan` — a person's ruling that a set of rows is one thing, and
+- [asterism-core::domain::modality](asterism_core/domain__modality.md): `ModalityDef` — the open Modality master entry (the `modality` table).
+- [asterism-core::domain::observation](asterism_core/domain__observation.md): Observability domain — the four streams and their policies.
+- [asterism-core::domain::persona](asterism_core/domain__persona.md): `Persona` — the primary aggregate root.
+- [asterism-core::domain::persona_profile](asterism_core/domain__persona_profile.md): `PersonaProfile` — a 1:1 side aggregate holding the identity
+- [asterism-core::domain::persona_theme](asterism_core/domain__persona_theme.md): `PersonaTheme` — a 1:1 aggregate holding the persona-scoped visual
+- [asterism-core::domain::probe](asterism_core/domain__probe.md): `probe` — the port a format's identity measurement is written
+- [asterism-core::domain::provenance](asterism_core/domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
+- [asterism-core::domain::provenance::source](asterism_core/domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
+- [asterism-core::domain::query_group_eval](asterism_core/domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
+- [asterism-core::domain::render](asterism_core/domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
+- [asterism-core::domain::repository](asterism_core/domain__repository.md): Repository ports — the persistence traits declared here and implemented
+- [asterism-core::domain::series](asterism_core/domain__series.md): `series` — "made the same way": a rule for reading a material's
+- [asterism-core::domain::session](asterism_core/domain__session.md): `Session` — the Dialog-modality 1st-class aggregate root.
+- [asterism-core::domain::snapshot](asterism_core/domain__snapshot.md): `Snapshot` — an immutable, content-addressed freeze of an ordered
+- [asterism-core::domain::snapshot_hash](asterism_core/domain__snapshot_hash.md): Snapshot `content_hash` — the canonical member-set fingerprint.
+- [asterism-core::domain::sort_eval](asterism_core/domain__sort_eval.md): Sort evaluation — the backend port of the UI grid comparator.
+- [asterism-core::domain::source_locator](asterism_core/domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
+- [asterism-core::domain::tag](asterism_core/domain__tag.md): `Tag` — the channel entity (a classification axis shared across
+- [asterism-core::domain::thread](asterism_core/domain__thread.md): `Thread` — the app-level container that collects `Message`s from
+- [asterism-core::domain::value](asterism_core/domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
+- [asterism-core::error](asterism_core/error.md): `DomainError` — the innermost error type shared across every layer of
+
+## asterism-dispatch-sdk 0.0.0
+
+- [asterism-dispatch-sdk overview](asterism_dispatch_sdk/index.md): # asterism-dispatch-sdk
+- [asterism-dispatch-sdk::derived](asterism_dispatch_sdk/derived.md): Re-export shim for the shared boundary type
+- [asterism-dispatch-sdk::exporter](asterism_dispatch_sdk/exporter.md): `Exporter` — the trait every outbound adapter implements.
+- [asterism-dispatch-sdk::handle](asterism_dispatch_sdk/handle.md): `Handle` — the exporter's backend-side reference to an in-flight job.
+- [asterism-dispatch-sdk::schema](asterism_dispatch_sdk/schema.md): Schema artifact registry — the SDK-owned half of the "SDK =
+- [asterism-dispatch-sdk::state](asterism_dispatch_sdk/state.md): Lifecycle state of a dispatch as seen by the exporter's
+
+## asterism-exporter-comfy 0.0.0
+
+- [asterism-exporter-comfy overview](asterism_exporter_comfy/index.md): # asterism-exporter-comfy
+
+## asterism-exporter-file 0.0.0
+
+- [asterism-exporter-file overview](asterism_exporter_file/index.md): # asterism-exporter-file
+
+## asterism-exporter-http 0.0.0
+
+- [asterism-exporter-http overview](asterism_exporter_http/index.md): # asterism-exporter-http
+
+## asterism-importer 0.0.0
+
+- [asterism-importer overview](asterism_importer/index.md): Unified CLI for all built-in Asterism import adapters.
+
+## asterism-importer-audio 0.0.0
+
+- [asterism-importer-audio overview](asterism_importer_audio/index.md): Audio import adapter — turns a scanned audio file into
+- [asterism-importer-audio::parser](asterism_importer_audio/parser.md): Audio `RawItem` → `Footprint::Audio` parser.
+
+## asterism-importer-cc 0.0.0
+
+- [asterism-importer-cc overview](asterism_importer_cc/index.md): Claude Code session import adapter — turns a session's JSONL log
+- [asterism-importer-cc::parser](asterism_importer_cc/parser.md): Claude Code JSONL → `Footprint::ChatMessage` (+ `Footprint::Image`)
+
+## asterism-importer-image 0.0.0
+
+- [asterism-importer-image overview](asterism_importer_image/index.md): Image import adapter — parses one image file into one
+- [asterism-importer-image::parser](asterism_importer_image/parser.md): Image `RawItem` → `Footprint::Image` parser.
+
+## asterism-importer-persona-journal 0.0.0
+
+- [asterism-importer-persona-journal overview](asterism_importer_persona_journal/index.md): persona-journal import adapter — turns a persona-journal SQLite row
+- [asterism-importer-persona-journal::parser](asterism_importer_persona_journal/parser.md): persona-journal SQLite row -> `Footprint::JournalEntry` parser.
+
+## asterism-importer-sdk 0.0.0
+
+- [asterism-importer-sdk overview](asterism_importer_sdk/index.md): # asterism-importer-sdk
+- [asterism-importer-sdk::bundle](asterism_importer_sdk/bundle.md): Deriving the grouping key that ties the footprints of one container
+- [asterism-importer-sdk::card](asterism_importer_sdk/card.md): # Character-card parser subsystem
+- [asterism-importer-sdk::card::envelope](asterism_importer_sdk/card__envelope.md): Envelope + context types shared by every character-card parser.
+- [asterism-importer-sdk::card::parser](asterism_importer_sdk/card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
+- [asterism-importer-sdk::card::parser::v2_default](asterism_importer_sdk/card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives
+- [asterism-importer-sdk::card::png_chunk](asterism_importer_sdk/card__png_chunk.md): Character-card PNG `tEXt` chunk decoders.
+- [asterism-importer-sdk::card::registry](asterism_importer_sdk/card__registry.md): Registry that dispatches a [`CardEnvelope`] to the right
+- [asterism-importer-sdk::card::source_parser](asterism_importer_sdk/card__source_parser.md): [`SourceParser`] adapter that turns any character-card [`RawItem`]
+- [asterism-importer-sdk::card::v2](asterism_importer_sdk/card__v2.md): Canonical Character Card V2 parser (see [`crate::catalogue`] section 1).
+- [asterism-importer-sdk::card::v3](asterism_importer_sdk/card__v3.md): Character Card V3 parser (see [`crate::catalogue`] section 2).
+- [asterism-importer-sdk::catalogue](asterism_importer_sdk/catalogue.md): # Import target catalogue
+- [asterism-importer-sdk::client](asterism_importer_sdk/client.md): Thin HTTP client for the asterism-server API.
+- [asterism-importer-sdk::footprint](asterism_importer_sdk/footprint.md): `Footprint` — the typed, plugin-facing shape a parser hands back.
+- [asterism-importer-sdk::harvest](asterism_importer_sdk/harvest.md): # Agent-harvest intake subsystem
+- [asterism-importer-sdk::harvest::envelope](asterism_importer_sdk/harvest__envelope.md): Typed schema for `asterism_agent_harvest` v1 JSON dumps.
+- [asterism-importer-sdk::harvest::parser](asterism_importer_sdk/harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
+- [asterism-importer-sdk::mapper](asterism_importer_sdk/mapper.md): Convenience shape for parser output plus the mapping to the wire
+- [asterism-importer-sdk::parser](asterism_importer_sdk/parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [asterism-importer-sdk::progress](asterism_importer_sdk/progress.md): Tiny progress reporter — running success / failure counters, plus
+- [asterism-importer-sdk::runner](asterism_importer_sdk/runner.md): Shared importer execution pipeline.
+- [asterism-importer-sdk::scanner](asterism_importer_sdk/scanner.md): `SourceScanner` trait and shared item type.
+- [asterism-importer-sdk::scanner::fs](asterism_importer_sdk/scanner__fs.md): `FsScanner` — filesystem source scanner.
+- [asterism-importer-sdk::scanner::sqlite](asterism_importer_sdk/scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+
+## asterism-importer-tape 0.0.0
+
+- [asterism-importer-tape overview](asterism_importer_tape/index.md): Tape import adapter — turns an exported conversation tape file into
+- [asterism-importer-tape::parser](asterism_importer_tape/parser.md): Persona Tape parser — one terminal transcript file becomes one document.
+
+## asterism-importer-video 0.0.0
+
+- [asterism-importer-video overview](asterism_importer_video/index.md): Video import adapter — turns a scanned video file into
+- [asterism-importer-video::parser](asterism_importer_video/parser.md): Video `RawItem` → `Footprint::Video` parser.
+
+## asterism-infra 0.0.0
+
+- [asterism-infra overview](asterism_infra/index.md): # asterism-infra — outbound adapters (SQLite, filesystem, job engine)
+- [asterism-infra::dispatch](asterism_infra/dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
+- [asterism-infra::dispatch::runtime](asterism_infra/dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [asterism-infra::jobs](asterism_infra/jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
+- [asterism-infra::jobs::chapter_ffmetadata](asterism_infra/jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
+- [asterism-infra::jobs::handlers](asterism_infra/jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
+- [asterism-infra::jobs::preview_ffmpeg](asterism_infra/jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
+- [asterism-infra::jobs::thumb_ffmpeg](asterism_infra/jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
+- [asterism-infra::jobs::thumb_macos](asterism_infra/jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
+- [asterism-infra::jobs::thumb_video](asterism_infra/jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [asterism-infra::observe](asterism_infra/observe.md): Observation — the `tracing` subscriber and the streams it writes.
+- [asterism-infra::paths](asterism_infra/paths.md): Data-profile and on-disk layout conventions.
+- [asterism-infra::probes](asterism_infra/probes.md): The probes this build has, and the one question a caller asks of all
+- [asterism-infra::probes::jpeg](asterism_infra/probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
+- [asterism-infra::probes::png](asterism_infra/probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
+- [asterism-infra::search](asterism_infra/search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
+- [asterism-infra::search::fan_out](asterism_infra/search__fan_out.md): One [`AssetIndexer`] over several.
+- [asterism-infra::search::tantivy_index](asterism_infra/search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
+- [asterism-infra::search::tokenizer](asterism_infra/search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
+- [asterism-infra::source_text](asterism_infra/source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
+- [asterism-infra::sqlite](asterism_infra/sqlite.md): SQLite backend — connection lifecycle and schema migration built on
+- [asterism-infra::sqlite::map](asterism_infra/sqlite__map.md): Row ↔ domain conversion helpers.
+- [asterism-infra::sqlite::migrations](asterism_infra/sqlite__migrations.md): SQLite schema migrations — `PRAGMA user_version` scheme.
+- [asterism-infra::sqlite::repo](asterism_infra/sqlite__repo.md): Repository adapters — SQLite implementations of the ports declared in
+- [asterism-infra::sqlite::repo::app_setting](asterism_infra/sqlite__repo__app_setting.md): SQLite adapter for the `AppSettingRepository` port.
+- [asterism-infra::sqlite::repo::asset](asterism_infra/sqlite__repo__asset.md): SQLite adapter for the `AssetRepository` port.
+- [asterism-infra::sqlite::repo::asset_body](asterism_infra/sqlite__repo__asset_body.md): SQLite adapter for the `AssetBodyRepository` port.
+- [asterism-infra::sqlite::repo::asset_comment](asterism_infra/sqlite__repo__asset_comment.md): SQLite adapter for the `AssetCommentRepository` port.
+- [asterism-infra::sqlite::repo::asset_text_index](asterism_infra/sqlite__repo__asset_text_index.md): SQLite adapter for the write side of the **Query-side** text index
+- [asterism-infra::sqlite::repo::attribution_guard](asterism_infra/sqlite__repo__attribution_guard.md): Write-side guard for the attribution columns.
+- [asterism-infra::sqlite::repo::chapter_mark](asterism_infra/sqlite__repo__chapter_mark.md): SQLite adapter for the `ChapterMarkRepository` port.
+- [asterism-infra::sqlite::repo::dir](asterism_infra/sqlite__repo__dir.md): SQLite adapter for `DirRepository`.
+- [asterism-infra::sqlite::repo::dispatch](asterism_infra/sqlite__repo__dispatch.md): SQLite adapter for the `DispatchRepository` port.
+- [asterism-infra::sqlite::repo::edge](asterism_infra/sqlite__repo__edge.md): SQLite adapter for the `EdgeRepository` port.
+- [asterism-infra::sqlite::repo::group](asterism_infra/sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
+- [asterism-infra::sqlite::repo::instance](asterism_infra/sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
+- [asterism-infra::sqlite::repo::material_layer](asterism_infra/sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
+- [asterism-infra::sqlite::repo::material_mark](asterism_infra/sqlite__repo__material_mark.md): SQLite adapter for the `MaterialMarkRepository` port.
+- [asterism-infra::sqlite::repo::modality](asterism_infra/sqlite__repo__modality.md): SQLite adapter for the `ModalityRepository` port — the Modality
+- [asterism-infra::sqlite::repo::persona](asterism_infra/sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
+- [asterism-infra::sqlite::repo::persona_profile](asterism_infra/sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
+- [asterism-infra::sqlite::repo::persona_theme](asterism_infra/sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
+- [asterism-infra::sqlite::repo::query_group](asterism_infra/sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
+- [asterism-infra::sqlite::repo::series](asterism_infra/sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
+- [asterism-infra::sqlite::repo::session](asterism_infra/sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
+- [asterism-infra::sqlite::repo::snapshot](asterism_infra/sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
+- [asterism-infra::sqlite::repo::tag](asterism_infra/sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
+- [asterism-infra::sqlite::repo::thread](asterism_infra/sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
+- [asterism-infra::sqlite::repo::thumb](asterism_infra/sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
+- [asterism-infra::telemetry](asterism_infra/telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
+
+## asterism-media-probe 0.0.0
+
+- [asterism-media-probe overview](asterism_media_probe/index.md): Header-only media measurement: what the bytes say about themselves.
+
+## asterism-server 0.0.0
+
+- [asterism-server overview](asterism_server/index.md): # asterism-server — library surface.
+- [asterism-server::attribution](asterism_server/attribution.md): Turning what a remote caller said into the attribution a write
+- [asterism-server::core_init](asterism_server/core_init.md): Shared backend initialisation for both the Tauri UI and the standalone
+- [asterism-server::http](asterism_server/http.md): HTTP transport — axum router.
+- [asterism-server::mcp](asterism_server/mcp.md): MCP transport — the third adapter over the same application services.
+- [asterism-server::mcp_proxy](asterism_server/mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
+- [asterism-server::state](asterism_server/state.md): Backend context for the standalone server. Thin wrapper over the
+
+## asterism-ui 0.0.0
+
+- [asterism-ui overview](asterism_ui/index.md): # asterism-ui — Asterism desktop UI (Tauri v2 backend)
+- [asterism-ui::commands](asterism_ui/commands.md): Tauri command handlers — a thin translation layer. They pass DTOs
+- [asterism-ui::error](asterism_ui/error.md): `UiError` — error type crossed by Tauri command handlers.
+- [asterism-ui::state](asterism_ui/state.md): `AppState` — service DI + backend initialisation.
+

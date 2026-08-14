@@ -274,6 +274,57 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
     BENCH_JUMPS="{{ jumps }}" BENCH_CORPUS_SEED="{{ seed }}" \
         npx wdio run wdio.bench.conf.ts --spec ./e2e-bench/bench-scroll.spec.ts
 
+# Regenerate the LLM-facing doc artifacts under docs/aidoc/.
+#
+# cargo-aidoc (https://github.com/ynishi/cargo-aidoc) projects rustdoc
+# JSON into committed markdown: llms.txt, a per-crate index.md carrying
+# the public-module list, and per-module reference pages. That committed
+# copy is the module inventory this repository maintains — domain/mod.rs
+# stopped hand-listing its submodules after the list shipped 15 modules
+# stale (27 of 42, #25). A generated inventory cannot rot the same way
+# because `aidoc-check` fails when it drifts from the tree.
+#
+# Two prerequisites, stated here because the recipe outlives any PR:
+# (1) a nightly toolchain — the pipeline shells out to `cargo +nightly
+# rustdoc --output-format json` per crate, which is why neither aidoc
+# recipe joins `check`: this workspace's toolchain floats (no
+# rust-toolchain.toml) and a machine without nightly must still be able
+# to run the full gate. (2) cargo-aidoc newer than the 0.1.0 release,
+# which fails on this workspace: it derived the rustdoc JSON filename
+# from the package name, and asterism-ui's `[lib] name =
+# "asterism_ui_lib"` (the Tauri bin/lib name split) breaks that
+# assumption. Until a fixed version is on crates.io, install from the
+# repo: `cargo install --git https://github.com/ynishi/cargo-aidoc
+# cargo-aidoc`.
+#
+# `--title` pins the llms.txt H1. The tool's default is the checkout
+# directory's basename, which from a worktree named after its branch
+# would bake the branch slug into a committed artifact — and then
+# `aidoc-check` reports drift from every other checkout.
+#
+# Run this after changing any public API or doc comment, and commit
+# the diff.
+aidoc:
+    cargo aidoc --workspace-root "{{ project_root }}" --title asterism
+
+# Fail when docs/aidoc/ no longer matches the tree (exit 2 on drift).
+#
+# The other half of #25's guard: adding a module without regenerating
+# the committed artifacts is exactly the "addition skips the inventory"
+# hole a hand-written list cannot detect — intra-doc links only break on
+# removals. Same prerequisites as `aidoc`, same reason it stays outside
+# `check`.
+#
+# Carries `allow-agent` on ui-e2e's half of that group's reasoning, not
+# the "seconds long, writes nothing" half: a run costs minutes and
+# writes rustdoc JSON under target/ in order to have something to
+# compare (docs/aidoc/ itself is untouched in check mode), but it is
+# the only surface that can check the inventory, so it is run
+# deliberately rather than skipped.
+[group('allow-agent')]
+aidoc-check:
+    cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism
+
 # Run all Rust and frontend checks.
 [group('check')]
 check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build

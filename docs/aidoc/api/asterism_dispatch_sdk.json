@@ -1,0 +1,91 @@
+{
+  "crate": "asterism-dispatch-sdk",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_dispatch_sdk::derived",
+      "kind": "module",
+      "docs": "Re-export shim for the shared boundary type\n[`asterism_contract::DerivedDto`], plus the character-count\nconstants exporter authors want to pre-enforce.\n\nRationale: the wire shape lives in `asterism-contract` (the\nleaf DTO crate) so both the SDK and the core can talk about\n`Derived` without either depending on the other — the SDK\nstays a pure adapter surface, the core stays free of any\nadapter dep. Exporter authors keep writing `use\nasterism_dispatch_sdk::Derived;` unchanged."
+    },
+    {
+      "path": "asterism_dispatch_sdk::exporter",
+      "kind": "module",
+      "docs": "`Exporter` — the trait every outbound adapter implements.\n\nAn exporter is stateless from the SDK's point of view: the core\npasses it a [`DispatchContext`] on every method and stores anything\nthe exporter wants to remember about the in-flight job as an opaque\n[`Handle`]. The three methods split the lifecycle so backends with\nvery different rhythms (single-shot HTTP, long-poll, watchdog on a\nfilesystem drop dir) all fit the same shape:\n\n1. [`Exporter::dispatch`] — send the job to the backend. Returns a\n   `Handle` the core persists so subsequent calls survive restart.\n2. [`Exporter::poll`] — check the backend for progress. Called by\n   the apalis `DispatchRun` job on a re-enqueue loop until the\n   state is terminal.\n3. [`Exporter::harvest`] — once `poll` returns `Done`, ask the\n   exporter to collect the produced artefacts and describe them as\n   [`Derived`]s. The core reifies each Derived into a new `Asset`\n   with `parent_ids` = the Selection's inputs, `session_id` =\n   `DispatchJob.id`, and `source_kind` = `format!(\"dispatch:{}\",\n   exporter_slug)`."
+    },
+    {
+      "path": "asterism_dispatch_sdk::exporter::DispatchContext",
+      "kind": "struct",
+      "docs": "The Selection-plus-context bundle the core hands the exporter on\nevery method call.\n\nCarries **references only** — the core owns the entity storage\nand lets exporters borrow read-only slices for the duration of\nthe call. `inputs` is materialised from `Selection::asset_ids`\n(which is why an exporter never has to talk to the AssetRepo\nitself).\n\n`Copy` because every field is a shared borrow — the runner\nhands the same context to `dispatch` → `poll` → `harvest` on\nseparate ticks without extra allocation.\n\n`inputs` carries [`asterism_contract::dto::AssetCardDto`] —\nthe same wire shape the Tauri UI already receives, so backends\nconsuming the SDK see the exact card the human sees in the\ngrid. No SDK-local projection type is invented; the contract\ncrate is the single source of truth for both the frontend and\nevery outbound adapter."
+    },
+    {
+      "path": "asterism_dispatch_sdk::exporter::Exporter",
+      "kind": "trait",
+      "docs": "The single trait every outbound adapter implements.\n\nImplementations live outside this crate — see the sibling\n`asterism-exporter-comfy` for the first real one."
+    },
+    {
+      "path": "asterism_dispatch_sdk::exporter::ExporterError",
+      "kind": "enum",
+      "docs": "Errors returned by an exporter. Everything not covered by a\ndedicated variant flows through [`ExporterError::Other`]."
+    },
+    {
+      "path": "asterism_dispatch_sdk::handle",
+      "kind": "module",
+      "docs": "`Handle` — the exporter's backend-side reference to an in-flight job.\n\nThe exporter returns one of these from [`crate::Exporter::dispatch`]\nand receives it back on every subsequent [`crate::Exporter::poll`]\nand [`crate::Exporter::harvest`] call. The core persists the raw\nbytes verbatim (opaque JSON payload); the exporter is free to\ninterpret them however it needs to reach the same backend job on\nprocess restart.\n\nThe `kind` slug lets the exporter fast-fail with a clear error\n(\"this handle was issued by ComfyExporter, not GeminiExporter\")\nwhen the caller feeds the wrong handle to the wrong adapter — that\nonly happens on programmer error, but the failure mode is worth\nnaming."
+    },
+    {
+      "path": "asterism_dispatch_sdk::handle::Handle",
+      "kind": "struct",
+      "docs": "Opaque reference to one in-flight backend job.\n\nSerialised into the persisted `DispatchJob.handle_json` column so\npolling / harvesting survives a server restart. Exporters embed\nwhatever they need to reach the backend again (ComfyUI prompt id,\nGemini operation name, VDSL run task id, filesystem watch cookie,\n…)."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema",
+      "kind": "module",
+      "docs": "Schema artifact registry — the SDK-owned half of the \"SDK =\nexternal contract\" story.\n\nEvery entry here is a `(name, example JSON)` pair. The example\nJSON is the canonical wire shape an external backend author\nconsumes — LLMs work fine off an example, and the schema files\nlive in `schema/` next to this crate for `cat`-friendly access.\n\nPer-exporter parameter schemas are *not* listed here; each\nexporter crate ships its own `params_example_json()` fn and\n`SCHEMA_NAME` const, and `asterism-server` walks the exporter\nregistry to enumerate them alongside the SDK-owned ones.\n\nNaming convention: SDK-owned schemas use bare snake_case names\n(`public_asset`, `dispatch_context`, `derived`). Exporter-owned\nschemas use the `exporter:<slug>:params` form so the two\nnamespaces cannot collide."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::SDK_SCHEMAS",
+      "kind": "constant",
+      "docs": "Every schema this crate publishes, keyed by public name.\n\nKept as a `const` slice so consumers can `iter()` at boot time\nwithout paying an allocation and without a runtime registry\nstep. The `asset_card` name matches the contract DTO\n[`asterism_contract::dto::AssetCardDto`] to keep external\nconsumers on the same word the Tauri UI already uses."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::SdkSchemaEntry",
+      "kind": "type_alias",
+      "docs": "One [`SDK_SCHEMAS`] row: the public schema name paired with the\naccessor that yields its canonical example JSON."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::asset_card_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`asterism_contract::dto::AssetCardDto`] —\nthe per-asset shape [`crate::DispatchContext::inputs`] carries,\nwhat exporter-file emits as sidecar metadata, and what the\nharvest-style `asset_card.example.json` LLM prompt hands to a\nbackend author."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::derived_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`crate::Derived`] — the shape\nexporters return to the core for reification into new Assets."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::dispatch_context_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for the dispatch envelope (what\nexporter-file writes in `instruction` mode and what an\nHTTP-backed sibling would POST)."
+    },
+    {
+      "path": "asterism_dispatch_sdk::schema::find_sdk_schema",
+      "kind": "function",
+      "docs": "One-shot lookup by name against [`SDK_SCHEMAS`]."
+    },
+    {
+      "path": "asterism_dispatch_sdk::state",
+      "kind": "module",
+      "docs": "Lifecycle state of a dispatch as seen by the exporter's\n[`crate::Exporter::poll`] response.\n\nThe core drives the state machine — the exporter only reports \"what\nI see on the backend right now\". Terminal states (`Done` / `Failed`\n/ `Cancelled`) stop the poll loop; non-terminal states keep it\nrunning with a re-enqueue delay derived from the progress hint (if\nany)."
+    },
+    {
+      "path": "asterism_dispatch_sdk::state::DispatchState",
+      "kind": "enum",
+      "docs": "State of one dispatched backend job.\n\nSerialised into `DispatchJob.state_slug` at rest via\n[`DispatchState::slug`] for cheap SQL filtering; the terminal\nvariants also carry payloads (`error` message, `Cancelled` reason)\nfor the detail view. The persisted column stores the slug only —\nthe payload lives in adjacent columns (`error_message`,\n`cancelled_reason`) so the enum stays open to future variants\nwithout a stored-format migration."
+    },
+    {
+      "path": "asterism_dispatch_sdk::state::ProgressHint",
+      "kind": "struct",
+      "docs": "Optional soft progress signal returned alongside a\n[`DispatchState::Running`] response.\n\nNot a strict contract — some backends only expose \"we're still\nworking\", others hand back a percent + a message. The exporter\nfills in whichever fields it can cheaply lift; unknown fields are\nleft as `None`. The core surfaces this to the UI progress channel\nbut never uses it as a control signal."
+    }
+  ]
+}

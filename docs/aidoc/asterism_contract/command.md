@@ -1,0 +1,118 @@
+# asterism-contract::command
+
+Command DTOs — inputs for state-changing operations.
+
+Callers (Tauri command handlers, MCP tool handlers, HTTP endpoints)
+build these as JSON; the application services in `asterism-core`
+convert them into domain types and surface any validation failures as
+`DomainError::Validation`. This crate only defines the shapes.
+
+## Types
+
+- `AddAssetBatchCommand` — Ingests many assets in one call — the batched form of
+- `AddAssetBatchResult` — Result of a batched ingest. `succeeded` and `failed` are sized to
+- `AddAssetCommand` — Ingests a single asset — entry point for the asset-add pipeline.
+- `AddAssetToGroupCommand` — Adds an asset to a Group. Idempotent — a duplicate insert is a
+- `AppendMessageCommand` — Appends a Message to a Thread.
+- `ArchivePersonaCommand` — Toggles a persona's archive flag (a soft-delete alternative).
+- `ArchiveThreadCommand` — Toggles a Thread's `archived` flag. Idempotent — setting it to
+- `AttachTagBatchCommand` — Attaches one tag to many assets in one call — the batched form of
+- `AttachTagBatchResult` — Result of a batched tag attach. Shape mirrors
+- `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
+- `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
+- `CancelJobCommand` — Requests cancellation of a running or pending job.
+- `ConflictResolution` — How a person answered one raised duplicate question.
+- `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
+- `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
+- `CreateGroupCommand` — Creates a new user-curated Group (bucket) under a persona.
+- `CreateMaterialLayerCommand` — Opens a band over an Asset's material that the person owns.
+- `CreateModalityCommand` — Creates a Modality master row (`POST /asterism/modalities`).
+- `CreateQueryGroupCommand` — Creates a Query Group — a Group whose membership is the
+- `CreateSavedQueryCommand` — Creates a `SavedQuery` — DEAD WIRE TYPE. The SavedQuery concept was
+- `CreateSeriesStrategyCommand` — Registers a series Strategy (`POST /asterism/series-strategies`).
+- `CreateSnapshotCommand` — Freezes a picked asset list as an immutable `Snapshot` — internal
+- `CreateThreadCommand` — Creates a Thread anchored to the given axis.
+- `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
+- `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
+- `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
+- `DeleteChapterMarkCommand` — Removes one section from a structure band the person owns.
+- `DeleteDirCommand` — Deletes an **empty** Dir. Rejected while the dir still contains
+- `DeleteMaterialLayerCommand` — Deletes a band the person owns, with everything in it.
+- `DeleteMaterialMarkCommand` — Deletes a `MaterialMark` by id. Idempotent.
+- `DeleteMessageCommand` — Deletes one Message. Idempotent — a missing id is a no-op.
+- `DeleteModalityCommand` — Deletes a Modality master row
+- `DeletePersonaProfileCommand` — Removes the persona profile row entirely (reverts the sidebar
+- `DeletePersonaThemeCommand` — Removes the persona theme row entirely, reverting the UI to
+- `DeleteSavedQueryCommand` — Deletes a `SavedQuery`. Idempotent — missing id is a no-op.
+- `DeleteSeriesStrategyCommand` — Deletes a series Strategy
+- `DeleteSessionCommand` — Deletes a Session (`DELETE /asterism/sessions/{id}`). Rejected
+- `DeleteTagCommand` — Deletes a tag row and every `asset_tag` link that referenced it
+- `DeleteTagResult` — Result of a [`DeleteTagCommand`].
+- `DeleteThreadCommand` — Deletes a Thread and every Message attached to it. Idempotent —
+- `DetachTagBatchCommand` — Detaches one tag from many assets in one call — the batched form of
+- `DetachTagBatchResult` — Result of a batched tag detach. `detach` carries no payload, so the
+- `DetachTagCommand` — Detaches a tag from an asset. Idempotent — a missing m:n link is
+- `DispatchRunCommand` — Runs a dispatch from a live source: the input is **either** a Group
+- `EditAssetCommentCommand` — Rewrites the body of an existing `AssetComment`. Stamps
+- `EditChapterMarkCommand` — Rewrites one section of a structure band the person owns.
+- `EditMaterialMarkCommand` — Rewrites the body of an existing `MaterialMark`. Stamps `edited_at`.
+- `EmptyTrashCommand` — Permanently deletes **every** asset currently in the trash — the
+- `EmptyTrashResult` — Outcome of [`EmptyTrashCommand`].
+- `GroupMembershipEntry` — One asset↔group pair inside a `BatchGroupMembershipCommand`.
+- `LinkGroupCommand` — Connects a Group into another Group (the Are.na channel-in-channel
+- `MergeAssetsCommand` — A person's ruling that a set of rows is one thing — the manual
+- `MergeGroupsCommand` — Merges one Group into another (duplicate-group consolidation):
+- `MergeTagsCommand` — Merges one tag into another and deletes the source
+- `MergeTagsResult` — Result of a [`MergeTagsCommand`].
+- `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
+- `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
+- `OnDuplicate` — What the caller wants done if the asset being registered turns out
+- `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
+- `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
+- `PasteImageImportCommand` — Writes a clipboard-pasted image blob to disk and dispatches
+- `PatchSessionMetadataCommand` — Partially updates a Session's metadata
+- `PostAssetCommentCommand` — Posts a new comment on an Asset. `author_kind` is `"user"` for
+- `PostChapterMarkCommand` — Adds a section to a structure band the person owns.
+- `PostMaterialMarkCommand` — Places a new mark into an Asset's material.
+- `PromoteSnapshotToGroupCommand` — Promotes a frozen `Snapshot` into a hand-owned `Group`
+- `PromoteSnapshotToGroupResult` — Result of a `PromoteSnapshotToGroupCommand` (also returned by the
+- `PromoteTagToGroupCommand` — Promotes a Tag into a hand-curated Group: creates a new Group
+- `PromoteTagToGroupResult` — Result of a `PromoteTagToGroupCommand` — echoes the group that was
+- `PromoteVolatileSelectionCommand` — Fuses "freeze the volatile grid pick" + "promote to Group" into a
+- `PurgeAssetCommand` — Permanently deletes an **already-trashed** asset. Irreversible:
+- `PurgeGroupCommand` — Permanently deletes an **already-trashed** Group and every
+- `PurgePersonaCommand` — Permanently deletes an **already-trashed** persona. Irreversible, and
+- `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
+- `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
+- `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
+- `RedispatchCommand` — Re-runs a finished dispatch with the same frozen input, exporter,
+- `RegisterPersonaCommand` — Registers a new persona in Asterism.
+- `RemoveAssetFromGroupCommand` — Removes an asset from a Group. Idempotent — missing link is a
+- `RenameDirCommand` — Renames a Dir. The name stays unique among siblings.
+- `RenameGroupCommand` — Renames a Group. The name stays unique per persona.
+- `RenameSavedQueryCommand` — Renames a `SavedQuery`. Uniqueness `(persona_id, name)` is
+- `RenameSessionCommand` — Rewrites a Session's title
+- `RenameTagCommand` — Renames a tag in place (`POST /asterism/tags/rename`).
+- `ReorderGroupAssetsCommand` — Rewrites the front-to-back order of a Group. `ordered_asset_ids` is
+- `ReorderGroupChildrenCommand` — Rewrites the order of a Group's child groups. Same drift-tolerant
+- `ReorderPersonasCommand` — Rewrites `display_order` across a persona slice. `ordered_ids`
+- `ResetSettingCommand` — Clears one setting override (`DELETE /asterism/settings/{key}`).
+- `ResolveDuplicateConflictCommand` — Answers one duplicate question — the panel's confirm.
+- `RestoreAssetCommand` — Returns a trashed asset to the live set. Idempotent.
+- `RestoreGroupCommand` — Returns a trashed Group to the sidebar, membership and drag order
+- `RestorePersonaCommand` — Returns a trashed persona and the assets that went to the trash with
+- `SetDefaultMaterialLayerCommand` — Chooses the band a surface shows, and the one a new mark lands in.
+- `SetPersonaProfileCommand` — Upserts the identity signal for a persona (avatar / bio /
+- `SetPersonaThemeCommand` — Sets (or clears) the wallpaper for a persona.
+- `SetSettingCommand` — Overrides one application setting (`PUT /asterism/settings/{key}`).
+- `TrashAssetCommand` — Moves an asset to the trash — reversible, and the only route to
+- `TrashGroupCommand` — Moves a Group to the trash — reversible, and the only route to
+- `TrashPersonaCommand` — Moves a persona — and every asset it holds — to the trash.
+- `UnlinkGroupCommand` — Removes a Group-in-Group connection. Idempotent — a missing link
+- `UpdateAssetMetaBatchCommand` — Partially updates metadata for multiple assets in one call.
+- `UpdateAssetMetaBatchResult` — Result of a batched metadata update.
+- `UpdateAssetMetaCommand` — Partially updates asset metadata (`None` leaves the field unchanged).
+- `UpdateModalityCommand` — Partially updates a Modality master row
+- `UpdateQueryGroupQueryCommand` — Rewrites a Query Group's rule ("Update query"): validate,
+- `UpdateSeriesStrategyCommand` — Partially updates a series Strategy
+
