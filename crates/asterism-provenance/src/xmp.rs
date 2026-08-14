@@ -188,6 +188,25 @@ fn escape_into(out: &mut String, value: &str) {
             // and widening the filter to suit a parser the format does
             // not ask for would lose data on every file to fix none.
             c if (c as u32) < 0x20 => {}
+            // U+FFFE and U+FFFF, on the same rule as the C0 controls and
+            // for the same reason: XML 1.0's `Char` production stops at
+            // U+FFFD, so these two cannot appear in a document even as a
+            // numeric reference.
+            //
+            // They are reachable, which is why they are here. A PNG text
+            // chunk is decoded with `from_utf8_lossy`, which turns
+            // *invalid* bytes into U+FFFD but passes a valid encoding of
+            // U+FFFF (`EF BF BF`) straight through — so three bytes in a
+            // prompt chunk produced a packet no conforming parser
+            // accepts, and nothing downstream noticed: the packet is
+            // read back as text rather than parsed, so the round-trip
+            // check saw a packet and the write reported success.
+            //
+            // The other non-characters (U+FDD0–U+FDEF, U+1FFFE and the
+            // rest of the plane-enders) are deliberately kept. They are
+            // legal `Char`s, so they parse, and dropping them would be
+            // the second unstated rule the note above refuses to make.
+            '\u{FFFE}' | '\u{FFFF}' => {}
             c => out.push(c),
         }
     }
@@ -320,6 +339,39 @@ mod tests {
         let boundary =
             render(&DisclosureRecord::for_asset("a").with_prompt("h\u{1f}i", None)).unwrap();
         assert!(boundary.contains(">hi<"), "U+001F is dropped: {boundary}");
+    }
+
+    #[test]
+    fn the_two_non_characters_xml_cannot_hold_are_dropped_too() {
+        // The other end of the same rule, and the one that was missed.
+        // XML 1.0's `Char` production runs to U+FFFD, so U+FFFE and
+        // U+FFFF cannot appear in a document even as numeric references
+        // — a packet carrying either is refused whole.
+        //
+        // They arrive the same way a NUL does. A PNG text chunk is
+        // decoded leniently, which replaces *invalid* bytes with U+FFFD
+        // but passes a valid encoding of U+FFFF through untouched, so
+        // three bytes in somebody else's prompt chunk were enough. The
+        // packet was written, reported as written, and unreadable.
+        let packet = render(
+            &DisclosureRecord::for_asset("a").with_prompt("before\u{FFFE}\u{FFFF}after", None),
+        )
+        .unwrap();
+        assert!(packet.contains(">beforeafter<"), "{packet}");
+        assert!(!packet.contains('\u{FFFE}'));
+        assert!(!packet.contains('\u{FFFF}'));
+
+        // The neighbouring non-characters are legal `Char`s and stay.
+        // Dropping them would be a rule about which characters a value
+        // may hold, which is not what this filter is for.
+        let kept = render(
+            &DisclosureRecord::for_asset("a").with_prompt("j\u{FFFD}k\u{FDD0}l\u{1FFFE}m", None),
+        )
+        .unwrap();
+        assert!(
+            kept.contains("j\u{FFFD}k\u{FDD0}l\u{1FFFE}m"),
+            "only the two XML cannot represent are dropped: {kept}"
+        );
     }
 
     #[test]
