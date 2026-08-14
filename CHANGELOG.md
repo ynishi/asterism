@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reading a disclosure *back* has to be modelled in the core, because a
   port cannot return a type the core cannot name.
 
+  The job kind goes with it: `disclosure_stamp`, with the handler, the
+  dependency field and the operator-facing surface — the events are
+  `diag.disclosure*` and the error text a person reads says disclosure,
+  which is what the rename was for. A slug is a stored value and
+  renaming one is normally a migration; this one has never been in a
+  release, an unknown slug is skipped rather than fatal, and the cost of
+  a row queued on a development machine before the rename is one
+  artefact that stays unmarked until something re-fingerprints it.
+
   The signed assertion label and its payload tag are
   `io.github.ynishi.asterism.disclosure` and `asterism.disclosure/1`.
   Renaming an identifier inside a tamper-evident document is normally
