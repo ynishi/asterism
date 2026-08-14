@@ -42,7 +42,18 @@
 //! by them validates as untrusted, which is strictly worse than no
 //! manifest: an absent manifest says nothing, and an untrusted one makes
 //! a provenance claim that a validator actively rejects.
-//! [`SigningIdentity::from_files`] refuses them by name.
+//!
+//! [`SigningIdentity::from_files`] refuses them by the name they carry.
+//! That is a heuristic and a rename defeats it, which is why
+//! [`inspect_certificate`] reads the certificate's own extensions
+//! beside it — though not for the same question. It refuses what cannot
+//! sign at all and reports the rest, because the extended key usage a
+//! test certificate carries is one legitimate certificates carry too:
+//! the two are not told apart by structure.
+//!
+//! Neither check decides whether a certificate is *trusted*. That is a
+//! validator's question, asked against a published trust list, and not
+//! one a signer can answer about itself.
 //!
 //! # The gap this leaves on video
 //!
@@ -255,6 +266,95 @@ impl std::fmt::Debug for SigningIdentity {
 /// is not one a signer can answer about itself.
 const TEST_CERT_MARKER: &[u8] = b"C2PA Test";
 
+/// `c2pa-kp-claimSigning`, under the C2PA's own private enterprise arc.
+///
+/// The Conformance Program's certificate profile requires this on a
+/// claim signing certificate *in addition to* `emailProtection` or
+/// `documentSigning`, so a certificate without it is one that profile
+/// would not have issued. That is a statement about being **listed**,
+/// not about being able to sign — see [`ACCEPTED_SIGNING_EKUS`].
+const C2PA_CLAIM_SIGNING_EKU: &str = "1.3.6.1.4.1.62558.2.1";
+
+/// Every extended key usage `c2pa` accepts on a claim signature, as
+/// dotted strings.
+///
+/// Copied from that crate's own accept-list (`valid_eku_oids.cfg`),
+/// which its validator reads as alternatives: `has_allowed_eku` returns
+/// on the first match and one is enough. In order —
+/// `id-kp-emailProtection`, `id-kp-documentSigning`, `id-kp-timeStamping`,
+/// `id-kp-OCSPSigning`, Microsoft's C2PA signing OID, and
+/// [`C2PA_CLAIM_SIGNING_EKU`].
+///
+/// True of `c2pa`'s **default** trust configuration, which is the one
+/// this build uses: `signing_cert_valid` seeds the policy with these
+/// six and then adds whatever `settings.trust.trust_config` holds, and
+/// nothing here sets c2pa settings.
+///
+/// This list is what decides a **refusal**, because a certificate
+/// carrying none of these is one nothing downstream will sign a claim
+/// with. Requiring `c2pa-kp-claimSigning` instead was this module's
+/// first attempt and it was wrong in a way worth recording: it would
+/// have refused a `documentSigning`-only certificate — a profile IPTC's
+/// own publisher policy explicitly permits, its requirement being an
+/// EKU valid for `emailProtection` *and/or* `documentSigning` — while
+/// telling its operator the certificate "cannot sign a C2PA claim",
+/// which is false and which they could not have acted on, an EKU not
+/// being something you can add to an issued certificate.
+const ACCEPTED_SIGNING_EKUS: &[&str] = &[
+    "1.3.6.1.5.5.7.3.4",
+    "1.3.6.1.5.5.7.3.36",
+    "1.3.6.1.5.5.7.3.8",
+    "1.3.6.1.5.5.7.3.9",
+    "1.3.6.1.4.1.311.76.59.1.9",
+    C2PA_CLAIM_SIGNING_EKU,
+];
+
+/// What reading a certificate's own extensions concluded.
+///
+/// Two lists rather than a `bool`, because "this cannot sign" and "this
+/// will not be trusted" are different sentences and only the first is
+/// this side's to act on.
+///
+/// **Refusals** are certificates nothing downstream will sign with: an
+/// extended key usage carrying none of [`ACCEPTED_SIGNING_EKUS`], or a
+/// certificate marked as a CA. Signing would fail or produce a manifest
+/// refused on its face, so it fails here with a reason instead.
+///
+/// **Warnings** are reasons a certificate would not be *listed*, which
+/// is a question about a trust list rather than about whether the bytes
+/// can sign. The specification's own guidance describes a private
+/// credential store — a certificate trusted by the parties who imported
+/// it and nobody else — and self-issued credentials for exactly that
+/// use. Refusing those would close a door the specification holds open.
+///
+/// The split is not this module's invention. C2PA's implementation
+/// guidance says of an extended key usage misconfiguration that a claim
+/// generator "should warn its user with an explanation of the problem,
+/// but should allow the user to choose to proceed with signing" — which
+/// is the shape here, with the line drawn at what cannot sign at all
+/// rather than at what will not be trusted.
+///
+/// # Where a strictness setting goes
+///
+/// A deployment signing for publication would reasonably want the
+/// warnings to refuse too. That configuration is deliberately not
+/// invented here, and the shape it needs is this verdict being
+/// reachable without loading an identity — which is what
+/// [`inspect_certificate`] is for. Such a caller inspects first and
+/// refuses on its own terms; what it cannot do is tell
+/// [`SigningIdentity::from_bytes`] to refuse for it, so it writes its
+/// own message and the warnings are logged a second time when it goes
+/// on to load. Whoever wires the setting decides whether that is worth
+/// a parameter.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CertificateVerdict {
+    /// Findings that make the certificate unusable for signing at all.
+    pub refusals: Vec<String>,
+    /// Findings that keep it off a trust list without stopping it
+    /// signing for a reader who has imported it.
+    pub warnings: Vec<String>,
+}
+
 impl SigningIdentity {
     /// Loads an identity from a certificate chain and a private key.
     ///
@@ -296,6 +396,33 @@ impl SigningIdentity {
         let alg = alg
             .parse::<c2pa::crypto::raw_signature::SigningAlg>()
             .map_err(|e| ProvenanceError::Identity(format!("unknown signing algorithm: {e}")))?;
+
+        // What the certificate says about itself, after what it is
+        // called. The name check above is a heuristic a rename defeats;
+        // this reads the extensions instead. Last of the three, so a
+        // bundle that fails an earlier one is refused for the earlier
+        // reason rather than warned about first.
+        let verdict = inspect_certificate(&cert_chain);
+        if !verdict.refusals.is_empty() {
+            return Err(ProvenanceError::Identity(format!(
+                "this certificate cannot sign a C2PA claim: {}. Nothing is written rather \
+                 than a signature that will not hold — the IPTC/XMP disclosure is written \
+                 either way",
+                verdict.refusals.join("; ")
+            )));
+        }
+        for warning in &verdict.warnings {
+            // The dotted name is the `event` field rather than the
+            // target, which is the convention the rest of this crate
+            // uses: both sinks filter on `asterism=info` by target
+            // prefix, so an event addressed `diag.…` reaches neither
+            // stderr nor the `diag_log` table.
+            tracing::warn!(
+                event = "diag.provenance.identity",
+                "signing certificate: {warning}"
+            );
+        }
+
         Ok(Self {
             cert_chain,
             private_key,
@@ -313,6 +440,159 @@ impl SigningIdentity {
             self.tsa_url.clone(),
         )
     }
+}
+
+/// Reads a signing certificate's own extensions and reports what they
+/// say, without deciding what to do about it.
+///
+/// Public because that decision is the one a strictness setting would
+/// make (see [`CertificateVerdict`]), and because a caller that wants to
+/// show an operator why an identity was refused should not have to
+/// attempt a load to find out.
+///
+/// The certificate inspected is the **first block of the bundle that
+/// parses as one**, which is the end-entity certificate in a chain
+/// written the usual way. Walking to the first that parses, rather than
+/// taking the first block outright, is what keeps a bundle that leads
+/// with a key from reading as unparseable.
+///
+/// Bytes this cannot read at all yield **no findings** rather than a
+/// refusal. `c2pa` parses the same certificate next with a real
+/// validator and says something better than a guess from here, and a
+/// check that refused what it could not read would turn every encoding
+/// this crate has not met into an export failing for a reason nobody can
+/// act on. What that costs is real and worth naming: DER rather than
+/// PEM, an empty file, and a bundle whose every block is something else
+/// all pass inspection silently.
+///
+/// # What this does not check
+///
+/// Everything else `c2pa` requires at signing time, which is a great
+/// deal more: certificate version, an unexpired validity window, the
+/// signature and key algorithms, `digitalSignature` key usage, an
+/// authority key identifier, no `any` usage, no `ocspSigning` or
+/// `timeStamping` mixed with another usage. Those arrive as
+/// [`ProvenanceError::Sign`] instead, which is a worse message but not a
+/// wrong one — this check is a strict subset, so nothing it passes ends
+/// up in a *less* informative failure than it would have without it.
+///
+/// The one worth knowing by name is **expiry**, because it is the
+/// failure a working configuration grows into: a Conformance Program
+/// certificate is valid for at most 366 days, so every deployment that
+/// signs will meet it, and it will arrive as a signing error rather than
+/// as an identity one.
+pub fn inspect_certificate(pem: &[u8]) -> CertificateVerdict {
+    use x509_parser::prelude::FromDer as _;
+
+    let mut verdict = CertificateVerdict::default();
+    // The block is found first and parsed again inside this scope: the
+    // parsed certificate borrows the block's bytes, so it cannot outlive
+    // a closure that owns them.
+    let Some(block) = x509_parser::pem::Pem::iter_from_buffer(pem)
+        .filter_map(Result::ok)
+        .find(|block| x509_parser::certificate::X509Certificate::from_der(&block.contents).is_ok())
+    else {
+        return verdict;
+    };
+    let Ok((_, certificate)) = x509_parser::certificate::X509Certificate::from_der(&block.contents)
+    else {
+        return verdict;
+    };
+
+    // Refusals first: what nothing downstream will sign with.
+    //
+    // The accept-list rather than `c2pa-kp-claimSigning` alone. A
+    // certificate carrying one of these is one `c2pa` will sign a claim
+    // with; requiring the C2PA OID here would refuse a
+    // `documentSigning`-only certificate that signs perfectly well, and
+    // tell its operator something untrue about why.
+    let declared = certificate.extended_key_usage().ok().flatten().map(|eku| {
+        let mut out: Vec<String> = eku.value.other.iter().map(|o| o.to_id_string()).collect();
+        // `x509-parser` lifts seven usages it knows into named fields,
+        // so `other` alone loses whichever of them a certificate holds.
+        // Three of those seven are on the accept-list and are lifted
+        // back here; `server_auth`, `client_auth`, `code_signing` and
+        // `any` are the other four and are deliberately not, because
+        // lifting them would manufacture an accept for a usage no claim
+        // is signed under. `documentSigning` and Microsoft's C2PA usage
+        // have no named field at all, so they arrive through `other` —
+        // which is why that path carries four of the six and is the one
+        // a test has to hold.
+        if eku.value.email_protection {
+            out.push("1.3.6.1.5.5.7.3.4".into());
+        }
+        if eku.value.time_stamping {
+            out.push("1.3.6.1.5.5.7.3.8".into());
+        }
+        if eku.value.ocsp_signing {
+            out.push("1.3.6.1.5.5.7.3.9".into());
+        }
+        out
+    });
+
+    // Absent and present-but-unusable are different sentences. A
+    // certificate with no extension at all has not named a wrong usage;
+    // it has named none, and telling its operator that "its extended key
+    // usage names nothing" describes an extension they do not have.
+    match &declared {
+        None => verdict.refusals.push(
+            "it carries no extended key usage extension, and a certificate signing a C2PA \
+             claim has to name what it is for"
+                .into(),
+        ),
+        Some(usages)
+            if !usages
+                .iter()
+                .any(|oid| ACCEPTED_SIGNING_EKUS.contains(&oid.as_str())) =>
+        {
+            verdict.refusals.push(
+                "its extended key usage names nothing a C2PA claim can be signed under \
+                 (expected one of emailProtection, documentSigning, timeStamping, \
+                 OCSPSigning, or a C2PA claim-signing usage)"
+                    .into(),
+            );
+        }
+        Some(_) => {}
+    }
+    let usages = declared.unwrap_or_default();
+
+    if certificate
+        .basic_constraints()
+        .ok()
+        .flatten()
+        .is_some_and(|constraints| constraints.value.ca)
+    {
+        verdict.refusals.push(
+            "the certificate inspected is a CA certificate, and a claim is signed by an \
+             end-entity one — a bundle written root-first reads this way too"
+                .into(),
+        );
+    }
+
+    // Warnings: reasons it would not be listed. See `CertificateVerdict`.
+    if !usages.iter().any(|oid| oid == C2PA_CLAIM_SIGNING_EKU) {
+        verdict.warnings.push(format!(
+            "its extended key usage does not include c2pa-kp-claimSigning \
+             ({C2PA_CLAIM_SIGNING_EKU}); it will sign, and the Conformance Program's \
+             certificate profile requires that usage of a certificate issued for claim \
+             signing, so this one would not be one it issued"
+        ));
+    }
+
+    if certificate
+        .subject()
+        .iter_organization()
+        .next()
+        .is_none_or(|organisation| organisation.as_str().is_ok_and(str::is_empty))
+    {
+        verdict.warnings.push(
+            "its subject names no organisation, and a validator that displays a signer's \
+             name reads that field"
+                .into(),
+        );
+    }
+
+    verdict
 }
 
 /// Whether a PEM bundle carries one of the C2PA test certificates.
@@ -734,10 +1014,20 @@ mod tests {
         // 2. `digitalSignature` key usage.
         // 3. An extended key usage that is present, is not
         //    `anyExtendedKeyUsage`, and is on the allowed list —
-        //    `emailProtection` is the one the C2PA specification names
-        //    for document signing.
+        //    `emailProtection` is one the C2PA specification names for
+        //    document signing.
         // 4. Both an authority key identifier and a subject key
         //    identifier extension.
+        //
+        // `emailProtection` alone, deliberately. It is the first entry
+        // in `c2pa`'s accept-list and the shape most certificates in use
+        // actually have, so it is the shape a fixture standing in for
+        // one should carry — and it keeps every signing test running
+        // through the input `inspect_certificate` is most likely to be
+        // handed. It briefly carried a C2PA claim-signing OID as well,
+        // to satisfy a version of that check which required one; the
+        // check was wrong (`ACCEPTED_SIGNING_EKUS`) and the fixture is
+        // back to the shape it was testing against.
         params.is_ca = rcgen::IsCa::ExplicitNoCa;
         params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
         params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection];
@@ -882,6 +1172,231 @@ mod tests {
         let err = SigningIdentity::from_bytes(pem.into_bytes(), b"key".to_vec(), "nonsense", None)
             .unwrap_err();
         assert!(err.to_string().contains("unknown signing algorithm"));
+    }
+
+    /// Builds a self-signed certificate with the extensions a test wants
+    /// to reason about.
+    fn certificate_with(
+        ekus: Vec<rcgen::ExtendedKeyUsagePurpose>,
+        is_ca: rcgen::IsCa,
+        organisation: Option<&str>,
+    ) -> Vec<u8> {
+        let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
+        let mut params = rcgen::CertificateParams::new(vec!["example.invalid".to_string()])
+            .expect("certificate parameters");
+        params.is_ca = is_ca;
+        params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = ekus;
+        if let Some(organisation) = organisation {
+            params
+                .distinguished_name
+                .push(rcgen::DnType::OrganizationName, organisation);
+        }
+        params
+            .self_signed(&key)
+            .expect("a self-signed certificate")
+            .pem()
+            .into_bytes()
+    }
+
+    fn claim_signing_eku() -> rcgen::ExtendedKeyUsagePurpose {
+        rcgen::ExtendedKeyUsagePurpose::Other(vec![1, 3, 6, 1, 4, 1, 62558, 2, 1])
+    }
+
+    /// The refusal is about what a certificate can sign, and nothing
+    /// else.
+    ///
+    /// The first version of this check required `c2pa-kp-claimSigning`
+    /// and refused everything without it. That is the Conformance
+    /// Program's *issuance* profile, not the set `c2pa` will sign with —
+    /// which is an accept-list where one entry is enough — so it would
+    /// have refused a `documentSigning`-only certificate that signs
+    /// perfectly well, with a message saying it could not.
+    #[test]
+    fn a_certificate_is_refused_only_for_what_it_cannot_do() {
+        // Signs, and is not what the profile would have issued: one
+        // warning, no refusal. This is the shape most certificates in
+        // use have.
+        let email_only = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        let verdict = inspect_certificate(&email_only);
+        assert!(verdict.refusals.is_empty(), "{verdict:?}");
+        assert_eq!(verdict.warnings.len(), 1, "{verdict:?}");
+        assert!(verdict.warnings[0].contains("c2pa-kp-claimSigning"));
+
+        // `documentSigning` alone — the profile IPTC's own publisher
+        // policy mandates, and the certificate the first version of this
+        // check would have refused while telling its operator it could
+        // not sign. It is not one of the usages `x509-parser` lifts into
+        // a named field, so it arrives through `other`, which is the
+        // path that has to work for four of the six accepted usages.
+        let document_signing = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::Other(vec![
+                1, 3, 6, 1, 5, 5, 7, 3, 36,
+            ])],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        let verdict = inspect_certificate(&document_signing);
+        assert!(verdict.refusals.is_empty(), "{verdict:?}");
+
+        // And the Microsoft C2PA signing usage, which arrives the same
+        // way and is the other one a hand-written accept-list is likely
+        // to lose.
+        let microsoft = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::Other(vec![
+                1, 3, 6, 1, 4, 1, 311, 76, 59, 1, 9,
+            ])],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        assert!(
+            inspect_certificate(&microsoft).refusals.is_empty(),
+            "{:?}",
+            inspect_certificate(&microsoft)
+        );
+
+        // What the profile issues: nothing to say at all.
+        let conforming = certificate_with(
+            vec![
+                rcgen::ExtendedKeyUsagePurpose::EmailProtection,
+                claim_signing_eku(),
+            ],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        assert_eq!(
+            inspect_certificate(&conforming),
+            CertificateVerdict::default()
+        );
+
+        // No organisation is its own warning, separate from the usage
+        // one — a certificate can miss either without the other.
+        let anonymous = certificate_with(
+            vec![
+                rcgen::ExtendedKeyUsagePurpose::EmailProtection,
+                claim_signing_eku(),
+            ],
+            rcgen::IsCa::ExplicitNoCa,
+            None,
+        );
+        let verdict = inspect_certificate(&anonymous);
+        assert!(verdict.refusals.is_empty(), "{verdict:?}");
+        assert_eq!(verdict.warnings.len(), 1, "{verdict:?}");
+        assert!(verdict.warnings[0].contains("organisation"));
+
+        // Signs nothing: an extended key usage naming only something a
+        // claim cannot be signed under.
+        let wrong_usage = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        let verdict = inspect_certificate(&wrong_usage);
+        assert_eq!(verdict.refusals.len(), 1, "{verdict:?}");
+        assert!(verdict.refusals[0].contains("extended key usage"));
+
+        // A CA certificate offering to sign a claim itself.
+        let authority = certificate_with(
+            vec![claim_signing_eku()],
+            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained),
+            Some("Example Ltd"),
+        );
+        let verdict = inspect_certificate(&authority);
+        assert!(
+            verdict
+                .refusals
+                .iter()
+                .any(|r| r.contains("CA certificate")),
+            "{verdict:?}"
+        );
+
+        // A certificate with no extended key usage extension at all is
+        // refused for that, and told so — it has not named a wrong
+        // usage, it has named none.
+        let no_usage = certificate_with(vec![], rcgen::IsCa::ExplicitNoCa, Some("Example Ltd"));
+        let verdict = inspect_certificate(&no_usage);
+        assert_eq!(verdict.refusals.len(), 1, "{verdict:?}");
+        assert!(
+            verdict.refusals[0].contains("no extended key usage"),
+            "{verdict:?}"
+        );
+
+        // Bytes nothing here can read yield no findings rather than a
+        // refusal, which is the escape hatch and its cost both.
+        assert_eq!(
+            inspect_certificate(b"not a certificate"),
+            CertificateVerdict::default()
+        );
+    }
+
+    /// The walk finds the certificate wherever the bundle puts it.
+    ///
+    /// Both shapes below are what the inspection's own doc argues from,
+    /// and neither was asserted: a simplification of that `find` back to
+    /// "the first block" would break the first case silently, and the
+    /// CA refusal's message claims to describe the second.
+    #[test]
+    fn the_inspection_reads_past_a_block_that_is_not_a_certificate() {
+        let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
+        let leaf = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+
+        // A bundle led by the private key, which some tools write.
+        let mut key_first = key.serialize_pem().into_bytes();
+        key_first.extend_from_slice(&leaf);
+        let verdict = inspect_certificate(&key_first);
+        assert!(verdict.refusals.is_empty(), "{verdict:?}");
+        assert_eq!(
+            verdict,
+            inspect_certificate(&leaf),
+            "the key block changes nothing about what is found"
+        );
+
+        // A chain written root-first: the CA is what gets inspected, and
+        // the refusal says which certificate it is talking about rather
+        // than calling it the leaf.
+        let root = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::EmailProtection],
+            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained),
+            Some("Example Ltd"),
+        );
+        let mut root_first = root;
+        root_first.extend_from_slice(&leaf);
+        let verdict = inspect_certificate(&root_first);
+        assert!(
+            verdict
+                .refusals
+                .iter()
+                .any(|r| r.contains("CA certificate") && r.contains("root-first")),
+            "{verdict:?}"
+        );
+    }
+
+    /// The refusal reaches the caller, with the sentence that tells them
+    /// what still happens.
+    ///
+    /// `inspect_certificate` is exercised directly above; this is the
+    /// wiring, which nothing else asserts — including the half of the
+    /// message saying the IPTC/XMP disclosure is written anyway.
+    #[test]
+    fn loading_an_identity_refuses_a_certificate_that_cannot_sign() {
+        let wrong_usage = certificate_with(
+            vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth],
+            rcgen::IsCa::ExplicitNoCa,
+            Some("Example Ltd"),
+        );
+        let err = SigningIdentity::from_bytes(wrong_usage, b"key".to_vec(), "es256", None)
+            .expect_err("a certificate that signs nothing is not an identity");
+        let message = err.to_string();
+        assert!(message.contains("cannot sign a C2PA claim"), "{message}");
+        assert!(message.contains("IPTC/XMP disclosure"), "{message}");
     }
 
     #[test]

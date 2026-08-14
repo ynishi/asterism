@@ -84,6 +84,11 @@ c2pa = { workspace = true }
 # it is a workspace line: what "standard base64" accepts is one answer
 # here.
 base64 = { workspace = true }
+# Reading a configured signing certificate's own extensions. `c2pa`
+# parses certificates for its own validation and exposes none of it, so
+# the check is this crate's; the workspace line says why the version is
+# where it is.
+x509-parser = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

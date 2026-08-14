@@ -251,6 +251,18 @@ c2pa = { version = "0.90", default-features = false, features = [
     "rust_native_crypto",
     "file_io",
 ] }
+# Reading a configured signing certificate's own extensions, so an
+# identity can be refused for what it can sign rather than only for what
+# its subject is called.
+#
+# The same requirement `c2pa` states for its own validation, so a build
+# resolves one copy — but that is a fact about today's tree rather than a
+# guarantee, and a `c2pa` that moved to 0.19 would compile two. No type
+# crosses between the two uses, so the cost of that would be build size
+# rather than correctness. Declared here, not inline in the crate, for
+# the reason every other shared line is: a second consumer picking its
+# own version is the drift a workspace table exists to stop.
+x509-parser = "0.18"
 
 # --- asterism-infra: job engine ---
 apalis     = { version = "0.7", features = ["limit"] }

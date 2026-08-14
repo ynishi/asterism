@@ -563,6 +563,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+ "x509-parser",
 ]
 
 [[package]]
