@@ -53,6 +53,7 @@ this crate.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
 - [`probes::jpeg`](probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
 - [`probes::png`](probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
+- [`provenance`](provenance.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`search`](search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk

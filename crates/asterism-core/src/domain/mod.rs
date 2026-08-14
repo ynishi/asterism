@@ -38,7 +38,10 @@
 //! content-addressed, a git-tree analogue, fingerprinted by
 //! [`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
 //! a freeze; [`provenance`] is the declared origin a re-ingested artefact
-//! carries back; [`edge`] holds typed asset↔asset facts — from derivation
+//! carries back, and [`disclosure`] its outbound counterpart — the pure
+//! judgement of which IPTC digital-source term the recorded evidence
+//! makes true of an artefact on its way out; [`edge`] holds typed
+//! asset↔asset facts — from derivation
 //! and identity to co-occurrence — that lineage walks and the hover burst
 //! renders; [`attribution`] types who a write is by, what operated on their
 //! behalf, and through which channel that answer arrived.
