@@ -196,6 +196,40 @@ pub fn is_synthetic(meta_kv: Option<&str>) -> bool {
 /// wrote the `derive`. The caller states it, and the composition root is
 /// where an installation's answer belongs.
 ///
+/// # What that answer should be, and why
+///
+/// [`Withhold`](Self::Withhold), with [`Embed`](Self::Embed) as an
+/// explicit choice per installation. Four independent reasons, none of
+/// them this repository's opinion:
+///
+/// 1. **The property is not defined to hold it.** IPTC defines
+///    `AIPromptInformation` as "the information that was given to the
+///    generative AI service as 'prompt(s)'", and elaborates only that
+///    it may include positive and negative statements. A sampler, a
+///    seed and a LoRA hash were not given as prompts. The model has its
+///    own property (`AISystemUsed`), and nothing in 2025.1 has a place
+///    for the rest — so there is no reading under which the standard
+///    expects them here.
+/// 2. **C2PA names this failure mode.** Harms Modelling §6.1 lists
+///    "inadvertent disclosure of information" by claim generators that
+///    "automatically add … information that may be sensitive", and the
+///    UX Recommendations require that recording personally identifiable
+///    information be opt-in. Their one carve-out — the thing an
+///    implementer may record over a creator's preference — is the *fact*
+///    of AI origin, not the prompt.
+/// 3. **The obligation does not ask for it.** EU AI Act Article 50(2)
+///    requires that synthetic output be "marked in a machine-readable
+///    format and detectable as artificially generated or manipulated".
+///    The source type alone discharges that. Embedding the prompt adds
+///    no compliance and creates a data-protection exposure that would
+///    not otherwise exist.
+/// 4. **It can destroy the disclosure it travels with.** A JPEG XMP
+///    packet caps at 65,502 bytes, and the XMP specification's rule for
+///    an oversized packet is to move out the largest top-level
+///    properties first — which is this one. Some writers fail the write
+///    outright instead. A prompt large enough takes the source type
+///    with it.
+///
 /// The asymmetry that decides which way to lean is the one this module
 /// already states for terms — a missing mark is a gap, a wrong statement
 /// is unrecoverable. Withholding a prompt can be undone by re-applying;
