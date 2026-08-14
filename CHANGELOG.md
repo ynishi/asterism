@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The row records what became of an artefact's disclosure** (#14) —
+  stamping wrote a mark into a file and said so in a log line, leaving
+  the library unable to answer which artefacts carry one. A mark lives
+  in the file's bytes and a downstream conversion strips it, so the row
+  is the only place the answer survives, and it is what a re-apply would
+  be decided from. The note lands under `extra._trace.disclosure`,
+  beside the declared-hash verdict already there — which generalised the
+  narrow write those notes need: `note_declared_hash` becomes
+  `note_trace_field`, one transaction per key rather than a near-copy of
+  the method per key.
+
+  What the note holds is `Stamped`'s own account of itself, so that
+  "no certificate was configured" and "the certificate stopped working"
+  stay apart in the row as they do in the type. A failed note changes
+  nothing — the mark is already in the file or already not.
+
 - **What a dispatch produces is written with its AI disclosure** (#14) —
   the writer landed with nothing calling it; this calls it. Not where
   the work was planned to call it from: stamping immediately after
