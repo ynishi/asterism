@@ -33,10 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   join) or, later, a judgment; the move lands atomically with its
   record, is refused when the caller's recorded `from` no longer
   matches the row — a repair verb that guesses is worse than one that
-  refuses — and never crosses personas. The verb stops at the
-  repository port for now: transport surfaces, the pursuit lifecycle
-  verbs (close / reopen), and the membership reads are the next slices
-  of #29.
+  refuses — and never crosses personas.
+
+  The lifecycle verbs are a service now (`PursuitService`): open (the
+  explicit pre-create — intent named up front, parenthood walled to
+  one persona), close (`satisfied` freezes the kept set at that moment
+  into a snapshot the event references, sorted ascending server-side
+  so identical kept sets dedupe across closes; an empty kept set is
+  the defined "concluded with nothing kept"; `abandoned` keeps
+  nothing by construction), reopen (legal on an open pursuit — a
+  recorded fact, not an error), restamp (the repair verb over a named
+  dispatch round), and the standing-deriving reads. Transport routes
+  (HTTP / Tauri / MCP) and the membership reads are the remaining
+  slices of #29.
 
   The sidecar claim lane closes the loop outward and back: exporters
   that write a sidecar copy the stamp out as `_asterism.pursuit_id`
