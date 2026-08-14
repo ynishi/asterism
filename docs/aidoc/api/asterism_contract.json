@@ -978,9 +978,19 @@
       "docs": "The shape of an exported artefact's `<file>.meta.json` sidecar.\n\nTwo crates that must not depend on each other need this vocabulary:\nan exporter writes the sidecar (adapter side), and the ingest path\nreads it back when a returning file declares `derived_from:\nsidecar` (core side). Adapters do not depend on the core and the\ncore does not depend on adapters, so the words live here, in the\nleaf DTO crate both already use — the same reasoning that puts\n[`DerivedDto`](crate::dto::DerivedDto) here.\n\nConstants rather than a struct: the body is an\n[`AssetCardDto`](crate::dto::AssetCardDto) projection (possibly\nfield-filtered by the caller) with one extra key, and the reader\nwalks it as JSON. A struct would claim a rigidity the file does not\nhave — it can be hand-written, truncated by an allowlist, or come\nfrom a version that knew fewer fields."
     },
     {
+      "path": "asterism_contract::sidecar::SIDECAR_DISPATCH_ID_FIELD",
+      "kind": "constant",
+      "docs": "Field inside the identity block naming the dispatch (the hop).\n\nA const for the same reason the block key is one: the writer\n(exporter crates) and the reader (the ingest path) cannot see each\nother, and a divergence between their spellings fails silently as\n\"no identity in this sidecar\"."
+    },
+    {
       "path": "asterism_contract::sidecar::SIDECAR_IDENTITY_KEY",
       "kind": "constant",
-      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```"
+      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"pursuit_id\": \"<PursuitId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```\n\n`pursuit_id` (#29) is present when the dispatch carried its stamp:\nthe dispatch names the hop the file travelled through, the pursuit\nnames the line of work it belongs to. On re-ingest both are\n**claims** — recorded in `_trace` and resolved independently. The\nrule the membership read follows (a later slice of #29): where the\ndispatch join and a sidecar copy disagree, the dispatch row's own\nstamp answers, because the copy can be stale after a restamp."
+    },
+    {
+      "path": "asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD",
+      "kind": "constant",
+      "docs": "Field inside the identity block naming the pursuit (the line of\nwork, #29). Same silent-divergence reasoning as\n[`SIDECAR_DISPATCH_ID_FIELD`]."
     },
     {
       "path": "asterism_contract::sidecar::SIDECAR_SCHEMA",

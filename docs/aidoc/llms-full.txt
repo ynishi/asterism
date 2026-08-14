@@ -454,7 +454,9 @@ from a version that knew fewer fields.
 
 ## Constants
 
+- `SIDECAR_DISPATCH_ID_FIELD` — Field inside the identity block naming the dispatch (the hop).
 - `SIDECAR_IDENTITY_KEY` — Key under which a sidecar carries the export's own identity.
+- `SIDECAR_PURSUIT_ID_FIELD` — Field inside the identity block naming the pursuit (the line of
 - `SIDECAR_SCHEMA` — Version tag written into the identity block.
 - `SIDECAR_SUFFIX` — Suffix appended to an artefact's locator to find its sidecar.
 

@@ -103,6 +103,12 @@ pub const CLAIM_FIELDS: &[&str] = &[
     "source",
     "operator",
     "relation",
+    // The pursuit claim (#29) is claim-owned on the same reasoning as
+    // `dispatch_id`: a re-declaration that no longer carries or no
+    // longer resolves one has to lose the filing it is no longer
+    // entitled to.
+    "pursuit_id",
+    "pursuit_resolved",
 ];
 
 /// Sidecar vocabulary, re-exported from the contract crate.

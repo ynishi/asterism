@@ -552,6 +552,7 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
+        pursuits.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
