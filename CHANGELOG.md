@@ -43,9 +43,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the defined "concluded with nothing kept"; `abandoned` keeps
   nothing by construction), reopen (legal on an open pursuit — a
   recorded fact, not an error), restamp (the repair verb over a named
-  dispatch round), and the standing-deriving reads. Transport routes
-  (HTTP / Tauri / MCP) and the membership reads are the remaining
-  slices of #29.
+  dispatch round), and the standing-deriving reads.
+
+  The membership read completes the domain/application layer: a
+  pursuit opened up (`PursuitService::view`) is its row plus its
+  rounds, its **returns**, and its events — all derived, nothing
+  stored. Returns are found through two virtual generated columns
+  (V80) that surface a `_trace` claim iff it resolved, each behind a
+  partial index, so the reverse lookup is an index seek and never a
+  library scan; the claim-lane authority order (dispatch join first,
+  direct claim only where no hop resolved) is baked into the columns
+  and the probe predicates rather than repeated per caller. Listings
+  derive standing from one window query instead of one events read
+  per row. The performance question was answered with a receipt, not
+  an assumption: `just bench-measure-pursuit` seeds a throwaway
+  profile at the documented scale and measures through the real
+  adapters — at 100,000 assets / 200 pursuits, single process, warm
+  by construction (the process that seeds measures), returns_of p95
+  is 97µs, the composed view p95 199µs, list-with-standings p95
+  530µs. The last of those is the one number that grows with a
+  persona's event total rather than the page width (the standing
+  window scans the persona's events; an index for it is a recorded
+  follow-up, cheap and not yet earned). That is why there is no
+  materialised projection and no job behind this read; the bench
+  stays in the tree as the tripwire that says when that decision must
+  be revisited. Transport routes (HTTP /
+  Tauri / MCP) are the remaining slice of #29.
 
   The sidecar claim lane closes the loop outward and back: exporters
   that write a sidecar copy the stamp out as `_asterism.pursuit_id`
