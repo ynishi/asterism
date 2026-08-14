@@ -30,7 +30,8 @@ use asterism_contract::dto::{DispatchDto, PursuitDto, PursuitEventDto};
 use chrono::Utc;
 
 use crate::application::mapping::{
-    parse_dispatch_id, parse_persona_id, parse_pursuit_id, parse_snapshot_id,
+    dispatch_to_dto, parse_asset_id, parse_dispatch_id, parse_persona_id, parse_pursuit_id,
+    parse_snapshot_id,
 };
 use crate::domain::attribution::AttributionContext;
 use crate::domain::pursuit::{
@@ -159,11 +160,11 @@ impl PursuitService {
             let mut kept = command
                 .kept_asset_ids
                 .iter()
-                .map(|s| crate::application::mapping::parse_asset_id(s))
+                .map(|s| parse_asset_id(s))
                 .collect::<Result<Vec<_>, _>>()?;
             kept.sort();
             kept.dedup();
-            let frozen = self
+            let mut frozen = self
                 .snapshots
                 .create(
                     asterism_contract::command::CreateSnapshotCommand {
@@ -173,6 +174,36 @@ impl PursuitService {
                     attribution,
                 )
                 .await?;
+            // The freeze redirects fold headstones to their keepers in
+            // place, preserving position — which can un-sort the set
+            // this path just sorted (and two headstones can collapse
+            // onto one keeper, duplicating a member). The convention
+            // is over the *effective* members, so when redirection
+            // changed the shape, re-freeze once over the post-redirect
+            // ids, canonicalised. The first freeze's row stays as an
+            // unreferenced content-addressed snapshot — harmless, and
+            // shared with anything else that ever freezes that exact
+            // sequence.
+            let post: Vec<_> = frozen
+                .asset_ids
+                .iter()
+                .map(|s| parse_asset_id(s))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut canonical = post.clone();
+            canonical.sort();
+            canonical.dedup();
+            if canonical != post {
+                frozen = self
+                    .snapshots
+                    .create(
+                        asterism_contract::command::CreateSnapshotCommand {
+                            persona_id: pursuit.persona_id.to_string(),
+                            asset_ids: canonical.iter().map(|a| a.to_string()).collect(),
+                        },
+                        attribution,
+                    )
+                    .await?;
+            }
             Some(parse_snapshot_id(&frozen.id)?)
         };
         let event = PursuitEvent::new(
@@ -247,7 +278,7 @@ impl PursuitService {
             .find(&dispatch_id)
             .await?
             .ok_or_else(|| DomainError::not_found("dispatch", &command.dispatch_id))?;
-        Ok(crate::application::mapping::dispatch_to_dto(&moved))
+        Ok(dispatch_to_dto(&moved))
     }
 
     /// Fetches one pursuit with its derived standing.

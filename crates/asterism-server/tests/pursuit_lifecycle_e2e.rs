@@ -373,4 +373,45 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         crossing_restamp.is_err(),
         "a filing never leaves its persona: {crossing_restamp:?}"
     );
+
+    // ---- intent pinned: closed is standing, not a wall --------------
+    // Filing a new round under a closed pursuit is deliberately legal:
+    // a close is a fact about a moment, not a lock, and work after it
+    // changes live standing rather than being refused. This assert
+    // exists so a future reader treats the absence of a guard as the
+    // design, not as a gap to fix.
+    let late_round = core
+        .dispatch_service
+        .create(
+            CreateDispatchCommand {
+                snapshot_id: picked.id.clone(),
+                exporter_slug: "file".into(),
+                action: "write".into(),
+                params_json: String::new(),
+                operator_ai: None,
+                pursuit_id: Some(child.id.clone()),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("a closed pursuit still accepts new rounds");
+    assert_eq!(late_round.pursuit_id.as_deref(), Some(child.id.as_str()));
+
+    // ---- the kept set is validated like every other freeze ----------
+    let ghost_kept = core
+        .pursuit_service
+        .close(
+            ClosePursuitCommand {
+                pursuit_id: child.id.clone(),
+                outcome: "satisfied".into(),
+                kept_asset_ids: vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
+                note: None,
+            },
+            &unattributed(),
+        )
+        .await;
+    assert!(
+        ghost_kept.is_err(),
+        "keeping an asset the library does not hold is refused: {ghost_kept:?}"
+    );
 }

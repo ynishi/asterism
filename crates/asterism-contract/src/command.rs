@@ -2005,10 +2005,13 @@ pub struct ReopenPursuitCommand {
 /// Moves a dispatch's pursuit filing — the restamp repair verb (#29),
 /// for when the carrying failed (a context-losing surface minted
 /// fragments, a pre-created pursuit was stranded). The move is
-/// recorded with the prior filing; it never touches what happened,
-/// never crosses personas, and is refused when the round was
-/// restamped by someone else in between (the recorded `from` is read
-/// from the row at execution time inside one transaction).
+/// recorded with the prior filing it replaced — read on the server
+/// inside the same transaction that moves the stamp, so the record is
+/// never stale — and it never touches what happened, never crosses
+/// personas. The command carries no caller-observed `from`: a caller
+/// acting on an old view moves whatever filing is current
+/// (compare-and-swap against the caller's own read is a possible
+/// later addition, not a promise this verb makes).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct RestampDispatchCommand {
     /// The dispatch round to re-file.
