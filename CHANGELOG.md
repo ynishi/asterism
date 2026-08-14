@@ -36,6 +36,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured, and a certificate that stopped working all reported the
   same `false`. `Skipped` names the ones that are not faults.
 
+- **A stamp is staged in a temporary nothing can predict, and keeps the
+  file's own permissions** (#14) — the rewrite went through a
+  deterministic sibling (`shot.png.c2pa-partial`), opened with neither
+  `O_EXCL` nor `O_NOFOLLOW`, at whatever the umask gave. An export
+  directory is wherever the user pointed the export — possibly shared,
+  synced or watched — so anything else able to create a file there could
+  place a symlink at that name and have the stamp write the asset
+  through it; two concurrent applies to one path shared the temporary
+  and interleaved; and the staged copy of the whole asset was
+  world-readable for as long as signing took. `tempfile` becomes a real
+  dependency and supplies all three of a random name, `O_EXCL` and mode
+  0600, with the target's own permissions copied across before the
+  rename so that stamping is not also a permission change. Still absent:
+  an `fsync` before the rename.
+
+- **Two non-characters XML cannot hold are dropped from the packet**
+  (#14) — the filter took the C0 controls and stopped, but XML 1.0's
+  `Char` production also excludes U+FFFE and U+FFFF, which cannot be
+  written even as numeric references. They are reachable: a PNG text
+  chunk is decoded leniently, so a valid encoding of U+FFFF passes
+  through into the prompt and into the packet, and nothing noticed —
+  the packet is read back as text rather than parsed, so the write
+  reported an XMP half that had landed while the file carried an
+  unreadable metadata block. The neighbouring non-characters are legal
+  and stay.
+
 - **The workspace says what its digests actually rest on, and the signed
   manifest stops claiming a version it does not have** (#14) — the
   `preserve_order` comment in the workspace `Cargo.toml` asserted two
