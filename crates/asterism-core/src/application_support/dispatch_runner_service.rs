@@ -466,13 +466,16 @@ fn reify_one(
     }
     match &mut extra {
         serde_json::Value::Object(map) => {
-            map.insert("_dispatch".into(), trace);
+            map.insert(crate::domain::dispatch::DISPATCH_TRACE_KEY.into(), trace);
         }
         serde_json::Value::Null => {
-            extra = serde_json::json!({ "_dispatch": trace });
+            extra = serde_json::json!({ crate::domain::dispatch::DISPATCH_TRACE_KEY: trace });
         }
         _ => {
-            extra = serde_json::json!({ "_derived": extra, "_dispatch": trace });
+            extra = serde_json::json!({
+                "_derived": extra,
+                crate::domain::dispatch::DISPATCH_TRACE_KEY: trace,
+            });
         }
     }
     asset.extra = extra;

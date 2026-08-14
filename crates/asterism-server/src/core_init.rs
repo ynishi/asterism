@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use asterism_core::DomainError;
+use asterism_core::application::provenance_service::ProvenanceService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
@@ -28,6 +29,7 @@ use asterism_core::application::{
 use asterism_core::application_support::{
     DispatchRunnerService, QueryGroupRefreshService, RetentionService, SupportServices,
 };
+use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
 use asterism_dispatch_sdk::Exporter;
@@ -36,6 +38,9 @@ use asterism_exporter_file::FileExporter;
 use asterism_exporter_http::HttpExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, QueueReEnqueue, ReEnqueue};
 use asterism_infra::jobs::{self, JobDeps};
+// Named for what it is on this side of the boundary: the core's port is
+// also called `ProvenanceWriter`, and both are in scope here.
+use asterism_infra::provenance::ProvenanceWriter as InfraProvenanceWriter;
 use asterism_infra::search::TantivyIndex;
 use asterism_infra::source_text::FsSourceTextReader;
 use asterism_infra::sqlite;
@@ -428,6 +433,11 @@ pub async fn init_core_with(
     // (the runtime references the queue as its re-enqueue port, so it
     // cannot be constructed before start).
     let dispatch_cell: Arc<OnceLock<Arc<DispatchRunEnv>>> = Arc::new(OnceLock::new());
+    // The disclosure writer the `provenance_stamp` handler drives. A
+    // cell like the two below, but not for their reason: nothing here
+    // is chicken-and-egg, the cell is what lets a build leave stamping
+    // unwired and have the handler skip rather than fail.
+    let provenance_cell: Arc<OnceLock<Arc<ProvenanceService>>> = Arc::new(OnceLock::new());
     // Late-bound invalidator cell (same chicken-and-egg): handler-chain
     // writes (auto_tag / cover_gen / index_rebuild) notify query-group
     // refreshes through it (W4-a).
@@ -500,6 +510,7 @@ pub async fn init_core_with(
                     material_layers: (*material_layers).clone(),
                     chapter_marks: (*chapter_marks).clone(),
                     previews_dir: previews_dir.clone(),
+                    provenance: provenance_cell.clone(),
                 },
                 job_concurrency,
             )
@@ -760,6 +771,32 @@ pub async fn init_core_with(
     exporters.insert(file.slug().to_string(), file);
     exporters.insert(http.slug().to_string(), http);
     let exporter_registry = ExporterRegistry::new(exporters);
+
+    // AI-disclosure provenance for what a dispatch mints.
+    //
+    // Unsigned, because this repository ships no certificate and there
+    // is no configuration surface that supplies one yet. That is the
+    // supported state rather than a degraded one: the writer emits the
+    // IPTC/XMP half — the half platforms read most widely, and the one
+    // that needs no key material — and reports the manifest half as
+    // skipped. An untrusted manifest would be worse than none.
+    //
+    // `Withhold` is the documented recommendation, and this is the
+    // place the recommendation was written for. The prompt field
+    // receives whatever the generator wrote as one blob, which for the
+    // one family that supplies it carries the model name and every
+    // LoRA hash beside the text somebody typed; IPTC scopes the
+    // property to what was given "as prompt(s)", the AI Act asks only
+    // that synthetic origin be detectable, and publication is the one
+    // operation here that cannot be undone. Turning it on is a
+    // deployment's call, and it does not have a way to make it yet —
+    // which is why this is a literal rather than a setting lookup.
+    let _ = provenance_cell.set(Arc::new(ProvenanceService::new(
+        assets_arc.clone(),
+        edges_arc.clone(),
+        Arc::new(InfraProvenanceWriter::unsigned()),
+        PromptDisclosure::Withhold,
+    )));
 
     // Fill the late-bound dispatch cell so apalis `DispatchRun` jobs route
     // into a live runtime.

@@ -185,6 +185,17 @@ pub struct JobDeps {
     /// sandboxes the renditions with it (the same reasoning as the
     /// Tantivy index override).
     pub previews_dir: std::path::PathBuf,
+    /// Writes AI-disclosure provenance into a file this library
+    /// produced — the one thing `provenance_stamp` does.
+    ///
+    /// A cell, and empty is a supported state: a build that has not
+    /// decided whether it wants its exports rewritten leaves it unset,
+    /// and the handler skips with a message rather than failing. That
+    /// is the same shape [`dispatch`](Self::dispatch) uses, for a
+    /// different reason — this one is not late-bound, it is optional.
+    pub provenance: Arc<
+        std::sync::OnceLock<Arc<asterism_core::application::provenance_service::ProvenanceService>>,
+    >,
 }
 
 /// Execution environment handed to worker handlers via apalis' `Data`
@@ -447,6 +458,16 @@ async fn handle_asterism_job(
         Ok(JobKind::AssetFold) => (handlers::asset_fold(&env, &job.payload).await, false),
         Ok(JobKind::PreviewGen) => (handlers::preview_gen(&env, &job.payload).await, false),
         Ok(JobKind::ChapterScan) => (handlers::chapter_scan(&env, &job.payload).await, false),
+        Ok(JobKind::ProvenanceStamp) => match env.deps.provenance.get() {
+            Some(_) => (handlers::provenance_stamp(&env, &job.payload).await, false),
+            // Same shape as `DispatchRun` above: an unbound cell means
+            // nothing was stamped, so it classifies as skipped rather
+            // than as a run that did its work.
+            None => (
+                Ok("provenance_stamp skipped: no writer configured".to_string()),
+                true,
+            ),
+        },
         Ok(JobKind::TrashPurge) => match env.deps.retention_service.get() {
             Some(_) => (handlers::trash_purge(&env, &job.payload).await, false),
             // Same shape as `DispatchRun` above — an unbound cell means
@@ -789,6 +810,242 @@ mod tests {
         }
     }
 
+    /// A 1×1 PNG, built here so the fixture depends on no other
+    /// crate's test module.
+    fn png_bytes() -> Vec<u8> {
+        fn chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+            out.extend_from_slice(kind);
+            out.extend_from_slice(payload);
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(kind);
+            hasher.update(payload);
+            out.extend_from_slice(&hasher.finalize().to_be_bytes());
+            out
+        }
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]));
+        png.extend_from_slice(&chunk(b"IDAT", &[0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02]));
+        png.extend_from_slice(&chunk(b"IEND", &[]));
+        png
+    }
+
+    /// The XMP packet a file on disk carries, if any.
+    fn packet_of(path: &std::path::Path) -> Option<String> {
+        asterism_provenance::embed::read_xmp(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    /// **A dispatch's output comes back marked.**
+    ///
+    /// The acceptance criterion, asserted where it actually happens.
+    /// The chain is `reify` → `material_hash` → `provenance_stamp`, and
+    /// this drives the last link over the row state the middle one
+    /// leaves behind: an artefact carrying the dispatch trace, a
+    /// material whose `meta_kv` names a generator, and a real file on
+    /// disk.
+    ///
+    /// It is the last link that had to be proven separately, because
+    /// the first attempt at this feature stamped at export time —
+    /// before any fingerprint existed — where the evidence set is empty
+    /// and the writer correctly does nothing. A test that only checked
+    /// "the export succeeded" was green for a build that marked no file
+    /// at all.
+    #[tokio::test]
+    async fn a_dispatch_output_comes_back_marked() {
+        use asterism_core::domain::asset::Asset;
+        use asterism_core::domain::attribution::AttributionContext;
+        use asterism_core::domain::disclosure::PromptDisclosure;
+        use asterism_core::domain::material::Material;
+        use asterism_core::domain::persona::Persona;
+        use asterism_core::domain::repository::{
+            AssetRepository, MaterialFingerprint, PersonaRepository,
+        };
+        use asterism_core::domain::value::{Modality, SourceKind, SourceRef};
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let assets = Arc::new(SqliteAssetRepository::new(isle.clone()));
+        let edges = Arc::new(SqliteEdgeRepository::new(isle.clone()));
+        let personas = Arc::new(crate::sqlite::repo::SqlitePersonaRepository::new(
+            isle.clone(),
+        ));
+
+        let unattributed = AttributionContext::asserted(None, None).unwrap();
+        let persona = Persona::new("P", None).unwrap();
+        personas.save(&persona).await.unwrap();
+
+        // The file a dispatch left in its outbox.
+        let dir = tempfile::tempdir().unwrap();
+        let exported = dir.path().join("out.png");
+        std::fs::write(&exported, png_bytes()).unwrap();
+        assert_eq!(
+            packet_of(&exported),
+            None,
+            "the fixture starts with nothing to read"
+        );
+
+        let source = SourceRef::new(
+            SourceKind::new(SourceKind::FS).unwrap(),
+            exported.to_string_lossy(),
+        )
+        .unwrap();
+        let mut asset = Asset::new(
+            persona.id,
+            source.clone(),
+            Some(Modality::new("image").unwrap()),
+            chrono::Utc::now(),
+            &unattributed,
+        );
+        asset
+            .attach_material(Material::primary(
+                asset.source.locator.clone(),
+                None,
+                asset.created_at,
+            ))
+            .unwrap();
+        // What `reify_one` writes, and the only thing that lets this
+        // artefact be stamped at all.
+        asset.extra = serde_json::json!({
+            "_dispatch": {
+                "selection_id": "01930000-0000-7000-8000-000000000001",
+                "dispatch_id": "01930000-0000-7000-8000-000000000002",
+                "exporter_slug": "file",
+            }
+        });
+        assets.save(&asset).await.unwrap();
+        // What `material_hash` writes, and the reason the stamp cannot
+        // happen before it: without this the evidence set is empty and
+        // the mapping establishes nothing.
+        assets
+            .set_material_fingerprint(
+                &asset.id,
+                0,
+                &MaterialFingerprint {
+                    file: "unhashable:no-bytes".into(),
+                    content: "unhashable:no-bytes".into(),
+                    meta: "m1-sha256:0".into(),
+                    meta_kv: Some(
+                        serde_json::json!({ "Software": "ComfyUI", "workflow": "{}" }).to_string(),
+                    ),
+                    meta_raw: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let provenance = Arc::new(std::sync::OnceLock::new());
+        let _ = provenance.set(Arc::new(
+            asterism_core::application::provenance_service::ProvenanceService::new(
+                assets.clone(),
+                edges.clone(),
+                Arc::new(crate::provenance::ProvenanceWriter::unsigned()),
+                // The composition root's answer, so the fixture exercises
+                // what a deployment runs rather than a friendlier setting.
+                PromptDisclosure::Withhold,
+            ),
+        ));
+
+        let env = JobEnv {
+            deps: test_deps(&isle, provenance.clone()).await,
+            queue: open_queue(pool).await.unwrap(),
+        };
+        let outcome = handlers::provenance_stamp(
+            &env,
+            &serde_json::json!({ "asset_id": asset.id.to_string() }),
+        )
+        .await
+        .expect("a stamp is never a failed job");
+        assert_eq!(outcome, "disclosed=true failures=0", "{outcome}");
+
+        let packet =
+            packet_of(&exported).expect("the file carries a packet it did not have before");
+        assert!(
+            packet.contains("trainedAlgorithmicMedia"),
+            "and the packet says what the row established: {packet}"
+        );
+    }
+
+    /// With no writer configured the handler skips, and the file it
+    /// would have rewritten is left exactly as it was.
+    #[tokio::test]
+    async fn an_unconfigured_build_stamps_nothing() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let env = JobEnv {
+            deps: test_deps(&isle, Arc::new(std::sync::OnceLock::new())).await,
+            queue: open_queue(pool).await.unwrap(),
+        };
+        let outcome = handlers::provenance_stamp(
+            &env,
+            &serde_json::json!({ "asset_id": uuid::Uuid::now_v7().to_string() }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, "no writer configured, skipped");
+    }
+
+    /// The dependency bundle these two fixtures need, with everything
+    /// they do not touch left inert.
+    async fn test_deps(
+        isle: &rusqlite_isle::AsyncIsle,
+        provenance: Arc<
+            std::sync::OnceLock<
+                Arc<asterism_core::application::provenance_service::ProvenanceService>,
+            >,
+        >,
+    ) -> JobDeps {
+        let tantivy_dir = tempfile::tempdir().unwrap();
+        let search_index =
+            Arc::new(crate::search::TantivyIndex::open(tantivy_dir.path().to_path_buf()).unwrap());
+        std::mem::forget(tantivy_dir);
+        let query_groups = Arc::new(
+            crate::sqlite::repo::query_group::SqliteQueryGroupRepository::new(isle.clone()),
+        );
+        let personas = Arc::new(crate::sqlite::repo::SqlitePersonaRepository::new(
+            isle.clone(),
+        ));
+        let assets_shared = Arc::new(SqliteAssetRepository::new(isle.clone()));
+        let groups_shared = Arc::new(crate::sqlite::repo::group::SqliteGroupRepository::new(
+            isle.clone(),
+        ));
+        let query_group_service = Arc::new(asterism_core::application::QueryGroupService::new(
+            query_groups.clone(),
+            personas.clone(),
+            assets_shared.clone(),
+            groups_shared.clone(),
+        ));
+        JobDeps {
+            emitter: Arc::new(RecordingEmitter {
+                records: Mutex::new(Vec::new()),
+                notify: tokio::sync::Notify::new(),
+            }),
+            assets: SqliteAssetRepository::new(isle.clone()),
+            tags: SqliteTagRepository::new(isle.clone()),
+            edges: SqliteEdgeRepository::new(isle.clone()),
+            thumbs: SqliteThumbRepository::new(isle.clone()),
+            modalities: SqliteModalityRepository::new(isle.clone()),
+            asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+            search_index,
+            source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
+            dispatch: Arc::new(std::sync::OnceLock::new()),
+            query_group_refresh: Arc::new(
+                asterism_core::application_support::QueryGroupRefreshService::new(
+                    query_groups.clone(),
+                    query_group_service,
+                ),
+            ),
+            query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
+            retention_service: Arc::new(std::sync::OnceLock::new()),
+            series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
+            observations: crate::observe::ObservationStore::new(isle.clone()),
+            material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone()),
+            chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
+            previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+            provenance,
+        }
+    }
+
     #[tokio::test]
     async fn enqueue_runs_handler_and_emits_progress() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -855,6 +1112,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             None,
         )
@@ -1186,6 +1444,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1318,6 +1577,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1481,6 +1741,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1668,6 +1929,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1855,6 +2117,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1945,6 +2208,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2031,6 +2295,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                provenance: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         }
