@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A disclosure's two halves report their own outcome, so one failing no
+  longer cancels the other** (#14) — applying a record writes an IPTC/XMP
+  packet and signs a C2PA manifest, and the writer has argued from the
+  start that the two fail independently. It did not behave that way.
+  Every failure inside the signing block returned early while the packet
+  was still in memory, so a signing error threw it away: on the day a
+  certificate expires — which the module's own docs call the failure
+  every signing deployment eventually meets — exports would have stopped
+  carrying the IPTC half, the one that needs no certificate at all. The
+  mirror case cost the manifest: a packet too large for a JPEG segment
+  even after the reduction failed the whole call.
+
+  The cause was the return type. `Result<Stamped, _>` made the error
+  channel total while the operation is composite, and an `Err` has
+  nowhere to carry the half that succeeded. `Stamped` now holds a `Half`
+  per side — `Written`, `Skipped(reason)` or `Failed(cause)` — and `Err`
+  is reserved for the case where nothing could be attempted: the file
+  cannot be read, or its container is not one this build writes into.
+  Whether a failed half makes a failed export is the caller's judgement,
+  and it now has both facts to make it with.
+
+  Three states rather than a boolean, for the reason the digest axes
+  already have three: "no packet" was at least four different answers,
+  and a video that cannot carry one, a build with no certificate
+  configured, and a certificate that stopped working all reported the
+  same `false`. `Skipped` names the ones that are not faults.
+
 - **The workspace says what its digests actually rest on, and the signed
   manifest stops claiming a version it does not have** (#14) — the
   `preserve_order` comment in the workspace `Cargo.toml` asserted two
