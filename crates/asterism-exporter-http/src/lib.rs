@@ -77,12 +77,21 @@
 //! ### Templates and JSONPath
 //!
 //! Both grammars are the shared adapter machinery, documented where
-//! they are defined: [`asterism_dispatch_sdk::template`] for the
+//! they are defined: [`asterism_exporter_common::template`] for the
 //! `{{...}}` roots, the optional-`?` suffix and which of them resolve in
-//! which phase, and [`asterism_dispatch_sdk::jsonpath`] for the path
+//! which phase, and [`asterism_exporter_common::jsonpath`] for the path
 //! subset. They are not restated here — a grammar with two write-ups
 //! grows two meanings, and a profile author cannot tell which one their
 //! adapter implements.
+//!
+//! This exporter reaches them through the
+//! [`TemplateAdapter`] / [`ResponsePath`] traits and is parameterised on
+//! the implementation, defaulting to
+//! [`CommonExportAdapter`][asterism_exporter_common::CommonExportAdapter].
+//! `HttpExporter::new()` therefore keeps meaning what it meant, and an
+//! adapter that needs a placeholder root this one must not have — a
+//! credential resolved outside the params blob, say — supplies its own
+//! grammar rather than widening this one.
 //!
 //! One consequence of the params blob being a template namespace is
 //! worth repeating at the point of use, because it decides what may go
@@ -97,14 +106,10 @@
 
 use std::collections::BTreeMap;
 
-use asterism_dispatch_sdk::jsonpath::{first as jsonpath_first, many as jsonpath_many};
-use asterism_dispatch_sdk::template::{
-    TemplateEnv, render as render_template, render_headers, substitute_json_leaves,
-    value_to_display_string,
-};
 use asterism_dispatch_sdk::{
     Derived, DispatchContext, DispatchState, Exporter, ExporterError, Handle, ProgressHint,
 };
+use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter, TemplateEnv};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -268,9 +273,14 @@ struct HttpHandlePayload {
 }
 
 /// HTTP-backed schema-driven [`Exporter`].
+///
+/// `A` is the profile grammar — substitution and path selection — and
+/// defaults to the shipped [`CommonExportAdapter`], so the ordinary
+/// constructors name no type parameter at all.
 #[derive(Debug, Clone)]
-pub struct HttpExporter {
+pub struct HttpExporter<A = CommonExportAdapter> {
     http: reqwest::Client,
+    grammar: A,
 }
 
 impl Default for HttpExporter {
@@ -282,23 +292,45 @@ impl Default for HttpExporter {
 impl HttpExporter {
     /// Builds an exporter with a default `reqwest::Client`.
     pub fn new() -> Self {
-        Self {
-            http: reqwest::Client::builder()
+        Self::with_client(
+            reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("reqwest client build"),
-        }
+        )
     }
 
     /// Uses a caller-supplied `reqwest::Client` (integration tests
     /// pass a mocked one).
     pub fn with_client(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            grammar: CommonExportAdapter,
+        }
+    }
+}
+
+impl<A: TemplateAdapter + ResponsePath> HttpExporter<A> {
+    /// Uses a caller-supplied grammar in place of the shipped one.
+    pub fn with_grammar(http: reqwest::Client, grammar: A) -> Self {
+        Self { http, grammar }
+    }
+
+    /// Evaluates a poll predicate against a response body.
+    ///
+    /// A path that matches nothing is false rather than an error: on a
+    /// poll that is "not yet", which is the answer a job in flight
+    /// should produce.
+    fn match_rule(&self, rule: &MatchRule, resp: &Value) -> bool {
+        match self.grammar.select_first(resp, &rule.path) {
+            Some(actual) => actual == rule.equals,
+            None => false,
+        }
     }
 }
 
 #[async_trait]
-impl Exporter for HttpExporter {
+impl<A: TemplateAdapter + ResponsePath + Send + Sync> Exporter for HttpExporter<A> {
     fn slug(&self) -> &str {
         SLUG
     }
@@ -314,19 +346,15 @@ impl Exporter for HttpExporter {
     async fn dispatch(&self, ctx: DispatchContext<'_>) -> Result<Handle, ExporterError> {
         let params = parse_params(&ctx)?;
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(
-            &params.dispatch.path,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
+        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
+        let path = self.grammar.render(&params.dispatch.path, &env)?;
         let url = format!("{base}{path}");
-        let body = substitute_json_leaves(
-            &params.dispatch.body_template,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
-        let headers = render_headers(
-            &params.dispatch.headers,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
+        let body = self
+            .grammar
+            .render_json(&params.dispatch.body_template, &env)?;
+        let headers = self
+            .grammar
+            .render_headers(&params.dispatch.headers, &env)?;
         let resp = send_request(
             &self.http,
             &params.dispatch.method,
@@ -335,8 +363,10 @@ impl Exporter for HttpExporter {
             Some(body),
         )
         .await?;
-        let handle_value =
-            jsonpath_first(&resp, &params.dispatch.handle_from).ok_or_else(|| {
+        let handle_value = self
+            .grammar
+            .select_first(&resp, &params.dispatch.handle_from)
+            .ok_or_else(|| {
                 ExporterError::BackendRejected(format!(
                     "dispatch response missing handle_from path {:?}",
                     params.dispatch.handle_from
@@ -361,31 +391,31 @@ impl Exporter for HttpExporter {
         let payload = parse_handle_payload(handle)?;
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &payload.handle);
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(&params.poll.path, &env)?;
+        let path = self.grammar.render(&params.poll.path, &env)?;
         let url = format!("{base}{path}");
-        let headers = render_headers(&params.poll.headers, &env)?;
+        let headers = self.grammar.render_headers(&params.poll.headers, &env)?;
         let resp = send_request(&self.http, &params.poll.method, &url, &headers, None).await?;
 
-        if match_rule(&params.poll.failed_when, &resp) {
+        if self.match_rule(&params.poll.failed_when, &resp) {
             let message = params
                 .poll
                 .failed_when
                 .message_path
                 .as_deref()
-                .and_then(|p| jsonpath_first(&resp, p))
-                .and_then(value_to_display_string)
+                .and_then(|p| self.grammar.select_first(&resp, p))
+                .and_then(|v| self.grammar.display_string(v))
                 .unwrap_or_else(|| "backend reported failure".into());
             return Ok(DispatchState::Failed { message });
         }
-        if match_rule(&params.poll.done_when, &resp) {
+        if self.match_rule(&params.poll.done_when, &resp) {
             return Ok(DispatchState::Done);
         }
         let message = params
             .poll
             .progress_message_path
             .as_deref()
-            .and_then(|p| jsonpath_first(&resp, p))
-            .and_then(value_to_display_string);
+            .and_then(|p| self.grammar.select_first(&resp, p))
+            .and_then(|v| self.grammar.display_string(v));
         Ok(DispatchState::Running(ProgressHint {
             current: None,
             total: None,
@@ -403,41 +433,45 @@ impl Exporter for HttpExporter {
         let payload = parse_handle_payload(handle)?;
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &payload.handle);
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(&params.harvest.path, &env)?;
+        let path = self.grammar.render(&params.harvest.path, &env)?;
         let url = format!("{base}{path}");
-        let headers = render_headers(&params.harvest.headers, &env)?;
+        let headers = self.grammar.render_headers(&params.harvest.headers, &env)?;
         let resp = send_request(&self.http, &params.harvest.method, &url, &headers, None).await?;
-        let items = jsonpath_many(&resp, &params.harvest.items_path);
+        let items = self.grammar.select(&resp, &params.harvest.items_path);
         let now = Utc::now();
         let mut out: Vec<Derived> = Vec::with_capacity(items.len());
         for item in items {
             let item_env = env.with_item(&item);
-            let modality = render_template(&params.harvest.map.modality, &item_env)?;
-            let locator = render_template(&params.harvest.map.locator, &item_env)?;
+            let modality = self
+                .grammar
+                .render(&params.harvest.map.modality, &item_env)?;
+            let locator = self
+                .grammar
+                .render(&params.harvest.map.locator, &item_env)?;
             let cover_hint = params
                 .harvest
                 .map
                 .cover_hint
                 .as_deref()
-                .map(|t| render_template(t, &item_env))
+                .map(|t| self.grammar.render(t, &item_env))
                 .transpose()?;
             let register_note = params
                 .harvest
                 .map
                 .register_note
                 .as_deref()
-                .map(|t| render_template(t, &item_env))
+                .map(|t| self.grammar.render(t, &item_env))
                 .transpose()?;
             let mut labels: Vec<String> = Vec::new();
             for tmpl in &params.harvest.map.labels_static {
-                labels.push(render_template(tmpl, &item_env)?);
+                labels.push(self.grammar.render(tmpl, &item_env)?);
             }
             if let Some(path) = &params.harvest.map.labels_path {
-                for v in jsonpath_many(
+                for v in self.grammar.select(
                     &item,
                     path.trim_start_matches("$.item").trim_start_matches("$"),
                 ) {
-                    if let Some(s) = value_to_display_string(v) {
+                    if let Some(s) = self.grammar.display_string(v) {
                         labels.push(s);
                     }
                 }
@@ -529,13 +563,6 @@ async fn send_request(
     })
 }
 
-fn match_rule(rule: &MatchRule, resp: &Value) -> bool {
-    match jsonpath_first(resp, &rule.path) {
-        Some(actual) => actual == rule.equals,
-        None => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,25 +621,29 @@ mod tests {
     }
 
     // The template and JSONPath mechanics are tested where they are
-    // defined (`asterism_dispatch_sdk::template` / `::jsonpath`). What
-    // stays here is what this crate owns: the params schema, the shipped
-    // example, and the state-machine rules read out of a response.
+    // defined (`asterism_exporter_common::template` / `::jsonpath`).
+    // What stays here is what this crate owns: the params schema, the
+    // shipped example, and the state-machine rules read out of a
+    // response. The example is exercised through the same grammar the
+    // exporter holds, so a test cannot pass against a spelling the
+    // exporter does not use.
 
     #[test]
     fn match_rule_fires_only_on_equal_value() {
+        let exp = HttpExporter::new();
         let doc = serde_json::json!({ "status": "done" });
         let rule = MatchRule {
             path: "$.status".into(),
             equals: Value::String("done".into()),
             message_path: None,
         };
-        assert!(match_rule(&rule, &doc));
+        assert!(exp.match_rule(&rule, &doc));
         let rule_neg = MatchRule {
             path: "$.status".into(),
             equals: Value::String("failed".into()),
             message_path: None,
         };
-        assert!(!match_rule(&rule_neg, &doc));
+        assert!(!exp.match_rule(&rule_neg, &doc));
     }
 
     /// The shipped example is what `asterism-server schema print
@@ -642,12 +673,13 @@ mod tests {
         let params: HttpDispatchParams = serde_json::from_value(raw.clone()).unwrap();
         let inputs = vec![card_fixture("asset-uuid", "/tmp/photo.png")];
         let ctx = stub_ctx(&inputs, &raw);
+        let g = CommonExportAdapter;
 
         // dispatch — no handle exists yet.
         let pre = TemplateEnv::pre_handle(&ctx, ctx.params);
-        render_template(&params.dispatch.path, &pre).unwrap();
-        render_headers(&params.dispatch.headers, &pre).unwrap();
-        let body = substitute_json_leaves(&params.dispatch.body_template, &pre).unwrap();
+        g.render(&params.dispatch.path, &pre).unwrap();
+        g.render_headers(&params.dispatch.headers, &pre).unwrap();
+        let body = g.render_json(&params.dispatch.body_template, &pre).unwrap();
         assert_eq!(body["input_url"], "/tmp/photo.png");
         assert_eq!(body["prompt"], "photo studio portrait");
         assert_eq!(body["client_id"], "disp-1");
@@ -655,32 +687,29 @@ mod tests {
         // poll / harvest — the handle is in play.
         let handle = Value::String("job-1".into());
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &handle);
-        assert_eq!(
-            render_template(&params.poll.path, &env).unwrap(),
-            "/jobs/job-1"
-        );
-        render_headers(&params.poll.headers, &env).unwrap();
-        render_template(&params.harvest.path, &env).unwrap();
-        render_headers(&params.harvest.headers, &env).unwrap();
+        assert_eq!(g.render(&params.poll.path, &env).unwrap(), "/jobs/job-1");
+        g.render_headers(&params.poll.headers, &env).unwrap();
+        g.render(&params.harvest.path, &env).unwrap();
+        g.render_headers(&params.harvest.headers, &env).unwrap();
 
         // harvest.map — the only place `{{item.…}}` resolves.
         let item = serde_json::json!({ "url": "https://renders.test/a.png" });
         let item_env = env.with_item(&item);
         assert_eq!(
-            render_template(&params.harvest.map.locator, &item_env).unwrap(),
+            g.render(&params.harvest.map.locator, &item_env).unwrap(),
             "https://renders.test/a.png"
         );
-        render_template(&params.harvest.map.modality, &item_env).unwrap();
+        g.render(&params.harvest.map.modality, &item_env).unwrap();
         // The example's cover hint is optional (`?`); this item has no
         // caption, so it has to resolve to empty rather than error.
         let cover = params.harvest.map.cover_hint.as_deref().unwrap();
-        assert_eq!(render_template(cover, &item_env).unwrap(), "");
+        assert_eq!(g.render(cover, &item_env).unwrap(), "");
         let labels: Vec<String> = params
             .harvest
             .map
             .labels_static
             .iter()
-            .map(|t| render_template(t, &item_env).unwrap())
+            .map(|t| g.render(t, &item_env).unwrap())
             .collect();
         // The runner prepends `exporter:{slug}` to every Derived's
         // label list and does not dedupe
@@ -695,11 +724,12 @@ mod tests {
     /// the file is JSONPath, and nothing had ever evaluated one — a
     /// `$.ouputs[*]` typo would harvest zero items against a backend
     /// doing everything right, silently. Every path the example ships
-    /// is evaluated here through the same `jsonpath_first` /
-    /// `jsonpath_many` the exporter calls.
+    /// is evaluated here through the same grammar the exporter holds.
     #[test]
     fn params_example_jsonpaths_resolve_against_a_representative_response() {
         let params: HttpDispatchParams = serde_json::from_str(params_example_json()).unwrap();
+        let exp = HttpExporter::new();
+        let g = CommonExportAdapter;
         // One document standing in for all three phases: the fields
         // the paths reach are disjoint, so a single response exercises
         // every path without pretending the backend returns this shape
@@ -718,22 +748,22 @@ mod tests {
         // dispatch.handle_from — what gets persisted on the Handle and
         // interpolated into every later path.
         assert_eq!(
-            jsonpath_first(&resp, &params.dispatch.handle_from),
+            g.select_first(&resp, &params.dispatch.handle_from),
             Some(Value::String("job-1".into()))
         );
 
         // poll.done_when / failed_when — both sides of the state
         // machine read the same field and differ only in `equals`.
         assert_eq!(
-            jsonpath_first(&resp, &params.poll.done_when.path),
+            g.select_first(&resp, &params.poll.done_when.path),
             Some(Value::String("succeeded".into()))
         );
-        assert!(match_rule(&params.poll.done_when, &resp));
+        assert!(exp.match_rule(&params.poll.done_when, &resp));
         assert_eq!(
-            jsonpath_first(&resp, &params.poll.failed_when.path),
+            g.select_first(&resp, &params.poll.failed_when.path),
             Some(Value::String("succeeded".into()))
         );
-        assert!(!match_rule(&params.poll.failed_when, &resp));
+        assert!(!exp.match_rule(&params.poll.failed_when, &resp));
         let message_path = params
             .poll
             .failed_when
@@ -741,7 +771,7 @@ mod tests {
             .as_deref()
             .expect("the example ships a failure message path");
         assert_eq!(
-            jsonpath_first(&resp, message_path),
+            g.select_first(&resp, message_path),
             Some(Value::String("upstream refused the workflow".into()))
         );
 
@@ -752,13 +782,13 @@ mod tests {
             .as_deref()
             .expect("the example ships a progress path");
         assert_eq!(
-            jsonpath_first(&resp, progress_path),
+            g.select_first(&resp, progress_path),
             Some(Value::String("step 12/30".into()))
         );
 
         // harvest.items_path — one Derived per element, and the map's
         // locator has to resolve against each of them.
-        let items = jsonpath_many(&resp, &params.harvest.items_path);
+        let items = g.select(&resp, &params.harvest.items_path);
         assert_eq!(items.len(), 2, "the wildcard has to reach every output");
 
         let raw: Value = serde_json::from_str(params_example_json()).unwrap();
@@ -769,7 +799,7 @@ mod tests {
         let mut locators: Vec<String> = Vec::new();
         for item in &items {
             let item_env = env.with_item(item);
-            locators.push(render_template(&params.harvest.map.locator, &item_env).unwrap());
+            locators.push(g.render(&params.harvest.map.locator, &item_env).unwrap());
         }
         assert_eq!(
             locators,

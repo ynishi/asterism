@@ -391,6 +391,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "asterism-exporter-common"
+version = "0.0.0"
+dependencies = [
+ "asterism-contract",
+ "asterism-dispatch-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "asterism-exporter-file"
 version = "0.0.0"
 dependencies = [
@@ -413,6 +422,7 @@ dependencies = [
  "anyhow",
  "asterism-contract",
  "asterism-dispatch-sdk",
+ "asterism-exporter-common",
  "async-trait",
  "chrono",
  "reqwest 0.12.28",

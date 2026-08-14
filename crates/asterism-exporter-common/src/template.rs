@@ -35,16 +35,18 @@
 //! anything that can list dispatches, and a credential does not belong
 //! there. An adapter that needs one resolves it outside the blob.
 //!
-//! # Where this lives and why
+//! # What is here and what is on the trait
 //!
-//! It moved into the SDK when a second exporter needed it, for the
-//! reason given in [`crate::jsonpath`]: one grammar with two spellings
-//! is worse than either spelling on its own.
+//! This module is the grammar: what a placeholder may name, and how one
+//! template string is rendered. Everything built *on top* of that — JSON
+//! documents, header maps — lives on [`crate::TemplateAdapter`] as default
+//! methods, so an adapter that changes the grammar changes it in one
+//! place and the traversals follow.
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-use crate::exporter::{DispatchContext, ExporterError};
 use asterism_contract::dto::AssetCardDto;
+use asterism_dispatch_sdk::{DispatchContext, ExporterError};
 
 /// What a placeholder can be resolved against.
 ///
@@ -253,45 +255,6 @@ pub fn render(template: &str, env: &TemplateEnv<'_>) -> Result<String, ExporterE
     Ok(out)
 }
 
-/// Renders every string leaf of a JSON document in place.
-///
-/// Numbers, booleans and nulls pass through untouched, so a body
-/// template can carry a real `"steps": 20` rather than a string that the
-/// backend has to coerce.
-pub fn substitute_json_leaves(
-    value: &Value,
-    env: &TemplateEnv<'_>,
-) -> Result<Value, ExporterError> {
-    match value {
-        Value::String(s) => Ok(Value::String(render(s, env)?)),
-        Value::Array(arr) => arr
-            .iter()
-            .map(|v| substitute_json_leaves(v, env))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        Value::Object(obj) => {
-            let mut out = Map::with_capacity(obj.len());
-            for (k, v) in obj {
-                out.insert(k.clone(), substitute_json_leaves(v, env)?);
-            }
-            Ok(Value::Object(out))
-        }
-        other => Ok(other.clone()),
-    }
-}
-
-/// Renders every value of a header map.
-pub fn render_headers(
-    headers: &std::collections::BTreeMap<String, String>,
-    env: &TemplateEnv<'_>,
-) -> Result<std::collections::BTreeMap<String, String>, ExporterError> {
-    let mut out = std::collections::BTreeMap::new();
-    for (k, v) in headers {
-        out.insert(k.clone(), render(v, env)?);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,28 +363,6 @@ mod tests {
         assert_eq!(
             render("背景は{{params.who}}、前景は逆光", &env).unwrap(),
             "背景は夕焼け、前景は逆光"
-        );
-    }
-
-    #[test]
-    fn json_leaves_are_rendered_and_non_strings_pass_through() {
-        let inputs = [card("a-1", "/in/one.png")];
-        let params = json!({ "extras": { "prompt": "hello" } });
-        let c = ctx(&inputs, &params);
-        let env = TemplateEnv::pre_handle(&c, &params);
-
-        let body = json!({
-            "prompt": "{{params.extras.prompt}}",
-            "steps": 20,
-            "flags": [true, "{{dispatch_id}}"]
-        });
-        assert_eq!(
-            substitute_json_leaves(&body, &env).unwrap(),
-            json!({
-                "prompt": "hello",
-                "steps": 20,
-                "flags": [true, "disp-1"]
-            })
         );
     }
 

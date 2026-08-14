@@ -34,11 +34,15 @@
 //!
 //! # Where this lives and why
 //!
-//! It moved into the SDK when a second exporter needed it. One grammar
-//! with two spellings is worse than either spelling: a profile author
-//! reads one paragraph of documentation and cannot tell which adapter it
-//! describes, and a fix to the wildcard in one copy leaves the other
-//! wrong in a way no test in either crate can see.
+//! It left `asterism-exporter-http` when a second exporter needed it.
+//! One grammar with two spellings is worse than either spelling: a
+//! profile author reads one paragraph of documentation and cannot tell
+//! which adapter it describes, and a fix to the wildcard in one copy
+//! leaves the other wrong in a way no test in either crate can see.
+//!
+//! Adapters reach it through [`crate::ResponsePath`] rather than calling
+//! [`many`] directly, so the selection grammar is substitutable for the
+//! same reason the substitution grammar is.
 
 use serde_json::Value;
 

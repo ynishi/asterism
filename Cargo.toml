@@ -11,6 +11,7 @@ members = [
     "crates/asterism-disclosure-format",
     "crates/asterism-dispatch-sdk",
     "crates/asterism-exporter-comfy",
+    "crates/asterism-exporter-common",
     "crates/asterism-exporter-file",
     "crates/asterism-exporter-http",
     "crates/asterism-importer-cc",

@@ -12,8 +12,9 @@ publish     = false
 [lib]
 
 [dependencies]
-asterism-contract     = { path = "../asterism-contract" }
-asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+asterism-contract        = { path = "../asterism-contract" }
+asterism-dispatch-sdk    = { path = "../asterism-dispatch-sdk" }
+asterism-exporter-common = { path = "../asterism-exporter-common" }
 
 serde       = { workspace = true }
 serde_json  = { workspace = true }
