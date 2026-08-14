@@ -1,0 +1,851 @@
+{
+  "crate": "asterism-infra",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_infra::dispatch",
+      "kind": "module",
+      "docs": "Outbound-dispatch runtime — `ExporterRegistry` plus the apalis\n`DispatchRun` handler.\n\nThe registry is a simple `HashMap<slug, Arc<dyn Exporter>>` shared\nthrough `JobDeps`. Server / Tauri boot picks the concrete exporters\nand registers them here; the runner looks them up by slug on every\npoll cycle.\n\n`DispatchRun` drives one dispatch through `dispatch → poll →\nharvest → reify`. Re-enqueue between polls is done by pushing a new\n`DispatchRun` job with the same payload (apalis 0.7 does not\nexpose a native delayed-retry hook) — combined with the\nterminal-state guard on the domain side, the loop is safe against\nduplicated worker picks."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime",
+      "kind": "module",
+      "docs": "`DispatchRun` handler + `ExporterRegistry`.\n\nThe handler is intentionally boring: fetch the job row → look up\nthe matching Exporter → advance one step of the state machine →\npersist → optionally re-enqueue. All Exporter interaction goes\nthrough the SDK trait so this file has no knowledge of any\nspecific backend."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime::DispatchRunEnv",
+      "kind": "struct",
+      "docs": "Bundle of dependencies the runner needs on every tick."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime::ExporterRegistry",
+      "kind": "struct",
+      "docs": "Registry of exporters keyed by their `Exporter::slug()`.\n\nCheap to `Clone` (behind an `Arc`)."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime::QueueReEnqueue",
+      "kind": "struct",
+      "docs": "[`ReEnqueue`] impl that pushes another `DispatchRun` job through\nthe shared apalis-backed queue.\n\nThe runner uses this to bridge the poll-loop's \"check again in a\nmoment\" back into the same queue every other job flows through, so\ndispatch progress lands in the same monitoring surface as the rest\nof the pipeline."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime::ReEnqueue",
+      "kind": "trait",
+      "docs": "Small port around \"put this dispatch id back on the queue for\nanother tick\". Kept as a trait so the runner does not have to know\nabout apalis specifics — the caller wires it up to\n[`crate::jobs::SqliteJobQueue::enqueue`] with\n[`JobKind::DispatchRun`], or a test fake in unit tests."
+    },
+    {
+      "path": "asterism_infra::dispatch::runtime::run_dispatch_run",
+      "kind": "function",
+      "docs": "Executes one step of the dispatch state machine.\n\nReturns a short human-readable status for the progress emitter.\nStructured to leave the poll loop safe against:\n  - duplicate ticks: terminal-state guard exits fast.\n  - lost handles: `Pending` reruns `dispatch` because `handle` is `None`.\n  - dead exporters: the runner marks the job `Failed` and stops."
+    },
+    {
+      "path": "asterism_infra::jobs",
+      "kind": "module",
+      "docs": "Job engine — apalis with the `apalis-sql` SQLite backend.\n\n## Contents\n\n- [`AsterismJob`] — the queue payload. A single typed queue holds every\n  kind of job; the kind is carried in a slug field.\n- [`SqliteJobQueue`] — implementation of the `JobQueue` port from\n  `asterism-core`.\n- [`start`] — runs `SqliteStorage::setup` and spawns the worker\n  `Monitor` on a tokio task.\n\n## Coexistence with `rusqlite-isle`\n\n`apalis-sql` reaches SQLite through `sqlx 0.8` (which uses\n`libsqlite3-sys 0.30`). The workspace pins `rusqlite-isle` to the\nrelease line built against the same cluster, so both stacks link\nagainst a single copy of `sqlite3`. Job persistence tables (`Jobs`,\nand so on) are created by `SqliteStorage::setup` inside the same DB\nfile as the domain tables — they are owned by apalis, and the domain\nnever mirrors them.\n\n## Handlers\n\n[`handlers`] holds the per-kind implementations: `cover_gen`\n(modality-specific heuristic), `auto_tag` (keyword extraction + tag\nmaterialisation), and `edge_rebuild` (windowed incremental rebuild via\n`plan_edges`). `asset_add`, `persona_import`, and `index_rebuild` are\nfuture work."
+    },
+    {
+      "path": "asterism_infra::jobs::AsterismJob",
+      "kind": "struct",
+      "docs": "Queue payload — the job-kind slug (see [`JobKind::as_str`]) plus a\nkind-specific JSON payload.\n\nApalis' typed storage holds one Rust type per queue, so the kind is a\nslug field rather than an enum variant. This maps 1:1 to the\n`(JobKind, Value)` input of the [`JobQueue`] port."
+    },
+    {
+      "path": "asterism_infra::jobs::JobDeps",
+      "kind": "struct",
+      "docs": "Dependencies passed in by the caller (`asterism-ui` /\n`asterism-server`)."
+    },
+    {
+      "path": "asterism_infra::jobs::JobEnv",
+      "kind": "struct",
+      "docs": "Execution environment handed to worker handlers via apalis' `Data`\nextractor. Built by [`start`] from the caller-supplied [`JobDeps`] and\na queue handle used for chain-enqueue."
+    },
+    {
+      "path": "asterism_infra::jobs::JobKindSnapshot",
+      "kind": "struct",
+      "docs": "Per-kind slice of the apalis `Jobs` table."
+    },
+    {
+      "path": "asterism_infra::jobs::JobsDepth",
+      "kind": "struct",
+      "docs": "Queue depth by status — the poll-cheap half of [`jobs_snapshot`].\n\nNo `by_kind`, and so no `json_extract` over every row: this is one\nindexed `GROUP BY status` (`idx_jobs_status`) and nothing else.\n[`jobs_snapshot`] pays for the kind × status pass whenever anything\nis in flight, which is 1.15-1.27 s per call at 368 k accumulated\nrows [measured 2026-07-21, sqlx slow-statement WARN] — affordable for a\n3-second banner poll that only runs while a person is watching, and\nnot affordable for a bench driver polling a 5,000-file import to\ncompletion. Kept as a second function\nrather than as a flag on the first so the expensive path cannot be\nreached by forgetting an argument."
+    },
+    {
+      "path": "asterism_infra::jobs::JobsSnapshot",
+      "kind": "struct",
+      "docs": "Snapshot of the apalis `Jobs` table used by the UI progress banner."
+    },
+    {
+      "path": "asterism_infra::jobs::SqliteJobQueue",
+      "kind": "struct",
+      "docs": "Implementation of `JobQueue` on top of apalis' `SqliteStorage`."
+    },
+    {
+      "path": "asterism_infra::jobs::SqlitePool",
+      "kind": "type_alias",
+      "docs": "Re-export the sqlx-side pool type so downstream crates (server /\nTauri UI) can carry a handle without pulling `apalis_sql::sqlite`\ndirectly."
+    },
+    {
+      "path": "asterism_infra::jobs::chapter_ffmetadata",
+      "kind": "module",
+      "docs": "Reading a container's declared chapter list through an external\n`ffmpeg`, and turning ffmetadata's `[CHAPTER]` blocks into spans on\nthe app's own timeline.\n\n# Why ffmpeg, and why not ffprobe\n\nEvery container that declares chapters spells it differently — MP4's\n`chpl` / chapter track, Matroska's `Chapters` segment, an MP3's\nID3 `CHAP` frames — and ffmpeg's demuxers already read all of them\ninto one shape. `-f ffmetadata` is that shape printed out, so this\nmodule parses one grammar instead of three container formats.\n\n`ffprobe -show_chapters` prints the same facts as JSON and would be\nthe obvious tool, but **the bundled sidecar does not contain it**:\n`scripts/build-ffmpeg-sidecar.sh` configures with `--disable-ffprobe`,\nso on a clean machine — no Homebrew, the case the sidecar exists for\n— the JSON route reads chapters from nothing. The binary that ships\nis the binary this parses the output of.\n\nThe binary is located through\n[`thumb_ffmpeg::ffmpeg_binary`](crate::jobs::thumb_ffmpeg::ffmpeg_binary)\nrather than through a probe of this module's own, so the sidecar\nbeside the executable outranks `PATH` here exactly as it does for\nthumbnails. A second copy of that order is the drift the preview e2e\nalready paid for once.\n\n# What the parser refuses, and why refusing is not dropping quietly\n\nA `[CHAPTER]` block this reading cannot represent — no `TIMEBASE`, a\nnegative `START`, an `END` before its `START` — is left out of the\nband **and named in [`ChapterReading::refused`]**, which the handler\nputs in the job's own message. The alternative, inventing a plausible\nvalue, would put a timestamp the file never declared into a band\nwhose entire claim is that it says what the file says."
+    },
+    {
+      "path": "asterism_infra::jobs::chapter_ffmetadata::ChapterProbe",
+      "kind": "enum",
+      "docs": "The outcome of asking a file for its chapters.\n\nThe distinction is the one `ChapterScan` is built on: [`Read`] leaves\na band behind — an empty one when the file declares nothing — and\n[`Unreadable`] leaves the material in the backfill walk. Recording an\nempty band for a file nobody opened would answer \"does this declare\nchapters?\" permanently on the strength of a missing binary or an\nunmounted volume.\n\n[`Read`]: ChapterProbe::Read\n[`Unreadable`]: ChapterProbe::Unreadable"
+    },
+    {
+      "path": "asterism_infra::jobs::chapter_ffmetadata::ChapterReading",
+      "kind": "struct",
+      "docs": "What one reading of a material's chapter list came back with."
+    },
+    {
+      "path": "asterism_infra::jobs::chapter_ffmetadata::parse_chapters",
+      "kind": "function",
+      "docs": "Turns the text of an ffmetadata document into spans on the playback\ntimeline.\n\nPure, and the reason it is worth keeping pure is the unit tests below\nit: every shape this has to survive — a missing title, a zero-length\nsection, a timebase in nanoseconds, a container that declares its\nsections out of order — is a string, and none of them need a file.\n\n# The grammar, as much of it as matters here\n\nA document is lines. `;` or `#` opens a comment, `[NAME]` opens a\nsection, and everything else is `key=value`. A backslash escapes the\nnext character, which is how a value carries a literal `=`, `;`, `#`,\n`\\` or newline. Keys before the first section belong to the file as a\nwhole — which is why a top-level `title=` must not be mistaken for a\nchapter's, and why this walks sections rather than grepping for\n`title`.\n\n# `TIMEBASE` and the conversion this function owes the domain\n\n`START` and `END` are integers in units of `TIMEBASE` seconds, and\nthe unit is per file rather than per format. Measured against this\nrepository's own fixtures, both of which were *written* with\nmillisecond chapter times: the Matroska one reads back as\n`TIMEBASE=1/1000000000` and the MP4 one as `TIMEBASE=1/1000`. So a\nparser that assumed milliseconds would be right on one of the two\nand wrong by a factor of a million on the other — which is why a\nblock that declares no `TIMEBASE` is refused rather than assumed.\n\n[`TimelineSpan`] documents that \"values on another origin must be\nconverted before they arrive here\". The multiply below is this\nreading's half of that contract.\n\nThe division truncates, so a division point never lands later than\nthe file puts it."
+    },
+    {
+      "path": "asterism_infra::jobs::chapter_ffmetadata::read_chapters",
+      "kind": "function",
+      "docs": "Asks the file at `path_str` for its chapter list.\n\nRuns synchronously — call inside `spawn_blocking`, like the frame\ngrab it sits beside.\n\nA file that simply has no chapters is `Read` with an empty list, not\n`Unreadable`: ffmpeg exits zero and prints a header with no\n`[CHAPTER]` block, which is a complete answer."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers",
+      "kind": "module",
+      "docs": "Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.\n\nEvery handler is idempotent and can be re-derived from persisted\nstate — if an enqueue is lost the missing signal (for example a null\ncover) can trigger another run. v1 uses simple heuristics for cover\ntext and keywords; higher-quality generation via an LLM is planned\nfor later modalities."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::asset_dims",
+      "kind": "function",
+      "docs": "Measures `asset.width_px` / `height_px`.\n\nTwo payload shapes, the same split [`material_hash`] uses:\n\n- `{ \"asset_id\": <uuid> }` — **one asset, because somebody asked.**\n  A person who replaced the file behind a card; an agent over HTTP\n  naming the rows it wants redone. No scope and no dedup: the request\n  *is* the reason, and it overwrites, because a caller who asks for a\n  re-measure knows something the stored value does not.\n- `{ \"batch\": true, \"scope\": <scope?>, \"cursor\": <uuid?> }` — a pass\n  over the table, chain-enqueued while pages come back full. `scope`\n  defaults to `unlooked`, which is the startup seed's reading.\n\n**`scope` rides the payload through the chain.** A pass that read it\nonce and let the next page fall back to the default would apply the\ncaller's intent to the first hundred rows and silently revert for the\nrest — a force-walk that appears to run and mostly does not.\n\nOff the ingest path for the reason the fingerprint walk is: it opens\nfiles. An asset arriving today is measured by the importer that\nalready holds its bytes, which is both cheaper and better evidence."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::asset_fold",
+      "kind": "function",
+      "docs": "Folds one asset into another — the structural half of resolving a\nduplicate.\n\nPayload: `{ \"asset_id\": \"<uuid>\", \"keeper_id\": \"<uuid>\" }`. The\nfirst is the row that becomes a headstone, the second the row that\nstays.\n\n# Why this is not part of `material_hash`\n\nThe fingerprint is what raises the conflict, so folding from inside\nthe hash handler would save a queue hop. It would also make a\npartial failure permanent: the backfill walk finds work by asking\nwhether the fingerprint columns hold an answer\n(`content_hash::needs_fingerprint`), so once both are written the row\nis one the walk will never look at again — a run that died between the hash\nwrite and the fold would leave a state nothing comes back for, and\nthis job engine has no retries (`JobKind::AssetFold`). Split, each\nhalf is either done or never started. The second reason is plainer:\nhashing is a fact about bytes, folding is a decision about identity.\n\n# What it does to the keeper\n\nThe structure that pointed at the folded row moves, and the columns\nthe two rows both carry are combined by the rules\n`AssetRepository::fold_into` documents: sets union, `rating` takes\nthe larger of the two, a restricted side wins, notes are joined.\nEvery other column keeps the keeper's value — and what the headstone\nheld there is written to the keeper's `_trace.absorbed`, because\n\"the keeper's title stands\" is a decision, not an observation that\nthe two titles were the same.\n\n# Order of the two side effects\n\nThe database transaction commits **first**; the search document and\nthe Query Group invalidation follow. That direction is chosen for\nhow it fails:\n\n- **This way**, a crash after the commit leaves a Tantivy document\n  naming a row that is now a headstone. It cannot resurrect it — the\n  search path intersects its hits with the SQL population, which\n  excludes folded rows — so the cost is a stale document until the\n  next reindex. That is the same judgement\n  `AssetService::unindex_removed_assets` already records for trash\n  and purge, in the same words: the stale document is the\n  recoverable direction.\n- **The other way**, deleting the document first, a fold that then\n  failed to commit would leave a **live** asset missing from search.\n  Nothing restores that: the index backfill looks for rows with no\n  cached body, and this row's body cache is intact, so it would stay\n  unfindable until somebody rebuilt the whole index by hand.\n\nThe invalidation goes last for the same reason it is not in the\ntransaction: it is a notification, and a missed one costs a stale\nQuery Group membership until the next refresh.\n\n# Why a row that is already a headstone is not simply skipped\n\n[`FoldRefusal::AlreadyFolded`] means the transaction has nothing left\nto do, and it used to mean this job had nothing left to do either.\nBoth of the effects above are about the *state* of the row — a\nheadstone must not be retrievable, and a persona holding a fresh one\nhas stale Query Group memberships — so they are owed whether or not\nthis particular invocation is the one that stood it up. Two callers\narrive in exactly that state:\n\n- [`AssetService::merge_assets`](asterism_core::application::AssetService::merge_assets),\n  whose transaction folds the rows itself and then enqueues this job\n  for the half that lives outside a transaction. Without this branch\n  the manual merge would enqueue a job that reports \"already folded\"\n  and cleans nothing — the bug the enqueue was added to fix.\n- A re-run after a crash between the commit and the removal, which is\n  the recoverable direction the section above chooses deliberately.\n  This is what makes it recoverable rather than merely survivable.\n\nEvery other refusal is still a skip: the row is not a headstone, so\nthere is no document that should not be there."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::auto_tag",
+      "kind": "function",
+      "docs": "Extracts keywords, materialises channel tags, and links them to the\nasset.\n\nv1 heuristic: labels + register annotation + file-stem tokens +\nleading markdown headings. Capped at 8 to keep the channel space\nfrom getting spammed."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::chapter_scan",
+      "kind": "function",
+      "docs": "Reads a container's own chapter list into its imported structure\nband.\n\nPayload is either `{ \"asset_id\": <uuid> }` (one asset, from the\ningest fan-out) or `{ \"batch\": true, \"cursor\": {…} }` (the walk over\nmaterials no reading has reached yet).\n\nFailures are per-material and never fatal, for the reason the\nfingerprint job gives: a file that has moved leaves its band\nunwritten, which reads downstream as \"not scanned yet\" rather than\nas \"declares nothing\", and returning `Err` for one of them would\nabandon the rest of the page."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::cover_gen",
+      "kind": "function",
+      "docs": "Auto-generates the card cover. Idempotent — if the cover column is\nalready populated the handler skips.\n\nWrites only the cover column (partial `UPDATE`) so that concurrent\nhandlers do not race through a read-modify-write cycle. The full-row\nupsert path was observed clobbering the cover value in practice."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::duplicate_scan",
+      "kind": "function",
+      "docs": "Re-derives duplicate conflicts from fingerprints already on the rows.\n\nPayload: `{ \"batch\": true, \"cursor\": {\"asset_id\": …, \"ord\": …} }`.\nOne shape only — there is no per-asset variant because the per-asset\nderivation already happens, inline, when that asset's digest is\nwritten (`detect_after_hash`). This exists for the rows whose moment\npassed; see [`JobKind::DuplicateScan`].\n\n**Nothing here is destructive and nothing is folded.** The origin is\n[`DetectionOrigin::Backfill`], which turns a lane's `Fold` into `Ask`,\nand the conflict insert is `ON CONFLICT DO NOTHING` over\n`UNIQUE (pair_lo, pair_hi, axis)` — so a pair already queued is not\nduplicated, and a pair a person already resolved keeps its answer.\nThat is what makes the job safe to re-run at will.\n\n[`JobKind::DuplicateScan`]: asterism_core::domain::job::JobKind::DuplicateScan"
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::edge_rebuild",
+      "kind": "function",
+      "docs": "Incrementally rebuilds constellation edges for the target asset.\n\nCandidate fetch is window-scoped (within ±48h of the target or\nsharing its session id, capped at 200); the weight / label rules\nlive in the pure `plan_edges` domain function."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::index_rebuild",
+      "kind": "function",
+      "docs": "Rebuilds the Tantivy full-text index for one asset (single-doc\nmode) or performs a backfill pass over assets that do not yet\nhave an `asset_body` row (`{\"batch\": true}` payload).\n\nPayload shapes:\n- `{ \"asset_id\": \"<uuid>\" }` — single doc mode. Resolves the\n  body via [`SourceTextReader`], upserts `asset_body`, adds a\n  Tantivy document, and commits. Enqueued by `AssetService::add`\n  at ingest time.\n- `{ \"batch\": true }` — backfill mode. Scans `asset` LEFT JOIN\n  `asset_body IS NULL`, processes one page (`INDEX_BACKFILL_PAGE`),\n  then chain-enqueues itself for the next page when the page was\n  full. Idempotent — re-running against a fully-indexed DB is a\n  no-op (`scan_missing_body` returns empty).\n\nFailure per asset (locator unreadable, tantivy write error) is\nlogged and skipped — the row simply lands without a body cache\nentry and the next backfill picks it up."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::material_hash",
+      "kind": "function",
+      "docs": "Fingerprints an original's bytes into `material.content_hash`, then\nasks what the digest means for the corpus.\n\nPayload is either `{ \"asset_id\": <uuid> }` (one asset, from the\ningest fan-out) or `{ \"batch\": true, \"cursor\": <uuid?> }` (the\nbackfill walk over everything imported before the column existed).\n**The payload shape is also what tells the two passes apart** for\n[`DetectionOrigin`] — the branch below is the fact, and a dedicated\nfield would be a second copy of it that whoever enqueued the job\ncould get wrong.\n\nFailures are per-material and never fatal: a file that has moved\nor been deleted leaves its hash `NULL`, which reads downstream as\n\"unknown\", not as \"unique\". Returning `Err` for one missing file\nwould abandon the rest of the page."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::observation_sweep",
+      "kind": "function",
+      "docs": "Expires observations past their stream's declared retention.\nPayload is empty (`{}`) — the windows come from `STREAM_REGISTRY`,\nnever from the payload, so a queued job cannot sweep on a policy\nthat has since changed.\n\nChain-enqueues while a page comes back full. Unlike `trash_purge`\nthis needs no \"made progress\" guard: a full page here means rows\nwere deleted, so the backlog strictly shrinks and the chain\nterminates."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::preview_gen",
+      "kind": "function",
+      "docs": "Transcodes a webview-unplayable video into its preview rendition\n(`super::preview_ffmpeg`). Payload: `{ \"asset_id\": <uuid> }`.\n\nIdempotent: an existing rendition is a completed job. On failure a\n`.failed` marker carrying the reason is written beside the target\nso the status endpoint answers \"failed: why\" instead of keeping\nthe pane on a spinner forever; the marker is cleared before every\nfresh attempt so a retry starts clean."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::query_group_refresh",
+      "kind": "function",
+      "docs": "Re-evaluates every Query Group under one persona. Payload:\n`{ \"persona_id\": \"<uuid>\" }`. Failures per group are collected\nand surfaced in the completion message but do not fail the job\n(one corrupt rule must not stop the other groups' refresh)."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::series_derive",
+      "kind": "function",
+      "docs": "Derives `material_series` keys — applies every registered\n[`Strategy`](asterism_core::domain::series::Strategy) to a material's\n`meta_kv` and files what each rule concluded.\n\nTwo payload shapes, the same split [`material_hash`] uses:\n\n- `{ \"asset_id\": <uuid> }` — one asset's materials, enqueued by the\n  fingerprint pass at the moment it writes their `meta_kv`. Without it\n  a file imported now would carry no key until the next start.\n- `{ \"batch\": true, \"cursor\": {\"asset_id\": …, \"ord\": …,\n  \"strategy_id\": …} }` — a pass over the pairs nothing has answered,\n  chain-enqueued while pages come back full.\n\n**Every pair is answered, including the two answers that are not\nkeys.** That is the whole of why the walk ends: its predicate is \"a\n`(material, rule)` pair with no row\", so a pair leaves the population\nby acquiring one. Filing only derived keys would re-offer every JPEG\nand every material a rule declines on every page, and the chain — which\nre-enqueues while a page comes back full — would run for as long as\nthe process lived. See\n[`JobKind::SeriesDerive`](asterism_core::domain::job::JobKind::SeriesDerive)."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::session_rebuild",
+      "kind": "function",
+      "docs": "Session reconciliation stub — the precomputed rkyv snapshot was\nretired when Session became the 1st-class Dialog entity. Aggregates\n(`message_count` / `started_at_ms` / `ended_at_ms`) are now\nderived at query time by\n[`AssetRepository::list_sessions`](asterism_core::domain::repository::AssetRepository::list_sessions)\nvia a LEFT JOIN on the `asset` aggregate, so a snapshot\nrebuild has no work to do. The handler stays wired so callers\nenqueueing `SessionRebuild` (the HTTP endpoint / startup path /\nimport chain) still succeed idempotently; a future P2/P3\nreconciliation pass that writes back the derived columns onto\nthe `session` row can slot in here without a handler-table\nchange. The `sessions:progress` broadcast is preserved for UI\ncompatibility."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::thumb_gen",
+      "kind": "function",
+      "docs": "Generates a resized JPEG thumbnail for a visual asset at a\nspecific size and upserts it into `thumb_cache`.\n\nPayload: `{ \"asset_id\": <uuid>, \"size_px\": <u32> }`.\nIdempotent: `INSERT OR REPLACE` on the `(asset_id, size_px)`\nkey. Images and videos are eligible (a video contributes one\nextracted frame); anything else returns silently as \"not\nthumbnailable, skipped\"."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::trash_purge",
+      "kind": "function",
+      "docs": "Retention sweep — purges assets and Groups whose trash stamp has\naged past the configured retention period. Payload is empty (`{}`).\n\nThe cutoff is **not** in the payload: it is derived inside\n`RetentionService::purge_expired` from the injected retention\nvalue, so a job that sat in the queue across a policy change purges\non the current policy rather than the one in force when it was\nenqueued.\n\nChain-enqueues itself while a page comes back full **and made\nprogress**. Both halves matter:\n\n- \"full\" is measured on rows *scanned*, so a page is not mistaken for\n  the end of the backlog just because some rows were skipped.\n- \"made progress\" is what stops a spin. A page that purged nothing\n  would otherwise re-enqueue instantly and forever, and since this\n  queue has no retry policy the failure would surface only as an\n  ever-growing `Jobs` table. The one *expected* skip — a restore\n  landing mid-sweep — needs no chaining anyway: the restored row\n  fails `scan_purgeable`'s predicate on the next pass, so it is gone\n  from the scan regardless. That leaves genuine errors, and retrying\n  those in a tight loop helps nobody; the next startup sweep picks\n  the page back up."
+    },
+    {
+      "path": "asterism_infra::jobs::jobs_depth",
+      "kind": "function",
+      "docs": "Reads [`JobsDepth`] off the apalis `Jobs` table.\n\n`Killed` / `Retry` rows count towards none of the four fields, the\nsame way [`jobs_snapshot`] leaves them out of its four counters. A\ndrain check therefore asks `pending + running == 0`: those are the\ntwo states that still owe work."
+    },
+    {
+      "path": "asterism_infra::jobs::jobs_snapshot",
+      "kind": "function",
+      "docs": "Returns a compact snapshot of the apalis `Jobs` table. Groups by\nstatus and by kind so the UI banner can render a \"N total, K\ndone\" gauge and — if space allows — per-kind chips."
+    },
+    {
+      "path": "asterism_infra::jobs::open_job_pool",
+      "kind": "function",
+      "docs": "Opens the sqlx pool used by the job engine. Provided as a helper so\nconsumers (the Tauri UI, the standalone server) do not need to import\nsqlx directly. The pool shares the on-disk file with the isle backend\n(they run on separate connection stacks under WAL)."
+    },
+    {
+      "path": "asterism_infra::jobs::open_queue",
+      "kind": "function",
+      "docs": "Opens the job queue: runs `SqliteStorage::setup`, creates the\nsnapshot-poll indexes, and wraps the storage in a [`SqliteJobQueue`].\n\nThis is the enqueue-only half of [`start`] — no worker `Monitor` is\nspawned, so the returned queue can push jobs but nothing in this\nprocess consumes them. Used by read-only consumers (the standalone\nserver) that share the apalis DB with a worker-running process (the\nTauri UI) which drains the queue."
+    },
+    {
+      "path": "asterism_infra::jobs::preview_ffmpeg",
+      "kind": "module",
+      "docs": "Preview-rendition transcode: an unplayable video in, an H.264 MP4\nout.\n\nThe embedded webview cannot display VP9 at all and rejects the\nMatroska container (measured 2026-07-31), and the\ncorpus this app is for — generation-tool output — emits VP9 WebM\nby default. No delivery trick fixes a codec the engine will not\ndecode in the DOM, so the fix is the one video sites use: keep the\noriginal untouched in the ledger and play a transcoded rendition.\nH.264 + AAC in MP4 is the one combination every measured route\nplays.\n\nThe rendition is a **cache**, not a copy of record: capped\nresolution, disposable, regenerable from the original at any time\n— the thumbnail relationship at video scale. It lives beside the\nprofile database (`<profile>/previews/<asset_id>.mp4`) so tests\nthat sandbox the database sandbox the renditions with it.\n\nLike `thumb_ffmpeg`, this shells out to an installed ffmpeg\nbinary; when none is present the job fails naming the fix instead\nof leaving a silent crossed-out player."
+    },
+    {
+      "path": "asterism_infra::jobs::preview_ffmpeg::PREVIEW_MAX_EDGE",
+      "kind": "constant",
+      "docs": "Box the rendition fits in (longer edge, pixels). Preview quality\nis deliberately below original quality — the original is one\nclick away and the rendition's job is \"does this clip look right\",\nnot archival fidelity."
+    },
+    {
+      "path": "asterism_infra::jobs::preview_ffmpeg::make_preview",
+      "kind": "function",
+      "docs": "Transcodes `src` into `dest` (H.264 + AAC MP4, capped to\n[`PREVIEW_MAX_EDGE`]). Synchronous — call inside `spawn_blocking`.\n\nWrites to the `.part` path and renames on success, so a `dest`\nthat exists is always a complete rendition."
+    },
+    {
+      "path": "asterism_infra::jobs::start",
+      "kind": "function",
+      "docs": "Starts the job engine: opens the queue ([`open_queue`]) and spawns a\nworker `Monitor` ([`start_workers`]).\n\n`concurrency` is the caller-resolved worker count; `None` defers to\n`available_parallelism`. The composition root reads it from the\n`jobs.concurrency` setting, so the value survives a restart and\n`ASTERISM_JOB_CONCURRENCY` still applies while nothing is stored —\nboth arrive through the one resolution stack rather than through a\nsecond env read here.\n\nThe returned [`SqliteJobQueue`] is what application services hold on\nto for enqueueing. The monitor runs for the lifetime of the process;\ngraceful shutdown is a future addition."
+    },
+    {
+      "path": "asterism_infra::jobs::start_workers",
+      "kind": "function",
+      "docs": "Spawns the worker `Monitor` for an already-opened queue on a tokio\ntask. The monitor runs for the lifetime of the process; graceful\nshutdown is a future addition.\n\nSplit out of [`start`] so consumers can choose enqueue-only\n([`open_queue`] alone) versus enqueue + consume ([`open_queue`] +\nthis)."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_ffmpeg",
+      "kind": "module",
+      "docs": "Video frame extraction through an external `ffmpeg`, for the\nformats AVFoundation cannot open.\n\nmacOS ships no WebM / Matroska / AVI demuxer, so before this path\nexisted a `.webm` clip kept an empty tile forever — the thumb job\nfailed softly and the grid showed nothing (journal 2026-07-27, the\n\"webm mkv avi\" carry). Bundling an ffmpeg *library* was rejected\nback then for its build cost, and still is; this module instead\nshells out to an ffmpeg *binary* when one is installed, and fails\nwith an instruction naming the fix when none is.\n\n# Routing, and the drift this module closes\n\n[`route_for`] is the single answer to \"which extractor can turn\nthis video mime into a frame\". The extension→mime table\n(`asterism_core::domain::material`) and the extractors' real\ncapabilities used to be two lists growing independently — a format\nadded to the table without an extractor showed up as an empty\ntile, not an error. The test at the bottom walks\n`KNOWN_VIDEO_MIMES` and fails the moment an entry has no\ndeliberate route, so the two lists can no longer drift silently.\n\n# Why the binary is probed at fixed paths too\n\nA GUI app launched through LaunchServices inherits a minimal\n`PATH` (`/usr/bin:/bin:…`) that does not contain Homebrew's\nprefix, so `Command::new(\"ffmpeg\")` alone would report \"not\ninstalled\" on exactly the machines that have it. The probe order\nis: `$ASTERISM_FFMPEG` (explicit override) → the bundled sidecar\nbeside the executable → `PATH` → the usual install prefixes.\n\nThe sidecar is an LGPL-clean ffmpeg (no libx264 — H.264 encoding\nrides `h264_videotoolbox`) that `tauri build` copies to\n`Asterism.app/Contents/MacOS/ffmpeg` via `bundle.externalBin`;\n`scripts/build-ffmpeg-sidecar.sh` produces it. It outranks `PATH`\nso the app prefers the binary it shipped and was tested with over\nwhatever the host happens to carry, and a clean machine (no\nHomebrew) plays video out of the box."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_ffmpeg::VideoThumbRoute",
+      "kind": "enum",
+      "docs": "Which extractor owns a video mime."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_ffmpeg::ffmpeg_binary",
+      "kind": "function",
+      "docs": "Locates an ffmpeg binary, or says how to get one. Shared with the\npreview-rendition transcoder (`preview_ffmpeg`), which rides the\nsame soft dependency.\n\n`pub` so tests outside this crate resolve ffmpeg the way the app\ndoes. A test that reimplements the probe drifts from it: the\nserver-side preview e2e carried its own `PATH`-then-prefixes copy\nand so could not see the bundled sidecar — it reported \"ffmpeg is\nrequired\" on exactly the machines the sidecar exists for."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_ffmpeg::make_thumb",
+      "kind": "function",
+      "docs": "Extracts one frame from the video at `path_str`, scaled to fit a\n`target_px` box, and returns JPEG-encoded bytes — the same blob\nshape the AVFoundation and ImageIO routes produce, so the cache,\nthe UI and the palette extractor cannot tell the sources apart.\n\nRuns synchronously — call inside `spawn_blocking`, like the two\nroutes it sits beside."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_ffmpeg::route_for",
+      "kind": "function",
+      "docs": "Picks the extraction route for a video mime.\n\n`None` (mime unknown) routes native: that is the pre-existing\nbehaviour for unclassified rows, and AVFoundation's own error is\nmore informative than a guessed ffmpeg invocation.\nThe set lives on [`VideoFormat`] rather than here: this question and\n\"does the detail player need a transcoded rendition?\"\n(`render::needs_video_preview`) are the same three containers, and\nthey used to be two copies of the same literals in two crates —\nadding a format to one and not the other is silent in both\ndirections (an empty tile, or a crossed-out player)."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_macos",
+      "kind": "module",
+      "docs": "ImageIO fast path for `thumb_gen` on macOS.\n\n`CGImageSourceCreateThumbnailAtIndex` reads a JPEG (or HEIC / PNG),\nresizes to a target longer edge, and returns a `CGImage` in one\ncall. On Apple Silicon this route flips to the hardware JPEG\ndecoder, keeping CPU load close to zero during a large import\nwave — the pure-Rust `image` crate path (see `handlers::make_thumb`\nfallback) burns a full core per decode even at `Lanczos3`.\n\nThe returned bytes are JPEG-encoded via `CGImageDestination` so\nthe DB blob shape stays identical across platforms."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_macos::make_thumb",
+      "kind": "function",
+      "docs": "Decodes the JPEG at `path_str`, resizes so the longer edge is\n`target_px`, and returns JPEG-encoded bytes. Runs synchronously —\ncall inside `spawn_blocking` from an async handler."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_video",
+      "kind": "module",
+      "docs": "Video frame extraction for `thumb_gen` on macOS.\n\nA video has no thumbnail without this: ImageIO (`thumb_macos`) and\nthe pure-Rust `image` crate both decode stills only, so before this\npath existed a video asset simply showed an empty tile in the grid.\n`AVAssetImageGenerator` pulls one frame as a `CGImage`, which\n`thumb_macos::encode_jpeg` then turns into the same JPEG blob every\nother thumbnail is stored as — the cache, the UI and the palette\nextractor cannot tell the two sources apart, which is the point.\n\nFormat coverage is AVFoundation's, not the mime map's. `video/mp4`\nand `video/quicktime` open natively; `video/webm` does not (macOS\nships no WebM demuxer), so those assets fail here and keep the\nempty tile they had before. The failure is soft — one logged job\nfailure per enqueue, no retry storm (`jobs::mod` has no retry\npolicy, and the UI stops re-kicking after its own budget) — but it\nmeans the extension→mime table in `domain::material` and this\nextractor's real capabilities are two lists that can drift apart.\n\nThe generator's synchronous `copyCGImageAtTime` is deprecated in\nfavour of the async form. It is the right call here anyway: the\nwhole `thumb_gen` handler already runs inside `spawn_blocking`\nunder a decode-slot semaphore, so blocking is the contract this\npath is called under, and an async completion handler would only\nadd a channel round-trip to get back to it."
+    },
+    {
+      "path": "asterism_infra::jobs::thumb_video::make_thumb",
+      "kind": "function",
+      "docs": "Extracts one frame from the video at `path_str`, scaled to fit a\n`target_px` box, and returns JPEG-encoded bytes.\n\nRuns synchronously — call inside `spawn_blocking`, like the image\npath it sits beside."
+    },
+    {
+      "path": "asterism_infra::observe",
+      "kind": "module",
+      "docs": "Observation — the `tracing` subscriber and the streams it writes.\n\nOne channel for everything the application observes about itself\nthrough `tracing`. Call sites anywhere in the workspace write\n`tracing::warn!` / `info!` / `error!` and never think about\ntransport; this module decides where those records go.\n\n## Which stream a record belongs to\n\nTwo of the four observation streams are written here: `DiagLog`\n(what the application decided or failed at) and `PerfLog` (how long\nsomething took). A call site selects `PerfLog` by naming itself —\n`event = \"perf.list_index\"` — and anything unnamed is a diagnostic.\n`ActionLog` and `JobLog` are written by their own subsystems; see\n[`asterism_core::domain::observation`] for the four-way split and\nwhy it exists.\n\n## Why a subscriber rather than a handle\n\n`asterism-core` deliberately does not depend on `asterism-infra`, so\na service in the application layer cannot reach a database-backed\nsink through a field. Threading a port through `AssetService` /\n`PersonaService` / the job handlers for the sake of a swallowed\nwarning would cost a constructor change per seam. `tracing` installs\none process-global subscriber instead, so a call site needs no\nhandle and the layering stays intact.\n\n## What is written is written verbatim\n\nField values reach `attrs` as they were given. Ids, counts,\ndurations and error strings are fine; a token, a credential or a\nuser's content is not. Check that before adding a field. How long a\nrow then survives is the stream's retention policy, not this\nmodule's business.\n\n## Two layers, and where the real decision is made\n\n- a `fmt` layer to stderr, filtered by `RUST_LOG` (default\n  `asterism=info`) — the developer-facing view;\n- [`ObservationLayer`], which persists to a stream table — the\n  durable view, readable long after the terminal is gone.\n\nThe filters are deliberately separate. `RUST_LOG` is the dial a\ndeveloper reaches for, and it must not change what the application\nwrites to its own database: the sink keeps a fixed `asterism=info`.\n\nThat fixed filter only selects *candidates*. What is actually kept\nis\n[`StreamPolicy::should_persist`](asterism_core::domain::observation::StreamPolicy::should_persist)\n— a filter sees a level and a target, and decisions like \"perf\ntimings, in development only\" need the stream.\n\n## Ordering, and what the startup queue does and does not buy\n\nThe subscriber must exist before anything can log, but the database\nopens later. [`install`] therefore runs first and records accumulate\nin a bounded queue until [`DiagSink::attach`] supplies the isle,\nafter which they flush and later records go straight to the writer.\n\nWhat that covers: records emitted before the database opened **on a\nrun that goes on to open it** — argument parsing, migration\nwarnings, an unusable environment override.\n\nWhat it does not: a failure *of* the open itself. `attach` is only\nreached once the database is up, so a run that dies opening it\nflushes nothing. Those records reach stderr and stop there, which is\nwhy the fatal path also prints verbatim rather than relying on this.\n\n## Never in the way\n\nEmitting is a lock plus a channel send — no spawn, no await, no\nblocking — so a record can be produced from any thread, including\nthe one inside a SQLite call. One writer task drains the channel.\nWhen it falls behind, records are dropped and counted rather than\nqueued without end: the application shares a single SQLite\nconnection, and diagnostics must never put a user's query behind a\nburst of warnings."
+    },
+    {
+      "path": "asterism_infra::observe::DiagSink",
+      "kind": "struct",
+      "docs": "Handle used to attach the database once it is open."
+    },
+    {
+      "path": "asterism_infra::observe::ObservationLayer",
+      "kind": "struct",
+      "docs": "`tracing` layer that turns each event into an [`ObservationRecord`]."
+    },
+    {
+      "path": "asterism_infra::observe::ObservationRecord",
+      "kind": "struct",
+      "docs": "One row destined for a stream table."
+    },
+    {
+      "path": "asterism_infra::observe::ObservationStore",
+      "kind": "struct",
+      "docs": "Handle over the observation streams: reads, and expiry.\n\nSeparate from [`DiagSink`] and deliberately unable to append —\nrecords arrive through the subscriber and nowhere else. What this\ntype can do besides read is remove rows past their stream's\nretention, which is the other half of owning a durable table.\n\nOne handle rather than four because the four tables share an\nenvelope and a caller investigating the application wants all of\nthem; the split matters to the writer, not the reader."
+    },
+    {
+      "path": "asterism_infra::observe::RetentionSweep",
+      "kind": "struct",
+      "docs": "What one retention pass removed, per stream."
+    },
+    {
+      "path": "asterism_infra::observe::attach",
+      "kind": "function",
+      "docs": "Points the installed sink at the open database and flushes whatever\nwas captured before it existed.\n\nA no-op when [`install`] was never called — a library test that\nopens a database has no subscriber and wants none."
+    },
+    {
+      "path": "asterism_infra::observe::install",
+      "kind": "function",
+      "docs": "Installs the process-global subscriber. The sink it writes through\nis a private global, handed the database later by [`attach`].\n\nCall once, as early in `main` as possible — before anything that can\nlog. A second call is a no-op: `tracing` refuses to replace an\ninstalled global, and swallowing that keeps a test which installs\nits own subscriber from aborting the process."
+    },
+    {
+      "path": "asterism_infra::paths",
+      "kind": "module",
+      "docs": "Data-profile and on-disk layout conventions.\n\nAsterism separates three local workloads that have very different\ndurability requirements:\n\n- [`DataProfile::Dev`] — disposable development data.\n- [`DataProfile::Dogfood`] — durable, real daily-use data.\n- [`DataProfile::Bench`] — reproducible large/stress datasets.\n\nResolution order is `$ASTERISM_HOME` (explicit path) followed by\n`$ASTERISM_PROFILE`, then a build-mode default (`dev` for debug builds,\n`dogfood` for release builds). Named profiles live below\n`$HOME/.asterism/profiles/<profile>`. An explicit home without a profile\nis treated as `custom`, preserving scratch/test workflows.\n\nNamed homes contain a `.asterism-profile` marker. Opening a home whose\nmarker disagrees with `$ASTERISM_PROFILE` is rejected before SQLite or\nTantivy is touched; this is the last guard against a mistyped launch\ncommand pointing a development build at durable dogfood data."
+    },
+    {
+      "path": "asterism_infra::paths::DataProfile",
+      "kind": "enum",
+      "docs": "Isolated local dataset selected for the current process."
+    },
+    {
+      "path": "asterism_infra::paths::active_profile",
+      "kind": "function",
+      "docs": "Returns the active data profile without creating directories."
+    },
+    {
+      "path": "asterism_infra::paths::asterism_home",
+      "kind": "function",
+      "docs": "Returns (creating on demand) the isolated Asterism home directory."
+    },
+    {
+      "path": "asterism_infra::paths::default_db_path",
+      "kind": "function",
+      "docs": "Returns the default SQLite database path (`<asterism_home>/asterism.db`)."
+    },
+    {
+      "path": "asterism_infra::paths::tantivy_index_dir",
+      "kind": "function",
+      "docs": "Returns (creating on demand) the profile-local Tantivy index directory."
+    },
+    {
+      "path": "asterism_infra::probes",
+      "kind": "module",
+      "docs": "The probes this build has, and the one question a caller asks of all\nof them at once.\n\nEach probe is one format's reading of the two walking fingerprint\naxes ([`ArtefactProbe`]); this module is the list of probes, and\nwhich formats each one answers for is that probe's own statement\n([`ArtefactProbe::declares`]) rather than a second list kept here. So\na new format is one implementation and one line below, and nothing in\n`asterism-core` is edited when it arrives.\n\nThat is what the format costs for the next file read, not for the\nlibrary already on disk. Rows imported before the probe landed hold\n`unsupported:image/jpeg`, and every `unsupported:` value is a final\nanswer to \"has anybody looked\"\n([`is_axis_answer`](asterism_core::domain::content_hash::is_axis_answer)),\nso the ordinary fingerprint pass never offers them again: new imports\nwould take digests while the rows that were there first keep the\nmarker, and one column would hold two meanings with nothing to tell\nthem apart. A format therefore also arrives owing a way back to the\nrows it was refused on, **per axis and per column**, since a probe\nmay claim one of them a slice before the other — which is what JPEG\ndid.\n\nTwo shapes have been used for that, and which one a case wants is\ndecided by how much reading it costs. A numbered `UPDATE` writing\nNULL over the one stale marker is the cheap one, and it is what both\nof JPEG's axes took (V72 for content, V76 for meta): the rows rejoin\nthe ordinary walk, which is already built for reads that must not\nhappen inside a transaction.\n[`needs_content_walk`](asterism_core::domain::content_hash::needs_content_walk)\nis the other — a second predicate over one column, driven by a\nmigration-chain read — and it stays reserved for the case it was\nwritten for, a region definition that is versioned up. It still reads\nthe content column and only that; the meta axis has no equivalent\npredicate and has not needed one.\n\n# Answering for a set of probes\n\nThe gates are **OR** — a file is read if any probe claims it — and\nthe readings are **first claim wins**, in registration order. That\npairing is deliberate: the gate has to be optimistic because it runs\nbefore the file is open and its only input is a guess from a\nfilename, while the reading happens with the bytes in hand and can\nafford to be decided. Two probes claiming one mime **on one axis** is\na mistake at registration rather than a case to arbitrate at runtime,\nand `tests::every_probe_here_is_reachable_through_the_registry` is\nwhere it shows up.\n\nPer axis, because the axes are counted separately everywhere else\n([`ArtefactProbe`]): one probe reading a container's pixels and\nanother reading the metadata alongside it is a legitimate\narrangement, and a rule that counted claimants across both axes at\nonce would call it a collision.\n\nNothing claiming the format is not a failure: the row falls back to\nthe file axis, which groups byte-identical copies perfectly well, and\nthe columns say which format was declined rather than pretending the\nbytes were read."
+    },
+    {
+      "path": "asterism_infra::probes::content",
+      "kind": "function",
+      "docs": "The content-axis reading, from the first probe that claims the\nformat.\n\nWhen none does, the answer is the same marker the caller would have\nstored without opening the file at all\n([`content_region::unsupported_format`]) — one artefact must not\ncarry two different values depending on which side of a size gate it\nfell."
+    },
+    {
+      "path": "asterism_infra::probes::jpeg",
+      "kind": "module",
+      "docs": "JPEG's reading of the content axis: which of its segments are the\npicture, and which are notes written about it.\n\nThe segment framing — where one marker segment ends and the next\nbegins, how far the entropy-coded data runs — is\n[`asterism_media_probe::jpeg`](asterism_media_probe::jpeg), and it has\nno opinion about any of this. What is here is the opinion, on the same\nterms as [`png`](super::png): a judgement about *this* corpus, which\nis why it sits beside the application rather than in a crate that\nwalks JPEGs in general.\n\n# Both axes, and what the second one took to arrive\n\nThis probe declares `image/jpeg` on **both** axes ([`CLAIMS`]). It\narrived on the content axis alone, and the meta axis was declined for\na stated reason rather than left unwritten: a meta digest over EXIF\ngroups photographs that share a camera body, a lens and a second of\nwall-clock time — frames 3 and 4 of a burst, with the fields that\nseparate them stripped by whatever exported them. The duplicate panel\nis driven by these columns, so a definition that admits that fills\nthe panel with pairs a person has to refuse one at a time. What that\nargument concluded was that **the reading worth having is a narrower\none, over fields chosen for the purpose, and choosing them is its own\nslice.**\n\nThat slice is the series axis\n([`series`](asterism_core::domain::series)), and it landed. A\n[`Strategy`](asterism_core::domain::series::Strategy) is a registered\nrule that reads `meta_kv` and derives its own key, so *which* EXIF\nfields decide that two photographs were made the same way is a value\nsomebody registers and edits rather than a definition compiled into\nthis file.\n\n**That answers half of the objection, and the other half is a live\ndefect.** Claiming this axis does two things at once, and only one of\nthem is the Series substrate: `image/jpeg` also enters the **meta\nduplicate axis**, because the column it fills is one of the three\n[`detect_duplicate`](asterism_core::application_support::duplicate_detection::detect_duplicate)\nwalks. A JPEG pair whose blocks agree can now stop there, and a\n`duplicate_conflict` row is a question with a fold button on it —\nwhich is the panel behaviour the burst argument was about, arriving\nby a different door than it expected.\n\nWhat lands there is not a duplicate, and that is the defect rather\nthan a mitigation. The walk stops at the *first* agreement, so a pair\nreaches `Meta` only when `Artefact` and `Content` both found\nnothing — **the pictures differ**. So a meta-alone agreement is not\nan identity claim at all; it is \"made the same way\", which is the\nsentence [`series`](asterism_core::domain::series) exists to say and\ndeliberately says without folding anything.\n\nThe root of it is one axis older than this slice: the algebra is\n`Artefact = Content + Meta` — the whole bytes are the picture plus\nthe metadata — so there are **two** independent axes and `Artefact`\nis the name for both agreeing, while\n[`STRONGEST_FIRST`](asterism_core::domain::duplicate_conflict::DuplicateAxis::STRONGEST_FIRST)\nlists three in parallel. **This build still does that**; correcting\nit is its own slice, and nothing here anticipates the correction.\n\n**Nothing is selected here, deliberately.** Every field the block\nstates goes into `meta_kv`, including the ones a burst rewrites and\nthe ones nobody has a use for, because narrowing on this side would\ndecide for every Strategy at once what an author is allowed to\naddress — the same argument\n[`asterism_media_probe::exif_tags`] makes for refusing to select one\nlayer further down, and the reason\n[`series`](asterism_core::domain::series) offers `exclude` beside\n`include`.\n\n## Nobody has published the axis a narrower reading would need\n\n\"Keep the fields a burst does not rewrite\" sounds like a lookup, and\nit was researched as one before this axis was claimed. A published\nclassification of every standard tag does exist — **Exif 3.0\nAnnex H**, the guidelines for handling tag information in\npost-processing by application software (CIPA DC-008; the current\nedition is 3.1) — and it gives each tag two labels. A **Category**:\nI image structure, II shooting conditions, III the rest (model,\nserial number, capture time, place, owner, copyright). And a\n**Rank**: `Update 0` (update on every edit), `Update 1` (may be\nupdated on its own), `Freeze 0` (shall not be deleted or modified\nunder any circumstance), `Freeze 1` (needs no update), `Freeze 2`\n(may be corrected where wrong). Two rules bind the pair: every\nCategory I tag is `Update 0`, and Category II — the shooting\nsettings — is `Freeze 1`.\n\n**It answers a different question.** Annex H's axis is *may a tool\nrewrite this*; the axis a series needs is *does this change from one\nexposure to the next*. They correlate, and they come apart in one\ndirection systematically:\n\n| Rank | tags | changes across a burst? |\n|---|---|---|\n| `Update 0` | `DateTime` (`0x0132`), `SubSecTime`, image structure | yes — the one part usable as a quotation |\n| `Freeze 0` | `ImageUniqueID` (`0xa420`), alone | frozen *and* per-exposure |\n| `Freeze 2` | `DateTimeOriginal` (`0x9003`), the GPS tags, the lens tags, `CameraFirmware` | the capture time does; the lens and the firmware do not |\n| `Freeze 1` | `Make`, `Model`, `BodySerialNumber`, **and exposure time, aperture, ISO, focal length** | the body does not; under auto-exposure the exposure tags change frame to frame |\n\nSo **reading `Freeze 1` / `Freeze 2` as \"steady across a burst\" is\nthis project's judgement rather than a citation**, and it is wrong\nexactly where auto-exposure is working. Excluding `Update 0` **is** a\ncitation: the specification says an editor rewrites those fields, so\ndropping them is following a rule somebody else wrote. The\nspecification illustrates the divergence itself — a subject position\nis Category II and `Freeze 2` as a subject, and is reclassified\nCategory I/II and `Update 0` when it is expressed relatively, because\nresizing the picture moves it.\n\n**No other published schema closes the gap**, which is itself the\nfinding rather than a gap in the search. MWG 2.0 reconciles one\nfield across containers (Exif ↔ IIM ↔ XMP) and has no stability axis\n— and the group has not existed since 2018. IPTC's Photo Metadata\nTechReference defines properties, machine-readably and openly\nlicensed, but defines no classification. XMP's `xmpMM`\n(ISO 16684-1) versions a *document* — `DocumentID`, `InstanceID`,\n`OriginalDocumentID` — which separates two edits of one photograph\nand says nothing about two frames of one burst. C2PA asserts\nprovenance, and its hard bindings are *designed* not to match a\nderivative or a related frame, which is the opposite direction.\nSomebody has to make the judgement, so it is made by the author of a\n[`Strategy`](asterism_core::domain::series::Strategy) — see\n[`Decode::Exif`](asterism_core::domain::series::Decode::Exif) for\nwhat that author is told, and this module for why the probe hands\nthem everything to choose from.\n\nSources: <https://www.cipa.jp/e/std/std-sec.html>;\n<https://archive.org/details/exif-specs-3.0-dc-008-translation-2023-e>\n(Annex H, pp. 233–241). CIPA's own PDF is encrypted, so the ranks\nabove were read off the Internet Archive's OCR of the 2023 English\ntranslation: the rank tokens come through cleanly, the Category\nroman numerals do not always, which is why no per-tag Category is\nquoted here.\n\n## The one identifier the specification insists on is the one nobody trusts\n\n`ImageUniqueID` (`0xa420`) is what a reader reaches for first, and\nthe specification is at its most emphatic about it: `Freeze 0`, the\nonly tag carrying that rank, *shall not be deleted or modified under\nany circumstance*. **Two independent implementations record that it\nis not written reliably.** One validates the value's shape before\ntrusting it, because cameras were found writing their own model name\ninto the field; the other declined the tag outright as missing,\nreused and inconsistent across vendors. So the tag is read like any\nother — it lands in `meta_kv` and a Strategy may name it — but\nnothing here treats it as an identity on its own.\n\nNeither is a standard, and the same holds for every other grouping\nrule shipped in this space: they are timestamp windows, filename\nstems and capture intervals, and at least one vendor has had to turn\none of them **off by default** after unrelated photographs\ndownloaded together were grouped by a shared prefix. That is the\nmerge-is-unrecoverable asymmetry this file argues from, observed in\nproduction by somebody else, and it is why the axis a Strategy reads\nis data rather than a rule compiled in here.\n\nWhich products those are, and what each one groups on, is not\nwritten here on purpose. A per-vendor survey in a module doc is read\nonce and then goes stale silently, and it is not what this file has\nto decide — the decision is the sentence above, that no published\nrule can be quoted for this axis, so the axis is data.\n\n## What lands in `meta_kv`, and what a key may not carry\n\n[`exif_tags`](asterism_media_probe::exif_tags) produces the map\nwhole: `exif:0x829a` → `rational:1/125`, the key an address and the\nvalue self-describing. The two properties this file leans on are\nargued there — the IFD is in the key because one tag number means\ndifferent things in different IFDs, and the type is on the *value*\nbecause `1/125` is otherwise ambiguous between a rational and an\nASCII tag whose text is literally that.\n\n## The block's bytes are kept as well\n\n[`meta_raw_of`](JpegProbe::meta_raw_of) keeps the `APP1` payload\nverbatim, which is what makes the rendering above revisable: `MakerNote`\nis one opaque `undefined` value today, and Apple's `BurstUUID` — the\nsignal every other library reaches for — is inside it. A reader that\nlearns to open it later works from the column\n([`material_meta_raw`](asterism_core::domain::material_meta_raw))\nrather than from somebody's disk.\n\n# Which segments are content\n\nEverything except three, named one at a time:\n\n- `APP1` whose payload begins `Exif\\0\\0` — the EXIF block. **One\n  field of it comes back in by another door**; see below.\n- `APP1` whose payload begins `http://ns.adobe.com/xap/1.0/\\0` *and\n  does not carry the bytes `tiff:Orientation` anywhere in it* — an\n  XMP packet. `APP1` is shared by both and by anything else a vendor\n  puts there, so the marker alone does not identify either; the\n  payload's own identifier does, and an `APP1` carrying neither is\n  **content**.\n- `COM` (`0xFFFE`) — the comment segment.\n\n…and one thing that is in the region without being a segment: the\norientation the file renders under, fed as its own element.\n\nA denylist, not an allowlist of the segments known to matter, for the\nreason written into the port's contract\n([`ArtefactProbe::content_of`]): the two are wrong in opposite\ndirections, and not by a little. An allowlist drops whatever nobody\nthought of, and saying \"the same\" about two artefacts that are not is\na loss no later correction can undo — downstream a fold turns the\nloser of a duplicate group into a tombstone. A denylist's error runs\nthe other way: a metadata segment nobody remembered is hashed, two\nfiles differing only in it get two digests, and that is exactly the\nstate of a format with no content axis at all.\n\n## The criterion is rendering, and EXIF Orientation meets it\n\nThe denylist has a *criterion* behind it, and the criterion is not\n\"is this segment metadata\" — it is **does this change what a person\nis shown**. A rule that excludes by segment name is a shortcut\nthrough that question, and it works right up until a segment carries\nboth kinds of byte at once. EXIF is that segment.\n\nOrientation codes `2`–`4` mirror the frame and `5`–`8` transpose it,\nand this repository already treats that as display-affecting rather\nthan as trivia: the stored dimensions are documented as *coded*, with\nthe caller told to combine them with the orientation to get a\ndisplayed shape\n([`AssetDto::width_px`](asterism_contract::dto::AssetDto::width_px)),\nthe image importer carries the code onto the asset's `extra`, and the\ndetail pane prints it. So the failure was concrete rather than\ntheoretical: a phone photograph tagged `Orientation=6` and the same\nfile through any EXIF stripper have **byte-identical entropy-coded\ndata**. Under a wholesale exclusion they take one digest, land in one\nduplicate group, and a fold turns the row that displayed the right\nway up into a tombstone. After the fold there is one picture, so\nthere is nothing left for a person to compare and notice — the\nunrecoverable direction, reached through the door the denylist was\nbuilt to hold shut.\n\nThe answer is not to stop excluding EXIF. Nearly all of it *is*\nnotes — timestamps, camera bodies, GPS, exposure — and excluding it\nis the reason this axis exists. What the region takes is the one\nfield, normalised, on its own:\n\n- **Normalised**, because absent, unreadable and `1` all render\n  identically, so all three feed the same value. A file that never\n  had an orientation and a file explicitly tagged upright are one\n  picture, and a probe that could tell them apart would be reporting\n  on the EXIF block again.\n- **In a fixed position**, ahead of every segment, because *where*\n  the `APP1` sat is a fact about the writer and not about the\n  picture. Two files whose EXIF blocks are at different offsets, or\n  one of which has none at all, still agree.\n\nIt costs one header-region EXIF parse per content walk\n([`jpeg::orientation`](asterism_media_probe::jpeg::orientation)),\nwhich is the same read the importer already does at ingest. Reading\nthe tag is `asterism-media-probe`'s (a fact about the format);\ndeciding it belongs in a digest is this file's (a judgement about a\ncorpus), which is the same line every other rule here is drawn on.\n\n`tests::two_photographs_differing_only_in_their_orientation_are_two_pictures`\nkeeps it measured rather than asserted, the way the `APP2` case\nbelow does: it runs a second walk with EXIF excluded whole and shows\nthe phone photograph and its stripped export collapsing onto one\ndigest under it.\n\n### XMP carries it too, and is not parsed for it\n\n`tiff:Orientation` can appear in an XMP packet. Reading XMP would\nmean an XML parser deciding what a picture is, so instead the\n**exclusion is withdrawn**: an XMP packet with those bytes anywhere\nin it stays in the region, in full. The cost is an improvement lost\n— two files differing only in unrelated XMP that happens to mention\nthe property get two digests — and that is the direction this whole\nselection is allowed to fail in.\n\n### What is still excluded and might have mattered\n\nStated rather than implied, because the criterion above does not\nstop at one tag. `Gamma`, `ColorSpace`, and the TIFF colour\ndescription tags (`WhitePoint`, `PrimaryChromaticities`,\n`TransferFunction`) can all change a rendering, and all of them are\ninside the excluded `APP1` today. Two files differing only in one of\nthose still take one digest.\n\nThat is a smaller risk than the one being fixed, on this corpus, and\nsaying why is the point: those tags are rare, they are usually\nredundant beside an `APP2` ICC profile that **is** in the region, and\na difference in them is subtle where a transposed photograph is\nobvious at arm's length. Orientation is the one tag that is on nearly\nevery photograph a phone takes, that nearly every export pipeline\nstrips, and that this repo had already decided is display-affecting.\nIt earned the machinery; the rest have not yet, and the way they\nwould is somebody measuring a pair on this corpus.\n\n## `APP2` is content, and this is the segment that says why\n\n**The ICC colour profile is inside the region.** Two files whose\npixels agree byte for byte and whose profiles differ are two\npictures: the profile is what the same numbers are rendered *as*, so\nexcluding it merges an sRGB export with a Display-P3 one and a viewer\nshows the difference.\n\nThat is not a hypothetical borrowed from a specification. It is the\nfailure the PNG probe measured on this repo's own corpus, in the same\nplace — colour-management chunks and APNG frame data, where two\nvisibly different pictures came out with one digest — and the shape\nof the mistake there was exactly this one: a rule that looked like it\nwas excluding metadata was excluding rendering.\n`tests::an_icc_profile_is_part_of_the_picture` keeps it measured\nrather than asserted, by running a second walk with `APP2` on the\nexcluded side and showing that the two files collapse onto one\ndigest under it.\n\nEverything else stays in: `APP0` (JFIF), `APP13` (Photoshop's image\nresource block), every other `APPn`, extended XMP — which announces\nitself with a *different* identifier and is therefore not one of the\ntwo `APP1` cases above — the coding tables (`DQT`, `DHT`, `SOF*`,\n`DRI`), the `SOS` headers, the entropy-coded data, the restart\nmarkers inside it, the closing `EOI`, and whatever the file carries\nbehind it. When a segment is arguable, it goes here: that error costs\na duplicate nobody spots.\n\n## The bytes after `EOI` are content, and PNG's are not\n\n`EOI` ends the image and does not end the file. **Google and Samsung\nMotion Photos are a complete JPEG with a complete MP4 appended**, and\nthat is how a phone ships a still and its couple of seconds of video\nas one artefact — a default, not a curiosity. Excluding the tail\nmakes a Motion Photo and its still-only export one digest: measured,\na 598-byte still and the same still with 4 KB appended came out\nidentical. One duplicate group, one fold, and the video is gone with\nthe row that carried it.\n\nSo the trailing span is in the region, as one element, fed whole and\nunread — the walk has no grammar for what follows an image and does\nnot need one to know the bytes are there.\n\n**[`png`](super::png) excludes what follows its `IEND` and stays that\nway**, which is a decision rather than an inconsistency the two\nprobes have not got round to reconciling. The question is not what\nthe container permits — both permit a trailing payload — but what\nthis corpus's files do with it. A PNG carrying something meaningful\nafter `IEND` is rare enough that the PNG probe's own fixture had to\nconstruct one; a JPEG carrying something meaningful there is what a\nphone hands you. Where the format's *use* differs, the region\ndefinitions differ with it, and copying either shape onto the other\nwould be copying past the reasoning again.\n\n# What is fed to the hash\n\nThe normalised orientation first, as one byte, before anything the\nwalk yields — the fixed position argued for above. Then, in the order\nthe file carries them:\n\n- a framed segment: `marker (1 byte) || length (2 bytes,\n  big-endian) || payload`;\n- a marker with no length field: its single byte;\n- entropy-coded data: `length (8 bytes, big-endian) || bytes`, the\n  bytes exactly as the file carries them, stuffing and restart\n  markers included;\n- the trailing span: `length (8 bytes, big-endian) || bytes`.\n\n`SOI` is not fed. It is the signature, it was checked to get here,\nand it is the same two bytes in every JPEG, so feeding it would\nseparate nothing from nothing.\n\n## Every element carries its own length, including the ones with no\nlength field\n\nA framed segment's length is in the file and gets fed (the next\nsection argues that against PNG, which omits its own). A scan's\nlength is *not* in the file — entropy-coded data is delimited by the\nmarker that follows it — and it is fed anyway, computed, for the\nidentical reason: **without it the region is one run of bytes with no\nseam in it, and a scan can spell out the element behind it.**\n\nMeasured, before this was fixed: a scan ending `0x11 0xE4 0x00 0x04\n0xAA 0xBB` followed by `EOI`, against a scan ending `0x11` followed\nby an `APP4` carrying `0xAA 0xBB` and then `EOI`. Two entropy streams\ndiffering by five bytes, one digest. The `0xFF` that introduces every\nmarker is not fed either — it is in every marker and separates\nnothing — so nothing in the feed marked the boundary at all.\n`tests::the_scans_length_separates_it_from_the_segment_behind_it` is\nthat pair.\n\nEight bytes rather than the file's two, because the number being\ndescribed is not a segment's: a scan is as long as the picture is,\nand the trailing span can be a whole video. A scan of no bytes is fed\nas a length of zero rather than skipped, so the rule has no exception\nin it.\n\nWith that, the feed is *decodable*: read a byte, and whether it is a\nbare marker or the head of a framed one is a property of the byte\nalone; after an `SOS` comes a scan's length; after `EOI`, a trailing\nlength if anything is left. Two different element sequences cannot\nproduce one stream — which is the property \"no collisions from\nre-division\" actually names, and it is what makes the claim checkable\ninstead of a hope.\n\n## The length **is** fed, and PNG's is not\n\nThe second of the two places these probes disagree about the shape of\nan answer (the trailing span was the first), so it is worth being\nexplicit about why, and about why the difference is not an\ninconsistency to be tidied away later.\n\nPNG omits the chunk length because an encoder is free to cut one\ncompressed stream into any number of `IDAT` chunks — zlib's buffer\nsize is not part of the image — and hashing the lengths would make\none picture written by two encoders two pictures. That was measured:\nthe same stream in 1, 8 and 63 chunks produces one digest, and a real\nComfyUI corpus writes its pixels as 17–24 chunks of 64 KiB.\n\n**A JPEG segment's length is not that kind of number.** It is fixed\nby the segment's own contents — a quantisation table is as long as a\nquantisation table — and there is no re-cutting for it to absorb,\nbecause the one unbounded run in the container (the scan) is not\nlength-prefixed at all. So PNG's reason does not carry over, and with\nno reason to drop it the length goes in, because feeding it removes a\nclass of collision: without it, `marker || payload` runs together, and\ntwo adjacent segments of one marker can be re-divided into two\ndifferent segments of the same marker with the same concatenation.\n\nThe general form of the rule, for whoever adds the next format:\n**copy the reasoning, not the shape.** A format that borrows PNG's\nomission without PNG's encoders has thrown away a distinction for\nnothing.\n\n# A region with no scan in it is no region\n\nA reading that reached the end of the image and found no\nentropy-coded bytes returns [`ContentRegion::EmptySpan`] rather than\na digest, and the same rule stands behind it as behind PNG's \"no\n`IDAT`, no region\": a digest over what is left is perfectly real, and\nevery file in that state would share it. Concretely — two stubs\ncarrying nothing but different EXIF blocks would hash their `EOI` and\nnothing else, come out identical, and be offered to the user as the\nsame picture, which they are not and which the fold cannot take back.\nThe scan is where a JPEG keeps its picture; a file with none has no\npicture for this axis to be about.\n\n# Every structural defect is one outcome\n\nThe walk distinguishes truncation from a lying length from a byte\nwhere a marker belongs from too many segments, and all of them land\non [`ContentRegion::EmptySpan`]. The variants are worth having — a\nreader of a stack trace can tell which happened — but the stored\nvalue must not fork on them, because the true statement they share is\nthe one the column carries: there is no complete region to stand\nbehind. Same arrangement as [`png`](super::png), argued where the\nmarker is defined\n([`EMPTY_SPAN`](asterism_core::domain::content_region::EMPTY_SPAN)).\n\n# The whole file, and the convention that follows from it\n\n`content_of` takes a slice and reads all of it: the scan is the\nlargest part of a JPEG and it is the part that decides the answer, so\nthere is no prefix that settles this axis. A caller that wanted to\nread only a file's first N bytes could not use this method, and the\nconvention it would need is worth writing down before somebody\nreaches for it:\n\n**A prefix read may answer the meta axis and may never answer the\ncontent axis.** Metadata lives in the header region, so a bounded\nread either finds it or truthfully says it did not. A content digest\ntaken over a prefix says \"these are the bytes that decide what this\ndecodes to\" about bytes that do not — two different photographs from\none camera share their `APP0`, `DQT`, `DHT` and `SOF`, so they would\nbe handed the same digest, declared duplicates, and folded. The size\nquestion belongs to the job that opens the file, and its answer for a\nfile it will not read whole is\n[`TOO_LARGE`](asterism_core::domain::content_region::TOO_LARGE) — a\nmarker saying the region was not computed — never a digest over part\nof one.\n\n# The rows that were here first, and how each axis got them back\n\nEvery JPEG already in the library carried `unsupported:image/jpeg` on\nboth axes, and a marker is a final answer to \"has anybody looked\", so\nthe ordinary fingerprint pass would never have offered those rows\nagain: they would keep the marker while files imported afterwards\ntook digests, leaving one column with two meanings and nothing in it\nto tell them apart. That debt was this probe's to leave and is paid\non both axes now, by one migration step apiece — V72 cleared the\ncontent column and V76 the meta one, each writing NULL over that one\nliteral so the ordinary walk selects the row and re-reads the file.\n\nNeither is a version bump, and the distinction is worth keeping\nstraight (V72's doc argues it at length): a bump invalidates\n**positives** — every digest ever written, on every format — where\nthese invalidate **negatives** on one format, rows saying \"nothing\nhere reads JPEG\", which was true when written and is not now.\n\nOne row is answered as a side effect and is worth naming: the walk\nrecomputes every column from a single read, so a JPEG re-offered on\nthe meta axis also has its `meta_raw` filled in, replacing the\n`unsupported:not-captured` V75 wrote across the whole table."
+    },
+    {
+      "path": "asterism_infra::probes::jpeg::JpegProbe",
+      "kind": "struct",
+      "docs": "JPEG's reading of the content axis.\n\nStateless — the registry holds it as a constant."
+    },
+    {
+      "path": "asterism_infra::probes::meta",
+      "kind": "function",
+      "docs": "The meta-axis reading, from the first probe that claims the format."
+    },
+    {
+      "path": "asterism_infra::probes::meta_raw",
+      "kind": "function",
+      "docs": "The metadata bytes the same probe keeps — the meta axis's other\ncolumn ([`material_meta_raw`](asterism_core::domain::material_meta_raw)).\n\nSelected by [`walks_meta`] rather than a gate of its own, so the\nbytes in a row and the digest in the row beside it come from one\nprobe's reading of one container. The fall-through is\n[`MetaRaw::Absent`] and not a marker: a format nothing claims has no\nmetadata region, and NULL is what that says."
+    },
+    {
+      "path": "asterism_infra::probes::png",
+      "kind": "module",
+      "docs": "PNG's reading of the two walking axes: which of its chunks are the\npicture, and which are notes written about it.\n\nThe chunk framing — where one chunk ends and the next begins, what a\n`tEXt` payload decodes to — is\n[`asterism_media_probe::png`](asterism_media_probe::png), and it has\nno opinion about any of this. What is here is the opinion: a\njudgement about *this* corpus, argued from measurements taken in this\nrepo, which is why it sits beside the application rather than in a\ncrate that walks PNGs in general.\n\n# From a slice, and what that costs the caller\n\nBoth readings take `&[u8]`: the caller already holds the bytes.\n`ContentHasher` streams for a reason — an original can be a 4 GB\nvideo and reading it into memory would be the process's largest\nallocation — and that reason still stands, but it does not reach\nhere, for two reasons.\n\nThe first is the region's shape. The pixel stream is fed last, as one\nconcatenation, so that the same compressed data split across a\ndifferent number of `IDAT` chunks hashes the same (see below). A\nreader would therefore have to either hold every `IDAT` payload in\nmemory until the end — the allocation we were avoiding, in a worse\nform, since it is the largest part of the file — or seek back and\nread the file a second time. A slice makes the second pass free: it\nis a second walk over memory the caller already paid for.\n\nThe second is the corpus. This is the PNG probe; PNGs here run to a\nfew megabytes (a real character card is a few hundred KB), and the 4 GB\ncase is video, which needs a completely different reading (mp4 sample\ntables) that will take a reader rather than a slice. Sizing this\nprobe's signature against a file type it does not handle would buy\nnothing and cost the second pass.\n\nSo: **a 4 GB PNG would be a 4 GB allocation in the caller**, before\neither method is entered. That decision belongs to the job that opens\nthe file — it is the one that knows the file's size before reading\nit, and the one that can answer \"too big to fingerprint\" by storing\n[`TOO_LARGE`](asterism_core::domain::content_region::TOO_LARGE). This\nmodule never opens anything, so it cannot make that call; what it\nguarantees is that once the bytes are in hand it adds no allocation\nproportional to them.\n\n# Which chunks are content\n\nEverything except metadata. The excluded set is `tEXt`, `zTXt`,\n`iTXt`, `tIME`, `eXIf`, plus the structural `IEND`.\n\nA denylist, not an allowlist of the chunks known to matter, and the\nreason is the one written into the port's own contract\n([`ArtefactProbe::content_of`]): the two are wrong in opposite\ndirections. An allowlist drops any chunk nobody thought of: a private\nchunk, a type added to the spec later, or — measured, not imagined —\nthe colour-management chunks and APNG frame data, where two visibly\ndifferent pictures came out with one digest. That error is a false\npositive, and downstream a fold turns the loser into a tombstone,\nwhich is not something the user can undo by looking at it again. A\ndenylist's error runs the other way: forget to exclude something and\ntwo files that differ only in metadata get separate digests, which is\nexactly what happens with no content axis at all. One failure loses\ndata, the other loses an improvement, so the unknown chunk goes on\nthe side that loses the improvement.\n\n# What is fed to the hash\n\nEvery included chunk contributes `type (4 bytes) || payload`, in the\norder it appears; all `IDAT` payloads are concatenated and fed once,\nlast, behind a single `IDAT` tag.\n\n**The chunk's length field is never fed.** Encoders split the same\ncompressed stream at different boundaries — zlib's buffer size is not\npart of the image — and hashing the lengths would make one picture\nwritten by two encoders two pictures. Measured: the same stream in 1,\n8 and 63 chunks produces one digest, and a real ComfyUI corpus writes\nits pixels as 17–24 chunks of 64 KiB, so this is the ordinary case\nrather than an adversarial one.\n\nThe type *is* fed, because a payload alone does not say which chunk\nit was: two files carrying the same four bytes under different chunk\ntypes would otherwise collide.\n\nNeither the order nor the presence of a chunk is assumed. The real\nfixture in this repo carries its `tEXt` chunks **after** the pixel\ndata; a ComfyUI export carries one on each side (the prompt before,\nthe workflow after), and files in the same corpus have the second one\nmissing entirely. Anything that treated \"metadata comes first\", or\n\"these two chunks are always there\", would break on ordinary files.\nSelection is by type and nothing else.\n\n# Which chunks are metadata\n\nOnly `tEXt` is read. It is the chunk this corpus's metadata actually\ntravels in, and it is the one the reader that defines the form\n(`asterism_media_probe::png::text_fields`, a `BTreeMap<String,\nString>` keyed by chunk keyword) returns. `zTXt` is compressed and\n`iTXt` may be; `tIME` and `eXIf` are binary, not text. Reading them\nmeans deciding how each decodes to a string *before* the digest means\nanything, and a decision made carelessly there is a redefinition of\nthe axis, not a widening of it. They are excluded from the content\nregion as well, so **neither digest is about them** — a stated gap\nrather than a silent one, and one that a `m2-` generation would\nclose.\n\n# Which chunks are kept\n\nAll five, as bytes. The gap above stays a gap in what is *hashed*,\nand stops being a loss: [`meta_raw_of`](PngProbe::meta_raw_of) keeps\nthe frames of every chunk in [`METADATA_CHUNKS`] verbatim, so a later\ngeneration can decide how a `zTXt` decompresses, or read the Latin-1\nbytes an accented `tEXt` lost to `from_utf8_lossy`, **without opening\nthe file again** ([`material_meta_raw`](asterism_core::domain::material_meta_raw)).\n\nThe list is the same list on purpose. What the content digest drops\nand what the raw keeps are one sentence about this container — the\nbytes that are notes rather than picture — and stating it twice is\nhow the two stop agreeing. So \"widen the denylist\" and \"keep more\"\nare one edit, and a chunk added to the five is excluded from the\ndigest *and* recoverable from the row that day.\n\n# Every structural defect is one outcome\n\nThe walk distinguishes truncation from a lying length from a missing\n`IEND` from too many chunks, and all four land on\n[`ContentRegion::EmptySpan`]. The variants are worth having anyway —\na reader of a stack trace or a future diagnostic can tell which\nhappened — but the stored value must not fork on them, because the\ntrue statement they share is the one the column carries: there is no\ncomplete region to stand behind. Splitting them into separate markers\nwas argued down where the marker is defined\n([`EMPTY_SPAN`](asterism_core::domain::content_region::EMPTY_SPAN)),\nand doing it here instead would put the same vocabulary in two\nplaces."
+    },
+    {
+      "path": "asterism_infra::probes::png::PngProbe",
+      "kind": "struct",
+      "docs": "PNG's reading of the content and meta axes.\n\nStateless — the registry holds it as a constant."
+    },
+    {
+      "path": "asterism_infra::probes::walks_content",
+      "kind": "function",
+      "docs": "Whether **any** probe reads the content axis for this declared\nformat — the question a caller asks before opening the file."
+    },
+    {
+      "path": "asterism_infra::probes::walks_meta",
+      "kind": "function",
+      "docs": "Whether **any** probe reads the meta axis for this declared format.\n\nAsked separately from [`walks_content`], on the terms\n[`ArtefactProbe`] sets out: they are two definitions, and a single\ngate would either skip a walk that would have worked or read a file\nwhole for a walk that answers nothing."
+    },
+    {
+      "path": "asterism_infra::provenance",
+      "kind": "module",
+      "docs": "Writing a [`DisclosureRecord`] into a file that already exists.\n\nThis is the adapter half of AI-disclosure provenance. `asterism-provenance`\ndecides *what is asserted* and renders both forms of it as values; this\nmodule puts them into a file on disk, in the one order that works, and\nsigns the manifest when — and only when — a signing identity has been\nconfigured.\n\n# Why it happens here rather than inside the generator\n\nInside a generation graph only tensors move between nodes, so a signed\nimage fed through a save node is re-encoded from pixels and comes out\nwith the signature gone. Video is worse: the combine step discards\nwhatever frame-level record existed, and the manifest can only be\nattached after the encode. Signing is therefore possible only in a\nlayer that holds the finished file, which is this application.\n\n# The order is not a preference\n\n```text\nread → XMP packet → C2PA manifest → one write\n```\n\nThe manifest's hard binding is computed over the file's bytes, and on\na still image the XMP packet is part of them. Writing the packet after\nsigning therefore invalidates the signature — IPTC's own 2025.1\nannouncement carries a worked example whose caption records exactly\nthat outcome, so this is documented behaviour rather than a\ndeduction. [`ProvenanceWriter::apply`] does the two in this order and\n[`tests::the_packet_is_written_before_the_manifest_is_signed`] is what\nkeeps them there.\n\n# What happens with no certificate\n\nThe IPTC/XMP half still lands. That is the half platforms read most\nwidely, it needs no key material, and it is a legitimate disclosure on\nits own — IPTC's guidance is to emit the XMP property *or* a C2PA\nmanifest, with both being better than either.\n\nThe manifest half does not, and there is deliberately no fallback to\nthe test certificates the C2PA tooling ships with. A manifest signed\nby them validates as untrusted, which is strictly worse than no\nmanifest: an absent manifest says nothing, and an untrusted one makes\na provenance claim that a validator actively rejects.\n\n[`SigningIdentity::from_files`] refuses them by the name they carry.\nThat is a heuristic and a rename defeats it, which is why\n[`inspect_certificate`] reads the certificate's own extensions\nbeside it — though not for the same question. It refuses what cannot\nsign at all and reports the rest, because the extended key usage a\ntest certificate carries is one legitimate certificates carry too:\nthe two are not told apart by structure.\n\nNeither check decides whether a certificate is *trusted*. That is a\nvalidator's question, asked against a published trust list, and not\none a signer can answer about itself.\n\n# The gap this leaves on video\n\nA still gets its XMP packet either way; MP4 and MOV get nothing\nwithout a certificate. MP4 can carry XMP in a `uuid` box, but writing\nBMFF boxes is not something this module does — the manifest path goes\nthrough `c2pa`, which knows the container, and the packet path goes\nthrough `asterism-provenance::embed`, which knows PNG and JPEG. Until\none of those two grows the other's format, an unsigned video export\ncarries no disclosure at all, and [`Stamped`] says so rather than\nreporting a success it did not have.\n\n# Renditions are not signed\n\nThe preview rendition path re-encodes through ffmpeg, which produces\na new file carrying none of the original's container tags, stream\ntags, manifest or XMP. A rendition therefore cannot inherit a\nsignature and must not be given one of its own that would claim the\noriginal's provenance for a derived file. Nothing here is wired to\nthat path; this note is why."
+    },
+    {
+      "path": "asterism_infra::provenance::CertificateVerdict",
+      "kind": "struct",
+      "docs": "What reading a certificate's own extensions concluded.\n\nTwo lists rather than a `bool`, because \"this cannot sign\" and \"this\nwill not be trusted\" are different sentences and only the first is\nthis side's to act on.\n\n**Refusals** are certificates nothing downstream will sign with: an\nextended key usage carrying none of [`ACCEPTED_SIGNING_EKUS`], or a\ncertificate marked as a CA. Signing would fail or produce a manifest\nrefused on its face, so it fails here with a reason instead.\n\n**Warnings** are reasons a certificate would not be *listed*, which\nis a question about a trust list rather than about whether the bytes\ncan sign. The specification's own guidance describes a private\ncredential store — a certificate trusted by the parties who imported\nit and nobody else — and self-issued credentials for exactly that\nuse. Refusing those would close a door the specification holds open.\n\nThe split is not this module's invention. C2PA's implementation\nguidance says of an extended key usage misconfiguration that a claim\ngenerator \"should warn its user with an explanation of the problem,\nbut should allow the user to choose to proceed with signing\" — which\nis the shape here, with the line drawn at what cannot sign at all\nrather than at what will not be trusted.\n\n# Where a strictness setting goes\n\nA deployment signing for publication would reasonably want the\nwarnings to refuse too. That configuration is deliberately not\ninvented here, and the shape it needs is this verdict being\nreachable without loading an identity — which is what\n[`inspect_certificate`] is for. Such a caller inspects first and\nrefuses on its own terms; what it cannot do is tell\n[`SigningIdentity::from_bytes`] to refuse for it, so it writes its\nown message and the warnings are logged a second time when it goes\non to load. Whoever wires the setting decides whether that is worth\na parameter."
+    },
+    {
+      "path": "asterism_infra::provenance::Container",
+      "kind": "enum",
+      "docs": "A container this module can write provenance into."
+    },
+    {
+      "path": "asterism_infra::provenance::ProvenanceError",
+      "kind": "enum",
+      "docs": "What went wrong applying a record."
+    },
+    {
+      "path": "asterism_infra::provenance::ProvenanceWriter",
+      "kind": "struct",
+      "docs": "Applies disclosure records to files.\n\nCheap to build and holds no file state; one is constructed per\nprocess from settings and shared."
+    },
+    {
+      "path": "asterism_infra::provenance::SigningIdentity",
+      "kind": "struct",
+      "docs": "The certificate and key a manifest is signed with.\n\nConfiguration, never a shipped asset: this repository has no\ncertificate to give, and the one that gets used decides whose claim\nthe manifest is."
+    },
+    {
+      "path": "asterism_infra::provenance::inspect_certificate",
+      "kind": "function",
+      "docs": "Reads a signing certificate's own extensions and reports what they\nsay, without deciding what to do about it.\n\nPublic because that decision is the one a strictness setting would\nmake (see [`CertificateVerdict`]), and because a caller that wants to\nshow an operator why an identity was refused should not have to\nattempt a load to find out.\n\nThe certificate inspected is the **first block of the bundle that\nparses as one**, which is the end-entity certificate in a chain\nwritten the usual way. Walking to the first that parses, rather than\ntaking the first block outright, is what keeps a bundle that leads\nwith a key from reading as unparseable.\n\nBytes this cannot read at all yield **no findings** rather than a\nrefusal. `c2pa` parses the same certificate next with a real\nvalidator and says something better than a guess from here, and a\ncheck that refused what it could not read would turn every encoding\nthis crate has not met into an export failing for a reason nobody can\nact on. What that costs is real and worth naming: DER rather than\nPEM, an empty file, and a bundle whose every block is something else\nall pass inspection silently.\n\n# What this does not check\n\nEverything else `c2pa` requires at signing time, which is a great\ndeal more: certificate version, an unexpired validity window, the\nsignature and key algorithms, `digitalSignature` key usage, an\nauthority key identifier, no `any` usage, no `ocspSigning` or\n`timeStamping` mixed with another usage. Those arrive as\n[`ProvenanceError::Sign`] instead, which is a worse message but not a\nwrong one — this check is a strict subset, so nothing it passes ends\nup in a *less* informative failure than it would have without it.\n\nThe one worth knowing by name is **expiry**, because it is the\nfailure a working configuration grows into: a Conformance Program\ncertificate is valid for at most 366 days, so every deployment that\nsigns will meet it, and it will arrive as a signing error rather than\nas an identity one."
+    },
+    {
+      "path": "asterism_infra::search",
+      "kind": "module",
+      "docs": "Retrieval adapter — Tantivy on-disk index + Lindera Japanese\ntokenizer + Porter English stemmer.\n\n## Position\n\n`AssetRetriever` / `AssetIndexer` (declared in\n`asterism-core::domain::repository`) are the ports this implements.\nThe index is a rank-time projection: the durable truth is `asset_body` in\nSQLite (`AssetBodyRepository`). Tantivy lives outside the SQLite\ntx; index drift is recovered by re-running the `IndexRebuild`\njob against `asset_body`.\n\n## Storage\n\nIndex directory: `~/.asterism/tantivy/` (override via\n`$ASTERISM_HOME`). Tantivy owns the layout inside (`meta.json`\nplus segment files); `asterism-infra::paths::tantivy_index_dir`\nonly picks the parent.\n\n## Tokenizer chain\n\nSingle tokenizer name `mixed_body` registered on the index:\n\n```text\nLindera (IPADIC, Normal mode) → LowerCaser → AsciiFoldingFilter\n  → Stemmer(Language::English) → RemoveLongFilter (40 char cap)\n```\n\n- Japanese text is segmented by lindera into morphemes.\n- English words fall through as whitespace-separated tokens, are\n  lowercased, accent-stripped (`café` → `cafe`), and Porter-stemmed\n  (`typing` / `types` → `type`).\n- Long tokens (URLs, base64, etc.) are dropped by the 40-char\n  cap so the term dictionary stays compact.\n\n## Query time\n\n[`TantivyIndex::retrieve`] wraps each user query term as\n`TermQuery OR FuzzyTermQuery(distance=1)` so single-char English\ntypos (`teh` → `the`) still hit even when the stemmer cannot\nrewrite them. The whole query is combined with `SHOULD` under a\n`BooleanQuery` so multi-word queries rank by BM25 sum."
+    },
+    {
+      "path": "asterism_infra::search::fan_out",
+      "kind": "module",
+      "docs": "One [`AssetIndexer`] over several.\n\nAn asset's body feeds two indexes with different jobs: the SQL\n`asset_fts` trigram index answers the Query-side `text_match`\npredicate (an exact set), and the Tantivy index answers Retrieval\n(a ranked shortlist). They are separate because the questions are\nseparate — but they go stale together, so keeping them in step is\none concern, not two.\n\nFanning out here rather than at each call site means every path\nthat already maintains the index (rebuild / trash / fold / purge)\nmaintains both, with no chance of a new path remembering one and\nforgetting the other.\n\n# Failure is not partial-silent\n\nEvery member runs even when an earlier one fails, and the **first**\nerror is returned. Stopping at the first failure would leave the\nremaining indexes untouched with no signal about which ones, which\nis a worse state to recover from than \"all attempted, one reported\".\nThe recovery path is the same either way: re-run `IndexRebuild`."
+    },
+    {
+      "path": "asterism_infra::search::fan_out::FanOutIndexer",
+      "kind": "struct",
+      "docs": "Fans one indexer call out to every member, in order."
+    },
+    {
+      "path": "asterism_infra::search::tantivy_index",
+      "kind": "module",
+      "docs": "[`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk\nTantivy index.\n\n## Schema\n\nThree fields:\n- `asset_id` — STRING (whole term, stored). Uuid v7 hyphenated;\n  used as the doc term for `remove` and returned in [`Candidate`].\n- `persona_id` — STRING (whole term, stored). Denormalised so a\n  persona-scope filter can be pushed into the query with a\n  `TermQuery` (no SQL round-trip per hit).\n- `body` — TEXT with the `mixed_body` tokenizer, stored so the\n  `SnippetGenerator` can render a highlight window without\n  re-fetching the SQLite row.\n\n## Concurrency\n\nOne `IndexWriter` is held behind a `Mutex` (write serialisation\nis what tantivy expects; `IndexWriter::add_document` is `&mut\nself`). Readers are lock-free — a fresh `IndexReader::searcher`\nis opened per query, which is O(µs) after the first commit\n[estimated, tantivy 0.26].\n\nWriter heap: 50 MB (tantivy default; smaller heaps flush more\noften and hurt bulk backfill throughput)."
+    },
+    {
+      "path": "asterism_infra::search::tantivy_index::TantivyIndex",
+      "kind": "struct",
+      "docs": "Tantivy-backed [`AssetRetriever`] + [`AssetIndexer`] implementation.\n\nCheap to clone (`Arc` inside); one instance per process is enough."
+    },
+    {
+      "path": "asterism_infra::search::tokenizer",
+      "kind": "module",
+      "docs": "Registers the `mixed_body` tokenizer on a Tantivy index.\n\nThe chain is: `LinderaTokenizer` (IPADIC, Normal segmentation) →\n`RemoveLongFilter(40)` → `LowerCaser` → `AsciiFoldingFilter` →\n`Stemmer(English)`. See `search/mod.rs` for the rationale.\n\nLindera does the heavy lifting on Japanese; the later filters are\nno-ops on Japanese morphemes but do the work on English tokens\nthat fall through unchanged."
+    },
+    {
+      "path": "asterism_infra::search::tokenizer::TOKENIZER_NAME",
+      "kind": "constant",
+      "docs": "Tokenizer name registered on the index. Referenced by\n`TEXT.set_tokenizer(TOKENIZER_NAME)` in the schema builder."
+    },
+    {
+      "path": "asterism_infra::search::tokenizer::mixed_body_analyzer",
+      "kind": "function",
+      "docs": "Builds the `mixed_body` tokenizer (lindera + English chain +\nlong-token filter). Kept as a free function so both the index\nbuilder and the query-time parser share exactly the same chain."
+    },
+    {
+      "path": "asterism_infra::search::tokenizer::register_on",
+      "kind": "function",
+      "docs": "Registers `mixed_body` on the given tokenizer manager. Idempotent\n(register replaces)."
+    },
+    {
+      "path": "asterism_infra::source_text",
+      "kind": "module",
+      "docs": "Filesystem adapter for `SourceTextReader` — resolves asset\nlocators back to the full text of the original artefact.\n\nThe DB stores only the 200-char cover snippet; the source of\ntruth stays on disk (Asterism never writes back to a locator).\nFour locator forms are handled, chosen by the extension of the\ncontainer path:\n\n- `<path>` — plain text file; the whole content, capped.\n- `<path>.jsonl#<uuid>` — one record inside a JSON-lines\n  container (Claude Code session logs): the line whose `uuid`\n  field equals the fragment. The message body is extracted from\n  the common chat-log shapes (`message.content` as a string, or\n  as an array of `{type: \"text\", text}` blocks joined by blank\n  lines).\n- `<path>.db#<uuid>` — one row in a persona-journal SQLite\n  EventLog dump (`entries` + `versions` schema). The current\n  version's `body` column is returned. Opened read-only so it\n  never collides with the journal-mcp writer.\n- `<path>.json#conversation=<conv_id>/message=<msg_id>` — one\n  nested message inside a single-envelope harvest JSON\n  (`asterism_agent_harvest` v1). The envelope is parsed once,\n  then the walk finds `conversations[].id == conv_id` and\n  `messages[].id == msg_id`.\n\nBatching: locators are grouped by container path first, so a\n200-message session / db / envelope costs exactly one open.\nExtraction failures degrade to `None` per locator — the caller\nfalls back to the stored cover instead of failing the whole\nbatch."
+    },
+    {
+      "path": "asterism_infra::source_text::FsSourceTextReader",
+      "kind": "struct",
+      "docs": "Filesystem-backed reader. Stateless; safe to share."
+    },
+    {
+      "path": "asterism_infra::sqlite",
+      "kind": "module",
+      "docs": "SQLite backend — connection lifecycle and schema migration built on\n`rusqlite-isle`.\n\n## Layout\n\n- [`migrations`] — `PRAGMA user_version`-based append-only migrations.\n- [`open`] / [`open_in_memory`] — entry points that return an\n  `(AsyncIsle, AsyncIsleDriver)` pair with the pragmas set and the\n  schema migrated.\n\n## Responsibilities\n\nRepository adapters (`SqlitePersonaRepository`, and so on) take an\n`AsyncIsle` handle from this module and issue queries through\n`isle.call(|conn| ...)`. Connection pragmas and schema initialisation\nare the sole concern of this module — adapters never reissue them.\n\n## Where migrations run\n\nThe authoritative entry point for schema migration is the\n`asterism-server init` / `migrate` CLI subcommand. To keep the\nfirst-run experience friendly, [`open_and_migrate`] also applies any\npending migrations before returning — the CLI is the source of\ntruth, the in-process call is a convenience for the app / server\nprocesses so they never fail to start on a fresh install.\n\n## Pragma choices\n\n- `journal_mode = WAL` — the standard 1-writer / N-readers setup. A\n  reader pool (`IslePool`) can be added later once contention is\n  measurable.\n- `synchronous = NORMAL` — the usual tradeoff paired with WAL.\n- `foreign_keys = ON` — enables cascading deletes at the DB layer.\n  SQLite defaults to `OFF` per connection, so this must be reissued\n  inside every init closure.\n- `busy_timeout = 5000` — Asterism ships two processes that share the\n  same file (UI + server), so writer contention can happen; waiting for\n  a few seconds is nicer than an immediate `SQLITE_BUSY`.\n\nOne non-pragma setting rides along: transactions default to `BEGIN\nIMMEDIATE`. `busy_timeout` does not protect a DEFERRED transaction\nthat opens with a read and upgrades to a write — SQLite bypasses\nthe busy handler on the upgrade (waiting cannot help, the read\nsnapshot is already stale) and returns `SQLITE_BUSY` on the spot.\nThe apalis job pool writes to the same file every poll tick, so\nthat window is hit for real (snapshot-freeze e2e flake, 2026-07-28\n/ 2026-08-01). Taking the write lock at `BEGIN` keeps every wait\non the busy-handler path."
+    },
+    {
+      "path": "asterism_infra::sqlite::map",
+      "kind": "module",
+      "docs": "Row ↔ domain conversion helpers.\n\nConvention: inside an isle closure we handle only `rusqlite` primitives\n(`Result<_, rusqlite::Error>`). Promoting rows into domain types\n(including validation) happens **outside** the closure. Corrupted\nrows and unknown slugs surface as `DomainError::Infra` /\n`DomainError::Validation` for the caller."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::datetime_to_ms",
+      "kind": "function",
+      "docs": "Converts `DateTime<Utc>` into unix epoch milliseconds for storage."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::escape_like",
+      "kind": "function",
+      "docs": "Escapes `%`, `_`, and `\\` for a SQL `LIKE` pattern\n(paired with `ESCAPE '\\'`)."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::infra_err",
+      "kind": "function",
+      "docs": "Wraps an infrastructure error (typically `IsleError`) into\n`DomainError::Infra`."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::json_to_strings",
+      "kind": "function",
+      "docs": "Parses a JSON array `TEXT` column into `Vec<String>`\n(`labels`, `keywords`, `vis_sharing`)."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::ms_to_datetime",
+      "kind": "function",
+      "docs": "Converts unix epoch milliseconds (as stored in `INTEGER` columns) into\n`DateTime<Utc>`."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::opt_u32",
+      "kind": "function",
+      "docs": "Converts `Option<i64>` (from a nullable `INTEGER` column) into\n`Option<u32>`, refusing both ends.\n\nDistinct from [`opt_u64`] one function up, which only has a floor to\ncheck: a 32-bit target has a ceiling as well, and `INTEGER` columns\nhold values above it. A `as u32` cast would take `4294967296` down to\n`0` — a value that reads as a measurement and sorts ahead of every\nreal one — and `-1` up to `4294967295`. Both are silent, so both are\nerrors instead: `u32::try_from` covers the two ends in one question\n(the shape `repo/thread.rs` uses for `message_count`).\n\nDeliberately unlike the truncating conversions elsewhere in the same\nread path (`rating` narrows with `as u8`). Those are bounded by a\ndomain rule the writer holds to; a pixel dimension is bounded by\nnothing but the column, so out-of-range here means the row is wrong\nand saying so is the only honest answer."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::opt_u64",
+      "kind": "function",
+      "docs": "Converts `Option<i64>` (from a nullable `INTEGER` column) into\n`Option<u64>`. A negative value is treated as data corruption."
+    },
+    {
+      "path": "asterism_infra::sqlite::map::strings_to_json",
+      "kind": "function",
+      "docs": "Serialises a string slice as a JSON array `TEXT` value."
+    },
+    {
+      "path": "asterism_infra::sqlite::migrations",
+      "kind": "module",
+      "docs": "SQLite schema migrations — `PRAGMA user_version` scheme.\n\n## How it works\n\n`MIGRATIONS[i]` is the DDL batch that upgrades from version `i` to\n`i + 1`. [`migrate`] applies every pending batch inside its own\ntransaction and bumps `user_version` on success. **Never rewrite a\npast batch** — schema changes go at the end (append-only, mirroring\nthe discipline used elsewhere in the workspace).\n\n## Schema decisions\n\n- **Ids are 16-byte BLOBs (UUID v7).** Smaller index footprint than\n  36-byte TEXT ids at Asterism's 100k+ scale. The `uuid` feature of\n  `rusqlite` provides the `ToSql` / `FromSql` bridge.\n- **Timestamps are `INTEGER` (unix epoch ms).** Range filters and sorts\n  use indexes directly; ISO 8601 TEXT would be readable but slower and\n  larger.\n- **`STRICT` tables** disallow implicit type conversion (SQLite 3.37+\n  is bundled by `rusqlite`).\n- **Visibility is split into two columns** (`vis_restricted` and\n  `vis_sharing` as a JSON array). This lets the visibility filter be\n  written directly with the JSON1 extension.\n- **`labels` / `keywords` / `extra` are JSON TEXT.** They stay\n  denormalised until a query needs to join on them.\n- **No dedicated `job` table.** Job persistence is owned by\n  `apalis-sql`, which creates its own table (`Jobs`, and so on) inside\n  the same DB via `SqliteStorage::setup`. Duplicating that in a\n  domain-side mirror would give us two sources of truth for the same\n  data."
+    },
+    {
+      "path": "asterism_infra::sqlite::migrations::LATEST_VERSION",
+      "kind": "constant",
+      "docs": "Latest schema version (`MIGRATIONS.len()`)."
+    },
+    {
+      "path": "asterism_infra::sqlite::migrations::migrate",
+      "kind": "function",
+      "docs": "Applies every pending migration up to the latest version. Idempotent:\nre-running against an already-up-to-date database is a no-op.\n\nEach batch runs inside its own transaction; a failure rolls back only\nthat batch and leaves earlier migrations in place."
+    },
+    {
+      "path": "asterism_infra::sqlite::open_and_migrate",
+      "kind": "function",
+      "docs": "Opens the Asterism database, applying any pending migrations before\nreturning. The returned `AsyncIsleDriver` owns the lifecycle —\ncallers should `driver.shutdown().await` at process exit to drain\nqueued jobs and join the SQLite thread.\n\nMigration is convenience-first: the CLI is the authoritative\nentry point, but embedding processes (the Tauri UI, the standalone\nserver's `serve` subcommand) call this helper so they succeed even\non a fresh install. Anything that needs stricter control should call\n[`open_expecting_latest`] instead."
+    },
+    {
+      "path": "asterism_infra::sqlite::open_and_migrate_in_memory",
+      "kind": "function",
+      "docs": "Opens an in-memory Asterism database with migrations applied (used\nby tests and preview tooling). WAL is a no-op on memory databases."
+    },
+    {
+      "path": "asterism_infra::sqlite::open_expecting_latest",
+      "kind": "function",
+      "docs": "Opens the database and asserts that it is already at\n[`LATEST_VERSION`]. Fails otherwise — used by tooling that wants to\nverify state without silently changing the schema."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo",
+      "kind": "module",
+      "docs": "Repository adapters — SQLite implementations of the ports declared in\n`asterism-core`.\n\nConventions shared by every adapter:\n\n- Each adapter holds a cloneable writer `AsyncIsle` handle and issues\n  queries through `isle.call`. Activating a WAL reader pool is deferred\n  until read contention is measurable.\n- Only `rusqlite` primitives are handled inside an isle closure;\n  promotion into domain types happens outside (see the convention in\n  [`crate::sqlite::map`]).\n- Visibility filtering (for restricted assets) is always applied\n  inside SQL by the asset adapter."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::app_setting",
+      "kind": "module",
+      "docs": "SQLite adapter for the `AppSettingRepository` port.\n\nStores only the keys a user has actually overridden; absence of a row\nis the \"use the code default\" state, so `delete` is the reset path.\n\n**Downgrade tolerance.** A row this build cannot interpret — an\nunknown key, or a timestamp outside the representable range — is\ntreated as \"not overridden\" rather than as an error. A profile opened\nby a newer build can carry keys this one has never heard of, and a\nsettings screen that refuses to render at all would be a far worse\noutcome than ignoring one row. The row is left on disk, so going back\nto the newer build restores the preference, and every skip is logged\nat warn level so the anomaly is visible rather than silent.\n\n`list` and `find` apply the *same* rule on purpose: if `find` raised\nan error where `list` skipped, one uninterpretable row would make the\ntwo read paths disagree about whether a key is overridden."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::app_setting::SqliteAppSettingRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `AppSettingRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset",
+      "kind": "module",
+      "docs": "SQLite adapter for the `AssetRepository` port.\n\nHot-path methods (`list` / `list_index`) build [`AssetCard`] /\n[`AssetIndex`](asterism_core::domain::asset::AssetIndex) projections\ndirectly from a row scan without materialising the full entity.\nVisibility filtering is always applied inside SQL; to make it\nimpossible to forget, the `WHERE` clause is built by a single\n[`QueryParts`] helper — `filter_ids` (the SQL half of the search\npath) goes through the same builder."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset::BodyCandidate",
+      "kind": "struct",
+      "docs": "One asset the body-cache backfill is considering.\n\nCarries the format alongside the locator because the decision the\ncaller makes with it is \"should these bytes be read as text\", and a\nscan that returned only a locator left that question unanswerable —\nwhich is how the backfill came to read pictures. A struct rather\nthan a fourth tuple element so the field that answers it has a name."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset::SqliteAssetRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `AssetRepository` (uses a writer isle).\n\n`list_sessions` reads the `session` table directly and joins the\n`asset` aggregate for the derived `message_count` /\n`started_at_ms` / `ended_at_ms` columns; the removed rkyv\nsnapshot module (previously served this read path) was retired\nwith the Session 1st-class migration because the snapshot's\nrecord shape no longer matches the entity."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_body",
+      "kind": "module",
+      "docs": "SQLite adapter for the `AssetBodyRepository` port.\n\nBacks onto the `asset_body` side table (migration V11): 1:1 with\n`asset` by `asset_id`, holding the resolved plain-text body used\nby the Tantivy full-text index and the session Reader fallback.\n`WITHOUT ROWID` because the natural key is the BLOB `asset_id`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_body::SqliteAssetBodyRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for the asset-body cache (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_comment",
+      "kind": "module",
+      "docs": "SQLite adapter for the `AssetCommentRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_comment::SqliteAssetCommentRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `AssetCommentRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_text_index",
+      "kind": "module",
+      "docs": "SQLite adapter for the write side of the **Query-side** text index\n(`asset_fts` + `asset_fts_key`, migration V58).\n\n# Why an `AssetIndexer`, and not a trigger\n\nThe rows this keeps in step are written and deleted by paths that\nalready call [`AssetIndexer`] explicitly — index rebuild, trash,\nfold, purge. Riding those calls means the SQL index and the Tantivy\nindex go stale or fresh together, and it needs no dependency on\nwhether a foreign-key cascade happens to fire a trigger (SQLite only\nfires those under `PRAGMA recursive_triggers`, which is exactly the\nkind of silent condition this wave is removing).\n\nCompose it with the Tantivy adapter through\n[`FanOutIndexer`](crate::search::FanOutIndexer): one `upsert` from a\ncaller lands in both indexes.\n\n# No flush\n\n`flush` is a no-op. FTS5 writes are ordinary SQL inside the isle's\ntransaction, so they are durable when the statement returns; there\nis no pending-writer state to commit. The method stays on the port\nbecause the Tantivy side genuinely has one."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::asset_text_index::SqliteAssetTextIndex",
+      "kind": "struct",
+      "docs": "SQLite adapter for the Query-side text index (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::attribution_guard",
+      "kind": "module",
+      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`] and\n[`super::dispatch`], at the point where the values about to be bound\nare visible as the columns themselves."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::attribution_guard::assert_channel_recorded",
+      "kind": "function",
+      "docs": "Rejects a row that records somebody without recording how that\nanswer arrived.\n\nTakes the encoded column values rather than domain types so it sits\nat the same boundary the `params!` list does — the last place where\nwhat is about to be written is visible as itself.\n\n- author / operator absent → nothing to attribute, no channel\n  expected (an ordinary unrecorded write).\n- author or operator present, channel present → recorded.\n- author or operator present, channel absent → rejected here."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::chapter_mark",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ChapterMarkRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::chapter_mark::SqliteChapterMarkRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ChapterMarkRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::dir",
+      "kind": "module",
+      "docs": "SQLite adapter for `DirRepository`.\n\n`dir` is the sidebar organisation tree (see\n`asterism_core::domain::dir` for the axis rationale). All tree\nsemantics that need recursion — the move-cycle guard — run as a\nrecursive CTE inside the writer isle, so check-then-write stays\nrace-free under the isle's serialized calls."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::dir::SqliteDirRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter (writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::dispatch",
+      "kind": "module",
+      "docs": "SQLite adapter for the `DispatchRepository` port.\n\nOne row per dispatch job — the enum-carrying `DispatchState` is\nstored as a slug column plus three payload columns\n(`state_message`, `progress_current`, `progress_total`) that\ntogether round-trip the variants without a JSON-tagged shape (the\nwire DTO does the same split)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::dispatch::SqliteDispatchRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `DispatchRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::edge",
+      "kind": "module",
+      "docs": "SQLite adapter for the `EdgeRepository` port.\n\nThe port boundary is intentionally narrow so an alternative graph\nbackend could sit behind it later. v1 stores edges in the dedicated\n`edge` table introduced in schema v1."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::edge::SqliteEdgeRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `EdgeRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::group",
+      "kind": "module",
+      "docs": "SQLite adapter for `GroupRepository`.\n\nStorage note: the domain type is `Group`, but the SQL table is\nnamed `bucket` because SQLite reserves `GROUP` for `GROUP BY`.\nEvery SQL string in this module hard-codes `bucket` /\n`asset_bucket`; the wire, DTO, HTTP path and UI layers still say\n\"group\" so users never see the rename."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::group::SqliteGroupRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter (writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::instance",
+      "kind": "module",
+      "docs": "SQLite adapter for the `InstanceRepository` port.\n\nOne row, minted by the V49 migration. The adapter deliberately does\n**not** create it on read: a migrated database always has it, so an\nempty table is an anomaly, and minting a replacement would hand out\nan identity that disagrees with whatever the rows on disk were\nattributed against."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::instance::SqliteInstanceRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `InstanceRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::material_layer",
+      "kind": "module",
+      "docs": "SQLite adapter for the `MaterialLayerRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::material_layer::SqliteMaterialLayerRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `MaterialLayerRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::material_mark",
+      "kind": "module",
+      "docs": "SQLite adapter for the `MaterialMarkRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::material_mark::SqliteMaterialMarkRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `MaterialMarkRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::modality",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ModalityRepository` port — the Modality\nmaster (`modality` table), backed by rusqlite-isle.\n\nFollows the crate-wide adapter convention: only `rusqlite`\nprimitives inside the isle closure; promotion into domain types\n(parsing `kind` → `ContentKind`, `cover_template` → `CoverTemplate`)\nhappens outside via [`ModalityRow::into_domain`]."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::modality::SqliteModalityRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ModalityRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona",
+      "kind": "module",
+      "docs": "SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona::SqlitePersonaRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `PersonaRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona_profile",
+      "kind": "module",
+      "docs": "SQLite adapter for the `PersonaProfileRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona_profile::SqlitePersonaProfileRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `PersonaProfileRepository` (writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona_theme",
+      "kind": "module",
+      "docs": "SQLite adapter for the `PersonaThemeRepository` port."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::persona_theme::SqlitePersonaThemeRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `PersonaThemeRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::query_group",
+      "kind": "module",
+      "docs": "SQLite adapter for `QueryGroupRepository` — the persistence half of\nthe Query Group evaluation core.\n\nThree primitives, all against the existing schema (no migration — the\n`bucket.kind` / `query_json` columns land in W2):\n\n- [`expand_group_closure`](SqliteQueryGroupRepository::expand_group_closure)\n  — recursive-CTE nesting expansion over `bucket_link`, reusing the\n  reachability shape the link cycle check uses (`group.rs`).\n- [`fetch_sortable_assets`](SqliteQueryGroupRepository::fetch_sortable_assets)\n  — the SQL filter evaluated with no `LIMIT`, projecting exactly the\n  columns the sort evaluator reads. The `WHERE` clause is built by the\n  shared [`QueryParts`] so the evaluate path and the read path can\n  never drift.\n- [`replace_membership`](SqliteQueryGroupRepository::replace_membership)\n  — bulk `DELETE` + positioned bulk `INSERT` in one transaction."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::query_group::SqliteQueryGroupRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter (writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::series",
+      "kind": "module",
+      "docs": "SQLite adapter for the `SeriesRepository` port — the series axis's\ntwo tables (`series_strategy` / `material_series`, V73).\n\nFollows the crate-wide adapter convention: only `rusqlite` primitives\ninside the isle closure, promotion into domain types outside it\n([`StrategyRow::into_domain`]).\n\nThe one thing worth stating beyond that convention is where the path\nlists are taken apart. `include` / `exclude` are JSON columns (the\nV73 doc comment argues why they are not a side table), so the\n`serde_json` call is the promotion step and a column this build\ncannot parse is [`DomainError::Infra`] — a rule read as though it\nselected nothing would derive keys nobody wrote."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::series::SqliteSeriesRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `SeriesRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::session",
+      "kind": "module",
+      "docs": "SQLite adapter for the [`SessionRepository`] port.\n\nsession-model v2 (shape updated by asset-model v4): a Session is a\n**composite Asset** (`asset` row with `role = 'collection'`,\n`modality` NULL), not a row in the legacy `session`\ntable. Its members are the assets pointing at it via\n`asset.container_id`. This adapter therefore reads/writes the\n`asset` table and projects composite rows into the [`Session`]\ndomain shape, deriving the aggregates\n(`message_count` / `started_at_ms` / `ended_at_ms`) at query time\nfrom the members — so there is no cached-count drift (the class of\nbug the old stored `session.message_count` column produced).\n\nMetadata mapping composite Asset ↔ Session: `title` ↔ `title`,\n`register_note` ↔ `note`, `cover` ↔ `cover_hint`, `external_key` ↔\n`external_key`. The composite's own `occurred_at` seeds the time\nwindow when it has no members yet.\n\nThe delete guard (`delete_if_empty`) is implemented server-side\n(SQLite `COUNT` over `container_id` inside the same isle closure\nthat issues the composite DELETE) so a race between an\n`AssetRepository::save` writing `container_id = <id>` and a caller\ntrying to delete the composite cannot slip an orphan through — both\nwrites hit the same writer isle serially.\n\n`create` is single-valued by the same mechanism. It is a\nfind-or-create — the lookup on `(persona_id, external_key)` and the\ncomposite `INSERT` run inside **one** isle closure, so no second\nwriter can interleave between them. Until V62 the atomicity was\nborrowed from a UNIQUE index instead: `create` inserted blindly, read\nthe violation back out of the error text, and the caller re-queried.\nThat index is gone — `external_key` is a Prop, an external record\nlegitimately arrives twice, and ids from two platforms collide — so\nthe serialisation point had to become explicit. It always was the thing\ndoing the work; the constraint was only where it happened to live."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::session::SqliteSessionRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for [`SessionRepository`] (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::snapshot",
+      "kind": "module",
+      "docs": "SQLite adapter for the `SnapshotRepository` port.\n\n`snapshot` holds the row's identity (`id`, `persona_id`,\n`content_hash`, `created_at`); `snapshot_asset` holds the ordered\nmembers. Reads join the two so the domain `Snapshot::asset_ids` field\nis populated in one round trip.\n\nWrites go through a single `create_or_reuse` path: the freeze\nis deduped on `(persona_id, content_hash)` inside one transaction, so\ntwo producers that froze the same ordered members collapse onto one\nrow instead of the membership table growing linearly with every repeat\ndispatch."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::snapshot::SqliteSnapshotRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `SnapshotRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::tag",
+      "kind": "module",
+      "docs": "SQLite adapter for the `TagRepository` port (backed by rusqlite-isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::tag::SqliteTagRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `TagRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::thread",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ThreadRepository` port.\n\nStorage shape mirrors the V20 migration in\n[`crate::sqlite::migrations`]. Projection columns on `thread`\n(`message_count`, `last_message_at`,\n`updated_at`) are trigger-maintained; `save` therefore preserves\nthem across an `ON CONFLICT DO UPDATE` (title / archive edits only\ntouch the caller-owned columns). `append_message` is idempotent by\n`(thread_id, idempotency_key)` — a repeat write returns the\npre-existing row instead of a constraint error."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::thread::SqliteThreadRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ThreadRepository`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::thumb",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ThumbRepository` port.\n\nBacks onto the `thumb_cache` table declared in the initial schema:\n`(asset_id, size_px)` primary key with the raw encoded image bytes\nand a `created_at` timestamp. `INSERT OR REPLACE` on upsert so the\nsame importer run can safely re-emit a thumbnail if the source\nchanged."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::thumb::SqliteThumbRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for the thumbnail cache (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::schema_version",
+      "kind": "function",
+      "docs": "Reads the current schema version from an already-open isle."
+    },
+    {
+      "path": "asterism_infra::telemetry",
+      "kind": "module",
+      "docs": "Local telemetry — append-only `action_log` access (dogfooding\nmetrics).\n\n`action_log` is the ActionLog stream of the observability domain: what\nthe *person* did. Its siblings (`job_log`, `diag_log`, `perf_log`)\nanswer different questions and are written elsewhere; see\n[`asterism_core::domain::observation`].\n\nOperational tier like [`crate::jobs::jobs_snapshot`]: no domain\naggregate, no repository port. The struct wraps the writer isle and\nexposes exactly two operations — `record` (append) and `list`\n(newest-first read) — consumed by the Tauri commands and the HTTP\nAPI. Rows are local-only by design; nothing ever leaves the\nmachine.\n\nContract types are used directly on the boundary (`asterism-infra`\nalready depends on `asterism-contract` for the dispatch runtime) so\nthe two transports share one mapping instead of duplicating it."
+    },
+    {
+      "path": "asterism_infra::telemetry::Telemetry",
+      "kind": "struct",
+      "docs": "Append/read handle for the `action_log` table."
+    }
+  ]
+}

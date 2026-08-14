@@ -1,0 +1,146 @@
+{
+  "crate": "asterism-server",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_server::attribution",
+      "kind": "module",
+      "docs": "Turning what a remote caller said into the attribution a write\nrecords.\n\nBoth remote surfaces this crate owns — the HTTP routes and the MCP\ntools — are the [`Asserted`](AttributionChannel::Asserted) channel:\nwhatever `author_kind` / `author_subject` / `operator_ai` a command\ncarries is the caller's own statement about itself, believed and\nlabelled as such. Translating those fields into an\n[`AttributionContext`] is the adapter's job; the\nservices below this layer never read them.\n\nIt is one function rather than an inline `AttributionContext::asserted`\nper route so that every remote write agrees on what the fields mean,\nincluding the two answers the pair form makes possible: a corrupt\npair is refused here, and an owner claim is refused by the\nconstructor (a caller cannot state owner-ness — that follows from the\nsurface or from authentication, never from the claim)."
+    },
+    {
+      "path": "asterism_server::attribution::asserted",
+      "kind": "function",
+      "docs": "Builds the context for a request that arrived over HTTP or MCP.\n\nPassing all three as `None` is the ordinary case for the many\ncommands that carry no attribution fields at all: a caller that\nstated nothing records nothing, which is the same value a system\nwrite leaves behind (attribution rule 3)."
+    },
+    {
+      "path": "asterism_server::core_init",
+      "kind": "module",
+      "docs": "Shared backend initialisation for both the Tauri UI and the standalone\nserver.\n\nThe two processes assemble the exact same service graph. The only\ndifferences are (1) the progress emitter (`TauriEmitter` in the UI, the\nstderr [`LogEmitter`] in the server), (2) whether the Tantivy index is\nopened read-write or read-only, and (3) whether a job-worker `Monitor`\nis spawned. Those three axes are captured by [`CoreMode`]; everything\nelse lives here so the ~160 lines of DI wiring are written once.\n\nCallers wrap the returned [`CoreCtx`] into their own context struct\n(`ServerCtx` / `AppState`) and add nothing to it. A service assembled\nin one wrapper instead of here would be reachable from that\ntransport alone, which is how the Asset comment thread ended up with\nfour Tauri commands and no HTTP route."
+    },
+    {
+      "path": "asterism_server::core_init::CoreCtx",
+      "kind": "struct",
+      "docs": "Shared service graph assembled by [`init_core`].\n\nBoth the Tauri UI (`AppState`) and the standalone server (`ServerCtx`)\nwrap this bundle. Every service is assembled here rather than in\neither wrapper: a service built on one side only is reachable from\none transport only, which is how the comment thread ended up with\nfour Tauri commands and no HTTP route."
+    },
+    {
+      "path": "asterism_server::core_init::CoreMode",
+      "kind": "enum",
+      "docs": "Selects how the shared core is opened for the calling process."
+    },
+    {
+      "path": "asterism_server::core_init::LogEmitter",
+      "kind": "struct",
+      "docs": "Default [`ProgressEmitter`] for processes without a UI event bus (the\nstandalone server). Logs each progress payload to stderr; `broadcast`\nfalls back to the trait's no-op default."
+    },
+    {
+      "path": "asterism_server::core_init::init_core",
+      "kind": "function",
+      "docs": "Initialises the shared backend and returns the assembled [`CoreCtx`].\n\n`db_path` is the SQLite file shared by the UI and the server; `emitter`\nis the process-specific progress sink; `mode` selects the read-write\n([`CoreMode::Full`]) versus read-only / enqueue-only\n([`CoreMode::ReadOnly`]) shape. The startup drift check (rebuild the\nSession snapshot when stale) runs at the end in both modes — in\n`ReadOnly` the resulting `SessionRebuild` no-op still enqueues\nbut the `Full` worker consumes it."
+    },
+    {
+      "path": "asterism_server::core_init::init_core_with",
+      "kind": "function",
+      "docs": "[`init_core`] with an explicit override for the Tantivy index dir.\n\nThe production entry point resolves the index location from the\nactive profile via [`asterism_infra::paths::tantivy_index_dir`],\nwhich is exactly what the running app should do. Tests are the\nother caller: they hand in a tempdir path so an `init_core` inside\na test binary does not open — let alone write into — the User's\nprofile-scoped index (which is the DB the running app is using).\n\nKept as an override rather than a required argument so every\nproduction call site stays a one-liner and the profile lookup\nremains the single source of truth for \"where does the app's index\nlive\"; `Some(path)` is the escape hatch, not the norm."
+    },
+    {
+      "path": "asterism_server::http",
+      "kind": "module",
+      "docs": "HTTP transport — axum router.\n\nRoute conventions: RPC-style endpoints that mirror the Tauri command\nsurface (for example `POST /asterism/assets/add`). Contract DTOs are\nreused verbatim so the same shape flows through the HTTP body, the\nTauri IPC bridge, and the MCP tool schemas (`crate::mcp`, nested on\nthis router at `/mcp`).\n\nThe server is bound to loopback in v1 and does not authenticate\nrequests."
+    },
+    {
+      "path": "asterism_server::http::record_webview_diag",
+      "kind": "function",
+      "docs": "Re-emits one webview-origin diagnostic as a `tracing` event, which\nthe installed subscriber persists to `diag_log` like any native\nrecord. Shared by the HTTP route below and the Tauri `record_diag`\ncommand, so both adapters land byte-identical rows.\n\nThe target is the literal `asterism_webview`: it must carry the\n`asterism` prefix or the subscriber's db filter (`asterism=info`,\n`observe::install`) drops it, and it is distinct from every real\nmodule path so `GET /asterism/diag?target=asterism_webview` is the\nexact query for \"what did the UI see\".\n\nValidation is deliberately strict on `event`: the `webview.`\nnamespace keeps a client payload out of the `perf` / `job` stream\nrouting (`Stream::of_event`), and an unknown `level` is an error\nrather than a guessed severity."
+    },
+    {
+      "path": "asterism_server::http::router",
+      "kind": "function",
+      "docs": "Builds the router; the caller binds a listener and calls\n`axum::serve`."
+    },
+    {
+      "path": "asterism_server::mcp",
+      "kind": "module",
+      "docs": "MCP transport — the third adapter over the same application services.\n\nTools are a curated use-case vocabulary, not a mirror of the 100+\nHTTP routes: an agent walking `tools/list` should see the ledger's\nactual entry points (search / list / get / add / lineage / comments /\ncatalog / dispatch) and nothing that only exists to serve the grid's\nrendering loop. Anything not covered here is reachable over the HTTP\nAPI on the same port — `get_info` says so in `instructions`.\n\nInput schemas come from the same `asterism-contract` types that back\nHTTP bodies and Tauri IPC (contract feature `json-schema`), so the\nthree transports cannot drift on shape. Thin parameter structs exist\nonly where HTTP used path/query extractors instead of a body type\n(mirroring `http.rs`'s `LineageParams` and friends).\n\nThis handler is served over **streamable-http**, nested at `/mcp` on\nthe loopback axum router ([`streamable_service`]) — it exists\nwherever the HTTP API does (Tauri-embedded serve and the standalone\nbinary alike). MCP clients that spawn a child process use\n`asterism-server mcp` instead, which is a lifecycle-aware stdio\n*proxy* onto this same endpoint (see `crate::mcp_proxy`), not a\nsecond instance of this handler.\n\nDomain failures are reported as tool results (`is_error: true`) with\nthe same `{kind, message}` shape the HTTP `ApiError` writes, rather\nthan JSON-RPC protocol errors: a NotFound is an answer the calling\nagent should read, not a broken call."
+    },
+    {
+      "path": "asterism_server::mcp::AssetCommentsParams",
+      "kind": "struct",
+      "docs": "`asset_comments` input."
+    },
+    {
+      "path": "asterism_server::mcp::AssetLineageParams",
+      "kind": "struct",
+      "docs": "`asset_lineage` input — mirrors the HTTP `LineageParams` query pair\nplus the path segment."
+    },
+    {
+      "path": "asterism_server::mcp::AsterismMcp",
+      "kind": "struct",
+      "docs": "The MCP server handler — a thin tool facade over [`ServerCtx`].\n\nHolds the same service bundle the HTTP handlers share; every tool\nbody is one service call plus serialisation, exactly like an axum\nhandler."
+    },
+    {
+      "path": "asterism_server::mcp::CatalogOverviewParams",
+      "kind": "struct",
+      "docs": "`catalog_overview` input."
+    },
+    {
+      "path": "asterism_server::mcp::DispatchGetParams",
+      "kind": "struct",
+      "docs": "`dispatch_get` input."
+    },
+    {
+      "path": "asterism_server::mcp::DuplicateConflictsParams",
+      "kind": "struct",
+      "docs": "`duplicate_conflicts` input — the same persona / limit pair the\nHTTP query string carries."
+    },
+    {
+      "path": "asterism_server::mcp::MaterialLayersParams",
+      "kind": "struct",
+      "docs": "`material_layers` input."
+    },
+    {
+      "path": "asterism_server::mcp::MaterialMarksParams",
+      "kind": "struct",
+      "docs": "`material_marks` input."
+    },
+    {
+      "path": "asterism_server::mcp::streamable_service",
+      "kind": "function",
+      "docs": "Builds the streamable-http tower service the axum router nests at\n`/mcp`.\n\n`json_response = true` answers plain request/response tool calls\nwith `application/json` (the SSE stream is still used when a\nhandler emits notifications first — rmcp falls back automatically)."
+    },
+    {
+      "path": "asterism_server::mcp_proxy",
+      "kind": "module",
+      "docs": "MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.\n\n## Why a proxy instead of serving the tools directly over stdio\n\nThe tool surface lives in the running app (Full core: writer lock +\njob worker) and is served at `/mcp` on the loopback port. A client\nthat connects to that port directly couples its session to the app\nprocess's lifetime: the client must be (re)started after the app,\nand a backend rebuild mid-session strands it. This proxy inverts the\ndependency:\n\n- **Starts with no backend.** `get_info` is answered locally, so the\n  MCP handshake succeeds even when the app is down.\n- **Connects on access.** Every forwarded request first ensures the\n  backend is up (`/asterism/health`); if it is not, the app is\n  launched and the health endpoint polled before forwarding.\n- **Forwards schemas, does not own them.** `tools/list`,\n  `tools/call`, `resources/list`, `resources/read` are relayed to\n  the backend's `/mcp`, so tool shapes always describe the build\n  that is actually serving — this binary does not need a rebuild\n  when the tool set changes.\n- **Owns the lifecycle vocabulary.** `app_status` (probe, never\n  launches) and `app_restart` (shutdown → relaunch → health poll)\n  are implemented here, in the process that survives the backend's\n  death — the piece a tool living inside the backend can never do\n  cleanly.\n\nA dropped backend connection is retried once through a fresh\nconnection before the error is surfaced, so an `app_restart` (or a\nmanual app quit + relaunch) does not strand the MCP session."
+    },
+    {
+      "path": "asterism_server::mcp_proxy::AppLaunch",
+      "kind": "enum",
+      "docs": "How the proxy brings the app up when the backend is unreachable."
+    },
+    {
+      "path": "asterism_server::mcp_proxy::McpProxy",
+      "kind": "struct",
+      "docs": "The stdio-facing MCP server that relays to the app's `/mcp`."
+    },
+    {
+      "path": "asterism_server::state",
+      "kind": "module",
+      "docs": "Backend context for the standalone server. Thin wrapper over the\nshared [`crate::core_init::init_core`] (`ReadOnly` mode): assembles a\n[`ServerCtx`] from the returned `CoreCtx`.\n\nThe server shares the SQLite file with the Tauri UI process under\nWAL; the `busy_timeout = 5000` pragma is applied by `sqlite::open`.\nProgress updates go to stderr via `LogEmitter` — there is no UI event\nbus in this process."
+    },
+    {
+      "path": "asterism_server::state::ServerCtx",
+      "kind": "struct",
+      "docs": "Bundle of services that HTTP handlers share via `axum` state.\n\nNote: no isle handle here. The precomputed session snapshot is\nrebuilt through `AssetService::rebuild_sessions` (which enqueues\na `SessionRebuild` job); the store's SQLite handle lives inside\nthe store itself."
+    },
+    {
+      "path": "asterism_server::state::default_db_path",
+      "kind": "function",
+      "docs": "Default DB path: active local data profile (override via\n`$ASTERISM_HOME`). Shared with `asterism-ui` through\n`asterism_infra::paths`."
+    },
+    {
+      "path": "asterism_server::state::init",
+      "kind": "function",
+      "docs": "Initialises the backend in read-only mode and returns the shared\ncontext. The tantivy writer lock and the job worker stay with the\nTauri UI process; the server only enqueues jobs and serves reads."
+    }
+  ]
+}

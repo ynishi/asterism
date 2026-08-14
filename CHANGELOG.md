@@ -153,6 +153,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A generated module inventory, and the end of the hand-written one**
+  (#25) — `asterism_core::domain`'s module doc hand-enumerated its
+  submodules and had gone stale (27 of 42 covered by the time it was
+  caught). The list is replaced by a capability tour plus the doctrines
+  code alone misreads (events-not-state, facts vs verdicts,
+  freeze-then-refer, attribution's stopping point); the inventory itself
+  is generated from each module's opening summary line — rustdoc's own
+  index, a one-line grep recorded in the doc, and committed cargo-aidoc
+  artifacts under `docs/aidoc/` with `just aidoc` / `just aidoc-check`
+  (nightly-only, deliberately outside `check`) turning drift into a
+  failing exit code.
+
 - **AI-disclosure provenance: the vocabulary, the emitters and the signer**
   (#14) — a new `asterism-provenance` crate holds what an exported file
   says about where it came from, as values: the IPTC digital source type

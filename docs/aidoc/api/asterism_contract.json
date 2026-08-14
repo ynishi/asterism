@@ -1,0 +1,1016 @@
+{
+  "crate": "asterism-contract",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_contract::command",
+      "kind": "module",
+      "docs": "Command DTOs — inputs for state-changing operations.\n\nCallers (Tauri command handlers, MCP tool handlers, HTTP endpoints)\nbuild these as JSON; the application services in `asterism-core`\nconvert them into domain types and surface any validation failures as\n`DomainError::Validation`. This crate only defines the shapes."
+    },
+    {
+      "path": "asterism_contract::command::AddAssetBatchCommand",
+      "kind": "struct",
+      "docs": "Ingests many assets in one call — the batched form of\n[`AddAssetCommand`], meant for importers walking large source dirs."
+    },
+    {
+      "path": "asterism_contract::command::AddAssetBatchResult",
+      "kind": "struct",
+      "docs": "Result of a batched ingest. `succeeded` and `failed` are sized to\nmatch the request; each entry corresponds to the same index in\n[`AddAssetBatchCommand::items`]."
+    },
+    {
+      "path": "asterism_contract::command::AddAssetCommand",
+      "kind": "struct",
+      "docs": "Ingests a single asset — entry point for the asset-add pipeline."
+    },
+    {
+      "path": "asterism_contract::command::AddAssetToGroupCommand",
+      "kind": "struct",
+      "docs": "Adds an asset to a Group. Idempotent — a duplicate insert is a\nno-op."
+    },
+    {
+      "path": "asterism_contract::command::AppendMessageCommand",
+      "kind": "struct",
+      "docs": "Appends a Message to a Thread.\n\n`author_kind` accepts `\"human\"` / `\"claude_code\"` / `\"agent\"` /\n`\"persona\"`. `author_name` is required when `author_kind =\n\"agent\"` (the agent slug). `author_persona_id` is required when\n`author_kind = \"persona\"` (must reference an existing Persona).\n\n`role`:\n- `\"note\"` — plain thought / observation.\n- `\"action\"` — record of an action the author performed.\n- `\"system\"` — pipeline-emitted event (usually written by the\n  server side rather than caller-side).\n\n`body` is trimmed; blank bodies are rejected.\n\n`idempotency_key` is optional. When set, the pair\n`(thread_id, idempotency_key)` is unique — retrying an append\nwith the same key returns the previously stored Message instead\nof inserting a duplicate.\n\n`refs` are reference chips embedded in the body (Phase 4 UI\nconsumers). Each entry carries a kind + entity uuid."
+    },
+    {
+      "path": "asterism_contract::command::ArchivePersonaCommand",
+      "kind": "struct",
+      "docs": "Toggles a persona's archive flag (a soft-delete alternative)."
+    },
+    {
+      "path": "asterism_contract::command::ArchiveThreadCommand",
+      "kind": "struct",
+      "docs": "Toggles a Thread's `archived` flag. Idempotent — setting it to\nits current value returns the row unchanged."
+    },
+    {
+      "path": "asterism_contract::command::AttachTagBatchCommand",
+      "kind": "struct",
+      "docs": "Attaches one tag to many assets in one call — the batched form of\n[`AttachTagCommand`], meant for the grid multi-select action bar."
+    },
+    {
+      "path": "asterism_contract::command::AttachTagBatchResult",
+      "kind": "struct",
+      "docs": "Result of a batched tag attach. Shape mirrors\n[`UpdateAssetMetaBatchResult`] — each index lines up with the\nsame index in [`AttachTagBatchCommand::items`]."
+    },
+    {
+      "path": "asterism_contract::command::AttachTagCommand",
+      "kind": "struct",
+      "docs": "Attaches a tag to an asset by name (creates the tag if it does\nnot exist yet, idempotent on both the tag row and the m:n link).\n\nReads through `TagRepository::find_or_create` + `link`, so the\nsame call is safe to fire from the manual chip editor and the\nauto-tag pipeline without extra guards."
+    },
+    {
+      "path": "asterism_contract::command::BatchGroupMembershipCommand",
+      "kind": "struct",
+      "docs": "Applies a batch of group-membership changes in one call: every\n`attach` pair is linked (idempotent) and every `detach` pair\nunlinked (missing link = no-op). The bulk primitive behind AI /\nscript membership cleanup — one round-trip\ninstead of N single-pair calls. Manual groups only; query-group\nmembership is defined by its stored query."
+    },
+    {
+      "path": "asterism_contract::command::CancelJobCommand",
+      "kind": "struct",
+      "docs": "Requests cancellation of a running or pending job."
+    },
+    {
+      "path": "asterism_contract::command::ConflictResolution",
+      "kind": "enum",
+      "docs": "How a person answered one raised duplicate question.\n\nThe wire half of\n`asterism_core::domain::duplicate_conflict::ConflictResolution`, two\ndeclarations of one closed set for the reason [`OnDuplicate`]\nrecords about its own pair.\n\nTwo values because a person looking at a pair has two things to say.\nThere is deliberately no \"skip\" / \"later\": leaving the question\nunanswered is what the queue already represents, and spelling it as\nan answer would close a row that nobody decided."
+    },
+    {
+      "path": "asterism_contract::command::CreateDirCommand",
+      "kind": "struct",
+      "docs": "Creates a sidebar Dir under a persona (`parent_id = None` = root)."
+    },
+    {
+      "path": "asterism_contract::command::CreateDispatchCommand",
+      "kind": "struct",
+      "docs": "Kicks off one exporter invocation against a frozen `Snapshot`.\n\nThe server records a `DispatchJob` row in `pending` state and\nenqueues an apalis `DispatchRun` task that drives the exporter's\n`dispatch → poll → harvest` state machine. Callers monitor\nprogress through `GET /asterism/dispatch/{id}` or the\n`dispatch:progress:{id}` event channel."
+    },
+    {
+      "path": "asterism_contract::command::CreateGroupCommand",
+      "kind": "struct",
+      "docs": "Creates a new user-curated Group (bucket) under a persona."
+    },
+    {
+      "path": "asterism_contract::command::CreateMaterialLayerCommand",
+      "kind": "struct",
+      "docs": "Opens a band over an Asset's material that the person owns.\n\nThe band is always `origin = \"user\"`, and the command has no field\nfor that: the other two origins name producers — the material itself\nand a job — and neither of them arrives through a command. A caller\nasking for an imported band is asking for the file to be read again,\nwhich is a different verb on a different surface.\n\nThe new band is never the default. Moving the flag as a side effect\nof creation would leave a caller that wanted a second band with the\nfirst one no longer shown; [`SetDefaultMaterialLayerCommand`] is how\na caller says it meant that."
+    },
+    {
+      "path": "asterism_contract::command::CreateModalityCommand",
+      "kind": "struct",
+      "docs": "Creates a Modality master row (`POST /asterism/modalities`).\n\n`slug` is validated by the same `[a-z0-9_-]{1,64}` grammar as\n`Modality`; a duplicate slug surfaces as `409 Conflict`."
+    },
+    {
+      "path": "asterism_contract::command::CreateQueryGroupCommand",
+      "kind": "struct",
+      "docs": "Creates a Query Group — a Group whose membership is the\nmaterialised result of a stored rule (\"Save as Group\").\n\n`query_json` is the v1 blob\n(`asterism_contract::query_group::QueryGroupQuery`) as a JSON\nstring — a text blob for the same `schema-bridge` reason as\n[`CreateDispatchCommand::params_json`]. The server validates it\nloudly, mints the `kind='query'` Group, and evaluates the rule\nsynchronously once so the group is never visible with empty\nmembers."
+    },
+    {
+      "path": "asterism_contract::command::CreateSavedQueryCommand",
+      "kind": "struct",
+      "docs": "Creates a `SavedQuery` — DEAD WIRE TYPE. The SavedQuery concept was\nabsorbed into Query Groups; the\nV19 migration transcribed every row and dropped the table, and no\nbackend surface accepts this command any more. The type survives\nonly to keep `bindings.ts` stable until the W5 UI wave removes the\nSavedQuery catalog; do not add new callers."
+    },
+    {
+      "path": "asterism_contract::command::CreateSeriesStrategyCommand",
+      "kind": "struct",
+      "docs": "Registers a series Strategy (`POST /asterism/series-strategies`).\n\nThe rule crosses a process boundary as data — an importer, or the\nagent driving one, runs in its own process and can register a rule\nbut cannot ship a decoder — so `decode` names one of the tokens this\nbuild already carries and an unknown one is refused rather than read\nas \"do not decode\".\n\nNo `id` field: the identity is a surrogate the server mints, and the\nresponse carries it. What derived keys are filed under is therefore a\nvalue the caller learns rather than one it asserts."
+    },
+    {
+      "path": "asterism_contract::command::CreateSnapshotCommand",
+      "kind": "struct",
+      "docs": "Freezes a picked asset list as an immutable `Snapshot` — internal\nmaterialise input only (no public command surface mints a\nSnapshot directly; the dispatch / promote paths are the callers)."
+    },
+    {
+      "path": "asterism_contract::command::CreateThreadCommand",
+      "kind": "struct",
+      "docs": "Creates a Thread anchored to the given axis.\n\n`anchor_kind`:\n- `\"app_global\"` — the Home-tab Inbox / free-form axis.\n  `anchor_id` must be `None`.\n- `\"snapshot\"` — attaches to a Snapshot. `anchor_id` is required\n  and must reference an existing Snapshot.\n- `\"query_group\"` — attaches to a query Group. `anchor_id` is\n  required.\n- `\"card\"` — attaches to an Asset. `anchor_id` is required.\n\n`title` is trimmed; a blank / whitespace-only value is rejected."
+    },
+    {
+      "path": "asterism_contract::command::DeclareAssetMetaCommand",
+      "kind": "struct",
+      "docs": "Records — or removes — one AlbumMeta statement on an asset.\n\nAlbumMeta is what a person or an agent *says about* an asset under a\nname they chose, as opposed to what an importer read out of the\nsource. The domain module\n(`asterism_core::domain::album_meta`) carries the argument for why\nit is neither a tag nor a column, and why an external identifier\narriving on an artefact is recorded here rather than becoming a key.\n\nStatements are single-slot: declaring the same `key` twice leaves\nthe later one. That is the difference from a provenance claim, which\nis append-only because each one draws an edge — a second statement\nunder one name is a correction, and keeping both would leave a\nreader to guess which is current."
+    },
+    {
+      "path": "asterism_contract::command::DeclareProvenanceCommand",
+      "kind": "struct",
+      "docs": "Declares (or repairs) the origin of an asset that is already in\nthe library — the after-the-fact twin of\n[`AddAssetCommand::derived_from`].\n\nExists because a claim can outlive its first chance to resolve:\nthe artefact landed before its dispatch finished, the sidecar\narrived later, or nobody knew the parent at ingest time. Same\nvocabulary (`asset:<uuid>`, `dispatch:<uuid>`, `sidecar`), same\nbehaviour on failure — the claim is recorded on `extra._trace`\nrather than rejected, so it stays repairable.\n\nClaims through this verb are bookkept as `_trace.source:\n\"manual\"` — this *is* the after-the-fact declaration channel, as\nopposed to `embedded` / `pushed` which only ingest-time claims\n([`AddAssetCommand::derived_from`]) can carry."
+    },
+    {
+      "path": "asterism_contract::command::DeleteAssetCommentCommand",
+      "kind": "struct",
+      "docs": "Deletes an `AssetComment` by id. Idempotent."
+    },
+    {
+      "path": "asterism_contract::command::DeleteChapterMarkCommand",
+      "kind": "struct",
+      "docs": "Removes one section from a structure band the person owns.\n\nNot idempotent, deliberately, where [`DeleteMaterialMarkCommand`] is:\na chapter is named by `(layer_id, chapter_id)`, so an id that is not\nin that band is refused rather than treated as already-gone — without\nthat a caller could not tell \"removed\" from \"was never yours\"."
+    },
+    {
+      "path": "asterism_contract::command::DeleteDirCommand",
+      "kind": "struct",
+      "docs": "Deletes an **empty** Dir. Rejected while the dir still contains\nchild dirs or groups."
+    },
+    {
+      "path": "asterism_contract::command::DeleteMaterialLayerCommand",
+      "kind": "struct",
+      "docs": "Deletes a band the person owns, with everything in it.\n\nRefuses an imported or machine band rather than deleting one: those\nare reproduced by running their producer again, so the removal would\nlast until the next re-read and then silently undo itself. A verb\nwhose effect ends when something unrelated happens is worse than no\nverb."
+    },
+    {
+      "path": "asterism_contract::command::DeleteMaterialMarkCommand",
+      "kind": "struct",
+      "docs": "Deletes a `MaterialMark` by id. Idempotent."
+    },
+    {
+      "path": "asterism_contract::command::DeleteMessageCommand",
+      "kind": "struct",
+      "docs": "Deletes one Message. Idempotent — a missing id is a no-op."
+    },
+    {
+      "path": "asterism_contract::command::DeleteModalityCommand",
+      "kind": "struct",
+      "docs": "Deletes a Modality master row\n(`DELETE /asterism/modalities/{slug}`). Rejected with `409\nConflict` when any asset still carries the slug (no orphaning\ndelete); the operational retirement path is the `hidden` flag."
+    },
+    {
+      "path": "asterism_contract::command::DeletePersonaProfileCommand",
+      "kind": "struct",
+      "docs": "Removes the persona profile row entirely (reverts the sidebar\ncard to the plain name + accent color)."
+    },
+    {
+      "path": "asterism_contract::command::DeletePersonaThemeCommand",
+      "kind": "struct",
+      "docs": "Removes the persona theme row entirely, reverting the UI to\nbuilt-in defaults for that persona."
+    },
+    {
+      "path": "asterism_contract::command::DeleteSavedQueryCommand",
+      "kind": "struct",
+      "docs": "Deletes a `SavedQuery`. Idempotent — missing id is a no-op."
+    },
+    {
+      "path": "asterism_contract::command::DeleteSeriesStrategyCommand",
+      "kind": "struct",
+      "docs": "Deletes a series Strategy\n(`DELETE /asterism/series-strategies/{id}`).\n\nNo guard, unlike [`DeleteModalityCommand`]: the keys derived under\nthe rule go with it (the schema cascades), and they cost a scan of\nrows already in hand to rebuild rather than a pass over anybody's\ndisk. A modality slug cannot be recomputed, which is why that one is\nrefused while assets still carry it."
+    },
+    {
+      "path": "asterism_contract::command::DeleteSessionCommand",
+      "kind": "struct",
+      "docs": "Deletes a Session (`DELETE /asterism/sessions/{id}`). Rejected\nwith `409 Conflict` when any `asset` row still references the\nSession — orphaning delete is forbidden, mirroring the Modality\ndelete guard. Detach the participating assets (or delete them)\nfirst, then retry."
+    },
+    {
+      "path": "asterism_contract::command::DeleteTagCommand",
+      "kind": "struct",
+      "docs": "Deletes a tag row and every `asset_tag` link that referenced it\n(`POST /asterism/tags/delete`).\n\nUnlike [`DetachTagCommand`] — which unlinks one asset and leaves\nthe channel standing — this removes the channel itself. There is\nno trash for tags: the row and its links go in one transaction.\nThe assets are untouched beyond losing the link."
+    },
+    {
+      "path": "asterism_contract::command::DeleteTagResult",
+      "kind": "struct",
+      "docs": "Result of a [`DeleteTagCommand`]."
+    },
+    {
+      "path": "asterism_contract::command::DeleteThreadCommand",
+      "kind": "struct",
+      "docs": "Deletes a Thread and every Message attached to it. Idempotent —\na missing id is a no-op."
+    },
+    {
+      "path": "asterism_contract::command::DetachTagBatchCommand",
+      "kind": "struct",
+      "docs": "Detaches one tag from many assets in one call — the batched form of\n[`DetachTagCommand`]."
+    },
+    {
+      "path": "asterism_contract::command::DetachTagBatchResult",
+      "kind": "struct",
+      "docs": "Result of a batched tag detach. `detach` carries no payload, so the\nper-item `succeeded` slot is a plain flag; the counts / `failed`\nvector keep the same shape as the other batch results."
+    },
+    {
+      "path": "asterism_contract::command::DetachTagCommand",
+      "kind": "struct",
+      "docs": "Detaches a tag from an asset. Idempotent — a missing m:n link is\na no-op. The tag row is left in place so other assets keep it;\ntags with zero attached assets drop out of the sidebar via the\n`tag_counts` query (dead channels never surface)."
+    },
+    {
+      "path": "asterism_contract::command::DispatchRunCommand",
+      "kind": "struct",
+      "docs": "Runs a dispatch from a live source: the input is **either** a Group\n(manual or query — a query group is refreshed synchronously first\nso the freeze is always fresh) **or** a volatile grid selection\n(`asset_ids`). The server freezes the members into a Snapshot\n(content-hash deduped), stamps the provenance\n(`source_group_id` / `source_query_json`) on the dispatch row, and\nenqueues the run.\n\nExactly one of `group_id` / `asset_ids` must be provided."
+    },
+    {
+      "path": "asterism_contract::command::EditAssetCommentCommand",
+      "kind": "struct",
+      "docs": "Rewrites the body of an existing `AssetComment`. Stamps\n`edited_at`."
+    },
+    {
+      "path": "asterism_contract::command::EditChapterMarkCommand",
+      "kind": "struct",
+      "docs": "Rewrites one section of a structure band the person owns.\n\nUnlike [`EditMaterialMarkCommand`], which rewords without moving,\nthis verb **can** move a section: the reason a person opens a band of\ntheir own is usually that the file's divisions are in the wrong\nplaces, so correcting a position is the ordinary case rather than a\nsecond act.\n\nThe band is named as well as the chapter, matching the\n`(asset_id, mark_id)` pair on the mark face: the ownership guard is a\nfact about the parent, and naming it is what lets a caller's own band\nid fail to reach into another band's row."
+    },
+    {
+      "path": "asterism_contract::command::EditMaterialMarkCommand",
+      "kind": "struct",
+      "docs": "Rewrites the body of an existing `MaterialMark`. Stamps `edited_at`.\n\nThe anchor is not editable through this command: moving a mark is a\ndifferent act from rewording one, and no surface asks for it yet."
+    },
+    {
+      "path": "asterism_contract::command::EmptyTrashCommand",
+      "kind": "struct",
+      "docs": "Permanently deletes **every** asset currently in the trash — the\nbulk form of [`PurgeAssetCommand`], and irreversible for the same\nreasons.\n\nDeliberately takes no filter. The trash is one place, not a view of\nthe library: a user emptying it means \"everything I threw away is\ngone\", and honouring the grid's active filter here would leave\nrows behind that the confirmation prompt just said would go. Live\nassets are never in scope — the command reaches only rows that\nalready carry a trash stamp, so it inherits the same\n\"trash first, purge second\" guarantee.\n\nNo `SchemaBridge` derive, unlike every sibling here: the exported\nschema is built from the field list, and a struct with no fields\ngives the macro nothing to infer from. The emptiness *is* the\ncontract, so the fix is not to invent a field — the frontend sends\n`{}` and reads [`EmptyTrashResult`], which is exported."
+    },
+    {
+      "path": "asterism_contract::command::EmptyTrashResult",
+      "kind": "struct",
+      "docs": "Outcome of [`EmptyTrashCommand`].\n\n`skipped` is not an error channel the caller has to act on: the\nrealistic cause is a restore landing between the scan and the\npurge, which comes back as a conflict. Reported rather than\npropagated so one recovered asset cannot cancel the rest of the\nsweep — the same trade the retention sweep makes."
+    },
+    {
+      "path": "asterism_contract::command::GroupMembershipEntry",
+      "kind": "struct",
+      "docs": "One asset↔group pair inside a `BatchGroupMembershipCommand`."
+    },
+    {
+      "path": "asterism_contract::command::LinkGroupCommand",
+      "kind": "struct",
+      "docs": "Connects a Group into another Group (the Are.na channel-in-channel\ngesture). Idempotent; rejected when it would close a cycle or\ncross personas."
+    },
+    {
+      "path": "asterism_contract::command::MergeAssetsCommand",
+      "kind": "struct",
+      "docs": "A person's ruling that a set of rows is one thing — the manual\nmerge verb's input.\n\nThe other entry point to a fold is the queue answer above: a pair\nthe fingerprint match raised, kept in\n[`ResolveDuplicateConflictCommand`] because every field of that\ncommand is keyed to the pair the queue row was raised on. This is\nwhat reaches the fold from somewhere the queue does not: a person\nlooking at several rows in a panel and declaring them one thing.\n\nThe shape mirrors the domain type that checks it\n(`asterism_core::domain::merge_plan::MergePlan`): the keeper and the\nrows folded into it *and* the whole set the ruling was made over.\nThe last field is not decoration; without it the caller has said\ntwo different things — \"the rows I did not tick are separate\" and\n\"I did not notice them\" — with the same call, and the check that\nsplits them cannot be added after the fact (the rows a person saw\nstop being knowable the moment the call is made). The `MergePlan`\nport doc is the authoritative account of what it refuses and why;\nthis command's job is to carry the same three lists across the wire."
+    },
+    {
+      "path": "asterism_contract::command::MergeGroupsCommand",
+      "kind": "struct",
+      "docs": "Merges one Group into another (duplicate-group consolidation):\nmembers of `from_group_id` that the target\nlacks are appended after its tail, then the source group is\ndeleted. Both groups must be manual and belong to the same\npersona."
+    },
+    {
+      "path": "asterism_contract::command::MergeTagsCommand",
+      "kind": "struct",
+      "docs": "Merges one tag into another and deletes the source\n(`POST /asterism/tags/merge`) — the repair verb for the synonym /\nspelling-variant sprawl an automatic tagger produces at scale.\n\nEvery asset carrying `source_tag_id` ends up carrying\n`target_tag_id`; assets that already carried the target keep a\nsingle link (the duplicate is dropped, not doubled). The source\nrow is then removed. All of it happens in one transaction.\n\nThe target's `axis` survives untouched — merge folds the source\n*into* the target, so the target's classification is the one that\nwas chosen to keep. A source axis that disagreed is discarded with\nthe source row.\n\nA Query Group rule that names the source tag by id is **not**\nrewritten (same treatment as group merge): its refresh runs, finds\nno assets under the now-absent id, and the group's membership goes\nempty. Re-save the rule against the target to follow the merge."
+    },
+    {
+      "path": "asterism_contract::command::MergeTagsResult",
+      "kind": "struct",
+      "docs": "Result of a [`MergeTagsCommand`].\n\n`affected_assets + already_tagged` is the number of assets the\nsource carried. Both count link rows, so trashed assets are\nincluded — same rule as [`DeleteTagResult::detached_assets`]."
+    },
+    {
+      "path": "asterism_contract::command::MoveDirCommand",
+      "kind": "struct",
+      "docs": "Re-parents a Dir (`None` = to the root). Rejected when the target\nparent sits inside the moved dir's own subtree."
+    },
+    {
+      "path": "asterism_contract::command::MoveGroupToDirCommand",
+      "kind": "struct",
+      "docs": "Files a Group under a Dir (`None` = back to the root level).\nOrganisation axis only — the group's members and nesting links\nare untouched."
+    },
+    {
+      "path": "asterism_contract::command::OnDuplicate",
+      "kind": "enum",
+      "docs": "What the caller wants done if the asset being registered turns out\nto hold bytes an existing asset already holds.\n\nThe wire half of `asterism_core::domain::value::OnDuplicate`, which\nis the type the row is written from. Two declarations of the same\nclosed set rather than one, because this crate is a leaf — it has\nno dependency on `asterism-core` (that arrow points the other way),\nand it is the crate the TypeScript bindings and the MCP tool schemas\nare generated from. The `snake_case` tokens are `ask` / `fold` /\n`separate` on both sides, and the single conversion between them\n(`AssetService::add`) is an exhaustive match, so a variant added to\neither set stops compiling until the other is answered for.\n\nSpelled as an enum rather than a free string — unlike `author_kind`,\nthe neighbouring caller-asserted field — because the set really is\nclosed and small: a caller reading the generated schema sees the\nthree answers instead of guessing, and an unknown token is refused\nby deserialisation, above every side effect the ingest could have."
+    },
+    {
+      "path": "asterism_contract::command::OrganizeByLocationCommand",
+      "kind": "struct",
+      "docs": "Auto-organises existing assets under a Dir tree derived from\neach asset's `source_locator` parent path. When `base_dir` is\nset, only locators that start with it are affected and the tree\nis built from the components *after* the prefix — this matches\nthe drag-drop story where the folder the user dropped becomes\nthe tree root, or the HTTP call where the caller passes an\nexplicit root. When `base_dir` is `None`, the tree is derived\nfrom every component of the locator's parent.\n\nA single Group named `<joined path>` is auto-created inside the\nleaf Dir (Group names are `(persona, name)` unique globally, so\nthe joined path is used verbatim to avoid collisions between\ntwo different folder trees whose leaves happen to share a name),\nand every matched asset is idempotently added to that Group."
+    },
+    {
+      "path": "asterism_contract::command::OrganizeByLocationResult",
+      "kind": "struct",
+      "docs": "Result summary of an `organize-by-location` run."
+    },
+    {
+      "path": "asterism_contract::command::PasteImageImportCommand",
+      "kind": "struct",
+      "docs": "Writes a clipboard-pasted image blob to disk and dispatches\n`add_asset` in one shot. `bytes` is the raw payload (PNG /\nJPEG); `mime_type` is the clipboard hint (`image/png`, …) and\npicks the file extension so downstream `image::open` on the\nstored file can rely on the container. The saved locator is\nechoed back through `AssetDto.locator`."
+    },
+    {
+      "path": "asterism_contract::command::PatchSessionMetadataCommand",
+      "kind": "struct",
+      "docs": "Partially updates a Session's metadata\n(`PATCH /asterism/sessions/{id}`). Every field is `None = leave\nunchanged`, `Some(v) = set to v`, mirroring\n[`UpdateModalityCommand`]. To clear `title` back to `NULL` use\n[`RenameSessionCommand`] instead (the patch shape has no\n\"explicit null\" leg)."
+    },
+    {
+      "path": "asterism_contract::command::PostAssetCommentCommand",
+      "kind": "struct",
+      "docs": "Posts a new comment on an Asset. `author_kind` is `\"user\"` for\nthe human running Asterism or `\"persona\"` for one of the vault's\nPersonas (in which case `author_persona_id` is required and\nmust reference an existing persona). `body` is free-form text;\nblank / whitespace-only bodies are rejected."
+    },
+    {
+      "path": "asterism_contract::command::PostChapterMarkCommand",
+      "kind": "struct",
+      "docs": "Adds a section to a structure band the person owns.\n\n`start_ms` is the position on the playback timeline; `end_ms` is the\nexclusive end, and omitting it declares a section with no stated end\n(the shape MP4's `chpl` produces) rather than one running to the end\nof the media. `label` may be empty — plenty of containers declare\nuntitled sections, and this verb accepts what an import accepts.\n\nRefused against an imported or machine band (not the caller's to\nwrite into) and against an annotation band (which holds notes, not\nsections — post a material mark instead)."
+    },
+    {
+      "path": "asterism_contract::command::PostMaterialMarkCommand",
+      "kind": "struct",
+      "docs": "Places a new mark into an Asset's material.\n\n`anchor_kind` names the coordinate space; `\"temporal\"` is the only\none this build places, and it requires `start_ms` (milliseconds from\nthe playback origin, the same zero the player reports). `end_ms` is\nthe exclusive end of an interval — omit it for an instant. The\ntarget Asset must be time-bearing: a mark on the timeline of\nsomething that has no timeline is refused.\n\n`author_kind` is `\"user\"` for the human running Asterism or\n`\"persona\"` for one of the vault's Personas (in which case\n`author_persona_id` is required and must reference an existing\npersona) — the same value domain [`PostAssetCommentCommand`] uses,\nand not the one `AddAssetCommand` uses. `body` is free-form text;\nblank / whitespace-only bodies are rejected."
+    },
+    {
+      "path": "asterism_contract::command::PromoteSnapshotToGroupCommand",
+      "kind": "struct",
+      "docs": "Promotes a frozen `Snapshot` into a hand-owned `Group`\n(\"Promote snapshot to Group\").\n\nCreates a new Group under the Snapshot's persona, bulk-attaches the\nfrozen membership in order, and stamps the Group's\n`origin_snapshot_id` birth record. Name uniqueness follows the\n(persona, name) unique constraint on `bucket`."
+    },
+    {
+      "path": "asterism_contract::command::PromoteSnapshotToGroupResult",
+      "kind": "struct",
+      "docs": "Result of a `PromoteSnapshotToGroupCommand` (also returned by the\nfused `PromoteVolatileSelectionCommand`)."
+    },
+    {
+      "path": "asterism_contract::command::PromoteTagToGroupCommand",
+      "kind": "struct",
+      "docs": "Promotes a Tag into a hand-curated Group: creates a new Group\nunder the given persona (and optionally files it under a Dir),\nthen attaches every asset currently carrying the tag to the new\nGroup in one call.\n\nThis is the primary curation gesture behind an Are.na-style \"turn\nthis channel into a bucket I own\": the underlying tag is left\nuntouched (auto-tag can keep growing it), while the Group starts\noff as a hand-arrangeable snapshot the user takes ownership of."
+    },
+    {
+      "path": "asterism_contract::command::PromoteTagToGroupResult",
+      "kind": "struct",
+      "docs": "Result of a `PromoteTagToGroupCommand` — echoes the group that was\nmaterialised and the number of assets attached, so the UI can\nflash a `▤ N assets → <group>` toast without a follow-up query."
+    },
+    {
+      "path": "asterism_contract::command::PromoteVolatileSelectionCommand",
+      "kind": "struct",
+      "docs": "Fuses \"freeze the volatile grid pick\" + \"promote to Group\" into a\nsingle command (right-click \"Group-ify selection\", W5-d): mints a Snapshot\nfrom `asset_ids` (content-hash deduped — an identical pick reuses\nthe existing freeze) and materialises a hand-owned Group from\nit, stamping `origin_snapshot_id` as the birth record.\n\nIf the promote half fails (e.g. group-name conflict) the minted\nSnapshot stays behind — harmless by design: a Snapshot is a nameless\ncontent object and the orphan is the later GC job's concern."
+    },
+    {
+      "path": "asterism_contract::command::PurgeAssetCommand",
+      "kind": "struct",
+      "docs": "Permanently deletes an **already-trashed** asset. Irreversible:\n`asset_tag`, edges, thumbnails, group filing, body text, snapshot\nmembership, and comments all go with it via the DB foreign-key\ncascade. Everything Asterism knew about the asset is gone — the\noriginal file on disk is untouched, but re-importing it produces a\nfresh asset with none of that value.\n\nRejected with a conflict when the asset is still live: purge is\nreachable only through [`TrashAssetCommand`], so a bulk caller\nalways leaves a recoverable intermediate state."
+    },
+    {
+      "path": "asterism_contract::command::PurgeGroupCommand",
+      "kind": "struct",
+      "docs": "Permanently deletes an **already-trashed** Group and every\n`asset_bucket` row that referenced it. Irreversible: the name, the\nDir filing, and the drag-arranged member order are gone. Member\nassets survive — they are simply no longer filed here.\n\nRejected with a conflict when the Group is still live."
+    },
+    {
+      "path": "asterism_contract::command::PurgePersonaCommand",
+      "kind": "struct",
+      "docs": "Permanently deletes an **already-trashed** persona. Irreversible, and\nthe widest destructive verb in the system: the DB cascade takes every\nasset of that persona (with their tags, comments, group filings, body\ntext and thumbnails), plus its Groups, snapshots and dispatch\nhistory.\n\nRejected with a conflict when the persona is still live."
+    },
+    {
+      "path": "asterism_contract::command::RebuildEdgesCommand",
+      "kind": "struct",
+      "docs": "Enqueues an incremental constellation-edge rebuild for the asset."
+    },
+    {
+      "path": "asterism_contract::command::RecordDiagCommand",
+      "kind": "struct",
+      "docs": "Appends one webview-origin diagnostic to `diag_log`\n(`POST /asterism/diag`, Tauri `record_diag`).\n\nThe write half of the diagnostics story the webview lost when\n`tauri-plugin-log` was removed: the backend subscriber persists\neverything `tracing` emits, but a `console.error` or an uncaught\nexception inside the webview died in the devtools console — which a\nbundled app does not have open. The frontend capture\n(`lib/diag.ts`) forwards those moments through this command; the\nserver re-emits them as `tracing` events under the `asterism_webview`\ntarget, so they ride the same subscriber → `diag_log` pipe as every\nnative diagnostic and come back out of `GET /asterism/diag`.\n\nFire-and-forget on the UI side, like [`RecordEventCommand`]: a lost\ndiagnostic is strictly better than a blocked or recursing UI."
+    },
+    {
+      "path": "asterism_contract::command::RecordEventCommand",
+      "kind": "struct",
+      "docs": "Appends one telemetry event to the local `event_log` (dogfooding\nmetrics — `app_open` / `persona_switch` / `search` / `burst_open` /\n`asset_open`, kinds are open slugs). `occurred_at` is stamped\nserver-side; the recording path is fire-and-forget on the UI side\nso it never blocks an interaction. Local-only: rows never leave\nthe machine."
+    },
+    {
+      "path": "asterism_contract::command::RedispatchCommand",
+      "kind": "struct",
+      "docs": "Re-runs a finished dispatch with the same frozen input, exporter,\naction, and params (P2). The snapshot row is shared — the\ncontent hash already deduped it — so history grows by one job row\nonly."
+    },
+    {
+      "path": "asterism_contract::command::RegisterPersonaCommand",
+      "kind": "struct",
+      "docs": "Registers a new persona in Asterism."
+    },
+    {
+      "path": "asterism_contract::command::RemoveAssetFromGroupCommand",
+      "kind": "struct",
+      "docs": "Removes an asset from a Group. Idempotent — missing link is a\nno-op."
+    },
+    {
+      "path": "asterism_contract::command::RenameDirCommand",
+      "kind": "struct",
+      "docs": "Renames a Dir. The name stays unique among siblings."
+    },
+    {
+      "path": "asterism_contract::command::RenameGroupCommand",
+      "kind": "struct",
+      "docs": "Renames a Group. The name stays unique per persona."
+    },
+    {
+      "path": "asterism_contract::command::RenameSavedQueryCommand",
+      "kind": "struct",
+      "docs": "Renames a `SavedQuery`. Uniqueness `(persona_id, name)` is\nre-checked server-side."
+    },
+    {
+      "path": "asterism_contract::command::RenameSessionCommand",
+      "kind": "struct",
+      "docs": "Rewrites a Session's title\n(`POST /asterism/sessions/{id}/rename`). The Session model\ntreats `title` as a\nuser-editable label with `None` meaning \"untitled\"; passing\n`title = None` is the canonical way to clear a Session back to\nthe untitled state (the fatter `PatchSessionMetadataCommand`\ncannot express \"clear\" because its per-field `None` means\n\"leave unchanged\"). `note` / `cover_hint` are untouched."
+    },
+    {
+      "path": "asterism_contract::command::RenameTagCommand",
+      "kind": "struct",
+      "docs": "Renames a tag in place (`POST /asterism/tags/rename`).\n\nThe new name goes through the same normalisation as\n[`AttachTagCommand`] (trim; empty is rejected), so a name minted\nhere and a name minted by an attach cannot drift apart.\n\n**Renaming never merges.** When the normalised name already\nbelongs to a *different* tag the call is rejected with `409\nConflict` and the caller is pointed at [`MergeTagsCommand`] —\ncollapsing two channels destroys one of them, which is an\nexplicit gesture, not a side effect of a typo fix. Renaming a tag\nto the name it already carries succeeds as a no-op."
+    },
+    {
+      "path": "asterism_contract::command::ReorderGroupAssetsCommand",
+      "kind": "struct",
+      "docs": "Rewrites the front-to-back order of a Group. `ordered_asset_ids` is\nthe full sequence in the new order; any id not currently in the\ngroup is silently skipped (the client sends the snapshot it drew,\nand drift against server state should not fail the write)."
+    },
+    {
+      "path": "asterism_contract::command::ReorderGroupChildrenCommand",
+      "kind": "struct",
+      "docs": "Rewrites the order of a Group's child groups. Same drift-tolerant\ncontract as [`ReorderGroupAssetsCommand`]."
+    },
+    {
+      "path": "asterism_contract::command::ReorderPersonasCommand",
+      "kind": "struct",
+      "docs": "Rewrites `display_order` across a persona slice. `ordered_ids`\nis the front-to-back list the sidebar is about to render; the\nserver sets each persona's `display_order` to its index so the\norder survives across sessions."
+    },
+    {
+      "path": "asterism_contract::command::ResetSettingCommand",
+      "kind": "struct",
+      "docs": "Clears one setting override (`DELETE /asterism/settings/{key}`).\n\nIdempotent: resetting a key that was never overridden succeeds. This\nis deliberately a delete rather than a write of the default value, so\na later change to the default in code reaches every profile that had\nnot pinned the key.\n\nThe response is the *resolved* value, not necessarily the default:\nclearing the stored row does not clear an environment variable that\noutranks it, so a pinned key still reports `source: \"env\"`."
+    },
+    {
+      "path": "asterism_contract::command::ResolveDuplicateConflictCommand",
+      "kind": "struct",
+      "docs": "Answers one duplicate question — the panel's confirm.\n\nWrites the answer onto the queue row and, for `folded`, enqueues the\nfold. Nothing is deleted either way: a closed row is the record that\nthe question was raised and ruled on, and it is also what keeps the\nsame pair from being asked again."
+    },
+    {
+      "path": "asterism_contract::command::RestoreAssetCommand",
+      "kind": "struct",
+      "docs": "Returns a trashed asset to the live set. Idempotent."
+    },
+    {
+      "path": "asterism_contract::command::RestoreGroupCommand",
+      "kind": "struct",
+      "docs": "Returns a trashed Group to the sidebar, membership and drag order\nintact. Idempotent."
+    },
+    {
+      "path": "asterism_contract::command::RestorePersonaCommand",
+      "kind": "struct",
+      "docs": "Returns a trashed persona and the assets that went to the trash with\nit. Assets trashed individually stay trashed."
+    },
+    {
+      "path": "asterism_contract::command::SetDefaultMaterialLayerCommand",
+      "kind": "struct",
+      "docs": "Chooses the band a surface shows, and the one a new mark lands in.\n\nOpen to every origin, unlike the write verbs: choosing to read the\nfile's own chapter list rather than one's own is not an edit to\neither. The refusal that does apply is the model's — an annotation\nband that is not the user's cannot be the default, because a new note\nwould land in a band nobody may write to.\n\nThe call changes **two** rows (the flag moves off whichever band held\nit), so a caller that displays bands re-reads the asset's list rather\nthan patching one entry."
+    },
+    {
+      "path": "asterism_contract::command::SetPersonaProfileCommand",
+      "kind": "struct",
+      "docs": "Upserts the identity signal for a persona (avatar / bio /\nrole). Every optional field is a full-replace: passing `None`\nclears the stored value; omitting the field on the wire is not\nsupported (the client always sends the full desired state). To\nremove the whole row use `DeletePersonaProfileCommand`."
+    },
+    {
+      "path": "asterism_contract::command::SetPersonaThemeCommand",
+      "kind": "struct",
+      "docs": "Sets (or clears) the wallpaper for a persona.\n\n`wallpaper_asset_id = None` clears the wallpaper while leaving the\ntheme row intact so subsequent decoration fields inherit it. To\nremove the theme row entirely (revert to \"no custom theme, use\nbuilt-in defaults\") use `DeletePersonaThemeCommand`."
+    },
+    {
+      "path": "asterism_contract::command::SetSettingCommand",
+      "kind": "struct",
+      "docs": "Overrides one application setting (`PUT /asterism/settings/{key}`).\n\n`key` must name an entry of the closed setting registry; an unknown\nkey is a `404`, not a silent insert. `value_json` is the value as\nJSON text (`true`, `7`, `\"http://…\"`) and must match the key's\ndeclared kind, otherwise the write is rejected as a validation\nerror. The stored value is canonicalised, so whitespace differences\nnever produce two spellings of the same setting."
+    },
+    {
+      "path": "asterism_contract::command::TrashAssetCommand",
+      "kind": "struct",
+      "docs": "Moves an asset to the trash — reversible, and the only route to\n[`PurgeAssetCommand`].\n\nNothing is destroyed: the asset keeps its tags, group filing and\nhand-arranged order, comments, body text, thumbnails, and snapshot\nmembership while it sits in the trash, so\n[`RestoreAssetCommand`] brings all of it back. The asset simply\nstops appearing in listings, counts, and search."
+    },
+    {
+      "path": "asterism_contract::command::TrashGroupCommand",
+      "kind": "struct",
+      "docs": "Moves a Group to the trash — reversible, and the only route to\n[`PurgeGroupCommand`].\n\nThe `asset_bucket` rows stay, so the membership **and its\nhand-arranged order** survive; the Group just stops appearing in the\nsidebar and stops contributing to filters. Member assets are never\ntouched — trashing a Group discards a filing, not the things filed."
+    },
+    {
+      "path": "asterism_contract::command::TrashPersonaCommand",
+      "kind": "struct",
+      "docs": "Moves a persona — and every asset it holds — to the trash.\n\nReversible: the assets are stamped with the persona's own trash\ntimestamp, so [`RestorePersonaCommand`] brings back exactly this set\nwhile leaving anything the user trashed separately where it is.\nNothing is destroyed until the retention sweep or an explicit\n[`PurgePersonaCommand`]."
+    },
+    {
+      "path": "asterism_contract::command::UnlinkGroupCommand",
+      "kind": "struct",
+      "docs": "Removes a Group-in-Group connection. Idempotent — a missing link\nis a no-op."
+    },
+    {
+      "path": "asterism_contract::command::UpdateAssetMetaBatchCommand",
+      "kind": "struct",
+      "docs": "Partially updates metadata for multiple assets in one call."
+    },
+    {
+      "path": "asterism_contract::command::UpdateAssetMetaBatchResult",
+      "kind": "struct",
+      "docs": "Result of a batched metadata update."
+    },
+    {
+      "path": "asterism_contract::command::UpdateAssetMetaCommand",
+      "kind": "struct",
+      "docs": "Partially updates asset metadata (`None` leaves the field unchanged)."
+    },
+    {
+      "path": "asterism_contract::command::UpdateModalityCommand",
+      "kind": "struct",
+      "docs": "Partially updates a Modality master row\n(`PATCH /asterism/modalities/{slug}`). Every field is `None =\nleave unchanged`, mirroring [`UpdateAssetMetaCommand`]. The target\n`slug` is supplied by the path; the body `slug` field is ignored\n(defaulted for convenience)."
+    },
+    {
+      "path": "asterism_contract::command::UpdateQueryGroupQueryCommand",
+      "kind": "struct",
+      "docs": "Rewrites a Query Group's rule (\"Update query\"): validate,\nreject a rule that would close a dependency cycle, persist,\nand synchronously re-evaluate the membership."
+    },
+    {
+      "path": "asterism_contract::command::UpdateSeriesStrategyCommand",
+      "kind": "struct",
+      "docs": "Partially updates a series Strategy\n(`PATCH /asterism/series-strategies/{id}`). Every field is `None =\nleave unchanged`, mirroring [`UpdateModalityCommand`]. The target id\nis supplied by the path; the body `id` field is ignored.\n\n**Four of the five fields invalidate.** `applies_to`, `decode`,\n`include` and `exclude` are what the derivation reads, so changing\nany of them makes every key already derived under this rule a key\nnothing would derive again; `name` is a label and moves nothing. The\nservice compares the four and only invalidates when one actually\ndiffers, so renaming a rule does not cost a re-derivation of the\nlibrary.\n\nThe id is not among them. It is what derived rows are filed under —\na rule that could change it would strand its own keys."
+    },
+    {
+      "path": "asterism_contract::digest",
+      "kind": "module",
+      "docs": "The notation a digest is written in — the `sha256:` tag, and the\nhasher that produces a value carrying it.\n\n# Why the grammar sits in the contract crate\n\n[`AddAssetCommand::declared_content_hash`](crate::command::AddAssetCommand::declared_content_hash)\nis a field of this crate, and the grammar of a field's value belongs\nwith the field: a caller that may state a digest has to be able to\nspell one without reaching for anything else.\n\nThe caller that needs it most is an importer.\n`asterism-importer-sdk` depends on exactly one Asterism crate — this\none — and that is the whole point of it: an importer states where\nbytes are and what it found in them, and pointing it at\n`asterism-core` would put the entire domain (repositories, services,\nduplicate axes) behind a plugin whose job is to read files. The two\nalternatives were both worse. A second `sha256:` and a second\n`of_bytes` in the SDK is the two-crates-one-predicate shape the\n`is_duplicate_error` family had before it was deleted — one rule,\ntwo spellings, kept in step by whoever remembers. An SDK → core\ndependency is a layering inversion that no later edit undoes.\n\nThere is a verbatim precedent one file away: `chrono` was moved into\nthis crate's dependencies \"so the SDK can drop its self-defined\nDerived and the core can consume the shared shape without pulling\nthe SDK\" (`Cargo.toml`). Same shape, same reason, same direction of\ntravel.\n\n# What deliberately did *not* come with it\n\nOnly the notation moved. What a stored value **means** is domain and\nstayed in `asterism_core::domain::content_hash`: the markers\n(`unhashable:no-bytes`, the `unsupported:` family), the reserved\nvalues, `is_duplicate_key`, which axis a value belongs to, and the\ntwo versioned tags (`cr1-sha256:`, `m1-sha256:`) that the container\nwalkers produce. Core re-exports the three names below, so nothing\non its side spells a different import than it did before.\n\nAn importer can therefore say \"these bytes hash to this\" and cannot\nsay \"and that makes them a duplicate\" — which is the correct\ndivision: a declaration is an unverified assertion, and the rules\nthat read digests as sameness run where the bytes were actually\nmeasured."
+    },
+    {
+      "path": "asterism_contract::digest::ContentHasher",
+      "kind": "struct",
+      "docs": "Incremental hasher over an artefact's bytes.\n\nIncremental because the caller streams: an original can be a 4 GB\nvideo, and reading it into memory to hash it would be the largest\nallocation in the process by two orders of magnitude."
+    },
+    {
+      "path": "asterism_contract::digest::DIGEST_PREFIX",
+      "kind": "constant",
+      "docs": "Algorithm tag and separator on every digest this module produces —\nthe storage form's prefix, written in one place.\n\nA constant rather than a literal at each site because the prefix is\nread in several languages: the domain's duplicate-key rule, the\n`WHERE` clause the duplicate report hands to SQLite, and the\ndeclaration parser that decides which axis a caller named. A literal\nspelled out on each side is a rule that can be half-changed."
+    },
+    {
+      "path": "asterism_contract::digest::of_bytes",
+      "kind": "function",
+      "docs": "Hashes a whole slice — the convenience form for callers that already\nhold the bytes (an importer that just read a file, tests, small\nin-memory artefacts)."
+    },
+    {
+      "path": "asterism_contract::dto",
+      "kind": "module",
+      "docs": "Response DTOs — outputs shared between the application services, the\nTypeScript bindings, and any future MCP tool responses.\n\nConversion from domain types happens in `asterism-core`\n(`application::mapping`); this crate is a leaf and knows nothing about\nthe domain types."
+    },
+    {
+      "path": "asterism_contract::dto::AssetCardDto",
+      "kind": "struct",
+      "docs": "Lightweight card representation used on the grid (wire form of\n`AssetCard`)."
+    },
+    {
+      "path": "asterism_contract::dto::AssetCommentDto",
+      "kind": "struct",
+      "docs": "One comment attached to an Asset."
+    },
+    {
+      "path": "asterism_contract::dto::AssetCountEntryDto",
+      "kind": "struct",
+      "docs": "One row of a sidebar count aggregation — `(key, asset_count)`.\n\nThe `key` string carries different id shapes depending on the\naxis being counted (persona UUID for\n`list_persona_asset_counts`, modality slug for\n`list_modality_asset_counts`); the UI resolves it against the\naxis's own name map."
+    },
+    {
+      "path": "asterism_contract::dto::AssetDetailDto",
+      "kind": "struct",
+      "docs": "Composite response for the detail view (asset + tags + edges)."
+    },
+    {
+      "path": "asterism_contract::dto::AssetDto",
+      "kind": "struct",
+      "docs": "Full asset payload used on the detail view."
+    },
+    {
+      "path": "asterism_contract::dto::AssetIndexEntryDto",
+      "kind": "struct",
+      "docs": "Index-only wire form for 6-figure grids.\n\nSame sort / filter surface as `AssetCardDto` minus the heavy\nper-row fields (cover, source_locator, snippet, score). The\nfrontend fetches this eagerly (~150 bytes/row × 100 k = ~15 MB IPC)\nto drive the full-page virtualised scroll, then hydrates the visible\nviewport slice through `cards_by_ids`.\n\n`file_size_bytes` was named on that dropped list until the metric\naxes landed, and `duration_ms` had never been on the row at all.\nBoth are here now, and the exception is not \"these two happened to\nbe cheap\": it is the rule this type states one field down — **an\naxis the index cannot express is an axis the grid cannot offer**.\nSize and length are axes (`SortTarget::FileSize` /\n`SortTarget::Duration`) and the grid sorts these rows, so withholding\nthem made the picker withhold the axes. They cost two nullable\nintegers, the weight class of the timestamps already here — the\ndropped three are unbounded text and a per-query score.\n\nCover text and source locator stay dropped for the same rule read the\nother way: neither is an axis this projection can serve. Cover-text\nsort is deliberately unsupported on index rows (the full cover only\nexists on the hydrated card) and the locator is a render input, not\nan ordering key."
+    },
+    {
+      "path": "asterism_contract::dto::AssetIndexPageDto",
+      "kind": "struct",
+      "docs": "Paginated index page (sibling of `AssetPageDto`)."
+    },
+    {
+      "path": "asterism_contract::dto::AssetPageDto",
+      "kind": "struct",
+      "docs": "Paginated grid page."
+    },
+    {
+      "path": "asterism_contract::dto::AssetTextDto",
+      "kind": "struct",
+      "docs": "Full source text of one asset, resolved from the original\nartefact on disk (the DB itself only stores the 200-char cover\nsnippet). `text = None` means the source could not be read — the\nUI falls back to the cover."
+    },
+    {
+      "path": "asterism_contract::dto::ChapterMarkDto",
+      "kind": "struct",
+      "docs": "One named section of a material — an entry in a chapter list.\n\nNot a [`MaterialMarkDto`]. A mark is a note fastened to a position\n(\"look at this\"); a chapter is a claim about how the material is\n*divided* (\"this section starts here\"). Two differences follow from\nthat and are visible on this shape:\n\n- **`start_ms` is not optional and there is no `anchor_kind`.** A\n  chapter is a section of a playback timeline by construction, where\n  a mark names the coordinate space it is anchored in and leaves the\n  columns of the other spaces empty.\n- **`label` may be empty, and `end_ms` may be absent.** Both are\n  ordinary container output: MP4's `chpl` declares start times only\n  (a chapter ends where the next begins, which is a fact about other\n  rows), and plenty of files declare untitled sections. Refusing\n  either would mean an import drops a section the file really has or\n  invents a title for it."
+    },
+    {
+      "path": "asterism_contract::dto::ConstellationItemDto",
+      "kind": "struct",
+      "docs": "One hover-burst item — an edge paired with the card it lands on."
+    },
+    {
+      "path": "asterism_contract::dto::DERIVED_COVER_MAX_CHARS",
+      "kind": "constant",
+      "docs": "Maximum cover hint length in Unicode scalar values (matches\n`asterism-importer-sdk::COVER_MAX_CHARS`)."
+    },
+    {
+      "path": "asterism_contract::dto::DERIVED_REGISTER_MAX_CHARS",
+      "kind": "constant",
+      "docs": "Maximum register-note preview length (matches\n`asterism-importer-sdk::REGISTER_MAX_CHARS`)."
+    },
+    {
+      "path": "asterism_contract::dto::DerivedDto",
+      "kind": "struct",
+      "docs": "One thing an exporter produced, ready for the core to reify\ninto a new Asset.\n\nMoved here from `asterism-dispatch-sdk` so the SDK does not\nhave to depend on `asterism-core` and the core does not have\nto depend on the SDK — the type is genuinely shared boundary\ndata (SDK returns it, core consumes it, UI displays the\nresulting Asset).\n\n**No `SchemaBridge` derive** — the `extra` field is a\n`serde_json::Value`, which schema-bridge does not know how to\nrender (see this crate's lib doc). The wire representation\nstill round-trips via serde; the frontend consumes results\nthrough the reified `AssetDto` rather than this shape, so no TS\ngen is needed."
+    },
+    {
+      "path": "asterism_contract::dto::DiagDto",
+      "kind": "struct",
+      "docs": "One persisted diagnostic (`GET /asterism/diag`).\n\nThe read side of the `DiagLog` stream. Separate from [`EventDto`]\nfor the same reason the tables are separate: an event measures an\ninteraction, a diagnostic explains a decision the application made\non its own."
+    },
+    {
+      "path": "asterism_contract::dto::DirDto",
+      "kind": "struct",
+      "docs": "A sidebar organisation folder. Dirs contain dirs and groups —\nnever assets — and are a pure navigation axis: selecting a dir is\nexpanded client-side into the group ids beneath it, so the asset\nfilter wire shape (`group_ids` OR) is unchanged."
+    },
+    {
+      "path": "asterism_contract::dto::DispatchDto",
+      "kind": "struct",
+      "docs": "One exporter invocation against a frozen [`SnapshotDto`].\n\nThe wire form mirrors `asterism_core::domain::dispatch::DispatchJob`:\n`state` is the slug (`pending` / `running` / `done` / `failed` /\n`cancelled`); `output_asset_ids` is populated atomically with the\ntransition to `done`. `state_message` carries the failure /\ncancellation reason for terminal error states, `progress_*` fields\ncarry the running-state hint."
+    },
+    {
+      "path": "asterism_contract::dto::DuplicateAxis",
+      "kind": "enum",
+      "docs": "Which fingerprint a duplicate finding is about.\n\nThe wire half of `asterism_core::domain::duplicate_conflict::DuplicateAxis`,\ndeclared here for the reason [`OnDuplicate`](crate::command::OnDuplicate)\nis: this crate is a leaf, the arrow to `asterism-core` points the\nother way, and this is the crate the TypeScript bindings and the MCP\nschemas are generated from. The `snake_case` tokens are the same on\nboth sides and the conversions are exhaustive matches, so a further\naxis stops compiling until both sets answer for it.\n\nAn enum rather than a free string because the reader that most needs\nthe closed set is the panel: it draws one control per axis and has to\nlabel a group with the agreement it reports. Rendered as a union in\nthe generated bindings, which is what keeps the UI from restating the\nvocabulary in TypeScript — and a restatement is how a fourth spelling\n(`\"File\"`, `\"content-region\"`) gets compared against on one side only."
+    },
+    {
+      "path": "asterism_contract::dto::DuplicateConflictDto",
+      "kind": "struct",
+      "docs": "One unanswered \"are these two the same thing?\" question.\n\nRaised when a fingerprint lands on bytes another asset in the same\npersona already holds and the registering caller's strategy was to\nask (the default). What the pair *did* agree on is recorded\nseparately and permanently as an `identical_to` edge; this is the\npart of the event that stops existing once somebody answers.\n\nBoth sides arrive as full cards rather than ids. A panel showing a\npair has to draw two thumbnails, two titles and two locators to be\nworth showing at all, so returning ids would buy nothing but a\nsecond round-trip per row."
+    },
+    {
+      "path": "asterism_contract::dto::DuplicateGroupDto",
+      "kind": "struct",
+      "docs": "One set of live assets that share a fingerprint on one axis.\n\nMembers are ordered oldest first, which is the order a \"keep the\nfirst one, trash the rest\" reading expects. The group is only\nreported when it has two or more members — a fingerprint held by\none asset is not a finding."
+    },
+    {
+      "path": "asterism_contract::dto::DuplicateReportDto",
+      "kind": "struct",
+      "docs": "The duplicate report (`GET /asterism/duplicates`).\n\nCarries two counts alongside the groups because an empty report has\nthree very different meanings — \"there are no duplicates\", \"nothing\nhas been fingerprinted yet\", and \"the content axis has never looked\nat these files\" — and only the numbers can tell them apart."
+    },
+    {
+      "path": "asterism_contract::dto::DuplicateResolutionDto",
+      "kind": "struct",
+      "docs": "What one answered question ended up saying.\n\nReturned by the resolution verb rather than an empty 200, because\nthe two answers have different consequences and a caller that\ncannot tell which one it just recorded cannot report it either."
+    },
+    {
+      "path": "asterism_contract::dto::EdgeDto",
+      "kind": "struct",
+      "docs": "A single constellation edge (payload for the hover-burst)."
+    },
+    {
+      "path": "asterism_contract::dto::EventDto",
+      "kind": "struct",
+      "docs": "One telemetry event row (wire form of the local `event_log`\ntable). Newest-first listings feed the UI and agent-side usage\naggregation over the HTTP API."
+    },
+    {
+      "path": "asterism_contract::dto::GroupDto",
+      "kind": "struct",
+      "docs": "A user-curated Group (bucket) — the hand-picked twin of a Tag.\n\nGroups are persona-scoped: `(persona_id, name)` is unique on the\nstorage side. See `asterism_core::domain::group::Group` for the\ndomain rationale (\"hand-picked\" vs Tag's \"organically labelled\")."
+    },
+    {
+      "path": "asterism_contract::dto::GroupLinkDto",
+      "kind": "struct",
+      "docs": "One Group-in-Group connection (Are.na channel-in-channel). The\nclient receives the full persona-scoped list and assembles the\nnesting graph (child bands, descendant expansion) itself."
+    },
+    {
+      "path": "asterism_contract::dto::GroupSummaryDto",
+      "kind": "struct",
+      "docs": "A group paired with the number of distinct assets attached, used\nto render the sidebar Groups section and chip count badges."
+    },
+    {
+      "path": "asterism_contract::dto::JobDto",
+      "kind": "struct",
+      "docs": "Job status payload."
+    },
+    {
+      "path": "asterism_contract::dto::JobKindSnapshotDto",
+      "kind": "struct",
+      "docs": "Per-kind slice of the background-jobs table (wire form of the\ninfra-side snapshot; the UI banner consumes it via `jobs_stats`)."
+    },
+    {
+      "path": "asterism_contract::dto::JobLogDto",
+      "kind": "struct",
+      "docs": "One job run (`GET /asterism/jobs/log`).\n\nThe read side of the `JobLog` stream: one row per run, written at\ncompletion. The queue's own table keeps state rather than history,\nso this is the only place that answers \"how long did this take\" and\n\"how often does it fail\"."
+    },
+    {
+      "path": "asterism_contract::dto::JobsSnapshotDto",
+      "kind": "struct",
+      "docs": "Snapshot of the background-jobs table used by the UI progress\nbanner (status roll-up + per-kind breakdown)."
+    },
+    {
+      "path": "asterism_contract::dto::LineageEdgeDto",
+      "kind": "struct",
+      "docs": "One `derived_from` link in a lineage walk. Direction is\nchild → parent, matching the stored edge."
+    },
+    {
+      "path": "asterism_contract::dto::LineageNodeDto",
+      "kind": "struct",
+      "docs": "One asset in a multi-hop lineage walk."
+    },
+    {
+      "path": "asterism_contract::dto::LineageViewDto",
+      "kind": "struct",
+      "docs": "Multi-hop `derived_from` lineage around one asset.\n\nThe 1-hop [`ProvenanceViewDto`] answers \"what is next to this\";\nthis answers \"what route did this take\", which is the question a\nchain that left the machine and came back poses."
+    },
+    {
+      "path": "asterism_contract::dto::MaterialLayerDto",
+      "kind": "struct",
+      "docs": "One band of marks over an Asset's material — which reading of the\ncontent this is, and who produced it.\n\n`origin` is `\"imported\"` (read out of the material itself: the\nchapter list the container declares), `\"user\"` (written by the person\nrunning Asterism) or `\"machine\"` (derived by a job). It is the axis\nthat decides whether a band may be edited: the write verbs accept\n`\"user\"` and refuse the other two, because an imported band is\nreplaced by reading the file again and a machine band by running its\njob again, so a hand edit into either is lost at the next run.\n\n`role` is `\"structure\"` (a reading of how the material is divided —\nholds [`ChapterMarkDto`]) or `\"annotation\"` (notes fastened to\npositions — holds [`MaterialMarkDto`]). The two hold different rows,\nso a chapter verb aimed at an annotation band is refused rather than\nsilently writing something that band's readers cannot see.\n\n**No display name.** A band is described by what it *is* —\n`(origin, role)` — and a surface renders that pair. A stored caption\nbeside it would be a second answer to one question, and the caption\nis the one that would drift."
+    },
+    {
+      "path": "asterism_contract::dto::MaterialLayerViewDto",
+      "kind": "struct",
+      "docs": "One band together with the chapters in it — what an asset-level read\nof the layer model returns per band.\n\nBundled rather than left to a second call per band because the\nsurface that shows a chapter list needs both halves at once (the\nbands to choose between, and the contents of the chosen one), and an\nasset carries single-digit bands: the round trips saved are the point\nand the payload is the same rows either way."
+    },
+    {
+      "path": "asterism_contract::dto::MaterialMarkDto",
+      "kind": "struct",
+      "docs": "One mark placed into an Asset's material — the coordinate space its\ncontent carries, rather than the asset as a catalogue entry.\n\nThe anchor arrives flattened: a `anchor_kind` slug plus the columns\nthat kind populates. The alternative — a tagged sub-object — would\nput the wire shape at odds with both the storage row and the\n`AssetCommentDto` beside it, for a payload that is two integers wide.\n\n`body` / `author_kind` / `author_persona_id` / `created_at_ms` /\n`edited_at_ms` deliberately carry the same names and types as on\n[`AssetCommentDto`]: one note vocabulary, spelled once.\n\n**The band the mark sits in is not on this shape.** Every mark\nbelongs to a [`MaterialLayerDto`] — an annotation band, resolved for\nthe caller when the mark is placed — but no surface asks which one:\na person clicking a timeline is answering \"where\", not \"in which of\nmy passes over this file\", and the marks read back through\n`list_material_marks` are the asset's, not one band's. Adding\n`layer_id` here would be putting a field on the wire (and into the\ngenerated bindings, which are tracked) before anything reads it, and\na field nobody reads is one nobody notices going wrong. It arrives\nwhen a surface offers a second annotation band to choose between."
+    },
+    {
+      "path": "asterism_contract::dto::MergeAssetsDto",
+      "kind": "struct",
+      "docs": "What the manual merge verb saw and did — the answer to\n[`MergeAssetsCommand`](crate::command::MergeAssetsCommand), for both\nthe preview and the real thing.\n\n# One shape for `dry_run` and the commit\n\nThe two branches of the command return the **same** DTO, and that is\nnot incidental. The port doc on\n[`merge_into`](../../asterism_core/domain/repository/trait.AssetRepository.html#tymethod.merge_into)\nrecords why: the preview is a prediction of *this* call, and every\nnumber it reports (folded ids, refusals, per-column counts) comes\nfrom the statements that would have been kept — not from a second\nimplementation that estimates alongside. Splitting the DTO would make\nthat contract unhelpable on the wire: a caller would read two shapes\noff the same verb and, at the exact point where the two must agree,\nhave no way to say so. The single field that distinguishes a run from\na preview — [`committed`](Self::committed) — is what the port doc\nkeeps them tellable-apart on.\n\nThis is also how a panel following a preview reads the answer back.\nThe `false` returned by `dry_run` is the *same DTO shape* the `true`\nreturned by the commit is, so the code that rendered \"these five rows\nwill fold into this one, and this exclusion warns why the machine\nwould not have done it\" runs unchanged over the confirmed run —\nwhich is the affordance the wire layer is there to give the caller.\n\n# `warnings` is the whole reason a preview is worth running\n\nThe exclusions that stop an *automatic* fold (lineage, dispatch\nproduct) are deliberately not binding on the manual merge verb — a\nperson looking at the rows can see what the rule was protecting\nagainst. They are read anyway, on the dry run, so\nthe panel can say what those rules would have said before the person\noverrode them. On the commit branch [`warnings`](Self::warnings) is\nalways empty, since the caller has already seen them."
+    },
+    {
+      "path": "asterism_contract::dto::MergeRefusalDto",
+      "kind": "struct",
+      "docs": "One row a fold could not touch, and why.\n\nThe reason is a slug rather than a sentence for the same reason\n[`DuplicateConflictDto::fold_exclusion`] is: every closed vocabulary\non this wire is one, and a rendered warning baked in here would be a\nUI string travelling through the transport, re-worded in the contract\ncrate every time the panel's wording changed. The slugs come from\n[`FoldRefusal::as_str`](../../asterism_core/domain/repository/enum.FoldRefusal.html#method.as_str)\n— `\"already folded\"`, `\"no such asset\"`, `\"no such keeper\"`,\n`\"the keeper is itself folded\"`, `\"the keeper is in the trash\"`,\n`\"an asset cannot be folded into itself\"` — the caller writes the\nsentence."
+    },
+    {
+      "path": "asterism_contract::dto::MergeTotalsDto",
+      "kind": "struct",
+      "docs": "Row-count totals of a merge, a field-by-field port of\n[`FoldReport`](../../asterism_core/domain/repository/struct.FoldReport.html)\n— see that type for what each column means and how the two\ndeliberately-doubled counts\n([`columns_merged`](Self::columns_merged) and\n[`values_discarded`](Self::values_discarded)) are read."
+    },
+    {
+      "path": "asterism_contract::dto::MergeWarningDto",
+      "kind": "struct",
+      "docs": "One rule that would have declined an *automatic* fold of a pair, if\nthis pair had reached detection.\n\nThe manual merge verb overrides these rules on purpose — that is the\nwhole point of a person's ruling — but a panel drawing the\n[`dry_run`](crate::command::MergeAssetsCommand::dry_run) has to say\nwhat a rule was protecting before the person overrides it. That is\nwhat this is: one pair, one exclusion, and the words for which one.\n\n`keeper_id` and `headstone_id` are both here rather than one of them,\nbecause a merge folds several rows into one keeper and a caller\nreading a list of warnings has to be able to say **which pair each\none is about**. A warning that named only the discard would still be\nreadable (\"this row shares a lineage with the keeper\"), but a\nwarning list is being drawn beside a panel that lists the whole set,\nand pointing at both ends is what lets the caller mark the pair\nrather than the row."
+    },
+    {
+      "path": "asterism_contract::dto::MessageDto",
+      "kind": "struct",
+      "docs": "One appended entry in a Thread.\n\n`author_kind`:\n- `\"human\"` — the person running Asterism. `author_name` /\n  `author_persona_id` are both `None`.\n- `\"claude_code\"` — the Claude Code CLI / harness.\n  `author_name` / `author_persona_id` are both `None`.\n- `\"agent\"` — a named agent worker. `author_name` carries the\n  agent slug (e.g. `\"lint-bot\"`); `author_persona_id` is\n  `None`.\n- `\"persona\"` — a persona-tagged author. `author_persona_id`\n  carries the persona uuid; `author_name` is `None`.\n\n`role` is `\"note\"` / `\"action\"` / `\"system\"` (see\n[`crate::command::AppendMessageCommand`] for semantics)."
+    },
+    {
+      "path": "asterism_contract::dto::MessageRefDto",
+      "kind": "struct",
+      "docs": "One reference chip embedded in a `MessageDto` body.\n\n`kind`:\n- `\"card\"` — asset uuid.\n- `\"snapshot\"` — snapshot uuid.\n- `\"query_group\"` — group uuid."
+    },
+    {
+      "path": "asterism_contract::dto::ModalityDefDto",
+      "kind": "struct",
+      "docs": "One row of the Modality master (`GET /asterism/modalities`).\n\nTwo-layer model: `slug` / `label` / `sort_order` / `hidden` /\n`cover_template` are the open, editable identity + presentation\nmetadata; `kind` is the single reference into the closed\n`ContentKind` behaviour set. `asset_count` is the number of assets\ncurrently carrying the slug (feeds the sidebar badge and the\ndelete guard)."
+    },
+    {
+      "path": "asterism_contract::dto::ObservationDto",
+      "kind": "struct",
+      "docs": "The envelope every observation carries, whatever stream it is in.\n\nRepeated by value in each stream's DTO rather than nested or\nflattened: these are read with `curl` by whoever is investigating\nthe application, and a flat object is what that reader wants. The\nsix fields are the same six in every stream table, so the repetition\nis a transcription, not a second definition."
+    },
+    {
+      "path": "asterism_contract::dto::PerfDto",
+      "kind": "struct",
+      "docs": "One persisted timing (`GET /asterism/perf`).\n\nThe read side of the `PerfLog` stream. Written in development only,\nand kept for days rather than months: its value is in the aggregate\nover a session, not in any individual row."
+    },
+    {
+      "path": "asterism_contract::dto::PersonaDto",
+      "kind": "struct",
+      "docs": "Persona payload."
+    },
+    {
+      "path": "asterism_contract::dto::PersonaProfileDto",
+      "kind": "struct",
+      "docs": "Per-persona identity signal — the avatar / short bio / role\ntag the archive UI surfaces on the sidebar Profile card. Kept\nseparate from `PersonaThemeDto` because identity metadata and\nUI chrome evolve on independent commit cadences."
+    },
+    {
+      "path": "asterism_contract::dto::PersonaThemeDto",
+      "kind": "struct",
+      "docs": "Per-persona visual chrome — currently holds the wallpaper asset\nreference. Returned by `get_persona_theme` and echoed back by\n`set_persona_theme` so the UI can flip its CSS variables without\na follow-up query."
+    },
+    {
+      "path": "asterism_contract::dto::ProvenanceViewDto",
+      "kind": "struct",
+      "docs": "Composite response for `GET /asterism/assets/{id}/provenance` —\nthe provenance (\"derived from\") mini-graph the detail view surfaces.\n\nSemantics (aligned with the write path in\n`dispatch_service::reify_derived`, which writes\n`ConstellationEdge { from = derived_asset, to = parent, kind =\nDerivedFrom }`):\n\n- `ancestors` — cards this asset was *derived from* (Selection\n  inputs that seeded the dispatch producing this asset). Empty\n  for imported assets that never went through a dispatch.\n- `descendants` — cards *derived from* this asset (this asset\n  sat as a Selection input for some later dispatch). Empty for\n  leaves that were never re-dispatched.\n\nMVP scope: 1 hop in each direction, capped at `limit`. Deeper\nlineage traversal is a follow-up (each side can be re-fetched\nagainst the picked card to walk further)."
+    },
+    {
+      "path": "asterism_contract::dto::RetrievedIdsDto",
+      "kind": "struct",
+      "docs": "A retrieval reduced to **order**: the ranked ids and nothing else.\n\nThe second composition form: membership\nstays with the Query side (exact, countable, no ceiling) and only the\n*sequence* comes from Retrieval. So this carries no cards, no paging\nand no counts of the library — a caller pairs it with a page it\nalready holds and uses the rank to sort what is on screen.\n\nNot a set. `ids` is best-first and stops at the candidate ceiling, so\nan id missing from it means \"not in the top N we looked at\", never\n\"does not match\". Treating it as a membership answer is the mistake\n[`RetrievedPageDto`]'s missing `total` exists to prevent."
+    },
+    {
+      "path": "asterism_contract::dto::RetrievedPageDto",
+      "kind": "struct",
+      "docs": "One page of a **retrieval** — the ranked shortlist, narrowed by the\nfilter and cut to a page.\n\nA separate type from [`AssetPageDto`] because it cannot answer the\nquestion that one's `total` answers. Retrieval looks at a bounded\nnumber of candidates and returns the closest of them, so \"how many\nassets match\" is not a number it holds. Reusing the page shape meant\nthe count of *survivors of the shortlist* travelled under the name\n`total` and was rendered as a library-wide count — a wrong number\nwith nothing marking it as wrong.\n\nThe exhaustive, countable question is the Query side's: the same\ntext as `ListAssetsQuery::text_match` answers it exactly."
+    },
+    {
+      "path": "asterism_contract::dto::SampledPageDto",
+      "kind": "struct",
+      "docs": "A random handful drawn from the set a filter describes — the answer to\n[`RandomAssetsQuery`](crate::query::RandomAssetsQuery).\n\n**Order is the shuffle itself and carries no meaning.** Nothing here\nis reproducible: the same request answers with different picks, in a\ndifferent sequence, every time (Retrieval promises\nno determinism, and this is a Retrieval-shaped read that happens to be\nimplemented in SQL). Freezing this state into a saved query or a URL\nwould freeze something that cannot be restored.\n\nIt is also **not** an enumeration: `items` stops at the requested `k`\nhowever large the set is, so it can never be paged through to reach\nthe rest. The set's size is answerable, though, and `set_total` says\nit exactly — the filter is a SQL predicate, so this is the Query\nside's kind of count, not the shortlist-bounded number\n[`RetrievedPageDto`] deliberately withholds."
+    },
+    {
+      "path": "asterism_contract::dto::SavedQueryDto",
+      "kind": "struct",
+      "docs": "A named `(filter, sort)` snapshot pinned in the sidebar next to\nSelections and Groups. Restores to the grid's active filter chips\n+ Sorter toolbar without freezing asset ids.\n\n`filter_json` is a serialised `ListAssetsQuery`; `sort_json` is a\nserialised `SortSpec`. The wire form matches\n[`CreateSavedQueryCommand`](crate::command::CreateSavedQueryCommand) —\nstring blobs, because `schema-bridge` cannot codegen\n`serde_json::Value`."
+    },
+    {
+      "path": "asterism_contract::dto::SeriesStrategyDto",
+      "kind": "struct",
+      "docs": "One registered series Strategy — a rule for reading \"made the same\nway\" out of a material's metadata (`GET /asterism/series-strategies`).\n\nThe five rule fields are what the derivation reads; the three\nprovenance fields are what the row says about itself. `include` and\n`exclude` keep the nesting the rule was written with — a list of\npaths, each a list of segments — because a flattened `[\"vdsl.script\"]`\nwould be one path naming a keyword nothing carries, and the two spell\nalike enough that a reader would not notice.\n\n`system` is provenance and not permission: it says a migration seeded\nthe row, and a seeded row is editable and deletable like any other.\n`created_at_ms` / `updated_at_ms` are here for the same reason they\nare in the schema — equal stamps are how a later migration tells a\npristine seed from one somebody took over.\n\n**No group projection.** Which materials a rule put on which key is a\ndifferent question with a different shape, and no surface asks it yet;\nsee the `series` domain module for the constraint the query that\neventually does will have to satisfy."
+    },
+    {
+      "path": "asterism_contract::dto::SessionDto",
+      "kind": "struct",
+      "docs": "One `session` row — the Dialog-modality 1st-class entity.\n\nWire form of `asterism_core::domain::session::Session`. `title` /\n`note` / `cover_hint` are the user-editable metadata (all\n`Option<String>`, default absent); `external_key` is the raw\nimporter-supplied identifier the find-or-create path resolves\nagainst; the aggregates (`started_at_ms` / `ended_at_ms` /\n`message_count`) are derived from the participating dialogue\nassets and refreshed by P1b's `SessionRebuild` job."
+    },
+    {
+      "path": "asterism_contract::dto::SessionPageDto",
+      "kind": "struct",
+      "docs": "Paginated response for the Sessions view. Items are\n[`SessionDto`] rows sourced from the `session` table\n(Dialog-modality 1st-class entity); the SessionsView\ntile grid renders straight from these."
+    },
+    {
+      "path": "asterism_contract::dto::SettingDto",
+      "kind": "struct",
+      "docs": "One application setting, resolved through the whole layer stack\n(`GET /asterism/settings`).\n\nThe row carries the value in force (`value_json` / `source`), the\nwhole chain it came from (`layers`, which includes the code default\nand any rejected layer), and the material a settings UI needs to\nrender a control without a second round trip: the declared `kind`,\nthe `min` / `max` bound, and the `env_var` that seeds the key.\n\nValues are JSON text rather than a tagged union because\n`schema-bridge` cannot codegen one; the consumer parses according to\n`kind`."
+    },
+    {
+      "path": "asterism_contract::dto::SettingLayerDto",
+      "kind": "struct",
+      "docs": "One layer contributing a value to a setting.\n\nThe listing returns every layer that has a value, not just the one in\nforce, so a client can show what the effective value is shadowing —\nthe same reason `git config --show-origin` prints each scope rather\nthan only the winner. A settings screen that shows only the winner\ncannot explain why a control reads the way it does, and cannot offer\na meaningful way back to the layer underneath."
+    },
+    {
+      "path": "asterism_contract::dto::SnapshotDto",
+      "kind": "struct",
+      "docs": "An immutable, content-addressed freeze of an ordered asset set —\nthe git-tree analogue behind every dispatch and promote. Opened from\nits referencing\nevent (a dispatch-history row or a Group's \"promoted from\" chip),\nnever listed or managed on its own."
+    },
+    {
+      "path": "asterism_contract::dto::TagCountDto",
+      "kind": "struct",
+      "docs": "A tag paired with the number of assets currently attached to it,\nused to render the sidebar Tags section and chip count badges.\n\nAggregated by `list_tag_counts` — persona-scoped when the caller\nsupplies a persona id, global otherwise. Tags with zero assets in\nthe query scope are omitted so the sidebar does not list dead\nchannels."
+    },
+    {
+      "path": "asterism_contract::dto::TagDto",
+      "kind": "struct",
+      "docs": "A single channel tag."
+    },
+    {
+      "path": "asterism_contract::dto::ThreadAnchorDto",
+      "kind": "struct",
+      "docs": "Thread anchor — what a `ThreadDto` hangs off of.\n\n`anchor_kind`:\n- `\"app_global\"` — Home-tab Inbox / free-form threads. `anchor_id`\n  is `None`.\n- `\"snapshot\"` — anchored to a Snapshot. `anchor_id` is the\n  Snapshot uuid.\n- `\"query_group\"` — anchored to a query Group. `anchor_id` is the\n  Group uuid.\n- `\"card\"` — anchored to an Asset (per-card conversation lane).\n  `anchor_id` is the Asset uuid."
+    },
+    {
+      "path": "asterism_contract::dto::ThreadDto",
+      "kind": "struct",
+      "docs": "Thread container payload."
+    },
+    {
+      "path": "asterism_contract::dto::VideoPreviewDto",
+      "kind": "struct",
+      "docs": "Where a video's preview rendition stands\n(`GET /asterism/assets/{id}/video-preview`).\n\nSome formats the embedded webview cannot display (VP9 WebM,\nMatroska — measured); for those the player uses a\ntranscoded H.264 MP4 rendition cached beside the profile database.\nThis DTO is how the pane finds out whether one exists yet."
+    },
+    {
+      "path": "asterism_contract::query",
+      "kind": "module",
+      "docs": "Query DTOs — inputs for read-side operations.\n\n`viewer_subject` is the raw input for visibility enforcement:\n`None` means the owner view (everything visible), and `Some(subject)`\nmeans a restricted subject view (persona view, and so on)."
+    },
+    {
+      "path": "asterism_contract::query::DiagLevel",
+      "kind": "enum",
+      "docs": "Severity of a persisted diagnostic — the closed set `tracing` can\nproduce, and the only values `ListDiagQuery::min_level` accepts.\n\nA closed type rather than a string comparison: severity is an\nordering, callers filter on it, and a value outside the set has no\nmeaningful rank. Keeping that knowledge in one place is what lets\nthe reader turn `min_level` into an exact SQL predicate instead of\nguessing, and lets `GET /asterism/diag/levels` publish the accepted\nvalues rather than leaving a caller to discover them by trial."
+    },
+    {
+      "path": "asterism_contract::query::GetAssetDetailQuery",
+      "kind": "struct",
+      "docs": "Detail view (asset + tags + constellation edges)."
+    },
+    {
+      "path": "asterism_contract::query::GetJobStatusQuery",
+      "kind": "struct",
+      "docs": "Job status lookup (for progress polling; push updates travel over the\n`job:progress:{id}` event channel)."
+    },
+    {
+      "path": "asterism_contract::query::ListAssetsQuery",
+      "kind": "struct",
+      "docs": "Filter and pagination parameters for the asset grid.\n\n`#[serde(default)]` lets an HTTP `GET` query string omit fields — the\nserver falls back to [`ListAssetsQuery::default`] (`limit = 200`)."
+    },
+    {
+      "path": "asterism_contract::query::ListDiagQuery",
+      "kind": "struct",
+      "docs": "Diagnostic listing — newest first, the read side of `diag_log`.\n\nHTTP-only by design (`GET /asterism/diag`). Diagnostics are for\nwhoever is investigating the application, not for the application to\nshow its user, so this deliberately has no Tauri command and no\ngenerated TypeScript binding. Reaching it means opening a terminal,\nwhich is the right amount of friction.\n\nFilters mirror [`ListEventsQuery`] so the two logs are queried the\nsame way, with `level` / `target` standing in for `kind`."
+    },
+    {
+      "path": "asterism_contract::query::ListEventsQuery",
+      "kind": "struct",
+      "docs": "Telemetry event listing — newest first. All filters are optional so\nan HTTP `GET /asterism/events` query string can express \"everything\nrecent\" (`limit` alone), one kind, or a time window. Consumed by\nthe UI and by agents aggregating usage summaries over the HTTP API."
+    },
+    {
+      "path": "asterism_contract::query::ListJobLogQuery",
+      "kind": "struct",
+      "docs": "Job-run listing — newest first, the read side of `job_log`.\n\nHTTP-only, like the rest of the observation reads."
+    },
+    {
+      "path": "asterism_contract::query::ListObservationsQuery",
+      "kind": "struct",
+      "docs": "Cross-stream listing — newest first, over the `observation` view.\n\nThe single-timeline read the four separate tables would otherwise\ncost. Returns the shared envelope only: a stream's own columns are\nthe reason it is a separate table, so asking for them means asking\nthat stream's own endpoint."
+    },
+    {
+      "path": "asterism_contract::query::ListPerfQuery",
+      "kind": "struct",
+      "docs": "Timing listing — newest first, the read side of `perf_log`.\n\nHTTP-only, like the rest of the observation reads."
+    },
+    {
+      "path": "asterism_contract::query::RandomAssetsQuery",
+      "kind": "struct",
+      "docs": "A random handful out of the set a filter describes — the \"🎲 Random\"\nentry of the sidebar's Discover section.\n\nThe filter is [`ListAssetsQuery`] verbatim, so every chip the grid has\nlit narrows the pool the picks come from. What comes back is a\n*sample*, not a page: it does not enumerate the set, it cannot be\npaged through, and asking the same question twice answers differently.\n\n[`filter.sort`](ListAssetsQuery::sort) is refused with a validation\nerror for the same reason the search path refuses it: the order here\n*is* the shuffle, so an axis would have to discard it. Sorted listings\nare the list path's job."
+    },
+    {
+      "path": "asterism_contract::query::SearchAssetsQuery",
+      "kind": "struct",
+      "docs": "Full-text / fuzzy search. Shares the same filter and pagination shape\nas [`ListAssetsQuery`].\n\nResults are ranked by relevance (BM25) and that ranking **is** the\norder: [`filter.sort`](ListAssetsQuery::sort) is refused with a\nvalidation error rather than accepted and dropped. Sorted listings are\nthe list path's job (`asset_list` / `POST /asterism/assets`), which\ntakes the same filter surface. The unblock point, if search ever gains\nan axis, is the guard in `AssetService::search`."
+    },
+    {
+      "path": "asterism_contract::query::TagMatch",
+      "kind": "enum",
+      "docs": "How the entries of [`ListAssetsQuery::tag_ids`] combine.\n\nTwo readings of the same chip row, and the caller says which:\n\"anything carrying one of these\" widens as chips are added, \"only\nwhat carries all of these\" narrows. Both are wanted often enough that\npicking one and calling it the meaning of a multi-select would be\nwrong half the time.\n\n[`Any`](Self::Any) is the default, so a caller that never heard of\nthis field keeps the OR semantic it already had."
+    },
+    {
+      "path": "asterism_contract::query_group",
+      "kind": "module",
+      "docs": "Query Group `query_json` — the persisted rule of a query-backed Group.\n\nA Query Group stores its *rule* (not its members) as a versioned\nJSON blob on\nthe `bucket.query_json` column. The members are materialised into\n`asset_bucket` rows by the evaluation job. This module is the typed\nform of that blob:\n\n```json\n{\n  \"v\": 1,\n  \"filter\": { ...ListAssetsQuery... },\n  \"sort\":   { \"target\": \"...\", \"order\": \"...\", \"reverse\": false },\n  \"search_text\": \"optional free text or null\"\n}\n```\n\n# Why a version tag\n\nThe v1 shape replaces the legacy `saved_query.filter_json` hack — where\n`search_text` piggybacked *inside* the filter object\n(`App.svelte:2603-2607`) and `group_ids` were pre-expanded to a flat\nlist (`App.svelte:618/2379`). The v1 shape splits `search_text` out as\na first-class field and keeps `group_ids` **raw** (nesting expansion is\nthe evaluation job's re-entrant CTE, not something frozen here). The\nexplicit `v` lets the migration and every future read reject an\nunknown shape loudly instead of silently mis-parsing.\n\n# `filter` reuse\n\n`filter` is the existing [`ListAssetsQuery`](crate::query::ListAssetsQuery)\nverbatim — no re-definition. `group_ids` inside it are raw (un-expanded)\ngroup ids; the evaluator walks the nesting graph itself."
+    },
+    {
+      "path": "asterism_contract::query_group::QUERY_JSON_VERSION",
+      "kind": "constant",
+      "docs": "The only `query_json` schema version this build understands."
+    },
+    {
+      "path": "asterism_contract::query_group::QueryGroupQuery",
+      "kind": "struct",
+      "docs": "Typed `query_json` v1 payload.\n\nConstruct via [`QueryGroupQuery::new`] (stamps the current version) and\nread back via [`QueryGroupQuery::parse`] (validates the version)."
+    },
+    {
+      "path": "asterism_contract::query_group::QueryJsonError",
+      "kind": "enum",
+      "docs": "Failure modes of [`QueryGroupQuery::parse`]."
+    },
+    {
+      "path": "asterism_contract::sidecar",
+      "kind": "module",
+      "docs": "The shape of an exported artefact's `<file>.meta.json` sidecar.\n\nTwo crates that must not depend on each other need this vocabulary:\nan exporter writes the sidecar (adapter side), and the ingest path\nreads it back when a returning file declares `derived_from:\nsidecar` (core side). Adapters do not depend on the core and the\ncore does not depend on adapters, so the words live here, in the\nleaf DTO crate both already use — the same reasoning that puts\n[`DerivedDto`](crate::dto::DerivedDto) here.\n\nConstants rather than a struct: the body is an\n[`AssetCardDto`](crate::dto::AssetCardDto) projection (possibly\nfield-filtered by the caller) with one extra key, and the reader\nwalks it as JSON. A struct would claim a rigidity the file does not\nhave — it can be hand-written, truncated by an allowlist, or come\nfrom a version that knew fewer fields."
+    },
+    {
+      "path": "asterism_contract::sidecar::SIDECAR_IDENTITY_KEY",
+      "kind": "constant",
+      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```"
+    },
+    {
+      "path": "asterism_contract::sidecar::SIDECAR_SCHEMA",
+      "kind": "constant",
+      "docs": "Version tag written into the identity block.\n\nThis JSON leaves the machine and can come back months later, after\na round trip through tools that know nothing about Asterism. A\nreader that cannot tell \"a shape I understand\" from \"a shape I do\nnot\" will keep interpreting a stale file confidently, which is\nworse than refusing it."
+    },
+    {
+      "path": "asterism_contract::sidecar::SIDECAR_SUFFIX",
+      "kind": "constant",
+      "docs": "Suffix appended to an artefact's locator to find its sidecar."
+    },
+    {
+      "path": "asterism_contract::sort",
+      "kind": "module",
+      "docs": "Sort specification DTO — the wire form of the grid's sort axis.\n\nHistorically `sort_json` was an opaque `String` blob owned entirely\nby the UI (`SavedQuery.sort_json`, see\n`asterism_core::domain::saved_query`). The backend had no type and no\nevaluator: SQL order was hard-wired to `occurred_at DESC` (or a single\ngroup's `position`). The Query Group model materialises a query's\nmembers\ninto `asset_bucket` rows with a frozen `position`, which means the\nbackend must now *evaluate* the sort itself. This module gives that\nsort a real type; the evaluator lives in\n`asterism_core::domain::sort_eval` (behaviour stays in the core, shape\nstays in the leaf contract crate).\n\n# UI correspondence (drift watch)\n\nThese enums mirror the TypeScript unions `SortTarget` / `SortOrder`\nin `crates/asterism-ui/src/lib/stores/filter.svelte.ts` and the\n`{ target, order, reverse }` object `saveCurrentQuery` builds in\n`crates/asterism-ui/src/App.svelte` (symbol references on purpose —\nline numbers here drifted the moment either file moved). The serde\n`rename_all = \"snake_case\"` reproduces the exact string tokens the UI\nwrites into `sort_json`, so a round-trip through this type is\nbyte-identical to what `saveCurrentQuery` persists. Keep the variant\nset in lock-step with the UI union; a new axis on either side without\nthe other is the classic drift bug this module is documented against."
+    },
+    {
+      "path": "asterism_contract::sort::SortOrder",
+      "kind": "enum",
+      "docs": "Direction of ordering *inside* the chosen [`SortTarget`].\n\nMirrors `SortOrder` in\n`crates/asterism-ui/src/lib/stores/filter.svelte.ts:34`. Not every\norder is meaningful for every target (the UI gates the combinations\nvia `ORDER_OPTIONS`, `App.svelte`); the evaluator treats\nunsupported combinations exactly as the UI comparator does — e.g.\n`Tag` + `Ordered` is not offered, and a spec naming it reads as\n[`Alpha`](Self::Alpha).\n\nFour targets carry no choice at all: on [`SortTarget::OccurredAt`] /\n[`SortTarget::CreatedAt`] / [`SortTarget::UpdatedAt`] the target *is*\nthe ordering, and [`SortTarget::Cover`] has a single reading. The\nfield is not nullable, so those specs still name an order — a\nplaceholder that every comparator branch ignores. The UI hides the\ndropdown when the option list has one entry rather than displaying\nit: `Sort: Occurred` beside `Order: updated` reads as a promise to\norder by modification time, which is a different axis\n([`SortTarget::UpdatedAt`]) rather than a direction within this one."
+    },
+    {
+      "path": "asterism_contract::sort::SortSpec",
+      "kind": "struct",
+      "docs": "Serialised sort axis (`sort_json` payload, and the `sort` field of\nthe Query Group `query_json` v1 blob).\n\nCorresponds to the `{ target, order, reverse, collation }` object\nbuilt at `crates/asterism-ui/src/App.svelte:2380`.\n\nNot `Copy`: [`collation`](Self::collation) carries an owned tag."
+    },
+    {
+      "path": "asterism_contract::sort::SortTarget",
+      "kind": "enum",
+      "docs": "Which asset dimension the grid sorts on.\n\nMirrors `SortTarget` in\n`crates/asterism-ui/src/lib/stores/filter.svelte.ts`. The\n`snake_case` wire tokens are `occurred_at` / `created_at` /\n`updated_at` / `persona` / `modality` / `tag` / `group` / `cover` /\n`rating` / `duration` / `file_size` / `pixels`.\n\n[`UpdatedAt`](Self::UpdatedAt) and [`Rating`](Self::Rating) are the\nvariants the UI union does not carry: each was wired server-side\nfirst (the grid's own comparator has no branch for either), so such a\nspec is answerable over the wire and inert client-side. They are\nnamed here rather than left implicit so the drift is a documented gap\ninstead of a surprise.\n\n[`Duration`](Self::Duration) and [`FileSize`](Self::FileSize) were in\nthat list until the UI union took them: `card-cmp.ts` carries both\nbranches now and `card-cmp.test.ts` pins them against the evaluator\nbelow. The grid's Sort dropdown withheld them for one wave after\nthat, for a reason one layer down from this enum — the index rows it\nsorts carried neither column, a row-shape question rather than an\naxis one. Both are on the row now\n(`AssetIndexEntryDto::duration_ms` / `file_size_bytes`) and the\npicker offers them, so the two unions and the two comparators agree\nend to end.\n\nA `msg_count` token used to sit on both unions with a comparator on\nneither: the UI declined it (`buildCardCmp` returned `null`) and the\nevaluator answered `Equal`, so naming the axis produced the order the\ncaller would have got by naming nothing. The grid retired it from the\npicker when the Session tiles left the grid (asset-model v4 P3), and\nthe token went with it — a spec naming it now fails to parse, which\nis the same answer a misspelled axis gets and the only honest one for\nan axis nothing implements. A `query_json` v1 blob frozen with it\nfails its own refresh loudly (`RefreshAllOutcome::failures`, one\ngroup, keep-going) rather than materialising a position under a\ndifferent order; re-saving the group from the picker mints a live\naxis. One legacy path stays quiet: the V19 migration transcribing\npre-Query-Group `saved_query.sort_json` reads with\n`unwrap_or_default()`, so a retired token there falls to the default\naxis — which orders identically to what `MsgCount`'s `Equal`\ncomparator produced, so the silence is harmless there and only there."
+    }
+  ]
+}

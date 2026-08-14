@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-importer-cc",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_cc::parser",
+      "kind": "module",
+      "docs": "Claude Code JSONL → `Footprint::ChatMessage` (+ `Footprint::Image`)\nparser.\n\nEach `*.jsonl` file under `~/.claude/projects/<slug>/` is one Claude\nCode session. We emit one `Footprint::ChatMessage` per `user` /\n`assistant` line with extractable text content. Non-text records\n(mode, file-history-snapshot, tool_use / tool_result blocks with no\ntext) are skipped.\n\nImages that entered the conversation (asset-model v4 P4): Claude\nCode renders a pasted / referenced image into the message text as a\n`[Image: source: <absolute path>]` marker — pasted screenshots get\na durable copy under `~/.claude/image-cache/<session>/`, file\nreferences keep their original path. Each unique marker path emits\none `Footprint::Image` carrying the **same `external_session_key`**\nas the messages, so the image lands as a member of the same Session\ncomposite (membership is modality-agnostic). The base64 content\nblocks in the same lines are ignored — they have no durable locator\nof their own and the marker already points at the on-disk truth.\n\nThe `FootprintSource.locator` is `<file-path>#<line-uuid>` so\nre-imports collapse to no-ops via the server-side\n`asset.source_kind + source_locator` unique constraint. Image\nfootprints use the marker path itself as the locator — the same\nconstraint therefore assigns an image pasted into several sessions\nto the first session imported (one asset per original file).\n\nA line that carries no `uuid` is **not** given one made from its\nline number: it has no address, so no `Footprint::ChatMessage` is\nemitted for it and the drop is counted\n([`asterism_importer_sdk::RecordAddresses`], which states the rule\nand reports the count). An image marker on such a line still\nbecomes a `Footprint::Image` — its locator is the marker path, an\naddress the source really does state, and dropping the whole line\nwould take the picture down with the missing id."
+    },
+    {
+      "path": "asterism_importer_cc::parser::CcSessionParser",
+      "kind": "struct",
+      "docs": "Parser for Claude Code session JSONL logs."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-importer-persona-journal",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_persona_journal::parser",
+      "kind": "module",
+      "docs": "persona-journal SQLite row -> `Footprint::JournalEntry` parser.\n\nEach row emitted by the `SqliteScanner` corresponds to one\npersona-journal `entries` row joined with its current `versions`\nbody. We route each row to a `JournalEntry` whose `JournalKind` is\nchosen from the `entries.kind` column.\n\nConstellation-edge grouping (persona × kind bucket) is carried on\n`bundle_id` after the session-model refactor — journal is a\nnon-Dialog modality, so Session-related fields stay unused.\n\nLegacy note: the original mapping table:\n\n- `\"states\"`   -> `JournalKind::State`\n- `\"emo\"`      -> `JournalKind::Emo`\n- `\"non_rem\"`  -> `JournalKind::NonRem`\n- `\"memories\"` -> `JournalKind::Memory`\n- anything else round-trips via `JournalKind::Other(kind)`.\n\nLocator shape: `{db_path}#{entry_id}` (produced by `SqliteScanner`).\nIdempotency relies on the server-side\n`asset.source_kind + source_locator` unique constraint."
+    },
+    {
+      "path": "asterism_importer_persona_journal::parser::PersonaJournalParser",
+      "kind": "struct",
+      "docs": "Parser for persona-journal rows."
+    }
+  ]
+}

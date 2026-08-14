@@ -1,5 +1,6 @@
-//! Repository ports. Implementations live in `asterism-infra` (dependency
-//! inversion — trait declarations belong to the consuming crate).
+//! Repository ports — the persistence traits declared here and implemented
+//! in `asterism-infra` (dependency inversion: trait declarations belong to
+//! the consuming crate).
 //!
 //! Every trait is `Send + Sync` because Tauri v2 uses a multi-threaded
 //! tokio runtime. Hot-path list / search methods return the `AssetCard`
