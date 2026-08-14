@@ -317,6 +317,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path already took care to avoid. Both routes clear it now, and a test
   covers the signing path's failure route rather than only its success.
 
+- **`parameters` is AUTOMATIC1111's chunk, not ComfyUI's** (#14) — three
+  doc comments and a test fixture said otherwise. The rule they were
+  making is right and unaffected: a digest must not re-render a value it
+  was given, because that puts number formatting and nested key order
+  into the digest's definition. The example was wrong. ComfyUI writes
+  `prompt` and `workflow`, both JSON; `parameters` is AUTOMATIC1111's and
+  holds line-oriented prose. `domain::disclosure` had it right all along,
+  which is where the two families are actually told apart.
+
+  It matters because a reader who took the docs literally would reach for
+  a JSON decoder on a value that never parses — and the fixture in
+  `asterism-importer-image` had already done something adjacent, carrying
+  `steps: 30, sampler: euler` under that keyword, which is neither JSON
+  nor A1111's grammar. It now carries the real shape: a prompt, a
+  `Negative prompt:` line, and one comma-separated settings line.
+
 - **The PNG chunk length is checked, and three comments now describe
   what their code does** (#14) — the length was
   `u32::try_from(payload.len()).unwrap_or(u32::MAX)` under a comment
