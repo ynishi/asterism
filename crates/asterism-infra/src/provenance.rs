@@ -870,79 +870,64 @@ impl ProvenanceWriter {
         // to read from, and a version of `c2pa` that did would fail
         // with `EBADF` on the video path only.
         //
-        // The temporary is now visible for the whole signing
-        // operation rather than for the length of one `write`. An
-        // importer scanning the export directory can see it growing;
-        // that is the cost of not holding the asset in memory, and
-        // the extension is the same one the short-lived version
-        // used.
-        let temporary = temporary_for(path);
-        let signing = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&temporary)
-            .map_err(|e| ProvenanceError::Io {
-                // The target, not the temporary: the temporary is
-                // removed below, so naming it would hand the reader
-                // a filename that no longer exists.
-                path: path.to_path_buf(),
-                source: e,
-            })
-            .and_then(|mut destination| match staged {
-                // Sign over the XMP-stamped bytes: the hard binding
-                // covers the packet, so signing the original and
-                // then writing the packet would invalidate what was
-                // signed. These are already in memory — the packet
-                // was written into them — so there is nothing to
-                // stream from.
-                Some(bytes) => {
-                    let mut source = Cursor::new(bytes);
-                    builder
-                        .sign(
-                            signer.as_ref(),
-                            container.mime(),
-                            &mut source,
-                            &mut destination,
-                        )
-                        .map_err(|failure| ProvenanceError::Sign {
-                            path: path.to_path_buf(),
-                            source: Box::new(failure),
-                        })
-                }
-                // Nothing staged: the container takes no packet
-                // (video), there was nothing to disclose in one, or
-                // the packet half failed. Stream from the file, so
-                // neither end of a large video is read into memory
-                // whole.
-                None => std::fs::File::open(path)
-                    .map_err(|e| ProvenanceError::Io {
-                        path: path.to_path_buf(),
-                        source: e,
-                    })
-                    .and_then(|mut source| {
-                        builder
-                            .sign(
-                                signer.as_ref(),
-                                container.mime(),
-                                &mut source,
-                                &mut destination,
-                            )
-                            .map_err(|failure| ProvenanceError::Sign {
-                                path: path.to_path_buf(),
-                                source: Box::new(failure),
-                            })
-                    }),
-            });
-        if let Err(e) = signing {
-            // Same reasoning as `commit`'s: a `.c2pa-partial` left
-            // in an export directory an importer is watching turns
-            // one failure into a second artefact.
-            let _ = std::fs::remove_file(&temporary);
-            return Err(e);
-        }
-        commit(&temporary, path).map_err(|source| ProvenanceError::Io {
+        // The temporary is visible for the whole signing operation
+        // rather than for the length of one `write`. An importer
+        // scanning the export directory can see it growing; that is the
+        // cost of not holding the asset in memory. It is why [`stage`]
+        // opens it at 0600 — for a video, "briefly" is minutes.
+        //
+        // `Builder::sign` takes `W: Write + Read + Seek`, and the
+        // `Read` is not decorative: the BMFF handler re-reads box
+        // headers out of the destination to adjust offsets. A
+        // write-only descriptor works with today's signing and would
+        // fail with `EBADF` on the video path under a version that
+        // used it, which is why this is a real file handle rather than
+        // a buffer.
+        let mut temporary = stage(path).map_err(|e| ProvenanceError::Io {
+            // The target, not the temporary: the temporary is removed
+            // when it drops, so naming it would hand the reader a
+            // filename that no longer exists.
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        let destination = temporary.as_file_mut();
+        let sign_failed = |failure: c2pa::Error| ProvenanceError::Sign {
+            path: path.to_path_buf(),
+            source: Box::new(failure),
+        };
+        let signing = match staged {
+            // Sign over the XMP-stamped bytes: the hard binding covers
+            // the packet, so signing the original and then writing the
+            // packet would invalidate what was signed. These are
+            // already in memory — the packet was written into them —
+            // so there is nothing to stream from.
+            Some(bytes) => builder
+                .sign(
+                    signer.as_ref(),
+                    container.mime(),
+                    &mut Cursor::new(bytes),
+                    destination,
+                )
+                .map_err(sign_failed),
+            // Nothing staged: the container takes no packet (video),
+            // there was nothing to disclose in one, or the packet half
+            // failed. Stream from the file, so neither end of a large
+            // video is read into memory whole.
+            None => match std::fs::File::open(path) {
+                Err(e) => Err(ProvenanceError::Io {
+                    path: path.to_path_buf(),
+                    source: e,
+                }),
+                Ok(mut source) => builder
+                    .sign(signer.as_ref(), container.mime(), &mut source, destination)
+                    .map_err(sign_failed),
+            },
+        };
+        // A failure needs no cleanup here: dropping the temporary
+        // removes it, which is what stops a half-signed file being left
+        // in an export directory an importer is watching.
+        signing?;
+        commit(temporary, path).map_err(|source| ProvenanceError::Io {
             path: path.to_path_buf(),
             source,
         })
@@ -1005,49 +990,62 @@ fn read_head(path: &Path, n: usize) -> std::io::Result<Vec<u8>> {
     Ok(head)
 }
 
-/// The sibling temporary a rewrite is staged in.
+/// Opens the temporary a rewrite is staged in.
 ///
-/// Same directory as the target so the rename stays within one
+/// Three properties, and each of them was a defect before it was one.
+///
+/// **Same directory as the target**, so the rename stays within one
 /// filesystem — across a mount boundary `rename` fails with `EXDEV`,
 /// and the fallback (copy, then delete) is exactly the non-atomic
 /// behaviour this is here to avoid.
-fn temporary_for(path: &Path) -> PathBuf {
-    path.with_extension(match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => format!("{ext}.c2pa-partial"),
-        None => "c2pa-partial".to_string(),
-    })
+///
+/// **A name nothing can predict, created with `O_EXCL`.** The name used
+/// to be a deterministic sibling — `shot.png` staged through
+/// `shot.png.c2pa-partial` — opened with neither `O_EXCL` nor
+/// `O_NOFOLLOW`. Anything else that could create a file in that
+/// directory could put a symlink there first and have this write
+/// through it, and two concurrent applies to one path shared a
+/// temporary and interleaved into it. An export directory is not
+/// necessarily private: it is wherever the user pointed the export,
+/// which may be shared, synced, or watched by something else.
+///
+/// **Mode 0600 while it is open, and the target's own mode once it is
+/// in place.** A staged file holds the whole asset for as long as the
+/// signing takes, which for a video is not a moment. Inheriting the
+/// umask made that world-readable. Copying the target's permissions
+/// across before the rename is the other half: without it, replacing a
+/// file the user had kept at 0600 would publish it at 0644.
+fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = tempfile::Builder::new()
+        .prefix(".asterism-")
+        .suffix(".c2pa-partial")
+        .tempfile_in(directory)?;
+    // Best-effort: a target whose permissions cannot be read is one
+    // whose replacement is about to fail anyway, and failing here would
+    // turn a metadata quirk into a refusal to stamp.
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let _ = temporary.as_file().set_permissions(metadata.permissions());
+    }
+    Ok(temporary)
 }
 
 /// Moves a finished temporary over its target.
-fn commit(temporary: &Path, path: &Path) -> std::io::Result<()> {
-    match std::fs::rename(temporary, path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // The temporary is this module's litter, and leaving it
-            // beside a file an importer may be watching turns one
-            // failure into a second artefact.
-            let _ = std::fs::remove_file(temporary);
-            Err(e)
-        }
-    }
+///
+/// The temporary removes itself when dropped, so the failure path needs
+/// no cleanup of its own — which is the part the hand-rolled version
+/// kept having to remember at each new return.
+fn commit(temporary: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
+    temporary.persist(path).map(|_| ()).map_err(|e| e.error)
 }
 
-/// Replaces `path`'s contents through a sibling temporary and a rename.
-///
-/// Sibling for the reason [`temporary_for`] gives. A failed write clears
-/// the temporary as a failed rename does: `fs::write` can fail with the
-/// file already created and partly filled, and the old shape returned
-/// straight out of that, leaving exactly the litter [`commit`] exists to
-/// avoid.
+/// Replaces `path`'s contents through a temporary and a rename.
 fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let temporary = temporary_for(path);
-    match std::fs::write(&temporary, bytes) {
-        Ok(()) => commit(&temporary, path),
-        Err(e) => {
-            let _ = std::fs::remove_file(&temporary);
-            Err(e)
-        }
-    }
+    use std::io::Write as _;
+    let mut temporary = stage(path)?;
+    temporary.write_all(bytes)?;
+    temporary.flush()?;
+    commit(temporary, path)
 }
 
 #[cfg(test)]
@@ -1631,6 +1629,61 @@ mod tests {
             .filter(|name| name.contains("c2pa-partial"))
             .collect();
         assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_staging_name_is_not_one_anything_can_predict() {
+        // What the deterministic sibling allowed. `shot.png` staged
+        // through `shot.png.c2pa-partial`, opened with neither `O_EXCL`
+        // nor `O_NOFOLLOW`, so anything else able to create a file in
+        // the export directory could put a symlink there first and have
+        // the stamp write the whole asset through it, over a file of
+        // the attacker's choosing.
+        //
+        // An export directory is not necessarily private: it is
+        // wherever the user pointed the export, which may be shared,
+        // synced, or watched.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+
+        let victim = dir.path().join("victim");
+        std::fs::write(&victim, b"not this file").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.path().join("shot.png.c2pa-partial")).unwrap();
+
+        ProvenanceWriter::unsigned()
+            .apply(&path, &record())
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(&victim).unwrap(),
+            b"not this file",
+            "the staged write went somewhere nothing had guessed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stamping_keeps_the_permissions_the_file_had() {
+        // The staged file is created at 0600 and the rename carries
+        // that mode onto the target, so without copying the original's
+        // permissions across, stamping would change them — in whichever
+        // direction the umask happened to point. Narrowing is a
+        // surprise; widening, on a file about to be published, is worse.
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        ProvenanceWriter::unsigned()
+            .apply(&path, &record())
+            .unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640, "stamping is not a permission change");
     }
 
     /// A file shorter than the sniff window reads as what it holds.

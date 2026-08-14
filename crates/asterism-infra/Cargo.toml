@@ -89,6 +89,13 @@ base64 = { workspace = true }
 # the check is this crate's; the workspace line says why the version is
 # where it is.
 x509-parser = { workspace = true }
+# Staging a rewrite. Not for the convenience: the name has to be
+# unpredictable and the file has to be created with `O_EXCL` and mode
+# 0600, because the directory a stamped file is written into is not
+# necessarily one only this process can write to. Was a dev-dependency
+# until the provenance writer's own temporary was found to be a
+# deterministic sibling opened with neither.
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"
