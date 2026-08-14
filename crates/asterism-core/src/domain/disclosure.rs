@@ -168,6 +168,19 @@ pub fn is_synthetic(meta_kv: Option<&str>) -> bool {
     meta_kv.is_some_and(|meta_kv| read_evidence(meta_kv).generated)
 }
 
+/// Key under which what became of an artefact's disclosure is recorded,
+/// inside `extra.`[`_trace`](crate::domain::provenance::TRACE_KEY).
+///
+/// Here rather than at the writing call site for the reason
+/// `DECLARED_HASH_NOTE_KEY` is beside the digest it describes: the key
+/// belongs to the module that owns the concept, so that the writer and
+/// anything asking "which artefacts carry a mark" cannot drift apart on
+/// the spelling.
+///
+/// The value is [`Stamped::to_note`](asterism_provenance::Stamped::to_note)
+/// with the moment added by whoever recorded it.
+pub const DISCLOSURE_NOTE_KEY: &str = "disclosure";
+
 /// Whether an artefact's prompt is disclosed in the exported file.
 ///
 /// # Why this is a parameter and not a constant

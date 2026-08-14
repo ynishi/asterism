@@ -398,8 +398,11 @@ fn extra_with_absorbed_note(extra: Option<&str>, entry: serde_json::Value) -> Op
 /// and the later answer is the one about the bytes that are there now
 /// — a list would grow one entry per sweep and leave a reader to work
 /// out which line is current.
-fn extra_with_declared_hash_note(extra: Option<&str>, note: serde_json::Value) -> Option<String> {
-    use asterism_core::domain::content_hash::DECLARED_HASH_NOTE_KEY;
+fn extra_with_trace_field(
+    extra: Option<&str>,
+    field: &str,
+    note: serde_json::Value,
+) -> Option<String> {
     use asterism_core::domain::provenance::TRACE_KEY;
 
     let mut bag = match extra {
@@ -416,7 +419,7 @@ fn extra_with_declared_hash_note(extra: Option<&str>, note: serde_json::Value) -
         .entry(TRACE_KEY.to_string())
         .or_insert_with(|| serde_json::json!({}));
     let trace = trace.as_object_mut()?;
-    trace.insert(DECLARED_HASH_NOTE_KEY.to_string(), note);
+    trace.insert(field.to_string(), note);
     Some(bag.to_string())
 }
 
@@ -4144,12 +4147,14 @@ impl AssetRepository for SqliteAssetRepository {
             .map_err(infra_err)
     }
 
-    async fn note_declared_hash(
+    async fn note_trace_field(
         &self,
         asset_id: &AssetId,
+        field: &str,
         note: serde_json::Value,
     ) -> Result<bool, DomainError> {
         let uuid = *asset_id.as_uuid();
+        let field = field.to_string();
         self.isle
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
@@ -4179,7 +4184,7 @@ impl AssetRepository for SqliteAssetRepository {
                 let Some(extra) = extra else {
                     return Ok(false);
                 };
-                let Some(merged) = extra_with_declared_hash_note(extra.as_deref(), note) else {
+                let Some(merged) = extra_with_trace_field(extra.as_deref(), &field, note) else {
                     return Ok(false);
                 };
                 tx.execute(

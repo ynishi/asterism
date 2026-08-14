@@ -964,6 +964,35 @@ mod tests {
             packet.contains("trainedAlgorithmicMedia"),
             "and the packet says what the row established: {packet}"
         );
+
+        // And the row says so. A mark lives in the file's bytes, which
+        // a downstream conversion can strip; without this note there is
+        // nothing to ask about what happened and nothing to re-apply
+        // from.
+        let stored = assets.find(&asset.id).await.unwrap().unwrap();
+        let note = stored.extra["_trace"]["disclosure"].clone();
+        assert_eq!(note["discloses"], serde_json::json!(true), "{note}");
+        assert_eq!(
+            note["xmp"],
+            serde_json::json!({ "state": "written" }),
+            "{note}"
+        );
+        assert_eq!(
+            note["manifest"],
+            serde_json::json!({ "state": "skipped", "reason": "no_signing_identity" }),
+            "an unsigned build says why, rather than reporting a failure: {note}"
+        );
+        assert!(note["at"].is_i64(), "{note}");
+
+        // The dispatch trace it was written beside is still there: the
+        // narrow write replaces one field of a shared bag, and the key
+        // that decides whether this artefact may be stamped at all is
+        // one of its neighbours.
+        assert!(
+            stored.extra["_dispatch"]["dispatch_id"].is_string(),
+            "{}",
+            stored.extra
+        );
     }
 
     /// With no writer configured the handler skips, and the file it
