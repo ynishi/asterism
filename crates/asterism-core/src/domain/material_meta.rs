@@ -36,13 +36,21 @@
 //!
 //! ## Values stay as the container stated them — strings, unparsed
 //!
-//! A ComfyUI `parameters` chunk happens to hold JSON. Parsing it in
-//! order to re-render it would put number formatting and nested key
-//! order into the digest's definition, so two files the container calls
+//! A ComfyUI `prompt` chunk happens to hold JSON. Parsing it in order
+//! to re-render it would put number formatting and nested key order
+//! into the digest's definition, so two files the container calls
 //! identical could stop matching on a serialiser's habits. The digest
 //! says one thing: *the container carried this text*. The type is what
 //! enforces it — the map is `BTreeMap<String, String>` end to end, and
 //! there is no `from_str` anywhere on this path.
+//!
+//! This said `parameters` until it was checked, and `parameters` is
+//! AUTOMATIC1111's, not ComfyUI's, and holds line-oriented prose rather
+//! than JSON ([`disclosure`](crate::domain::disclosure) is where the two
+//! families are actually distinguished). The rule was right and the
+//! example named the wrong chunk of the wrong generator — which matters
+//! because a reader who took it literally would reach for a JSON decoder
+//! on a value that never parses.
 //!
 //! That rule is also what makes this digest independent of
 //! `serde_json`'s `preserve_order` feature, which this workspace runs

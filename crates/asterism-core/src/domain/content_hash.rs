@@ -61,7 +61,7 @@
 //! stored cannot be edited afterwards without changing what every value
 //! written under it meant. [`META_DIGEST_PREFIX`] is that trade being
 //! made deliberately for the meta axis: it selects, because
-//! re-rendering a ComfyUI `parameters` blob would put a serialiser's
+//! re-rendering a ComfyUI `prompt` graph would put a serialiser's
 //! number formatting between two files the container itself calls
 //! identical.
 
@@ -296,9 +296,9 @@ pub const CONTENT_RESERVED_VALUES: &[&str] = &[CONTENT_REGION_EMPTY];
 /// that a later reading could reasonably want to change.
 ///
 /// - **Values stay as the container stated them — strings, unparsed.**
-///   A ComfyUI `parameters` chunk happens to hold JSON, and parsing it
-///   in order to re-render it would put number formatting and nested
-///   key order into the digest's definition, so two files the container
+///   A ComfyUI `prompt` chunk happens to hold JSON, and parsing it in
+///   order to re-render it would put number formatting and nested key
+///   order into the digest's definition, so two files the container
 ///   calls identical could stop matching on a serialiser's habits. If
 ///   that proves too strict — the same workflow re-saved by a tool that
 ///   reformats — the answer is **`m2-sha256:`**, not an edit to the
