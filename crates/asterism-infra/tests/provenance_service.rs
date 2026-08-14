@@ -30,7 +30,7 @@ use asterism_infra::sqlite::open_and_migrate_in_memory;
 use asterism_infra::sqlite::repo::{
     SqliteAssetRepository, SqliteEdgeRepository, SqlitePersonaRepository,
 };
-use asterism_provenance::{DigitalSourceType, embed};
+use asterism_provenance::{DigitalSourceType, Half, Skipped, embed};
 use chrono::Utc;
 use rusqlite_isle::AsyncIsleDriver;
 
@@ -355,10 +355,11 @@ async fn a_file_that_carries_nothing_is_stamped_from_the_database() {
     );
 
     let stamped = fx.service.apply_to(&asset, &returned, None).await.unwrap();
-    assert!(stamped.xmp_written);
+    assert_eq!(stamped.xmp, Half::Written);
     assert!(stamped.discloses());
-    assert!(
-        !stamped.manifest_written,
+    assert_eq!(
+        stamped.manifest,
+        Half::Skipped(Skipped::NoSigningIdentity),
         "no identity is configured, and the test certificates are refused"
     );
 
@@ -413,5 +414,5 @@ async fn the_adapter_is_reachable_through_the_port() {
     let record = asterism_provenance::DisclosureRecord::for_asset("asset-1")
         .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia);
     let stamped = writer.apply(&path, &record).await.unwrap();
-    assert!(stamped.xmp_written);
+    assert_eq!(stamped.xmp, Half::Written);
 }

@@ -70,6 +70,22 @@ pub trait ProvenanceWriter: Send + Sync {
     /// disclosure fail independently, so a caller must be able to see
     /// which of them landed rather than inferring success from the
     /// absence of an error ([`Stamped`]).
+    ///
+    /// # What `Err` means here
+    ///
+    /// Only that **nothing could be attempted** — the file could not be
+    /// read, or its container is not one the implementation writes
+    /// into. A half that was tried and failed comes back inside
+    /// [`Stamped`] as [`Half::Failed`](asterism_provenance::Half::Failed),
+    /// alongside whatever the other half achieved.
+    ///
+    /// The split is not stylistic. An implementation that reported a
+    /// failed manifest through `Err` would have to discard the packet
+    /// it had already produced, because an error return has nowhere to
+    /// carry it — which is how a certificate expiring came to withhold
+    /// the disclosure half that needs no certificate. Collecting both
+    /// outcomes and letting the caller decide which of them is a fault
+    /// keeps that decision where the context is.
     async fn apply(&self, path: &Path, record: &DisclosureRecord) -> Result<Stamped, DomainError>;
 }
 
