@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **What a dispatch produces is written with its AI disclosure** (#14) —
+  the writer landed with nothing calling it; this calls it. Not where
+  the work was planned to call it from: stamping immediately after
+  `reify` reads an evidence set that does not exist yet, because `reify`
+  builds the material from the exporter's string and enqueues the
+  hashing that fills `meta_kv` in. That version compiled, passed the
+  existing dispatch fixtures, and marked no file at all. So the order is
+  a chain — `MaterialHash` enqueues a new `ProvenanceStamp` job once the
+  fingerprint lands, which is the first moment there is anything to
+  disclose.
+
+  Its own job kind rather than a mode of the hashing one: hashing reads
+  bytes and writes a column, stamping rewrites the user's file, and the
+  two want different retry policies. A stamp that fails leaves an
+  artefact that exists and is unmarked, so the handler returns `Ok` on
+  every outcome and reports which halves landed rather than failing a
+  completed export over metadata.
+
+  **Only artefacts a dispatch produced are stamped.** Stamping rewrites
+  bytes, and doing that to a file somebody imported would be this
+  application editing something it was asked to index and not to touch.
+  The dispatch trace separates the two, `_dispatch` becomes a named
+  constant now that both sides depend on the spelling, and the check is
+  a pure function pinned by tests over every shape an imported asset's
+  `extra` can take.
+
+  The composition root builds the service unsigned and with the prompt
+  withheld — the two documented answers — and an unwired build skips
+  rather than fails.
+
 ### Changed
 
 - **A disclosure's two halves report their own outcome, so one failing no
