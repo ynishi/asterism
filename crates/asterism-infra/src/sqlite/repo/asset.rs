@@ -386,20 +386,29 @@ fn extra_with_absorbed_note(extra: Option<&str>, entry: serde_json::Value) -> Op
     Some(bag.to_string())
 }
 
-/// Writes `note` at `_trace.declared_hash` of an `extra` bag, keeping
+/// Writes `note` at `_trace.<field>` of an `extra` bag, keeping
 /// whatever else the bag and the note object hold. `None` means the
 /// same thing it means for the two helpers above: the column carries
 /// something this cannot merge into without destroying it.
 ///
-/// An **object**, not a list like `_trace.absorbed`: one registration
-/// makes at most one declaration about its bytes, and the hash job
-/// answers it once. A re-hash of the same material (the file changed
-/// underneath, the row was re-scanned) answers the same claim again,
-/// and the later answer is the one about the bytes that are there now
-/// — a list would grow one entry per sweep and leave a reader to work
-/// out which line is current.
-fn extra_with_declared_hash_note(extra: Option<&str>, note: serde_json::Value) -> Option<String> {
-    use asterism_core::domain::content_hash::DECLARED_HASH_NOTE_KEY;
+/// **One key is replaced and its neighbours are left alone**, which is
+/// the property every caller depends on: `_trace` is a shared bag whose
+/// writers do not know about each other — `fold` and `absorbed` above,
+/// the declared-hash verdict, the disclosure note, the claim fields.
+///
+/// Each field is an **object**, not a list like `_trace.absorbed`,
+/// because both current keys answer a question that has one current
+/// answer. A declaration is made once per registration and the hash job
+/// answers it once; a disclosure is whatever the last stamp achieved. A
+/// re-run answers the same question about the state that is there now,
+/// and a list would grow an entry per sweep and leave a reader working
+/// out which line is current. A future key whose history matters wants
+/// `absorbed`'s shape instead, and should say so where it is defined.
+fn extra_with_trace_field(
+    extra: Option<&str>,
+    field: &str,
+    note: serde_json::Value,
+) -> Option<String> {
     use asterism_core::domain::provenance::TRACE_KEY;
 
     let mut bag = match extra {
@@ -416,7 +425,7 @@ fn extra_with_declared_hash_note(extra: Option<&str>, note: serde_json::Value) -
         .entry(TRACE_KEY.to_string())
         .or_insert_with(|| serde_json::json!({}));
     let trace = trace.as_object_mut()?;
-    trace.insert(DECLARED_HASH_NOTE_KEY.to_string(), note);
+    trace.insert(field.to_string(), note);
     Some(bag.to_string())
 }
 
@@ -4144,12 +4153,14 @@ impl AssetRepository for SqliteAssetRepository {
             .map_err(infra_err)
     }
 
-    async fn note_declared_hash(
+    async fn note_trace_field(
         &self,
         asset_id: &AssetId,
+        field: &str,
         note: serde_json::Value,
     ) -> Result<bool, DomainError> {
         let uuid = *asset_id.as_uuid();
+        let field = field.to_string();
         self.isle
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
@@ -4179,7 +4190,7 @@ impl AssetRepository for SqliteAssetRepository {
                 let Some(extra) = extra else {
                     return Ok(false);
                 };
-                let Some(merged) = extra_with_declared_hash_note(extra.as_deref(), note) else {
+                let Some(merged) = extra_with_trace_field(extra.as_deref(), &field, note) else {
                     return Ok(false);
                 };
                 tx.execute(

@@ -104,6 +104,38 @@ Every crate has `publish = false`; nothing is distributed via crates.io.
   bindings are regenerated from `asterism-contract` at build time via
   `schema-bridge`.
 
+## Development environment
+
+`just check` is the gate. Beyond a stable Rust toolchain and Node for the
+UI, one step has prerequisites it cannot install for you:
+
+| Needed by | Install | Without it |
+|---|---|---|
+| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` (0.2.2 or newer), then `rustup toolchain install "$(cargo aidoc --print-required-toolchain)"` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+
+The toolchain is a dated nightly rather than the channel, and the tool
+names it rather than this file: rustdoc's JSON carries a
+`format_version`, every nightly emits exactly one, and it moves whenever
+rustdoc's types do — so `cargo-aidoc` pins the one it can read and
+`--print-required-toolchain` prints it. A date copied into a script here
+would go stale the next time the tool is upgraded.
+
+An older `cargo-aidoc` is worse than none: it is on `PATH`, so the guard
+runs it, and it fails on an argument it does not have rather than on
+anything about this repository.
+
+`docs/aidoc/` is the committed module inventory — generated, because the
+hand-written one shipped 15 modules stale. Regenerate it with `just
+aidoc` after changing any public API or doc comment, and commit the
+diff; `aidoc-guard` fails on drift.
+
+The warning exists because the alternative is worse than the
+inconvenience. The step needs a nightly toolchain, this workspace pins
+none, and a machine without one must still be able to run the full
+gate — but a gate that is silently skipped is not a gate. A change that
+deleted a crate once left the committed docs describing it while `just
+check` went green.
+
 ## Public development
 
 Asterism keeps public product and implementation work self-contained while

@@ -70,13 +70,13 @@ tantivy = { workspace = true }
 lindera = { workspace = true }
 lindera-tantivy = { workspace = true }
 
-# AI-disclosure provenance. The pure half — the IPTC vocabulary, the XMP
-# packet, the manifest definition — comes from `asterism-provenance`;
-# `c2pa` is here because signing is the one part of it that needs key
-# material and a cryptography backend, and `provenance.rs` is the only
-# module that touches it. See the workspace `Cargo.toml` for which
-# default features are off and why.
-asterism-provenance = { path = "../asterism-provenance" }
+# AI disclosure. The vocabulary and the rule are in the core; the two
+# renderings — the XMP packet and the manifest definition — come from
+# `asterism-disclosure-format`, which is pure. `c2pa` is here because
+# signing is the one part that needs key material and a cryptography
+# backend, and `disclosure.rs` is the only module that touches it. See
+# the workspace `Cargo.toml` for which default features are off and why.
+asterism-disclosure-format = { path = "../asterism-disclosure-format" }
 c2pa = { workspace = true }
 # Decoding the PEM a signing identity arrives as, so the refusal of the
 # C2PA test certificates can look at the DER rather than only at whatever
@@ -104,9 +104,9 @@ tempfile = "3"
 # in `asterism-importer-sdk`: building PNGs by hand is the chunk-boundary
 # arithmetic these tests just stopped doing.
 pngmeta  = { version = "0.2.1", features = ["test-util"] }
-# The provenance tests build a PNG chunk by hand to have a container to
-# stamp, and a chunk needs its CRC — the same line `asterism-provenance`
-# takes for the writer itself.
+# The disclosure tests build a PNG chunk by hand to have a container to
+# stamp, and a chunk needs its CRC — the same line
+# `asterism-disclosure-format` takes for the writer itself.
 crc32fast = "1"
 # A throwaway signing identity, so the signing path is exercised rather
 # than described. This repository ships no certificate and refuses the

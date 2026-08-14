@@ -15,6 +15,7 @@ for later modalities.
 - `auto_tag` — Extracts keywords, materialises channel tags, and links them to the
 - `chapter_scan` — Reads a container's own chapter list into its imported structure
 - `cover_gen` — Auto-generates the card cover. Idempotent — if the cover column is
+- `disclosure_stamp` — Writes the AI disclosure into a file this library produced.
 - `duplicate_scan` — Re-derives duplicate conflicts from fingerprints already on the rows.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc

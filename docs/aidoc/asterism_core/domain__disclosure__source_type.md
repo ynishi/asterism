@@ -1,4 +1,4 @@
-# asterism-provenance::source_type
+# asterism-core::domain::disclosure::source_type
 
 `DigitalSourceType` — the one field a synthetic file is obliged to
 carry, and the closed set of values this corpus can honestly assert.
@@ -41,7 +41,7 @@ its URI.
 There is no `Unknown` variant. An artefact whose origin nothing
 established gets no `DigitalSourceType` property at all — the same
 doctrine
-[`attribution`](../../asterism_core/domain/attribution/index.html)
+[`attribution`](crate::domain::attribution)
 states for an absent author: absence is a question nobody has
 answered, and a vocabulary term meaning "we do not know" would be an
 answer. It also matters legally in the one direction that is not

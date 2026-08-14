@@ -49,7 +49,7 @@
 //! evidenced rather than assumed. Deriving it from an absence would
 //! manufacture exactly the evidence it is supposed to record.
 
-use crate::source_type::DigitalSourceType;
+use super::source_type::DigitalSourceType;
 
 /// What one exported artefact will disclose.
 ///
@@ -170,7 +170,7 @@ impl DisclosureRecord {
     /// The same record with everything but the obligation dropped.
     ///
     /// JPEG's XMP packet has to fit one APP1 segment, which leaves it
-    /// [`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET) bytes —
+    /// `asterism_disclosure_format::embed::JPEG_MAX_PACKET` bytes —
     /// 65,504, the segment's 65,533-byte payload less the 29-byte XMP
     /// identifier that has to go in front of it. A ComfyUI prompt can be
     /// larger than that on its own. The ExtendedXMP mechanism exists for

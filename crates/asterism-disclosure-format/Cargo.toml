@@ -1,12 +1,12 @@
 [package]
-name        = "asterism-provenance"
+name        = "asterism-disclosure-format"
 version.workspace     = true
 edition.workspace     = true
 authors.workspace     = true
 license.workspace     = true
 repository.workspace  = true
 homepage.workspace    = true
-description = "AI-disclosure provenance for Asterism — the IPTC vocabulary, the XMP packet, and the C2PA manifest definition, as pure values"
+description = "How an Asterism AI disclosure is written down — the XMP packet, its PNG/JPEG placement, and the C2PA manifest definition, as pure values"
 publish     = false
 
 # A leaf crate on purpose, and one that cannot sign anything.
@@ -30,6 +30,11 @@ publish     = false
 [lib]
 
 [dependencies]
+# The vocabulary these renderers render. The dependency runs this way —
+# an adapter depends on the core, never the reverse — which is the whole
+# point of the split: the core states what may be asserted, and this
+# crate knows only how to write it into a container.
+asterism-core = { path = "../asterism-core" }
 serde      = { workspace = true }
 # The C2PA manifest definition is JSON — `c2pa::Builder::with_definition`
 # takes exactly this shape. Building it as `serde_json::Value` here keeps

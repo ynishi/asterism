@@ -1,4 +1,4 @@
-//! `ProvenanceService` over real storage: what an asset discloses, and
+//! `DisclosureService` over real storage: what an asset discloses, and
 //! whether the answer survives being written into a file.
 //!
 //! The service lives in `asterism-core` and its tests live here for the
@@ -15,10 +15,11 @@
 
 use std::sync::Arc;
 
-use asterism_core::application::provenance_service::ProvenanceService;
+use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::disclosure::PromptDisclosure;
+use asterism_core::domain::disclosure::{DigitalSourceType, Half, Skipped};
 use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
 use asterism_core::domain::material::Material;
 use asterism_core::domain::persona::Persona;
@@ -26,12 +27,12 @@ use asterism_core::domain::repository::{
     AssetRepository, EdgeRepository, MaterialFingerprint, PersonaRepository,
 };
 use asterism_core::domain::value::{AssetId, Modality, PersonaId, SourceKind, SourceRef};
-use asterism_infra::provenance::ProvenanceWriter;
+use asterism_disclosure_format::embed;
+use asterism_infra::disclosure::DisclosureWriter;
 use asterism_infra::sqlite::open_and_migrate_in_memory;
 use asterism_infra::sqlite::repo::{
     SqliteAssetRepository, SqliteEdgeRepository, SqlitePersonaRepository,
 };
-use asterism_provenance::{DigitalSourceType, Half, Skipped, embed};
 use chrono::Utc;
 use rusqlite_isle::AsyncIsleDriver;
 
@@ -42,7 +43,7 @@ fn unattributed() -> AttributionContext {
 }
 
 struct Fixture {
-    service: ProvenanceService,
+    service: DisclosureService,
     assets: Arc<SqliteAssetRepository>,
     personas: Arc<SqlitePersonaRepository>,
     edges: Arc<SqliteEdgeRepository>,
@@ -58,12 +59,12 @@ impl Fixture {
         // Unsigned: these fixtures are about which record comes out of
         // the library, and a signature would only add a certificate to
         // the setup without changing any answer here. The signing path
-        // has its own tests in `src/provenance.rs`.
-        let writer = Arc::new(ProvenanceWriter::unsigned());
+        // has its own tests in `src/disclosure.rs`.
+        let writer = Arc::new(DisclosureWriter::unsigned());
         // `Embed`: these fixtures assert what the library puts in a
         // record, and withholding the prompt would make the assertions
         // about it vacuous. An installation's own answer is not this.
-        let service = ProvenanceService::new(
+        let service = DisclosureService::new(
             assets.clone(),
             edges.clone(),
             writer,
@@ -418,9 +419,9 @@ async fn the_adapter_is_reachable_through_the_port() {
     let path = dir.path().join("shot.png");
     std::fs::write(&path, png()).unwrap();
 
-    let writer: Arc<dyn asterism_core::application::provenance_service::ProvenanceWriter> =
-        Arc::new(ProvenanceWriter::unsigned());
-    let record = asterism_provenance::DisclosureRecord::for_asset("asset-1")
+    let writer: Arc<dyn asterism_core::application::disclosure_service::DisclosureWriter> =
+        Arc::new(DisclosureWriter::unsigned());
+    let record = asterism_core::domain::disclosure::DisclosureRecord::for_asset("asset-1")
         .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia);
     let stamped = writer.apply(&path, &record).await.unwrap();
     assert_eq!(stamped.xmp, Half::Written);

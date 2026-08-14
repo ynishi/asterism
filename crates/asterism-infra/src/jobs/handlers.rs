@@ -1884,11 +1884,11 @@ fn dispatch_id_of(extra: &serde_json::Value) -> Option<String> {
 /// The two halves of a disclosure fail independently and the outcome
 /// says which landed, so a partial result is reported as one rather
 /// than collapsed into success or failure.
-pub async fn provenance_stamp(
+pub async fn disclosure_stamp(
     env: &JobEnv,
     payload: &serde_json::Value,
 ) -> Result<String, DomainError> {
-    let Some(service) = env.deps.provenance.get() else {
+    let Some(service) = env.deps.disclosure.get() else {
         return Ok("no writer configured, skipped".into());
     };
     let Some(asset) = load_target(env, payload).await? else {
@@ -1913,13 +1913,14 @@ pub async fn provenance_stamp(
             let failures = outcome.failures();
             if !failures.is_empty() {
                 tracing::warn!(
-                    event = "diag.provenance_stamp.partial",
+                    event = "diag.disclosure_stamp.partial",
                     asset_id = %asset.id,
                     discloses = outcome.discloses(),
                     failures = ?failures,
                     "part of the disclosure did not land"
                 );
             }
+            note_disclosure(env, &asset.id, &outcome).await;
             Ok(format!(
                 "disclosed={} failures={}",
                 outcome.discloses(),
@@ -1928,13 +1929,67 @@ pub async fn provenance_stamp(
         }
         Err(err) => {
             tracing::warn!(
-                event = "diag.provenance_stamp.failed",
+                event = "diag.disclosure_stamp.failed",
                 asset_id = %asset.id,
                 error = %err,
                 "the artefact exists and carries no mark"
             );
             Ok(format!("not stamped: {err}"))
         }
+    }
+}
+
+/// Records what became of an artefact's disclosure on the row.
+///
+/// # Why the row and not only the log
+///
+/// The database is the source of truth for what this library holds, and
+/// until this existed the answer to "which artefacts carry a mark" was
+/// in a log line. A mark is not visible in the row it belongs to — it
+/// is in the file's bytes, and the file can come back from a downstream
+/// conversion with it gone — so without a note there is nothing to
+/// re-apply *from* and nothing to ask.
+///
+/// Through the narrow write, not a save: the caller is a worker, and a
+/// read-modify-save of the whole entity would discard a rating or a tag
+/// applied while the job ran.
+///
+/// # Why a failure here changes nothing
+///
+/// The mark is already in the file, or already not. Failing the job
+/// over the bookkeeping would retry a file rewrite to fix a row, which
+/// is the larger operation of the two. It is said out loud instead.
+async fn note_disclosure(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    outcome: &asterism_core::domain::disclosure::Stamped,
+) {
+    let mut note = outcome.to_note();
+    // When, added here because the outcome type is produced in places
+    // that write nothing down and has no business holding a clock.
+    note["at"] = serde_json::json!(chrono::Utc::now().timestamp_millis());
+    match env
+        .deps
+        .assets
+        .note_trace_field(
+            asset_id,
+            asterism_core::domain::disclosure::DISCLOSURE_NOTE_KEY,
+            note,
+        )
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => tracing::warn!(
+            event = "diag.disclosure_stamp.note_skipped",
+            asset_id = %asset_id,
+            "extra column could not carry the disclosure note"
+        ),
+        Err(err) => tracing::warn!(
+            event = "diag.disclosure_stamp.note_failed",
+            asset_id = %asset_id,
+            error = %err,
+            "the file was stamped and the row does not say so"
+        ),
     }
 }
 
@@ -1973,7 +2028,7 @@ async fn stamp_after_hash(env: &JobEnv, asset_id: &AssetId, fingerprint: &Materi
     }
     // No writer configured is not a failure and not a warning: it is
     // the state a build that has not asked for stamping is in.
-    if env.deps.provenance.get().is_none() {
+    if env.deps.disclosure.get().is_none() {
         return;
     }
     let produced_here = matches!(
@@ -1986,13 +2041,13 @@ async fn stamp_after_hash(env: &JobEnv, asset_id: &AssetId, fingerprint: &Materi
     if let Err(err) = env
         .queue
         .enqueue(
-            asterism_core::domain::job::JobKind::ProvenanceStamp,
+            asterism_core::domain::job::JobKind::DisclosureStamp,
             serde_json::json!({ "asset_id": asset_id.to_string() }),
         )
         .await
     {
         tracing::warn!(
-            event = "diag.provenance_stamp.enqueue_failed",
+            event = "diag.disclosure_stamp.enqueue_failed",
             asset_id = %asset_id,
             error = %err,
             "the metadata landed but nothing was asked to write the disclosure"
@@ -2100,7 +2155,12 @@ async fn check_declaration(
         recomputed,
         chrono::Utc::now().timestamp_millis(),
     );
-    match env.deps.assets.note_declared_hash(asset_id, note).await {
+    match env
+        .deps
+        .assets
+        .note_trace_field(asset_id, content_hash::DECLARED_HASH_NOTE_KEY, note)
+        .await
+    {
         Ok(true) => {}
         Ok(false) => tracing::warn!(
             event = "diag.material_hash.declaration_note_skipped",

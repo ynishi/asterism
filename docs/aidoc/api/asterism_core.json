@@ -58,6 +58,21 @@
       "docs": "Where one asset's original artefact is, and what shape its bytes\nhave — the answer [`AssetService::original_file`] gives a caller that\nis about to read them.\n\nDeliberately not a DTO: it never crosses the wire. The transport that\nasked opens `path` and streams it, so the bytes exist in one place\nonly (the socket), never in a field on this struct."
     },
     {
+      "path": "asterism_core::application::disclosure_service",
+      "kind": "module",
+      "docs": "Building an artefact's disclosure out of the library, and putting it\ninto a file.\n\nTwo verbs, and the second is the one the acceptance criteria are\nreally about:\n\n- [`record_for`](DisclosureService::record_for) — assemble what an\n  asset discloses from what is *stored*: the container metadata a\n  probe read, the `derived_from` edges the library recorded, the\n  asset's own title.\n- [`apply_to`](DisclosureService::apply_to) — write that record into\n  a file through the [`DisclosureWriter`] port.\n\n# Why this makes the database the source of truth\n\nNothing here reads the target file's metadata. The record is derived\nentirely from rows, so a file that came back from a downstream\nconversion with its manifest stripped can be handed to\n[`apply_to`](DisclosureService::apply_to) and get the same disclosure\nagain — the answer never lived in the file. That is the property a\nmanifest cannot have on its own, since any re-encode removes it.\n\n# Why the port is here and not in `repository`\n\n[`DisclosureWriter`] is an outbound port like the repositories, and\nit lives in the core for the same reason they do — adapters\nimplement traits, they do not define them (`asterism-infra`'s crate\ndoc). It is declared beside its only caller rather than in\n[`repository`](crate::domain::repository) because it is not one: a\nrepository owns the storage of an entity, and this one owns no\nentity at all — it takes a value and a path and modifies a file\nneither it nor this service owns."
+    },
+    {
+      "path": "asterism_core::application::disclosure_service::DisclosureService",
+      "kind": "struct",
+      "docs": "Assembles and applies AI-disclosure provenance."
+    },
+    {
+      "path": "asterism_core::application::disclosure_service::DisclosureWriter",
+      "kind": "trait",
+      "docs": "Writes a disclosure into a file that already exists.\n\nThe one outbound port of this service. Implemented by\n`asterism-infra::disclosure`, which owns the containers, the XMP\npacket and the C2PA signer; nothing about any of those reaches this\nside of the boundary."
+    },
+    {
       "path": "asterism_core::application::dispatch_service",
       "kind": "module",
       "docs": "`DispatchService` — the transport-fronted half of the outbound\ndispatch lifecycle.\n\nEvery verb here is behind a Tauri command, an HTTP route, or both:\n\n- [`create`](DispatchService::create) — start a new dispatch from\n  an existing Snapshot, enqueueing an apalis `DispatchRun` job.\n- [`run`](DispatchService::run) / [`redispatch`](DispatchService::redispatch)\n  — freeze a live source (Group or volatile pick) and start it, or\n  re-run a previous freeze unchanged.\n- [`get`](DispatchService::get) / [`list`](DispatchService::list)\n  — read the persisted state (used by the UI polling endpoint and\n  an MCP tool).\n\nEach of the three start verbs takes an\n[`AttributionContext`](crate::domain::attribution::AttributionContext)\nand stamps it on the job row, because the run outlives its caller:\nthe exporter is polled by a background job, and the moment the answer\nis needed (stamping the reified outputs) is minutes or hours after\nthe request that supplied it.\n\nWhat the runner does to a dispatch in flight — `save_state` /\n`save_handle` / `reify` — is not here. Those live on\n[`DispatchRunnerService`](crate::application_support::DispatchRunnerService),\nreachable from the `DispatchRun` job's environment and from no\ntransport context, so no handler can park a job in `Done` or mint\nassets from a wire payload."
@@ -406,21 +421,6 @@
       "path": "asterism_core::application::persona_service::PersonaService",
       "kind": "struct",
       "docs": "Persona use-case service. Shared as an `Arc` through Tauri state and\nserver contexts."
-    },
-    {
-      "path": "asterism_core::application::provenance_service",
-      "kind": "module",
-      "docs": "Building an artefact's disclosure out of the library, and putting it\ninto a file.\n\nTwo verbs, and the second is the one the acceptance criteria are\nreally about:\n\n- [`record_for`](ProvenanceService::record_for) — assemble what an\n  asset discloses from what is *stored*: the container metadata a\n  probe read, the `derived_from` edges the library recorded, the\n  asset's own title.\n- [`apply_to`](ProvenanceService::apply_to) — write that record into\n  a file through the [`ProvenanceWriter`] port.\n\n# Why this makes the database the source of truth\n\nNothing here reads the target file's metadata. The record is derived\nentirely from rows, so a file that came back from a downstream\nconversion with its manifest stripped can be handed to\n[`apply_to`](ProvenanceService::apply_to) and get the same disclosure\nagain — the answer never lived in the file. That is the property a\nmanifest cannot have on its own, since any re-encode removes it.\n\n# Why the port is here and not in `repository`\n\n[`ProvenanceWriter`] is an outbound port like the repositories, and\nit lives in the core for the same reason they do — adapters\nimplement traits, they do not define them (`asterism-infra`'s crate\ndoc). It is declared beside its only caller rather than in\n[`repository`](crate::domain::repository) because it is not one: a\nrepository owns the storage of an entity, and this one owns no\nentity at all — it takes a value and a path and modifies a file\nneither it nor this service owns."
-    },
-    {
-      "path": "asterism_core::application::provenance_service::ProvenanceService",
-      "kind": "struct",
-      "docs": "Assembles and applies AI-disclosure provenance."
-    },
-    {
-      "path": "asterism_core::application::provenance_service::ProvenanceWriter",
-      "kind": "trait",
-      "docs": "Writes a disclosure into a file that already exists.\n\nThe one outbound port of this service. Implemented by\n`asterism-infra::provenance`, which owns the containers, the XMP\npacket and the C2PA signer; nothing about any of those reaches this\nside of the boundary."
     },
     {
       "path": "asterism_core::application::query_group_invalidation",
@@ -985,12 +985,17 @@
     {
       "path": "asterism_core::domain::disclosure",
       "kind": "module",
-      "docs": "Turning what the library stored into what a file will disclose.\n\n[`asterism_provenance`] owns the vocabulary and both renderings of\nit, and is deliberately unable to decide anything. This module is\nwhere the deciding happens: given the metadata a container carried\nand the edges the library recorded, which IPTC term is true of this\nartefact, and which of the 2025.1 AI properties can be filled in.\n\n# The database is the source of truth, not the file\n\nEverything here is derived from stored values —\n[`Material::meta_kv`](crate::domain::material::Material::meta_kv) and\nthe [`DerivedFrom`](crate::domain::edge::EdgeKind::DerivedFrom)\nedges — and never from the exported file's own metadata. That is what\nmakes a manifest re-appliable after a downstream conversion strips\nit: the answer was never in the file to begin with.\n\n# Evidence, not inference\n\nEach term is asserted only on evidence that something wrote:\n\n| evidence in the container | term |\n|---|---|\n| a generator's own keys, and every recorded parent is itself synthetic (or there are none) | `trainedAlgorithmicMedia` |\n| a generator's own keys, and some recorded parent is **not** synthetic | `compositeWithTrainedAlgorithmicMedia` |\n| no generator keys, but EXIF names a camera | `digitalCapture` |\n| none of the above | nothing is written |\n\nThe last row is the important one. An artefact nothing established\ngets no `DigitalSourceType` property, which is a different statement\nfrom every term in the vocabulary — the same doctrine\n[`attribution`](crate::domain::attribution) states for an absent\nauthor. A missing mark on a synthetic file is a gap; a wrong mark on\none is a false statement, and only the second is unrecoverable.\n\nTwo terms have no automatic producer and are not reachable from here\nat all.\n[`HumanEdits`](asterism_provenance::DigitalSourceType::HumanEdits)\nwould have to be inferred from the *absence* of a machine, which\nmanufactures exactly the evidence a copyright claim needs it to\nrecord.\n[`AlgorithmicMedia`](asterism_provenance::DigitalSourceType::AlgorithmicMedia)\nneeds a producer that says so about itself, and none in this corpus\ndoes. Both remain assertable by hand."
+      "docs": "What an artefact discloses about how it was made, and the rule that\ndecides it.\n\nThree things live here, and they are one concept: the vocabulary\n([`DigitalSourceType`], [`DisclosureRecord`], [`Stamped`]), the rule\nthat turns stored metadata into a statement ([`record_for`]), and the\npolicy the rule takes ([`PromptDisclosure`]). Rendering a record into\nan XMP packet or a C2PA manifest definition is not here — that is\n`asterism-disclosure-format`, and putting a packet's bytes beside the\nterm it carries would be the container formats leaking into the\nvocabulary.\n\n# Why the vocabulary is in the core and not in a leaf crate\n\nIt was in one, beside the renderers, and that was wrong in a way that\nonly showed as the feature grew. The renderers need `pngmeta` and a\nCRC — a chunk walker — so the core's dependency graph acquired the\ncontainer parser this crate's own manifest records evicting. And the\nread-back side (\"what does this file currently say, and does it still\nmatch its bytes\") has to be modelled in the core, because a port\ncannot return a type the core cannot name; with the write vocabulary\nin a leaf crate, one concept would have been split across two places\nthe moment the second half arrived.\n\nThe split that holds is by *reason to change*: what may be asserted\nchanges with IPTC, and how a packet is written into a PNG changes\nwith the container. The first is domain and is here; the second is an\nadapter concern and is not.\n\n# The database is the source of truth, not the file\n\nEverything here is derived from stored values —\n[`Material::meta_kv`](crate::domain::material::Material::meta_kv) and\nthe [`DerivedFrom`](crate::domain::edge::EdgeKind::DerivedFrom)\nedges — and never from the exported file's own metadata. That is what\nmakes a manifest re-appliable after a downstream conversion strips\nit: the answer was never in the file to begin with.\n\n# Evidence, not inference\n\nEach term is asserted only on evidence that something wrote:\n\n| evidence in the container | term |\n|---|---|\n| a generator's own keys, and every recorded parent is itself synthetic (or there are none) | `trainedAlgorithmicMedia` |\n| a generator's own keys, and some recorded parent is **not** synthetic | `compositeWithTrainedAlgorithmicMedia` |\n| no generator keys, but EXIF names a camera | `digitalCapture` |\n| none of the above | nothing is written |\n\nThe last row is the important one. An artefact nothing established\ngets no `DigitalSourceType` property, which is a different statement\nfrom every term in the vocabulary — the same doctrine\n[`attribution`](crate::domain::attribution) states for an absent\nauthor. A missing mark on a synthetic file is a gap; a wrong mark on\none is a false statement, and only the second is unrecoverable.\n\nTwo terms have no automatic producer and are not reachable from here\nat all.\n[`HumanEdits`](DigitalSourceType::HumanEdits)\nwould have to be inferred from the *absence* of a machine, which\nmanufactures exactly the evidence a copyright claim needs it to\nrecord.\n[`AlgorithmicMedia`](DigitalSourceType::AlgorithmicMedia)\nneeds a producer that says so about itself, and none in this corpus\ndoes. Both remain assertable by hand."
     },
     {
       "path": "asterism_core::domain::disclosure::ContainerEvidence",
       "kind": "struct",
       "docs": "What a container's metadata establishes about how a file was made."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::DISCLOSURE_NOTE_KEY",
+      "kind": "constant",
+      "docs": "Key under which what became of an artefact's disclosure is recorded,\ninside `extra.`[`_trace`](crate::domain::provenance::TRACE_KEY).\n\nHere rather than at the writing call site for the reason\n`DECLARED_HASH_NOTE_KEY` is beside the digest it describes: the key\nbelongs to the module that owns the concept, so that the writer and\nanything asking \"which artefacts carry a mark\" cannot drift apart on\nthe spelling.\n\nThe value is [`Stamped::to_note`]\nwith the moment added by whoever recorded it."
     },
     {
       "path": "asterism_core::domain::disclosure::ParentEvidence",
@@ -1008,9 +1013,44 @@
       "docs": "Whether a container's metadata says a generator made the file.\n\nThe same question [`read_evidence`] answers, exposed on its own\nbecause it is what a caller asks about a *parent* — establishing the\none bit of [`ParentEvidence`] without materialising the rest."
     },
     {
+      "path": "asterism_core::domain::disclosure::outcome",
+      "kind": "module",
+      "docs": "What applying a record to a file actually achieved.\n\nHere rather than beside the writer that produces it, because two\nlayers need to name it and neither may depend on the other: the port\nis declared in `asterism-core` (ports live in the core; adapters\nnever define traits) and the implementation lives in\n`asterism-infra`. This crate is the one both can already see.\n\n# Why a failure lives in the value and not only in the error\n\nApplying a disclosure is two operations against one file, and either\ncan fail without the other being affected. An error return can say\nonly \"the whole thing failed\", so a writer that reports a failed\nmanifest that way discards the packet it had already produced —\nwhich is how an expired certificate came to withhold the half that\nneeds no certificate at all.\n\nSo the two halves report their own outcome, including their own\nfailure, and the error channel is left for the case where nothing\ncould be attempted: the file could not be read, or its container is\none this build does not write into. What a caller does with a\nhalf that failed is the caller's decision — a manifest that did not\nland while the packet did is still a disclosed file, and calling\nthat an export failure is the judgement this type exists to let\nsomebody else make."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::outcome::DISCLOSURE_NOTE_SCHEMA",
+      "kind": "constant",
+      "docs": "Version tag carried inside a stored disclosure note.\n\nBeside the payload rather than implied by where it is stored, on the\nsame terms the custom manifest assertion and the export sidecar\ncarry theirs: a note written today is read by a build that has moved\non, and the reader needs to know which shape it is holding before it\nstarts walking it. The row is the durable half of this feature —\nre-applying a disclosure is decided from it — so it is the one value\nhere that will certainly be read by code that does not exist yet."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::outcome::Half",
+      "kind": "enum",
+      "docs": "What became of one half of a disclosure.\n\nThree states rather than a `bool`, because \"not written\" is at least\nthree different answers and they lead somewhere different. A video\ncannot carry an XMP packet and never will; a build with no\ncertificate configured is doing exactly what it was configured to\ndo; a certificate that expired last night is a fault somebody has to\ngo and fix. A boolean reports all three as `false` and leaves the\ncaller to work out which — the shape the digest axes already refuse\n(`MaterialMeta`, `MetaRaw`)."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::outcome::Skipped",
+      "kind": "enum",
+      "docs": "Why a half was not attempted.\n\nEvery variant is a state the application is meant to be able to be\nin. None of them is a fault, which is what separates this from\n[`Half::Failed`] — the distinction a caller needs to decide whether\nto tell anybody."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::outcome::Stamped",
+      "kind": "struct",
+      "docs": "The result of writing a [`DisclosureRecord`](super::DisclosureRecord)\ninto a file.\n\nEvery field is an outcome rather than an intention. The two halves\nfail independently — a container may take an XMP packet and no\nmanifest, or a manifest and no packet — so a caller that recorded\n\"provenance applied\" would be recording something no particular file\nnecessarily has.\n\nThere is no `Default`. An outcome that says nothing happened, and\ndoes not say why, is precisely the value this type was reshaped to\nremove."
+    },
+    {
       "path": "asterism_core::domain::disclosure::read_evidence",
       "kind": "function",
       "docs": "Reads the canonical metadata object a probe stored.\n\nThe input is [`material_meta`](crate::domain::material_meta)'s\ncanonical form: a JSON object of string → string, values exactly as\nthe container stated them. A value that does not parse as that\nobject yields no evidence rather than an error — an unreadable\nmetadata blob is a file nothing was established about, which is a\nstate this module already has a representation for.\n\n# Why the prompt is only taken from one of the two families\n\n`Iptc4xmpExt:AIPromptInformation` is defined as the information given\nto the service *as prompts*. AUTOMATIC1111's `parameters` is exactly\nthat — the text a person typed, plus the settings, in one blob.\nComfyUI's `prompt` is not: it is the API-format node graph the run\nexecuted, a JSON document that can reach hundreds of kilobytes and\nwhose relationship to anything a person typed depends on the graph.\nWriting that into the property would put a workflow dump into every\nexported file under a field that says it is a prompt, so it is left\nalone and the graph stays where it already is — in the library."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::record",
+      "kind": "module",
+      "docs": "`DisclosureRecord` — everything one exported file is going to say\nabout where it came from, decided before either emitter runs.\n\nThe two emitters write into different places for different readers.\nThe XMP packet carries the IPTC properties a platform reads to decide\nwhether a file is synthetic; the C2PA manifest carries a signed claim\nplus the lineage this library holds. They must not disagree, and the\ncheapest way to make disagreement impossible is for both to be\nrendered from one value that was assembled once.\n\n# What is here and what is deliberately not\n\nThis is a *statement*, not a projection of a row. The application\nservice builds it out of what the database holds — material metadata\nfor the generator and the prompt, derivation edges for the parents,\nattribution for the operator — and every judgement (is this\nsynthetic, is the parent a photograph, may the prompt be disclosed)\nis made there, on the way in. Nothing downstream of this type\nre-decides anything: an emitter that had a policy would be a second\nplace the answer could differ from the first.\n\n# The two audiences, and why the identifiers only reach one\n\nAsterism's own identifiers — the asset id, the dispatch the file left\nthrough, the parents it was made from — go into the C2PA manifest's\ncustom assertion and **not** into the XMP packet. Two reasons, and\nthe second is the load-bearing one:\n\n1. IPTC has no property for them. Inventing an `Iptc4xmpExt` field\n   would put a private vocabulary into a namespace that is not this\n   repository's to extend.\n2. The manifest is where lineage belongs by design, and it is signed.\n   An id in an unsigned XMP packet is an id anybody can rewrite,\n   which makes it useless for exactly the job it would be there for\n   — finding the row again — while still being present in every\n   published file.\n\nThe sidecar the file exporter already writes carries the same\nidentifiers in the clear for the receiver that has no C2PA reader\n(`asterism-contract::sidecar`), so nothing is lost by keeping them\nout of the packet.\n\n# A human pass is asserted, never inferred\n\n[`DigitalSourceType::HumanEdits`] is the one value a caller has to\nstate. Nothing observable distinguishes \"a person worked on this\" from\n\"no generator metadata was found\", and the copyright question that\nmakes the distinction worth recording turns on the human layer being\nevidenced rather than assumed. Deriving it from an absence would\nmanufacture exactly the evidence it is supposed to record."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::record::DisclosureRecord",
+      "kind": "struct",
+      "docs": "What one exported artefact will disclose.\n\nBuilt through [`for_asset`](Self::for_asset) and the `with_*` chain\nso that adding a field cannot silently produce a record where a\ncaller's positional argument moved."
     },
     {
       "path": "asterism_core::domain::disclosure::record_for",
@@ -1018,9 +1058,29 @@
       "docs": "Builds the record for one artefact.\n\n`meta_kv` is the canonical metadata of the material the file came\nfrom; `parents` are its recorded `derived_from` edges, in the order\nthey were read; `prompts` decides whether the prompt is disclosed at\nall ([`PromptDisclosure`])."
     },
     {
+      "path": "asterism_core::domain::disclosure::source_type",
+      "kind": "module",
+      "docs": "`DigitalSourceType` — the one field a synthetic file is obliged to\ncarry, and the closed set of values this corpus can honestly assert.\n\nThe vocabulary is IPTC's, published as a controlled vocabulary at\n`cv.iptc.org/newscodes/digitalsourcetype`. The *value* is the term's\nURI, not its short name: that is what\n`Iptc4xmpExt:DigitalSourceType` is typed as (URI, per the IPTC Photo\nMetadata Standard 2025.1 specification), and it is what a C2PA\n`c2pa.actions` assertion carries in its `digitalSourceType` field.\nOne string serves both, which is the reason this type exists at all\nrather than each emitter spelling its own.\n\n# Why a closed set, when `Modality` next door is an open slug\n\nAn open slug is right when a new value is a data change with no code\nbehind it. This is the opposite case twice over. Each value here is a\n*claim about how a file came to exist*, and the claims are not\ninterchangeable — the difference between `trainedAlgorithmicMedia`\nand `compositeWithTrainedAlgorithmicMedia` is the difference between\n\"a model made this\" and \"a model altered a photograph\", and a caller\nthat could pass an arbitrary string could assert either by typo.\nSecond, the receiving side is closed too: a validator reads the URI\nagainst the published vocabulary, and a term IPTC does not define is\nnot a weaker claim, it is an unreadable one.\n\n# Why these five and not the whole vocabulary\n\nIPTC defines more terms than this — film and print digitisation,\nseveral composite forms, a deprecated pair. A term is here when a\nfile in this corpus can arrive with the fact it names, because a\nvalue nothing can produce is a value nothing tests. The three\ndigitisation terms (`negativeFilm` / `positiveFilm` / `print`)\ndescribe a scanner Asterism has no knowledge of; they can be added\nwhen something can establish them, and adding one is this enum plus\nits URI.\n\n# Not asserting is a state\n\nThere is no `Unknown` variant. An artefact whose origin nothing\nestablished gets no `DigitalSourceType` property at all — the same\ndoctrine\n[`attribution`](crate::domain::attribution)\nstates for an absent author: absence is a question nobody has\nanswered, and a vocabulary term meaning \"we do not know\" would be an\nanswer. It also matters legally in the one direction that is not\nsymmetric: a missing mark on a synthetic file is a gap, while a wrong\nmark on one is a false statement."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::source_type::DigitalSourceType",
+      "kind": "enum",
+      "docs": "How a file came to exist, in IPTC's vocabulary.\n\nSee the module docs for why the set is closed and why these five."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::source_type::UnknownSourceType",
+      "kind": "struct",
+      "docs": "A value that is not a term of the IPTC digital source type vocabulary."
+    },
+    {
       "path": "asterism_core::domain::dispatch",
       "kind": "module",
       "docs": "`DispatchJob` — one exporter invocation against a Snapshot.\n\nAggregate root for a single outbound job's whole lifecycle\n(Pending → Running → Done/Failed/Cancelled). Everything the apalis\n`DispatchRun` runner needs to resume after restart is on this row:\n\n- `snapshot_id` — points back at the input Snapshot.\n- `exporter_slug` + `action` + `params_json` — how to reach the\n  backend.\n- `handle_json` — opaque bytes the exporter's `Handle` serialised\n  into; the runner rehydrates this to call `poll` / `harvest`\n  again.\n- `state_slug` — the lifecycle state (mirrors\n  `asterism_dispatch_sdk::DispatchState::slug()`).\n- `output_asset_ids` — populated during `harvest` so callers can\n  go \"show me what this dispatch produced\" without a follow-up\n  query.\n\n# Invariants\n\n1. `persona_id` is the persona the dispatch belongs to; the\n   Snapshot carries the same persona (application service\n   enforces).\n2. `state` transitions are one-way: Pending → Running →\n   (Done | Failed | Cancelled). Backwards transitions are rejected\n   at the service layer.\n3. `output_asset_ids` is empty until state is `Done`; setting it\n   is atomic with the transition to `Done` (the reify path writes\n   both in one save)."
+    },
+    {
+      "path": "asterism_core::domain::dispatch::DISPATCH_TRACE_KEY",
+      "kind": "constant",
+      "docs": "Key under which a reified artefact records the run that made it,\ninside `Asset::extra`.\n\nA named constant because two sides depend on the spelling and only\none of them writes it: `reify_one` puts the trace there, and anything\nasking \"did this library produce this file, and under which run\"\nreads it. The object holds `selection_id`, `dispatch_id`,\n`exporter_slug`, and the operator when one was recorded."
     },
     {
       "path": "asterism_core::domain::dispatch::DispatchJob",

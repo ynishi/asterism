@@ -334,7 +334,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "asterism-contract",
- "asterism-provenance",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -347,6 +346,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "asterism-disclosure-format"
+version = "0.0.0"
+dependencies = [
+ "asterism-core",
+ "crc32fast",
+ "pngmeta",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -524,9 +535,9 @@ dependencies = [
  "apalis-sql",
  "asterism-contract",
  "asterism-core",
+ "asterism-disclosure-format",
  "asterism-dispatch-sdk",
  "asterism-media-probe",
- "asterism-provenance",
  "async-trait",
  "base64 0.22.1",
  "bytecheck 0.6.12",
@@ -578,17 +589,6 @@ dependencies = [
  "matroska",
  "mp4parse",
  "pngmeta",
-]
-
-[[package]]
-name = "asterism-provenance"
-version = "0.0.0"
-dependencies = [
- "crc32fast",
- "pngmeta",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -24,6 +24,7 @@
 - [asterism-core::application::app_setting_service](asterism_core/application__app_setting_service.md): `AppSettingService` — use cases for application settings.
 - [asterism-core::application::asset_comment_service](asterism_core/application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [asterism-core::application::asset_service](asterism_core/application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
+- [asterism-core::application::disclosure_service](asterism_core/application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
 - [asterism-core::application::dispatch_service](asterism_core/application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [asterism-core::application::fold_redirect](asterism_core/application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
@@ -31,7 +32,6 @@
 - [asterism-core::application::material_mark_service](asterism_core/application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [asterism-core::application::modality_service](asterism_core/application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [asterism-core::application::persona_service](asterism_core/application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [asterism-core::application::provenance_service](asterism_core/application__provenance_service.md): Building an artefact's disclosure out of the library, and putting it
 - [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
@@ -58,7 +58,10 @@
 - [asterism-core::domain::content_hash](asterism_core/domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [asterism-core::domain::content_region](asterism_core/domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
 - [asterism-core::domain::dir](asterism_core/domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
-- [asterism-core::domain::disclosure](asterism_core/domain__disclosure.md): Turning what the library stored into what a file will disclose.
+- [asterism-core::domain::disclosure](asterism_core/domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
+- [asterism-core::domain::disclosure::record](asterism_core/domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
+- [asterism-core::domain::disclosure::source_type](asterism_core/domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
@@ -92,6 +95,13 @@
 - [asterism-core::domain::thread](asterism_core/domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [asterism-core::domain::value](asterism_core/domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [asterism-core::error](asterism_core/error.md): `DomainError` — the innermost error type shared across every layer of
+
+## asterism-disclosure-format 0.0.0
+
+- [asterism-disclosure-format overview](asterism_disclosure_format/index.md): # asterism-disclosure-format
+- [asterism-disclosure-format::embed](asterism_disclosure_format/embed.md): Putting an XMP packet into a container, and taking the old one out.
+- [asterism-disclosure-format::manifest](asterism_disclosure_format/manifest.md): The C2PA manifest *definition* — what would be signed, built as a
+- [asterism-disclosure-format::xmp](asterism_disclosure_format/xmp.md): The XMP packet — the half of the disclosure that needs no
 
 ## asterism-dispatch-sdk 0.0.0
 
@@ -178,6 +188,7 @@
 ## asterism-infra 0.0.0
 
 - [asterism-infra overview](asterism_infra/index.md): # asterism-infra — outbound adapters (SQLite, filesystem, job engine)
+- [asterism-infra::disclosure](asterism_infra/disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [asterism-infra::dispatch](asterism_infra/dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [asterism-infra::dispatch::runtime](asterism_infra/dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
 - [asterism-infra::jobs](asterism_infra/jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
@@ -192,7 +203,6 @@
 - [asterism-infra::probes](asterism_infra/probes.md): The probes this build has, and the one question a caller asks of all
 - [asterism-infra::probes::jpeg](asterism_infra/probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
 - [asterism-infra::probes::png](asterism_infra/probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
-- [asterism-infra::provenance](asterism_infra/provenance.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [asterism-infra::search](asterism_infra/search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [asterism-infra::search::fan_out](asterism_infra/search__fan_out.md): One [`AssetIndexer`] over several.
 - [asterism-infra::search::tantivy_index](asterism_infra/search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
@@ -232,16 +242,6 @@
 ## asterism-media-probe 0.0.0
 
 - [asterism-media-probe overview](asterism_media_probe/index.md): Header-only media measurement: what the bytes say about themselves.
-
-## asterism-provenance 0.0.0
-
-- [asterism-provenance overview](asterism_provenance/index.md): # asterism-provenance
-- [asterism-provenance::embed](asterism_provenance/embed.md): Putting an XMP packet into a container, and taking the old one out.
-- [asterism-provenance::manifest](asterism_provenance/manifest.md): The C2PA manifest *definition* — what would be signed, built as a
-- [asterism-provenance::outcome](asterism_provenance/outcome.md): What applying a record to a file actually achieved.
-- [asterism-provenance::record](asterism_provenance/record.md): `DisclosureRecord` — everything one exported file is going to say
-- [asterism-provenance::source_type](asterism_provenance/source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
-- [asterism-provenance::xmp](asterism_provenance/xmp.md): The XMP packet — the half of the disclosure that needs no
 
 ## asterism-server 0.0.0
 

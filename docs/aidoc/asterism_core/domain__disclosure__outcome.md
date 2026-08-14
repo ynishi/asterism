@@ -1,4 +1,4 @@
-# asterism-provenance::outcome
+# asterism-core::domain::disclosure::outcome
 
 What applying a record to a file actually achieved.
 
@@ -30,5 +30,9 @@ somebody else make.
 
 - `Half` — What became of one half of a disclosure.
 - `Skipped` — Why a half was not attempted.
-- `Stamped` — The result of writing a [`DisclosureRecord`](crate::DisclosureRecord)
+- `Stamped` — The result of writing a [`DisclosureRecord`](super::DisclosureRecord)
+
+## Constants
+
+- `DISCLOSURE_NOTE_SCHEMA` — Version tag carried inside a stored disclosure note.
 
