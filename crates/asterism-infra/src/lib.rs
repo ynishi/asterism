@@ -43,6 +43,7 @@ pub mod jobs;
 pub mod observe;
 pub mod paths;
 pub mod probes;
+pub mod provenance;
 pub mod search;
 pub mod source_text;
 pub mod sqlite;

@@ -7,7 +7,190 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A disclosure's two halves report their own outcome, so one failing no
+  longer cancels the other** (#14) — applying a record writes an IPTC/XMP
+  packet and signs a C2PA manifest, and the writer has argued from the
+  start that the two fail independently. It did not behave that way.
+  Every failure inside the signing block returned early while the packet
+  was still in memory, so a signing error threw it away: on the day a
+  certificate expires — which the module's own docs call the failure
+  every signing deployment eventually meets — exports would have stopped
+  carrying the IPTC half, the one that needs no certificate at all. The
+  mirror case cost the manifest: a packet too large for a JPEG segment
+  even after the reduction failed the whole call.
+
+  The cause was the return type. `Result<Stamped, _>` made the error
+  channel total while the operation is composite, and an `Err` has
+  nowhere to carry the half that succeeded. `Stamped` now holds a `Half`
+  per side — `Written`, `Skipped(reason)` or `Failed(cause)` — and `Err`
+  is reserved for the case where nothing could be attempted: the file
+  cannot be read, or its container is not one this build writes into.
+  Whether a failed half makes a failed export is the caller's judgement,
+  and it now has both facts to make it with.
+
+  Three states rather than a boolean, for the reason the digest axes
+  already have three: "no packet" was at least four different answers,
+  and a video that cannot carry one, a build with no certificate
+  configured, and a certificate that stopped working all reported the
+  same `false`. `Skipped` names the ones that are not faults.
+
+- **Disclosing the prompt is a decision somebody makes, not a constant**
+  (#14) — `DisclosureRecord::with_prompt` says the prompt is "a decision
+  the service makes, not a property of the data" and that it "cannot be
+  taken back out of a file already published"; the service made no
+  decision, filling the field whenever the evidence had one, with nowhere
+  to state a different policy. What the field receives is the whole
+  AUTOMATIC1111 `parameters` blob — prompt, negative prompt, sampler,
+  seed, checkpoint name and hash, and the name and hash of every LoRA —
+  so a locally trained model named after a person or a client went into
+  every published copy. `record_for` now takes a `PromptDisclosure`
+  (`Withhold` / `Embed`) and `ProvenanceService` takes one at
+  construction. No `Default` and no default chosen: it belongs to the
+  composition root, and the asymmetry that should decide it is the one
+  the module already applies to terms — withholding can be undone by
+  re-applying, publishing cannot be undone at all.
+
+- **A stamp is staged in a temporary nothing can predict, and keeps the
+  file's own permissions** (#14) — the rewrite went through a
+  deterministic sibling (`shot.png.c2pa-partial`), opened with neither
+  `O_EXCL` nor `O_NOFOLLOW`, at whatever the umask gave. An export
+  directory is wherever the user pointed the export — possibly shared,
+  synced or watched — so anything else able to create a file there could
+  place a symlink at that name and have the stamp write the asset
+  through it; two concurrent applies to one path shared the temporary
+  and interleaved; and the staged copy of the whole asset was
+  world-readable for as long as signing took. `tempfile` becomes a real
+  dependency and supplies all three of a random name, `O_EXCL` and mode
+  0600, with the target's own permissions copied across before the
+  rename so that stamping is not also a permission change. Still absent:
+  an `fsync` before the rename.
+
+- **Two non-characters XML cannot hold are dropped from the packet**
+  (#14) — the filter took the C0 controls and stopped, but XML 1.0's
+  `Char` production also excludes U+FFFE and U+FFFF, which cannot be
+  written even as numeric references. They are reachable: a PNG text
+  chunk is decoded leniently, so a valid encoding of U+FFFF passes
+  through into the prompt and into the packet, and nothing noticed —
+  the packet is read back as text rather than parsed, so the write
+  reported an XMP half that had landed while the file carried an
+  unreadable metadata block. The neighbouring non-characters are legal
+  and stay.
+
+- **The workspace says what its digests actually rest on, and the signed
+  manifest stops claiming a version it does not have** (#14) — the
+  `preserve_order` comment in the workspace `Cargo.toml` asserted two
+  things that are not true. It said `c2pa` requires the feature: `c2pa`
+  does declare it in its own manifest, which is why it is unconditionally
+  on, but it does not depend on the semantic — verification re-hashes the
+  bytes read out of the file rather than re-serialising a parsed model,
+  and the default assertion kind routes through a CBOR map that sorts,
+  discarding the author's key order before anything is encoded. And it
+  said the digests were safe because they are built from a struct and
+  never parsed, which is not a discharge at all: `serde_json::to_value`
+  produces a `Map` too, so a value that never met a parser is still an
+  `IndexMap` under the feature.
+
+  The comment now names the four stored forms that are hashed or compared
+  byte for byte — `material_meta::render`, `series::render`,
+  `source_locator::to_storage` and `snapshot_hash` — with what makes each
+  one independent of the line, since the reasons differ and only one of
+  them is "it sorts". It also states why the line is there at all: what
+  this workspace writes back out is somebody else's document, and handing
+  it back with the keys re-sorted is an edit nobody asked for.
+
+  `domain::content_hash` gains the rule a digest added beside them owes.
+  A digest either **selects** bytes the artefact already carries or
+  **re-renders** them, and it has to say which, because the two fail in
+  opposite directions: re-rendering too widely reports two different
+  artefacts as one and duplicate resolution folds them, while selecting
+  too narrowly only misses a match. Re-rendering additionally owes its
+  canonical form in full — naming a published scheme is not enough, as
+  the rules for numbers and for duplicate keys are what decide the
+  answers — and a versioned tag, because a shipped definition cannot be
+  edited without changing what every value stored under it meant.
+
+  Neither of the two disclosures claims a build version any more.
+  `claim_generator_info` carries a name and nothing else — the
+  specification requires only the name, every crate here inherits the
+  same `0.0.0`, and a version string identical on every build ever made
+  tells a reader nothing while sounding like it tells them something, in
+  a document that cannot be corrected after signing. The XMP packet's
+  `x:xmptk` drops it too, for that reason and one more: those bytes go
+  inside the C2PA hard binding, and the toolkit string was the only
+  thing in the packet not read off the record, so a version bump
+  re-rendered an unchanged record into different bytes. The module doc
+  had already promised the packet is a function of the record and
+  nothing else; now it is.
+
+  Both tests were weaker than they read. The manifest one compared the
+  emitted field against the same `env!("CARGO_PKG_VERSION")` the code
+  used, so it passed at any value; it now asserts the field is absent.
+  The packet one compared two renderings inside one build, which cannot
+  see a difference that moves both sides together; it now pins the
+  toolkit attribute literally.
+
+- **The series key no longer borrows its canonical form from a
+  dependency** (#14) — `series::render` hashes a `serde_json::Value`
+  parsed out of a container, and was taking its nested key order from
+  whichever map type `serde_json`'s feature flags selected. A new
+  `series::canonical_value` sorts every object's keys recursively before
+  the bytes are rendered, so the digest is a function of the document
+  rather than of how it was typed: a JSON object is an unordered
+  collection (RFC 8259), and two containers carrying the same fields in a
+  different order carry the same document. Arrays keep their order, since
+  a JSON array *is* ordered. Byte output is unchanged and no stored key
+  moves.
+
+  `serde_json`'s `preserve_order` is now declared in the workspace
+  `Cargo.toml` with its reasoning rather than arriving as a side effect of
+  `c2pa`. The old test that asserted sorted output and warned in prose
+  that this rested on a default has a sibling asserting the property
+  itself, plus the negative case; both fail by name if the sort is
+  removed, which is the point — the function reads like a no-op and will
+  invite deletion.
+
 ### Added
+
+- **AI-disclosure provenance: the vocabulary, the emitters and the signer**
+  (#14) — a new `asterism-provenance` crate holds what an exported file
+  says about where it came from, as values: the IPTC digital source type
+  (five terms, closed, refusing anything the vocabulary does not define),
+  the XMP packet carrying `Iptc4xmpExt:DigitalSourceType` and the four AI
+  properties IPTC added in Photo Metadata Standard 2025.1, that packet
+  written into a PNG `iTXt` chunk or a JPEG `APP1` segment as a byte
+  transform, and the C2PA manifest definition built from the same record
+  so the two cannot disagree. `asterism-infra::provenance` is the adapter
+  that puts them into a file and signs the manifest through `c2pa`,
+  covering MP4 and MOV as well as stills — signing after the encode,
+  which is the only point at which it is possible.
+
+  Two decisions are worth stating. **XMP is written before the manifest is
+  signed**: the hard binding covers the packet, so the reverse order
+  invalidates the signature, and a test signs a file, edits its packet and
+  asserts the binding then fails. **A signing identity is configuration**:
+  the IPTC/XMP disclosure is written with or without one, a manifest only
+  with, and the C2PA test certificates are refused by name rather than
+  used as a fallback — a manifest signed by them validates as untrusted,
+  which claims a provenance a reader rejects.
+
+  `domain::disclosure` is the judgement that feeds them, and it is pure:
+  which IPTC term is true of an artefact, given the container metadata a
+  probe stored and the `derived_from` edges the library recorded. Terms
+  are asserted on evidence something wrote, and an artefact nothing
+  established gets no term rather than one meaning "unknown".
+  `compositeWithTrainedAlgorithmicMedia` turns on whether a recorded
+  parent is itself synthetic, which the child's own metadata cannot say.
+  `application::provenance_service` does the reads and owns the port,
+  looking at no file metadata at all — which is what lets a file that came
+  back from a downstream conversion with its manifest stripped be handed
+  to `apply_to` and get the same disclosure again.
+
+  Not yet wired to the export path, and not exposed over HTTP or IPC;
+  both are the rest of #14. Unsigned video carries no disclosure at all,
+  because the XMP half has no BMFF spelling here, and the writer reports
+  that rather than a success it did not have.
 
 - **Material layers, and the chapters an import brings in** (#1) — a
   material now carries layers: an origin (`imported` / `user` / `machine`),
@@ -107,6 +290,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changelog.
 
 ### Fixed
+
+- **The XMP writer does the two things its module doc promises** (#14) —
+  both were promised in prose and neither was done, and in both cases the
+  reason nothing caught it is that no fixture could reach the shape.
+
+  **A packet another tool left behind is now removed rather than
+  shadowed.** The doc's position is that a file must never leave with two
+  packets, because readers disagree about which one wins and the failure
+  mode is a stale `digitalSourceType` shadowing a corrected one. Both
+  writers recorded only the *first* packet and copied any later one
+  through untouched. The walks collect every XMP chunk or segment now,
+  replace the first where it stands — which keeps a re-stamped file's
+  chunk order stable — and drop the rest. The test that claimed to cover
+  this reached its "twice-stamped" input by calling the writer twice, so
+  its input had exactly one packet by construction and it re-tested the
+  one-packet path under a name that read like it covered both. The new
+  fixtures are hand-built rather than produced by the writer, on the
+  habit the neighbouring fixtures already state, and they place an
+  ordinary chunk ahead of both packets and another between them — with
+  the packets adjacent, neither "the bytes between two packets survive"
+  nor "the survivor stays where it was" is observable.
+
+  **A JPEG with no scan keeps its packet inside the image.** The
+  insertion point is "before the first non-`APPn` marker", and a
+  metadata-only file that reaches `EOI` without meeting one fell back to
+  the end of the file. That put the `APP1` *after* `EOI`, outside the
+  structure, where the module's own reader returns `None` while
+  `asterism-infra` records `xmp_written = true`: an export that reported
+  success and carried no readable disclosure at all. The walk now brings
+  the `EOI` offset back and the packet goes before it, which is the same
+  answer the PNG side already gave a file with no `IDAT`. A *truncated*
+  JPEG is a different thing and is still refused as malformed — it has
+  no `EOI` either.
+
+  Both fixes were checked against the behaviour they replace: reverting
+  either one fails its new test by name, and the thirteen `embed` tests
+  that predate this change pass under both.
+
+- **Five things the provenance writer said about itself that were not so**
+  (#14) — all in `asterism-infra`, all found by reading the code against
+  its own comments.
+
+  **A failed read-back is no longer reported as a shortened prompt.**
+  `Stamped::prompt_dropped` exists to record that a JPEG segment could
+  not hold the packet, so the reduced record was written instead — a fact
+  that cannot be recovered from the file afterwards, which is why it is
+  reported at all. It was derived by reading the stamped bytes back and
+  asking whether the prompt survived, through `.ok().flatten()`, which
+  gave the same `true` to three different outcomes: the honest fallback,
+  a packet the reader could not find, and a file that would not parse.
+  The last two say the writer produced something this crate does not
+  recognise, which is a defect rather than a fact about the record, and
+  they are errors now — `XmpUnreadable` for the one that has no
+  underlying failure to carry. Nothing is known to reach that variant
+  today: its one producer was the JPEG writer putting the packet where
+  the reader could not see it, fixed above. It is the guard that says
+  the two halves have to agree, not a case in the field.
+
+  **A manifest that could not be built no longer blames the
+  certificate.** A definition `c2pa` refuses came back as
+  `ProvenanceError::Identity`, which renders `signing identity: …` — so
+  a mapping defect in this crate sent whoever was reading the log to
+  their key configuration. It happens strictly before signing, with the
+  certificate already loaded, and now has its own variant.
+
+  **The container sniff survives a short read.** `read_head` used one
+  `read`, which is allowed to return fewer bytes than the buffer holds
+  without being at end of file. Local regular files do not do this;
+  NFS, SMB and FUSE do, which is to say every network-mounted library.
+  Eleven bytes back instead of twelve made the `ftyp` test fail and a
+  perfectly good MP4 report as a container this build does not write
+  into.
+
+  **The signed output streams to disk instead of being held whole.** The
+  comment on the video path said it streams "so a large video is not read
+  into memory whole", and the source did — but the destination was a
+  `Cursor<Vec<u8>>` collected with `into_inner()`, so a 2 GB MOV was
+  fully resident at the moment of collection, and the still path held two
+  buffers at once. `Builder::sign` takes any `Write + Read + Seek`
+  destination, so it writes into the sibling temporary the rename will
+  move, and `replace` was split into the pieces that path needs. The
+  temporary is opened read-write rather than through `File::create`,
+  which gives a write-only descriptor: today's signing happens not to
+  read its destination, but the `Read` in that bound is there because
+  the BMFF handler re-reads box headers to adjust offsets, and relying
+  on it staying unexercised would fail on video and nowhere else. What
+  this costs is that the temporary is visible for the length of the
+  signing rather than for the length of one write.
+
+  **A failed write clears its temporary too.** Splitting `replace`
+  surfaced that its own error route returned straight out of a failed
+  `fs::write`, which can leave the file created and partly filled —
+  exactly the litter beside a watched export directory that the rename
+  path already took care to avoid. Both routes clear it now, and a test
+  covers the signing path's failure route rather than only its success.
+
+- **When a signing certificate is configured, it is read before it is
+  used** (#14) — nothing wires one yet, which is #14's own open item;
+  this is what will happen when something does.
+  `inspect_certificate` reports what a certificate's extensions say, and
+  `SigningIdentity` refuses on the half of it that means the certificate
+  cannot sign at all: an extended key usage naming nothing a claim can
+  be signed under, or a CA certificate offering to sign one itself.
+  Neither reaches `c2pa` as anything better than a failure later, so it
+  fails here with a reason.
+
+  The other half is reported and not acted on. A certificate without
+  `c2pa-kp-claimSigning` is not one the Conformance Program's issuance
+  profile would have produced, and a subject naming no organisation is
+  one no validator can display a signer for — both keep a certificate
+  off a trust list without stopping it signing for a reader who has
+  imported it, which is a use the specification's own guidance describes
+  (a private credential store, and self-issued credentials for it). That
+  guidance also states the split rather than leaving it to be invented:
+  of an extended key usage misconfiguration it says a claim generator
+  "should warn its user with an explanation of the problem, but should
+  allow the user to choose to proceed with signing". A deployment
+  signing for publication would reasonably want the warnings to refuse
+  too; `inspect_certificate` is public so that setting has somewhere to
+  read from when it is written.
+
+  This started out refusing every certificate without
+  `c2pa-kp-claimSigning`, on the belief that the profile requires it in
+  addition to `emailProtection` or `documentSigning` — which it does, of
+  a certificate a conforming CA *issues*. That is not the set `c2pa`
+  will sign with: its accept-list takes any one of six usages, and one
+  is enough. The strict version would have refused a
+  `documentSigning`-only certificate — a profile IPTC's own publisher
+  policy explicitly permits — while telling its operator the certificate
+  could not sign, which is false and which they could not have acted on,
+  an EKU not being something you can add to an issued certificate. The
+  two questions are separate and the code now keeps them separate.
+
+  What the check does *not* look at is worth knowing: everything else
+  `c2pa` requires at signing time, which is a good deal more, and in
+  particular expiry. A Conformance Program certificate is valid for at
+  most 366 days, so every deployment that signs meets that one
+  eventually, and it arrives as a signing error rather than as an
+  identity one.
+
+  Bytes that do not parse yield no findings rather than a refusal:
+  `c2pa` reads the same certificate next with a real validator and says
+  something better than a guess from here. What that costs is named
+  where it is done — DER rather than PEM, an empty file, and a bundle
+  whose every block is something else all pass inspection silently.
+
+- **`parameters` is AUTOMATIC1111's chunk, not ComfyUI's** (#14) — three
+  doc comments and a test fixture said otherwise. The rule they were
+  making is right and unaffected: a digest must not re-render a value it
+  was given, because that puts number formatting and nested key order
+  into the digest's definition. The example was wrong. ComfyUI writes
+  `prompt` and `workflow`, both JSON; `parameters` is AUTOMATIC1111's and
+  holds line-oriented prose. `domain::disclosure` had it right all along,
+  which is where the two families are actually told apart.
+
+  It matters because a reader who took the docs literally would reach for
+  a JSON decoder on a value that never parses — and the fixture in
+  `asterism-importer-image` had already done something adjacent, carrying
+  `steps: 30, sampler: euler` under that keyword, which is neither JSON
+  nor A1111's grammar. It now carries the real shape: a prompt, a
+  `Negative prompt:` line, and one comma-separated settings line.
+
+- **The PNG chunk length is checked, and three comments now describe
+  what their code does** (#14) — the length was
+  `u32::try_from(payload.len()).unwrap_or(u32::MAX)` under a comment
+  claiming the impossible case was made loud. It was the opposite: a
+  payload past the bound emitted a chunk whose declared length
+  disagreed with the bytes after it, and returned success. The ceiling
+  is taken from `pngmeta::MAX_CHUNK_LENGTH`, because that crate reads
+  the chunks this one writes and refuses a length above it — a
+  hand-written cap would make the two equal by coincidence.
+  `PacketTooLarge` covers both containers now, and its message no
+  longer names JPEG.
+
+  The three that were prose only: `png::read` stops at the first XMP
+  chunk even when its text is unreadable (which matches the writer, and
+  now says so); the control-character filter keeps DEL and C1, which
+  are legal XML 1.0 and which the comment said were dropped; and
+  `IPTC_CV`'s doc claimed a structural guarantee that is actually held
+  by a test. Two tests are renamed, because what they assert stopped
+  matching what they were called.
+
+- **The documented JPEG packet limit was the segment's, not the
+  packet's** (#14) — three docs quoted 65,533 bytes, including the one a
+  caller reads when deciding how long a prompt to allow. That is the
+  segment's payload; the packet gets 65,504, because the 29-byte
+  `http://ns.adobe.com/xap/1.0/` identifier is inside the payload and is
+  paid first. A packet between the two figures was refused by a limit the
+  documentation did not have, and the caller learned about it only
+  through the silent fallback to the reduced record. The docs now point
+  at `JPEG_MAX_PACKET`, which is what the writer enforces and what
+  `PacketTooLarge` reports, and a test pins the arithmetic.
 
 - **A refused operation says so on screen** (`asterism-ui`) — asking
   Asterism to do something it then refused could leave no trace: the

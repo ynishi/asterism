@@ -70,6 +70,33 @@ tantivy = { workspace = true }
 lindera = { workspace = true }
 lindera-tantivy = { workspace = true }
 
+# AI-disclosure provenance. The pure half — the IPTC vocabulary, the XMP
+# packet, the manifest definition — comes from `asterism-provenance`;
+# `c2pa` is here because signing is the one part of it that needs key
+# material and a cryptography backend, and `provenance.rs` is the only
+# module that touches it. See the workspace `Cargo.toml` for which
+# default features are off and why.
+asterism-provenance = { path = "../asterism-provenance" }
+c2pa = { workspace = true }
+# Decoding the PEM a signing identity arrives as, so the refusal of the
+# C2PA test certificates can look at the DER rather than only at whatever
+# comment lines happen to surround it. The workspace line, for the reason
+# it is a workspace line: what "standard base64" accepts is one answer
+# here.
+base64 = { workspace = true }
+# Reading a configured signing certificate's own extensions. `c2pa`
+# parses certificates for its own validation and exposes none of it, so
+# the check is this crate's; the workspace line says why the version is
+# where it is.
+x509-parser = { workspace = true }
+# Staging a rewrite. Not for the convenience: the name has to be
+# unpredictable and the file has to be created with `O_EXCL` and mode
+# 0600, because the directory a stamped file is written into is not
+# necessarily one only this process can write to. Was a dev-dependency
+# until the provenance writer's own temporary was found to be a
+# deterministic sibling opened with neither.
+tempfile = "3"
+
 [dev-dependencies]
 tempfile = "3"
 # Fixture builder for the PNG-shaped test corpus used by the walker /
@@ -77,6 +104,18 @@ tempfile = "3"
 # in `asterism-importer-sdk`: building PNGs by hand is the chunk-boundary
 # arithmetic these tests just stopped doing.
 pngmeta  = { version = "0.2.1", features = ["test-util"] }
+# The provenance tests build a PNG chunk by hand to have a container to
+# stamp, and a chunk needs its CRC — the same line `asterism-provenance`
+# takes for the writer itself.
+crc32fast = "1"
+# A throwaway signing identity, so the signing path is exercised rather
+# than described. This repository ships no certificate and refuses the
+# C2PA test ones, which would otherwise leave every claim about signing
+# untested — including the ordering claim that the XMP packet is inside
+# what gets signed, which is only observable once a signature exists.
+# Generated per test run and never written outside the temporary
+# directory.
+rcgen = "0.14"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # ImageIO fast path for `thumb_gen` — uses Apple's ImageIO framework

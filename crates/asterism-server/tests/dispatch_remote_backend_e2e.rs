@@ -444,10 +444,21 @@ fn comfy_waiting_message() -> String {
 /// is the branch that decides whether the locator gains a directory
 /// segment.
 ///
-/// `serde_json`'s map is a `BTreeMap` here (no `preserve_order`), so
-/// the walk visits `"12"` before `"9"` whatever order this literal is
-/// written in — every order-sensitive assertion is about the `images`
-/// array, which is a real array and keeps its order.
+/// This fixture does **not** rest on the walk's order over the map,
+/// and the sentence that used to stand here said it did — that
+/// `serde_json`'s map is a `BTreeMap` "(no `preserve_order`)", so the
+/// walk would reach `"12"` before `"9"` however this literal was
+/// written. The workspace declares `preserve_order` (see the workspace
+/// `Cargo.toml`), so the map is an `IndexMap` and the walk follows the
+/// order written here. The conclusion survived only because `"12"`
+/// happens to be written first and sorts first as well, which is two
+/// coincidences rather than a reason.
+///
+/// What the assertions actually depend on: only node `"9"` carries an
+/// `images` array, so exactly one node contributes outputs whatever
+/// order the walk takes, and the ordering that is asserted is inside
+/// that array — a real JSON array, which keeps its order under either
+/// map type.
 fn comfy_success_outputs() -> serde_json::Value {
     json!({
         "12": { "text": ["a node that produced no images"] },
