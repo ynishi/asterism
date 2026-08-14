@@ -122,6 +122,7 @@ convert them into domain types and surface any validation failures as
 - `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
 - `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
 - `CancelJobCommand` — Requests cancellation of a running or pending job.
+- `ClosePursuitCommand` — Closes a pursuit (#29): records a one-way lifecycle fact, never a
 - `ConflictResolution` — How a person answered one raised duplicate question.
 - `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
 - `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
@@ -168,6 +169,7 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
+- `OpenPursuitCommand` — Opens a pursuit explicitly — the "start new pursuit" affordance
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
 - `PasteImageImportCommand` — Writes a clipboard-pasted image blob to disk and dispatches
@@ -194,11 +196,13 @@ convert them into domain types and surface any validation failures as
 - `RenameSavedQueryCommand` — Renames a `SavedQuery`. Uniqueness `(persona_id, name)` is
 - `RenameSessionCommand` — Rewrites a Session's title
 - `RenameTagCommand` — Renames a tag in place (`POST /asterism/tags/rename`).
+- `ReopenPursuitCommand` — Reopens a pursuit (#29). Legal on an already-open pursuit: the
 - `ReorderGroupAssetsCommand` — Rewrites the front-to-back order of a Group. `ordered_asset_ids` is
 - `ReorderGroupChildrenCommand` — Rewrites the order of a Group's child groups. Same drift-tolerant
 - `ReorderPersonasCommand` — Rewrites `display_order` across a persona slice. `ordered_ids`
 - `ResetSettingCommand` — Clears one setting override (`DELETE /asterism/settings/{key}`).
 - `ResolveDuplicateConflictCommand` — Answers one duplicate question — the panel's confirm.
+- `RestampDispatchCommand` — Moves a dispatch's pursuit filing — the restamp repair verb (#29),
 - `RestoreAssetCommand` — Returns a trashed asset to the live set. Idempotent.
 - `RestoreGroupCommand` — Returns a trashed Group to the sidebar, membership and drag order
 - `RestorePersonaCommand` — Returns a trashed persona and the assets that went to the trash with
@@ -338,6 +342,8 @@ the domain types.
 - `PersonaProfileDto` — Per-persona identity signal — the avatar / short bio / role
 - `PersonaThemeDto` — Per-persona visual chrome — currently holds the wallpaper asset
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
+- `PursuitDto` — The minted unit of work (#29): one line of generation and curation
+- `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
 - `SampledPageDto` — A random handful drawn from the set a filter describes — the answer to
@@ -564,6 +570,7 @@ the private design notes.
 - [`application::modality_service`](application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [`application::provenance_service`](application__provenance_service.md): Building an artefact's disclosure out of the library, and putting it
+- [`application::pursuit_service`](application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
@@ -1186,6 +1193,37 @@ neither it nor this service owns.
 ## Traits
 
 - `ProvenanceWriter` — Writes a disclosure into a file that already exists.
+
+
+<!-- asterism_core/application__pursuit_service.md -->
+# asterism-core::application::pursuit_service
+
+`PursuitService` — the lifecycle verbs of the minted unit of work
+(#29): open, close, reopen, restamp, and the reads that derive
+standing.
+
+Always-mint lives in [`DispatchService`](super::DispatchService) —
+a dispatch arriving unstamped mints its own pursuit there. This
+service is everything else: the explicit pre-create (naming intent
+up front), the one-way lifecycle facts (close / reopen — recorded,
+never a status write), the close's single deliberate
+materialisation (the kept set frozen into a snapshot), and the
+restamp repair verb. Transport routes land in the next slice of
+#29; until then the service fronts the e2e surface through
+`CoreCtx`, the same way every service is reachable there.
+
+# The close freeze is a forge-side calling convention
+
+The core treats snapshot member order as part of snapshot identity
+(caller order, nothing sorts). The close path sorts the kept set
+ascending *itself* before freezing, so identical kept sets dedupe
+across closes; a close snapshot consequently does not dedupe with a
+pick-ordered input snapshot over the same members — correct, they
+are different statements.
+
+## Types
+
+- `PursuitService` — Pursuit lifecycle use-case service.
 
 
 <!-- asterism_core/application__query_group_invalidation.md -->

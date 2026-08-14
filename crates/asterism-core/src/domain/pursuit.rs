@@ -318,6 +318,18 @@ pub enum PursuitStanding {
     ClosedAbandoned,
 }
 
+impl PursuitStanding {
+    /// Wire slug. No parse counterpart on purpose: standing is derived,
+    /// never accepted as input.
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::ClosedSatisfied => "closed_satisfied",
+            Self::ClosedAbandoned => "closed_abandoned",
+        }
+    }
+}
+
 /// Derives standing from a pursuit's events: latest by
 /// `(created_at, id)` wins, no row means open. The id tie-break is not
 /// decoration — v7 ids make it agree with mint order when two events

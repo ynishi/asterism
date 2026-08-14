@@ -32,6 +32,7 @@
 - [asterism-core::application::modality_service](asterism_core/application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [asterism-core::application::persona_service](asterism_core/application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
 - [asterism-core::application::provenance_service](asterism_core/application__provenance_service.md): Building an artefact's disclosure out of the library, and putting it
+- [asterism-core::application::pursuit_service](asterism_core/application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules

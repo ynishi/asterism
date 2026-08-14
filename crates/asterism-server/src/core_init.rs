@@ -158,6 +158,8 @@ pub struct CoreCtx {
     /// Immutable content-addressed snapshot lifecycle (seeds outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
+    /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
+    pub pursuit_service: Arc<asterism_core::application::PursuitService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
@@ -764,6 +766,15 @@ pub async fn init_core_with(
         query_group_service.clone(),
         pursuits.clone(),
     ));
+    // Lifecycle verbs of the unit of work (#29); the close freeze goes
+    // through the snapshot service so kept ids get the same hydration
+    // every other freeze gets.
+    let pursuit_service = Arc::new(asterism_core::application::PursuitService::new(
+        pursuits.clone(),
+        personas.clone(),
+        dispatches.clone(),
+        snapshot_service.clone(),
+    ));
 
     // Register the built-in exporters (`comfy` / `file` / `http`).
     let comfy: Arc<dyn Exporter> = Arc::new(ComfyHttpExporter::new());
@@ -863,6 +874,7 @@ pub async fn init_core_with(
         thumb_service: Arc::new(ThumbService::new(Arc::new(thumbs))),
         snapshot_service,
         dispatch_service,
+        pursuit_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

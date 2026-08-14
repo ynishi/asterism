@@ -57,6 +57,8 @@ the domain types.
 - `PersonaProfileDto` — Per-persona identity signal — the avatar / short bio / role
 - `PersonaThemeDto` — Per-persona visual chrome — currently holds the wallpaper asset
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
+- `PursuitDto` — The minted unit of work (#29): one line of generation and curation
+- `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
 - `SampledPageDto` — A random handful drawn from the set a filter describes — the answer to
