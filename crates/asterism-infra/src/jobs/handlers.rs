@@ -1959,7 +1959,11 @@ pub async fn provenance_stamp(
 /// The mark is already in the file, or already not. Failing the job
 /// over the bookkeeping would retry a file rewrite to fix a row, which
 /// is the larger operation of the two. It is said out loud instead.
-async fn note_disclosure(env: &JobEnv, asset_id: &AssetId, outcome: &asterism_provenance::Stamped) {
+async fn note_disclosure(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    outcome: &asterism_core::domain::disclosure::Stamped,
+) {
     let mut note = outcome.to_note();
     // When, added here because the outcome type is produced in places
     // that write nothing down and has no business holding a clock.

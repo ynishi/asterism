@@ -1,4 +1,4 @@
-# asterism-provenance::manifest
+# asterism-disclosure-format::manifest
 
 The C2PA manifest *definition* — what would be signed, built as a
 value, with nothing here able to sign it.

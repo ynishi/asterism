@@ -194,7 +194,7 @@ pub struct JobDeps {
     /// is the same shape [`dispatch`](Self::dispatch) uses, for a
     /// different reason — this one is not late-bound, it is optional.
     pub provenance: Arc<
-        std::sync::OnceLock<Arc<asterism_core::application::provenance_service::ProvenanceService>>,
+        std::sync::OnceLock<Arc<asterism_core::application::disclosure_service::DisclosureService>>,
     >,
 }
 
@@ -833,7 +833,7 @@ mod tests {
 
     /// The XMP packet a file on disk carries, if any.
     fn packet_of(path: &std::path::Path) -> Option<String> {
-        asterism_provenance::embed::read_xmp(&std::fs::read(path).unwrap()).unwrap()
+        asterism_disclosure_format::embed::read_xmp(&std::fs::read(path).unwrap()).unwrap()
     }
 
     /// **A dispatch's output comes back marked.**
@@ -936,10 +936,10 @@ mod tests {
 
         let provenance = Arc::new(std::sync::OnceLock::new());
         let _ = provenance.set(Arc::new(
-            asterism_core::application::provenance_service::ProvenanceService::new(
+            asterism_core::application::disclosure_service::DisclosureService::new(
                 assets.clone(),
                 edges.clone(),
-                Arc::new(crate::provenance::ProvenanceWriter::unsigned()),
+                Arc::new(crate::disclosure::DisclosureWriter::unsigned()),
                 // The composition root's answer, so the fixture exercises
                 // what a deployment runs rather than a friendlier setting.
                 PromptDisclosure::Withhold,
@@ -995,6 +995,76 @@ mod tests {
         );
     }
 
+    /// **Two writers of `_trace` do not evict each other.**
+    ///
+    /// The property the narrow write acquired when it stopped being
+    /// about one key. `_trace` is a shared bag whose writers do not
+    /// know about each other — the declared-hash verdict, the
+    /// disclosure note, a fold, an absorption — and the whole reason
+    /// the merge reads before it writes is that each of them must find
+    /// its neighbours intact afterwards. Nothing asserted that until
+    /// there were two keys to assert it with.
+    #[tokio::test]
+    async fn one_trace_writer_does_not_evict_another() {
+        use asterism_core::domain::asset::Asset;
+        use asterism_core::domain::attribution::AttributionContext;
+        use asterism_core::domain::content_hash::DECLARED_HASH_NOTE_KEY;
+        use asterism_core::domain::disclosure::DISCLOSURE_NOTE_KEY;
+        use asterism_core::domain::persona::Persona;
+        use asterism_core::domain::repository::{AssetRepository, PersonaRepository};
+        use asterism_core::domain::value::{SourceKind, SourceRef};
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let assets = SqliteAssetRepository::new(isle.clone());
+        let personas = crate::sqlite::repo::SqlitePersonaRepository::new(isle.clone());
+
+        let persona = Persona::new("P", None).unwrap();
+        personas.save(&persona).await.unwrap();
+        let asset = Asset::new(
+            persona.id,
+            SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), "/tmp/x.png").unwrap(),
+            None,
+            chrono::Utc::now(),
+            &AttributionContext::asserted(None, None).unwrap(),
+        );
+        assets.save(&asset).await.unwrap();
+
+        assert!(
+            assets
+                .note_trace_field(
+                    &asset.id,
+                    DECLARED_HASH_NOTE_KEY,
+                    serde_json::json!({ "agreed": true }),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            assets
+                .note_trace_field(
+                    &asset.id,
+                    DISCLOSURE_NOTE_KEY,
+                    serde_json::json!({ "discloses": true }),
+                )
+                .await
+                .unwrap()
+        );
+
+        let stored = assets.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            stored.extra["_trace"][DECLARED_HASH_NOTE_KEY],
+            serde_json::json!({ "agreed": true }),
+            "the first writer's key survived the second: {}",
+            stored.extra
+        );
+        assert_eq!(
+            stored.extra["_trace"][DISCLOSURE_NOTE_KEY],
+            serde_json::json!({ "discloses": true }),
+            "{}",
+            stored.extra
+        );
+    }
+
     /// With no writer configured the handler skips, and the file it
     /// would have rewritten is left exactly as it was.
     #[tokio::test]
@@ -1020,7 +1090,7 @@ mod tests {
         isle: &rusqlite_isle::AsyncIsle,
         provenance: Arc<
             std::sync::OnceLock<
-                Arc<asterism_core::application::provenance_service::ProvenanceService>,
+                Arc<asterism_core::application::disclosure_service::DisclosureService>,
             >,
         >,
     ) -> JobDeps {

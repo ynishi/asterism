@@ -24,6 +24,17 @@
 //! that an export failure is the judgement this type exists to let
 //! somebody else make.
 
+/// Version tag carried inside a stored disclosure note.
+///
+/// Beside the payload rather than implied by where it is stored, on the
+/// same terms the custom manifest assertion and the export sidecar
+/// carry theirs: a note written today is read by a build that has moved
+/// on, and the reader needs to know which shape it is holding before it
+/// starts walking it. The row is the durable half of this feature —
+/// re-applying a disclosure is decided from it — so it is the one value
+/// here that will certainly be read by code that does not exist yet.
+pub const DISCLOSURE_NOTE_SCHEMA: &str = "asterism.disclosure-note/1";
+
 /// What became of one half of a disclosure.
 ///
 /// Three states rather than a `bool`, because "not written" is at least
@@ -137,7 +148,7 @@ impl Skipped {
     }
 }
 
-/// The result of writing a [`DisclosureRecord`](crate::DisclosureRecord)
+/// The result of writing a [`DisclosureRecord`](super::DisclosureRecord)
 /// into a file.
 ///
 /// Every field is an outcome rather than an intention. The two halves
@@ -211,6 +222,7 @@ impl Stamped {
     /// place the rule lives.
     pub fn to_note(&self) -> serde_json::Value {
         serde_json::json!({
+            "schema": DISCLOSURE_NOTE_SCHEMA,
             "xmp": self.xmp.to_note(),
             "manifest": self.manifest.to_note(),
             "prompt_dropped": self.prompt_dropped,

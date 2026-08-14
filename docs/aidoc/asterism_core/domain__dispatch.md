@@ -35,3 +35,7 @@ Aggregate root for a single outbound job's whole lifecycle
 - `DispatchJob` — One dispatch invocation.
 - `DispatchState` — Lifecycle state persisted with the dispatch job.
 
+## Constants
+
+- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
+

@@ -21,6 +21,7 @@ for later modalities.
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `observation_sweep` — Expires observations past their stream's declared retention.
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
+- `provenance_stamp` — Writes the AI disclosure into a file this library produced.
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:
 - `series_derive` — Derives `material_series` keys — applies every registered
 - `session_rebuild` — Session reconciliation stub — the precomputed rkyv snapshot was

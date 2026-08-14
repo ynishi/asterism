@@ -45,7 +45,7 @@
 
 use serde_json::{Value, json};
 
-use crate::record::DisclosureRecord;
+use asterism_core::domain::disclosure::DisclosureRecord;
 
 /// Label of the standard actions assertion.
 ///
@@ -141,7 +141,7 @@ pub fn definition(record: &DisclosureRecord) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_type::DigitalSourceType;
+    use asterism_core::domain::disclosure::DigitalSourceType;
 
     fn assertion<'a>(definition: &'a Value, label: &str) -> Option<&'a Value> {
         definition["assertions"]

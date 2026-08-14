@@ -4,25 +4,25 @@
 //! Two verbs, and the second is the one the acceptance criteria are
 //! really about:
 //!
-//! - [`record_for`](ProvenanceService::record_for) — assemble what an
+//! - [`record_for`](DisclosureService::record_for) — assemble what an
 //!   asset discloses from what is *stored*: the container metadata a
 //!   probe read, the `derived_from` edges the library recorded, the
 //!   asset's own title.
-//! - [`apply_to`](ProvenanceService::apply_to) — write that record into
-//!   a file through the [`ProvenanceWriter`] port.
+//! - [`apply_to`](DisclosureService::apply_to) — write that record into
+//!   a file through the [`DisclosureWriter`] port.
 //!
 //! # Why this makes the database the source of truth
 //!
 //! Nothing here reads the target file's metadata. The record is derived
 //! entirely from rows, so a file that came back from a downstream
 //! conversion with its manifest stripped can be handed to
-//! [`apply_to`](ProvenanceService::apply_to) and get the same disclosure
+//! [`apply_to`](DisclosureService::apply_to) and get the same disclosure
 //! again — the answer never lived in the file. That is the property a
 //! manifest cannot have on its own, since any re-encode removes it.
 //!
 //! # Why the port is here and not in `repository`
 //!
-//! [`ProvenanceWriter`] is an outbound port like the repositories, and
+//! [`DisclosureWriter`] is an outbound port like the repositories, and
 //! it lives in the core for the same reason they do — adapters
 //! implement traits, they do not define them (`asterism-infra`'s crate
 //! doc). It is declared beside its only caller rather than in
@@ -36,7 +36,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use asterism_provenance::{DisclosureRecord, Stamped};
+use crate::domain::disclosure::{DisclosureRecord, Stamped};
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
 use crate::domain::edge::EdgeKind;
@@ -59,11 +59,11 @@ const MAX_PARENTS: u32 = 8;
 /// Writes a disclosure into a file that already exists.
 ///
 /// The one outbound port of this service. Implemented by
-/// `asterism-infra::provenance`, which owns the containers, the XMP
+/// `asterism-infra::disclosure`, which owns the containers, the XMP
 /// packet and the C2PA signer; nothing about any of those reaches this
 /// side of the boundary.
 #[async_trait]
-pub trait ProvenanceWriter: Send + Sync {
+pub trait DisclosureWriter: Send + Sync {
     /// Applies `record` to the file at `path`, replacing it.
     ///
     /// Returns what was actually written. The two halves of a
@@ -76,7 +76,7 @@ pub trait ProvenanceWriter: Send + Sync {
     /// Only that **nothing could be attempted** — the file could not be
     /// read, or its container is not one the implementation writes
     /// into. A half that was tried and failed comes back inside
-    /// [`Stamped`] as [`Half::Failed`](asterism_provenance::Half::Failed),
+    /// [`Stamped`] as [`Half::Failed`](crate::domain::disclosure::Half::Failed),
     /// alongside whatever the other half achieved.
     ///
     /// The split is not stylistic. An implementation that reported a
@@ -90,14 +90,14 @@ pub trait ProvenanceWriter: Send + Sync {
 }
 
 /// Assembles and applies AI-disclosure provenance.
-pub struct ProvenanceService {
+pub struct DisclosureService {
     assets: Arc<dyn AssetRepository>,
     edges: Arc<dyn EdgeRepository>,
-    writer: Arc<dyn ProvenanceWriter>,
+    writer: Arc<dyn DisclosureWriter>,
     prompts: PromptDisclosure,
 }
 
-impl ProvenanceService {
+impl DisclosureService {
     /// Builds the service over its ports.
     ///
     /// `prompts` is configuration, not a port: it is the one thing this
@@ -108,7 +108,7 @@ impl ProvenanceService {
     pub fn new(
         assets: Arc<dyn AssetRepository>,
         edges: Arc<dyn EdgeRepository>,
-        writer: Arc<dyn ProvenanceWriter>,
+        writer: Arc<dyn DisclosureWriter>,
         prompts: PromptDisclosure,
     ) -> Self {
         Self {
@@ -208,7 +208,7 @@ impl ProvenanceService {
 }
 
 // The behaviour of this service is tested in
-// `crates/asterism-infra/tests/provenance_service.rs`, against the real
+// `crates/asterism-infra/tests/disclosure_service.rs`, against the real
 // SQLite repositories rather than fakes. That is not a preference: what
 // there is to get wrong here — which material's metadata is read, which
 // side of a `derived_from` edge is the parent, what a purged parent does

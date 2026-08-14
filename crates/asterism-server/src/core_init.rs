@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use asterism_core::DomainError;
-use asterism_core::application::provenance_service::ProvenanceService;
+use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
@@ -39,8 +39,8 @@ use asterism_exporter_http::HttpExporter;
 use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, QueueReEnqueue, ReEnqueue};
 use asterism_infra::jobs::{self, JobDeps};
 // Named for what it is on this side of the boundary: the core's port is
-// also called `ProvenanceWriter`, and both are in scope here.
-use asterism_infra::provenance::ProvenanceWriter as InfraProvenanceWriter;
+// also called `DisclosureWriter`, and both are in scope here.
+use asterism_infra::disclosure::DisclosureWriter as InfraDisclosureWriter;
 use asterism_infra::search::TantivyIndex;
 use asterism_infra::source_text::FsSourceTextReader;
 use asterism_infra::sqlite;
@@ -437,7 +437,7 @@ pub async fn init_core_with(
     // cell like the two below, but not for their reason: nothing here
     // is chicken-and-egg, the cell is what lets a build leave stamping
     // unwired and have the handler skip rather than fail.
-    let provenance_cell: Arc<OnceLock<Arc<ProvenanceService>>> = Arc::new(OnceLock::new());
+    let provenance_cell: Arc<OnceLock<Arc<DisclosureService>>> = Arc::new(OnceLock::new());
     // Late-bound invalidator cell (same chicken-and-egg): handler-chain
     // writes (auto_tag / cover_gen / index_rebuild) notify query-group
     // refreshes through it (W4-a).
@@ -791,10 +791,10 @@ pub async fn init_core_with(
     // operation here that cannot be undone. Turning it on is a
     // deployment's call, and it does not have a way to make it yet —
     // which is why this is a literal rather than a setting lookup.
-    let _ = provenance_cell.set(Arc::new(ProvenanceService::new(
+    let _ = provenance_cell.set(Arc::new(DisclosureService::new(
         assets_arc.clone(),
         edges_arc.clone(),
-        Arc::new(InfraProvenanceWriter::unsigned()),
+        Arc::new(InfraDisclosureWriter::unsigned()),
         PromptDisclosure::Withhold,
     )));
 

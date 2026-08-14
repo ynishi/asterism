@@ -8,7 +8,7 @@ members = [
     "crates/asterism-importer-sdk",
     "crates/asterism-importer",
     "crates/asterism-media-probe",
-    "crates/asterism-provenance",
+    "crates/asterism-disclosure-format",
     "crates/asterism-dispatch-sdk",
     "crates/asterism-exporter-comfy",
     "crates/asterism-exporter-file",
@@ -97,7 +97,7 @@ serde       = { version = "1", features = ["derive"] }
 # through a CBOR map that sorts, discarding the author's key order
 # before anything is encoded. The one path where an author's order does
 # reach a signed digest is a custom label stamped `kind: "json"`, which
-# `asterism-provenance` does not use.
+# `asterism-disclosure-format` does not use.
 #
 # What must **not** rest on this line is any digest. A JSON object is an
 # unordered collection of name/value pairs (RFC 8259), so a hash over
@@ -228,10 +228,11 @@ rand_chacha = "0.9"
 # with a hard binding computed over byte ranges the format decides. That
 # is a specification-sized problem, not a serialisation one.
 #
-# Confined to `asterism-infra::provenance`. Everything that decides *what
-# is asserted* lives in `asterism-provenance`, which does not take this
-# dependency and can therefore be tested on a machine with no
-# cryptography backend and no certificate.
+# Confined to `asterism-infra::disclosure`. What is asserted is decided
+# in `asterism-core::domain::disclosure` and rendered by
+# `asterism-disclosure-format`; neither takes this dependency, so both
+# can be tested on a machine with no cryptography backend and no
+# certificate.
 #
 # `default-features = false` drops two defaults that are wrong here:
 #

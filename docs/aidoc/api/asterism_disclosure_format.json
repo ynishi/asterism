@@ -1,0 +1,86 @@
+{
+  "crate": "asterism-disclosure-format",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_disclosure_format::embed",
+      "kind": "module",
+      "docs": "Putting an XMP packet into a container, and taking the old one out.\n\nTwo containers, because those are the two still-image formats this\ncorpus arrives in. Both are handled as byte transforms over a whole\nfile rather than as a decode/re-encode: an export must hand back the\npixels it was given, and the only way to be sure of that is to never\ndecode them. It also means a PNG whose ancillary chunks nothing here\nunderstands comes out with those chunks intact and in order.\n\n# Replace, never append\n\nBoth containers permit a second XMP packet to sit next to the first,\nand neither says which one wins. Readers disagree in practice, so a\nfile with two packets has a disclosure that depends on who opens it —\nthe failure mode being that a stale `digitalSourceType` shadows a\ncorrected one. Every writer here removes *every* packet it can see\nbefore adding its own, and the tests pin that a file arriving with\ntwo leaves with one.\n\nWhat a writer can see is what its walk covers: a PNG chunk after\n`IEND`, or a JPEG `APP1` after the scan, is neither collected nor\ndropped. Those positions are also outside what [`read_xmp`] reads,\nso no reader of this crate can be shown one — the promise is about\nthe part of the file both halves agree on rather than about every\nbyte present.\n\n# Where the packet goes\n\nPositions below are where a *new* packet lands. A file that already\ncarries one keeps it where it is: the first packet is replaced in\nplace, so a re-stamped file's chunk order does not drift with every\nexport.\n\nPNG: an `iTXt` chunk before the first `IDAT`. The chunk is\nuncompressed — the compression flag exists, and the packet is small\nenough that a reader unable to inflate it would be a worse outcome\nthan a few hundred spare bytes.\n\nJPEG: an `APP1` segment before the first non-`APPn` marker, so it\nlands after a JFIF `APP0` and after an EXIF `APP1` rather than\ndisplacing either. A metadata-only file that reaches `EOI` without\nany such marker takes the position before the `EOI`, so the segment\nis inside the image either way. (A *truncated* file has no `EOI`\neither, and is refused as malformed rather than written into.)\n\n# How much a packet may hold\n\nBoth containers have a ceiling and only one of them is reachable.\nJPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP\nidentifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a\nbudget a generator prompt exhausts on its own, which is why\n[`DisclosureRecord::essential`](asterism_core::domain::disclosure::DisclosureRecord::essential)\nexists and why [`stamp`] falls back to it. PNG's is the\nspecification's limit on a chunk's data field, about 2 GiB, which no\nrecord approaches; it is checked rather than assumed because the\nassumption used to be written as a silent truncation. Both refusals\nare [`EmbedError::PacketTooLarge`]."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::Container",
+      "kind": "enum",
+      "docs": "A still-image container this module can write into."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::EmbedError",
+      "kind": "enum",
+      "docs": "What went wrong writing a packet."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::JPEG_MAX_PACKET",
+      "kind": "constant",
+      "docs": "Largest XMP packet a JPEG can carry in one segment.\n\nExposed so a caller can decide to write a reduced record *before*\npaying for a render it is about to be told does not fit."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::embed_xmp",
+      "kind": "function",
+      "docs": "Writes `packet` into `bytes`, replacing any packet already there.\n\nReturns the whole file. Nothing is written in place: the caller\ndecides whether the result replaces the original, and an export that\nfails halfway must not leave a half-stamped file behind."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::read_xmp",
+      "kind": "function",
+      "docs": "Reads back the XMP packet a file carries, if it carries one.\n\nPresent for the tests and for the re-apply path, which has to be able\nto say whether a file that came back from somewhere still has its\ndisclosure — the question \"did this survive the round trip\" cannot be\nanswered by the writer alone."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::sniff",
+      "kind": "function",
+      "docs": "Identifies the container from its own first bytes.\n\nDeliberately not from a MIME type or a file extension. Both are\nstatements *about* a file made by something that is not the file, and\nthis module is about to rewrite the byte framing — being wrong here\nproduces a corrupt artefact rather than a failed call."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::stamp",
+      "kind": "function",
+      "docs": "Convenience: renders the record and writes it, doing nothing when\nthere is nothing to disclose.\n\nReturns `Ok(None)` for a record that discloses nothing, which is the\nsame answer [`xmp::render`] gives and for the same reason — an empty\npacket would be a modification with no content."
+    },
+    {
+      "path": "asterism_disclosure_format::manifest",
+      "kind": "module",
+      "docs": "The C2PA manifest *definition* — what would be signed, built as a\nvalue, with nothing here able to sign it.\n\n`c2pa::Builder::with_definition` takes a JSON document describing the\nmanifest; producing that document is a mapping problem (what the\ndatabase holds → what the manifest asserts) and producing a\n*signature* is a key-management problem. They are separated here so\nthe mapping can be tested exhaustively on a machine with no\ncertificate, which is every machine this repository has today.\n\n# Two assertions, and why the second one exists\n\n`c2pa.actions` carries the standard claim: this asset was created,\nand its `digitalSourceType` is the same IPTC URI the XMP packet\nstates. That is the half a validator understands.\n\n`io.github.ynishi.asterism.provenance` carries what the database\nknows and the standard has no field for: the asset id, the dispatch\nthe file left through, and the ids it was derived from. A reader that\nhas this Asterism instance can resolve those; a reader that does not\nat least learns that the lineage exists and is recorded somewhere.\n\nThe label is reverse-DNS under a domain that resolves to the author,\nwhich is the convention the C2PA specification asks third-party\nassertions to follow. A label invented outside a controlled namespace\nis one that can collide with somebody else's meaning of the same\nwords.\n\n# Why the parents are ids and not ingredients\n\nC2PA has a first-class way to say \"this was made from that\": an\ningredient, which carries the parent's own hash and, where it has\none, its manifest. That is a stronger statement than an id, and it is\none this path cannot honestly make — signing happens over a file that\nhas been exported, and the parents' bytes are not in hand at that\nmoment (they may have been purged, and re-reading them would make an\nexport's cost depend on the depth of its lineage). An ingredient\nconstructed without the parent's bytes would be an assertion about a\nhash nobody computed.\n\nSo the ids go in the custom assertion, where they are what they are:\na pointer into the library that recorded the edge. Promoting them to\ningredients is a later change that needs the parent files, not a\ndetail left out."
+    },
+    {
+      "path": "asterism_disclosure_format::manifest::ACTIONS_LABEL",
+      "kind": "constant",
+      "docs": "Label of the standard actions assertion.\n\nThe base label rather than `c2pa.actions.v2`: the SDK picks the\nversioned spelling from the claim version it is building, and\npinning the versioned one here would make this definition wrong the\nmoment the builder targets a different claim version."
+    },
+    {
+      "path": "asterism_disclosure_format::manifest::ASTERISM_ASSERTION_SCHEMA",
+      "kind": "constant",
+      "docs": "Version of the payload under [`ASTERISM_LABEL`].\n\nBeside the payload rather than implied by the label, on the same\nterms the export sidecar carries `asterism.sidecar/1`: a file signed\ntoday can be read years later by a build that has moved on, and the\nreader needs to know which shape it is holding before it starts\nwalking it."
+    },
+    {
+      "path": "asterism_disclosure_format::manifest::ASTERISM_LABEL",
+      "kind": "constant",
+      "docs": "Label of Asterism's own assertion (module docs on the namespace)."
+    },
+    {
+      "path": "asterism_disclosure_format::manifest::definition",
+      "kind": "function",
+      "docs": "Renders the manifest definition for one record.\n\nThe result is a `serde_json::Value` ready for\n`c2pa::Builder::with_definition`. It always contains the Asterism\nassertion (the asset id alone is worth recording) and contains the\nactions assertion only when a digital source type was established —\nan action that names no source type asserts less than nothing, since\na validator reads the absence as \"created, provenance unstated\"."
+    },
+    {
+      "path": "asterism_disclosure_format::xmp",
+      "kind": "module",
+      "docs": "The XMP packet — the half of the disclosure that needs no\ncertificate.\n\nIPTC Extension properties can only be carried in XMP; there is no\nEXIF or IIM spelling of them. So this packet is the entire IPTC side\nof the acceptance criteria, and it is the side that works today,\nunsigned, on a machine with no signing identity configured.\n\n# Why this is written by hand rather than by an RDF library\n\nAn XMP packet is RDF/XML, and a general RDF serialiser would be\nentitled to emit any of several equivalent forms — properties as\nattributes instead of elements, a different namespace prefix, a\ndifferent node ordering. Equivalent to a parser, not equivalent here:\nthe bytes go inside a C2PA hard binding (see the module docs on\nordering), so *which* equivalent form is produced decides whether a\nsignature made over one rendering still verifies against another. A\npacket this crate writes has to be a function of the record and\nnothing else, which is what a hand-written template is and a\nserialiser is not obliged to be.\n\nThe scope also does not justify a dependency: five properties, all\nsimple text or a URI, all in one namespace, none of them a container\n(no `rdf:Alt` / `rdf:Bag` / `rdf:Seq`), no language alternatives.\n\n# Ordering against the C2PA manifest\n\n**The packet is written before the manifest is signed, never after.**\nThe manifest's hard binding covers the XMP, so editing the packet\nafterwards invalidates the signature. This is not a deduction: IPTC's\nown 2025.1 announcement carries a worked example whose caption\nrecords that adding the new AI properties invalidated the C2PA\nmetadata that was already in the file. The apply path enforces the\norder, and its tests are what hold it.\n\n# No padding\n\nThe XMP specification suggests trailing whitespace so a packet can be\nrewritten in place without moving the bytes after it. This writes\nnone, and marks the packet read-only (`<?xpacket end=\"r\"?>`)\naccordingly. In-place rewriting is not something that can happen to a\nsigned file anyway — any edit breaks the binding — and JPEG's APP1\nsegment leaves the packet 65,504 bytes, which is a budget a generator\nprompt can exhaust on its own. Spending part of it on padding for an\nupdate path that cannot exist would be paying twice.\n\n(65,533 is the segment's payload, not the packet's: the 29-byte\n`http://ns.adobe.com/xap/1.0/\\0` identifier is inside it and has to\nbe paid first. The figure is\n[`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET), which is\nwhat the writer enforces and what\n[`EmbedError::PacketTooLarge`](crate::embed::EmbedError::PacketTooLarge)\nreports.)"
+    },
+    {
+      "path": "asterism_disclosure_format::xmp::IPTC_EXT_NS",
+      "kind": "constant",
+      "docs": "The IPTC Extension namespace, unchanged since 2008 and still the\nnamespace the 2025.1 AI properties were added to."
+    },
+    {
+      "path": "asterism_disclosure_format::xmp::render",
+      "kind": "function",
+      "docs": "Renders the record's IPTC properties as an XMP packet.\n\nReturns `None` when the record has nothing to disclose: an empty\npacket is a file modification that buys nothing, and \"nothing was\nestablished about this file\" is a normal outcome rather than an\nerror ([`DisclosureRecord::discloses_anything`])."
+    }
+  ]
+}

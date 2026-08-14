@@ -52,7 +52,7 @@
 //! [`EmbedError::PacketTooLarge`](crate::embed::EmbedError::PacketTooLarge)
 //! reports.)
 
-use crate::record::DisclosureRecord;
+use asterism_core::domain::disclosure::DisclosureRecord;
 
 /// The IPTC Extension namespace, unchanged since 2008 and still the
 /// namespace the 2025.1 AI properties were added to.
@@ -215,7 +215,7 @@ fn escape_into(out: &mut String, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_type::DigitalSourceType;
+    use asterism_core::domain::disclosure::DigitalSourceType;
 
     fn full_record() -> DisclosureRecord {
         DisclosureRecord::for_asset("asset-1")

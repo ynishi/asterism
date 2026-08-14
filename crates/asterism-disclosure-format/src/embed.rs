@@ -49,7 +49,7 @@
 //! JPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP
 //! identifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a
 //! budget a generator prompt exhausts on its own, which is why
-//! [`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential)
+//! [`DisclosureRecord::essential`](asterism_core::domain::disclosure::DisclosureRecord::essential)
 //! exists and why [`stamp`] falls back to it. PNG's is the
 //! specification's limit on a chunk's data field, about 2 GiB, which no
 //! record approaches; it is checked rather than assumed because the
@@ -658,7 +658,7 @@ pub const JPEG_MAX_PACKET: usize = jpeg::MAX_PACKET;
 /// packet would be a modification with no content.
 pub fn stamp(
     bytes: &[u8],
-    record: &crate::record::DisclosureRecord,
+    record: &asterism_core::domain::disclosure::DisclosureRecord,
 ) -> Result<Option<Vec<u8>>, EmbedError> {
     let Some(packet) = xmp::render(record) else {
         return Ok(None);
@@ -684,8 +684,7 @@ pub fn stamp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::DisclosureRecord;
-    use crate::source_type::DigitalSourceType;
+    use asterism_core::domain::disclosure::{DigitalSourceType, DisclosureRecord};
 
     /// A minimal but structurally valid PNG: signature, IHDR, one IDAT,
     /// IEND. Hand-built rather than encoded, so the test does not depend
