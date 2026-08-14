@@ -1884,11 +1884,11 @@ fn dispatch_id_of(extra: &serde_json::Value) -> Option<String> {
 /// The two halves of a disclosure fail independently and the outcome
 /// says which landed, so a partial result is reported as one rather
 /// than collapsed into success or failure.
-pub async fn provenance_stamp(
+pub async fn disclosure_stamp(
     env: &JobEnv,
     payload: &serde_json::Value,
 ) -> Result<String, DomainError> {
-    let Some(service) = env.deps.provenance.get() else {
+    let Some(service) = env.deps.disclosure.get() else {
         return Ok("no writer configured, skipped".into());
     };
     let Some(asset) = load_target(env, payload).await? else {
@@ -1913,7 +1913,7 @@ pub async fn provenance_stamp(
             let failures = outcome.failures();
             if !failures.is_empty() {
                 tracing::warn!(
-                    event = "diag.provenance_stamp.partial",
+                    event = "diag.disclosure_stamp.partial",
                     asset_id = %asset.id,
                     discloses = outcome.discloses(),
                     failures = ?failures,
@@ -1929,7 +1929,7 @@ pub async fn provenance_stamp(
         }
         Err(err) => {
             tracing::warn!(
-                event = "diag.provenance_stamp.failed",
+                event = "diag.disclosure_stamp.failed",
                 asset_id = %asset.id,
                 error = %err,
                 "the artefact exists and carries no mark"
@@ -1980,12 +1980,12 @@ async fn note_disclosure(
     {
         Ok(true) => {}
         Ok(false) => tracing::warn!(
-            event = "diag.provenance_stamp.note_skipped",
+            event = "diag.disclosure_stamp.note_skipped",
             asset_id = %asset_id,
             "extra column could not carry the disclosure note"
         ),
         Err(err) => tracing::warn!(
-            event = "diag.provenance_stamp.note_failed",
+            event = "diag.disclosure_stamp.note_failed",
             asset_id = %asset_id,
             error = %err,
             "the file was stamped and the row does not say so"
@@ -2028,7 +2028,7 @@ async fn stamp_after_hash(env: &JobEnv, asset_id: &AssetId, fingerprint: &Materi
     }
     // No writer configured is not a failure and not a warning: it is
     // the state a build that has not asked for stamping is in.
-    if env.deps.provenance.get().is_none() {
+    if env.deps.disclosure.get().is_none() {
         return;
     }
     let produced_here = matches!(
@@ -2041,13 +2041,13 @@ async fn stamp_after_hash(env: &JobEnv, asset_id: &AssetId, fingerprint: &Materi
     if let Err(err) = env
         .queue
         .enqueue(
-            asterism_core::domain::job::JobKind::ProvenanceStamp,
+            asterism_core::domain::job::JobKind::DisclosureStamp,
             serde_json::json!({ "asset_id": asset_id.to_string() }),
         )
         .await
     {
         tracing::warn!(
-            event = "diag.provenance_stamp.enqueue_failed",
+            event = "diag.disclosure_stamp.enqueue_failed",
             asset_id = %asset_id,
             error = %err,
             "the metadata landed but nothing was asked to write the disclosure"

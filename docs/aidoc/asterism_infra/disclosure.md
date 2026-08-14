@@ -85,7 +85,7 @@ that path; this note is why.
 ## Types
 
 - `CertificateVerdict` — What reading a certificate's own extensions concluded.
-- `Container` — A container this module can write provenance into.
+- `Container` — A container this module can write a disclosure into.
 - `DisclosureError` — What went wrong applying a record.
 - `DisclosureWriter` — Applies disclosure records to files.
 - `SigningIdentity` — The certificate and key a manifest is signed with.

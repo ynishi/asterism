@@ -82,7 +82,7 @@ use std::path::{Path, PathBuf};
 use asterism_core::domain::disclosure::{DisclosureRecord, Half, Skipped, Stamped};
 use asterism_disclosure_format::{embed, manifest};
 
-/// A container this module can write provenance into.
+/// A container this module can write a disclosure into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
     /// PNG — XMP as an `iTXt` chunk, manifest as a JUMBF chunk.
@@ -148,7 +148,7 @@ impl Container {
 #[derive(Debug, thiserror::Error)]
 pub enum DisclosureError {
     /// The file could not be read, written, or replaced.
-    #[error("provenance io on {path}: {source}")]
+    #[error("disclosure io on {path}: {source}")]
     Io {
         /// File the operation was against.
         path: PathBuf,
@@ -156,7 +156,7 @@ pub enum DisclosureError {
         source: std::io::Error,
     },
     /// The bytes are not a container this module writes into.
-    #[error("{path} is not a container this build writes provenance into")]
+    #[error("{path} is not a container this build writes a disclosure into")]
     UnsupportedContainer {
         /// File that was offered.
         path: PathBuf,
@@ -419,7 +419,7 @@ impl SigningIdentity {
             // prefix, so an event addressed `diag.…` reaches neither
             // stderr nor the `diag_log` table.
             tracing::warn!(
-                event = "diag.provenance.identity",
+                event = "diag.disclosure.identity",
                 "signing certificate: {warning}"
             );
         }
@@ -966,7 +966,7 @@ impl asterism_core::application::disclosure_service::DisclosureWriter for Disclo
             .await
             .map_err(|e| {
                 asterism_core::error::DomainError::Infra(anyhow::anyhow!(
-                    "provenance task did not finish: {e}"
+                    "disclosure task did not finish: {e}"
                 ))
             })?
             .map_err(|e| asterism_core::error::DomainError::Infra(anyhow::anyhow!("{e}")))

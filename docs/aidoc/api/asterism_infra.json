@@ -15,7 +15,7 @@
     {
       "path": "asterism_infra::disclosure::Container",
       "kind": "enum",
-      "docs": "A container this module can write provenance into."
+      "docs": "A container this module can write a disclosure into."
     },
     {
       "path": "asterism_infra::disclosure::DisclosureError",
@@ -173,6 +173,11 @@
       "docs": "Auto-generates the card cover. Idempotent — if the cover column is\nalready populated the handler skips.\n\nWrites only the cover column (partial `UPDATE`) so that concurrent\nhandlers do not race through a read-modify-write cycle. The full-row\nupsert path was observed clobbering the cover value in practice."
     },
     {
+      "path": "asterism_infra::jobs::handlers::disclosure_stamp",
+      "kind": "function",
+      "docs": "Writes the AI disclosure into a file this library produced.\n\nEnqueued by [`stamp_after_hash`] once the artefact's metadata has\nlanded — see there for why this cannot happen when the export\nfinishes, and why it is confined to artefacts a dispatch made.\n\n# Why a failure here is not a failed job\n\nA stamp that does not land leaves an artefact that exists and is not\nmarked. The file is fine; what is missing is a statement about it,\nand the statement can be made again — the disclosure is derived from\nstored rows, so re-running this job re-derives it. Failing the job\nwould put a retry loop around a file rewrite and would put an export\nthat produced exactly what it was asked for into a red state over\nmetadata.\n\nThe two halves of a disclosure fail independently and the outcome\nsays which landed, so a partial result is reported as one rather\nthan collapsed into success or failure."
+    },
+    {
       "path": "asterism_infra::jobs::handlers::duplicate_scan",
       "kind": "function",
       "docs": "Re-derives duplicate conflicts from fingerprints already on the rows.\n\nPayload: `{ \"batch\": true, \"cursor\": {\"asset_id\": …, \"ord\": …} }`.\nOne shape only — there is no per-asset variant because the per-asset\nderivation already happens, inline, when that asset's digest is\nwritten (`detect_after_hash`). This exists for the rows whose moment\npassed; see [`JobKind::DuplicateScan`].\n\n**Nothing here is destructive and nothing is folded.** The origin is\n[`DetectionOrigin::Backfill`], which turns a lane's `Fold` into `Ask`,\nand the conflict insert is `ON CONFLICT DO NOTHING` over\n`UNIQUE (pair_lo, pair_hi, axis)` — so a pair already queued is not\nduplicated, and a pair a person already resolved keeps its answer.\nThat is what makes the job safe to re-run at will.\n\n[`JobKind::DuplicateScan`]: asterism_core::domain::job::JobKind::DuplicateScan"
@@ -201,11 +206,6 @@
       "path": "asterism_infra::jobs::handlers::preview_gen",
       "kind": "function",
       "docs": "Transcodes a webview-unplayable video into its preview rendition\n(`super::preview_ffmpeg`). Payload: `{ \"asset_id\": <uuid> }`.\n\nIdempotent: an existing rendition is a completed job. On failure a\n`.failed` marker carrying the reason is written beside the target\nso the status endpoint answers \"failed: why\" instead of keeping\nthe pane on a spinner forever; the marker is cleared before every\nfresh attempt so a retry starts clean."
-    },
-    {
-      "path": "asterism_infra::jobs::handlers::provenance_stamp",
-      "kind": "function",
-      "docs": "Writes the AI disclosure into a file this library produced.\n\nEnqueued by [`stamp_after_hash`] once the artefact's metadata has\nlanded — see there for why this cannot happen when the export\nfinishes, and why it is confined to artefacts a dispatch made.\n\n# Why a failure here is not a failed job\n\nA stamp that does not land leaves an artefact that exists and is not\nmarked. The file is fine; what is missing is a statement about it,\nand the statement can be made again — the disclosure is derived from\nstored rows, so re-running this job re-derives it. Failing the job\nwould put a retry loop around a file rewrite and would put an export\nthat produced exactly what it was asked for into a red state over\nmetadata.\n\nThe two halves of a disclosure fail independently and the outcome\nsays which landed, so a partial result is reported as one rather\nthan collapsed into success or failure."
     },
     {
       "path": "asterism_infra::jobs::handlers::query_group_refresh",

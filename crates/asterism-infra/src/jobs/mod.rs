@@ -185,15 +185,15 @@ pub struct JobDeps {
     /// sandboxes the renditions with it (the same reasoning as the
     /// Tantivy index override).
     pub previews_dir: std::path::PathBuf,
-    /// Writes AI-disclosure provenance into a file this library
-    /// produced — the one thing `provenance_stamp` does.
+    /// Writes the AI disclosure into a file this library produced — the
+    /// one thing `disclosure_stamp` does.
     ///
     /// A cell, and empty is a supported state: a build that has not
     /// decided whether it wants its exports rewritten leaves it unset,
     /// and the handler skips with a message rather than failing. That
     /// is the same shape [`dispatch`](Self::dispatch) uses, for a
     /// different reason — this one is not late-bound, it is optional.
-    pub provenance: Arc<
+    pub disclosure: Arc<
         std::sync::OnceLock<Arc<asterism_core::application::disclosure_service::DisclosureService>>,
     >,
 }
@@ -458,13 +458,13 @@ async fn handle_asterism_job(
         Ok(JobKind::AssetFold) => (handlers::asset_fold(&env, &job.payload).await, false),
         Ok(JobKind::PreviewGen) => (handlers::preview_gen(&env, &job.payload).await, false),
         Ok(JobKind::ChapterScan) => (handlers::chapter_scan(&env, &job.payload).await, false),
-        Ok(JobKind::ProvenanceStamp) => match env.deps.provenance.get() {
-            Some(_) => (handlers::provenance_stamp(&env, &job.payload).await, false),
+        Ok(JobKind::DisclosureStamp) => match env.deps.disclosure.get() {
+            Some(_) => (handlers::disclosure_stamp(&env, &job.payload).await, false),
             // Same shape as `DispatchRun` above: an unbound cell means
             // nothing was stamped, so it classifies as skipped rather
             // than as a run that did its work.
             None => (
-                Ok("provenance_stamp skipped: no writer configured".to_string()),
+                Ok("disclosure_stamp skipped: no writer configured".to_string()),
                 true,
             ),
         },
@@ -839,7 +839,7 @@ mod tests {
     /// **A dispatch's output comes back marked.**
     ///
     /// The acceptance criterion, asserted where it actually happens.
-    /// The chain is `reify` → `material_hash` → `provenance_stamp`, and
+    /// The chain is `reify` → `material_hash` → `disclosure_stamp`, and
     /// this drives the last link over the row state the middle one
     /// leaves behind: an artefact carrying the dispatch trace, a
     /// material whose `meta_kv` names a generator, and a real file on
@@ -934,8 +934,8 @@ mod tests {
             .await
             .unwrap();
 
-        let provenance = Arc::new(std::sync::OnceLock::new());
-        let _ = provenance.set(Arc::new(
+        let disclosure = Arc::new(std::sync::OnceLock::new());
+        let _ = disclosure.set(Arc::new(
             asterism_core::application::disclosure_service::DisclosureService::new(
                 assets.clone(),
                 edges.clone(),
@@ -947,10 +947,10 @@ mod tests {
         ));
 
         let env = JobEnv {
-            deps: test_deps(&isle, provenance.clone()).await,
+            deps: test_deps(&isle, disclosure.clone()).await,
             queue: open_queue(pool).await.unwrap(),
         };
-        let outcome = handlers::provenance_stamp(
+        let outcome = handlers::disclosure_stamp(
             &env,
             &serde_json::json!({ "asset_id": asset.id.to_string() }),
         )
@@ -1075,7 +1075,7 @@ mod tests {
             deps: test_deps(&isle, Arc::new(std::sync::OnceLock::new())).await,
             queue: open_queue(pool).await.unwrap(),
         };
-        let outcome = handlers::provenance_stamp(
+        let outcome = handlers::disclosure_stamp(
             &env,
             &serde_json::json!({ "asset_id": uuid::Uuid::now_v7().to_string() }),
         )
@@ -1088,7 +1088,7 @@ mod tests {
     /// they do not touch left inert.
     async fn test_deps(
         isle: &rusqlite_isle::AsyncIsle,
-        provenance: Arc<
+        disclosure: Arc<
             std::sync::OnceLock<
                 Arc<asterism_core::application::disclosure_service::DisclosureService>,
             >,
@@ -1141,7 +1141,7 @@ mod tests {
             material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone()),
             chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
             previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-            provenance,
+            disclosure,
         }
     }
 
@@ -1211,7 +1211,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             None,
         )
@@ -1543,7 +1543,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1676,7 +1676,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1840,7 +1840,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2028,7 +2028,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2216,7 +2216,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2307,7 +2307,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2394,7 +2394,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         }

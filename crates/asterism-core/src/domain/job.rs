@@ -339,7 +339,20 @@ pub enum JobKind {
     /// leaves an artefact that exists and is unmarked — a state to
     /// record, not an error to retry into. One handler over both would
     /// be one retry policy over two kinds of loss.
-    ProvenanceStamp,
+    ///
+    /// # The slug was `provenance_stamp` for one commit
+    ///
+    /// Renamed with the rest of the feature, once `provenance` stopped
+    /// meaning two things. A slug is a stored value and renaming one is
+    /// normally a migration; this one is safe to rename outright
+    /// because the kind has never been in a release, so the only rows
+    /// that can carry the old spelling are jobs queued on a development
+    /// machine in the hours since it was added. An unknown slug is
+    /// skipped rather than fatal (`parse` refuses it, the dispatcher
+    /// reports "unknown job kind skipped"), and the cost of one skipped
+    /// row is one artefact that stays unmarked until something
+    /// re-fingerprints it.
+    DisclosureStamp,
 }
 
 impl JobKind {
@@ -365,7 +378,7 @@ impl JobKind {
             Self::SeriesDerive => "series_derive",
             Self::PreviewGen => "preview_gen",
             Self::ChapterScan => "chapter_scan",
-            Self::ProvenanceStamp => "provenance_stamp",
+            Self::DisclosureStamp => "disclosure_stamp",
         }
     }
 
@@ -391,7 +404,7 @@ impl JobKind {
             "series_derive" => Ok(Self::SeriesDerive),
             "preview_gen" => Ok(Self::PreviewGen),
             "chapter_scan" => Ok(Self::ChapterScan),
-            "provenance_stamp" => Ok(Self::ProvenanceStamp),
+            "disclosure_stamp" => Ok(Self::DisclosureStamp),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),
