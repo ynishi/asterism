@@ -38,7 +38,7 @@ use async_trait::async_trait;
 
 use asterism_provenance::{DisclosureRecord, Stamped};
 
-use crate::domain::disclosure::{self, ParentEvidence};
+use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
 use crate::domain::edge::EdgeKind;
 use crate::domain::repository::{AssetRepository, EdgeRepository};
 use crate::domain::value::AssetId;
@@ -94,19 +94,28 @@ pub struct ProvenanceService {
     assets: Arc<dyn AssetRepository>,
     edges: Arc<dyn EdgeRepository>,
     writer: Arc<dyn ProvenanceWriter>,
+    prompts: PromptDisclosure,
 }
 
 impl ProvenanceService {
     /// Builds the service over its ports.
+    ///
+    /// `prompts` is configuration, not a port: it is the one thing this
+    /// service decides rather than reads, and it decides it the same way
+    /// for every asset it is asked about. It is taken here rather than
+    /// per call so that an installation states it once, in the
+    /// composition root, and no call site can quietly differ.
     pub fn new(
         assets: Arc<dyn AssetRepository>,
         edges: Arc<dyn EdgeRepository>,
         writer: Arc<dyn ProvenanceWriter>,
+        prompts: PromptDisclosure,
     ) -> Self {
         Self {
             assets,
             edges,
             writer,
+            prompts,
         }
     }
 
@@ -175,6 +184,7 @@ impl ProvenanceService {
             dispatch_id,
             meta_kv.as_deref(),
             &parents,
+            self.prompts,
         ))
     }
 

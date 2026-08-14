@@ -18,6 +18,7 @@ use std::sync::Arc;
 use asterism_core::application::provenance_service::ProvenanceService;
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
+use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
 use asterism_core::domain::material::Material;
 use asterism_core::domain::persona::Persona;
@@ -59,7 +60,15 @@ impl Fixture {
         // the setup without changing any answer here. The signing path
         // has its own tests in `src/provenance.rs`.
         let writer = Arc::new(ProvenanceWriter::unsigned());
-        let service = ProvenanceService::new(assets.clone(), edges.clone(), writer);
+        // `Embed`: these fixtures assert what the library puts in a
+        // record, and withholding the prompt would make the assertions
+        // about it vacuous. An installation's own answer is not this.
+        let service = ProvenanceService::new(
+            assets.clone(),
+            edges.clone(),
+            writer,
+            PromptDisclosure::Embed,
+        );
         Self {
             service,
             assets,

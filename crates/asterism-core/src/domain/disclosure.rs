@@ -168,17 +168,63 @@ pub fn is_synthetic(meta_kv: Option<&str>) -> bool {
     meta_kv.is_some_and(|meta_kv| read_evidence(meta_kv).generated)
 }
 
+/// Whether an artefact's prompt is disclosed in the exported file.
+///
+/// # Why this is a parameter and not a constant
+///
+/// The prompt is the one field here whose disclosure is a *choice*. The
+/// source type states what the file is, and there is one true answer;
+/// the AI system names the tool, and it is already in the container the
+/// user is exporting. The prompt is different: it is free text that a
+/// person wrote, and in the one family that supplies it —
+/// AUTOMATIC1111's `parameters` — the blob is not only the prompt. It
+/// carries the negative prompt, the sampler settings, the seed, and the
+/// names and hashes of the checkpoint and every LoRA. A model trained
+/// locally and named after a person or a client puts that name into
+/// every copy that leaves the machine.
+///
+/// [`DisclosureRecord::with_prompt`] already says this is the caller's
+/// call — "a decision the service makes, not a property of the data …
+/// it cannot be taken back out of a file already published". Until this
+/// existed there was nowhere to make it: the mapping filled the field
+/// whenever the evidence had one, so the policy was a constant nobody
+/// had chosen.
+///
+/// # There is no default
+///
+/// Deliberately: an enum with a `Default` is a policy chosen by whoever
+/// wrote the `derive`. The caller states it, and the composition root is
+/// where an installation's answer belongs.
+///
+/// The asymmetry that decides which way to lean is the one this module
+/// already states for terms — a missing mark is a gap, a wrong statement
+/// is unrecoverable. Withholding a prompt can be undone by re-applying;
+/// publishing one cannot be undone at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptDisclosure {
+    /// The record carries no prompt, whatever the container held.
+    Withhold,
+    /// The prompt is disclosed as the container stated it.
+    ///
+    /// Verbatim: this module does not parse the blob, so it cannot
+    /// separate the typed text from the settings beside it. Choosing
+    /// this discloses both.
+    Embed,
+}
+
 /// Builds the record for one artefact.
 ///
 /// `meta_kv` is the canonical metadata of the material the file came
 /// from; `parents` are its recorded `derived_from` edges, in the order
-/// they were read.
+/// they were read; `prompts` decides whether the prompt is disclosed at
+/// all ([`PromptDisclosure`]).
 pub fn record_for(
     asset_id: &str,
     title: Option<&str>,
     dispatch_id: Option<&str>,
     meta_kv: Option<&str>,
     parents: &[ParentEvidence],
+    prompts: PromptDisclosure,
 ) -> DisclosureRecord {
     let evidence = meta_kv.map(read_evidence).unwrap_or_default();
 
@@ -206,7 +252,7 @@ pub fn record_for(
             // a guess written into a signed claim.
             record = record.with_ai_system(system, None);
         }
-        if let Some(prompt) = evidence.prompt {
+        if let (PromptDisclosure::Embed, Some(prompt)) = (prompts, evidence.prompt) {
             record = record.with_prompt(prompt, None);
         }
     } else if evidence.captured {
@@ -242,7 +288,14 @@ mod tests {
             ("prompt", r#"{"3":{"inputs":{"seed":7}}}"#),
             ("workflow", "{}"),
         ]);
-        let record = record_for("asset-1", None, None, Some(&meta_kv), &[]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(
             record.source_type,
             Some(DigitalSourceType::TrainedAlgorithmicMedia)
@@ -256,7 +309,14 @@ mod tests {
         // the family the keywords belong to, and the keywords are the
         // evidence either way.
         let meta_kv = meta(&[("workflow", "{}")]);
-        let record = record_for("asset-1", None, None, Some(&meta_kv), &[]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(record.ai_system.as_deref(), Some("ComfyUI"));
     }
 
@@ -266,7 +326,14 @@ mod tests {
             "parameters",
             "1girl, purple eyes\nNegative prompt: blurry\nSteps: 20",
         )]);
-        let record = record_for("asset-1", None, None, Some(&meta_kv), &[]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(
             record.source_type,
             Some(DigitalSourceType::TrainedAlgorithmicMedia)
@@ -284,7 +351,14 @@ mod tests {
         // writing it there would put a workflow dump into every
         // exported file under a field that claims to be a prompt.
         let meta_kv = meta(&[("prompt", r#"{"3":{"inputs":{"text":"1girl"}}}"#)]);
-        let record = record_for("asset-1", None, None, Some(&meta_kv), &[]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(record.prompt, None);
         assert_eq!(
             record.source_type,
@@ -302,6 +376,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", false)],
+            PromptDisclosure::Embed,
         );
         assert_eq!(
             record.source_type,
@@ -321,6 +396,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", true), parent("parent-2", true)],
+            PromptDisclosure::Embed,
         );
         assert_eq!(
             record.source_type,
@@ -335,7 +411,14 @@ mod tests {
             (capture_keys::MAKE, "FUJIFILM"),
             (capture_keys::MODEL, "X-T5"),
         ]);
-        let record = record_for("asset-1", None, None, Some(&meta_kv), &[]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(record.source_type, Some(DigitalSourceType::DigitalCapture));
         assert_eq!(record.ai_system, None);
     }
@@ -353,6 +436,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", false)],
+            PromptDisclosure::Embed,
         );
         assert_eq!(
             record.source_type,
@@ -369,7 +453,7 @@ mod tests {
             Some("not json"),
             Some(r#"{"Software":"GIMP"}"#),
         ] {
-            let record = record_for("asset-1", None, None, meta_kv, &[]);
+            let record = record_for("asset-1", None, None, meta_kv, &[], PromptDisclosure::Embed);
             assert_eq!(record.source_type, None, "for {meta_kv:?}");
             assert!(!record.discloses_anything(), "for {meta_kv:?}");
         }
@@ -391,9 +475,94 @@ mod tests {
     fn the_identifiers_travel_even_when_nothing_else_does() {
         // The manifest half is worth writing for a file nothing was
         // established about: the ids are what make it findable again.
-        let record = record_for("asset-1", Some("  "), Some("dispatch-1"), None, &[]);
+        let record = record_for(
+            "asset-1",
+            Some("  "),
+            Some("dispatch-1"),
+            None,
+            &[],
+            PromptDisclosure::Embed,
+        );
         assert_eq!(record.asset_id, "asset-1");
         assert_eq!(record.dispatch_id.as_deref(), Some("dispatch-1"));
         assert_eq!(record.title, None, "a blank title is not a title");
+    }
+
+    #[test]
+    fn withholding_the_prompt_leaves_the_rest_of_the_disclosure_intact() {
+        // The whole point of the switch: it decides one field. A file
+        // whose prompt is withheld still says it is synthetic and still
+        // names the system, because those are not the contested part.
+        let meta_kv = meta(&[
+            (
+                generator_keys::A1111,
+                "a prompt\nNegative prompt: none\nModel: secret-v3",
+            ),
+            (SOFTWARE, "AUTOMATIC1111"),
+        ]);
+
+        let withheld = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Withhold,
+        );
+        assert_eq!(withheld.prompt, None);
+        assert_eq!(
+            withheld.source_type,
+            Some(DigitalSourceType::TrainedAlgorithmicMedia)
+        );
+        assert_eq!(withheld.ai_system.as_deref(), Some("AUTOMATIC1111"));
+        assert!(
+            withheld.discloses_anything(),
+            "withholding the prompt is not withholding the disclosure"
+        );
+
+        let embedded = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
+        assert!(embedded.prompt.is_some());
+    }
+
+    #[test]
+    fn withholding_is_the_only_thing_that_keeps_the_settings_out() {
+        // The blob is not separable here — this module does not parse
+        // it — so `Embed` publishes the model name and the LoRA hashes
+        // along with the text somebody typed. Pinned so that a later
+        // change which starts parsing has to come past this test.
+        let meta_kv = meta(&[(
+            generator_keys::A1111,
+            "cat\nNegative prompt: dog\nSteps: 28, Model: client-name-v3, \
+             Lora hashes: \"client-name: a1b2c3d4\"",
+        )]);
+
+        let embedded = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Embed,
+        );
+        let prompt = embedded.prompt.expect("embedded");
+        assert!(prompt.contains("client-name-v3"));
+        assert!(prompt.contains("Lora hashes"));
+
+        let withheld = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            PromptDisclosure::Withhold,
+        );
+        assert_eq!(withheld.prompt, None);
     }
 }
