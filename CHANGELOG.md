@@ -54,7 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `aidoc-guard` step runs the check when it can and fails on drift as
   before; when the toolchain or `cargo-aidoc` is missing it prints what is
   missing and continues. A gate nobody is told they skipped is not a gate.
-  The prerequisites are in the README.
+  The prerequisites are in the README, and CI installs them — a step that
+  warns on every run is a step nobody reads, so on the one machine that
+  runs `check` for every change, drift is red rather than a log line.
 
 - **The row records what became of an artefact's disclosure** (#14) —
   stamping wrote a mark into a file and said so in a log line, leaving
