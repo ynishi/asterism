@@ -1,81 +1,98 @@
 //! Domain layer — entities, value objects, and repository ports.
 //!
-//! This module is the source of truth for the domain design; drafts of the
-//! narrative live in private design notes.
+//! This module is the source of truth for the domain design. It deliberately
+//! carries **no per-module inventory**: rustdoc builds the Modules index on
+//! this page from the first paragraph of every child's own doc, so a
+//! hand-written copy can only ever be a stale duplicate — the one this file
+//! used to carry covered 27 of 42 modules by the time the gap was caught
+//! (#25). To read the full, always-current index straight from the tree
+//! with no doc build (each opening paragraph, which may wrap over a few
+//! source lines):
 //!
-//! ## Modules
+//! ```text
+//! awk '/^\/\/!$/ { nextfile } /^\/\/!/ { print FILENAME ": " substr($0, 5) }' \
+//!     crates/asterism-core/src/domain/*.rs
+//! ```
 //!
-//! - [`value`]        — value objects (id / slug / text newtypes, `Visibility`,
-//!   `SourceRef`, `Page<T>`).
-//! - [`app_setting`]  — closed registry of application setting keys plus
-//!   the stored-override entity behind the `app_setting` table.
-//! - [`persona`]      — `Persona`, the primary aggregate root.
-//! - [`persona_theme`] — 1:1 side aggregate carrying persona-scoped
-//!   UI chrome (wallpaper asset reference).
-//! - [`asset`]        — `Asset` entity, the `AssetCard` read projection, and
-//!   `AssetQuery`.
-//! - [`material_layer`] — `MaterialLayer`: one band of marks over a
-//!   material, carrying who produced it (`LayerOrigin`: imported from
-//!   the file / written by the user / derived by a job) and what it
-//!   holds (`LayerRole`: structure or annotation). What makes
-//!   "re-read the file" able to replace the file's own reading without
-//!   touching a person's.
-//! - [`material_mark`] — `MaterialMark`: a note fastened to a point in
-//!   an asset's *material* (the coordinate space its content carries).
-//!   `MaterialAnchor` names which space and where — today the playback
-//!   timeline (an instant or a half-open interval), tomorrow a
-//!   rectangle on an image plane. Distinct from a comment on the asset
-//!   as a whole. Belongs to an `Annotation` layer.
-//! - [`chapter_mark`] — `ChapterMark`: one named section of a material,
-//!   as the container declares it. Belongs to a `Structure` layer.
-//!   Shares `TimelineSpan` with `material_mark` and nothing else — a
-//!   note points *at* a position, a chapter states a *division*.
-//! - [`attribution`]  — the attribution doctrine: `Author` /
-//!   `OperatorRef` / `AttributionChannel` (who a record is by, which
-//!   agent operated on their behalf, and through which channel that
-//!   arrived), plus the `AttributionContext` write-path carrier.
-//!   Distinct from `provenance`, which records where an artefact came
-//!   from.
-//! - [`instance`]     — `InstanceIdentity`: the single owner record
-//!   `Author::Owner` refers to.
-//! - [`material`]     — `Material`, the physical-original layer of an
-//!   asset (locator / size / mime facts; aggregate-internal).
-//! - [`source_locator`] — `SourceLocator` and the four shapes it is a
-//!   sum of: where an artefact's bytes are, held as a typed value and
-//!   the only code that knows the storage encoding.
-//! - [`color`]        — `ColorBucket`, the closed swatch set the palette
-//!   facet filters on (a projection of `asset.palette`).
-//! - [`content_hash`] — fingerprint of an original's bytes; the axis
-//!   duplicate detection groups on (distinct from `snapshot_hash`,
-//!   which fingerprints a member list).
-//! - [`content_region`] — the vocabulary of the content axis: the three
-//!   things a reading of "which of an artefact's bytes decide what it
-//!   decodes to" can conclude, and the markers each is stored as.
-//! - [`series`]         — "made the same way": a `Strategy` (a data
-//!   rule for reading a material's metadata) and the key it derives.
-//!   A second sentence over `material_meta`'s map rather than a change
-//!   to it, and derived without reading a byte, so a rule can be
-//!   rewritten and the whole library re-derived from rows.
-//! - [`probe`]          — the port those readings are written against.
-//!   Format knowledge and container parsing live behind it, in
-//!   `asterism-media-probe` and the adapters in `asterism-infra`.
-//! - [`duplicate_conflict`] — the open question two rows holding the
-//!   same bytes raise, and how it is answered (the edge records the
-//!   fact; this records what is still to decide).
-//! - [`merge_plan`]   — a person's ruling that a set of rows is one
-//!   thing, checked as a declaration (the manual counterpart to the
-//!   automatic 1:1 fold a `duplicate_conflict` answer produces).
-//! - [`tag`]          — `Tag` (the channel entity, shared across personas).
-//! - [`dir`]          — `Dir` (sidebar folder tree; organisation axis).
-//! - [`edge`]         — `ConstellationEdge` (the hover-burst backbone).
-//! - [`constellation`] — pure planning function for edge weights and labels.
-//! - [`provenance`]   — `ProvenanceRef`, the declared origin a
-//!   re-ingested artefact carries when it comes back from outside.
-//! - [`job`]          — `Job` lifecycle model.
-//! - [`observation`]  — the four observation streams (action / job /
-//!   diag / perf) and the retention, sampling and persistence policy
-//!   declared for each.
-//! - [`repository`]   — port traits; implementations live in `asterism-infra`.
+//! What follows is the part no index can generate: how the modules hang
+//! together, and the doctrines that reading one module at a time gets wrong.
+//!
+//! ## A tour of the domain
+//!
+//! **The catalogue.** [`persona`] is the primary aggregate root; [`asset`]
+//! is one catalogued footprint, with [`material`] as its physical-original
+//! layer and [`value`] holding the shared newtypes. [`modality`], [`tag`],
+//! [`dir`] and [`group`] are the organisation axes over it; [`instance`]
+//! names the single owner that `Author::Owner` refers to.
+//!
+//! **The identity of bytes.** What makes two rows "the same":
+//! [`content_hash`] fingerprints a whole file, [`content_region`] narrows
+//! to the bytes that decide what it decodes to, [`material_meta`] /
+//! [`material_meta_raw`] canonicalise and keep the container's metadata,
+//! [`series`] derives "made the same way", [`source_locator`] types where
+//! the bytes live, and [`probe`] is the port those readings are written
+//! against. When identity collides, [`duplicate_conflict`] holds the open
+//! question and [`merge_plan`] a person's ruling over a whole set.
+//!
+//! **The record layer.** [`snapshot`] freezes an ordered asset set —
+//! content-addressed, a git-tree analogue, fingerprinted by
+//! [`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
+//! a freeze; [`provenance`] is the declared origin a re-ingested artefact
+//! carries back; [`edge`] holds typed asset↔asset facts — from derivation
+//! and identity to co-occurrence — that lineage walks and the hover burst
+//! renders; [`attribution`] types who a write is by, what operated on their
+//! behalf, and through which channel that answer arrived.
+//!
+//! **The annotation layer.** [`thread`] collects messages from humans and
+//! agents alike; [`asset_comment`] is the short-note thread on one asset;
+//! [`material_layer`] bands marks by who produced them, [`material_mark`]
+//! pins a note into a material's own coordinate space, [`chapter_mark`]
+//! states a division, and [`album_meta`] is what a person or an agent says
+//! about an asset in Album's own words.
+//!
+//! **Evaluation and presentation.** [`query_group_eval`] holds the pure
+//! pieces of query-group materialisation and [`sort_eval`] the backend port
+//! of the grid comparator; [`render`] decides thumbnail eligibility and
+//! preview mode in one place; [`constellation`] plans edge weights and
+//! labels; [`color`] is the palette facet's closed swatch set; [`session`]
+//! is the Dialog-modality aggregate root.
+//!
+//! **Runtime support.** [`job`] models asynchronous work, [`observation`]
+//! the four telemetry streams and their policies, [`app_setting`] the
+//! closed setting registry, [`persona_profile`] / [`persona_theme`] a
+//! persona's identity signal and visual chrome, and [`repository`] the
+//! persistence ports `asterism-infra` implements.
+//!
+//! The tour groups by capability and makes no completeness promise — a
+//! module absent here is an omission from a narrative, not from the
+//! record; the generated index and the command above are the inventory.
+//!
+//! ## Doctrines
+//!
+//! The recurring decisions that reading code alone misleads on. Each is
+//! stated in full next to the type that carries it; this is the
+//! cross-module view.
+//!
+//! 1. **Events, not state.** A recorded act is one row per invocation over
+//!    a frozen set, with one-way lifecycle transitions — re-dispatching a
+//!    snapshot inserts a new `DispatchJob` rather than rolling a status
+//!    row per snapshot-exporter pair — and "current standing" is derived
+//!    on read: `duplicate_conflict` refuses a third resolution value, and
+//!    its repository re-derives "one of them went away" against the
+//!    assets on every read rather than writing it into the queue row.
+//! 2. **Facts and verdicts stay apart.** Edges are facts about content and
+//!    deliberately carry no actor and no timestamp; verdicts — a conflict
+//!    resolution, a fold, a merge ruling — live on their own rows, where
+//!    who and when can be recorded.
+//! 3. **Freeze, then refer.** A snapshot carries no name, no note, no
+//!    origin story. Every statement of *where it came from* lives on the
+//!    referencing event (`dispatch_job.source_group_id` /
+//!    `source_query_json`), never on the snapshot itself (`migrations.rs`,
+//!    `v19_selection_model`).
+//! 4. **Attribution answers "whose write is this" and stops there.** The
+//!    `(author, operator, via)` triple is about the write; where an
+//!    artefact came from is [`provenance`]'s question. The two vocabularies
+//!    do not mix.
 //!
 //! ## Aggregate boundaries
 //!
