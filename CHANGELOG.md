@@ -317,6 +317,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path already took care to avoid. Both routes clear it now, and a test
   covers the signing path's failure route rather than only its success.
 
+- **When a signing certificate is configured, it is read before it is
+  used** (#14) — nothing wires one yet, which is #14's own open item;
+  this is what will happen when something does.
+  `inspect_certificate` reports what a certificate's extensions say, and
+  `SigningIdentity` refuses on the half of it that means the certificate
+  cannot sign at all: an extended key usage naming nothing a claim can
+  be signed under, or a CA certificate offering to sign one itself.
+  Neither reaches `c2pa` as anything better than a failure later, so it
+  fails here with a reason.
+
+  The other half is reported and not acted on. A certificate without
+  `c2pa-kp-claimSigning` is not one the Conformance Program's issuance
+  profile would have produced, and a subject naming no organisation is
+  one no validator can display a signer for — both keep a certificate
+  off a trust list without stopping it signing for a reader who has
+  imported it, which is a use the specification's own guidance describes
+  (a private credential store, and self-issued credentials for it). That
+  guidance also states the split rather than leaving it to be invented:
+  of an extended key usage misconfiguration it says a claim generator
+  "should warn its user with an explanation of the problem, but should
+  allow the user to choose to proceed with signing". A deployment
+  signing for publication would reasonably want the warnings to refuse
+  too; `inspect_certificate` is public so that setting has somewhere to
+  read from when it is written.
+
+  This started out refusing every certificate without
+  `c2pa-kp-claimSigning`, on the belief that the profile requires it in
+  addition to `emailProtection` or `documentSigning` — which it does, of
+  a certificate a conforming CA *issues*. That is not the set `c2pa`
+  will sign with: its accept-list takes any one of six usages, and one
+  is enough. The strict version would have refused a
+  `documentSigning`-only certificate — a profile IPTC's own publisher
+  policy explicitly permits — while telling its operator the certificate
+  could not sign, which is false and which they could not have acted on,
+  an EKU not being something you can add to an issued certificate. The
+  two questions are separate and the code now keeps them separate.
+
+  What the check does *not* look at is worth knowing: everything else
+  `c2pa` requires at signing time, which is a good deal more, and in
+  particular expiry. A Conformance Program certificate is valid for at
+  most 366 days, so every deployment that signs meets that one
+  eventually, and it arrives as a signing error rather than as an
+  identity one.
+
+  Bytes that do not parse yield no findings rather than a refusal:
+  `c2pa` reads the same certificate next with a real validator and says
+  something better than a guess from here. What that costs is named
+  where it is done — DER rather than PEM, an empty file, and a bundle
+  whose every block is something else all pass inspection silently.
+
 - **`parameters` is AUTOMATIC1111's chunk, not ComfyUI's** (#14) — three
   doc comments and a test fixture said otherwise. The rule they were
   making is right and unaffected: a digest must not re-render a value it
