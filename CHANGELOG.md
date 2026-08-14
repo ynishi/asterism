@@ -33,10 +33,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   join) or, later, a judgment; the move lands atomically with its
   record, is refused when the caller's recorded `from` no longer
   matches the row — a repair verb that guesses is worse than one that
-  refuses — and never crosses personas. In this change the verb stops
-  at the repository port: transport surfaces, the pursuit lifecycle
-  verbs (close / reopen), the sidecar claim lane, and the membership
-  reads are the next slices of #29.
+  refuses — and never crosses personas. The verb stops at the
+  repository port for now: transport surfaces, the pursuit lifecycle
+  verbs (close / reopen), and the membership reads are the next slices
+  of #29.
+
+  The sidecar claim lane closes the loop outward and back: exporters
+  that write a sidecar copy the stamp out as `_asterism.pursuit_id`
+  beside `dispatch_id`, and on re-ingest the value is a **claim** —
+  recorded in `_trace` with its own resolution marker (it resolves iff
+  the pursuit exists in the ingesting persona), never a reason to
+  refuse the file, owned by the claim's clear-then-write so a
+  re-declaration that no longer carries one loses it, and retried by
+  the same post-reify sweep that repairs dispatch claims (the two
+  halves repair independently — an unresolvable derivation does not
+  hold a pursuit answer hostage). The rule the membership read will
+  follow, stated now so the claim lane is built for it: where the
+  dispatch join and a sidecar copy disagree, the dispatch row's own
+  stamp answers — the copy can be stale after a restamp — so the
+  disagreement never needs adjudication.
 
 - **What a dispatch produces is written with its AI disclosure** (#14) —
   the writer landed with nothing calling it; this calls it. Not where
