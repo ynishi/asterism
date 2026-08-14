@@ -170,9 +170,23 @@ fn escape_into(out: &mut String, value: &str) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '\t' | '\n' | '\r' => out.push(ch),
-            // C0 controls other than the three above, and DEL's
-            // companion block C1, which XML 1.0 admits but which no
-            // metadata value has a use for.
+            // The C0 controls other than those three, which is the whole
+            // set XML 1.0 cannot represent.
+            //
+            // DEL (U+007F) and the C1 block (U+0080–U+009F) are **kept**,
+            // and the comment that used to stand here said they were
+            // dropped. They are inside XML 1.0's `Char` production, so
+            // keeping them does not make a packet unparseable — which is
+            // the only thing this filter exists to prevent. Dropping
+            // them would be a second, unstated rule about which
+            // characters a metadata value may hold, applied to bytes
+            // somebody else's tooling wrote.
+            //
+            // It is not free: XML 1.1 requires those characters escaped
+            // as numeric references and rejects the literal form, so a
+            // 1.1 parser refuses a packet carrying one. XMP is XML 1.0,
+            // and widening the filter to suit a parser the format does
+            // not ask for would lose data on every file to fix none.
             c if (c as u32) < 0x20 => {}
             c => out.push(c),
         }
@@ -273,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn control_characters_are_dropped_rather_than_making_the_packet_unparseable() {
+    fn the_c0_controls_are_dropped_and_the_legal_ones_are_kept() {
         // XML 1.0 cannot represent a NUL at all — not even as `&#0;` —
         // so the choice is between losing the character and losing the
         // packet.
@@ -287,6 +301,25 @@ mod tests {
         // multi-line prompt is made of.
         let kept = render(&DisclosureRecord::for_asset("a").with_prompt("a\nb\tc", None)).unwrap();
         assert!(kept.contains("a\nb\tc"));
+
+        // DEL and the C1 block are kept, and the boundary is where the
+        // filter says it is. The comment here used to claim they were
+        // dropped while the code kept them, and a test that only ever
+        // fed it U+0000 and U+0001 could not tell the two readings
+        // apart. They are legal XML 1.0 characters, so keeping them
+        // costs nothing this filter is for.
+        let high =
+            render(&DisclosureRecord::for_asset("a").with_prompt("d\u{7f}e\u{80}f\u{9f}g", None))
+                .unwrap();
+        assert!(
+            high.contains("d\u{7f}e\u{80}f\u{9f}g"),
+            "DEL and C1 survive: {high}"
+        );
+
+        // …and the character immediately below the boundary does not.
+        let boundary =
+            render(&DisclosureRecord::for_asset("a").with_prompt("h\u{1f}i", None)).unwrap();
+        assert!(boundary.contains(">hi<"), "U+001F is dropped: {boundary}");
     }
 
     #[test]

@@ -41,13 +41,20 @@
 //! displacing either. A metadata-only file that reaches `EOI` without
 //! any such marker takes the position before the `EOI`, so the segment
 //! is inside the image either way. (A *truncated* file has no `EOI`
-//! either, and is refused as malformed rather than written into.) The
-//! one hard
-//! limit in this module is here — a JPEG segment carries at most 65,533
-//! bytes, of which the 29-byte XMP identifier is one part, so a packet
-//! has [`JPEG_MAX_PACKET`] and a generator prompt can be larger than
-//! that on its own; see [`EmbedError::PacketTooLarge`] and
-//! [`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential).
+//! either, and is refused as malformed rather than written into.)
+//!
+//! # How much a packet may hold
+//!
+//! Both containers have a ceiling and only one of them is reachable.
+//! JPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP
+//! identifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a
+//! budget a generator prompt exhausts on its own, which is why
+//! [`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential)
+//! exists and why [`stamp`] falls back to it. PNG's is the
+//! specification's limit on a chunk's data field, about 2 GiB, which no
+//! record approaches; it is checked rather than assumed because the
+//! assumption used to be written as a silent truncation. Both refusals
+//! are [`EmbedError::PacketTooLarge`].
 
 use crate::xmp;
 
@@ -87,22 +94,32 @@ pub enum EmbedError {
         /// What the walk found, in the words of whatever read it.
         detail: String,
     },
-    /// The packet does not fit the container's metadata slot. JPEG only
-    /// — PNG's chunk length field admits 2 GiB, so no realistic packet
-    /// reaches it.
+    /// The packet does not fit the container's metadata slot.
+    ///
+    /// In practice this is JPEG, whose `APP1` segment holds
+    /// [`JPEG_MAX_PACKET`] and which a generator prompt can exhaust on
+    /// its own. PNG has a ceiling too — the specification limits a
+    /// chunk's *data field* to 2³¹−1 rather than to the 2³²−1 its
+    /// four-byte length field could express — and no record reaches it.
+    /// It is checked rather than assumed because the assumption used to
+    /// be written as `unwrap_or(u32::MAX)`, which would have emitted a
+    /// chunk whose declared length disagreed with its contents and
+    /// reported success. That ceiling is internal: unlike
+    /// [`JPEG_MAX_PACKET`] there is nothing a caller usefully does with
+    /// a 2 GiB budget ahead of a render, so it is not exported.
     ///
     /// The caller's move is to write less rather than to split the
     /// packet: the ExtendedXMP mechanism JPEG defines for this is not
     /// implemented, and a split packet a reader fails to reassemble is a
     /// disclosure that silently is not there.
     #[error(
-        "XMP packet is {bytes} bytes and a JPEG APP1 segment holds at most {limit}; \
-         write a reduced record instead of splitting the packet"
+        "XMP packet is {bytes} bytes and this container's metadata slot holds \
+         at most {limit}; write a reduced record instead of splitting the packet"
     )]
     PacketTooLarge {
         /// Size of the packet that was offered.
         bytes: usize,
-        /// The largest packet this segment can carry.
+        /// The largest packet the container that refused it can carry.
         limit: usize,
     },
 }
@@ -168,15 +185,51 @@ mod png {
     /// string, not for "a chunk that happens to hold RDF".
     const XMP_KEYWORD: &[u8] = b"XML:com.adobe.xmp";
 
+    /// Fixed bytes an `iTXt` payload carries before the text: the
+    /// keyword, its terminator, the two compression fields, and the two
+    /// empty strings.
+    pub(super) const PAYLOAD_OVERHEAD: usize = XMP_KEYWORD.len() + 5;
+
+    /// Largest packet a PNG chunk can carry.
+    ///
+    /// The length field is four bytes wide, and the specification still
+    /// limits what it may say: a chunk's *data* field is "a four-byte
+    /// unsigned integer limited to the range 0 to 2³¹-1", and the
+    /// rationale given is portability — "to accommodate languages that
+    /// have difficulty with unsigned four-byte values" — rather than
+    /// anything reserved. The ceiling here is that limit less what the
+    /// payload spends before the text.
+    ///
+    /// Taken from [`pngmeta::MAX_CHUNK_LENGTH`] rather than written out.
+    /// The same crate reads the chunks this module writes and refuses a
+    /// length above it, so a number of our own would make the writer's
+    /// ceiling and the reader's ceiling equal by coincidence — and this
+    /// crate's manifest already says, of that crate's other constant,
+    /// that a value with exactly one right answer is not one this
+    /// repository should re-derive.
+    ///
+    /// Nothing a record can hold comes close. It is checked anyway
+    /// because the alternative was `unwrap_or(u32::MAX)` beneath a
+    /// comment claiming the impossible case was made loud: that wrote a
+    /// length field disagreeing with the bytes after it, and handed back
+    /// `Ok`.
+    pub(super) const MAX_PACKET: usize = (pngmeta::MAX_CHUNK_LENGTH as usize) - PAYLOAD_OVERHEAD;
+
     /// Builds one `iTXt` chunk: `length || type || payload || CRC`.
-    fn chunk(packet: &str) -> Vec<u8> {
+    pub(super) fn chunk(packet: &str) -> Result<Vec<u8>, EmbedError> {
+        if packet.len() > MAX_PACKET {
+            return Err(EmbedError::PacketTooLarge {
+                bytes: packet.len(),
+                limit: MAX_PACKET,
+            });
+        }
         // Payload layout, from the PNG specification:
         //   keyword \0 compression-flag compression-method
         //   language-tag \0 translated-keyword \0 text
         // The two empty strings before the text are the language tag and
         // the translated keyword; both are legitimately empty for a
         // packet that is not human prose.
-        let mut payload = Vec::with_capacity(XMP_KEYWORD.len() + 5 + packet.len());
+        let mut payload = Vec::with_capacity(PAYLOAD_OVERHEAD + packet.len());
         payload.extend_from_slice(XMP_KEYWORD);
         payload.push(0);
         payload.push(0); // compression flag: uncompressed
@@ -186,11 +239,9 @@ mod png {
         payload.extend_from_slice(packet.as_bytes());
 
         let mut out = Vec::with_capacity(payload.len() + 12);
-        // A payload this long cannot occur: it is bounded by the packet,
-        // which is bounded by the record, and `as` here would silently
-        // truncate rather than fail. `try_into` makes the impossible
-        // case loud if the bound ever moves.
-        let length = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+        // Infallible after the check above, which is what makes the
+        // `expect` a statement rather than a hope.
+        let length = u32::try_from(payload.len()).expect("the packet was measured against the cap");
         out.extend_from_slice(&length.to_be_bytes());
         out.extend_from_slice(b"iTXt");
         out.extend_from_slice(&payload);
@@ -202,7 +253,7 @@ mod png {
         hasher.update(b"iTXt");
         hasher.update(&payload);
         out.extend_from_slice(&hasher.finalize().to_be_bytes());
-        out
+        Ok(out)
     }
 
     /// Whether an `iTXt` payload is an XMP packet's.
@@ -285,8 +336,12 @@ mod png {
     }
 
     pub(super) fn embed(bytes: &[u8], packet: &str) -> Result<Vec<u8>, EmbedError> {
+        // Built before the walk, on the same reasoning the JPEG side
+        // gives: an oversized packet is refused without having read the
+        // file, because the caller's answer to it does not depend on
+        // anything the walk would find.
+        let new_chunk = chunk(packet)?;
         let found = layout(bytes)?;
-        let new_chunk = chunk(packet);
 
         // The first one is replaced where it stands, which keeps a
         // re-stamped file's chunk order stable across repeated exports.
@@ -341,6 +396,20 @@ mod png {
                 container: Container::Png,
                 detail: e.to_string(),
             })?;
+            // The *first* XMP chunk, and its text or nothing — the walk
+            // does not go looking for a second one that might read.
+            //
+            // That is the same choice the writer makes: `embed` replaces
+            // the first and drops the rest, so the first is what this
+            // crate means by "the packet". A reader that skipped an
+            // unreadable one and returned the next would disagree with
+            // the writer about which packet a file has, and the two
+            // would be describing different files.
+            //
+            // What it costs is any file whose first XMP chunk is one
+            // `text_of` declines — compressed, not valid UTF-8, or
+            // missing one of the NUL-terminated fields — followed by one
+            // that would have read. That file reports no packet.
             if span.kind == pngmeta::ChunkType::ITXT && is_xmp(payload) {
                 return Ok(text_of(payload));
             }
@@ -597,8 +666,8 @@ pub fn stamp(
     match embed_xmp(bytes, &packet) {
         Ok(stamped) => Ok(Some(stamped)),
         // The obligation outranks the context: rather than fail the
-        // export over a prompt that will not fit a JPEG segment, write
-        // the reduced record. The caller learns this happened by
+        // export over a prompt that will not fit the container's slot,
+        // write the reduced record. The caller learns this happened by
         // comparing what it asked for against what came back, which is
         // why the reduced record is not silently substituted upstream.
         Err(EmbedError::PacketTooLarge { .. }) => {
@@ -857,6 +926,33 @@ mod tests {
         assert_eq!(JPEG_MAX_PACKET, 65_504);
     }
 
+    /// The PNG budget is the chunk limit less what the payload spends
+    /// before the text — and the two halves of that are checked against
+    /// their sources rather than against each other.
+    ///
+    /// Neither is reachable by a fixture: building a 2 GiB packet to
+    /// watch it be refused is not a test anybody should run. What can
+    /// go wrong without one is an edit to the payload layout that adds
+    /// a field and forgets `PAYLOAD_OVERHEAD`, or a hand-written cap
+    /// drifting from the reader's. The first is caught by counting the
+    /// bytes the writer actually emits before the text; the second by
+    /// naming `pngmeta`'s constant on both sides.
+    #[test]
+    fn the_png_packet_budget_is_the_chunk_limit_less_the_payload_overhead() {
+        assert_eq!(
+            png::MAX_PACKET + png::PAYLOAD_OVERHEAD,
+            pngmeta::MAX_CHUNK_LENGTH as usize
+        );
+
+        // The overhead against the bytes `chunk` writes ahead of the
+        // text: the keyword, its terminator, the compression flag, the
+        // compression method, and the two empty strings.
+        let built = png::chunk("").expect("an empty packet is not too large");
+        // `length || type || payload || CRC`, so the payload is the
+        // whole chunk less the twelve bytes of framing.
+        assert_eq!(built.len() - 12, png::PAYLOAD_OVERHEAD);
+    }
+
     /// A file that arrives with two packets leaves with one.
     ///
     /// The sibling above cannot reach this: its input was written by
@@ -978,9 +1074,16 @@ mod tests {
     }
 
     #[test]
-    fn png_has_no_such_ceiling() {
-        // PNG's length field admits 2 GiB, so the JPEG fallback must not
-        // fire here — a PNG keeps the prompt.
+    fn a_png_keeps_a_prompt_that_would_not_fit_a_jpeg() {
+        // The two containers have different ceilings, and the fallback
+        // is keyed to the one the file actually has. PNG's is roughly
+        // 2 GiB, so a packet a JPEG segment refuses is nothing here and
+        // the prompt survives.
+        //
+        // Named for that rather than for "PNG has no ceiling", which is
+        // what it said while the PNG path had no check at all. It has
+        // one now — see `png::MAX_PACKET` — and a test asserting the
+        // absence of a limit would now be asserting something false.
         let long = "y".repeat(JPEG_MAX_PACKET + 1);
         let record = record().with_prompt(long, None);
         let stamped = stamp(&png_fixture(), &record).unwrap().unwrap();

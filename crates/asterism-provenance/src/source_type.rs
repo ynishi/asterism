@@ -50,9 +50,20 @@ use std::fmt;
 
 /// Prefix every IPTC digital source type URI shares.
 ///
-/// Split out so the terms below are one word each and cannot disagree
-/// about the host — a term pointing at the wrong authority is a value a
-/// validator refuses, and it would be invisible in a table of full URIs.
+/// Read by [`parse`][DigitalSourceType::parse], which strips it to
+/// recover the term. [`uri`] does
+/// **not** build on it — a `const` cannot be concatenated with another
+/// at compile time without a macro over literals, and returning
+/// `&'static str` is worth more here than sharing one string, so the
+/// five URIs are written out in full.
+///
+/// Which means the agreement between them and this constant is a
+/// property held by `every_term_sits_under_the_iptc_vocabulary` rather
+/// than by construction. The doc here used to claim the second: that
+/// the terms "cannot disagree about the host". They can — a typo in one
+/// of the five literals compiles — and what catches it is a test.
+///
+/// [`uri`]: DigitalSourceType::uri
 const IPTC_CV: &str = "http://cv.iptc.org/newscodes/digitalsourcetype/";
 
 /// How a file came to exist, in IPTC's vocabulary.
