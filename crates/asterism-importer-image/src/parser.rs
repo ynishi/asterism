@@ -245,7 +245,18 @@ mod tests {
                 r#"{"2":{"class_type":"CLIPTextEncode","inputs":{"text":"1girl, purple eyes"}}}"#,
             ),
             ("vdsl", r#"{"script":"local s = C.camera.medium_shot"}"#),
-            ("parameters", "steps: 30, sampler: euler"),
+            // AUTOMATIC1111's chunk, in its own grammar: the prompt,
+            // then a `Negative prompt:` line, then one comma-separated
+            // settings line. It read `steps: 30, sampler: euler` — which
+            // is neither that grammar nor JSON, and looked enough like
+            // ComfyUI's to have been written by somebody who believed
+            // `parameters` was ComfyUI's chunk. It is not; the two
+            // families are told apart in `domain::disclosure`.
+            (
+                "parameters",
+                "a portrait\nNegative prompt: blurry\nSteps: 30, Sampler: Euler, \
+                 CFG scale: 7, Seed: 1198099675, Model: sd_xl_base_1.0",
+            ),
         ])
     }
 

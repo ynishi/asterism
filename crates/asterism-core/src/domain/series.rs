@@ -920,11 +920,12 @@ fn drop_at(value: &mut Value, segments: &[String]) {
 /// Renders a selection into the form the key is taken over — **the only
 /// place that form is produced.**
 ///
-/// A JSON array of `[path, kind, value]` triples, ordered by path, no
-/// whitespace. Two properties the digest depends on, and neither is a
-/// caller's responsibility: the order is the [`BTreeMap`]'s, and the
-/// compactness is `serde_json`'s default. **Nothing here hand-writes
-/// JSON** — the rule
+/// A JSON array of `[path, kind, value]` triples, ordered by path, with
+/// every nested object's keys sorted and no whitespace. Three properties
+/// the digest depends on, and none of them a caller's responsibility:
+/// the triple order is the [`BTreeMap`]'s, the nested key order is
+/// [`canonical_value`]'s, and the compactness is `serde_json`'s default.
+/// **Nothing here hand-writes JSON** — the rule
 /// [`material_meta`](crate::domain::material_meta) states, and it bites
 /// harder here, since the values being rendered are arbitrary documents
 /// out of a container rather than strings.
@@ -952,11 +953,79 @@ fn drop_at(value: &mut Value, segments: &[String]) {
 /// [`SeriesKey::NothingToSelect`] before an empty selection reaches
 /// here.
 fn render(selection: &BTreeMap<Vec<String>, Selected>) -> String {
-    let triples: Vec<(&Vec<String>, &str, &Value)> = selection
+    let triples: Vec<(&Vec<String>, &str, Value)> = selection
         .iter()
-        .map(|(path, selected)| (path, selected.kind, &selected.value))
+        .map(|(path, selected)| (path, selected.kind, canonical_value(&selected.value)))
         .collect();
     serde_json::to_string(&triples).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Sorts every object's keys, recursively, leaving arrays alone.
+///
+/// # Do not delete this. It is not a no-op, and it is not `serde_json`'s
+/// job.
+///
+/// It reads like dead code: `serde_json::Map` is a `BTreeMap` by
+/// default, so a value round-tripped through it comes out sorted anyway
+/// and this function looks like it is sorting what is already sorted.
+/// **That default is off in this workspace.** `serde_json/preserve_order`
+/// is declared in the workspace `Cargo.toml` — where the reasoning is —
+/// and Cargo unifies features across a build, so it is on for every
+/// crate here. With it on, `serde_json::Map` is an `IndexMap` and a
+/// parsed object re-serialises in *the order the container's author
+/// wrote it*.
+///
+/// So without this call, [`render`] would hash key order, and:
+///
+/// - the same workflow re-saved by a tool that reorders keys would
+///   produce a different series key, splitting a batch that belongs
+///   together — which is a wrong answer to the only question a series
+///   key asks;
+/// - every stored key would move on the day a dependency turned the
+///   feature on or off, with nothing in the diff saying so.
+///
+/// The deeper reason is not about the feature at all. A JSON object is
+/// an unordered collection of name/value pairs (RFC 8259), so a digest
+/// over one has to be a function of its content. Sorting here is this
+/// module stating its own canonical form instead of borrowing whichever
+/// one a dependency's feature flags happen to select — the same
+/// independence `material_meta` gets by holding a
+/// `BTreeMap<String, String>` and never parsing at all. This module
+/// cannot take that route: a rule selects values by path
+/// (`["prompt", "3", "inputs"]`), so parsing is a requirement rather
+/// than a convenience, and the canonical form has to be re-established
+/// afterwards.
+///
+/// Arrays keep their order, because a JSON array *is* ordered — two
+/// documents differing in element order are two different documents,
+/// and collapsing them would merge materials that are not the same.
+///
+/// If the feature is ever dropped, this function still must not be
+/// removed: it is what makes the property true independently, and the
+/// property is what
+/// `the_key_is_the_same_whatever_order_the_container_wrote_its_keys_in`
+/// tests. Deleting it would make that test pass for a reason nobody
+/// chose.
+fn canonical_value(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => {
+            let mut sorted: Vec<(&String, &Value)> = fields.iter().collect();
+            sorted.sort_by_key(|(key, _)| *key);
+            // Inserting in sorted order is what produces sorted output
+            // under `preserve_order` (an `IndexMap` keeps insertion
+            // order); under the default `BTreeMap` the same insertions
+            // sort themselves. One expression, correct either way.
+            Value::Object(
+                sorted
+                    .into_iter()
+                    .map(|(key, value)| (key.clone(), canonical_value(value)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(canonical_value).collect()),
+        // Scalars have no order to establish.
+        other => other.clone(),
+    }
 }
 
 /// The key over an already-rendered selection.
@@ -1592,11 +1661,13 @@ mod tests {
     /// The form the key is taken over, stated as a literal.
     ///
     /// Three properties at once: the path travels beside its value
-    /// rather than flattened into a string, the ordering is the map's,
-    /// and the nested object's own keys come out sorted — the last of
-    /// which is `serde_json`'s default and would silently stop being
-    /// true under the `preserve_order` feature, moving every stored key
-    /// in the library.
+    /// rather than flattened into a string, the entries are in path
+    /// order, and every nested object's keys come out sorted. The last
+    /// of those is [`canonical_value`]'s doing and deliberately not
+    /// `serde_json`'s — this workspace runs with `preserve_order` on, so
+    /// a parsed object re-serialises in the order its author wrote it
+    /// unless something sorts it. The sibling test states that as the
+    /// property; this one pins the exact bytes that get hashed.
     #[test]
     fn the_selected_form_carries_the_path_beside_the_value_and_is_ordered() {
         let meta_kv = fields(&[
@@ -1623,6 +1694,66 @@ mod tests {
             key[SERIES_KEY_PREFIX.len()..]
                 .chars()
                 .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
+    }
+
+    /// The key is a function of the document, not of how it was typed.
+    ///
+    /// A JSON object is an unordered collection (RFC 8259), so two
+    /// containers that carry the same fields in a different order carry
+    /// the same document, and a series key that told them apart would be
+    /// answering the wrong question — the whole point of the axis is
+    /// "made the same way".
+    ///
+    /// This is the property [`canonical_value`] exists for, and it is
+    /// stated here as a property rather than as a byte literal so that
+    /// deleting that function fails *here*, with a name that says what
+    /// broke. Under `preserve_order` — which this workspace runs with —
+    /// removing the sort makes these two keys differ.
+    #[test]
+    fn the_key_is_the_same_whatever_order_the_container_wrote_its_keys_in() {
+        let rule = strategy(Decode::RawJson, &[], &[]);
+
+        // The same object, typed two ways: one already sorted, one not.
+        // Nested, because the sort has to be recursive — a top-level
+        // sort would pass a shallow version of this test.
+        let sorted = fields(&[(
+            "vdsl",
+            r#"{"alpha":{"inner_a":1,"inner_b":2},"beta":"x","gamma":[3,1,2]}"#,
+        )]);
+        let shuffled = fields(&[(
+            "vdsl",
+            r#"{"gamma":[3,1,2],"beta":"x","alpha":{"inner_b":2,"inner_a":1}}"#,
+        )]);
+
+        let key_of = |meta_kv: &BTreeMap<String, String>| {
+            let mut selection = select(&rule, meta_kv);
+            remove_excluded(&rule, &mut selection);
+            render(&selection)
+        };
+        assert_eq!(
+            key_of(&sorted),
+            key_of(&shuffled),
+            "key order is how a document was written, not what it says"
+        );
+        assert_eq!(
+            derive(&rule, png().as_ref(), &sorted),
+            derive(&rule, png().as_ref(), &shuffled)
+        );
+
+        // And the other direction, so the assertion above cannot be
+        // satisfied by a function that flattens everything: an array's
+        // order *is* content, and reordering one is a different
+        // document.
+        let reordered_array = fields(&[(
+            "vdsl",
+            r#"{"alpha":{"inner_a":1,"inner_b":2},"beta":"x","gamma":[1,2,3]}"#,
+        )]);
+        assert_ne!(
+            key_of(&sorted),
+            key_of(&reordered_array),
+            "a JSON array is ordered; collapsing two of them would merge \
+             materials that are not the same"
         );
     }
 

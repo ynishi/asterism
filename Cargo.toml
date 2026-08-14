@@ -8,6 +8,7 @@ members = [
     "crates/asterism-importer-sdk",
     "crates/asterism-importer",
     "crates/asterism-media-probe",
+    "crates/asterism-provenance",
     "crates/asterism-dispatch-sdk",
     "crates/asterism-exporter-comfy",
     "crates/asterism-exporter-file",
@@ -71,7 +72,72 @@ log                = "0.4"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
+# `preserve_order` makes `serde_json::Map` an `IndexMap`: a parsed object
+# keeps the key order the document was written in, instead of being
+# re-sorted on the way back out.
+#
+# Declared here because this workspace wants that semantic for its own
+# sake. What it writes back out — an instruction file, a `.meta.json`
+# sidecar, a `params_json` that made a round trip through the database —
+# is somebody else's document, and handing it back with the keys
+# re-sorted is an edit nobody asked for. Cargo unifies features across a
+# workspace build, so the feature is on whether or not this line exists;
+# stating it here makes it this workspace's decision rather than a side
+# effect of somebody else's dependency, and makes removing it a decision
+# too.
+#
+# It is **not** here for the reason this comment used to give. `c2pa`
+# does declare the same feature in its own manifest — which is why the
+# feature is unconditionally on today, and why removing this line would
+# change nothing while that crate is a dependency. What was wrong was
+# the *why*: the claim that `c2pa` needs an author's key order to
+# survive a round trip. It does not.
+# Verification re-hashes the bytes read out of the file rather than
+# re-serialising a parsed model, and the default assertion kind routes
+# through a CBOR map that sorts, discarding the author's key order
+# before anything is encoded. The one path where an author's order does
+# reach a signed digest is a custom label stamped `kind: "json"`, which
+# `asterism-provenance` does not use.
+#
+# What must **not** rest on this line is any digest. A JSON object is an
+# unordered collection of name/value pairs (RFC 8259), so a hash over
+# "what the container carried" has to be a function of the content and
+# not of the key order whoever wrote it happened to use — with the
+# feature or without it. Four stored forms are *rendered by a
+# serialiser* and then hashed or compared byte for byte, which is the
+# set this line could reach, and each is independent of it for a reason
+# of its own:
+#
+#   - `material_meta::render` serialises a `BTreeMap<String, String>`
+#     and keeps every value as the container stated it, unparsed.
+#   - `series::render` does parse — a rule selects by path, so it has
+#     no choice — and sorts every nested object back through
+#     `series::canonical_value` before rendering.
+#   - `source_locator::to_storage` serialises a private enum through
+#     serde's struct path, so no `serde_json::Map` is constructed.
+#   - `snapshot_hash` hashes an ordered list of ids and touches no JSON.
+#
+# The digests this line cannot reach at all are the ones over bytes
+# nothing here serialised: the artefact digest over a whole file, and
+# the content-region digest over the subset of it a probe selected.
+# They are listed nowhere above because the question does not arise for
+# them, not because they were forgotten. `source_locator`'s stored form
+# has one thing the others do not — a second producer, in the V63
+# migration, which has to render byte-identically to `to_storage` or
+# the equality lookup on the column splits by which wrote the row.
+#
+# "Built from a struct rather than parsed" is *not* one of those
+# reasons, and reading it as one is what left this comment claiming a
+# discharge it had not made: `serde_json::to_value` produces a `Map`
+# too, so a value that never saw a parser is still an `IndexMap` under
+# this feature. What makes the four safe is what each one feeds the
+# hash, which is why they are listed one by one.
+#
+# A digest added beside them owes the same statement, and the rule it
+# owes is written where the axes are defined (`domain::content_hash`):
+# say whether it selects bytes or re-renders them, and if it re-renders,
+# specify the canonical form and version the tag.
+serde_json  = { version = "1", features = ["preserve_order"] }
 tokio       = { version = "1", features = ["full"] }
 anyhow      = "1"
 thiserror   = "2"
@@ -154,6 +220,49 @@ color-thief  = "0.2"
 # reproducible.
 rand        = "0.9"
 rand_chacha = "0.9"
+
+# --- asterism-infra: C2PA signing ---
+# The CAI reference SDK, and the only realistic way to produce a
+# manifest: a C2PA claim is COSE-signed CBOR wrapped in JUMBF, embedded
+# per container (APP11 for JPEG, a chunk for PNG, a box for MP4/MOV),
+# with a hard binding computed over byte ranges the format decides. That
+# is a specification-sized problem, not a serialisation one.
+#
+# Confined to `asterism-infra::provenance`. Everything that decides *what
+# is asserted* lives in `asterism-provenance`, which does not take this
+# dependency and can therefore be tested on a machine with no
+# cryptography backend and no certificate.
+#
+# `default-features = false` drops two defaults that are wrong here:
+#
+# - `openssl` — a vendored C build, replaced by `rust_native_crypto` so
+#   this workspace keeps one toolchain and no system library to locate.
+#   Exactly one of the two must be on.
+# - `default_http` — four HTTP client backends, pulled in for fetching
+#   remote manifests and timestamps. This workspace already pins one
+#   `reqwest` line deliberately (see above), and a local-first exporter
+#   has no business reaching the network while it signs. A timestamp
+#   authority is configuration; if one is ever configured, the feature
+#   comes back with a comment saying which client it added.
+#
+# `file_io` is what `create_signer::from_files` needs — the certificate
+# and key arrive as paths from settings.
+c2pa = { version = "0.90", default-features = false, features = [
+    "rust_native_crypto",
+    "file_io",
+] }
+# Reading a configured signing certificate's own extensions, so an
+# identity can be refused for what it can sign rather than only for what
+# its subject is called.
+#
+# The same requirement `c2pa` states for its own validation, so a build
+# resolves one copy — but that is a fact about today's tree rather than a
+# guarantee, and a `c2pa` that moved to 0.19 would compile two. No type
+# crosses between the two uses, so the cost of that would be build size
+# rather than correctness. Declared here, not inline in the crate, for
+# the reason every other shared line is: a second consumer picking its
+# own version is the drift a workspace table exists to stop.
+x509-parser = "0.18"
 
 # --- asterism-infra: job engine ---
 apalis     = { version = "0.7", features = ["limit"] }

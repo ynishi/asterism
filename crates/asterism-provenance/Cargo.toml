@@ -1,0 +1,61 @@
+[package]
+name        = "asterism-provenance"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "AI-disclosure provenance for Asterism — the IPTC vocabulary, the XMP packet, and the C2PA manifest definition, as pure values"
+publish     = false
+
+# A leaf crate on purpose, and one that cannot sign anything.
+#
+# Two halves of this problem have very different weights. Deciding *what
+# is asserted* — which IPTC digital source type a file gets, which of the
+# 2025.1 AI properties are populated, what the manifest says about the
+# lineage — is a judgement about a corpus, is worth testing exhaustively,
+# and costs nothing to build. *Making a signature* needs the `c2pa` crate,
+# a cryptography backend, and a certificate that this repository does not
+# ship. Putting them in one crate would make the first half unbuildable
+# without the second, and would let the certificate question block the
+# half of the acceptance criteria (the IPTC/XMP mark) that needs no
+# certificate at all.
+#
+# So: everything here is a pure function of values, the C2PA manifest
+# leaves as a JSON *definition* rather than a signed manifest, and the
+# signing adapter lives in `asterism-infra` where the dependency is
+# already paid for.
+
+[lib]
+
+[dependencies]
+serde      = { workspace = true }
+# The C2PA manifest definition is JSON — `c2pa::Builder::with_definition`
+# takes exactly this shape. Building it as `serde_json::Value` here keeps
+# the mapping (what the database holds → what the manifest asserts)
+# testable without linking a signer.
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+
+# PNG's per-chunk CRC-32 (ISO-HDLC, the same polynomial zlib uses). A
+# chunk written with a wrong CRC is a chunk every strict decoder rejects,
+# so this has exactly one right answer and it is not one this repository
+# should re-derive — the same reasoning that put `pngmeta` in
+# `asterism-media-probe` for chunk boundaries. Reading needs no CRC (that
+# crate reads past them); writing cannot avoid one.
+crc32fast  = "1"
+
+# Chunk boundaries, on the same terms `asterism-media-probe` takes them:
+# where one chunk ends and the next begins has one right answer,
+# including for the files whose declared length lies, and this repository
+# has no reason to hold two implementations of it. What is new on this
+# side is that a writer needs the *offsets* rather than the payloads —
+# `chunk_spans` reports both, so the insertion point comes from the same
+# walk that finds the packet to replace.
+#
+# `inflate` is deliberately not asked for. This crate writes uncompressed
+# `iTXt` and treats a compressed packet as absent (`embed::png::text_of`),
+# because the packet is about to be replaced wholesale either way and a
+# decompressor would only add a bomb ceiling to maintain.
+pngmeta    = "0.2.1"

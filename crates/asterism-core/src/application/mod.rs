@@ -58,6 +58,7 @@ pub mod material_layer_service;
 pub mod material_mark_service;
 pub mod modality_service;
 pub mod persona_service;
+pub mod provenance_service;
 pub mod query_group_invalidation;
 pub mod query_group_service;
 pub mod series_strategy_service;
