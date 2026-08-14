@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured, and a certificate that stopped working all reported the
   same `false`. `Skipped` names the ones that are not faults.
 
+- **Disclosing the prompt is a decision somebody makes, not a constant**
+  (#14) — `DisclosureRecord::with_prompt` says the prompt is "a decision
+  the service makes, not a property of the data" and that it "cannot be
+  taken back out of a file already published"; the service made no
+  decision, filling the field whenever the evidence had one, with nowhere
+  to state a different policy. What the field receives is the whole
+  AUTOMATIC1111 `parameters` blob — prompt, negative prompt, sampler,
+  seed, checkpoint name and hash, and the name and hash of every LoRA —
+  so a locally trained model named after a person or a client went into
+  every published copy. `record_for` now takes a `PromptDisclosure`
+  (`Withhold` / `Embed`) and `ProvenanceService` takes one at
+  construction. No `Default` and no default chosen: it belongs to the
+  composition root, and the asymmetry that should decide it is the one
+  the module already applies to terms — withholding can be undone by
+  re-applying, publishing cannot be undone at all.
+
 - **A stamp is staged in a temporary nothing can predict, and keeps the
   file's own permissions** (#14) — the rewrite went through a
   deterministic sibling (`shot.png.c2pa-partial`), opened with neither
