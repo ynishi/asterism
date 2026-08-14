@@ -357,7 +357,26 @@ aidoc-guard:
         echo "         rustup toolchain install nightly" >&2
         exit 0
     fi
-    cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism
+    # The third way this cannot run, and the one that arrives on its
+    # own: cargo-aidoc is built against a fixed rustdoc JSON
+    # `format_version`, and nightly bumps that whenever it likes. When
+    # the two disagree the tool says so and exits 1 — a statement about
+    # the toolchain, not about this repository, so it belongs with the
+    # other two warnings rather than turning every gate red until
+    # somebody upstream releases. Drift still exits 2 and still fails.
+    output=$(cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism 2>&1)
+    status=$?
+    printf '%s\n' "$output"
+    if [ "$status" -eq 0 ]; then
+        exit 0
+    fi
+    if printf '%s' "$output" | grep -q 'rustdoc format version mismatch'; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc and this nightly" >&2
+        echo "         disagree on the rustdoc JSON format. Update cargo-aidoc," >&2
+        echo "         or pin a nightly it was built against." >&2
+        exit 0
+    fi
+    exit "$status"
 
 # Run all Rust and frontend checks.
 [group('check')]

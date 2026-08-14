@@ -96,6 +96,22 @@ jobs:
       # the default, so a `@nightly` after the `@stable` above would
       # quietly move the whole build — clippy, the tests, everything — onto
       # nightly. Only the rustdoc shell-out wants it.
+      #
+      # Floating, and not by choice. `cargo-aidoc` is built against a
+      # fixed rustdoc JSON `format_version` while nightly bumps that on
+      # its own schedule, so the two disagree until the tool catches up —
+      # this workflow met it as `expected 60, found 61`. Pinning a date
+      # would fix the pair, and cannot be done from here: the tool shells
+      # out to `cargo +nightly` literally, so a `nightly-<date>` that is
+      # not also `nightly` is a toolchain it will not find.
+      #
+      # `aidoc-guard` therefore treats a format mismatch as "could not
+      # run" and warns, the same as a missing toolchain. The consequence
+      # is worth stating plainly: **between a rustdoc format bump and a
+      # `cargo-aidoc` release that reads it, CI does not check
+      # `docs/aidoc/`** — it says so in the log rather than going red for
+      # a disagreement between two tools in a run about neither. Letting
+      # the caller choose the toolchain is the upstream fix.
       - name: Install nightly for rustdoc JSON
         run: rustup toolchain install nightly --profile minimal
 
