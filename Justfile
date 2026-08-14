@@ -285,21 +285,31 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 # because `aidoc-check` fails when it drifts from the tree.
 #
 # Two prerequisites, stated here because the recipe outlives any PR:
-# (1) a nightly toolchain — the pipeline shells out to `cargo +nightly
-# rustdoc --output-format json` per crate, which is why neither aidoc
-# recipe *runs unconditionally* inside `check`: this workspace's
-# toolchain floats (no rust-toolchain.toml) and a machine without
-# nightly must still be able to run the full gate. `aidoc-guard` is how
-# that is reconciled — it warns instead of skipping silently.
-# (2) `cargo install cargo-aidoc`, **0.2.1 or newer**. Two things this
-# workspace needs were unreleased until then: the rustdoc JSON filename
-# came from the package name, which asterism-ui's `[lib] name =
-# "asterism_ui_lib"` breaks, and `--title` did not exist. The note here
-# once said to install from git, then said 0.2.0 on crates.io was
-# enough — it was not. Both fixes shipped in 0.2.1, and the version is
-# stated rather than implied because a plain `cargo install` against an
-# older one fails on `--title` with an argument error that says nothing
-# about why.
+#
+# (1) `cargo install cargo-aidoc`, **0.2.2 or newer**. Three things this
+# workspace needs were unreleased at various points: the rustdoc JSON
+# filename came from the package name, which asterism-ui's `[lib] name =
+# "asterism_ui_lib"` breaks; `--title` did not exist; and the toolchain
+# was the `nightly` channel rather than a pin. The note here once said
+# to install from git, then said 0.2.0 was enough — it was not, and the
+# version is stated rather than implied because an older one fails on an
+# argument it does not have, which says nothing about why.
+#
+# (2) The dated nightly that tool asks for:
+#
+#     rustup toolchain install "$(cargo aidoc --print-required-toolchain)"
+#
+# Dated, because rustdoc's JSON carries a `format_version`, every
+# nightly emits exactly one, and it moves whenever rustdoc's types do —
+# the channel is a moving schema a pinned reader cannot follow. Asked
+# for rather than written down here, because the pin belongs to the tool
+# and a copy of it here would go stale on the next upgrade.
+#
+# This is why neither aidoc recipe *runs unconditionally* inside
+# `check`: the workspace pins no toolchain (no rust-toolchain.toml) and
+# a machine without this one must still be able to run the full gate.
+# `aidoc-guard` is how that is reconciled — it warns instead of skipping
+# silently.
 #
 # `--title` pins the llms.txt H1. The tool's default is the checkout
 # directory's basename, which from a worktree named after its branch
@@ -352,18 +362,30 @@ aidoc-guard:
         echo "         cargo install cargo-aidoc" >&2
         exit 0
     fi
-    if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
-        echo "WARNING: docs/aidoc/ NOT CHECKED — no nightly toolchain." >&2
-        echo "         rustup toolchain install nightly" >&2
+    # Ask the tool which toolchain it reads rather than testing for a
+    # `nightly` of any date: it pins one, and having some other nightly
+    # installed is not the same as having that one.
+    required=$(cargo aidoc --print-required-toolchain 2>/dev/null)
+    if [ -z "$required" ]; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc is too old to say" >&2
+        echo "         which toolchain it needs. cargo install cargo-aidoc" >&2
         exit 0
     fi
-    # The third way this cannot run, and the one that arrives on its
-    # own: cargo-aidoc is built against a fixed rustdoc JSON
-    # `format_version`, and nightly bumps that whenever it likes. When
-    # the two disagree the tool says so and exits 1 — a statement about
-    # the toolchain, not about this repository, so it belongs with the
-    # other two warnings rather than turning every gate red until
-    # somebody upstream releases. Drift still exits 2 and still fails.
+    if ! rustup toolchain list 2>/dev/null | grep -q "^${required}"; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — ${required} is not installed." >&2
+        echo "         rustup toolchain install ${required}" >&2
+        exit 0
+    fi
+    # The third way this cannot run: the toolchain the tool asks for is
+    # not installed, or a `--toolchain` override points at one whose
+    # rustdoc JSON format it cannot read. Either way the tool says so
+    # and exits 1 — a statement about the environment rather than about
+    # this repository, so it belongs with the other two warnings instead
+    # of turning every gate red. Drift still exits 2 and still fails.
+    #
+    # Since the tool pins its own nightly this should now only happen
+    # when somebody has not installed it, and the message names the
+    # `rustup` line that fixes that.
     output=$(cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism 2>&1)
     status=$?
     printf '%s\n' "$output"

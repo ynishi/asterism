@@ -111,7 +111,14 @@ UI, one step has prerequisites it cannot install for you:
 
 | Needed by | Install | Without it |
 |---|---|---|
-| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` (0.2.1 or newer) and `rustup toolchain install nightly` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` (0.2.2 or newer), then `rustup toolchain install "$(cargo aidoc --print-required-toolchain)"` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+
+The toolchain is a dated nightly rather than the channel, and the tool
+names it rather than this file: rustdoc's JSON carries a
+`format_version`, every nightly emits exactly one, and it moves whenever
+rustdoc's types do — so `cargo-aidoc` pins the one it can read and
+`--print-required-toolchain` prints it. A date copied into a script here
+would go stale the next time the tool is upgraded.
 
 An older `cargo-aidoc` is worse than none: it is on `PATH`, so the guard
 runs it, and it fails on an argument it does not have rather than on

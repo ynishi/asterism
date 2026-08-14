@@ -77,43 +77,43 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      # `aidoc-guard` (inside `check`) needs nightly: `cargo-aidoc` shells
-      # out to `cargo +nightly rustdoc --output-format json`, which is the
-      # reason that step warns instead of failing when it cannot run. On a
-      # developer's machine the warning is the right answer — the workspace
-      # pins no toolchain and a machine without nightly must still be able
-      # to run the full gate. Here it is the wrong one: a runner has
-      # whatever it is told to have, and a gate that warns on every run is
-      # a gate nobody reads.
+      # What `aidoc-guard` (inside `check`) needs, and the reason it is
+      # here rather than left to warn. That step warns instead of failing
+      # when it cannot run, which is right on a developer's machine — the
+      # workspace pins no toolchain, and somebody without nightly must
+      # still be able to run the full gate. On a runner it is wrong: a
+      # runner has whatever it is told to have, and a step that warns on
+      # every run is a step nobody reads. Installing these two is what
+      # makes `docs/aidoc/` drift a red run rather than a line in a log.
       #
-      # Installing it is what makes `docs/aidoc/` drift a red run rather
-      # than a line in a log. The hole was not hypothetical: a change that
-      # deleted a crate and added another was committed with the artifacts
-      # still describing the deleted one, and `just check` was green.
+      # The hole was not hypothetical: a change that deleted a crate and
+      # added another was committed with the artifacts still describing
+      # the deleted one, and `just check` was green at the time.
+      #
+      # The nightly is dated, and the date is not written here. rustdoc's
+      # JSON carries a `format_version`, every nightly emits exactly one,
+      # and it moves whenever rustdoc's types do — asking for the channel
+      # asks for whatever the schema is today, which failed here as
+      # `expected 60, found 61`. `cargo-aidoc` names the toolchain whose
+      # format it reads, so this asks the binary. A date pinned in this
+      # file would be a second place to remember and would go stale the
+      # moment the tool is upgraded.
       #
       # `rustup toolchain install` rather than a second
       # `dtolnay/rust-toolchain` step: that action makes what it installs
-      # the default, so a `@nightly` after the `@stable` above would
-      # quietly move the whole build — clippy, the tests, everything — onto
-      # nightly. Only the rustdoc shell-out wants it.
+      # the default, so a nightly added that way would quietly move the
+      # whole build — clippy, the tests, everything — onto nightly. Only
+      # the rustdoc shell-out wants it.
       #
-      # Floating, and not by choice. `cargo-aidoc` is built against a
-      # fixed rustdoc JSON `format_version` while nightly bumps that on
-      # its own schedule, so the two disagree until the tool catches up —
-      # this workflow met it as `expected 60, found 61`. Pinning a date
-      # would fix the pair, and cannot be done from here: the tool shells
-      # out to `cargo +nightly` literally, so a `nightly-<date>` that is
-      # not also `nightly` is a toolchain it will not find.
-      #
-      # `aidoc-guard` therefore treats a format mismatch as "could not
-      # run" and warns, the same as a missing toolchain. The consequence
-      # is worth stating plainly: **between a rustdoc format bump and a
-      # `cargo-aidoc` release that reads it, CI does not check
-      # `docs/aidoc/`** — it says so in the log rather than going red for
-      # a disagreement between two tools in a run about neither. Letting
-      # the caller choose the toolchain is the upstream fix.
-      - name: Install nightly for rustdoc JSON
-        run: rustup toolchain install nightly --profile minimal
+      # The floor on the tool is where this was found: `--title` and the
+      # `[lib] name` fix shipped in 0.2.1, the toolchain pin in 0.2.2.
+      - name: Install cargo-aidoc
+        run: cargo install cargo-aidoc --version '^0.2.2'
+
+      - name: Install the nightly cargo-aidoc reads
+        run: |
+          rustup toolchain install \
+            "$(cargo aidoc --print-required-toolchain)" --profile minimal
 
       # Caches `~/.cargo` and the dependency half of `target/`. The
       # workspace's own crates are deliberately not cached by this action,
@@ -150,17 +150,6 @@ jobs:
           cache-dependency-path: crates/asterism-ui/package-lock.json
 
       - uses: extractions/setup-just@v4
-
-      # The other half of what `aidoc-guard` needs, floor-pinned because
-      # this is where the floor was found: the first run of this step
-      # installed the then-current 0.2.0 and failed on `--title`, an
-      # argument that existed only in an unreleased working tree. The
-      # upper end floats, the same bargain the stable toolchain above
-      # takes and for the same reason — a tool that moves under the
-      # workflow meets its own breakage in a run nobody had to remember
-      # to start.
-      - name: Install cargo-aidoc
-        run: cargo install cargo-aidoc --version '^0.2.1'
 
       # No recipe installs frontend dependencies: every `ui-*` recipe assumes
       # a populated `node_modules`, the same assumption a fresh worktree
