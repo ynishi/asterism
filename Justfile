@@ -197,6 +197,19 @@ bench-reset:
 bench-measure-import preset seed="42":
     cargo run --release -q -p asterism-benchgen -- measure-import --preset {{ preset }} --seed {{ seed }}
 
+# Measure the pursuit membership reads (#29) against a self-seeded
+# temp profile at the documented asset scale. Self-contained: no
+# server, no bench profile, no reset dance — the command seeds a
+# throwaway database and measures through the real repository
+# adapters. This is the receipt for the index-seek bet the V80
+# lookup columns make, and the number that decides whether a
+# job-built materialised projection is ever needed. The result file
+# lands beside the other measurements, under
+# `workspace/bench-results/pursuit-view-<stamp>.json`.
+[group('bench')]
+bench-measure-pursuit assets="100000":
+    cargo run --release -q -p asterism-benchgen -- measure-pursuit --assets {{ assets }}
+
 # Measure the first listing a freshly started backend answers (issue
 # d47b0759), plus the warm repeat.
 #

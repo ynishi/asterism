@@ -375,6 +375,10 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "pursuit_service::list",
         "read — a persona's pursuits with derived standing",
     ),
+    (
+        "pursuit_service::view",
+        "read — one pursuit with its rounds, returns and events",
+    ),
     // ---- provenance_service
     (
         "provenance_service::record_for",

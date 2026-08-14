@@ -28,7 +28,7 @@ use crate::domain::modality::{ModalityDef, ModalityView};
 use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
-use crate::domain::pursuit::{Pursuit, PursuitEvent, PursuitRestamp};
+use crate::domain::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::series::{SeriesKey, Strategy};
 use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
@@ -2847,6 +2847,35 @@ pub trait PursuitRepository: Send + Sync {
     /// not equal the restamp's recorded `from` — a stale `from` means
     /// the caller is moving a filing it has not looked at.
     async fn restamp(&self, restamp: &PursuitRestamp) -> Result<(), DomainError>;
+
+    /// A pursuit's **returns**: assets whose resolved `_trace` names
+    /// one of its rounds (the dispatch join, which is why a restamped
+    /// round's returns follow it automatically), plus assets whose
+    /// resolved direct pursuit claim names it while no dispatch hop
+    /// resolved — the claim-lane authority order, evaluated over the
+    /// V80 lookup columns so each probe is an index seek, never a
+    /// scan (the documented scale is 100k+ assets). Fold headstones
+    /// are dropped (this is an enumeration path); trashed rows stay
+    /// (a return in the trash is still a return, and restorable).
+    /// Ordered by ingest time, then id.
+    ///
+    /// **A round's own outputs are not returns.** What `reify` mints
+    /// in-library rides on the round itself
+    /// (`DispatchJob::output_asset_ids`, stamped `_dispatch`, not
+    /// `_trace`) and reaches a view through its rounds; *returns* are
+    /// what came back from outside — files an external tool produced,
+    /// re-ingested with a claim. The two populations answer different
+    /// questions and deliberately do not mix here.
+    async fn returns_of(&self, pursuit_id: &PursuitId) -> Result<Vec<AssetId>, DomainError>;
+
+    /// The latest lifecycle event kind per pursuit of a persona — the
+    /// standing read for listings, one window query instead of one
+    /// `events_of` per row. A pursuit with no events is absent from
+    /// the result (= open).
+    async fn latest_event_kinds(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<(PursuitId, PursuitEventKind)>, DomainError>;
 }
 
 /// Persistence port for the Query Group evaluation core.

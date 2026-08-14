@@ -5797,6 +5797,60 @@ fn v79_pursuit(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Version 79 → 80: the reverse-lookup lane for pursuit membership
+/// (#29) — two virtual generated columns over `_trace`, each indexed.
+///
+/// A pursuit's **returns** are assets whose ingest note resolved to
+/// one of its rounds (`_trace.dispatch_id`, dispatch join first) or,
+/// failing that, to the pursuit directly (`_trace.pursuit_id`). Both
+/// keys live inside `asset.extra` JSON, so the naive read is a full
+/// scan with a JSON parse per row — a per-view cost that grows with
+/// the library, at a documented 100k+ asset scale. The columns
+/// surface the two keys **only when their claim resolved** (the
+/// authority rule is baked into the column, not repeated per query),
+/// and the partial indexes hold just the claim-carrying rows, so a
+/// membership probe is an index seek instead of a scan.
+///
+/// - VIRTUAL rather than STORED because `ALTER TABLE ADD COLUMN` can
+///   only add virtual generated columns; the index materialises the
+///   values anyway, which is where reads look.
+/// - `json_valid` guards both expressions: the app validates
+///   `extra_json` on write, but the read side already assumes a
+///   corrupt bag is possible, and on a local-first profile a single
+///   bad row must degrade to "no claim surfaced", not to "the
+///   migration fails and the profile no longer opens" —
+///   `json_extract` over invalid JSON is an error, and inside an
+///   ALTER it is the whole batch's error.
+/// - The columns are derived state over `_trace` — the note stays the
+///   fact, the columns are how it is found. Writers keep writing the
+///   note; nothing writes the columns.
+/// - `Step::Sql`: DDL only, nothing minted.
+const V80_TRACE_LOOKUP: &str = r#"
+ALTER TABLE asset ADD COLUMN trace_dispatch_id TEXT
+    GENERATED ALWAYS AS (
+        CASE WHEN json_valid(extra)
+              AND json_extract(extra, '$._trace.resolved') = 1
+             THEN json_extract(extra, '$._trace.dispatch_id')
+        END
+    ) VIRTUAL;
+
+ALTER TABLE asset ADD COLUMN trace_pursuit_id TEXT
+    GENERATED ALWAYS AS (
+        CASE WHEN json_valid(extra)
+              AND json_extract(extra, '$._trace.pursuit_resolved') = 1
+             THEN json_extract(extra, '$._trace.pursuit_id')
+        END
+    ) VIRTUAL;
+
+CREATE INDEX idx_asset_trace_dispatch
+    ON asset(trace_dispatch_id)
+ WHERE trace_dispatch_id IS NOT NULL;
+
+CREATE INDEX idx_asset_trace_pursuit
+    ON asset(trace_pursuit_id)
+ WHERE trace_pursuit_id IS NOT NULL;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -5879,6 +5933,7 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v77_series_strategy_admits_the_exif_decoder),
     Step::App(v78_material_layers),
     Step::App(v79_pursuit),
+    Step::Sql(V80_TRACE_LOOKUP),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -10728,6 +10783,105 @@ mod tests {
         assert_eq!(
             orphans, 0,
             "the backfill mints nothing beyond the dispatches"
+        );
+    }
+
+    /// A profile carrying a corrupt `extra` bag still upgrades: the
+    /// bad row degrades to "no claim surfaced", it does not turn into
+    /// a migration failure that keeps the profile from opening.
+    #[test]
+    fn v80_upgrades_over_a_corrupt_extra_bag() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 79).unwrap();
+        let persona = seed_persona(&conn);
+        let corrupt = seed_asset(&conn, persona);
+        conn.execute(
+            "UPDATE asset SET extra = 'not json' WHERE id = ?1",
+            params![corrupt],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let surfaced: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT trace_dispatch_id, trace_pursuit_id FROM asset WHERE id = ?1",
+                params![corrupt],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(surfaced, (None, None), "a corrupt bag surfaces nothing");
+    }
+
+    /// V80's columns surface a `_trace` claim iff it resolved — the
+    /// authority rule lives in the column definition — and the probe
+    /// the membership read issues is an index seek, not a scan.
+    #[test]
+    fn v80_surfaces_resolved_trace_claims_and_probes_by_index() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+
+        let resolved = seed_asset(&conn, persona);
+        let unresolved = seed_asset(&conn, persona);
+        let bare = seed_asset(&conn, persona);
+        conn.execute(
+            "UPDATE asset SET extra = ?1 WHERE id = ?2",
+            params![
+                r#"{"_trace":{"resolved":true,"dispatch_id":"d-1","pursuit_resolved":true,"pursuit_id":"p-1"}}"#,
+                resolved
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE asset SET extra = ?1 WHERE id = ?2",
+            params![
+                r#"{"_trace":{"resolved":false,"dispatch_id":"d-1","pursuit_resolved":false,"pursuit_id":"p-1"}}"#,
+                unresolved
+            ],
+        )
+        .unwrap();
+
+        let hits: Vec<Uuid> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id FROM asset WHERE trace_dispatch_id = 'd-1' \
+                       AND trace_dispatch_id IS NOT NULL",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            hits,
+            vec![resolved],
+            "only the resolved claim surfaces; unresolved and bare rows stay NULL"
+        );
+        let pursuit_hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM asset WHERE trace_pursuit_id = 'p-1' \
+                   AND trace_pursuit_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pursuit_hits, 1);
+        let _ = bare;
+
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT id FROM asset \
+                  WHERE trace_dispatch_id IN ('d-1', 'd-2') \
+                    AND trace_dispatch_id IS NOT NULL",
+                [],
+                |r| r.get(3),
+            )
+            .unwrap();
+        assert!(
+            plan.contains("idx_asset_trace_dispatch"),
+            "the membership probe must be an index seek, not a scan: {plan}"
         );
     }
 

@@ -1357,6 +1357,27 @@ pub struct PursuitEventDto {
     pub created_at_ms: i64,
 }
 
+/// One pursuit, opened up (#29): the thin row plus everything the
+/// record correlates to it — all of it derived at read time, none of
+/// it stored on the pursuit.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PursuitViewDto {
+    /// The pursuit itself, standing included.
+    pub pursuit: PursuitDto,
+    /// Its rounds — the dispatch jobs stamped with it, oldest first.
+    pub rounds: Vec<DispatchDto>,
+    /// Its returns — asset ids whose ingest note resolved to one of
+    /// the rounds (the dispatch join) or to the pursuit directly (the
+    /// claim lane), ingest order. What a round minted in-library is
+    /// not here: those ride on the round's own `output_asset_ids`
+    /// above — returns are what came back from outside. Ids rather
+    /// than cards: the asset surfaces already know how to open an id,
+    /// and this view answers membership, not display.
+    pub returns: Vec<String>,
+    /// The lifecycle facts, oldest first.
+    pub events: Vec<PursuitEventDto>,
+}
+
 /// One thing an exporter produced, ready for the core to reify
 /// into a new Asset.
 ///

@@ -416,4 +416,19 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
         .await
         .expect("a closed pursuit still accepts new rounds");
     assert_eq!(late.pursuit_id.as_deref(), Some(target.id.as_str()));
+
+    // The view composes what the record correlates: both rounds (the
+    // restamped one and the late one), the close fact, and — with no
+    // ingest in this scenario — an empty returns population, present
+    // as a set rather than absent as a field.
+    let opened = core
+        .pursuit_service
+        .view(&target.id)
+        .await
+        .expect("view the pursuit");
+    assert_eq!(opened.pursuit.standing, "closed_satisfied");
+    let round_ids: Vec<&str> = opened.rounds.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(round_ids, vec![round.id.as_str(), late.id.as_str()]);
+    assert!(opened.returns.is_empty());
+    assert_eq!(opened.events.len(), 1);
 }

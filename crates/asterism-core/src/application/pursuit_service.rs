@@ -306,19 +306,55 @@ impl PursuitService {
         Ok(events.iter().map(event_to_dto).collect())
     }
 
-    /// Lists a persona's pursuits, most-recent first, standing
-    /// derived per row. One events read per row — fine at listing
-    /// limits; a batched standing projection is the documented upgrade
-    /// path when a real surface needs more.
+    /// Lists a persona's pursuits, most-recent first. Standing comes
+    /// from one latest-event window query over the whole persona
+    /// rather than one events read per row — the listing is a surface
+    /// that opens constantly, and its cost has to stay flat in the
+    /// number of events.
     pub async fn list(&self, persona_id: &str, limit: u32) -> Result<Vec<PursuitDto>, DomainError> {
         let persona = parse_persona_id(persona_id)?;
         let pursuits = self.pursuits.list(&persona, limit).await?;
-        let mut out = Vec::with_capacity(pursuits.len());
-        for pursuit in &pursuits {
-            let events = self.pursuits.events_of(&pursuit.id).await?;
-            out.push(pursuit_to_dto(pursuit, standing(&events).slug()));
-        }
-        Ok(out)
+        let latest: std::collections::HashMap<_, _> = self
+            .pursuits
+            .latest_event_kinds(&persona)
+            .await?
+            .into_iter()
+            .collect();
+        Ok(pursuits
+            .iter()
+            .map(|pursuit| {
+                let standing = crate::domain::pursuit::PursuitStanding::from_latest(
+                    latest.get(&pursuit.id).copied(),
+                );
+                pursuit_to_dto(pursuit, standing.slug())
+            })
+            .collect())
+    }
+
+    /// One pursuit, opened up: the row, its rounds, its returns, its
+    /// events — every piece an indexed read (`list_rounds` and the
+    /// event log by their pursuit indexes, returns by the V80 lookup
+    /// columns), so the view's cost tracks the pursuit's own size and
+    /// not the library's.
+    pub async fn view(
+        &self,
+        id: &str,
+    ) -> Result<asterism_contract::dto::PursuitViewDto, DomainError> {
+        let pursuit_id = parse_pursuit_id(id)?;
+        let pursuit = self
+            .pursuits
+            .find(&pursuit_id)
+            .await?
+            .ok_or_else(|| DomainError::not_found("pursuit", id))?;
+        let events = self.pursuits.events_of(&pursuit_id).await?;
+        let rounds = self.dispatches.list_rounds(&pursuit_id).await?;
+        let returns = self.pursuits.returns_of(&pursuit_id).await?;
+        Ok(asterism_contract::dto::PursuitViewDto {
+            pursuit: pursuit_to_dto(&pursuit, standing(&events).slug()),
+            rounds: rounds.iter().map(dispatch_to_dto).collect(),
+            returns: returns.iter().map(|a| a.to_string()).collect(),
+            events: events.iter().map(event_to_dto).collect(),
+        })
     }
 }
 

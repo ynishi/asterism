@@ -11,7 +11,7 @@ use asterism_core::domain::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject,
 };
 use asterism_core::domain::repository::PursuitRepository;
-use asterism_core::domain::value::{PersonaId, PursuitEventId, PursuitId, SnapshotId};
+use asterism_core::domain::value::{AssetId, PersonaId, PursuitEventId, PursuitId, SnapshotId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -441,6 +441,108 @@ impl PursuitRepository for SqlitePursuitRepository {
             ))),
         }
     }
+
+    async fn returns_of(&self, pursuit_id: &PursuitId) -> Result<Vec<AssetId>, DomainError> {
+        let pursuit = *pursuit_id.as_uuid();
+        let pursuit_str = pursuit_id.to_string();
+        let rows: Vec<(Uuid, i64)> = self
+            .isle
+            .call(move |conn| {
+                // The rounds first: their ids are what the dispatch-join
+                // probe matches against. `_trace` stores them as
+                // hyphenated strings, so the conversion happens here
+                // rather than in SQL.
+                let round_ids: Vec<String> = {
+                    let mut stmt =
+                        conn.prepare("SELECT id FROM dispatch_job WHERE pursuit_id = ?1")?;
+                    stmt.query_map(params![pursuit], |r| r.get::<_, Uuid>(0))?
+                        .map(|r| r.map(|u| u.to_string()))
+                        .collect::<Result<_, _>>()?
+                };
+                let mut out: Vec<(Uuid, i64)> = Vec::new();
+                // Probe 1, the dispatch join — chunked so a pursuit with
+                // very many rounds never exceeds SQLite's bind limit.
+                for chunk in round_ids.chunks(500) {
+                    let placeholders = vec!["?"; chunk.len()].join(", ");
+                    let sql = format!(
+                        "SELECT id, created_at FROM asset \
+                          WHERE trace_dispatch_id IN ({placeholders}) \
+                            AND trace_dispatch_id IS NOT NULL \
+                            AND folded_into IS NULL"
+                    );
+                    let mut stmt = conn.prepare(&sql)?;
+                    let hits = stmt
+                        .query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+                            Ok((r.get::<_, Uuid>(0)?, r.get::<_, i64>(1)?))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    out.extend(hits);
+                }
+                // Probe 2, the direct claim — consumed only where no
+                // dispatch hop resolved (`trace_dispatch_id IS NULL` is
+                // that rule as a predicate), so a stale sidecar copy
+                // loses to the join without adjudication.
+                let mut stmt = conn.prepare(
+                    "SELECT id, created_at FROM asset \
+                      WHERE trace_pursuit_id = ?1 \
+                        AND trace_pursuit_id IS NOT NULL \
+                        AND trace_dispatch_id IS NULL \
+                        AND folded_into IS NULL",
+                )?;
+                let hits = stmt
+                    .query_map(params![pursuit_str], |r| {
+                        Ok((r.get::<_, Uuid>(0)?, r.get::<_, i64>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                out.extend(hits);
+                Ok(out)
+            })
+            .await
+            .map_err(infra_err)?;
+        let mut rows = rows;
+        rows.sort_by_key(|(id, created)| (*created, *id));
+        rows.dedup_by_key(|(id, _)| *id);
+        Ok(rows
+            .into_iter()
+            .map(|(id, _)| AssetId::from_uuid(id))
+            .collect())
+    }
+
+    async fn latest_event_kinds(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<(PursuitId, PursuitEventKind)>, DomainError> {
+        let persona = *persona_id.as_uuid();
+        let rows: Vec<(Uuid, String)> = self
+            .isle
+            .call(move |conn| {
+                // Greatest-per-group over the standing sort key
+                // (created_at, id) — the same tie-break `standing`
+                // derives with, so this read and the per-pursuit one
+                // can never disagree.
+                let mut stmt = conn.prepare(
+                    "SELECT pursuit_id, kind FROM ( \
+                        SELECT pursuit_id, kind, \
+                               ROW_NUMBER() OVER ( \
+                                   PARTITION BY pursuit_id \
+                                   ORDER BY created_at DESC, id DESC \
+                               ) AS rn \
+                          FROM pursuit_event WHERE persona_id = ?1 \
+                     ) WHERE rn = 1",
+                )?;
+                let rows = stmt
+                    .query_map(params![persona], |r| {
+                        Ok((r.get::<_, Uuid>(0)?, r.get::<_, String>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(|(id, kind)| Ok((PursuitId::from_uuid(id), PursuitEventKind::parse(&kind)?)))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -464,6 +566,26 @@ mod tests {
         .await
         .unwrap();
         PersonaId::from_uuid(persona)
+    }
+
+    /// One asset row with a caller-supplied `_trace` note (raw JSON)
+    /// and clock — the shape the ingest writes, seeded directly so the
+    /// membership probes are tested against the storage contract.
+    async fn seed_traced_asset(isle: &AsyncIsle, persona: PersonaId, trace: &str, at: i64) -> Uuid {
+        let id = Uuid::now_v7();
+        let persona = *persona.as_uuid();
+        let extra = format!(r#"{{"_trace":{trace}}}"#);
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO asset (id, persona_id, source_kind, source_locator, \
+                                    modality, occurred_at, created_at, updated_at, extra) \
+                 VALUES (?1, ?2, 'fs', ?3, 'state', 0, ?4, ?4, ?5)",
+                params![id, persona, format!("a-{id}.md"), at, extra],
+            )
+        })
+        .await
+        .unwrap();
+        id
     }
 
     /// A dispatch row this test can restamp — snapshot included, since
@@ -701,6 +823,160 @@ mod tests {
             (0, None),
             "a refused crossing writes nothing"
         );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn returns_follow_the_dispatch_join_first_and_the_claim_second() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = seed_persona(&isle).await;
+        let repo = SqlitePursuitRepository::new(isle.clone());
+        let ctx = AttributionContext::owner_surface();
+        let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
+
+        let home = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let other = Pursuit::new(persona, None, None, None, t0, &ctx);
+        repo.create(&home).await.unwrap();
+        repo.create(&other).await.unwrap();
+        let dispatch = seed_dispatch(&isle, persona).await;
+        {
+            let dispatch = *dispatch.as_uuid();
+            let home_id = *home.id.as_uuid();
+            isle.call(move |conn| {
+                conn.execute(
+                    "UPDATE dispatch_job SET pursuit_id = ?1 WHERE id = ?2",
+                    params![home_id, dispatch],
+                )
+            })
+            .await
+            .unwrap();
+        }
+
+        // Via the dispatch join.
+        let joined = seed_traced_asset(
+            &isle,
+            persona,
+            &format!(r#"{{"resolved":true,"dispatch_id":"{dispatch}"}}"#),
+            10,
+        )
+        .await;
+        // Via the direct claim (no dispatch hop resolved).
+        let claimed = seed_traced_asset(
+            &isle,
+            persona,
+            &format!(
+                r#"{{"resolved":false,"pursuit_resolved":true,"pursuit_id":"{}"}}"#,
+                home.id
+            ),
+            30,
+        )
+        .await;
+        // Stale sidecar copy: the resolved dispatch hop names `home`,
+        // the claim names `other` — the join wins without adjudication.
+        let stale_copy = seed_traced_asset(
+            &isle,
+            persona,
+            &format!(
+                r#"{{"resolved":true,"dispatch_id":"{dispatch}","pursuit_resolved":true,"pursuit_id":"{}"}}"#,
+                other.id
+            ),
+            20,
+        )
+        .await;
+        // Unresolved claims never surface.
+        seed_traced_asset(
+            &isle,
+            persona,
+            &format!(
+                r#"{{"resolved":false,"pursuit_resolved":false,"pursuit_id":"{}"}}"#,
+                home.id
+            ),
+            40,
+        )
+        .await;
+        // A fold headstone drops out of the enumeration.
+        let folded = seed_traced_asset(
+            &isle,
+            persona,
+            &format!(r#"{{"resolved":true,"dispatch_id":"{dispatch}"}}"#),
+            50,
+        )
+        .await;
+        {
+            let keeper = joined;
+            isle.call(move |conn| {
+                conn.execute(
+                    "UPDATE asset SET folded_into = ?1 WHERE id = ?2",
+                    params![keeper, folded],
+                )
+            })
+            .await
+            .unwrap();
+        }
+
+        let returns = repo.returns_of(&home.id).await.unwrap();
+        assert_eq!(
+            returns,
+            vec![
+                AssetId::from_uuid(joined),
+                AssetId::from_uuid(stale_copy),
+                AssetId::from_uuid(claimed),
+            ],
+            "join first, stale copies resolved by the join, claims second, \
+             ingest order — unresolved and folded rows absent"
+        );
+        assert!(
+            repo.returns_of(&other.id).await.unwrap().is_empty(),
+            "a stale sidecar copy never files a return under the pursuit it names"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn latest_event_kinds_agree_with_per_pursuit_standing() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = seed_persona(&isle).await;
+        let repo = SqlitePursuitRepository::new(isle.clone());
+        let ctx = AttributionContext::owner_surface();
+        let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
+
+        let closed = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let tied = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let untouched = Pursuit::new(persona, None, None, None, t0, &ctx);
+        for p in [&closed, &tied, &untouched] {
+            repo.create(p).await.unwrap();
+        }
+        let event = |pursuit: &Pursuit, kind, at| {
+            PursuitEvent::new(pursuit.id, persona, kind, None, None, at, &ctx).unwrap()
+        };
+        repo.append_event(&event(
+            &closed,
+            PursuitEventKind::ClosedSatisfied,
+            t0 + Duration::seconds(1),
+        ))
+        .await
+        .unwrap();
+        // Two events sharing one clock reading: the v7 id tie-break
+        // must pick the later mint, exactly as `standing` does.
+        let first = event(&tied, PursuitEventKind::ClosedAbandoned, t0);
+        let second = event(&tied, PursuitEventKind::Reopened, t0);
+        repo.append_event(&first).await.unwrap();
+        repo.append_event(&second).await.unwrap();
+
+        let mut latest = repo.latest_event_kinds(&persona).await.unwrap();
+        latest.sort_by_key(|(id, _)| *id.as_uuid());
+        let mut expected = vec![
+            (closed.id, PursuitEventKind::ClosedSatisfied),
+            (tied.id, PursuitEventKind::Reopened),
+        ];
+        expected.sort_by_key(|(id, _)| *id.as_uuid());
+        assert_eq!(
+            latest, expected,
+            "one row per evented pursuit, tie broken on id; no-event pursuits absent"
+        );
+        let _ = untouched;
 
         driver.shutdown().await.unwrap();
     }

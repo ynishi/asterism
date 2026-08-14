@@ -843,6 +843,11 @@
       "docs": "One lifecycle fact about a pursuit (#29): a close or a reopen,\nappend-only. A repeat close is a new fact; standing re-derives."
     },
     {
+      "path": "asterism_contract::dto::PursuitViewDto",
+      "kind": "struct",
+      "docs": "One pursuit, opened up (#29): the thin row plus everything the\nrecord correlates to it — all of it derived at read time, none of\nit stored on the pursuit."
+    },
+    {
       "path": "asterism_contract::dto::RetrievedIdsDto",
       "kind": "struct",
       "docs": "A retrieval reduced to **order**: the ranked ids and nothing else.\n\nThe second composition form: membership\nstays with the Query side (exact, countable, no ceiling) and only the\n*sequence* comes from Retrieval. So this carries no cards, no paging\nand no counts of the library — a caller pairs it with a page it\nalready holds and uses the rank to sort what is on screen.\n\nNot a set. `ids` is best-first and stops at the candidate ceiling, so\nan id missing from it means \"not in the top N we looked at\", never\n\"does not match\". Treating it as a membership answer is the mistake\n[`RetrievedPageDto`]'s missing `total` exists to prevent."

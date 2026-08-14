@@ -328,6 +328,18 @@ impl PursuitStanding {
             Self::ClosedAbandoned => "closed_abandoned",
         }
     }
+
+    /// The one kind→standing mapping, shared by [`standing`] and every
+    /// batched read that carries only the latest kind — so the two can
+    /// never drift, and a new event kind fails to compile until both
+    /// answer for it.
+    pub fn from_latest(kind: Option<PursuitEventKind>) -> Self {
+        match kind {
+            None | Some(PursuitEventKind::Reopened) => Self::Open,
+            Some(PursuitEventKind::ClosedSatisfied) => Self::ClosedSatisfied,
+            Some(PursuitEventKind::ClosedAbandoned) => Self::ClosedAbandoned,
+        }
+    }
 }
 
 /// Derives standing from a pursuit's events: latest by
@@ -339,17 +351,12 @@ pub fn standing<'a, I>(events: I) -> PursuitStanding
 where
     I: IntoIterator<Item = &'a PursuitEvent>,
 {
-    match events
-        .into_iter()
-        .max_by_key(|event| (event.created_at, event.id))
-    {
-        None => PursuitStanding::Open,
-        Some(latest) => match latest.kind {
-            PursuitEventKind::Reopened => PursuitStanding::Open,
-            PursuitEventKind::ClosedSatisfied => PursuitStanding::ClosedSatisfied,
-            PursuitEventKind::ClosedAbandoned => PursuitStanding::ClosedAbandoned,
-        },
-    }
+    PursuitStanding::from_latest(
+        events
+            .into_iter()
+            .max_by_key(|event| (event.created_at, event.id))
+            .map(|event| event.kind),
+    )
 }
 
 /// What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
