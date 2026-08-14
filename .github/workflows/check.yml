@@ -77,6 +77,28 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # `aidoc-guard` (inside `check`) needs nightly: `cargo-aidoc` shells
+      # out to `cargo +nightly rustdoc --output-format json`, which is the
+      # reason that step warns instead of failing when it cannot run. On a
+      # developer's machine the warning is the right answer — the workspace
+      # pins no toolchain and a machine without nightly must still be able
+      # to run the full gate. Here it is the wrong one: a runner has
+      # whatever it is told to have, and a gate that warns on every run is
+      # a gate nobody reads.
+      #
+      # Installing it is what makes `docs/aidoc/` drift a red run rather
+      # than a line in a log. The hole was not hypothetical: a change that
+      # deleted a crate and added another was committed with the artifacts
+      # still describing the deleted one, and `just check` was green.
+      #
+      # `rustup toolchain install` rather than a second
+      # `dtolnay/rust-toolchain` step: that action makes what it installs
+      # the default, so a `@nightly` after the `@stable` above would
+      # quietly move the whole build — clippy, the tests, everything — onto
+      # nightly. Only the rustdoc shell-out wants it.
+      - name: Install nightly for rustdoc JSON
+        run: rustup toolchain install nightly --profile minimal
+
       # Caches `~/.cargo` and the dependency half of `target/`. The
       # workspace's own crates are deliberately not cached by this action,
       # so all 19 are recompiled and re-linted on every run — the verdict is
@@ -112,6 +134,13 @@ jobs:
           cache-dependency-path: crates/asterism-ui/package-lock.json
 
       - uses: extractions/setup-just@v4
+
+      # The other half of what `aidoc-guard` needs. The version floats, the
+      # same bargain the stable toolchain above takes and for the same
+      # reason: a tool that moves under the workflow meets its own breakage
+      # in a run nobody had to remember to start.
+      - name: Install cargo-aidoc
+        run: cargo install cargo-aidoc
 
       # No recipe installs frontend dependencies: every `ui-*` recipe assumes
       # a populated `node_modules`, the same assumption a fresh worktree
