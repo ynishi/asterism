@@ -317,6 +317,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path already took care to avoid. Both routes clear it now, and a test
   covers the signing path's failure route rather than only its success.
 
+- **The PNG chunk length is checked, and three comments now describe
+  what their code does** (#14) — the length was
+  `u32::try_from(payload.len()).unwrap_or(u32::MAX)` under a comment
+  claiming the impossible case was made loud. It was the opposite: a
+  payload past the bound emitted a chunk whose declared length
+  disagreed with the bytes after it, and returned success. The ceiling
+  is taken from `pngmeta::MAX_CHUNK_LENGTH`, because that crate reads
+  the chunks this one writes and refuses a length above it — a
+  hand-written cap would make the two equal by coincidence.
+  `PacketTooLarge` covers both containers now, and its message no
+  longer names JPEG.
+
+  The three that were prose only: `png::read` stops at the first XMP
+  chunk even when its text is unreadable (which matches the writer, and
+  now says so); the control-character filter keeps DEL and C1, which
+  are legal XML 1.0 and which the comment said were dropped; and
+  `IPTC_CV`'s doc claimed a structural guarantee that is actually held
+  by a test. Two tests are renamed, because what they assert stopped
+  matching what they were called.
+
 - **The documented JPEG packet limit was the segment's, not the
   packet's** (#14) — three docs quoted 65,533 bytes, including the one a
   caller reads when deciding how long a prompt to allow. That is the
