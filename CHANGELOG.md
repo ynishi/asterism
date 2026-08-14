@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pursuit — a minted unit of work over the dispatch loop** (#29,
+  design on #21). Content ancestry cannot say "these rounds were one
+  attempt at one thing": regeneration shares no derivation edge with
+  the round it supersedes, rejected rounds have no descendants, and
+  abandonment has no ancestry expression at all. So the unit is minted
+  — three tables (`pursuit`, thin and immutable; `pursuit_event`,
+  append-only close/reopen facts with standing derived on read;
+  `pursuit_restamp`, the recorded repair verb) and a stamp column on
+  `dispatch_job`, RESTRICT everywhere, with the persona purge sequence
+  extended to sweep them in dependency order.
+
+  Every dispatch start verb now files its round under a pursuit:
+  supplied ids are validated in-persona (continuation is explicit,
+  never inferred from content overlap), an absent id mints an anonymous
+  pursuit in the same request, and a re-dispatch inherits the prior
+  round's pursuit — an explicit reference to a named dispatch, not a
+  heuristic. The migration backfills one single-round pursuit per
+  existing dispatch with NULL attribution: nobody opened those
+  pursuits, the migration did, and grouping consecutive dispatches by
+  guesswork is exactly the inferred correlation the model forbids.
+  Restamping moves a round (its returns follow through the dispatch
+  join) or, later, a judgment; the move lands atomically with its
+  record, is refused when the caller's recorded `from` no longer
+  matches the row — a repair verb that guesses is worse than one that
+  refuses — and never crosses personas. In this change the verb stops
+  at the repository port: transport surfaces, the pursuit lifecycle
+  verbs (close / reopen), the sidecar claim lane, and the membership
+  reads are the next slices of #29.
+
 - **What a dispatch produces is written with its AI disclosure** (#14) —
   the writer landed with nothing calling it; this calls it. Not where
   the work was planned to call it from: stamping immediately after
