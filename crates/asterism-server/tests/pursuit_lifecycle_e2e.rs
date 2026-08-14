@@ -1,13 +1,13 @@
 //! The pursuit lifecycle (#29), end to end through `CoreCtx`: open
-//! (with parenthood and its persona wall), close-satisfied freezing
-//! the kept set in canonical ascending order (asserted by dedupe:
-//! two closes over the same members in different input orders share
-//! one snapshot row), close-abandoned, reopen, derived standing, and
-//! the restamp repair verb with its cross-persona refusal.
+//! with parenthood and its persona wall, close-satisfied freezing the
+//! kept set canonically, close-abandoned and the empty conclusion,
+//! the append-only event log with derived standing, and the restamp
+//! repair verb.
 //!
-//! Its own test binary because `init_core` opens the profile-global
-//! Tantivy index (one core per test binary, as with the sibling e2e
-//! files).
+//! One test per scenario, each over its own core (an `init_core` per
+//! test, as the sibling e2e files do) — a failure names its scenario
+//! instead of hiding everything downstream of the first broken
+//! assert, and no scenario's acts can shift another's expectations.
 
 use std::sync::Arc;
 
@@ -15,50 +15,18 @@ use asterism_contract::command::{
     AddAssetCommand, ClosePursuitCommand, CreateDispatchCommand, CreateSnapshotCommand,
     OpenPursuitCommand, RegisterPersonaCommand, ReopenPursuitCommand, RestampDispatchCommand,
 };
-use asterism_server::core_init::{CoreMode, LogEmitter, init_core_with};
+use asterism_contract::dto::PersonaDto;
+use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
 
 fn unattributed() -> asterism_core::domain::attribution::AttributionContext {
     asterism_core::domain::attribution::AttributionContext::asserted(None, None)
         .expect("stating no author and no operator is always valid")
 }
 
-fn add_command(persona_id: &str, locator: &str, occurred_at_ms: i64) -> AddAssetCommand {
-    AddAssetCommand {
-        persona_id: persona_id.to_string(),
-        source_kind: "fs".into(),
-        locator: locator.to_string(),
-        modality: None,
-        occurred_at_ms,
-        session_id: None,
-        external_session_key: None,
-        external_key: None,
-        bundle_id: None,
-        labels: Vec::new(),
-        register_note: None,
-        platform: None,
-        file_size_bytes: None,
-        duration_ms: None,
-        width_px: None,
-        height_px: None,
-        extra_json: None,
-        cover_hint: None,
-        auto_organize_base_dir: None,
-        derived_from: None,
-        author_kind: None,
-        author_subject: None,
-        operator_ai: None,
-        on_duplicate: None,
-        declared_content_hash: None,
-        album_meta: Default::default(),
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
+/// One core over its own tempdir, plus the persona the scenario acts
+/// as. The tempdir rides back so it outlives the test body.
+async fn boot(tag: &str) -> (tempfile::TempDir, CoreCtx, PersonaDto) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let corpus = tmp.path().join("corpus");
-    std::fs::create_dir_all(&corpus).expect("corpus dir");
-
     let core = init_core_with(
         &tmp.path().join("asterism.db"),
         Arc::new(LogEmitter),
@@ -67,79 +35,124 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
     )
     .await
     .expect("init_core");
+    let persona = register(&core, tag).await;
+    (tmp, core, persona)
+}
 
-    let persona = core
-        .persona_service
+async fn register(core: &CoreCtx, tag: &str) -> PersonaDto {
+    core.persona_service
         .register(
             RegisterPersonaCommand {
-                name: "E2E".into(),
-                pack_id: Some("e2e-pursuit-lifecycle".into()),
+                name: tag.into(),
+                pack_id: Some(format!("e2e-pursuit-{tag}")),
             },
             &unattributed(),
         )
         .await
-        .expect("register persona");
-    let stranger = core
-        .persona_service
-        .register(
-            RegisterPersonaCommand {
-                name: "Stranger".into(),
-                pack_id: Some("e2e-pursuit-stranger".into()),
+        .expect("register persona")
+}
+
+/// Registers one on-disk asset for the persona and returns its id.
+async fn seed_asset(
+    core: &CoreCtx,
+    tmp: &tempfile::TempDir,
+    persona_id: &str,
+    name: &str,
+) -> String {
+    let path = tmp.path().join(name);
+    std::fs::write(&path, format!("# {name}\n")).expect("write asset file");
+    core.asset_service
+        .add(
+            AddAssetCommand {
+                persona_id: persona_id.to_string(),
+                source_kind: "fs".into(),
+                locator: path.to_str().unwrap().to_string(),
+                modality: None,
+                occurred_at_ms: 1_785_000_000_000,
+                session_id: None,
+                external_session_key: None,
+                external_key: None,
+                bundle_id: None,
+                labels: Vec::new(),
+                register_note: None,
+                platform: None,
+                file_size_bytes: None,
+                duration_ms: None,
+                width_px: None,
+                height_px: None,
+                extra_json: None,
+                cover_hint: None,
+                auto_organize_base_dir: None,
+                derived_from: None,
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+                on_duplicate: None,
+                declared_content_hash: None,
+                album_meta: Default::default(),
             },
             &unattributed(),
         )
         .await
-        .expect("register second persona");
+        .expect("add asset")
+        .id
+}
 
-    let mut assets = Vec::new();
-    for (name, at) in [("a.md", 1_785_000_000_000_i64), ("b.md", 1_785_000_000_100)] {
-        let path = corpus.join(name);
-        std::fs::write(&path, format!("# {name}\n")).expect("write asset file");
-        let dto = core
-            .asset_service
-            .add(
-                add_command(&persona.id, path.to_str().unwrap(), at),
-                &unattributed(),
-            )
-            .await
-            .expect("add asset");
-        assets.push(dto.id);
-    }
-
-    // ---- open: intent up front, parenthood, the persona wall -------
-    let root = core
-        .pursuit_service
+async fn open(
+    core: &CoreCtx,
+    persona_id: &str,
+    parent: Option<&str>,
+    title: Option<&str>,
+) -> asterism_contract::dto::PursuitDto {
+    core.pursuit_service
         .open(
             OpenPursuitCommand {
-                persona_id: persona.id.clone(),
-                parent_pursuit_id: None,
-                title: Some("  hero line  ".into()),
+                persona_id: persona_id.to_string(),
+                parent_pursuit_id: parent.map(str::to_string),
+                title: title.map(str::to_string),
                 note: None,
             },
             &unattributed(),
         )
         .await
-        .expect("open root pursuit");
+        .expect("open pursuit")
+}
+
+async fn close(
+    core: &CoreCtx,
+    pursuit_id: &str,
+    outcome: &str,
+    kept: Vec<String>,
+) -> Result<asterism_contract::dto::PursuitEventDto, asterism_core::DomainError> {
+    core.pursuit_service
+        .close(
+            ClosePursuitCommand {
+                pursuit_id: pursuit_id.to_string(),
+                outcome: outcome.into(),
+                kept_asset_ids: kept,
+                note: None,
+            },
+            &unattributed(),
+        )
+        .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn open_names_intent_and_walls_parenthood() {
+    let (_tmp, core, persona) = boot("open").await;
+
+    let root = open(&core, &persona.id, None, Some("  hero line  ")).await;
     assert_eq!(root.standing, "open", "a fresh pursuit is open");
     assert_eq!(
         root.title.as_deref(),
         Some("hero line"),
         "labels are trimmed to one storable representation"
     );
-    let child = core
-        .pursuit_service
-        .open(
-            OpenPursuitCommand {
-                persona_id: persona.id.clone(),
-                parent_pursuit_id: Some(root.id.clone()),
-                title: None,
-                note: Some("spawned".into()),
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("open child pursuit");
+
+    let child = open(&core, &persona.id, Some(&root.id), None).await;
     assert_eq!(child.parent_id.as_deref(), Some(root.id.as_str()));
+
+    let stranger = register(&core, "open-stranger").await;
     let crossing = core
         .pursuit_service
         .open(
@@ -156,37 +169,25 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         crossing.is_err(),
         "parenthood never crosses personas: {crossing:?}"
     );
+}
 
-    // ---- close-satisfied: the freeze is canonical ------------------
-    // Two pursuits, same kept members, opposite input orders. The
+#[tokio::test(flavor = "multi_thread")]
+async fn close_satisfied_freezes_the_kept_set_canonically() {
+    let (tmp, core, persona) = boot("freeze").await;
+    let a = seed_asset(&core, &tmp, &persona.id, "a.md").await;
+    let b = seed_asset(&core, &tmp, &persona.id, "b.md").await;
+
+    // Two pursuits, same kept members, opposite input orders: the
     // close path sorts ascending before freezing, so both conclusions
-    // are one snapshot row — that is the dedupe the convention buys.
-    let forward = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: root.id.clone(),
-                outcome: "satisfied".into(),
-                kept_asset_ids: vec![assets[0].clone(), assets[1].clone()],
-                note: Some("kept both".into()),
-            },
-            &unattributed(),
-        )
+    // are one snapshot row — the dedupe the convention buys.
+    let first = open(&core, &persona.id, None, None).await;
+    let second = open(&core, &persona.id, None, None).await;
+    let forward = close(&core, &first.id, "satisfied", vec![a.clone(), b.clone()])
         .await
-        .expect("close root satisfied");
-    let backward = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: child.id.clone(),
-                outcome: "satisfied".into(),
-                kept_asset_ids: vec![assets[1].clone(), assets[0].clone()],
-                note: None,
-            },
-            &unattributed(),
-        )
+        .expect("close forward");
+    let backward = close(&core, &second.id, "satisfied", vec![b.clone(), a.clone()])
         .await
-        .expect("close child satisfied");
+        .expect("close backward");
     let frozen = forward.snapshot_id.expect("a kept set freezes");
     assert_eq!(
         backward.snapshot_id.as_deref(),
@@ -194,23 +195,19 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         "identical kept sets dedupe to one snapshot regardless of input order"
     );
     assert_eq!(
-        core.pursuit_service
-            .get(&root.id)
-            .await
-            .expect("get closed root")
-            .standing,
+        core.pursuit_service.get(&first.id).await.unwrap().standing,
         "closed_satisfied"
     );
 
     // A dispatch input frozen from the same members in pick order is a
-    // different statement — and when the pick order differs from
-    // ascending, a different snapshot row.
+    // different statement — and when the pick differs from ascending,
+    // a different snapshot row.
     let picked = core
         .snapshot_service
         .create(
             CreateSnapshotCommand {
                 persona_id: persona.id.clone(),
-                asset_ids: vec![assets[1].clone(), assets[0].clone()],
+                asset_ids: vec![b, a],
             },
             &unattributed(),
         )
@@ -221,103 +218,137 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         "core keeps caller order as identity; the ascending close is the forge's own convention"
     );
 
-    // ---- reopen, close-abandoned, the empty conclusion -------------
+    // The kept set gets the same hydration every freeze gets: an
+    // asset the library does not hold is refused.
+    let ghost = close(
+        &core,
+        &first.id,
+        "satisfied",
+        vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
+    )
+    .await;
+    assert!(
+        ghost.is_err(),
+        "keeping an asset the library does not hold is refused: {ghost:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn abandonment_keeps_nothing_and_the_empty_conclusion_is_defined() {
+    let (_tmp, core, persona) = boot("abandon").await;
+    let pursuit = open(&core, &persona.id, None, None).await;
+
+    let kept_on_abandon = close(
+        &core,
+        &pursuit.id,
+        "abandoned",
+        vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
+    )
+    .await;
+    assert!(
+        kept_on_abandon.is_err(),
+        "an abandoned close keeps nothing: {kept_on_abandon:?}"
+    );
+
+    let nothing_kept = close(&core, &pursuit.id, "satisfied", Vec::new())
+        .await
+        .expect("an empty conclusion is a defined state");
+    assert_eq!(nothing_kept.snapshot_id, None);
+
+    let abandoned = close(&core, &pursuit.id, "abandoned", Vec::new())
+        .await
+        .expect("a repeat close is a new fact, not an error");
+    assert_eq!(abandoned.snapshot_id, None);
+    assert_eq!(
+        core.pursuit_service
+            .get(&pursuit.id)
+            .await
+            .unwrap()
+            .standing,
+        "closed_abandoned",
+        "the latest fact wins"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_log_is_append_only_and_standing_is_a_projection() {
+    let (_tmp, core, persona) = boot("log").await;
+    let pursuit = open(&core, &persona.id, None, None).await;
+    let other = open(&core, &persona.id, None, None).await;
+
+    close(&core, &pursuit.id, "satisfied", Vec::new())
+        .await
+        .expect("first close");
     core.pursuit_service
         .reopen(
             ReopenPursuitCommand {
-                pursuit_id: root.id.clone(),
+                pursuit_id: pursuit.id.clone(),
                 note: Some("second thoughts".into()),
             },
             &unattributed(),
         )
         .await
-        .expect("reopen root");
+        .expect("reopen");
     assert_eq!(
-        core.pursuit_service.get(&root.id).await.unwrap().standing,
+        core.pursuit_service
+            .get(&pursuit.id)
+            .await
+            .unwrap()
+            .standing,
         "open",
         "reopen re-derives to open"
     );
-    let rejected = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: root.id.clone(),
-                outcome: "abandoned".into(),
-                kept_asset_ids: vec![assets[0].clone()],
-                note: None,
-            },
-            &unattributed(),
-        )
-        .await;
-    assert!(
-        rejected.is_err(),
-        "an abandoned close keeps nothing: {rejected:?}"
-    );
-    let nothing_kept = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: root.id.clone(),
-                outcome: "satisfied".into(),
-                kept_asset_ids: Vec::new(),
-                note: Some("concluded with nothing kept".into()),
-            },
-            &unattributed(),
-        )
+    close(&core, &pursuit.id, "abandoned", Vec::new())
         .await
-        .expect("an empty conclusion is a defined state");
-    assert_eq!(nothing_kept.snapshot_id, None);
-    let abandoned = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: child.id.clone(),
-                outcome: "abandoned".into(),
-                kept_asset_ids: Vec::new(),
-                note: Some("dropped".into()),
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("close child abandoned");
-    assert_eq!(abandoned.snapshot_id, None);
-    assert_eq!(
-        core.pursuit_service.get(&child.id).await.unwrap().standing,
-        "closed_abandoned"
-    );
+        .expect("second close");
 
-    // ---- the log, whole ---------------------------------------------
     let history: Vec<String> = core
         .pursuit_service
-        .events(&root.id)
+        .events(&pursuit.id)
         .await
-        .expect("root history")
+        .expect("history")
         .into_iter()
         .map(|e| e.kind)
         .collect();
     assert_eq!(
         history,
-        vec!["closed_satisfied", "reopened", "closed_satisfied"],
+        vec!["closed_satisfied", "reopened", "closed_abandoned"],
         "every fact stays; standing is a projection, not an edit"
     );
+
     let listed = core
         .pursuit_service
         .list(&persona.id, 10)
         .await
-        .expect("list persona pursuits");
-    // The two explicit opens, most-recent first, each with its own
-    // derived standing (root's latest fact is the nothing-kept close).
-    assert_eq!(listed.len(), 2);
-    assert_eq!(listed[0].id, child.id);
-    assert_eq!(listed[0].standing, "closed_abandoned");
-    assert_eq!(listed[1].standing, "closed_satisfied");
+        .expect("list");
+    assert_eq!(listed.len(), 2, "both explicit opens, most-recent first");
+    assert_eq!(listed[0].id, other.id);
+    assert_eq!(listed[0].standing, "open");
+    assert_eq!(listed[1].id, pursuit.id);
+    assert_eq!(listed[1].standing, "closed_abandoned");
+}
 
-    // ---- restamp: the repair verb through the service --------------
+#[tokio::test(flavor = "multi_thread")]
+async fn restamp_refiles_a_round_and_the_walls_hold() {
+    let (tmp, core, persona) = boot("restamp").await;
+    let asset = seed_asset(&core, &tmp, &persona.id, "a.md").await;
+    let input = core
+        .snapshot_service
+        .create(
+            CreateSnapshotCommand {
+                persona_id: persona.id.clone(),
+                asset_ids: vec![asset],
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("freeze input");
+
     let round = core
         .dispatch_service
         .create(
             CreateDispatchCommand {
-                snapshot_id: picked.id.clone(),
+                snapshot_id: input.id.clone(),
                 exporter_slug: "file".into(),
                 action: "write".into(),
                 params_json: String::new(),
@@ -329,37 +360,25 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         .await
         .expect("create dispatch (mints its own pursuit)");
     let minted = round.pursuit_id.clone().expect("always-mint stamped it");
-    assert_ne!(minted, root.id, "an unstamped request minted fresh");
+
+    let target = open(&core, &persona.id, None, Some("the real line")).await;
+    assert_ne!(minted, target.id, "an unstamped request minted fresh");
     let moved = core
         .pursuit_service
         .restamp_dispatch(
             RestampDispatchCommand {
                 dispatch_id: round.id.clone(),
-                to_pursuit_id: root.id.clone(),
+                to_pursuit_id: target.id.clone(),
             },
             &unattributed(),
         )
         .await
         .expect("re-file the round under the named line of work");
-    assert_eq!(
-        moved.pursuit_id.as_deref(),
-        Some(root.id.as_str()),
-        "the stamp moved; the recorded move carries the prior filing"
-    );
-    let foreign = core
-        .pursuit_service
-        .open(
-            OpenPursuitCommand {
-                persona_id: stranger.id.clone(),
-                parent_pursuit_id: None,
-                title: None,
-                note: None,
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("open a stranger's pursuit");
-    let crossing_restamp = core
+    assert_eq!(moved.pursuit_id.as_deref(), Some(target.id.as_str()));
+
+    let stranger = register(&core, "restamp-stranger").await;
+    let foreign = open(&core, &stranger.id, None, None).await;
+    let crossing = core
         .pursuit_service
         .restamp_dispatch(
             RestampDispatchCommand {
@@ -370,48 +389,31 @@ async fn the_lifecycle_round_trips_and_the_close_freeze_is_canonical() {
         )
         .await;
     assert!(
-        crossing_restamp.is_err(),
-        "a filing never leaves its persona: {crossing_restamp:?}"
+        crossing.is_err(),
+        "a filing never leaves its persona: {crossing:?}"
     );
 
-    // ---- intent pinned: closed is standing, not a wall --------------
-    // Filing a new round under a closed pursuit is deliberately legal:
-    // a close is a fact about a moment, not a lock, and work after it
-    // changes live standing rather than being refused. This assert
-    // exists so a future reader treats the absence of a guard as the
-    // design, not as a gap to fix.
-    let late_round = core
+    // Closed is standing, not a lock: a new round files under a
+    // closed pursuit and changes live standing rather than being
+    // refused. Asserted so a future reader treats the missing guard
+    // as the design, not as a gap to fix.
+    close(&core, &target.id, "satisfied", Vec::new())
+        .await
+        .expect("close the target");
+    let late = core
         .dispatch_service
         .create(
             CreateDispatchCommand {
-                snapshot_id: picked.id.clone(),
+                snapshot_id: input.id,
                 exporter_slug: "file".into(),
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: Some(child.id.clone()),
+                pursuit_id: Some(target.id.clone()),
             },
             &unattributed(),
         )
         .await
         .expect("a closed pursuit still accepts new rounds");
-    assert_eq!(late_round.pursuit_id.as_deref(), Some(child.id.as_str()));
-
-    // ---- the kept set is validated like every other freeze ----------
-    let ghost_kept = core
-        .pursuit_service
-        .close(
-            ClosePursuitCommand {
-                pursuit_id: child.id.clone(),
-                outcome: "satisfied".into(),
-                kept_asset_ids: vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
-                note: None,
-            },
-            &unattributed(),
-        )
-        .await;
-    assert!(
-        ghost_kept.is_err(),
-        "keeping an asset the library does not hold is refused: {ghost_kept:?}"
-    );
+    assert_eq!(late.pursuit_id.as_deref(), Some(target.id.as_str()));
 }
