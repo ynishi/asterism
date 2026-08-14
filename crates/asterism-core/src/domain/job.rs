@@ -313,6 +313,33 @@ pub enum JobKind {
     /// handler over both would be one retry policy over two kinds of
     /// loss.
     ChapterScan,
+    /// Writes AI-disclosure provenance into a file this library
+    /// produced. Payload: `{ "asset_id": "<uuid>" }`.
+    ///
+    /// # Why this is its own job and not part of the export
+    ///
+    /// The disclosure is derived from stored container metadata, and
+    /// that metadata is written by
+    /// [`MaterialHash`](Self::MaterialHash). A dispatch mints its
+    /// outputs with no fingerprint at all — `reify` builds the material
+    /// from the exporter's string and enqueues the hashing — so a stamp
+    /// taken at export time reads an empty evidence set, establishes
+    /// nothing, and writes nothing. It would run, succeed, and leave
+    /// every file unmarked.
+    ///
+    /// So the order is a chain rather than a hope: the hashing job
+    /// enqueues this one after the fingerprint lands, which is the
+    /// first moment there is anything to disclose.
+    ///
+    /// # Why not a mode of `MaterialHash`
+    ///
+    /// They fail differently and are retried differently. Hashing reads
+    /// bytes and writes a column; stamping rewrites the user's file. A
+    /// hashing failure should be retried freely, and a stamping failure
+    /// leaves an artefact that exists and is unmarked — a state to
+    /// record, not an error to retry into. One handler over both would
+    /// be one retry policy over two kinds of loss.
+    ProvenanceStamp,
 }
 
 impl JobKind {
@@ -338,6 +365,7 @@ impl JobKind {
             Self::SeriesDerive => "series_derive",
             Self::PreviewGen => "preview_gen",
             Self::ChapterScan => "chapter_scan",
+            Self::ProvenanceStamp => "provenance_stamp",
         }
     }
 
@@ -363,6 +391,7 @@ impl JobKind {
             "series_derive" => Ok(Self::SeriesDerive),
             "preview_gen" => Ok(Self::PreviewGen),
             "chapter_scan" => Ok(Self::ChapterScan),
+            "provenance_stamp" => Ok(Self::ProvenanceStamp),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

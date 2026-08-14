@@ -1764,6 +1764,7 @@ async fn hash_material(
                 conflict: detect_after_hash(env, asset_id, ord, &fingerprint, origin).await,
             };
             derive_series_after_hash(env, asset_id, &fingerprint).await;
+            stamp_after_hash(env, asset_id, &fingerprint).await;
             outcome
         }
         Err(err) => {
@@ -1826,6 +1827,175 @@ async fn derive_series_after_hash(
             asset_id = %asset_id,
             error = %err,
             "the metadata landed but nothing was asked to derive its series keys"
+        );
+    }
+}
+
+/// Whether a dispatch in this library produced the artefact `extra`
+/// belongs to.
+///
+/// **This is the whole guard between the stamping path and the user's
+/// own files.** Stamping rewrites bytes; doing it to an artefact a
+/// dispatch made is the feature, and doing it to one somebody imported
+/// is this application editing a file it was only ever asked to index.
+/// A pure function over the value so the rule can be pinned without a
+/// database, a queue or a file.
+///
+/// The marker is the trace `reify_one` writes and nothing else does.
+/// `_derived` — where the merge puts an exporter's own non-object
+/// `extra` — deliberately does not count: it says an exporter had
+/// something to say, not that this library made the file.
+fn produced_by_dispatch(extra: &serde_json::Value) -> bool {
+    extra
+        .get(asterism_core::domain::dispatch::DISPATCH_TRACE_KEY)
+        .is_some_and(|trace| trace.is_object())
+}
+
+/// The run that produced an artefact, for the manifest's own
+/// `dispatch_id`.
+///
+/// `None` when the trace is absent or does not name one, which is the
+/// same answer a re-apply months later gives: the field is omitted
+/// rather than filled with something that is not a dispatch id.
+fn dispatch_id_of(extra: &serde_json::Value) -> Option<String> {
+    extra
+        .get(asterism_core::domain::dispatch::DISPATCH_TRACE_KEY)?
+        .get("dispatch_id")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Writes the AI disclosure into a file this library produced.
+///
+/// Enqueued by [`stamp_after_hash`] once the artefact's metadata has
+/// landed — see there for why this cannot happen when the export
+/// finishes, and why it is confined to artefacts a dispatch made.
+///
+/// # Why a failure here is not a failed job
+///
+/// A stamp that does not land leaves an artefact that exists and is not
+/// marked. The file is fine; what is missing is a statement about it,
+/// and the statement can be made again — the disclosure is derived from
+/// stored rows, so re-running this job re-derives it. Failing the job
+/// would put a retry loop around a file rewrite and would put an export
+/// that produced exactly what it was asked for into a red state over
+/// metadata.
+///
+/// The two halves of a disclosure fail independently and the outcome
+/// says which landed, so a partial result is reported as one rather
+/// than collapsed into success or failure.
+pub async fn provenance_stamp(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(service) = env.deps.provenance.get() else {
+        return Ok("no writer configured, skipped".into());
+    };
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    // The run that made it, for the manifest's own `dispatch_id` — the
+    // field that has been absent from every manifest written so far
+    // because nothing had one to pass.
+    let dispatch_id = dispatch_id_of(&asset.extra);
+    let Some(path) = asset.source.locator.local_path() else {
+        // A container record or a remote locator has no file to write
+        // into. An answer, not a failure — the same reading the hashing
+        // walk gives the same locator.
+        return Ok("no local file, skipped".into());
+    };
+
+    match service
+        .apply_to(&asset.id, path, dispatch_id.as_deref())
+        .await
+    {
+        Ok(outcome) => {
+            let failures = outcome.failures();
+            if !failures.is_empty() {
+                tracing::warn!(
+                    event = "diag.provenance_stamp.partial",
+                    asset_id = %asset.id,
+                    discloses = outcome.discloses(),
+                    failures = ?failures,
+                    "part of the disclosure did not land"
+                );
+            }
+            Ok(format!(
+                "disclosed={} failures={}",
+                outcome.discloses(),
+                failures.len()
+            ))
+        }
+        Err(err) => {
+            tracing::warn!(
+                event = "diag.provenance_stamp.failed",
+                asset_id = %asset.id,
+                error = %err,
+                "the artefact exists and carries no mark"
+            );
+            Ok(format!("not stamped: {err}"))
+        }
+    }
+}
+
+/// Asks for the AI disclosure of an artefact **this library produced**,
+/// once its metadata has landed, and swallows a failed enqueue.
+///
+/// # Why here and not at export time
+///
+/// The disclosure is derived from stored container metadata, and a
+/// dispatch mints its outputs without any: `reify` builds the material
+/// from the exporter's string and enqueues the hashing that fills
+/// `meta_kv` in. A stamp taken when the export finished would read an
+/// empty evidence set, establish nothing, and write nothing — it would
+/// succeed on every file and mark none of them. This is the first
+/// moment there is anything to disclose, which is why the order is a
+/// chain rather than a hope.
+///
+/// # Why only what this library produced
+///
+/// Stamping rewrites the file. For an artefact a dispatch made, that is
+/// the feature; for one the user imported, it is this application
+/// editing somebody's original because it happened to walk past it. The
+/// dispatch trace
+/// ([`DISPATCH_TRACE_KEY`](asterism_core::domain::dispatch::DISPATCH_TRACE_KEY))
+/// is what separates the two, and it costs the one read that answers
+/// it — paid here rather than in the handler so that a library-wide
+/// backfill does not put a job on the queue per asset to have it skip.
+///
+/// Swallowed for the reason [`derive_series_after_hash`] gives: the
+/// fingerprint is committed and the walk will not offer this row again,
+/// so a lost enqueue costs a mark that arrives at the next start rather
+/// than an observation thrown away. It is said out loud instead.
+async fn stamp_after_hash(env: &JobEnv, asset_id: &AssetId, fingerprint: &MaterialFingerprint) {
+    if fingerprint.meta_kv.is_none() {
+        return;
+    }
+    // No writer configured is not a failure and not a warning: it is
+    // the state a build that has not asked for stamping is in.
+    if env.deps.provenance.get().is_none() {
+        return;
+    }
+    let produced_here = matches!(
+        env.deps.assets.find(asset_id).await,
+        Ok(Some(asset)) if produced_by_dispatch(&asset.extra)
+    );
+    if !produced_here {
+        return;
+    }
+    if let Err(err) = env
+        .queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::ProvenanceStamp,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await
+    {
+        tracing::warn!(
+            event = "diag.provenance_stamp.enqueue_failed",
+            asset_id = %asset_id,
+            error = %err,
+            "the metadata landed but nothing was asked to write the disclosure"
         );
     }
 }
@@ -2785,6 +2955,62 @@ mod tests {
             derive_cover(CoverTemplate::FirstLine, Some(PLAIN_BODY), &any),
             "Just A Heading"
         );
+    }
+
+    /// **An artefact this library did not make is never stamped.**
+    ///
+    /// The property the whole stamping path rests on: it rewrites
+    /// files, and everything except an artefact a dispatch produced is
+    /// somebody's own file that this application was asked to index and
+    /// not to edit. Every shape an imported asset's `extra` can take
+    /// has to answer `false`, including the ones that look adjacent.
+    #[test]
+    fn only_what_a_dispatch_produced_is_stamped() {
+        let reified = serde_json::json!({
+            "_dispatch": {
+                "selection_id": "01930000-0000-7000-8000-000000000001",
+                "dispatch_id": "01930000-0000-7000-8000-000000000002",
+                "exporter_slug": "file",
+            }
+        });
+        assert!(produced_by_dispatch(&reified));
+        assert_eq!(
+            dispatch_id_of(&reified).as_deref(),
+            Some("01930000-0000-7000-8000-000000000002")
+        );
+
+        // Everything an import can leave behind.
+        for imported in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({ "camera": "X-T5" }),
+            // The exporter's own payload, kept beside the trace when it
+            // was not an object — an artefact that carries this and no
+            // trace did not come from a dispatch.
+            serde_json::json!({ "_derived": "whatever the exporter said" }),
+            // A key of the right name that is not a trace.
+            serde_json::json!({ "_dispatch": "01930000-0000-7000-8000-000000000002" }),
+            serde_json::json!({ "_dispatch": null }),
+        ] {
+            assert!(
+                !produced_by_dispatch(&imported),
+                "would have rewritten a file for {imported}"
+            );
+            assert_eq!(dispatch_id_of(&imported), None, "for {imported}");
+        }
+    }
+
+    /// A trace with no `dispatch_id` still marks the artefact as ours,
+    /// and the manifest simply omits the field.
+    ///
+    /// The two questions are separate: whether to stamp at all, and
+    /// what to say about the run. Folding them would mean a trace
+    /// missing one key silently turned stamping off.
+    #[test]
+    fn a_trace_without_a_run_id_still_belongs_to_this_library() {
+        let extra = serde_json::json!({ "_dispatch": { "exporter_slug": "file" } });
+        assert!(produced_by_dispatch(&extra));
+        assert_eq!(dispatch_id_of(&extra), None);
     }
 
     /// A detection that failed is reported as "no conflict", never as

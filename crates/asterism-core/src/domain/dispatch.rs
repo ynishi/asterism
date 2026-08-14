@@ -92,6 +92,16 @@ impl DispatchState {
     }
 }
 
+/// Key under which a reified artefact records the run that made it,
+/// inside `Asset::extra`.
+///
+/// A named constant because two sides depend on the spelling and only
+/// one of them writes it: `reify_one` puts the trace there, and anything
+/// asking "did this library produce this file, and under which run"
+/// reads it. The object holds `selection_id`, `dispatch_id`,
+/// `exporter_slug`, and the operator when one was recorded.
+pub const DISPATCH_TRACE_KEY: &str = "_dispatch";
+
 /// One dispatch invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DispatchJob {
