@@ -135,12 +135,16 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
-      # The other half of what `aidoc-guard` needs. The version floats, the
-      # same bargain the stable toolchain above takes and for the same
-      # reason: a tool that moves under the workflow meets its own breakage
-      # in a run nobody had to remember to start.
+      # The other half of what `aidoc-guard` needs, floor-pinned because
+      # this is where the floor was found: the first run of this step
+      # installed the then-current 0.2.0 and failed on `--title`, an
+      # argument that existed only in an unreleased working tree. The
+      # upper end floats, the same bargain the stable toolchain above
+      # takes and for the same reason — a tool that moves under the
+      # workflow meets its own breakage in a run nobody had to remember
+      # to start.
       - name: Install cargo-aidoc
-        run: cargo install cargo-aidoc
+        run: cargo install cargo-aidoc --version '^0.2.1'
 
       # No recipe installs frontend dependencies: every `ui-*` recipe assumes
       # a populated `node_modules`, the same assumption a fresh worktree

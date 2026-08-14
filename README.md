@@ -111,7 +111,11 @@ UI, one step has prerequisites it cannot install for you:
 
 | Needed by | Install | Without it |
 |---|---|---|
-| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` and `rustup toolchain install nightly` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` (0.2.1 or newer) and `rustup toolchain install nightly` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+
+An older `cargo-aidoc` is worse than none: it is on `PATH`, so the guard
+runs it, and it fails on an argument it does not have rather than on
+anything about this repository.
 
 `docs/aidoc/` is the committed module inventory — generated, because the
 hand-written one shipped 15 modules stale. Regenerate it with `just

@@ -291,11 +291,15 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 # toolchain floats (no rust-toolchain.toml) and a machine without
 # nightly must still be able to run the full gate. `aidoc-guard` is how
 # that is reconciled — it warns instead of skipping silently.
-# (2) `cargo install cargo-aidoc`. The 0.1.0 release failed on this
-# workspace (it derived the rustdoc JSON filename from the package
-# name, which asterism-ui's `[lib] name = "asterism_ui_lib"` breaks) and
-# the note here used to say install from git; 0.2.0 is on crates.io and
-# fixes it, so the plain install is the answer again.
+# (2) `cargo install cargo-aidoc`, **0.2.1 or newer**. Two things this
+# workspace needs were unreleased until then: the rustdoc JSON filename
+# came from the package name, which asterism-ui's `[lib] name =
+# "asterism_ui_lib"` breaks, and `--title` did not exist. The note here
+# once said to install from git, then said 0.2.0 on crates.io was
+# enough — it was not. Both fixes shipped in 0.2.1, and the version is
+# stated rather than implied because a plain `cargo install` against an
+# older one fails on `--title` with an argument error that says nothing
+# about why.
 #
 # `--title` pins the llms.txt H1. The tool's default is the checkout
 # directory's basename, which from a worktree named after its branch
