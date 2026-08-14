@@ -74,62 +74,41 @@
 //! interpolates `{{handle}}`; a `handle_from` of `"$"` keeps the whole
 //! response body and the path would read `{{handle.job_id}}` instead.
 //!
-//! ### Template placeholders
+//! ### Templates and JSONPath
 //!
-//! Simple `{{...}}` substitution, no arithmetic. Supported roots:
+//! Both grammars are the shared adapter machinery, documented where
+//! they are defined: [`asterism_dispatch_sdk::template`] for the
+//! `{{...}}` roots, the optional-`?` suffix and which of them resolve in
+//! which phase, and [`asterism_dispatch_sdk::jsonpath`] for the path
+//! subset. They are not restated here — a grammar with two write-ups
+//! grows two meanings, and a profile author cannot tell which one their
+//! adapter implements.
 //!
-//! - `{{selection_id}}`, `{{dispatch_id}}`, `{{persona_id}}`,
-//!   `{{action}}` — dispatch-context ids.
-//! - `{{input[N].<field>}}` — indexed input asset field. Supported
-//!   fields: `id`, `persona_id`, `source_locator`, `source_kind`,
-//!   `modality`, `cover`.
-//! - `{{params.<dot.path>}}` — deep dot-access into the params JSON
-//!   itself (so the caller can define its own "extra fields" section
-//!   in params and reference it from templates).
-//! - `{{handle.<dot.path>}}` — deep dot-access into the handle JSON.
-//!   Only available in `poll` / `harvest` templates (the exporter
-//!   panics on this in `dispatch`, when no handle exists yet).
-//! - `{{item.<dot.path>}}` — dot-access into the current
-//!   `harvest.items_path` element. Only available inside
-//!   `harvest.map`.
-//!
-//! A trailing `?` on a placeholder (`{{item.caption?}}`) means
-//! "resolve to empty string when the path is missing" instead of
-//! failing with `BackendRejected`.
-//!
-//! Params are persisted unedited. The blob handed to
-//! `CreateDispatchCommand` is stored whole as
+//! One consequence of the params blob being a template namespace is
+//! worth repeating at the point of use, because it decides what may go
+//! in the example above. Params are persisted unedited: the blob handed
+//! to `CreateDispatchCommand` is stored whole as
 //! `dispatch_job.params_json` and handed back out as
-//! `DispatchDto.params_json` on every read of the dispatch — nothing
-//! on that path filters, redacts, or drops a field. A credential
-//! reached by `{{params.…}}` (the `extras.api_key` above) is
-//! therefore readable by anything that can list dispatches; put one
-//! there only where that visibility is acceptable.
-//!
-//! ### JSONPath
-//!
-//! Minimal subset — enough to steer the state machine and pluck out
-//! items:
-//!
-//! - `$.foo`             — object field.
-//! - `$.foo.bar`         — dot chain.
-//! - `$.arr[0]`          — array index.
-//! - `$.arr[*]`          — array wildcard (only the last segment can
-//!   be a wildcard; matches the shape of every documented example).
-//!
-//! Anything outside this grammar is rejected up front with
-//! `BackendRejected`.
+//! `DispatchDto.params_json` on every read of the dispatch, and nothing
+//! on that path filters, redacts, or drops a field. A credential reached
+//! by `{{params.…}}` — the `extras.api_key` above — is therefore
+//! readable by anything that can list dispatches. Put one there only
+//! where that visibility is acceptable.
 
 use std::collections::BTreeMap;
 
-use asterism_contract::dto::AssetCardDto;
+use asterism_dispatch_sdk::jsonpath::{first as jsonpath_first, many as jsonpath_many};
+use asterism_dispatch_sdk::template::{
+    TemplateEnv, render as render_template, render_headers, substitute_json_leaves,
+    value_to_display_string,
+};
 use asterism_dispatch_sdk::{
     Derived, DispatchContext, DispatchState, Exporter, ExporterError, Handle, ProgressHint,
 };
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 /// Slug the registry uses for this exporter.
 pub const SLUG: &str = "http";
@@ -550,27 +529,6 @@ async fn send_request(
     })
 }
 
-fn render_headers(
-    headers: &BTreeMap<String, String>,
-    env: &TemplateEnv<'_>,
-) -> Result<BTreeMap<String, String>, ExporterError> {
-    let mut out = BTreeMap::new();
-    for (k, v) in headers {
-        out.insert(k.clone(), render_template(v, env)?);
-    }
-    Ok(out)
-}
-
-fn value_to_display_string(v: Value) -> Option<String> {
-    match v {
-        Value::Null => None,
-        Value::String(s) => Some(s),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Array(_) | Value::Object(_) => Some(v.to_string()),
-    }
-}
-
 fn match_rule(rule: &MatchRule, resp: &Value) -> bool {
     match jsonpath_first(resp, &rule.path) {
         Some(actual) => actual == rule.equals,
@@ -578,279 +536,10 @@ fn match_rule(rule: &MatchRule, resp: &Value) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Template substitution — {{...}}.
-// ---------------------------------------------------------------------------
-
-/// Environment used to resolve `{{...}}` placeholders during
-/// template rendering. Kept opaque to callers.
-struct TemplateEnv<'a> {
-    ctx: &'a DispatchContext<'a>,
-    params: &'a Value,
-    handle: Option<&'a Value>,
-    item: Option<&'a Value>,
-}
-
-impl<'a> TemplateEnv<'a> {
-    fn pre_handle(ctx: &'a DispatchContext<'a>, params: &'a Value) -> Self {
-        Self {
-            ctx,
-            params,
-            handle: None,
-            item: None,
-        }
-    }
-
-    fn with_handle(ctx: &'a DispatchContext<'a>, params: &'a Value, handle: &'a Value) -> Self {
-        Self {
-            ctx,
-            params,
-            handle: Some(handle),
-            item: None,
-        }
-    }
-
-    fn with_item<'b: 'a>(&'b self, item: &'a Value) -> TemplateEnv<'a> {
-        TemplateEnv {
-            ctx: self.ctx,
-            params: self.params,
-            handle: self.handle,
-            item: Some(item),
-        }
-    }
-
-    fn resolve(&self, key: &str, optional: bool) -> Result<String, ExporterError> {
-        let value = self.lookup(key);
-        match value {
-            Some(v) => Ok(value_to_display_string(v).unwrap_or_default()),
-            None if optional => Ok(String::new()),
-            None => Err(ExporterError::BackendRejected(format!(
-                "template placeholder {{{{{key}}}}} did not resolve"
-            ))),
-        }
-    }
-
-    fn lookup(&self, key: &str) -> Option<Value> {
-        // Top-level context ids.
-        match key {
-            "selection_id" => return Some(Value::String(self.ctx.selection_id.into())),
-            "dispatch_id" => return Some(Value::String(self.ctx.dispatch_id.into())),
-            "persona_id" => return Some(Value::String(self.ctx.persona_id.into())),
-            "action" => return Some(Value::String(self.ctx.action.into())),
-            _ => {}
-        }
-        // input[N].<field>
-        if let Some(rest) = key.strip_prefix("input[")
-            && let Some(bracket_end) = rest.find(']')
-        {
-            let (idx_str, tail) = rest.split_at(bracket_end);
-            let tail = &tail[1..]; // skip `]`
-            let idx: usize = idx_str.parse().ok()?;
-            let input = self.ctx.inputs.get(idx)?;
-            let field = tail.strip_prefix('.').unwrap_or(tail);
-            return input_field(input, field);
-        }
-        // params.<dot.path>
-        if let Some(rest) = key.strip_prefix("params.") {
-            return dot_path(self.params, rest);
-        }
-        if key == "params" {
-            return Some(self.params.clone());
-        }
-        // handle.<dot.path>
-        if let Some(rest) = key.strip_prefix("handle.") {
-            return self.handle.and_then(|h| dot_path(h, rest));
-        }
-        if key == "handle" {
-            return self.handle.cloned();
-        }
-        // item.<dot.path>
-        if let Some(rest) = key.strip_prefix("item.") {
-            return self.item.and_then(|i| dot_path(i, rest));
-        }
-        if key == "item" {
-            return self.item.cloned();
-        }
-        None
-    }
-}
-
-fn input_field(input: &AssetCardDto, field: &str) -> Option<Value> {
-    match field {
-        "" | "id" => Some(Value::String(input.id.clone())),
-        "persona_id" => Some(Value::String(input.persona_id.clone())),
-        "source_locator" => Some(Value::String(input.source_locator.clone())),
-        // Unclassified inputs (asset-model v4) template as "".
-        "modality" => Some(Value::String(input.modality.clone().unwrap_or_default())),
-        "cover" => input.cover.clone().map(Value::String),
-        _ => None,
-    }
-}
-
-fn dot_path(root: &Value, path: &str) -> Option<Value> {
-    let mut cur = root;
-    for seg in path.split('.') {
-        // Support `arr[0]` inside the dot chain.
-        if let Some(open) = seg.find('[') {
-            let field = &seg[..open];
-            let rest = &seg[open + 1..];
-            let close = rest.find(']')?;
-            let idx: usize = rest[..close].parse().ok()?;
-            let after_bracket = &rest[close + 1..];
-            if !field.is_empty() {
-                cur = cur.get(field)?;
-            }
-            cur = cur.get(idx)?;
-            if !after_bracket.is_empty() {
-                // Additional trailing chain like `[0].name` — recurse
-                // on the remainder starting after the `].` we just
-                // consumed.
-                return dot_path(cur, after_bracket.trim_start_matches('.'));
-            }
-        } else {
-            cur = cur.get(seg)?;
-        }
-    }
-    Some(cur.clone())
-}
-
-fn render_template(template: &str, env: &TemplateEnv<'_>) -> Result<String, ExporterError> {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    // Byte offset where the current literal run started. Literals are
-    // copied as `&str` slices rather than byte-by-byte so multi-byte
-    // UTF-8 sequences survive intact. Every byte of a multi-byte
-    // sequence is >= 0x80 — lead bytes (0xC2-0xF4) as well as
-    // continuation bytes (0x80-0xBF) — so none can equal `b'{'`, and
-    // `i` is a char boundary whenever a placeholder opens.
-    // `literal_start` is a boundary for the same reason: it is either 0
-    // or the offset just past a `}}`, both of which sit outside any
-    // multi-byte sequence.
-    let mut literal_start = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-            out.push_str(&template[literal_start..i]);
-            let end = template[i + 2..].find("}}").ok_or_else(|| {
-                ExporterError::BackendRejected(format!(
-                    "unterminated template placeholder starting at byte {i}"
-                ))
-            })?;
-            let raw = &template[i + 2..i + 2 + end];
-            let key = raw.trim();
-            let (real_key, optional) = match key.strip_suffix('?') {
-                Some(k) => (k.trim(), true),
-                None => (key, false),
-            };
-            out.push_str(&env.resolve(real_key, optional)?);
-            i += 2 + end + 2;
-            literal_start = i;
-        } else {
-            i += 1;
-        }
-    }
-    out.push_str(&template[literal_start..]);
-    Ok(out)
-}
-
-fn substitute_json_leaves(value: &Value, env: &TemplateEnv<'_>) -> Result<Value, ExporterError> {
-    match value {
-        Value::String(s) => Ok(Value::String(render_template(s, env)?)),
-        Value::Array(arr) => arr
-            .iter()
-            .map(|v| substitute_json_leaves(v, env))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        Value::Object(obj) => {
-            let mut out = Map::with_capacity(obj.len());
-            for (k, v) in obj {
-                out.insert(k.clone(), substitute_json_leaves(v, env)?);
-            }
-            Ok(Value::Object(out))
-        }
-        other => Ok(other.clone()),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Minimal JSONPath — $.foo.bar[0] and $.foo.bar[*]
-// ---------------------------------------------------------------------------
-
-fn parse_jsonpath(expr: &str) -> Vec<PathSeg> {
-    let mut segs: Vec<PathSeg> = Vec::new();
-    let expr = expr.trim();
-    let expr = expr.strip_prefix('$').unwrap_or(expr);
-    let expr = expr.strip_prefix('.').unwrap_or(expr);
-    for raw in expr.split('.') {
-        if raw.is_empty() {
-            continue;
-        }
-        // Possible forms: `foo`, `foo[0]`, `foo[*]`, `[0]`, `[*]`
-        let (field, index_part) = match raw.find('[') {
-            None => (raw, ""),
-            Some(open) => (&raw[..open], &raw[open..]),
-        };
-        if !field.is_empty() {
-            segs.push(PathSeg::Field(field.to_string()));
-        }
-        if !index_part.is_empty() {
-            let inner = index_part.trim_start_matches('[').trim_end_matches(']');
-            if inner == "*" {
-                segs.push(PathSeg::Wildcard);
-            } else if let Ok(idx) = inner.parse::<usize>() {
-                segs.push(PathSeg::Index(idx));
-            } else {
-                // Unsupported index form — leave as a literal field
-                // fallback so grammar errors are visible.
-                segs.push(PathSeg::Field(inner.to_string()));
-            }
-        }
-    }
-    segs
-}
-
-enum PathSeg {
-    Field(String),
-    Index(usize),
-    Wildcard,
-}
-
-fn jsonpath_many(root: &Value, expr: &str) -> Vec<Value> {
-    let segs = parse_jsonpath(expr);
-    let mut frontier: Vec<&Value> = vec![root];
-    for seg in &segs {
-        let mut next: Vec<&Value> = Vec::new();
-        for v in &frontier {
-            match seg {
-                PathSeg::Field(name) => {
-                    if let Some(child) = v.get(name) {
-                        next.push(child);
-                    }
-                }
-                PathSeg::Index(idx) => {
-                    if let Some(child) = v.get(*idx) {
-                        next.push(child);
-                    }
-                }
-                PathSeg::Wildcard => match v {
-                    Value::Array(arr) => next.extend(arr.iter()),
-                    Value::Object(obj) => next.extend(obj.values()),
-                    _ => {}
-                },
-            }
-        }
-        frontier = next;
-    }
-    frontier.into_iter().cloned().collect()
-}
-
-fn jsonpath_first(root: &Value, expr: &str) -> Option<Value> {
-    jsonpath_many(root, expr).into_iter().next()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use asterism_contract::dto::AssetCardDto;
 
     fn card_fixture(id: &str, source_locator: &str) -> AssetCardDto {
         AssetCardDto {
@@ -904,92 +593,10 @@ mod tests {
         assert!(exp.accepts("any-slug"));
     }
 
-    #[test]
-    fn render_template_substitutes_context_and_params() {
-        let params = serde_json::json!({ "prompt": "cats" });
-        let input = card_fixture("asset-uuid", "/tmp/photo.png");
-        let inputs = vec![input];
-        let ctx = DispatchContext {
-            inputs: &inputs,
-            selection_id: "sel-1",
-            dispatch_id: "disp-1",
-            persona_id: "persona-1",
-            action: "run",
-            params: &params,
-        };
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        assert_eq!(
-            render_template(
-                "{{selection_id}}/{{input[0].source_locator}}?p={{params.prompt}}",
-                &env
-            )
-            .unwrap(),
-            "sel-1//tmp/photo.png?p=cats"
-        );
-        // Optional placeholder silently resolves to empty string.
-        assert_eq!(render_template("{{params.missing?}}", &env).unwrap(), "");
-        // Non-optional missing placeholder errors.
-        assert!(render_template("{{params.missing}}", &env).is_err());
-    }
-
-    #[test]
-    fn render_template_keeps_non_ascii_literals_free_of_mojibake() {
-        let params = serde_json::json!({ "extras": { "prompt": "夜の街" } });
-        let inputs = vec![card_fixture("asset-uuid", "/tmp/写真.png")];
-        let ctx = stub_ctx(&inputs, &params);
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        // Multi-byte literals sit between the placeholders, and the
-        // placeholders themselves open at byte 0 and close at the end —
-        // exercising the empty leading slice and the empty trailing
-        // slice on top of the multi-byte runs. A byte-wise copy would
-        // widen each literal byte into its own Latin-1 char.
-        assert_eq!(
-            render_template(
-                "{{params.extras.prompt}}、対象 {{input[0].source_locator}} — 完了{{selection_id}}",
-                &env
-            )
-            .unwrap(),
-            "夜の街、対象 /tmp/写真.png — 完了sel-1"
-        );
-        // Template that is nothing but a non-ASCII literal.
-        assert_eq!(
-            render_template("絵文字🎨も壊さない", &env).unwrap(),
-            "絵文字🎨も壊さない"
-        );
-    }
-
-    #[test]
-    fn render_template_unterminated_offset_is_a_byte_index() {
-        let params = serde_json::json!({ "extras": { "prompt": "夜の街" } });
-        let inputs = vec![card_fixture("asset-uuid", "/tmp/写真.png")];
-        let ctx = stub_ctx(&inputs, &params);
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        // `夜` is 3 bytes, so the unterminated `{{` opens at byte 3 —
-        // the reported offset indexes bytes, not chars.
-        let err = render_template("夜{{a", &env).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("byte 3"), "unexpected message: {msg}");
-    }
-
-    #[test]
-    fn jsonpath_first_and_many_navigate_the_documented_subset() {
-        let doc = serde_json::json!({
-            "status": "done",
-            "outputs": [
-                {"url": "https://a", "tags": ["cat"]},
-                {"url": "https://b", "tags": ["dog"]}
-            ]
-        });
-        assert_eq!(
-            jsonpath_first(&doc, "$.status"),
-            Some(Value::String("done".into()))
-        );
-        assert_eq!(
-            jsonpath_first(&doc, "$.outputs[0].url"),
-            Some(Value::String("https://a".into()))
-        );
-        assert_eq!(jsonpath_many(&doc, "$.outputs[*]").len(), 2);
-    }
+    // The template and JSONPath mechanics are tested where they are
+    // defined (`asterism_dispatch_sdk::template` / `::jsonpath`). What
+    // stays here is what this crate owns: the params schema, the shipped
+    // example, and the state-machine rules read out of a response.
 
     #[test]
     fn match_rule_fires_only_on_equal_value() {
@@ -1006,33 +613,6 @@ mod tests {
             message_path: None,
         };
         assert!(!match_rule(&rule_neg, &doc));
-    }
-
-    #[test]
-    fn substitute_json_leaves_walks_nested_shapes() {
-        let params = serde_json::json!({ "prompt": "cats" });
-        let input = card_fixture("a", "/x");
-        let inputs = vec![input];
-        let ctx = DispatchContext {
-            inputs: &inputs,
-            selection_id: "s",
-            dispatch_id: "d",
-            persona_id: "p",
-            action: "run",
-            params: &params,
-        };
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        let body = serde_json::json!({
-            "top": "{{params.prompt}}",
-            "arr": ["{{input[0].source_locator}}", 42, true],
-            "nested": { "field": "{{selection_id}}" }
-        });
-        let out = substitute_json_leaves(&body, &env).unwrap();
-        assert_eq!(out["top"], "cats");
-        assert_eq!(out["arr"][0], "/x");
-        assert_eq!(out["arr"][1], 42);
-        assert_eq!(out["arr"][2], true);
-        assert_eq!(out["nested"]["field"], "s");
     }
 
     /// The shipped example is what `asterism-server schema print

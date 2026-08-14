@@ -65,12 +65,24 @@
 //! example-JSON artifacts under [`schema`]. Mirrors the harvest
 //! importer pattern where `asterism-importer-harvest
 //! --print-schema` streams the canonical ingest shape.
+//!
+//! ## Machinery for schema-driven adapters
+//!
+//! [`template`] and [`jsonpath`] are the two pieces an adapter needs in
+//! order to be *configured* rather than written: a `{{...}}` substitution
+//! over the dispatch, and a path grammar small enough to document in the
+//! params example a profile author reads. Neither is part of the wire
+//! contract above — they are shared implementation, and they live here
+//! because a grammar with two spellings is worse than either spelling.
+//! An adapter that hard-codes its backend's protocol needs neither.
 
 pub mod derived;
 pub mod exporter;
 pub mod handle;
+pub mod jsonpath;
 pub mod schema;
 pub mod state;
+pub mod template;
 
 pub use derived::{COVER_MAX_CHARS, Derived, REGISTER_MAX_CHARS};
 pub use exporter::{DispatchContext, Exporter, ExporterError};
@@ -80,3 +92,4 @@ pub use schema::{
     find_sdk_schema,
 };
 pub use state::{DispatchState, ProgressHint};
+pub use template::TemplateEnv;
