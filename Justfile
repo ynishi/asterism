@@ -287,15 +287,15 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 # Two prerequisites, stated here because the recipe outlives any PR:
 # (1) a nightly toolchain — the pipeline shells out to `cargo +nightly
 # rustdoc --output-format json` per crate, which is why neither aidoc
-# recipe joins `check`: this workspace's toolchain floats (no
-# rust-toolchain.toml) and a machine without nightly must still be able
-# to run the full gate. (2) cargo-aidoc newer than the 0.1.0 release,
-# which fails on this workspace: it derived the rustdoc JSON filename
-# from the package name, and asterism-ui's `[lib] name =
-# "asterism_ui_lib"` (the Tauri bin/lib name split) breaks that
-# assumption. Until a fixed version is on crates.io, install from the
-# repo: `cargo install --git https://github.com/ynishi/cargo-aidoc
-# cargo-aidoc`.
+# recipe *runs unconditionally* inside `check`: this workspace's
+# toolchain floats (no rust-toolchain.toml) and a machine without
+# nightly must still be able to run the full gate. `aidoc-guard` is how
+# that is reconciled — it warns instead of skipping silently.
+# (2) `cargo install cargo-aidoc`. The 0.1.0 release failed on this
+# workspace (it derived the rustdoc JSON filename from the package
+# name, which asterism-ui's `[lib] name = "asterism_ui_lib"` breaks) and
+# the note here used to say install from git; 0.2.0 is on crates.io and
+# fixes it, so the plain install is the answer again.
 #
 # `--title` pins the llms.txt H1. The tool's default is the checkout
 # directory's basename, which from a worktree named after its branch
@@ -325,9 +325,39 @@ aidoc:
 aidoc-check:
     cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism
 
+# Check the committed doc artifacts, or say out loud that nobody did.
+#
+# `aidoc-check` cannot be a hard step of `check` — it needs a nightly
+# toolchain this workspace does not pin, and a machine without one must
+# still be able to run the full gate. Leaving it out entirely is the
+# other failure, and it is the one that actually happened: a change that
+# deleted a crate and added another left `docs/aidoc/` describing the
+# deleted one, `just check` went green, and the drift was caught by a
+# human reading the diff. A gate nobody is told they skipped is not a
+# gate.
+#
+# So: run it when it can run, and fail on drift the way it always did.
+# When it cannot, print what is missing and exit 0 — the artifacts are
+# unchecked, and the person running this now knows it.
+[group('check')]
+aidoc-guard:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if ! command -v cargo-aidoc >/dev/null 2>&1; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc is not installed." >&2
+        echo "         cargo install cargo-aidoc" >&2
+        exit 0
+    fi
+    if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — no nightly toolchain." >&2
+        echo "         rustup toolchain install nightly" >&2
+        exit 0
+    fi
+    cargo aidoc --workspace-root "{{ project_root }}" --check --strict --title asterism
+
 # Run all Rust and frontend checks.
 [group('check')]
-check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build
+check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build aidoc-guard
 
 # Fail when any Rust file is not rustfmt-clean.
 #

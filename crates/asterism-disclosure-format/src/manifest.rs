@@ -14,7 +14,7 @@
 //! and its `digitalSourceType` is the same IPTC URI the XMP packet
 //! states. That is the half a validator understands.
 //!
-//! `io.github.ynishi.asterism.provenance` carries what the database
+//! `io.github.ynishi.asterism.disclosure` carries what the database
 //! knows and the standard has no field for: the asset id, the dispatch
 //! the file left through, and the ids it was derived from. A reader that
 //! has this Asterism instance can resolve those; a reader that does not
@@ -59,7 +59,25 @@ pub const ACTIONS_LABEL: &str = "c2pa.actions";
 const ACTION_CREATED: &str = "c2pa.created";
 
 /// Label of Asterism's own assertion (module docs on the namespace).
-pub const ASTERISM_LABEL: &str = "io.github.ynishi.asterism.provenance";
+///
+/// # Why this could still be renamed, and only now
+///
+/// A signed assertion label is the one identifier in this feature that
+/// cannot be corrected later: it sits inside a document whose whole
+/// point is that it is tamper-evident, in files that have left the
+/// machine, and a reader keys on it. That argument is what nearly kept
+/// the older spelling — `…asterism.provenance`, from before this
+/// feature and the derived-from claim graph were told apart.
+///
+/// It does not apply yet. No build has ever signed anything: the
+/// composition root constructs the writer `unsigned()`, and the one
+/// constructor that takes a certificate has no caller and no
+/// configuration surface. Every manifest that has ever carried this
+/// label was produced in a test, by a throwaway certificate, into a
+/// temporary directory. There is no file in the world to be
+/// compatible with — so the cost of the rename is zero today and
+/// permanent from the first signed export.
+pub const ASTERISM_LABEL: &str = "io.github.ynishi.asterism.disclosure";
 
 /// Version of the payload under [`ASTERISM_LABEL`].
 ///
@@ -68,7 +86,10 @@ pub const ASTERISM_LABEL: &str = "io.github.ynishi.asterism.provenance";
 /// today can be read years later by a build that has moved on, and the
 /// reader needs to know which shape it is holding before it starts
 /// walking it.
-pub const ASTERISM_ASSERTION_SCHEMA: &str = "asterism.provenance/1";
+///
+/// Still `/1` after the rename: a version distinguishes shapes a reader
+/// may hold, and nothing has ever read shape 1 under the old name.
+pub const ASTERISM_ASSERTION_SCHEMA: &str = "asterism.disclosure/1";
 
 /// Renders the manifest definition for one record.
 ///

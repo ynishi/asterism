@@ -104,6 +104,27 @@ Every crate has `publish = false`; nothing is distributed via crates.io.
   bindings are regenerated from `asterism-contract` at build time via
   `schema-bridge`.
 
+## Development environment
+
+`just check` is the gate. Beyond a stable Rust toolchain and Node for the
+UI, one step has prerequisites it cannot install for you:
+
+| Needed by | Install | Without it |
+|---|---|---|
+| `aidoc-guard` (inside `just check`) | `cargo install cargo-aidoc` and `rustup toolchain install nightly` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues |
+
+`docs/aidoc/` is the committed module inventory — generated, because the
+hand-written one shipped 15 modules stale. Regenerate it with `just
+aidoc` after changing any public API or doc comment, and commit the
+diff; `aidoc-guard` fails on drift.
+
+The warning exists because the alternative is worse than the
+inconvenience. The step needs a nightly toolchain, this workspace pins
+none, and a machine without one must still be able to run the full
+gate — but a gate that is silently skipped is not a gate. A change that
+deleted a crate once left the committed docs describing it while `just
+check` went green.
+
 ## Public development
 
 Asterism keeps public product and implementation work self-contained while
