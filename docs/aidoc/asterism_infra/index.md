@@ -47,6 +47,8 @@ this crate.
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
 - [`jobs::preview_ffmpeg`](jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
+- [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
+- [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all

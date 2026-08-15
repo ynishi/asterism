@@ -7501,6 +7501,8 @@ this crate.
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
 - [`jobs::preview_ffmpeg`](jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
+- [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
+- [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
@@ -7903,6 +7905,60 @@ Homebrew) plays video out of the box.
 ## Types
 
 - `VideoThumbRoute` — Which extractor owns a video mime.
+
+
+<!-- asterism_infra/jobs__thumb_macos.md -->
+# asterism-infra::jobs::thumb_macos
+
+ImageIO fast path for `thumb_gen` on macOS.
+
+`CGImageSourceCreateThumbnailAtIndex` reads a JPEG (or HEIC / PNG),
+resizes to a target longer edge, and returns a `CGImage` in one
+call. On Apple Silicon this route flips to the hardware JPEG
+decoder, keeping CPU load close to zero during a large import
+wave — the pure-Rust `image` crate path (see `handlers::make_thumb`
+fallback) burns a full core per decode even at `Lanczos3`.
+
+The returned bytes are JPEG-encoded via `CGImageDestination` so
+the DB blob shape stays identical across platforms.
+
+## Functions
+
+- `make_thumb` — Decodes the JPEG at `path_str`, resizes so the longer edge is
+
+
+<!-- asterism_infra/jobs__thumb_video.md -->
+# asterism-infra::jobs::thumb_video
+
+Video frame extraction for `thumb_gen` on macOS.
+
+A video has no thumbnail without this: ImageIO (`thumb_macos`) and
+the pure-Rust `image` crate both decode stills only, so before this
+path existed a video asset simply showed an empty tile in the grid.
+`AVAssetImageGenerator` pulls one frame as a `CGImage`, which
+`thumb_macos::encode_jpeg` then turns into the same JPEG blob every
+other thumbnail is stored as — the cache, the UI and the palette
+extractor cannot tell the two sources apart, which is the point.
+
+Format coverage is AVFoundation's, not the mime map's. `video/mp4`
+and `video/quicktime` open natively; `video/webm` does not (macOS
+ships no WebM demuxer), so those assets fail here and keep the
+empty tile they had before. The failure is soft — one logged job
+failure per enqueue, no retry storm (`jobs::mod` has no retry
+policy, and the UI stops re-kicking after its own budget) — but it
+means the extension→mime table in `domain::material` and this
+extractor's real capabilities are two lists that can drift apart.
+
+The generator's synchronous `copyCGImageAtTime` is deprecated in
+favour of the async form. It is the right call here anyway: the
+whole `thumb_gen` handler already runs inside `spawn_blocking`
+under a decode-slot semaphore, so blocking is the contract this
+path is called under, and an async completion handler would only
+add a channel round-trip to get back to it.
+
+## Functions
+
+- `make_thumb` — Extracts one frame from the video at `path_str`, scaled to fit a
 
 
 <!-- asterism_infra/observe.md -->

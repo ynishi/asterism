@@ -210,6 +210,8 @@
 - [asterism-infra::jobs::handlers](asterism_infra/jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
 - [asterism-infra::jobs::preview_ffmpeg](asterism_infra/jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
 - [asterism-infra::jobs::thumb_ffmpeg](asterism_infra/jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
+- [asterism-infra::jobs::thumb_macos](asterism_infra/jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
+- [asterism-infra::jobs::thumb_video](asterism_infra/jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
 - [asterism-infra::observe](asterism_infra/observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [asterism-infra::paths](asterism_infra/paths.md): Data-profile and on-disk layout conventions.
 - [asterism-infra::probes](asterism_infra/probes.md): The probes this build has, and the one question a caller asks of all
