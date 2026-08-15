@@ -808,6 +808,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `browser.tauri` from the service's own `TauriCapabilities` instead
   of a local cast.
 
+### Removed
+
+- **The prompt writer — the field, its argument, and the property it fed**
+  (#39, left open by #14) — `Iptc4xmpExt:AIPromptWriterName` was written
+  whenever `DisclosureRecord::prompt_writer` held a value, and the only
+  thing that ever put one there was the test suite: the sole production
+  builder passed `None`, and every other caller of the setter's second
+  argument was under `#[cfg(test)]`. A field that can only be `None` in
+  a running application reads to a maintainer as a supported capability,
+  and to anyone asking what this application discloses as something that
+  might be written.
+
+  Wiring it instead was the alternative, and there is nothing to wire it
+  to. IPTC gives the prompt writer a property of its own precisely
+  because that person is not thereby the image's creator, so filling it
+  from the asset's author or from the operator would assert something
+  nobody stated. The prompt reaching a record here is read back out of
+  the container the file arrived in — written by somebody else,
+  generated, or rewritten across rounds, for all this application knows.
+  A name in a published file cannot be taken back out, which is the
+  asymmetry `PromptDisclosure` already turns on, and a person is a
+  stronger claim than the text is.
+
+  `with_prompt` therefore takes the prompt alone, the emitter branch is
+  gone, the record's module docs state that this application does not
+  disclose a prompt writer and why, and a test asserts that no packet
+  names one. If a surface for stating it ever exists, it returns under
+  the same withholding control the prompt has.
+
 ### Boundaries
 
 - **Data layout**: user data is isolated per local profile rather than
