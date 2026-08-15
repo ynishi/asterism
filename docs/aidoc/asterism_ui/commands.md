@@ -33,6 +33,7 @@ here without choosing.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `close_pursuit` — Records that a pursuit concluded — `satisfied` (freezing the kept set
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -64,6 +65,7 @@ here without choosing.
 - `get_dispatch` — Fetches a dispatch job by id — used by the poll loop that drives
 - `get_persona_profile` — Fetches the persona's identity signal (avatar / bio / role).
 - `get_persona_theme` — Fetches the persona's UI chrome (wallpaper reference). `None`
+- `get_pursuit` — One pursuit with its standing derived from the latest event.
 - `get_session` — Fetches one Session by surrogate id (`None` when absent). Used
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
@@ -91,6 +93,7 @@ here without choosing.
 - `list_modality_asset_counts` — Sidebar Modality counts — `(modality_slug, asset_count)`, optionally
 - `list_persona_asset_counts` — Sidebar Persona counts — `(persona_id, asset_count)` per persona
 - `list_personas` — Lists every persona (used to render the sidebar).
+- `list_pursuits` — A persona's pursuits, most-recent first, each with its standing —
 - `list_sessions` — Sessions view — one row per `session_id` in the query scope.
 - `list_settings` — Every known application setting, resolved through code default →
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
@@ -101,6 +104,7 @@ here without choosing.
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
+- `open_pursuit` — Opens a pursuit and names what it is for, ahead of the first round.
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -112,6 +116,8 @@ here without choosing.
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
 - `purge_persona` — Permanently deletes an already-trashed persona and everything it
+- `pursuit_events` — A pursuit's lifecycle facts, oldest first.
+- `pursuit_view` — One pursuit opened up: the row and its standing, the rounds filed
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -124,11 +130,13 @@ here without choosing.
 - `rename_dir` — Renames a Dir.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
+- `reopen_pursuit` — Records that a pursuit carried on after a close. Legal on one that is
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.
 - `reset_setting` — Clears one setting override and returns the value that now applies.
 - `resolve_duplicate_conflict` — Answers one duplicate question — `folded` (queues the fold onto
+- `restamp_dispatch` — Re-files a dispatch round under another pursuit, recording the filing
 - `restore_asset` — Returns a trashed asset to the live set.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
