@@ -565,9 +565,54 @@ bindings-check:
     fi
     echo "$bindings matches the contract"
 
+# Run the tests of named packages only — the narrow half of the pair.
+#
+# `rust-test` links the whole workspace, and linking is where the load
+# is: one linker process per test binary, gigabytes of resident memory
+# each, as many at once as `jobs` allows. On a shared or memory-tight
+# machine that is enough to push the box into swap and take every other
+# session on it down with the run. Naming the crates a change touches
+# costs a fraction of that.
+#
+#   just rust-test-pkg asterism-core asterism-server
+#
+# This is not a weaker gate, it is a narrower one, and it is the one to
+# reach for while iterating: the full suite runs in CI on every push, so
+# opening a PR does not wait on a workspace run happening here first.
+# Run `rust-test` locally when the change is workspace-wide, when CI has
+# reported something a targeted run cannot reproduce, or when the
+# machine has the room — otherwise let CI be the one that runs it.
+#
+# Keeps `--no-fail-fast` and its own exit status per package for the
+# reason the full recipe does: one crate failing must not hide the rest.
+# It does not keep a log or count binaries — those exist to make a
+# workspace run auditable, and a two-crate run is read in the terminal.
+#
+# Run the tests of the named packages (the narrow alternative to rust-test).
+[group('check')]
+rust-test-pkg +packages:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{ project_root }}"
+    export CARGO_TERM_COLOR=never
+    status=0
+    for pkg in {{ packages }}; do
+        echo
+        echo "=== $pkg ==="
+        cargo test -p "$pkg" --no-fail-fast || status=1
+    done
+    if [ "$status" -ne 0 ]; then
+        echo
+        echo "One or more packages failed; the output above is the whole run." >&2
+    fi
+    exit "$status"
+
 # Run the Rust workspace tests, keeping the whole output.
 #
-# The only sanctioned way to run the full suite. `cargo test --workspace`
+# The heavy half of the pair with `rust-test-pkg`, and the only
+# sanctioned way to run the full suite — see that recipe for when the
+# narrow one is the right tool, and for why a pull request does not wait
+# on this having run here. `cargo test --workspace`
 # by hand is what produced an unexplainable result on 2026-07-30: the run
 # reported 455 passed / 1 failed against 472 expected, the operator had
 # piped it through an aggregate `grep`, and the identity of the failing

@@ -5,7 +5,7 @@
 - Branch, commit, and PR conventions (preferred commit format included): [CONTRIBUTING.md](../CONTRIBUTING.md)
 - Security reports: [SECURITY.md](../SECURITY.md)
 - API detail lives in RustDoc (`cargo doc`) and `docs/aidoc/`; code documentation outranks stale issue text.
-- Green is `just check`; the full Rust suite runs only via `just rust-test` (never hand-rolled `cargo test --workspace`).
+- Green is `just check`; the full Rust suite runs only via `just rust-test` (never hand-rolled `cargo test --workspace`). While iterating use `just rust-test-pkg <crate>…` — the workspace run is load-heavy, and CI runs the full suite on every push, so a PR does not wait on one here.
 - Never work on `main`; one worktree per issue under `.worktrees/`, and run `just branch-check` before implementing.
 - Agents do not push, publish, or open PRs — prepare the branch and hand over the literal commands.
 - Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) on the diff before every commit.
