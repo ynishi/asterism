@@ -6,7 +6,7 @@ authors.workspace     = true
 license.workspace     = true
 repository.workspace  = true
 homepage.workspace    = true
-description = "Schema-driven HTTP exporter for Asterism — caller supplies dispatch / poll / harvest JSON schema (mirror of asterism-importer-sqlite on the OUT side)"
+description = "Schema-driven exporter for HTTP job APIs — caller supplies submit / poll / harvest JSON schema, plus optional credential, custody and deadline blocks"
 publish     = false
 
 [lib]
@@ -23,3 +23,7 @@ thiserror   = { workspace = true }
 async-trait = { workspace = true }
 chrono      = { workspace = true }
 reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio       = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

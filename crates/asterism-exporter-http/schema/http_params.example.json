@@ -1,9 +1,8 @@
 {
   "endpoint": "https://backend.example.com",
-  "dispatch": {
+  "submit": {
     "method": "POST",
     "path": "/jobs",
-    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
     "body_template": {
       "workflow": "img2img",
       "input_url": "{{input[0].source_locator}}",
@@ -15,7 +14,6 @@
   "poll": {
     "method": "GET",
     "path": "/jobs/{{handle}}",
-    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
     "done_when": { "path": "$.status", "equals": "succeeded" },
     "failed_when": {
       "path": "$.status",
@@ -27,17 +25,26 @@
   "harvest": {
     "method": "GET",
     "path": "/jobs/{{handle}}/results",
-    "headers": { "Authorization": "Bearer {{params.extras.api_key}}" },
     "items_path": "$.outputs[*]",
     "map": {
       "modality": "image",
-      "locator": "{{item.url}}",
+      "source_url": "{{item.url}}",
       "cover_hint": "{{item.caption?}}",
       "labels_static": ["batch:{{dispatch_id}}"]
     }
   },
+
+  "auth": {
+    "secret_ref": "BACKEND_KEY",
+    "header": "authorization",
+    "value_template": "Bearer {{secret}}"
+  },
+  "fetch": {
+    "authenticated": false
+  },
+  "deadline_seconds": 86400,
+
   "extras": {
-    "api_key": "put-your-token-here",
     "prompt": "photo studio portrait"
   }
 }

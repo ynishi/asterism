@@ -1,13 +1,20 @@
 //! The profile grammar this adapter uses: the shared one, plus
-//! `{{secret}}`.
+//! `{{secret}}` when the profile names a credential.
 //!
-//! This is the case [`asterism_exporter_common`]'s traits exist for. The
-//! HTTP exporter must **not** have a `{{secret}}` root — everything it
-//! can reach comes out of the params blob, which is persisted unedited,
-//! so a root that resolved to a credential there would be a root that
-//! wrote one down. Here the credential is resolved from the environment
-//! at call time and never persisted, so the root is safe *in this
-//! adapter and not in that one*.
+//! The root is bound per call, from the environment variable an `auth`
+//! block names, and the value is never written into the params blob —
+//! which matters because that blob is persisted unedited and handed back
+//! on every read of the dispatch. A profile that instead interpolates a
+//! token it stored in its own params (`{{params.extras.api_key}}`, the
+//! pattern this adapter shipped with before it had an `auth` block) is
+//! still allowed and still works; what it loses is exactly this: nothing
+//! can scrub a value the adapter was never told was a credential.
+//!
+//! A profile with no `auth` block binds no secret. `{{secret}}` is then
+//! an error rather than an empty string: rendering it away would send an
+//! unauthenticated request that looks like an authenticated one, and the
+//! backend's 401 is a worse place to learn it than the dispatch that
+//! refuses to start.
 //!
 //! Only [`TemplateAdapter::render`] is overridden. The JSON-leaf and
 //! header traversals are the trait's default methods, written in terms
@@ -27,19 +34,30 @@ use crate::REDACTED;
 const SECRET_PLACEHOLDER: &str = "{{secret}}";
 
 /// [`CommonExportAdapter`] plus the `{{secret}}` root.
-#[derive(Debug, Clone)]
-pub struct CloudGrammar {
-    secret: String,
+#[derive(Debug, Clone, Default)]
+pub struct SecretGrammar {
+    secret: Option<String>,
 }
 
-impl CloudGrammar {
+impl SecretGrammar {
     /// Binds a resolved credential for the duration of one call.
     ///
     /// Held by value rather than re-read per placeholder so a single
     /// call cannot straddle an environment change and send one header
     /// with the old credential and another with the new.
     pub fn new(secret: String) -> Self {
-        Self { secret }
+        Self {
+            secret: Some(secret),
+        }
+    }
+
+    /// The grammar for a profile that names no credential.
+    ///
+    /// Everything the shared adapter resolves still resolves; only
+    /// `{{secret}}` is refused, and the scrubs become the identity —
+    /// there is no value to look for.
+    pub fn unauthenticated() -> Self {
+        Self { secret: None }
     }
 
     /// Replaces the auth header's value, and scrubs the credential from
@@ -50,18 +68,28 @@ impl CloudGrammar {
     /// construction; the scrub catches a profile that also reached for
     /// `{{secret}}` somewhere else, which is allowed and would
     /// otherwise be recorded verbatim.
+    ///
+    /// `auth_header` is `None` for a profile that names no credential,
+    /// and then **every** header value is redacted rather than none. The
+    /// adapter cannot tell which of them a profile built out of its own
+    /// params carries a token — `authorization` is where both shipped
+    /// examples put one — so the recorded copy keeps the header names
+    /// and drops the values. The residue is stated where the record is
+    /// documented: a credential a profile interpolates into a URL or a
+    /// body from its params is recorded as sent, and the way out of that
+    /// is an `auth` block rather than a cleverer guess here.
     pub fn redact_headers(
         &self,
         headers: &BTreeMap<String, String>,
-        auth_header: &str,
+        auth_header: Option<&str>,
     ) -> BTreeMap<String, String> {
         headers
             .iter()
             .map(|(name, value)| {
-                let redacted = if name.eq_ignore_ascii_case(auth_header) {
-                    REDACTED.to_string()
-                } else {
-                    self.scrub_str(value)
+                let redacted = match auth_header {
+                    Some(auth) if name.eq_ignore_ascii_case(auth) => REDACTED.to_string(),
+                    Some(_) => self.scrub_str(value),
+                    None => REDACTED.to_string(),
                 };
                 (name.clone(), redacted)
             })
@@ -121,17 +149,26 @@ impl CloudGrammar {
     /// substring, so it is left alone — an unset variable never gets
     /// this far (the exporter fails at resolution), and a variable set
     /// to the empty string is a profile pointing at nothing rather than
-    /// a secret to hide.
+    /// a secret to hide. No credential at all is the same identity, for
+    /// the same reason: there is nothing to look for.
     fn scrub_str(&self, s: &str) -> String {
-        if self.secret.is_empty() {
-            return s.to_string();
+        match self.secret.as_deref() {
+            Some(secret) if !secret.is_empty() => s.replace(secret, REDACTED),
+            _ => s.to_string(),
         }
-        s.replace(&self.secret, REDACTED)
     }
 }
 
-impl TemplateAdapter for CloudGrammar {
+impl TemplateAdapter for SecretGrammar {
     fn render(&self, template: &str, env: &TemplateEnv<'_>) -> Result<String, ExporterError> {
+        let Some(secret) = self.secret.as_deref() else {
+            if template.contains(SECRET_PLACEHOLDER) {
+                return Err(ExporterError::BackendRejected(format!(
+                    "template uses {SECRET_PLACEHOLDER} but the profile has no auth block naming a credential"
+                )));
+            }
+            return CommonExportAdapter.render(template, env);
+        };
         // Substituted before the shared engine runs, so the engine
         // never sees a root it does not know and never reports
         // `{{secret}}` as unresolved. The credential is substituted
@@ -141,7 +178,7 @@ impl TemplateAdapter for CloudGrammar {
         let mut out = String::with_capacity(template.len());
         for (index, piece) in template.split(SECRET_PLACEHOLDER).enumerate() {
             if index > 0 {
-                out.push_str(&self.secret);
+                out.push_str(secret);
             }
             out.push_str(&CommonExportAdapter.render(piece, env)?);
         }
@@ -149,7 +186,7 @@ impl TemplateAdapter for CloudGrammar {
     }
 }
 
-impl ResponsePath for CloudGrammar {
+impl ResponsePath for SecretGrammar {
     fn select(&self, root: &Value, expr: &str) -> Vec<Value> {
         CommonExportAdapter.select(root, expr)
     }
@@ -178,7 +215,7 @@ mod tests {
         let params = json!({ "model": "flux" });
         let ctx = env_ctx(&params);
         let env = TemplateEnv::pre_handle(&ctx, &params);
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
 
         assert_eq!(grammar.render("Key {{secret}}", &env).unwrap(), "Key k-123");
         assert_eq!(
@@ -197,7 +234,7 @@ mod tests {
         let params = json!({});
         let ctx = env_ctx(&params);
         let env = TemplateEnv::pre_handle(&ctx, &params);
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
 
         assert_eq!(
             grammar
@@ -223,7 +260,7 @@ mod tests {
         let params = json!({});
         let ctx = env_ctx(&params);
         let env = TemplateEnv::pre_handle(&ctx, &params);
-        let grammar = CloudGrammar::new("{{dispatch_id}}".into());
+        let grammar = SecretGrammar::new("{{dispatch_id}}".into());
 
         assert_eq!(
             grammar.render("Key {{secret}}", &env).unwrap(),
@@ -233,17 +270,61 @@ mod tests {
 
     #[test]
     fn the_auth_header_is_redacted_by_name_and_the_value_scrubbed_elsewhere() {
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
         let headers = BTreeMap::from([
             ("Authorization".to_string(), "Key k-123".to_string()),
             ("x-echo".to_string(), "prefix k-123 suffix".to_string()),
             ("x-plain".to_string(), "nothing here".to_string()),
         ]);
 
-        let redacted = grammar.redact_headers(&headers, "authorization");
+        let redacted = grammar.redact_headers(&headers, Some("authorization"));
         assert_eq!(redacted["Authorization"], REDACTED);
         assert_eq!(redacted["x-echo"], format!("prefix {REDACTED} suffix"));
         assert_eq!(redacted["x-plain"], "nothing here");
+    }
+
+    /// A profile with no `auth` block can still carry a token — in its
+    /// own params, the pattern this adapter shipped with. Nothing here
+    /// knows which header that is, so the recorded copy keeps the names
+    /// and drops every value rather than guessing one of them.
+    #[test]
+    fn without_a_credential_every_recorded_header_value_goes() {
+        let grammar = SecretGrammar::unauthenticated();
+        let headers = BTreeMap::from([
+            (
+                "Authorization".to_string(),
+                "Bearer from-params".to_string(),
+            ),
+            ("x-plain".to_string(), "nothing here".to_string()),
+        ]);
+
+        let redacted = grammar.redact_headers(&headers, None);
+        assert_eq!(redacted["Authorization"], REDACTED);
+        assert_eq!(redacted["x-plain"], REDACTED);
+        assert_eq!(redacted.len(), 2, "the names stay: {redacted:?}");
+    }
+
+    /// Rendering `{{secret}}` away as an empty string would send an
+    /// unauthenticated request shaped like an authenticated one. The
+    /// dispatch refuses instead, naming what the profile is missing.
+    #[test]
+    fn the_secret_root_without_an_auth_block_is_refused() {
+        let params = json!({});
+        let ctx = env_ctx(&params);
+        let env = TemplateEnv::pre_handle(&ctx, &params);
+
+        let err = SecretGrammar::unauthenticated()
+            .render("Key {{secret}}", &env)
+            .expect_err("no credential is bound");
+        assert!(err.to_string().contains("auth block"), "{err}");
+
+        // Everything else the shared grammar resolves still resolves.
+        assert_eq!(
+            SecretGrammar::unauthenticated()
+                .render("{{dispatch_id}}", &env)
+                .expect("the shared roots do not need a credential"),
+            "disp-1"
+        );
     }
 
     /// Query-parameter auth is a real shape, so a profile is allowed to
@@ -251,7 +332,7 @@ mod tests {
     /// rendered result on the dispatch row.
     #[test]
     fn a_url_carrying_the_credential_is_scrubbed() {
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
         assert_eq!(
             grammar.scrub_text("https://api.test/run?api_key=k-123&n=1"),
             format!("https://api.test/run?api_key={REDACTED}&n=1")
@@ -263,7 +344,7 @@ mod tests {
     /// a write to the row.
     #[test]
     fn an_error_message_cannot_carry_the_credential() {
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
 
         let rejected = grammar.scrub_error(ExporterError::BackendRejected(
             "POST https://api.test/run?key=k-123 HTTP 401: {\"sent\":\"k-123\"}".into(),
@@ -282,7 +363,7 @@ mod tests {
 
     #[test]
     fn the_credential_is_scrubbed_at_every_depth_of_a_document() {
-        let grammar = CloudGrammar::new("k-123".into());
+        let grammar = SecretGrammar::new("k-123".into());
         assert_eq!(
             grammar.scrub(json!({
                 "nested": { "auth": "Key k-123" },

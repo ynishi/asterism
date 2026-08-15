@@ -3,8 +3,8 @@
 //! What a *schema-driven* exporter needs in order to be configured
 //! rather than written: a `{{...}}` substitution over the dispatch
 //! ([`template`]) and a path grammar for reading the backend's answer
-//! ([`jsonpath`]). Two adapters want both — `asterism-exporter-http`
-//! today, the cloud adapter next — and a grammar with two spellings is
+//! ([`jsonpath`]). `asterism-exporter-http` wants both, any adapter
+//! configured the same way will, and a grammar with two spellings is
 //! worse than either spelling on its own.
 //!
 //! ## Why not in the SDK
@@ -28,13 +28,15 @@
 //! becomes substitutable per adapter without every adapter's call sites
 //! changing shape.
 //!
-//! That is not hypothetical. A cloud profile resolves its credential
-//! from the environment rather than out of the params blob, which means
-//! a placeholder root the HTTP adapter must not have — an adapter that
-//! wraps [`CommonExportAdapter`] and overrides [`TemplateAdapter::render`]
-//! adds it without touching the shared engine, and the JSON-leaf and
-//! header traversals keep working because they are default methods
-//! written in terms of `render`.
+//! That is not hypothetical. A profile that resolves its credential
+//! from the environment rather than out of the params blob needs a
+//! placeholder root for it, and the shared engine must not grow one:
+//! everything it can reach comes out of the params blob, so a `secret`
+//! root there would be a root that writes a credential down. The HTTP
+//! adapter's `SecretGrammar` wraps [`CommonExportAdapter`] and
+//! overrides [`TemplateAdapter::render`] to add exactly that root, and
+//! the JSON-leaf and header traversals keep working because they are
+//! default methods written in terms of `render`.
 //!
 //! ```no_run
 //! use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter};
