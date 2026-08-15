@@ -143,10 +143,6 @@ fn all_schemas() -> Vec<asterism_dispatch_sdk::SdkSchemaEntry> {
         asterism_exporter_http::SCHEMA_NAME,
         asterism_exporter_http::params_example_json,
     ));
-    out.push((
-        asterism_exporter_cloud::SCHEMA_NAME,
-        asterism_exporter_cloud::params_example_json,
-    ));
     out
 }
 

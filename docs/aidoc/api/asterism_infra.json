@@ -60,7 +60,7 @@
     {
       "path": "asterism_infra::dispatch::runtime::ExporterRegistry",
       "kind": "struct",
-      "docs": "Registry of exporters keyed by their `Exporter::slug()`.\n\nCheap to `Clone` (behind an `Arc`)."
+      "docs": "Registry of exporters keyed by their `Exporter::slug()`, plus any\nretired slugs that still resolve.\n\nCheap to `Clone` (behind an `Arc`)."
     },
     {
       "path": "asterism_infra::dispatch::runtime::QueueReEnqueue",

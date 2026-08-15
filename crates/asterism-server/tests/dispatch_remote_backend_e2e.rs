@@ -487,6 +487,12 @@ fn comfy_success_outputs() -> serde_json::Value {
 /// because serde ignores unknown keys, and `{{params.extras.prompt}}`
 /// reads it straight out of the raw params JSON. That is the
 /// documented way a caller carries its own values into a template.
+///
+/// It deliberately keeps the pre-merge spellings — `dispatch` for the
+/// submit block, `locator` for the item's URL — because a stored profile
+/// is re-read on every re-dispatch, so the aliases that let one keep
+/// working are load-bearing. Written the new way, this test would pass
+/// while every profile already on a row broke.
 fn http_params(port: u16) -> serde_json::Value {
     json!({
         "endpoint": format!("http://127.0.0.1:{port}"),
@@ -699,7 +705,21 @@ mod fake_backend {
     /// how the log and the submissions are read afterwards, and the
     /// serve task holds its own clone regardless.
     pub async fn spawn(backend: FakeBackend) -> (Arc<FakeBackend>, u16) {
-        let state = Arc::new(backend);
+        spawn_with_port(|_| backend).await
+    }
+
+    /// [`spawn`] for a script that has to name the port it is served
+    /// on — a backend whose result URLs point back at itself, which is
+    /// what a profile with a `fetch` block downloads from. The listener
+    /// is bound first so the port is known before the script is built.
+    pub async fn spawn_with_port(
+        build: impl FnOnce(u16) -> FakeBackend,
+    ) -> (Arc<FakeBackend>, u16) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake backend");
+        let port = listener.local_addr().expect("local_addr").port();
+        let state = Arc::new(build(port));
         // axum 0.8 path parameters: `{id}`, not the `:id` of 0.7.
         let app = Router::new()
             .route("/prompt", post(comfy_submit))
@@ -707,11 +727,8 @@ mod fake_backend {
             .route("/generate", post(http_submit))
             .route("/status/{id}", get(http_status))
             .route("/result/{id}", get(http_result))
+            .route("/artefact/{name}", get(http_artefact))
             .with_state(state.clone());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind fake backend");
-        let port = listener.local_addr().expect("local_addr").port();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -820,7 +837,19 @@ mod fake_backend {
             Outcome::Finished { outputs } => outputs.clone(),
             Outcome::Failed { .. } => json!([]),
         };
-        Json(json!({ "outputs": items }))
+        // `seed` is the point of the envelope: a value the backend
+        // decided, sitting beside the artefacts rather than inside one.
+        Json(json!({ "outputs": items, "seed": 913_224 }))
+    }
+
+    /// The bytes themselves, for a profile whose `fetch` block pulls
+    /// them into custody instead of pointing an asset at this URL.
+    async fn http_artefact(
+        State(backend): State<Arc<FakeBackend>>,
+        UrlPath(name): UrlPath<String>,
+    ) -> Vec<u8> {
+        backend.record(format!("GET /artefact/{name}"));
+        super::PNG_1X1.to_vec()
     }
 }
 
@@ -1435,7 +1464,10 @@ async fn a_schema_driven_http_export_drives_the_same_state_machine() {
         &db_path,
         &persona.id,
         &original.id,
-        Arc::new(HttpExporter::with_client(backend_client())),
+        Arc::new(HttpExporter::with_client(
+            tmp.path().join("custody"),
+            backend_client(),
+        )),
         "render",
         http_params(port),
     )
@@ -1529,6 +1561,129 @@ async fn a_schema_driven_http_export_drives_the_same_state_machine() {
     );
 }
 
+/// The same adapter, the same state machine, with the two blocks a
+/// hosted platform needs turned on: the bytes are pulled into custody
+/// before the harvest returns, and the call that produced them arrives
+/// on the asset.
+///
+/// This is what used to be a second crate. What it proves here is the
+/// wiring rather than the mapping — that the locator names the file we
+/// hold instead of a URL that is expected to stop working, that the
+/// bytes on disk are the bytes the backend served, and that the record
+/// riding on the asset carries what we sent and what came back. The
+/// envelope assertion is the one with teeth: `seed` is a sibling of the
+/// artefacts array, so an adapter that kept only the item that became
+/// this asset would drop it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_profile_that_asks_for_custody_lands_the_bytes_and_the_record() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let corpus = tmp.path().join("corpus");
+    std::fs::create_dir_all(&corpus).expect("fixture dir");
+    let plate = corpus.join("plate.png");
+    std::fs::write(&plate, PNG_1X1).expect("write plate");
+
+    let db_path = tmp.path().join("asterism.db");
+    let core = boot(tmp.path()).await;
+    // This backend's result URLs point back at itself, so the script
+    // cannot be written until the port is known.
+    let (backend, port) = fake_backend::spawn_with_port(|port| {
+        FakeBackend::new(
+            HTTP_JOB_ID,
+            0,
+            Outcome::Finished {
+                outputs: json!([{ "url": format!("http://127.0.0.1:{port}/artefact/a.png") }]),
+            },
+            None,
+        )
+    })
+    .await;
+
+    let persona = core
+        .persona_service
+        .register(
+            RegisterPersonaCommand {
+                name: "E2E".into(),
+                pack_id: Some("e2e-http-custody".into()),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("register persona");
+    let original = core
+        .asset_service
+        .add(
+            add_command(
+                &persona.id,
+                plate.to_str().expect("utf-8 fixture path"),
+                1_785_000_000_000,
+                None,
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("add original");
+
+    let custody_root = tmp.path().join("custody");
+    let mut params = http_params(port);
+    params["fetch"] = json!({ "authenticated": false });
+    params["deadline_seconds"] = json!(86_400);
+
+    let export = export_via(
+        &core,
+        &db_path,
+        &persona.id,
+        &original.id,
+        Arc::new(HttpExporter::with_client(
+            custody_root.clone(),
+            backend_client(),
+        )),
+        "render",
+        params,
+    )
+    .await;
+
+    assert_eq!(export.output_ids.len(), 1, "one item, one asset");
+    assert!(
+        backend.log().contains(&"GET /artefact/a.png".to_string()),
+        "the fetch step has to have happened: {:?}",
+        backend.log()
+    );
+
+    let facts = detail_of(&core, &export.output_ids[0]).await;
+    let locator = std::path::Path::new(&facts.locator);
+    assert!(
+        locator.starts_with(&custody_root),
+        "the locator names the file we hold, not the URL the backend served: {}",
+        facts.locator
+    );
+    assert_eq!(
+        std::fs::read(locator).expect("the custody file exists"),
+        PNG_1X1,
+        "what landed on disk is what the backend served"
+    );
+    assert_eq!(
+        facts.extra["http"]["source_url"],
+        json!(format!("http://127.0.0.1:{port}/artefact/a.png")),
+        "the URL that is expected to expire is kept beside the file"
+    );
+
+    let call = &facts.extra["http"]["call"];
+    assert_eq!(call["handle"], json!(HTTP_JOB_ID));
+    assert_eq!(
+        call["request"]["body"]["prompt"], "a test plate",
+        "the prompt as sent rides in with the artefact"
+    );
+    assert_eq!(call["response"]["job_id"], HTTP_JOB_ID);
+    assert_eq!(
+        call["result"]["seed"], 913_224,
+        "the envelope is kept whole, so what the backend decided survives"
+    );
+    assert!(
+        call["submitted_at_ms"].is_i64(),
+        "the submit moment is what a deadline is measured from: {call}"
+    );
+}
+
 /// The schema-driven half of the failure story: the reason the row
 /// shows was pulled out of the backend's response by a JSONPath the
 /// caller wrote (`failed_when.message_path`).
@@ -1587,7 +1742,10 @@ async fn a_schema_driven_export_reports_the_backends_own_failure_message() {
         &db_path,
         &persona.id,
         &original.id,
-        Arc::new(HttpExporter::with_client(backend_client())),
+        Arc::new(HttpExporter::with_client(
+            tmp.path().join("custody"),
+            backend_client(),
+        )),
         "render",
         http_params(port),
     )

@@ -33,7 +33,6 @@ use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
 use asterism_dispatch_sdk::Exporter;
-use asterism_exporter_cloud::CloudExporter;
 use asterism_exporter_comfy::ComfyHttpExporter;
 use asterism_exporter_file::FileExporter;
 use asterism_exporter_http::HttpExporter;
@@ -1034,18 +1033,18 @@ pub async fn init_core_with(
         snapshot_service.clone(),
     ));
 
-    // Register the built-in exporters (`comfy` / `file` / `http` /
-    // `cloud`).
+    // Register the built-in exporters (`comfy` / `file` / `http`, the
+    // last of them twice).
     //
-    // `cloud` is the one that needs an argument: it takes custody of
-    // the files a hosted platform produces, and where it puts them is
-    // the profile-local application directory rather than anything the
-    // dispatch params could name — a params-supplied path would let a
-    // dispatch write outside the profile that ran it.
+    // `http` is the one that needs an argument: a profile with a `fetch`
+    // block takes custody of the files its backend produces, and where
+    // they go is the profile-local application directory rather than
+    // anything the dispatch params could name — a params-supplied path
+    // would let a dispatch write outside the profile that ran it.
     let comfy: Arc<dyn Exporter> = Arc::new(ComfyHttpExporter::new());
     let file: Arc<dyn Exporter> = Arc::new(FileExporter::new());
-    let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new());
     let home = asterism_infra::paths::asterism_home()?;
+    let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new(home.join("custody")));
 
     // A profile names an environment variable; this is where the
     // process gets a chance to have one. Profile-local rather than
@@ -1059,13 +1058,22 @@ pub async fn init_core_with(
     // than a server that refuses to start.
     let _ = dotenvy::from_path(home.join(".env"));
 
-    let cloud: Arc<dyn Exporter> = Arc::new(CloudExporter::new(home.join("custody")));
     let mut exporters: HashMap<String, Arc<dyn Exporter>> = HashMap::new();
     exporters.insert(comfy.slug().to_string(), comfy);
     exporters.insert(file.slug().to_string(), file);
-    exporters.insert(http.slug().to_string(), http);
-    exporters.insert(cloud.slug().to_string(), cloud);
-    let exporter_registry = ExporterRegistry::new(exporters);
+    exporters.insert(http.slug().to_string(), Arc::clone(&http));
+    // `cloud` was a separate crate until hosted platforms turned out to
+    // be a profile of this one, and the slug outlived it: it is on every
+    // dispatch row that ran under it and on every asset those produced.
+    // An alias rather than a second registration, because those rows
+    // have to keep resolving while nothing new is created under a name
+    // this codebase merged away — `slugs()` is what the UI offers, and
+    // an alias is not in it.
+    let aliases = HashMap::from([(
+        asterism_exporter_http::LEGACY_HOSTED_SLUG.to_string(),
+        http.slug().to_string(),
+    )]);
+    let exporter_registry = ExporterRegistry::new(exporters).with_aliases(aliases);
 
     // The AI disclosure for what a dispatch mints.
     //

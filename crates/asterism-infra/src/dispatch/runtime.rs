@@ -23,12 +23,21 @@ use asterism_dispatch_sdk::{
     DispatchContext, DispatchState as SdkState, Exporter, ExporterError, Handle,
 };
 
-/// Registry of exporters keyed by their `Exporter::slug()`.
+/// Registry of exporters keyed by their `Exporter::slug()`, plus any
+/// retired slugs that still resolve.
 ///
 /// Cheap to `Clone` (behind an `Arc`).
 #[derive(Clone, Default)]
 pub struct ExporterRegistry {
     inner: Arc<HashMap<String, Arc<dyn Exporter>>>,
+    /// Retired slug → the slug that answers for it now.
+    ///
+    /// Separate from `inner` on purpose. An alias has to *resolve*,
+    /// because it is written on dispatch rows and on the assets those
+    /// produced, and it must not be *offered*, because offering it lets
+    /// a new dispatch be created under a name the codebase merged away.
+    /// One map would have to be both.
+    aliases: Arc<HashMap<String, String>>,
 }
 
 impl ExporterRegistry {
@@ -38,7 +47,20 @@ impl ExporterRegistry {
     pub fn new(entries: HashMap<String, Arc<dyn Exporter>>) -> Self {
         Self {
             inner: Arc::new(entries),
+            aliases: Arc::new(HashMap::new()),
         }
+    }
+
+    /// Adds retired slugs that resolve to a registered one.
+    ///
+    /// For a slug that outlived the crate that minted it: rows created
+    /// under it keep running, and it does not appear in [`slugs`] — so
+    /// nothing new can be created under it.
+    ///
+    /// [`slugs`]: Self::slugs
+    pub fn with_aliases(mut self, aliases: HashMap<String, String>) -> Self {
+        self.aliases = Arc::new(aliases);
+        self
     }
 
     /// Convenience builder for the common case of a single
@@ -49,13 +71,21 @@ impl ExporterRegistry {
         Self::new(map)
     }
 
-    /// Looks up an exporter by slug.
+    /// Looks up an exporter by slug, following one alias hop.
     pub fn get(&self, slug: &str) -> Option<Arc<dyn Exporter>> {
-        self.inner.get(slug).cloned()
+        if let Some(found) = self.inner.get(slug) {
+            return Some(Arc::clone(found));
+        }
+        let target = self.aliases.get(slug)?;
+        self.inner.get(target).cloned()
     }
 
     /// Returns every registered slug (used by the server's
     /// `/exporters` endpoint for UI discovery).
+    ///
+    /// Aliases are deliberately absent: this list is what a caller may
+    /// choose from, and a retired slug is something old rows carry
+    /// rather than something anybody should pick.
     pub fn slugs(&self) -> Vec<String> {
         let mut out: Vec<String> = self.inner.keys().cloned().collect();
         out.sort();
