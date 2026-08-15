@@ -327,7 +327,7 @@ pub fn record_for(
             record = record.with_ai_system(system, None);
         }
         if let (PromptDisclosure::Embed, Some(prompt)) = (prompts, evidence.prompt) {
-            record = record.with_prompt(prompt, None);
+            record = record.with_prompt(prompt);
         }
     } else if evidence.captured {
         record = record.with_source_type(DigitalSourceType::DigitalCapture);

@@ -2306,7 +2306,7 @@ mod tests {
 
         let huge = "x".repeat(embed::JPEG_MAX_PACKET + 1);
         let outcome = DisclosureWriter::unsigned()
-            .apply(&path, &record().with_prompt(huge, None))
+            .apply(&path, &record().with_prompt(huge))
             .unwrap();
         assert_eq!(outcome.xmp, Half::Written);
         assert!(outcome.prompt_dropped);
