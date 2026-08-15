@@ -68,6 +68,38 @@ impl CloudGrammar {
             .collect()
     }
 
+    /// Removes the credential from one string.
+    ///
+    /// Public because a rendered string reaches the dispatch row by more
+    /// routes than the JSON body: the URL a profile built with
+    /// `{{secret}}` in its query, and the text of an error that quotes
+    /// that URL back. Every one of them has to pass through here, so the
+    /// scrub is not a property of the body it was written for.
+    pub fn scrub_text(&self, s: &str) -> String {
+        self.scrub_str(s)
+    }
+
+    /// Rewrites an error so its message cannot carry the credential.
+    ///
+    /// The runner persists an `ExporterError`'s `to_string()` verbatim
+    /// as the dispatch's failure message
+    /// (`asterism_infra::dispatch::runtime`), and that message is handed
+    /// back on every read of the dispatch. A URL with the key in its
+    /// query and a backend that echoes the request both arrive here.
+    pub fn scrub_error(&self, err: ExporterError) -> ExporterError {
+        match err {
+            ExporterError::BackendRejected(message) => {
+                ExporterError::BackendRejected(self.scrub_str(&message))
+            }
+            ExporterError::Other(err) => {
+                ExporterError::Other(anyhow::anyhow!("{}", self.scrub_str(&err.to_string())))
+            }
+            // Neither carries adapter-composed text: both are built from
+            // slugs the core owns.
+            other => other,
+        }
+    }
+
     /// Removes the credential from every string in a JSON document.
     pub fn scrub(&self, value: Value) -> Value {
         match value {
@@ -211,6 +243,40 @@ mod tests {
         assert_eq!(redacted["Authorization"], REDACTED);
         assert_eq!(redacted["x-echo"], format!("prefix {REDACTED} suffix"));
         assert_eq!(redacted["x-plain"], "nothing here");
+    }
+
+    /// Query-parameter auth is a real shape, so a profile is allowed to
+    /// put `{{secret}}` in a path. What it must not do is put the
+    /// rendered result on the dispatch row.
+    #[test]
+    fn a_url_carrying_the_credential_is_scrubbed() {
+        let grammar = CloudGrammar::new("k-123".into());
+        assert_eq!(
+            grammar.scrub_text("https://api.test/run?api_key=k-123&n=1"),
+            format!("https://api.test/run?api_key={REDACTED}&n=1")
+        );
+    }
+
+    /// The runner persists an error's text as the dispatch's failure
+    /// message, so an error quoting a URL or echoing a response body is
+    /// a write to the row.
+    #[test]
+    fn an_error_message_cannot_carry_the_credential() {
+        let grammar = CloudGrammar::new("k-123".into());
+
+        let rejected = grammar.scrub_error(ExporterError::BackendRejected(
+            "POST https://api.test/run?key=k-123 HTTP 401: {\"sent\":\"k-123\"}".into(),
+        ));
+        let text = rejected.to_string();
+        assert!(!text.contains("k-123"), "{text}");
+        assert_eq!(text.matches(REDACTED).count(), 2, "{text}");
+
+        let other = grammar
+            .scrub_error(ExporterError::Other(anyhow::anyhow!(
+                "GET https://api.test/x?key=k-123: connection reset"
+            )))
+            .to_string();
+        assert!(!other.contains("k-123"), "{other}");
     }
 
     #[test]

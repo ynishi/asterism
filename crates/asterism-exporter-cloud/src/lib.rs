@@ -419,7 +419,8 @@ impl Exporter for CloudExporter {
             &headers,
             Some(body.clone()),
         )
-        .await?;
+        .await
+        .map_err(|e| grammar.scrub_error(e))?;
 
         let handle = grammar
             .select_first(&response, &params.submit.handle_from)
@@ -433,7 +434,10 @@ impl Exporter for CloudExporter {
         let exchange = params.record_exchange.then(|| Exchange {
             request: RecordedRequest {
                 method: params.submit.method.clone(),
-                url: url.clone(),
+                // Scrubbed, not copied: query-parameter auth is a real
+                // shape, so a profile may legitimately have rendered
+                // `{{secret}}` into this string.
+                url: grammar.scrub_text(&url),
                 headers: grammar.redact_headers(&headers, &params.auth.header),
                 body: Some(grammar.scrub(body)),
             },
@@ -459,10 +463,7 @@ impl Exporter for CloudExporter {
         check_kind(handle)?;
         let params = parse_params(&ctx)?;
         let payload = parse_handle_payload(handle)?;
-
-        if let Some(expired) = expiry_state(&params, &payload, Utc::now().timestamp_millis()) {
-            return Ok(expired);
-        }
+        let expiry = expiry_state(&params, &payload, Utc::now().timestamp_millis());
 
         let grammar = self.grammar(&params)?;
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &payload.handle);
@@ -472,7 +473,20 @@ impl Exporter for CloudExporter {
             grammar.render(&params.poll.path, &env)?
         );
         let headers = self.headers(&grammar, &params, &params.poll.headers, &env)?;
-        let response = send_json(&self.http, &params.poll.method, &url, &headers, None).await?;
+
+        // The backend is asked even when the deadline has passed, and
+        // the expiry is only the answer if the backend does not have a
+        // better one. A job that finished a second late finished; a
+        // deadline is our rule about how long to keep waiting, not a
+        // claim about what the platform did. When the call itself fails
+        // past the deadline — the platform has forgotten the job, which
+        // is what a deadline predicts — the expiry is the more useful
+        // explanation than the 404.
+        let response = match send_json(&self.http, &params.poll.method, &url, &headers, None).await
+        {
+            Ok(response) => response,
+            Err(err) => return expiry.ok_or_else(|| grammar.scrub_error(err)),
+        };
 
         if match_rule(&grammar, &params.poll.failed_when, &response) {
             let message = params
@@ -487,6 +501,12 @@ impl Exporter for CloudExporter {
         }
         if match_rule(&grammar, &params.poll.done_when, &response) {
             return Ok(DispatchState::Done);
+        }
+        // Still working, and out of time: this is where the deadline
+        // earns its keep, by ending a loop that would otherwise re-poll
+        // a queue position forever.
+        if let Some(expired) = expiry {
+            return Ok(expired);
         }
         Ok(DispatchState::Running(ProgressHint {
             current: None,
@@ -517,7 +537,9 @@ impl Exporter for CloudExporter {
             grammar.render(&params.harvest.path, &env)?
         );
         let headers = self.headers(&grammar, &params, &params.harvest.headers, &env)?;
-        let response = send_json(&self.http, &params.harvest.method, &url, &headers, None).await?;
+        let response = send_json(&self.http, &params.harvest.method, &url, &headers, None)
+            .await
+            .map_err(|e| grammar.scrub_error(e))?;
 
         let items = grammar.select(&response, &params.harvest.items_path);
         let now = Utc::now();
@@ -538,7 +560,9 @@ impl Exporter for CloudExporter {
                     grammar.render(&params.auth.value_template, &item_env)?,
                 );
             }
-            let bytes = fetch_bytes(&self.http, &source_url, &fetch_headers).await?;
+            let bytes = fetch_bytes(&self.http, &source_url, &fetch_headers)
+                .await
+                .map_err(|e| grammar.scrub_error(e))?;
             let locator = self
                 .custody
                 .write(ctx.dispatch_id, index, &source_url, &bytes)
@@ -567,9 +591,15 @@ impl Exporter for CloudExporter {
                 file_size_bytes: Some(bytes.len() as u64),
                 duration_ms: None,
                 // The platform's own item, and the URL it is expected to
-                // stop serving, kept beside the file we now hold.
+                // stop serving, kept beside the file we now hold. Both
+                // scrubbed: a download authenticated by query parameter
+                // renders the credential into that URL, and this one is
+                // persisted on the Asset rather than the dispatch.
                 extra: serde_json::json!({
-                    "cloud": { "item": grammar.scrub(item.clone()), "source_url": source_url }
+                    "cloud": {
+                        "item": grammar.scrub(item.clone()),
+                        "source_url": grammar.scrub_text(&source_url),
+                    }
                 }),
                 batch_hint: None,
             });
