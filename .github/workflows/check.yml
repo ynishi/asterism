@@ -67,6 +67,34 @@ jobs:
     # was meant to produce.
     timeout-minutes: 90
 
+    # Full debuginfo is written here and read never — nothing on a
+    # runner opens a debugger. `line-tables-only` keeps the part that is
+    # actually read (panic messages and backtraces still name the file
+    # and line) and drops the rest.
+    #
+    # Where the time is, measured on a warm run on 2026-08-15 (run
+    # 31906361509): the test build was 2 m 25 s of an 11 m 01 s job,
+    # spent emitting debug info and linking it into the 81 test binaries
+    # `Justfile:702` counts. The clippy and `bindings-check` passes ahead
+    # of it link nothing, so the saving is bounded by that one step.
+    #
+    # Set here rather than in a profile: a `Cargo.toml` override would
+    # follow everyone home, and locally the full information is worth
+    # what it costs. `dev` as well as `test` because the test binaries'
+    # dependencies are built under `dev`, which is where most of those
+    # bytes come from.
+    #
+    # The *second* run under these is the measurement, not the first.
+    # `Swatinem/rust-cache` hashes every `CARGO*` and `RUST*` variable
+    # into its restore key, so adding these two invalidates the whole
+    # cache once: the first run rebuilds every dependency from cold and
+    # says nothing about what the change bought. If the second run does
+    # not move the test build, these two lines are noise and should come
+    # back out.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
     steps:
       # On a pull request this checks out the head branch rather than
       # the merge commit `pull_request` defaults to. The regeneration
@@ -111,6 +139,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      # Caches `~/.cargo` and the dependency half of `target/`. The
+      # workspace's own crates are deliberately not cached by this action,
+      # so all 21 are recompiled and re-linted on every run — the verdict is
+      # recomputed, not replayed. What the cache does hide is anything that
+      # only appears when dependencies are built fresh; the sidecar resource
+      # error of 2026-08-03/04 was that shape, and a run here would not see
+      # it.
+      #
+      # Ahead of the two install steps below rather than after them,
+      # which is where it used to sit. The action caches `~/.cargo/bin`
+      # for anything installed while it is active, and `cargo-aidoc` is
+      # built from source on every run — it publishes no release
+      # binaries, so there is nothing for `cargo-binstall` or
+      # `taiki-e/install-action` to fetch. Installed after the restore,
+      # it lands in the cache and later runs find it already there;
+      # installed before, it was rebuilt every time. Twenty seconds on
+      # 2026-08-15, and the registry index the install reads is warm now
+      # too.
+      #
+      # Two things follow from how the action saves. It writes a new
+      # cache only when the restore missed or matched partially, so the
+      # binary joins the cache on a run that rebuilds something and not
+      # on one that hit its key exactly — this pays from the run after
+      # the next miss, not necessarily the next run. And `cargo install`
+      # still resolves `^0.3.0` against the registry every time, so a
+      # restored binary that no longer satisfies the floor is replaced
+      # rather than kept.
+      - uses: Swatinem/rust-cache@v2
 
       # What `aidoc-guard` (inside `check`) needs, and the reason it is
       # here rather than left to warn. That step warns instead of failing
@@ -158,15 +215,6 @@ jobs:
           rustup toolchain install \
             "$(cargo aidoc --print-required-toolchain)" --profile minimal
 
-      # Caches `~/.cargo` and the dependency half of `target/`. The
-      # workspace's own crates are deliberately not cached by this action,
-      # so all 19 are recompiled and re-linted on every run — the verdict is
-      # recomputed, not replayed. What the cache does hide is anything that
-      # only appears when dependencies are built fresh; the sidecar resource
-      # error of 2026-08-03/04 was that shape, and a run here would not see
-      # it.
-      - uses: Swatinem/rust-cache@v2
-
       # Three tests hard-require an ffmpeg binary and panic when it is
       # missing, deliberately: "this repo's fixture tests fail loudly rather
       # than skip silently, because a skipped gate reads as a passed one"
@@ -212,15 +260,63 @@ jobs:
       # is that build step.
       #
       # It runs *before* `just check` rather than as a separate job on
-      # purpose. A commit pushed with `GITHUB_TOKEN` does not start a
-      # new workflow run — GitHub suppresses that to stop workflows
-      # retriggering themselves — so a fix pushed from a second job
-      # would leave this pull request's own run red with no way back to
-      # green short of a manual rerun. Regenerating into the tree this
-      # job is about to check closes that in one run: `aidoc-guard`
-      # inside `check` then compares against artifacts that are already
-      # current, and stays the gate it was for everything it catches
-      # that regenerating cannot fix.
+      # purpose: regenerating into the tree this job is about to check
+      # settles the artifacts in one run, where a fix pushed from a
+      # second job would leave this pull request's own run red behind
+      # it.
+      #
+      # `[skip ci]` is what keeps that to one run, and the reason it is
+      # needed is worth stating because the opposite was written here
+      # first. This comment used to say that a commit pushed with
+      # `GITHUB_TOKEN` starts no workflow run. It does start one. On
+      # 2026-08-15 the push below created run 31906361509, whose first
+      # attempt is recorded as `conclusion: action_required` with
+      # `triggering_actor: github-actions[bot]`: rather than dropping
+      # the run, GitHub parked it behind an "Approve and run" button.
+      # Why it did — the bot holding no write access is the obvious
+      # guess — is not something the API says, and the last causal
+      # claim written in this spot was wrong, so it stays a guess here.
+      # What that cost is measured, on pull request #50: a human had to
+      # click, five minutes passed
+      # before anyone did, the approved run took another eleven minutes
+      # to repeat work that was already done, and the concurrency group
+      # cancelled the original run nine minutes in — after it had
+      # pushed, and midway through the `just check` that was the point
+      # of starting it. Two macOS runs and a manual step to answer a
+      # question the first run had already answered.
+      #
+      # So the commit says `[skip ci]`, which suppresses runs for both
+      # `push` and `pull_request`
+      # (docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs).
+      # The verdict then comes from this run, over the tree this step
+      # just wrote and pushed — which is the arrangement the paragraph
+      # above always described.
+      #
+      # Two costs, stated rather than left to be found.
+      #
+      # The head commit carries no check of its own, because the check
+      # is attached to the commit before it. Nothing requires one today
+      # — `main` has no branch protection and the sole ruleset is
+      # disabled — but a rule demanding a passing check on the head SHA
+      # would have to be reconciled with this first, and a skipped
+      # workflow's checks stay *pending* rather than absent, so such a
+      # rule would block the merge rather than quietly pass it.
+      #
+      # The second is the one to watch. This repository allows squash
+      # and rebase merges as well as merge commits, and both of those
+      # carry a branch commit's message into `main`: squash composes the
+      # body from the branch's messages, rebase replays the commit
+      # itself. Either lands `[skip ci]` on `main`'s head, and the
+      # `push: main` run — the one the concurrency block above exists to
+      # protect, because it is what gives a merged tree its verdict —
+      # does not start. A merge commit takes its message from the pull
+      # request title and does not carry the token, so merging that way
+      # avoids it. Whether a merge commit is enough is not settled:
+      # GitHub's own wording is that the token skips a workflow when it
+      # appears "in a push", which may or may not mean only the head
+      # commit of one. The first merge after this lands answers it —
+      # check that `main` got a run, and if it did not, this workflow
+      # needs a different way to suppress the branch run.
       #
       # `just aidoc` fails rather than writes when the committed
       # artifacts name a different target (cargo-aidoc 0.3.0), so a
@@ -231,22 +327,39 @@ jobs:
       # there, so there is nothing to push to. Not regenerating at all
       # in that case is deliberate — regenerating without pushing would
       # leave `aidoc-guard` comparing against a tree this step just
-      # made current, which is a gate reporting its own output.
+      # made current, which is a gate reporting its own output. On a
+      # fork the flag below is therefore never set, and `aidoc-guard`
+      # runs as the real gate it is everywhere else.
+      #
+      # `ASTERISM_AIDOC_REGENERATED` is what tells `aidoc-guard` that
+      # this happened; `Justfile:387` states what it does with it and
+      # why the check it skips could not have failed.
       - name: Regenerate docs/aidoc and commit what moved
         if: >-
           github.event_name != 'pull_request' ||
           github.event.pull_request.head.repo.full_name == github.repository
         run: |
           just aidoc
-          if git diff --quiet -- docs/aidoc; then
-            echo "docs/aidoc/ is already current."
-            exit 0
-          fi
+          echo 'ASTERISM_AIDOC_REGENERATED=1' >> "$GITHUB_ENV"
+          # Staged before the comparison, not after it. `git diff` reads
+          # tracked paths only, so a *new* artifact — the file a new
+          # crate or a new public module produces, which is the whole
+          # "an addition skips the inventory" hole `aidoc-check` exists
+          # for (`Justfile:352-357`) — left the tree looking unchanged.
+          # The step then reported "already current" and pushed nothing,
+          # and the artifact never reached the repository. `git add -A`
+          # sees untracked and deleted paths as well; comparing the
+          # index against `HEAD` is then the question actually being
+          # asked.
           git config user.name 'github-actions[bot]'
           git config user.email \
             '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/aidoc
-          git commit -m 'Regenerate docs/aidoc'
+          git add -A docs/aidoc
+          if git diff --cached --quiet -- docs/aidoc; then
+            echo "docs/aidoc/ is already current."
+            exit 0
+          fi
+          git commit -m 'Regenerate docs/aidoc [skip ci]'
           git push
 
       - name: just check

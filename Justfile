@@ -329,10 +329,24 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 # would bake the branch slug into a committed artifact — and then
 # `aidoc-check` reports drift from every other checkout.
 #
+# `--strict` promotes the doc lints from warnings to errors, which is
+# what `aidoc-check` and `aidoc-guard` have always done. Writing without
+# it produced artifacts that the very next gate rejected: the lints are
+# `missing-crate-doc`, `short-crate-doc`, `missing-module-doc` and
+# `llms-full-too-large`, none of which regenerating can fix, so the
+# difference was only ever *where* the author found out. Failing at the
+# point of writing says which crate or module is missing its doc block
+# while the person is still looking at it.
+#
+# It also matters now that CI regenerates: `aidoc-guard` steps aside
+# when this recipe has already run in the same job, and it may only do
+# that because this recipe applies the same bar. Drop `--strict` here
+# and that skip starts hiding lint failures — see `aidoc-guard`.
+#
 # Run this after changing any public API or doc comment, and commit
 # the diff.
 aidoc:
-    cargo aidoc --workspace-root "{{ project_root }}" --title asterism
+    cargo aidoc --workspace-root "{{ project_root }}" --strict --title asterism
 
 # Fail when docs/aidoc/ no longer matches the tree (exit 2 on drift).
 #
@@ -370,6 +384,35 @@ aidoc-check:
 aidoc-guard:
     #!/usr/bin/env bash
     set -uo pipefail
+    # The fifth way this cannot run, and the only one that is nobody's
+    # fault: the artifacts were regenerated earlier in this same run.
+    # CI does that (`.github/workflows/check.yml`) and sets this, and
+    # from here the check would compare a regeneration against the
+    # regeneration that produced it — it cannot report drift, and it
+    # spends a second rustdoc pass over the workspace saying so. That
+    # pass was 39 s of an 11 min run when it was measured on
+    # 2026-08-15.
+    #
+    # This is only sound because `just aidoc` runs every check this
+    # recipe would, and reaches each of them first:
+    #
+    #   - drift — impossible against a regeneration of the same tree;
+    #   - target mismatch — `just aidoc` refuses to write and exits
+    #     non-zero rather than retargeting the artifacts;
+    #   - rustdoc format mismatch — raised before either mode branches;
+    #   - the doc lints — `--strict`, which `just aidoc` carries for
+    #     this reason among others. Without it there would be a real
+    #     gate here and this skip would swallow it, since `--strict`
+    #     runs nowhere else by default: on a developer machine the
+    #     guard exits 0 unless the pinned nightly is installed.
+    #
+    # Said out loud rather than skipped quietly, on the same terms as
+    # the four warnings below — with the difference that here the
+    # artifacts *were* checked, by the tool that wrote them.
+    if [ -n "${ASTERISM_AIDOC_REGENERATED:-}" ]; then
+        echo "docs/aidoc/ was regenerated earlier in this run; not re-checked." >&2
+        exit 0
+    fi
     if ! command -v cargo-aidoc >/dev/null 2>&1; then
         echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc is not installed." >&2
         echo "         cargo install cargo-aidoc" >&2
