@@ -309,11 +309,13 @@ dependencies = [
  "rand_chacha 0.9.0",
  "rayon",
  "reqwest 0.12.28",
+ "rusqlite",
  "rusqlite-isle",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

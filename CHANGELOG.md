@@ -9,6 +9,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pursuit — a minted unit of work over the dispatch loop** (#29,
+  design on #21). Content ancestry cannot say "these rounds were one
+  attempt at one thing": regeneration shares no derivation edge with
+  the round it supersedes, rejected rounds have no descendants, and
+  abandonment has no ancestry expression at all. So the unit is minted
+  — three tables (`pursuit`, thin and immutable; `pursuit_event`,
+  append-only close/reopen facts with standing derived on read;
+  `pursuit_restamp`, the recorded repair verb) and a stamp column on
+  `dispatch_job`, RESTRICT everywhere, with the persona purge sequence
+  extended to sweep them in dependency order.
+
+  Every dispatch start verb now files its round under a pursuit:
+  supplied ids are validated in-persona (continuation is explicit,
+  never inferred from content overlap), an absent id mints an anonymous
+  pursuit in the same request, and a re-dispatch inherits the prior
+  round's pursuit — an explicit reference to a named dispatch, not a
+  heuristic. The migration backfills one single-round pursuit per
+  existing dispatch with NULL attribution: nobody opened those
+  pursuits, the migration did, and grouping consecutive dispatches by
+  guesswork is exactly the inferred correlation the model forbids.
+  Restamping moves a round (its returns follow through the dispatch
+  join) or, later, a judgment; the move lands atomically with its
+  record, is refused when the caller's recorded `from` no longer
+  matches the row — a repair verb that guesses is worse than one that
+  refuses — and never crosses personas.
+
+  The lifecycle verbs are a service now (`PursuitService`): open (the
+  explicit pre-create — intent named up front, parenthood walled to
+  one persona), close (`satisfied` freezes the kept set at that moment
+  into a snapshot the event references, sorted ascending server-side
+  so identical kept sets dedupe across closes; an empty kept set is
+  the defined "concluded with nothing kept"; `abandoned` keeps
+  nothing by construction), reopen (legal on an open pursuit — a
+  recorded fact, not an error), restamp (the repair verb over a named
+  dispatch round), and the standing-deriving reads.
+
+  The membership read completes the domain/application layer: a
+  pursuit opened up (`PursuitService::view`) is its row plus its
+  rounds, its **returns**, and its events — all derived, nothing
+  stored. Returns are found through two virtual generated columns
+  (V80) that surface a `_trace` claim iff it resolved, each behind a
+  partial index, so the reverse lookup is an index seek and never a
+  library scan; the claim-lane authority order (dispatch join first,
+  direct claim only where no hop resolved) is baked into the columns
+  and the probe predicates rather than repeated per caller. Listings
+  derive standing from one window query instead of one events read
+  per row. The performance question was answered with a receipt, not
+  an assumption: `just bench-measure-pursuit` seeds a throwaway
+  profile at the documented scale and measures through the real
+  adapters — at 100,000 assets / 200 pursuits, single process, warm
+  by construction (the process that seeds measures), returns_of p95
+  is 97µs, the composed view p95 199µs, list-with-standings p95
+  530µs. The last of those is the one number that grows with a
+  persona's event total rather than the page width (the standing
+  window scans the persona's events; an index for it is a recorded
+  follow-up, cheap and not yet earned). That is why there is no
+  materialised projection and no job behind this read; the bench
+  stays in the tree as the tripwire that says when that decision must
+  be revisited. Transport routes (HTTP /
+  Tauri / MCP) are the remaining slice of #29.
+
+  The sidecar claim lane closes the loop outward and back: exporters
+  that write a sidecar copy the stamp out as `_asterism.pursuit_id`
+  beside `dispatch_id`, and on re-ingest the value is a **claim** —
+  recorded in `_trace` with its own resolution marker (it resolves iff
+  the pursuit exists in the ingesting persona), never a reason to
+  refuse the file, owned by the claim's clear-then-write so a
+  re-declaration that no longer carries one loses it, and retried by
+  the same post-reify sweep that repairs dispatch claims (the two
+  halves repair independently — an unresolvable derivation does not
+  hold a pursuit answer hostage). The rule the membership read will
+  follow, stated now so the claim lane is built for it: where the
+  dispatch join and a sidecar copy disagree, the dispatch row's own
+  stamp answers — the copy can be stale after a restamp — so the
+  disagreement never needs adjudication.
+
 - **A certificate is configuration, and a broken one says so** (#14) —
   `SigningIdentity::from_files` had no caller and no way to reach it, so
   no deployment could turn the manifest half on. Five environment

@@ -5650,6 +5650,207 @@ fn v78_material_layers(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Version 78 → 79: the pursuit — the minted unit of work (#29,
+/// design on #21).
+///
+/// Three tables and one column. `pursuit` is thin and immutable (no
+/// status column — standing derives from `pursuit_event` on read, the
+/// `duplicate_conflict` doctrine); `pursuit_event` holds the one-way
+/// lifecycle facts; `pursuit_restamp` records moves of a stamped event
+/// between pursuits — the repair verb for mis-filed correlation.
+/// `dispatch_job.pursuit_id` is the stamp itself.
+///
+/// Schema choices worth writing down:
+///
+/// - **RESTRICT everywhere**, including `persona_id` — unlike
+///   `dispatch_job.persona_id`'s CASCADE. The persona purge is
+///   hand-rolled precisely because SQLite fires RESTRICT mid-cascade;
+///   these tables extend that sequence (`repo/persona.rs`), and a new
+///   delete path that forgets them should fail loudly rather than
+///   cascade half a record away.
+/// - **`kind` carries its CHECK** (a fresh table can, where V47/V50's
+///   ALTER could not); the attribution columns stay nullable TEXT with
+///   the same NULL-means-unrecorded reading, guarded on write by the
+///   repository row builders.
+/// - **`subject_kind` admits `'judgment'` now**: the worth-gate table
+///   arrives later, and widening a CHECK on a STRICT table costs a
+///   rebuild — the two-value set is the design's closed vocabulary,
+///   not speculation.
+/// - The `(created_at, id)` index on `pursuit_event` matches the
+///   standing derivation's sort key; the `id` tie-break is a real
+///   sorter (the V66 / V78 lesson).
+const V79_PURSUIT_TABLES: &str = r#"
+CREATE TABLE pursuit (
+    id             BLOB PRIMARY KEY,
+    persona_id     BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
+    parent_id      BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    title          TEXT,
+    note           TEXT,
+    author_kind    TEXT,
+    author_subject TEXT,
+    operator_ai    TEXT,
+    attributed_via TEXT,
+    created_at     INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_pursuit_persona_created
+    ON pursuit(persona_id, created_at DESC);
+CREATE INDEX idx_pursuit_parent
+    ON pursuit(parent_id);
+
+CREATE TABLE pursuit_event (
+    id             BLOB PRIMARY KEY,
+    pursuit_id     BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    persona_id     BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
+    kind           TEXT NOT NULL
+        CHECK (kind IN ('closed_satisfied', 'closed_abandoned', 'reopened')),
+    snapshot_id    BLOB REFERENCES snapshot(id) ON DELETE RESTRICT,
+    note           TEXT,
+    author_kind    TEXT,
+    author_subject TEXT,
+    operator_ai    TEXT,
+    attributed_via TEXT,
+    created_at     INTEGER NOT NULL,
+    CHECK (snapshot_id IS NULL OR kind = 'closed_satisfied')
+) STRICT;
+
+CREATE INDEX idx_pursuit_event_pursuit_created
+    ON pursuit_event(pursuit_id, created_at, id);
+CREATE INDEX idx_pursuit_event_persona
+    ON pursuit_event(persona_id);
+
+CREATE TABLE pursuit_restamp (
+    id              BLOB PRIMARY KEY,
+    subject_kind    TEXT NOT NULL
+        CHECK (subject_kind IN ('dispatch', 'judgment')),
+    subject_id      BLOB NOT NULL,
+    from_pursuit_id BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    to_pursuit_id   BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    author_kind     TEXT,
+    author_subject  TEXT,
+    operator_ai     TEXT,
+    attributed_via  TEXT,
+    created_at      INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_pursuit_restamp_subject
+    ON pursuit_restamp(subject_kind, subject_id);
+CREATE INDEX idx_pursuit_restamp_to
+    ON pursuit_restamp(to_pursuit_id);
+CREATE INDEX idx_pursuit_restamp_from
+    ON pursuit_restamp(from_pursuit_id);
+
+ALTER TABLE dispatch_job ADD COLUMN pursuit_id BLOB
+    REFERENCES pursuit(id) ON DELETE RESTRICT;
+
+CREATE INDEX idx_dispatch_pursuit
+    ON dispatch_job(pursuit_id);
+"#;
+
+/// Applies V79: the pursuit tables, the dispatch stamp column, and the
+/// backfill — one legacy dispatch = one single-round pursuit.
+///
+/// An App step because the backfill mints UUIDs, which no SQL batch can
+/// (the [`v19_selection_model`] / [`v49_instance_identity`] reason).
+/// The backfill copies `persona_id` and `created_at` from the dispatch
+/// row and leaves everything else absent: **attribution stays NULL**
+/// (nobody opened these pursuits — the migration did, and absent
+/// bookkeeping stays absent rather than being forged, the V48/V50
+/// rule), and no grouping heuristic runs — grouping consecutive
+/// dispatches would be exactly the inferred correlation the design
+/// forbids. Users continue or restamp afterwards; that is a statement,
+/// not a guess.
+fn v79_pursuit(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V79_PURSUIT_TABLES)?;
+
+    // Collected first rather than driven from a cursor: the UPDATE
+    // writes to the table the SELECT would be reading through (the V78
+    // shape).
+    let legacy: Vec<(Uuid, Uuid, i64)> = {
+        let mut stmt = tx.prepare("SELECT id, persona_id, created_at FROM dispatch_job")?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    {
+        let mut mint =
+            tx.prepare("INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, ?3)")?;
+        let mut stamp = tx.prepare("UPDATE dispatch_job SET pursuit_id = ?1 WHERE id = ?2")?;
+        for (dispatch_id, persona_id, created_at) in legacy {
+            let pursuit_id = Uuid::now_v7();
+            mint.execute(params![pursuit_id, persona_id, created_at])?;
+            stamp.execute(params![pursuit_id, dispatch_id])?;
+        }
+    }
+
+    // Guard: the loop synthesises rows that carry foreign keys with
+    // foreign keys off for the whole App step (the V78 lesson) — a
+    // dispatch row whose persona is gone would mint a pursuit over a
+    // persona that is not there, and commit it.
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v79: foreign_key_check reported violations after the backfill".into()),
+        ));
+    }
+    Ok(())
+}
+
+/// Version 79 → 80: the reverse-lookup lane for pursuit membership
+/// (#29) — two virtual generated columns over `_trace`, each indexed.
+///
+/// A pursuit's **returns** are assets whose ingest note resolved to
+/// one of its rounds (`_trace.dispatch_id`, dispatch join first) or,
+/// failing that, to the pursuit directly (`_trace.pursuit_id`). Both
+/// keys live inside `asset.extra` JSON, so the naive read is a full
+/// scan with a JSON parse per row — a per-view cost that grows with
+/// the library, at a documented 100k+ asset scale. The columns
+/// surface the two keys **only when their claim resolved** (the
+/// authority rule is baked into the column, not repeated per query),
+/// and the partial indexes hold just the claim-carrying rows, so a
+/// membership probe is an index seek instead of a scan.
+///
+/// - VIRTUAL rather than STORED because `ALTER TABLE ADD COLUMN` can
+///   only add virtual generated columns; the index materialises the
+///   values anyway, which is where reads look.
+/// - `json_valid` guards both expressions: the app validates
+///   `extra_json` on write, but the read side already assumes a
+///   corrupt bag is possible, and on a local-first profile a single
+///   bad row must degrade to "no claim surfaced", not to "the
+///   migration fails and the profile no longer opens" —
+///   `json_extract` over invalid JSON is an error, and inside an
+///   ALTER it is the whole batch's error.
+/// - The columns are derived state over `_trace` — the note stays the
+///   fact, the columns are how it is found. Writers keep writing the
+///   note; nothing writes the columns.
+/// - `Step::Sql`: DDL only, nothing minted.
+const V80_TRACE_LOOKUP: &str = r#"
+ALTER TABLE asset ADD COLUMN trace_dispatch_id TEXT
+    GENERATED ALWAYS AS (
+        CASE WHEN json_valid(extra)
+              AND json_extract(extra, '$._trace.resolved') = 1
+             THEN json_extract(extra, '$._trace.dispatch_id')
+        END
+    ) VIRTUAL;
+
+ALTER TABLE asset ADD COLUMN trace_pursuit_id TEXT
+    GENERATED ALWAYS AS (
+        CASE WHEN json_valid(extra)
+              AND json_extract(extra, '$._trace.pursuit_resolved') = 1
+             THEN json_extract(extra, '$._trace.pursuit_id')
+        END
+    ) VIRTUAL;
+
+CREATE INDEX idx_asset_trace_dispatch
+    ON asset(trace_dispatch_id)
+ WHERE trace_dispatch_id IS NOT NULL;
+
+CREATE INDEX idx_asset_trace_pursuit
+    ON asset(trace_pursuit_id)
+ WHERE trace_pursuit_id IS NOT NULL;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -5731,6 +5932,8 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V76_CLEAR_STALE_JPEG_META_MARKER),
     Step::App(v77_series_strategy_admits_the_exif_decoder),
     Step::App(v78_material_layers),
+    Step::App(v79_pursuit),
+    Step::Sql(V80_TRACE_LOOKUP),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -8987,17 +9190,22 @@ mod tests {
         );
     }
 
-    /// Two tables record a channel, and wiring more services to *receive*
-    /// an `AttributionContext` does not make a third (attribution
-    /// state lives on `asset` and `dispatch_job`; an operation ledger is
-    /// a separate decision, not a column that appears table by table).
+    /// The closed list of tables that record a channel, and wiring more
+    /// services to *receive* an `AttributionContext` does not extend it
+    /// (an operation ledger is a separate decision, not a column that
+    /// appears table by table). Two waves so far: `asset` /
+    /// `dispatch_job` (V47-V50), and the pursuit family (V79) — forge
+    /// events are actor-carrying by design (#29: who opened the
+    /// pursuit, who recorded the close, who ordered the restamp), with
+    /// the same NULL-means-unrecorded reading and the same write-side
+    /// channel guard.
     ///
-    /// Read off the schema rather than a hand-kept list: a fourth
+    /// Read off the schema rather than a hand-kept list: a new
     /// `attributed_via` would otherwise arrive silently, and every one of
     /// them is a place the doctrine has to answer for — which channel
     /// wrote it, what a NULL means there, and how auth resolves it later.
     #[test]
-    fn only_asset_and_dispatch_job_carry_a_channel_column() {
+    fn only_settled_tables_carry_a_channel_column() {
         let mut conn = test_conn();
         migrate(&mut conn).unwrap();
 
@@ -9016,7 +9224,13 @@ mod tests {
 
         assert_eq!(
             carriers,
-            vec!["asset".to_string(), "dispatch_job".to_string()],
+            vec![
+                "asset".to_string(),
+                "dispatch_job".to_string(),
+                "pursuit".to_string(),
+                "pursuit_event".to_string(),
+                "pursuit_restamp".to_string(),
+            ],
             "a table gained an attribution channel; that is a design decision, not a migration \
              detail — settle where attribution state lives before changing this list"
         );
@@ -10463,6 +10677,211 @@ mod tests {
             mismatched.is_empty(),
             "a step's name and its index disagree. The index is the \
              `user_version` it writes, so the name is what has to move: {mismatched:#?}"
+        );
+    }
+
+    /// V79 backfills one single-round pursuit per existing dispatch —
+    /// and nothing more. Copied `persona_id` / `created_at`, NULL
+    /// attribution (nobody opened these pursuits; the migration did),
+    /// no grouping: two dispatches that could plausibly be one line of
+    /// work still get two pursuits, because grouping-by-heuristic is
+    /// the inferred correlation the design forbids (#29).
+    #[test]
+    fn v79_backfills_one_single_round_pursuit_per_dispatch() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 78).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'cafe', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
+             VALUES (?1, ?2, 0)",
+            params![snapshot, asset],
+        )
+        .unwrap();
+        let first = Uuid::now_v7();
+        let second = Uuid::now_v7();
+        for (id, created) in [(first, 1_000_i64), (second, 5_000)] {
+            conn.execute(
+                "INSERT INTO dispatch_job (id, snapshot_id, persona_id, exporter_slug, \
+                                           action, state_slug, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, 'file', 'export', 'done', ?4, ?4)",
+                params![id, snapshot, persona, created],
+            )
+            .unwrap();
+        }
+
+        migrate(&mut conn).unwrap();
+
+        let stamped: Vec<(Uuid, Option<Uuid>, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, pursuit_id, created_at FROM dispatch_job ORDER BY created_at")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(stamped.len(), 2);
+        let mut minted = std::collections::HashSet::new();
+        for (dispatch, pursuit, dispatch_created) in &stamped {
+            let pursuit = pursuit.expect("every legacy dispatch is stamped");
+            assert!(
+                minted.insert(pursuit),
+                "no grouping: dispatch {dispatch} must not share a pursuit"
+            );
+            let (p_persona, p_created, title, author_kind, operator_ai, via): (
+                Uuid,
+                i64,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = conn
+                .query_row(
+                    "SELECT persona_id, created_at, title, author_kind, operator_ai, \
+                            attributed_via \
+                       FROM pursuit WHERE id = ?1",
+                    params![pursuit],
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(p_persona, persona);
+            assert_eq!(
+                p_created, *dispatch_created,
+                "the pursuit inherits the dispatch's clock, not the migration's"
+            );
+            assert_eq!(
+                (title, author_kind, operator_ai, via),
+                (None, None, None, None),
+                "absent bookkeeping stays absent"
+            );
+        }
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pursuit WHERE id NOT IN \
+                 (SELECT pursuit_id FROM dispatch_job WHERE pursuit_id IS NOT NULL)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            orphans, 0,
+            "the backfill mints nothing beyond the dispatches"
+        );
+    }
+
+    /// A profile carrying a corrupt `extra` bag still upgrades: the
+    /// bad row degrades to "no claim surfaced", it does not turn into
+    /// a migration failure that keeps the profile from opening.
+    #[test]
+    fn v80_upgrades_over_a_corrupt_extra_bag() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 79).unwrap();
+        let persona = seed_persona(&conn);
+        let corrupt = seed_asset(&conn, persona);
+        conn.execute(
+            "UPDATE asset SET extra = 'not json' WHERE id = ?1",
+            params![corrupt],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let surfaced: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT trace_dispatch_id, trace_pursuit_id FROM asset WHERE id = ?1",
+                params![corrupt],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(surfaced, (None, None), "a corrupt bag surfaces nothing");
+    }
+
+    /// V80's columns surface a `_trace` claim iff it resolved — the
+    /// authority rule lives in the column definition — and the probe
+    /// the membership read issues is an index seek, not a scan.
+    #[test]
+    fn v80_surfaces_resolved_trace_claims_and_probes_by_index() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+
+        let resolved = seed_asset(&conn, persona);
+        let unresolved = seed_asset(&conn, persona);
+        let bare = seed_asset(&conn, persona);
+        conn.execute(
+            "UPDATE asset SET extra = ?1 WHERE id = ?2",
+            params![
+                r#"{"_trace":{"resolved":true,"dispatch_id":"d-1","pursuit_resolved":true,"pursuit_id":"p-1"}}"#,
+                resolved
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE asset SET extra = ?1 WHERE id = ?2",
+            params![
+                r#"{"_trace":{"resolved":false,"dispatch_id":"d-1","pursuit_resolved":false,"pursuit_id":"p-1"}}"#,
+                unresolved
+            ],
+        )
+        .unwrap();
+
+        let hits: Vec<Uuid> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id FROM asset WHERE trace_dispatch_id = 'd-1' \
+                       AND trace_dispatch_id IS NOT NULL",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            hits,
+            vec![resolved],
+            "only the resolved claim surfaces; unresolved and bare rows stay NULL"
+        );
+        let pursuit_hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM asset WHERE trace_pursuit_id = 'p-1' \
+                   AND trace_pursuit_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pursuit_hits, 1);
+        let _ = bare;
+
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT id FROM asset \
+                  WHERE trace_dispatch_id IN ('d-1', 'd-2') \
+                    AND trace_dispatch_id IS NOT NULL",
+                [],
+                |r| r.get(3),
+            )
+            .unwrap();
+        assert!(
+            plan.contains("idx_asset_trace_dispatch"),
+            "the membership probe must be an index seek, not a scan: {plan}"
         );
     }
 

@@ -114,7 +114,7 @@ export type PromoteTagToGroupCommand = { tag_id: string; persona_id: string; nam
 
 export type PromoteTagToGroupResult = { group_id: string; persona_id: string; name: string; asset_count: number; };
 
-export type CreateDispatchCommand = { snapshot_id: string; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; };
+export type CreateDispatchCommand = { snapshot_id: string; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; pursuit_id: string | null; };
 
 export type PromoteSnapshotToGroupCommand = { snapshot_id: string; name: string; description: string | null; dir_id: string | null; };
 
@@ -126,9 +126,9 @@ export type CreateQueryGroupCommand = { persona_id: string; name: string; query_
 
 export type UpdateQueryGroupQueryCommand = { group_id: string; query_json: string; };
 
-export type DispatchRunCommand = { persona_id: string; group_id: string | null; asset_ids: string[]; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; };
+export type DispatchRunCommand = { persona_id: string; group_id: string | null; asset_ids: string[]; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; pursuit_id: string | null; };
 
-export type RedispatchCommand = { dispatch_id: string; };
+export type RedispatchCommand = { dispatch_id: string; pursuit_id: string | null; };
 
 export type CreateSavedQueryCommand = { persona_id: string; name: string; filter_json: string; sort_json: string; position: number | null; };
 
@@ -242,7 +242,7 @@ export type JobsSnapshotDto = { total: number; done: number; pending: number; ru
 
 export type SnapshotDto = { id: string; persona_id: string; content_hash: string; asset_ids: string[]; created_at_ms: number; };
 
-export type DispatchDto = { id: string; snapshot_id: string; persona_id: string; exporter_slug: string; action: string; params_json: string; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; };
+export type DispatchDto = { id: string; snapshot_id: string; persona_id: string; pursuit_id: string | null; exporter_slug: string; action: string; params_json: string; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; };
 
 export type SavedQueryDto = { id: string; persona_id: string; name: string; filter_json: string; sort_json: string; position: number; created_at_ms: number; updated_at_ms: number; };
 

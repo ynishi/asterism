@@ -8,7 +8,7 @@
 
 use asterism_core::domain::dispatch::{DispatchJob, DispatchState};
 use asterism_core::domain::repository::DispatchRepository;
-use asterism_core::domain::value::{AssetId, DispatchId, PersonaId, SnapshotId};
+use asterism_core::domain::value::{AssetId, DispatchId, PersonaId, PursuitId, SnapshotId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -57,6 +57,9 @@ struct DispatchRow {
     author_kind: Option<String>,
     author_subject: Option<String>,
     attributed_via: Option<String>,
+    // The pursuit stamp (V79). NULL only where the service invariant
+    // has not run — the backfill stamps every pre-V79 row.
+    pursuit_id: Option<Uuid>,
 }
 
 impl DispatchRow {
@@ -66,7 +69,7 @@ impl DispatchRow {
                                    handle_kind, handle_payload,
                                    output_asset_ids, created_at, updated_at, completed_at,
                                    source_group_id, source_query_json, operator_ai,
-                                   author_kind, author_subject, attributed_via";
+                                   author_kind, author_subject, attributed_via, pursuit_id";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -92,6 +95,7 @@ impl DispatchRow {
             author_kind: row.get(19)?,
             author_subject: row.get(20)?,
             attributed_via: row.get(21)?,
+            pursuit_id: row.get(22)?,
         })
     }
 
@@ -168,6 +172,7 @@ impl DispatchRow {
             .source_group_id
             .map(asterism_core::domain::value::GroupId::from_uuid);
         job.source_query_json = self.source_query_json;
+        job.pursuit_id = self.pursuit_id.map(PursuitId::from_uuid);
         job.completed_at = self.completed_at.map(ms_to_datetime).transpose()?;
         Ok(job)
     }
@@ -247,6 +252,7 @@ impl DispatchRepository for SqliteDispatchRepository {
             None => (None, None),
         };
         let attributed_via = job.attributed_via().map(|c| c.slug().to_string());
+        let pursuit_id = job.pursuit_id.map(|p| *p.as_uuid());
         // Same write-side rule as the asset table: a row that records
         // somebody records the channel that answer arrived through.
         super::attribution_guard::assert_channel_recorded(
@@ -264,16 +270,20 @@ impl DispatchRepository for SqliteDispatchRepository {
                           handle_kind, handle_payload, output_asset_ids,
                           created_at, updated_at, completed_at,
                           source_group_id, source_query_json, operator_ai,
-                          author_kind, author_subject, attributed_via)
+                          author_kind, author_subject, attributed_via, pursuit_id)
                      VALUES
                          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                          ?17, ?18, ?19, ?20, ?21, ?22)
+                          ?17, ?18, ?19, ?20, ?21, ?22, ?23)
                      -- The attribution columns are absent from the
                      -- update set for the same reason `source_*` is: who
                      -- asked for the run, and how the request arrived,
                      -- are settled when the row is created, and the
                      -- runner's own saves (state, handle, outputs) have
-                     -- nothing to say about them.
+                     -- nothing to say about them. `pursuit_id` is absent
+                     -- for a stronger reason: the restamp verb is the
+                     -- only sanctioned mover, and a runner save carrying
+                     -- a stale in-memory stamp must not undo a recorded
+                     -- restamp that landed in between.
                      ON CONFLICT(id) DO UPDATE SET
                          exporter_slug = excluded.exporter_slug,
                          action = excluded.action,
@@ -310,12 +320,33 @@ impl DispatchRepository for SqliteDispatchRepository {
                         author_kind,
                         author_subject,
                         attributed_via,
+                        pursuit_id,
                     ],
                 )?;
                 Ok(())
             })
             .await
             .map_err(infra_err)
+    }
+
+    async fn list_rounds(&self, pursuit_id: &PursuitId) -> Result<Vec<DispatchJob>, DomainError> {
+        let uuid = *pursuit_id.as_uuid();
+        let rows = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {} FROM dispatch_job WHERE pursuit_id = ?1 \
+                     ORDER BY created_at ASC, id ASC",
+                    DispatchRow::COLUMNS
+                ))?;
+                let rows = stmt
+                    .query_map(params![uuid], DispatchRow::from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter().map(DispatchRow::into_domain).collect()
     }
 
     async fn list(

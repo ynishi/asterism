@@ -14,9 +14,10 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`] and
-[`super::dispatch`], at the point where the values about to be bound
-are visible as the columns themselves.
+Called by the row builders in [`super::asset`], [`super::dispatch`]
+and [`super::pursuit`] (all three pursuit-family tables), at the
+point where the values about to be bound are visible as the columns
+themselves.
 
 ## Functions
 

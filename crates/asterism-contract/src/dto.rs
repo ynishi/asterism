@@ -1246,6 +1246,10 @@ pub struct DispatchDto {
     pub snapshot_id: String,
     /// Persona bucket.
     pub persona_id: String,
+    /// Pursuit this round is filed under (#29). `None` only on rows
+    /// that predate the stamp's backfill invariant; moved only by the
+    /// restamp verb, never by a state save.
+    pub pursuit_id: Option<String>,
     /// Exporter slug (`comfy` / `gemini` / `vdsl` / `alc-sd-bake`).
     pub exporter_slug: String,
     /// Action string handed to the exporter (`img2img` / `txt2img` /
@@ -1307,6 +1311,71 @@ pub struct SnapshotDto {
     pub asset_ids: Vec<String>,
     /// Creation time of the canonical row (unix epoch ms).
     pub created_at_ms: i64,
+}
+
+/// The minted unit of work (#29): one line of generation and curation
+/// toward an intent. The row is thin and immutable — `standing` is
+/// derived on read from the lifecycle events, never stored.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PursuitDto {
+    /// Pursuit id (UUID hyphenated) — minted, never derived from
+    /// content.
+    pub id: String,
+    /// Owner persona id.
+    pub persona_id: String,
+    /// Pursuit this one was spawned from (`None` for a root). Set at
+    /// creation, immutable.
+    pub parent_id: Option<String>,
+    /// Short human label (`None` for an anonymous, implicitly minted
+    /// pursuit — display names for those are synthesized, not stored).
+    pub title: Option<String>,
+    /// One short free-text slot.
+    pub note: Option<String>,
+    /// Live standing, derived from the latest lifecycle event:
+    /// `open` / `closed_satisfied` / `closed_abandoned`.
+    pub standing: String,
+    /// Creation time (unix epoch ms).
+    pub created_at_ms: i64,
+}
+
+/// One lifecycle fact about a pursuit (#29): a close or a reopen,
+/// append-only. A repeat close is a new fact; standing re-derives.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PursuitEventDto {
+    /// Event id (UUID hyphenated).
+    pub id: String,
+    /// Pursuit the fact is about.
+    pub pursuit_id: String,
+    /// `closed_satisfied` / `closed_abandoned` / `reopened`.
+    pub kind: String,
+    /// `closed_satisfied` only: the kept set frozen at close (`None`
+    /// there means "concluded with nothing kept" — a defined state).
+    pub snapshot_id: Option<String>,
+    /// One short free-text slot.
+    pub note: Option<String>,
+    /// When the fact was recorded (unix epoch ms).
+    pub created_at_ms: i64,
+}
+
+/// One pursuit, opened up (#29): the thin row plus everything the
+/// record correlates to it — all of it derived at read time, none of
+/// it stored on the pursuit.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PursuitViewDto {
+    /// The pursuit itself, standing included.
+    pub pursuit: PursuitDto,
+    /// Its rounds — the dispatch jobs stamped with it, oldest first.
+    pub rounds: Vec<DispatchDto>,
+    /// Its returns — asset ids whose ingest note resolved to one of
+    /// the rounds (the dispatch join) or to the pursuit directly (the
+    /// claim lane), ingest order. What a round minted in-library is
+    /// not here: those ride on the round's own `output_asset_ids`
+    /// above — returns are what came back from outside. Ids rather
+    /// than cards: the asset surfaces already know how to open an id,
+    /// and this view answers membership, not display.
+    pub returns: Vec<String>,
+    /// The lifecycle facts, oldest first.
+    pub events: Vec<PursuitEventDto>,
 }
 
 /// One thing an exporter produced, ready for the core to reify

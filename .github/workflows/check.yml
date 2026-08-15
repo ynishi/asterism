@@ -38,8 +38,14 @@ concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# `write` for one reason: the regeneration step below commits
+# `docs/aidoc/` back to the branch under test. Nothing else here writes,
+# and the token is still scoped to this repository — a fork's pull
+# request gets a read-only one, which is why that step skips itself
+# there rather than failing on a push it was never going to be allowed
+# to make.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
@@ -62,7 +68,36 @@ jobs:
     timeout-minutes: 90
 
     steps:
+      # On a pull request this checks out the head branch rather than
+      # the merge commit `pull_request` defaults to. The regeneration
+      # step below commits to that branch, and a detached merge commit
+      # is not something a commit can be pushed to — the checkout and
+      # the push target have to be the same ref or the write has
+      # nowhere to land.
+      #
+      # The cost, stated rather than left to be discovered: this job
+      # then tests the branch, not the branch merged into `main`. A
+      # change that is green alone and red merged is caught by the
+      # `push: main` run instead of by the pull request, one step
+      # later than before. Accepted because the alternative is a second
+      # macOS job — the whole workspace compiled twice, on the runner
+      # class that costs ten times a Linux minute — bought for a
+      # difference that `main`'s own run already covers.
+      #
+      # Only for a pull request from this repository. A fork's head ref
+      # does not exist here, so naming it would fail the checkout
+      # outright; those runs keep the merge commit they always had, and
+      # the regeneration step skips itself for the same reason. An
+      # empty `ref` is checkout's own default — whatever triggered the
+      # run.
+      #
+      # `persist-credentials` is the default and is what the push uses.
       - uses: actions/checkout@v7
+        with:
+          ref: >-
+            ${{ (github.event_name == 'pull_request' &&
+            github.event.pull_request.head.repo.full_name == github.repository)
+            && github.event.pull_request.head.ref || '' }}
 
       # There is no `rust-toolchain.toml`, so this follows stable and the
       # toolchain moves under the workflow. Deliberate, for now: clippy had
@@ -106,9 +141,17 @@ jobs:
       # the rustdoc shell-out wants it.
       #
       # The floor on the tool is where this was found: `--title` and the
-      # `[lib] name` fix shipped in 0.2.1, the toolchain pin in 0.2.2.
+      # `[lib] name` fix shipped in 0.2.1, the toolchain pin in 0.2.2,
+      # and the target record in 0.3.0. That last one is why the floor
+      # is not merely "new enough to run": `docs/aidoc/` here describes
+      # this runner's target, two of `asterism-infra`'s job modules are
+      # behind `#[cfg(target_os = "macos")]`, and a regeneration from
+      # any other machine deletes them from the committed inventory —
+      # a deletion shaped exactly like an ordinary regeneration in the
+      # diff. 0.3.0 refuses that write and reports the mismatch as
+      # "not checked" (exit 3) instead of as drift.
       - name: Install cargo-aidoc
-        run: cargo install cargo-aidoc --version '^0.2.2'
+        run: cargo install cargo-aidoc --version '^0.3.0'
 
       - name: Install the nightly cargo-aidoc reads
         run: |
@@ -157,6 +200,54 @@ jobs:
       - name: npm ci
         working-directory: crates/asterism-ui
         run: npm ci
+
+      # `docs/aidoc/` is generated output, and this runner is the only
+      # machine that can generate it correctly: two of
+      # `asterism-infra`'s job modules are behind
+      # `#[cfg(target_os = "macos")]`, rustdoc resolves `cfg` before it
+      # emits anything, and a regeneration from anywhere else drops
+      # them from the committed inventory. Asking a person to run
+      # `just aidoc` on a Mac and commit the result is asking them to
+      # be the build step for a fully deterministic artifact, so this
+      # is that build step.
+      #
+      # It runs *before* `just check` rather than as a separate job on
+      # purpose. A commit pushed with `GITHUB_TOKEN` does not start a
+      # new workflow run — GitHub suppresses that to stop workflows
+      # retriggering themselves — so a fix pushed from a second job
+      # would leave this pull request's own run red with no way back to
+      # green short of a manual rerun. Regenerating into the tree this
+      # job is about to check closes that in one run: `aidoc-guard`
+      # inside `check` then compares against artifacts that are already
+      # current, and stays the gate it was for everything it catches
+      # that regenerating cannot fix.
+      #
+      # `just aidoc` fails rather than writes when the committed
+      # artifacts name a different target (cargo-aidoc 0.3.0), so a
+      # change of canonical target is a red run and a decision, not a
+      # silent rewrite.
+      #
+      # Skipped for pull requests from forks: the token is read-only
+      # there, so there is nothing to push to. Not regenerating at all
+      # in that case is deliberate — regenerating without pushing would
+      # leave `aidoc-guard` comparing against a tree this step just
+      # made current, which is a gate reporting its own output.
+      - name: Regenerate docs/aidoc and commit what moved
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          just aidoc
+          if git diff --quiet -- docs/aidoc; then
+            echo "docs/aidoc/ is already current."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/aidoc
+          git commit -m 'Regenerate docs/aidoc'
+          git push
 
       - name: just check
         run: just check

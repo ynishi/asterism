@@ -55,6 +55,9 @@ Design notes:
 - `PersonaId` — Surrogate id for `Persona`. The natural key (external pack id) is
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
+- `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
+- `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
+- `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed

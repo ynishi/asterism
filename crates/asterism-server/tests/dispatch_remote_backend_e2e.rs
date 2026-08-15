@@ -360,6 +360,7 @@ async fn export_via(
                 action: action.to_string(),
                 params_json: params.to_string(),
                 operator_ai: None,
+                pursuit_id: None,
             },
             &unattributed(),
         )

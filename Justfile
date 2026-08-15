@@ -197,6 +197,19 @@ bench-reset:
 bench-measure-import preset seed="42":
     cargo run --release -q -p asterism-benchgen -- measure-import --preset {{ preset }} --seed {{ seed }}
 
+# Measure the pursuit membership reads (#29) against a self-seeded
+# temp profile at the documented asset scale. Self-contained: no
+# server, no bench profile, no reset dance — the command seeds a
+# throwaway database and measures through the real repository
+# adapters. This is the receipt for the index-seek bet the V80
+# lookup columns make, and the number that decides whether a
+# job-built materialised projection is ever needed. The result file
+# lands beside the other measurements, under
+# `workspace/bench-results/pursuit-view-<stamp>.json`.
+[group('bench')]
+bench-measure-pursuit assets="100000":
+    cargo run --release -q -p asterism-benchgen -- measure-pursuit --assets {{ assets }}
+
 # Measure the first listing a freshly started backend answers (issue
 # d47b0759), plus the warm repeat.
 #
@@ -390,6 +403,23 @@ aidoc-guard:
     status=$?
     printf '%s\n' "$output"
     if [ "$status" -eq 0 ]; then
+        exit 0
+    fi
+    # The fourth way this cannot run, and the first that is about the
+    # machine rather than the tool. `docs/aidoc/` records the target it
+    # describes (cargo-aidoc 0.3.0), and two of `asterism-infra`'s job
+    # modules are behind `#[cfg(target_os = "macos")]` — from anywhere
+    # else, every diff this reports is `cfg` resolution rather than
+    # drift, and none of it is fixable from here. The tool says so with
+    # exit 3 instead of exit 2, which is the whole reason it can be
+    # told apart from the drift this recipe exists to fail on.
+    #
+    # CI regenerates on the recorded target before it checks
+    # (`.github/workflows/check.yml`), so this branch is about the
+    # machine somebody is typing on, not about the gate.
+    if [ "$status" -eq 3 ]; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — the artifacts describe another" >&2
+        echo "         target, and CI regenerates them on it." >&2
         exit 0
     fi
     if printf '%s' "$output" | grep -q 'rustdoc format version mismatch'; then

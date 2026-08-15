@@ -28,6 +28,7 @@ use crate::domain::modality::{ModalityDef, ModalityView};
 use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
+use crate::domain::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::series::{SeriesKey, Strategy};
 use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
@@ -37,8 +38,8 @@ use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
-    PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
-    ThreadId,
+    PackId, Page, PersonaId, Progress, PursuitId, SessionId, SnapshotId, SourceKind, StrategyId,
+    TagId, ThreadId,
 };
 use crate::error::DomainError;
 
@@ -2808,6 +2809,83 @@ pub trait DispatchRepository: Send + Sync {
         state_slug: Option<&str>,
         limit: u32,
     ) -> Result<Vec<DispatchJob>, DomainError>;
+
+    /// Lists the dispatch jobs stamped with a pursuit — the pursuit's
+    /// rounds, oldest first (round order is dispatch creation order).
+    async fn list_rounds(&self, pursuit_id: &PursuitId) -> Result<Vec<DispatchJob>, DomainError>;
+}
+
+/// Persistence port for the pursuit family (#29): the minted unit of
+/// work, its lifecycle facts, and the restamp record.
+///
+/// One port for the three tables rather than three: they are one
+/// cohesive concern (the correlation layer over the record), share
+/// every caller, and the two write verbs that must be atomic across
+/// tables (`restamp`) could not live on a single-table port. The
+/// pursuit row itself has no update and no delete — it is immutable,
+/// standing is derived from the events, and the only deletion path is
+/// the persona purge, which is hand-rolled in the adapter.
+#[async_trait]
+pub trait PursuitRepository: Send + Sync {
+    /// Persists a fresh pursuit — the explicit pre-create, and the
+    /// mint half of always-mint. Insert-only: a pursuit is never
+    /// re-saved.
+    async fn create(&self, pursuit: &Pursuit) -> Result<(), DomainError>;
+
+    /// Fetches one pursuit by id.
+    async fn find(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError>;
+
+    /// Lists a persona's pursuits, most-recent first, capped at
+    /// `limit`. Standing is not part of this read — a caller that
+    /// needs it derives it from [`events_of`](Self::events_of) (or a
+    /// batched projection later; the row stores no status by design).
+    async fn list(&self, persona_id: &PersonaId, limit: u32) -> Result<Vec<Pursuit>, DomainError>;
+
+    /// Appends one lifecycle fact. Append-only: facts are never
+    /// edited, a repeat close is a new fact, standing re-derives.
+    async fn append_event(&self, event: &PursuitEvent) -> Result<(), DomainError>;
+
+    /// A pursuit's lifecycle facts in standing order —
+    /// `(created_at, id)` ascending, so the last element is the one
+    /// [`standing`](crate::domain::pursuit::standing) lets win.
+    async fn events_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitEvent>, DomainError>;
+
+    /// Records a restamp and moves the stamp, atomically: the
+    /// `pursuit_restamp` row and the `UPDATE` of the subject's
+    /// `pursuit_id` column land in one transaction, and the write is
+    /// refused with a `Conflict` when the subject's current stamp does
+    /// not equal the restamp's recorded `from` — a stale `from` means
+    /// the caller is moving a filing it has not looked at.
+    async fn restamp(&self, restamp: &PursuitRestamp) -> Result<(), DomainError>;
+
+    /// A pursuit's **returns**: assets whose resolved `_trace` names
+    /// one of its rounds (the dispatch join, which is why a restamped
+    /// round's returns follow it automatically), plus assets whose
+    /// resolved direct pursuit claim names it while no dispatch hop
+    /// resolved — the claim-lane authority order, evaluated over the
+    /// V80 lookup columns so each probe is an index seek, never a
+    /// scan (the documented scale is 100k+ assets). Fold headstones
+    /// are dropped (this is an enumeration path); trashed rows stay
+    /// (a return in the trash is still a return, and restorable).
+    /// Ordered by ingest time, then id.
+    ///
+    /// **A round's own outputs are not returns.** What `reify` mints
+    /// in-library rides on the round itself
+    /// (`DispatchJob::output_asset_ids`, stamped `_dispatch`, not
+    /// `_trace`) and reaches a view through its rounds; *returns* are
+    /// what came back from outside — files an external tool produced,
+    /// re-ingested with a claim. The two populations answer different
+    /// questions and deliberately do not mix here.
+    async fn returns_of(&self, pursuit_id: &PursuitId) -> Result<Vec<AssetId>, DomainError>;
+
+    /// The latest lifecycle event kind per pursuit of a persona — the
+    /// standing read for listings, one window query instead of one
+    /// `events_of` per row. A pursuit with no events is absent from
+    /// the result (= open).
+    async fn latest_event_kinds(
+        &self,
+        persona_id: &PersonaId,
+    ) -> Result<Vec<(PursuitId, PursuitEventKind)>, DomainError>;
 }
 
 /// Persistence port for the Query Group evaluation core.

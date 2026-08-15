@@ -1887,6 +1887,13 @@ pub struct CreateDispatchCommand {
     /// codebase does not have yet, and the exporter cannot answer it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
+    /// Pursuit to file this round under. `None` mints a fresh pursuit
+    /// server-side (always-mint: work cannot happen outside a pursuit,
+    /// there is no detached state). Continuation is explicit — the
+    /// server never infers it from snapshot overlap — so a surface
+    /// that wants rounds to correlate has to thread this id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
 }
 
 /// Runs a dispatch from a live source: the input is **either** a Group
@@ -1918,6 +1925,10 @@ pub struct DispatchRunCommand {
     /// downstream stamping as [`CreateDispatchCommand::operator_ai`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
+    /// Pursuit to file this round under — same contract as
+    /// [`CreateDispatchCommand::pursuit_id`] (`None` mints).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
 }
 
 /// Re-runs a finished dispatch with the same frozen input, exporter,
@@ -1928,6 +1939,85 @@ pub struct DispatchRunCommand {
 pub struct RedispatchCommand {
     /// The dispatch to re-run.
     pub dispatch_id: String,
+    /// Pursuit to file the re-run under. `None` continues the prior
+    /// dispatch's pursuit — not an inference: the caller named the
+    /// prior round literally, and a re-run is a new round of the same
+    /// line of work (the new-patchset-on-the-same-change shape).
+    /// Supply an id to file it elsewhere instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
+}
+
+/// Opens a pursuit explicitly — the "start new pursuit" affordance
+/// (#29). Optional: a dispatch or judgment arriving unstamped mints
+/// one anyway (always-mint); pre-creating simply lets the caller name
+/// the intent up front. An empty pursuit that never receives work is
+/// an honest record, closable as abandoned.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OpenPursuitCommand {
+    /// Owner persona id.
+    pub persona_id: String,
+    /// Pursuit this one is spawned from — set at creation, immutable,
+    /// same persona. `None` for a root pursuit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_pursuit_id: Option<String>,
+    /// Short human label; provenance of intent, not state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// One short free-text slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Closes a pursuit (#29): records a one-way lifecycle fact, never a
+/// status write. A repeat close is a new fact — standing re-derives
+/// from the latest event.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ClosePursuitCommand {
+    /// The pursuit to close.
+    pub pursuit_id: String,
+    /// `satisfied` or `abandoned`.
+    pub outcome: String,
+    /// `satisfied` only: the kept set, frozen at this moment into a
+    /// snapshot the event references. The server sorts the ids
+    /// ascending before freezing (a forge-side convention, so
+    /// identical kept sets dedupe across closes) — order here does not
+    /// matter. Empty means "concluded with nothing kept", a defined
+    /// state. Must be empty for `abandoned`.
+    #[serde(default)]
+    pub kept_asset_ids: Vec<String>,
+    /// One short free-text slot on the event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Reopens a pursuit (#29). Legal on an already-open pursuit: the
+/// fact is recorded and standing does not change.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ReopenPursuitCommand {
+    /// The pursuit to reopen.
+    pub pursuit_id: String,
+    /// One short free-text slot on the event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Moves a dispatch's pursuit filing — the restamp repair verb (#29),
+/// for when the carrying failed (a context-losing surface minted
+/// fragments, a pre-created pursuit was stranded). The move is
+/// recorded with the prior filing it replaced — read on the server
+/// inside the same transaction that moves the stamp, so the record is
+/// never stale — and it never touches what happened, never crosses
+/// personas. The command carries no caller-observed `from`: a caller
+/// acting on an old view moves whatever filing is current
+/// (compare-and-swap against the caller's own read is a possible
+/// later addition, not a promise this verb makes).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RestampDispatchCommand {
+    /// The dispatch round to re-file.
+    pub dispatch_id: String,
+    /// The pursuit to file it under.
+    pub to_pursuit_id: String,
 }
 
 /// Creates a Query Group — a Group whose membership is the

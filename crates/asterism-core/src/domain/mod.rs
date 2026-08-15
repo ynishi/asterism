@@ -37,7 +37,9 @@
 //! **The record layer.** [`snapshot`] freezes an ordered asset set —
 //! content-addressed, a git-tree analogue, fingerprinted by
 //! [`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
-//! a freeze; [`provenance`] is the declared origin a re-ingested artefact
+//! a freeze; [`pursuit`] is the minted unit of work those invocations are
+//! stamped with — the line of rounds and verdicts toward one intent;
+//! [`provenance`] is the declared origin a re-ingested artefact
 //! carries back, and [`disclosure`] its outbound counterpart — the pure
 //! judgement of which IPTC digital-source term the recorded evidence
 //! makes true of an artefact on its way out; [`edge`] holds typed
@@ -91,11 +93,23 @@
 //!    origin story. Every statement of *where it came from* lives on the
 //!    referencing event (`dispatch_job.source_group_id` /
 //!    `source_query_json`), never on the snapshot itself (`migrations.rs`,
-//!    `v19_selection_model`).
+//!    `v19_selection_model`). Extends to pursuits: a pursuit carries
+//!    intent (`title`, `note`) and lineage of work (`parent_id`) but never
+//!    content — what happened lives on the stamped events, and the one
+//!    materialised set (the close product) is itself a frozen snapshot
+//!    the event refers to.
 //! 4. **Attribution answers "whose write is this" and stops there.** The
 //!    `(author, operator, via)` triple is about the write; where an
 //!    artefact came from is [`provenance`]'s question. The two vocabularies
 //!    do not mix.
+//! 5. **The unit of work is minted, never derived.** Content identity
+//!    changes whenever work is redone, so correlation by ancestry alone
+//!    cannot express succession, rejection, or abandonment. A [`pursuit`]
+//!    is identified by a minted id stamped on its events, work cannot
+//!    happen outside one (a dispatch without a pursuit gets one minted in
+//!    the same request; a mint stranded by a failed dispatch write is the
+//!    legal pre-created-empty state, not debris), and everything else
+//!    about it — standing, membership, rollups — is projection.
 //!
 //! ## Aggregate boundaries
 //!
@@ -147,6 +161,7 @@ pub mod persona_profile;
 pub mod persona_theme;
 pub mod probe;
 pub mod provenance;
+pub mod pursuit;
 pub mod query_group_eval;
 pub mod render;
 pub mod repository;

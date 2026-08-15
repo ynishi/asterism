@@ -68,6 +68,11 @@
       "docs": "Requests cancellation of a running or pending job."
     },
     {
+      "path": "asterism_contract::command::ClosePursuitCommand",
+      "kind": "struct",
+      "docs": "Closes a pursuit (#29): records a one-way lifecycle fact, never a\nstatus write. A repeat close is a new fact — standing re-derives\nfrom the latest event."
+    },
+    {
       "path": "asterism_contract::command::ConflictResolution",
       "kind": "enum",
       "docs": "How a person answered one raised duplicate question.\n\nThe wire half of\n`asterism_core::domain::duplicate_conflict::ConflictResolution`, two\ndeclarations of one closed set for the reason [`OnDuplicate`]\nrecords about its own pair.\n\nTwo values because a person looking at a pair has two things to say.\nThere is deliberately no \"skip\" / \"later\": leaving the question\nunanswered is what the queue already represents, and spelling it as\nan answer would close a row that nobody decided."
@@ -298,6 +303,11 @@
       "docs": "What the caller wants done if the asset being registered turns out\nto hold bytes an existing asset already holds.\n\nThe wire half of `asterism_core::domain::value::OnDuplicate`, which\nis the type the row is written from. Two declarations of the same\nclosed set rather than one, because this crate is a leaf — it has\nno dependency on `asterism-core` (that arrow points the other way),\nand it is the crate the TypeScript bindings and the MCP tool schemas\nare generated from. The `snake_case` tokens are `ask` / `fold` /\n`separate` on both sides, and the single conversion between them\n(`AssetService::add`) is an exhaustive match, so a variant added to\neither set stops compiling until the other is answered for.\n\nSpelled as an enum rather than a free string — unlike `author_kind`,\nthe neighbouring caller-asserted field — because the set really is\nclosed and small: a caller reading the generated schema sees the\nthree answers instead of guessing, and an unknown token is refused\nby deserialisation, above every side effect the ingest could have."
     },
     {
+      "path": "asterism_contract::command::OpenPursuitCommand",
+      "kind": "struct",
+      "docs": "Opens a pursuit explicitly — the \"start new pursuit\" affordance\n(#29). Optional: a dispatch or judgment arriving unstamped mints\none anyway (always-mint); pre-creating simply lets the caller name\nthe intent up front. An empty pursuit that never receives work is\nan honest record, closable as abandoned."
+    },
+    {
       "path": "asterism_contract::command::OrganizeByLocationCommand",
       "kind": "struct",
       "docs": "Auto-organises existing assets under a Dir tree derived from\neach asset's `source_locator` parent path. When `base_dir` is\nset, only locators that start with it are affected and the tree\nis built from the components *after* the prefix — this matches\nthe drag-drop story where the folder the user dropped becomes\nthe tree root, or the HTTP call where the caller passes an\nexplicit root. When `base_dir` is `None`, the tree is derived\nfrom every component of the locator's parent.\n\nA single Group named `<joined path>` is auto-created inside the\nleaf Dir (Group names are `(persona, name)` unique globally, so\nthe joined path is used verbatim to avoid collisions between\ntwo different folder trees whose leaves happen to share a name),\nand every matched asset is idempotently added to that Group."
@@ -428,6 +438,11 @@
       "docs": "Renames a tag in place (`POST /asterism/tags/rename`).\n\nThe new name goes through the same normalisation as\n[`AttachTagCommand`] (trim; empty is rejected), so a name minted\nhere and a name minted by an attach cannot drift apart.\n\n**Renaming never merges.** When the normalised name already\nbelongs to a *different* tag the call is rejected with `409\nConflict` and the caller is pointed at [`MergeTagsCommand`] —\ncollapsing two channels destroys one of them, which is an\nexplicit gesture, not a side effect of a typo fix. Renaming a tag\nto the name it already carries succeeds as a no-op."
     },
     {
+      "path": "asterism_contract::command::ReopenPursuitCommand",
+      "kind": "struct",
+      "docs": "Reopens a pursuit (#29). Legal on an already-open pursuit: the\nfact is recorded and standing does not change."
+    },
+    {
       "path": "asterism_contract::command::ReorderGroupAssetsCommand",
       "kind": "struct",
       "docs": "Rewrites the front-to-back order of a Group. `ordered_asset_ids` is\nthe full sequence in the new order; any id not currently in the\ngroup is silently skipped (the client sends the snapshot it drew,\nand drift against server state should not fail the write)."
@@ -451,6 +466,11 @@
       "path": "asterism_contract::command::ResolveDuplicateConflictCommand",
       "kind": "struct",
       "docs": "Answers one duplicate question — the panel's confirm.\n\nWrites the answer onto the queue row and, for `folded`, enqueues the\nfold. Nothing is deleted either way: a closed row is the record that\nthe question was raised and ruled on, and it is also what keeps the\nsame pair from being asked again."
+    },
+    {
+      "path": "asterism_contract::command::RestampDispatchCommand",
+      "kind": "struct",
+      "docs": "Moves a dispatch's pursuit filing — the restamp repair verb (#29),\nfor when the carrying failed (a context-losing surface minted\nfragments, a pre-created pursuit was stranded). The move is\nrecorded with the prior filing it replaced — read on the server\ninside the same transaction that moves the stamp, so the record is\nnever stale — and it never touches what happened, never crosses\npersonas. The command carries no caller-observed `from`: a caller\nacting on an old view moves whatever filing is current\n(compare-and-swap against the caller's own read is a possible\nlater addition, not a promise this verb makes)."
     },
     {
       "path": "asterism_contract::command::RestoreAssetCommand",
@@ -813,6 +833,21 @@
       "docs": "Composite response for `GET /asterism/assets/{id}/provenance` —\nthe provenance (\"derived from\") mini-graph the detail view surfaces.\n\nSemantics (aligned with the write path in\n`dispatch_service::reify_derived`, which writes\n`ConstellationEdge { from = derived_asset, to = parent, kind =\nDerivedFrom }`):\n\n- `ancestors` — cards this asset was *derived from* (Selection\n  inputs that seeded the dispatch producing this asset). Empty\n  for imported assets that never went through a dispatch.\n- `descendants` — cards *derived from* this asset (this asset\n  sat as a Selection input for some later dispatch). Empty for\n  leaves that were never re-dispatched.\n\nMVP scope: 1 hop in each direction, capped at `limit`. Deeper\nlineage traversal is a follow-up (each side can be re-fetched\nagainst the picked card to walk further)."
     },
     {
+      "path": "asterism_contract::dto::PursuitDto",
+      "kind": "struct",
+      "docs": "The minted unit of work (#29): one line of generation and curation\ntoward an intent. The row is thin and immutable — `standing` is\nderived on read from the lifecycle events, never stored."
+    },
+    {
+      "path": "asterism_contract::dto::PursuitEventDto",
+      "kind": "struct",
+      "docs": "One lifecycle fact about a pursuit (#29): a close or a reopen,\nappend-only. A repeat close is a new fact; standing re-derives."
+    },
+    {
+      "path": "asterism_contract::dto::PursuitViewDto",
+      "kind": "struct",
+      "docs": "One pursuit, opened up (#29): the thin row plus everything the\nrecord correlates to it — all of it derived at read time, none of\nit stored on the pursuit."
+    },
+    {
       "path": "asterism_contract::dto::RetrievedIdsDto",
       "kind": "struct",
       "docs": "A retrieval reduced to **order**: the ranked ids and nothing else.\n\nThe second composition form: membership\nstays with the Query side (exact, countable, no ceiling) and only the\n*sequence* comes from Retrieval. So this carries no cards, no paging\nand no counts of the library — a caller pairs it with a page it\nalready holds and uses the rank to sort what is on screen.\n\nNot a set. `ids` is best-first and stops at the candidate ceiling, so\nan id missing from it means \"not in the top N we looked at\", never\n\"does not match\". Treating it as a membership answer is the mistake\n[`RetrievedPageDto`]'s missing `total` exists to prevent."
@@ -978,9 +1013,19 @@
       "docs": "The shape of an exported artefact's `<file>.meta.json` sidecar.\n\nTwo crates that must not depend on each other need this vocabulary:\nan exporter writes the sidecar (adapter side), and the ingest path\nreads it back when a returning file declares `derived_from:\nsidecar` (core side). Adapters do not depend on the core and the\ncore does not depend on adapters, so the words live here, in the\nleaf DTO crate both already use — the same reasoning that puts\n[`DerivedDto`](crate::dto::DerivedDto) here.\n\nConstants rather than a struct: the body is an\n[`AssetCardDto`](crate::dto::AssetCardDto) projection (possibly\nfield-filtered by the caller) with one extra key, and the reader\nwalks it as JSON. A struct would claim a rigidity the file does not\nhave — it can be hand-written, truncated by an allowlist, or come\nfrom a version that knew fewer fields."
     },
     {
+      "path": "asterism_contract::sidecar::SIDECAR_DISPATCH_ID_FIELD",
+      "kind": "constant",
+      "docs": "Field inside the identity block naming the dispatch (the hop).\n\nA const for the same reason the block key is one: the writer\n(exporter crates) and the reader (the ingest path) cannot see each\nother, and a divergence between their spellings fails silently as\n\"no identity in this sidecar\"."
+    },
+    {
       "path": "asterism_contract::sidecar::SIDECAR_IDENTITY_KEY",
       "kind": "constant",
-      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```"
+      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"pursuit_id\": \"<PursuitId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```\n\n`pursuit_id` (#29) is present when the dispatch carried its stamp:\nthe dispatch names the hop the file travelled through, the pursuit\nnames the line of work it belongs to. On re-ingest both are\n**claims** — recorded in `_trace` and resolved independently. The\nrule the membership read follows (a later slice of #29): where the\ndispatch join and a sidecar copy disagree, the dispatch row's own\nstamp answers, because the copy can be stale after a restamp."
+    },
+    {
+      "path": "asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD",
+      "kind": "constant",
+      "docs": "Field inside the identity block naming the pursuit (the line of\nwork, #29). Same silent-divergence reasoning as\n[`SIDECAR_DISPATCH_ID_FIELD`]."
     },
     {
       "path": "asterism_contract::sidecar::SIDECAR_SCHEMA",

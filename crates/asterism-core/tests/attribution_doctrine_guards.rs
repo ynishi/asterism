@@ -362,6 +362,23 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// inconvenience to be managed: a new entry is a new verb that writes
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
+    // ---- pursuit_service: reads (#29)
+    (
+        "pursuit_service::get",
+        "read — one pursuit plus its derived standing",
+    ),
+    (
+        "pursuit_service::events",
+        "read — a pursuit's lifecycle facts, oldest first",
+    ),
+    (
+        "pursuit_service::list",
+        "read — a persona's pursuits with derived standing",
+    ),
+    (
+        "pursuit_service::view",
+        "read — one pursuit with its rounds, returns and events",
+    ),
     // ---- provenance_service
     (
         "disclosure_service::record_for",

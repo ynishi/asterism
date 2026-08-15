@@ -416,6 +416,8 @@ pub struct CoreCtx {
     /// Immutable content-addressed snapshot lifecycle (seeds outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
+    /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
+    pub pursuit_service: Arc<asterism_core::application::PursuitService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
@@ -570,6 +572,7 @@ pub async fn init_core_with(
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
     let observations = asterism_infra::observe::ObservationStore::new(isle.clone());
     let dispatches = Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone()));
+    let pursuits = Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone()));
     let query_groups = Arc::new(sqlite::repo::query_group::SqliteQueryGroupRepository::new(
         isle.clone(),
     ));
@@ -809,6 +812,7 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
+        pursuits.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
@@ -1018,6 +1022,16 @@ pub async fn init_core_with(
         groups_arc.clone(),
         query_groups.clone(),
         query_group_service.clone(),
+        pursuits.clone(),
+    ));
+    // Lifecycle verbs of the unit of work (#29); the close freeze goes
+    // through the snapshot service so kept ids get the same hydration
+    // every other freeze gets.
+    let pursuit_service = Arc::new(asterism_core::application::PursuitService::new(
+        pursuits.clone(),
+        personas.clone(),
+        dispatches.clone(),
+        snapshot_service.clone(),
     ));
 
     // Register the built-in exporters (`comfy` / `file` / `http` /
@@ -1142,6 +1156,7 @@ pub async fn init_core_with(
         thumb_service: Arc::new(ThumbService::new(Arc::new(thumbs))),
         snapshot_service,
         dispatch_service,
+        pursuit_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

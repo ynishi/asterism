@@ -20,7 +20,7 @@ at ~1.3 MB each is 165 GB.
 
 Presets are prefixes of one stream: S ⊂ M ⊂ L for a given seed.
 
-Five subcommands — three that build a corpus, two that measure one:
+Six subcommands — three that build a corpus, three that measure:
 
 - `corpus` — materialise the corpus directory (PNGs + manifest).
 - `seed-meta` — T-meta: rows straight into the bench profile's
@@ -31,10 +31,13 @@ Five subcommands — three that build a corpus, two that measure one:
   enqueued, written up as a result file ([`measure`]).
 - `measure-cold` — first-listing cost against a just-restarted
   server, warm repeat alongside it ([`measure`]).
+- `measure-pursuit` — the pursuit membership reads over a seeded
+  100k-asset profile ([`measure_pursuit`]).
 
-Every write path is fenced to the bench profile: `seed-meta` refuses
-a database outside `profiles/bench` and everything that speaks HTTP
-refuses the Dogfood port. Neither fence is optional in the direction
-that matters — there is no flag that points any command at the real
-library.
+Every write path is fenced away from the real library: `seed-meta`
+refuses a database outside `profiles/bench`, everything that speaks
+HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
+throwaway temp directory it creates and removes itself. No fence is
+optional in the direction that matters — there is no flag that
+points any command at the real library.
 
