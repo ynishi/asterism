@@ -40,7 +40,9 @@ use asterism_infra::dispatch::{DispatchRunEnv, ExporterRegistry, QueueReEnqueue,
 use asterism_infra::jobs::{self, JobDeps};
 // Named for what it is on this side of the boundary: the core's port is
 // also called `DisclosureWriter`, and both are in scope here.
-use asterism_infra::disclosure::DisclosureWriter as InfraDisclosureWriter;
+use asterism_infra::disclosure::{
+    DisclosureWriter as InfraDisclosureWriter, SigningIdentity, Strictness,
+};
 use asterism_infra::search::TantivyIndex;
 use asterism_infra::source_text::FsSourceTextReader;
 use asterism_infra::sqlite;
@@ -140,6 +142,261 @@ fn parse_trash_retention(raw: Option<&str>) -> Result<chrono::Duration, DomainEr
     }
     Ok(chrono::Duration::days(days))
 }
+
+/// The certificate and key a C2PA manifest is signed with, and how
+/// strictly the certificate is judged.
+///
+/// # Why none of this is in `SETTING_REGISTRY`
+///
+/// The registry holds *user preferences*, and says so: its module doc
+/// records that mixing deployment configuration into that namespace is
+/// what made an earlier resolution order wrong. Signing is the operator's
+/// arrangement with an issuer, not a preference — nobody switches
+/// certificate from a settings screen mid-session.
+///
+/// Two consequences follow, and both are the reason rather than a side
+/// effect. A registry key is writable through
+/// `PUT /asterism/settings/{key}`, which is reachable without going
+/// through any UI, so a key holding a *path* would hand whoever reaches
+/// that route the choice of which file this process opens at the next
+/// launch. And a registry key is readable back with every layer it has,
+/// including the environment layer's value and origin, so the location
+/// of the private key would be published to the settings screen and to
+/// `GET /asterism/settings` by the act of storing it there. Neither is
+/// something a strictness toggle is worth.
+///
+/// So all five variables are read here, at the composition root, in the
+/// same shape as `ASTERISM_TRASH_RETENTION_DAYS` above. What it costs is
+/// that the settings screen shows nothing about signing: an operator
+/// reads the startup log, or the disclosure recorded beside an export.
+const SIGNING_CERT_CHAIN_ENV: &str = "ASTERISM_DISCLOSURE_CERT_CHAIN";
+const SIGNING_PRIVATE_KEY_ENV: &str = "ASTERISM_DISCLOSURE_PRIVATE_KEY";
+const SIGNING_ALG_ENV: &str = "ASTERISM_DISCLOSURE_SIGNING_ALG";
+const SIGNING_TSA_URL_ENV: &str = "ASTERISM_DISCLOSURE_TSA_URL";
+const SIGNING_STRICT_ENV: &str = "ASTERISM_DISCLOSURE_SIGNING_STRICT";
+/// COSE algorithm assumed when none is named — `c2pa`'s own default, and
+/// what a certificate issued under the conformance profile carries.
+const SIGNING_ALG_DEFAULT: &str = "es256";
+
+/// What the signing variables asked for, before anything has been read
+/// off disk.
+#[derive(Debug, PartialEq, Eq)]
+struct SigningRequest {
+    cert_chain: PathBuf,
+    private_key: PathBuf,
+    alg: String,
+    tsa_url: Option<String>,
+    strictness: Strictness,
+}
+
+/// Pure half of [`disclosure_writer`], split out so the rules can be
+/// tested without mutating process-global environment state — the same
+/// split [`parse_trash_retention`] is written for.
+///
+/// `Ok(None)` is "no certificate configured", which is the state every
+/// install starts in and a supported one. `Err` is a request that cannot
+/// be honoured as written; it does not stop the process, but it must not
+/// read as the `Ok(None)` above.
+///
+/// An exported-but-empty variable counts as unset. That is the shape a
+/// cleared value takes in a launcher plist, a systemd unit and a shell
+/// profile alike, and treating `ASTERISM_DISCLOSURE_CERT_CHAIN=` as a
+/// path would refuse to start signing over a file called "".
+fn signing_request(
+    cert_chain: Option<&str>,
+    private_key: Option<&str>,
+    alg: Option<&str>,
+    tsa_url: Option<&str>,
+    strict: Option<&str>,
+) -> Result<Option<SigningRequest>, String> {
+    fn set(raw: Option<&str>) -> Option<&str> {
+        raw.map(str::trim).filter(|v| !v.is_empty())
+    }
+    let (cert_chain, private_key) = (set(cert_chain), set(private_key));
+
+    // Before the "nothing configured" exit below, so that a value this
+    // switch would refuse is refused wherever it is set. Read after it,
+    // an install that misspelled both path variables would be told
+    // nothing at all about the one variable it got right.
+    let strictness = match set(strict) {
+        None => Strictness::Permissive,
+        Some(raw) => match raw.to_ascii_lowercase().as_str() {
+            "true" | "1" => Strictness::Strict,
+            "false" | "0" => Strictness::Permissive,
+            _ => {
+                return Err(format!(
+                    "invalid {SIGNING_STRICT_ENV}={raw:?}; expected true or false"
+                ));
+            }
+        },
+    };
+
+    // Half a configuration is refused rather than ignored. Signing needs
+    // both halves, so an install that names one has asked for something
+    // it is not going to get, and the quiet reading — no certificate
+    // configured — is the one answer that never prompts anybody to go
+    // and look at the variable they misspelled.
+    let (cert_chain, private_key) = match (cert_chain, private_key) {
+        (None, None) => return Ok(None),
+        (Some(cert_chain), Some(private_key)) => (cert_chain, private_key),
+        (Some(_), None) => {
+            return Err(format!(
+                "{SIGNING_CERT_CHAIN_ENV} names a certificate but {SIGNING_PRIVATE_KEY_ENV} \
+                 is not set; signing needs both"
+            ));
+        }
+        (None, Some(_)) => {
+            return Err(format!(
+                "{SIGNING_PRIVATE_KEY_ENV} names a key but {SIGNING_CERT_CHAIN_ENV} is not \
+                 set; signing needs both"
+            ));
+        }
+    };
+
+    // The timestamp authority is checked for shape and nothing more.
+    // Reachability is not a configuration question — a TSA that is down
+    // at launch is not a typo — but a typo is precisely what this cannot
+    // be allowed to carry through, because nothing else looks at this
+    // value until `c2pa` is asked to sign. Unchecked, a misspelled
+    // scheme produces a successful startup, a writer that reports it can
+    // sign, and a failed manifest on every export from then on. This
+    // moves that to one refusal at launch.
+    let tsa_url = match set(tsa_url) {
+        None => None,
+        Some(raw)
+            if (raw.starts_with("http://") && raw.len() > "http://".len())
+                || (raw.starts_with("https://") && raw.len() > "https://".len()) =>
+        {
+            Some(raw.to_string())
+        }
+        Some(raw) => {
+            return Err(format!(
+                "invalid {SIGNING_TSA_URL_ENV}={raw:?}; expected an http:// or https:// URL"
+            ));
+        }
+    };
+
+    Ok(Some(SigningRequest {
+        cert_chain: PathBuf::from(cert_chain),
+        private_key: PathBuf::from(private_key),
+        alg: set(alg).unwrap_or(SIGNING_ALG_DEFAULT).to_string(),
+        tsa_url,
+        strictness,
+    }))
+}
+
+/// Builds the writer the `disclosure_stamp` handler drives, from the
+/// environment.
+///
+/// Resolved once, here, for the reason `jobs.concurrency` is: the
+/// certificate is read from disk and inspected, and a hot path is not
+/// where that belongs.
+///
+/// A configuration that cannot be honoured does **not** stop the
+/// process. A certificate issued under the conformance profile is valid
+/// for at most 366 days, so an installation that signs will meet an
+/// expired one, and answering that by refusing to launch would make the
+/// library unopenable over a export-time feature. It does not pass
+/// silently either: the reason is logged at startup and carried into
+/// every manifest half the writer declines, where it reports as a
+/// failure rather than as the skip that means "no certificate is
+/// configured".
+fn disclosure_writer() -> InfraDisclosureWriter {
+    let read = |key: &str| std::env::var(key).ok();
+    let request = signing_request(
+        read(SIGNING_CERT_CHAIN_ENV).as_deref(),
+        read(SIGNING_PRIVATE_KEY_ENV).as_deref(),
+        read(SIGNING_ALG_ENV).as_deref(),
+        read(SIGNING_TSA_URL_ENV).as_deref(),
+        read(SIGNING_STRICT_ENV).as_deref(),
+    );
+
+    let request = match request {
+        Ok(None) => {
+            tracing::info!(
+                event = "diag.disclosure.identity",
+                "no signing certificate configured; exports carry the IPTC/XMP disclosure \
+                 and no manifest"
+            );
+            return InfraDisclosureWriter::unsigned();
+        }
+        Ok(Some(request)) => request,
+        Err(reason) => {
+            tracing::error!(event = "diag.disclosure.identity", "{reason}");
+            return InfraDisclosureWriter::unavailable(reason);
+        }
+    };
+
+    warn_if_key_is_readable_by_others(&request.private_key);
+    match SigningIdentity::from_files(
+        &request.cert_chain,
+        &request.private_key,
+        &request.alg,
+        request.tsa_url.clone(),
+        request.strictness,
+    ) {
+        Ok(identity) => {
+            tracing::info!(
+                event = "diag.disclosure.identity",
+                "signing manifests with the certificate at {}",
+                request.cert_chain.display()
+            );
+            InfraDisclosureWriter::signed_with(identity)
+        }
+        Err(err) => {
+            // The full reason names the file that could not be read,
+            // which is what makes it useful in a log and unusable as the
+            // value that travels. What `unavailable` is handed goes into
+            // the manifest half of every export, into the disclosure
+            // note persisted on the asset's `extra._trace`, and out
+            // through `AssetDto::extra_json` to every client that
+            // fetches that asset — permanently, because the note is
+            // written once per asset and never revisited.
+            //
+            // A private key's location published to every client is the
+            // exact exposure this configuration went to the environment
+            // to avoid; routing it through a different surface would not
+            // make it a different exposure. The log keeps the path, the
+            // record keeps the fact.
+            tracing::error!(event = "diag.disclosure.identity", "{err}");
+            InfraDisclosureWriter::unavailable(
+                "the configured signing identity could not be loaded; exports carry the \
+                 IPTC/XMP disclosure and no manifest until it is fixed, and the reason is \
+                 in the application log",
+            )
+        }
+    }
+}
+
+/// Warns when the private key is readable by anyone but its owner.
+///
+/// A warning and not a refusal: the file is the operator's, the mode may
+/// be what their deployment intends, and this process reading it changes
+/// nothing about who else already could. What it does is put the finding
+/// where somebody will see it, which is the whole of what this side can
+/// do about key material it does not manage.
+#[cfg(unix)]
+fn warn_if_key_is_readable_by_others(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let Ok(metadata) = std::fs::metadata(path) else {
+        // Unreadable for its own reasons, which the load is about to
+        // report in better words than a permission note could.
+        return;
+    };
+    let mode = metadata.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        tracing::warn!(
+            event = "diag.disclosure.identity",
+            "the signing key at {} is mode {mode:o}; a private key should be readable by \
+             its owner alone (0600)",
+            path.display()
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_if_key_is_readable_by_others(_path: &Path) {}
 
 /// Shared service graph assembled by [`init_core`].
 ///
@@ -774,12 +1031,13 @@ pub async fn init_core_with(
 
     // The AI disclosure for what a dispatch mints.
     //
-    // Unsigned, because this repository ships no certificate and there
-    // is no configuration surface that supplies one yet. That is the
-    // supported state rather than a degraded one: the writer emits the
-    // IPTC/XMP half — the half platforms read most widely, and the one
-    // that needs no key material — and reports the manifest half as
-    // skipped. An untrusted manifest would be worse than none.
+    // Unsigned unless a deployment supplies a certificate through the
+    // environment (see [`disclosure_writer`]). This repository ships
+    // none, so unsigned is what every install starts as — the supported
+    // state rather than a degraded one: the writer emits the IPTC/XMP
+    // half, the half platforms read most widely and the one that needs
+    // no key material, and reports the manifest half as skipped. An
+    // untrusted manifest would be worse than none.
     //
     // `Withhold` is the documented recommendation, and this is the
     // place the recommendation was written for. The prompt field
@@ -789,12 +1047,12 @@ pub async fn init_core_with(
     // property to what was given "as prompt(s)", the AI Act asks only
     // that synthetic origin be detectable, and publication is the one
     // operation here that cannot be undone. Turning it on is a
-    // deployment's call, and it does not have a way to make it yet —
-    // which is why this is a literal rather than a setting lookup.
+    // deployment's call, and it still has no way to make it — which is
+    // why this stays a literal while the writer beside it does not.
     let _ = disclosure_cell.set(Arc::new(DisclosureService::new(
         assets_arc.clone(),
         edges_arc.clone(),
-        Arc::new(InfraDisclosureWriter::unsigned()),
+        Arc::new(disclosure_writer()),
         PromptDisclosure::Withhold,
     )));
 
@@ -939,6 +1197,134 @@ mod trash_retention_tests {
                 "{bad:?} must be refused, got {:?}",
                 err.map(|d| d.num_days())
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod signing_tests {
+    use super::*;
+
+    /// The two paths every signing request needs.
+    const CERT: &str = "/etc/asterism/signing/cert.pem";
+    const KEY: &str = "/etc/asterism/signing/key.pem";
+
+    #[test]
+    fn no_signing_variables_is_not_an_error() {
+        assert_eq!(signing_request(None, None, None, None, None).unwrap(), None);
+        assert_eq!(
+            signing_request(Some(""), Some("  "), None, None, None).unwrap(),
+            None,
+            "an exported-but-empty variable is how a value gets cleared"
+        );
+    }
+
+    /// Half a configuration is the case that must not read as "no
+    /// certificate configured". Read that way, nothing ever tells the
+    /// operator that the variable they misspelled is why their exports
+    /// carry no manifest.
+    #[test]
+    fn naming_one_half_of_the_identity_is_refused() {
+        let err = signing_request(Some(CERT), None, None, None, None).unwrap_err();
+        assert!(err.contains(SIGNING_PRIVATE_KEY_ENV), "{err}");
+        let err = signing_request(None, Some(KEY), None, None, None).unwrap_err();
+        assert!(err.contains(SIGNING_CERT_CHAIN_ENV), "{err}");
+    }
+
+    #[test]
+    fn both_paths_produce_a_request_with_the_defaults_filled_in() {
+        let request = signing_request(Some(CERT), Some(KEY), None, None, None)
+            .unwrap()
+            .expect("a certificate and a key is a signing request");
+        assert_eq!(request.cert_chain, PathBuf::from(CERT));
+        assert_eq!(request.private_key, PathBuf::from(KEY));
+        assert_eq!(request.alg, SIGNING_ALG_DEFAULT);
+        assert_eq!(request.tsa_url, None);
+        assert_eq!(
+            request.strictness,
+            Strictness::Permissive,
+            "strict signs nothing at all on a self-issued credential, so it cannot be \
+             what an installation gets without asking"
+        );
+    }
+
+    #[test]
+    fn the_algorithm_and_timestamp_authority_are_carried_through() {
+        let request = signing_request(
+            Some(CERT),
+            Some(KEY),
+            Some("ps256"),
+            Some("http://timestamp.example/tsa"),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(request.alg, "ps256");
+        assert_eq!(
+            request.tsa_url.as_deref(),
+            Some("http://timestamp.example/tsa")
+        );
+    }
+
+    #[test]
+    fn strictness_takes_a_boolean_and_nothing_else() {
+        for on in ["true", "TRUE", "1", "  true  "] {
+            let request = signing_request(Some(CERT), Some(KEY), None, None, Some(on))
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.strictness, Strictness::Strict, "{on:?}");
+        }
+        for off in ["false", "False", "0"] {
+            let request = signing_request(Some(CERT), Some(KEY), None, None, Some(off))
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.strictness, Strictness::Permissive, "{off:?}");
+        }
+        // A value that looks like it should work is refused rather than
+        // read as `false`: this switch decides whether exports stop, and
+        // guessing at "yes" would let a deployment believe it is
+        // publishing strictly while it is not.
+        for bad in ["yes", "on", "strict", "2", "-1"] {
+            assert!(
+                signing_request(Some(CERT), Some(KEY), None, None, Some(bad)).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+    }
+
+    /// The switch is read wherever it is set. An install that misspelled
+    /// both path variables and got this one right would otherwise be
+    /// told nothing about the only variable it typed correctly.
+    #[test]
+    fn a_bad_strictness_is_refused_even_with_no_certificate_configured() {
+        assert!(signing_request(None, None, None, None, Some("yes")).is_err());
+        assert_eq!(
+            signing_request(None, None, None, None, Some("true")).unwrap(),
+            None,
+            "asking for strict signing is not itself a configured certificate"
+        );
+    }
+
+    /// Nothing else looks at the timestamp authority until `c2pa` is
+    /// asked to sign, so a typo left here is a failed manifest on every
+    /// export rather than one refusal at launch. Reachability is not
+    /// checked — a TSA that is down is not a typo.
+    #[test]
+    fn a_timestamp_authority_is_checked_for_shape() {
+        for good in ["http://timestamp.example/tsa", "https://ts.example"] {
+            let request = signing_request(Some(CERT), Some(KEY), None, Some(good), None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(request.tsa_url.as_deref(), Some(good), "{good:?}");
+        }
+        for bad in [
+            "htttp://timestamp.example/tsa",
+            "timestamp.example",
+            "http://",
+            "ftp://timestamp.example",
+        ] {
+            let err = signing_request(Some(CERT), Some(KEY), None, Some(bad), None).unwrap_err();
+            assert!(err.contains(SIGNING_TSA_URL_ENV), "{bad:?}: {err}");
         }
     }
 }

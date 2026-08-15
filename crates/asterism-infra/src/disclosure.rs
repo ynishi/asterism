@@ -335,18 +335,21 @@ const ACCEPTED_SIGNING_EKUS: &[&str] = &[
 /// is the shape here, with the line drawn at what cannot sign at all
 /// rather than at what will not be trusted.
 ///
-/// # Where a strictness setting goes
+/// # Where the strictness setting went
 ///
-/// A deployment signing for publication would reasonably want the
-/// warnings to refuse too. That configuration is deliberately not
-/// invented here, and the shape it needs is this verdict being
-/// reachable without loading an identity — which is what
-/// [`inspect_certificate`] is for. Such a caller inspects first and
-/// refuses on its own terms; what it cannot do is tell
-/// [`SigningIdentity::from_bytes`] to refuse for it, so it writes its
-/// own message and the warnings are logged a second time when it goes
-/// on to load. Whoever wires the setting decides whether that is worth
-/// a parameter.
+/// A deployment signing for publication reasonably wants the warnings
+/// to refuse too, and that is [`Strictness::Strict`], handed to
+/// [`SigningIdentity::from_bytes`] rather than decided by a caller
+/// after an [`inspect_certificate`] of its own. The parameter this
+/// module wondered about turned out to be worth it: a caller refusing
+/// on its own terms would have to own the chain check as well, which
+/// needs the certificate parser that already lives here, and its
+/// warnings would then be logged a second time when it went on to
+/// load.
+///
+/// The verdict stays reachable without loading an identity regardless,
+/// because showing an operator why a certificate was refused should not
+/// require attempting a load.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CertificateVerdict {
     /// Findings that make the certificate unusable for signing at all.
@@ -354,6 +357,41 @@ pub struct CertificateVerdict {
     /// Findings that keep it off a trust list without stopping it
     /// signing for a reader who has imported it.
     pub warnings: Vec<String>,
+}
+
+/// Whether a certificate no trust list would carry may still sign.
+///
+/// This selects between the two halves of [`CertificateVerdict`]: the
+/// refusals apply either way, and this decides what becomes of the
+/// warnings.
+///
+/// A deployment's call rather than a default, because the strict answer
+/// signs nothing at all on an installation holding a self-issued
+/// credential — an arrangement the specification's own guidance
+/// describes rather than warns about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Strictness {
+    /// Refuse only what cannot sign at all, and log the rest.
+    ///
+    /// C2PA's implementation guidance for a certificate whose extended
+    /// key usage is misconfigured: warn with an explanation of the
+    /// problem, and allow the operator to proceed.
+    #[default]
+    Permissive,
+    /// Also refuse what a trust list would not carry, and require the
+    /// certificate to arrive with its chain.
+    ///
+    /// For an installation that publishes, where an export carrying a
+    /// manifest nobody can validate is worth less than an export that
+    /// stops and says why.
+    ///
+    /// The chain requirement is the part no extension states. A
+    /// certificate issued under a conformance profile comes with the
+    /// intermediate that issued it; a bundle holding one certificate is
+    /// either self-issued or has had its chain dropped somewhere in
+    /// deployment, and both are fixed the same way — by supplying the
+    /// chain the issuer gave you.
+    Strict,
 }
 
 impl SigningIdentity {
@@ -366,6 +404,7 @@ impl SigningIdentity {
         private_key: &Path,
         alg: &str,
         tsa_url: Option<String>,
+        strictness: Strictness,
     ) -> Result<Self, DisclosureError> {
         let cert_chain = std::fs::read(cert_chain).map_err(|e| {
             DisclosureError::Identity(format!("reading {}: {e}", cert_chain.display()))
@@ -373,7 +412,7 @@ impl SigningIdentity {
         let private_key = std::fs::read(private_key).map_err(|e| {
             DisclosureError::Identity(format!("reading {}: {e}", private_key.display()))
         })?;
-        Self::from_bytes(cert_chain, private_key, alg, tsa_url)
+        Self::from_bytes(cert_chain, private_key, alg, tsa_url, strictness)
     }
 
     /// Loads an identity from material already in memory. Same checks as
@@ -384,6 +423,7 @@ impl SigningIdentity {
         private_key: Vec<u8>,
         alg: &str,
         tsa_url: Option<String>,
+        strictness: Strictness,
     ) -> Result<Self, DisclosureError> {
         if names_a_test_certificate(&cert_chain) {
             return Err(DisclosureError::Identity(
@@ -412,6 +452,50 @@ impl SigningIdentity {
                 verdict.refusals.join("; ")
             )));
         }
+        // Strict mode, which is the warnings turned into refusals plus
+        // the one check no extension carries. Separate from the branch
+        // above because the message has to be: this certificate *can*
+        // sign, and an installation that does not publish can use it by
+        // leaving strict mode off.
+        if strictness == Strictness::Strict {
+            let count = certificate_count(&cert_chain);
+
+            // Bytes that parse as nothing are their own answer and not a
+            // strictness one. `inspect_certificate` passes what it
+            // cannot read rather than guessing at it, so an unreadable
+            // bundle arrives here with no refusals and no warnings —
+            // and telling its operator that the certificate can sign
+            // with strict signing off would be false. It cannot sign
+            // either way; turning strict off only moves the failure from
+            // startup to the first export.
+            if count == 0 {
+                return Err(DisclosureError::Identity(
+                    "strict signing could not read a certificate out of this bundle. \
+                     Turning strict signing off would not make it sign — it would move \
+                     the failure to the first export — so check that the file is PEM and \
+                     holds the certificate you meant"
+                        .into(),
+                ));
+            }
+
+            let mut refusals = verdict.warnings.clone();
+            if count == 1 {
+                refusals.push(
+                    "the bundle carries one certificate and no issuer chain; supply the \
+                     chain your issuer gave you, ending before the root"
+                        .into(),
+                );
+            }
+            if !refusals.is_empty() {
+                return Err(DisclosureError::Identity(format!(
+                    "strict signing refuses this certificate: {}. It can sign — this is \
+                     what a publicly issued one would carry and this one does not — so an \
+                     installation that does not publish can use it with strict signing off",
+                    refusals.join("; ")
+                )));
+            }
+        }
+
         for warning in &verdict.warnings {
             // The dotted name is the `event` field rather than the
             // target, which is the convention the rest of this crate
@@ -421,6 +505,18 @@ impl SigningIdentity {
             tracing::warn!(
                 event = "diag.disclosure.identity",
                 "signing certificate: {warning}"
+            );
+        }
+
+        if strictness == Strictness::Strict {
+            // Recorded on the way through rather than only on refusal.
+            // A check that says nothing when it passes leaves whoever
+            // audits the deployment inferring that it ran from the
+            // absence of an error, which is not evidence — the gap
+            // cosign's own strict verification was filed for.
+            tracing::info!(
+                event = "diag.disclosure.identity",
+                "signing certificate accepted under strict signing"
             );
         }
 
@@ -441,6 +537,27 @@ impl SigningIdentity {
             self.tsa_url.clone(),
         )
     }
+}
+
+/// How many certificates the bundle holds.
+///
+/// Counts what parses rather than what looks like a PEM header, on the
+/// same terms as [`inspect_certificate`]: a block this cannot read is
+/// one it cannot count, and reporting a chain on the strength of a
+/// label would be worse than reporting none.
+///
+/// Only [`Strictness::Strict`] asks. Under [`Strictness::Permissive`] a
+/// single self-issued certificate is a supported configuration and
+/// counting them would decide nothing.
+fn certificate_count(pem: &[u8]) -> usize {
+    use x509_parser::prelude::FromDer as _;
+
+    x509_parser::pem::Pem::iter_from_buffer(pem)
+        .filter_map(Result::ok)
+        .filter(|block| {
+            x509_parser::certificate::X509Certificate::from_der(&block.contents).is_ok()
+        })
+        .count()
 }
 
 /// Reads a signing certificate's own extensions and reports what they
@@ -636,11 +753,38 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// process from settings and shared.
 #[derive(Debug, Default)]
 pub struct DisclosureWriter {
+    signing: Signing,
+}
+
+/// What this process has to sign manifests with.
+///
+/// Three states rather than an `Option`, because the third one exists
+/// and collapsing it is a false statement rather than a simplification:
+/// an installation that configured a certificate which then failed to
+/// load is not an installation with no certificate. Reported as the
+/// latter, the export record says the deployment is doing exactly what
+/// it was configured to do, at the one moment that is untrue and
+/// somebody needs to know.
+#[derive(Debug, Default, Clone)]
+enum Signing {
+    /// No certificate is configured. The state every install starts in.
+    #[default]
+    Unconfigured,
+    /// An identity loaded and is ready to sign.
+    ///
     /// Behind an `Arc` so the port impl can hand a copy to a blocking
     /// task without duplicating key material on every call — a signing
     /// identity holds a private key, and the fewer copies of it exist in
     /// the process at once, the better.
-    identity: Option<std::sync::Arc<SigningIdentity>>,
+    Ready(std::sync::Arc<SigningIdentity>),
+    /// A certificate was configured and cannot be used, in the words
+    /// whoever configured it needs in order to fix it.
+    ///
+    /// Resolved once, at startup, and carried for the life of the
+    /// process: the certificate is read when the writer is built, so
+    /// this is where the reason exists, and the export is where
+    /// somebody will notice.
+    Unavailable(String),
 }
 
 impl DisclosureWriter {
@@ -650,19 +794,37 @@ impl DisclosureWriter {
     /// than a degraded one — see the module docs on why an untrusted
     /// manifest is worse than none.
     pub fn unsigned() -> Self {
-        Self { identity: None }
+        Self {
+            signing: Signing::Unconfigured,
+        }
     }
 
     /// A writer that also signs.
     pub fn signed_with(identity: SigningIdentity) -> Self {
         Self {
-            identity: Some(std::sync::Arc::new(identity)),
+            signing: Signing::Ready(std::sync::Arc::new(identity)),
+        }
+    }
+
+    /// A writer whose configured identity could not be loaded, carrying
+    /// `reason` into every manifest half it declines to write.
+    ///
+    /// Not the same call as [`unsigned`](Self::unsigned) and
+    /// deliberately not reachable by leaving an argument out: this is a
+    /// fault, and it reports as one. What it is *not* is a reason to
+    /// refuse to start — a certificate under a conformance profile is
+    /// valid for at most 366 days, so every deployment that signs will
+    /// eventually meet an expired one, and a build that exited there
+    /// would answer an expiry by making the library unopenable.
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            signing: Signing::Unavailable(reason.into()),
         }
     }
 
     /// Whether this writer can produce a manifest.
     pub fn can_sign(&self) -> bool {
-        self.identity.is_some()
+        matches!(self.signing, Signing::Ready(_))
     }
 
     /// Writes `record` into the file at `path`, replacing it.
@@ -789,9 +951,17 @@ impl DisclosureWriter {
         };
 
         // --- 2. the manifest, when there is an identity to sign it ---
-        let manifest = match &self.identity {
-            None => Half::Skipped(Skipped::NoSigningIdentity),
-            Some(identity) => {
+        //
+        // The three cases are three different sentences. No certificate
+        // configured is the install doing what it was configured to do;
+        // one configured that would not load is a fault, and saying so
+        // here is the only place it reaches whoever reads the record.
+        // Neither takes the packet down with it — that is what step 3
+        // is for.
+        let manifest = match &self.signing {
+            Signing::Unconfigured => Half::Skipped(Skipped::NoSigningIdentity),
+            Signing::Unavailable(reason) => Half::Failed(reason.clone()),
+            Signing::Ready(identity) => {
                 match self.sign(identity, path, container, record, staged.as_deref()) {
                     Ok(()) => {
                         // The committed file already carries the packet
@@ -960,7 +1130,7 @@ impl asterism_core::application::disclosure_service::DisclosureWriter for Disclo
         let path = path.to_path_buf();
         let record = record.clone();
         let writer = DisclosureWriter {
-            identity: self.identity.clone(),
+            signing: self.signing.clone(),
         };
         tokio::task::spawn_blocking(move || writer.apply(&path, &record))
             .await
@@ -1096,8 +1266,13 @@ mod tests {
     fn throwaway_identity() -> SigningIdentity {
         let (cert, key) = self_signed_pair();
         SigningIdentity::from_bytes(
-            cert, key, // rcgen's default key pair is ECDSA P-256 with SHA-256.
-            "es256", None,
+            cert,
+            key, // rcgen's default key pair is ECDSA P-256 with SHA-256.
+            "es256",
+            None,
+            // Self-issued and chaining to nothing, which is exactly what
+            // strict signing exists to refuse.
+            Strictness::Permissive,
         )
         .expect("a generated certificate is not a C2PA test certificate")
     }
@@ -1118,6 +1293,7 @@ mod tests {
             b"-----BEGIN PRIVATE KEY-----\nnot a key at all\n-----END PRIVATE KEY-----\n".to_vec(),
             "es256",
             None,
+            Strictness::Permissive,
         )
         .expect("the certificate is inspected here; the key is not")
     }
@@ -1162,6 +1338,45 @@ mod tests {
         (cert.pem().into_bytes(), key.serialize_pem().into_bytes())
     }
 
+    /// A certificate carrying everything [`inspect_certificate`] warns
+    /// about the absence of, followed by a second certificate.
+    ///
+    /// What [`Strictness::Strict`] is meant to accept, built so that the
+    /// strict path is exercised on its passing side too — a check only
+    /// ever seen refusing is one nobody can tell apart from a switch
+    /// that disables the feature.
+    fn issued_shaped_pair() -> (Vec<u8>, Vec<u8>) {
+        let key = rcgen::KeyPair::generate().expect("a P-256 key pair");
+        let mut params = rcgen::CertificateParams::new(vec!["asterism.invalid".to_string()])
+            .expect("certificate parameters");
+        params.is_ca = rcgen::IsCa::ExplicitNoCa;
+        params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::EmailProtection,
+            // `c2pa-kp-claimSigning`, the usage the Conformance
+            // Program's profile requires beside one of the above.
+            rcgen::ExtendedKeyUsagePurpose::Other(vec![1, 3, 6, 1, 4, 1, 62558, 2, 1]),
+        ];
+        params.use_authority_key_identifier_extension = true;
+        params
+            .distinguished_name
+            .push(rcgen::DnType::OrganizationName, "Asterism Test Fixtures");
+        let cert = params.self_signed(&key).expect("a self-signed certificate");
+
+        let issuer_key = rcgen::KeyPair::generate().expect("a P-256 key pair");
+        let mut issuer_params =
+            rcgen::CertificateParams::new(vec!["asterism-issuer.invalid".to_string()])
+                .expect("certificate parameters");
+        issuer_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let issuer = issuer_params
+            .self_signed(&issuer_key)
+            .expect("an issuer certificate");
+
+        let mut chain = cert.pem().into_bytes();
+        chain.extend_from_slice(issuer.pem().as_bytes());
+        (chain, key.serialize_pem().into_bytes())
+    }
+
     #[test]
     fn containers_are_identified_from_their_own_bytes() {
         assert_eq!(Container::sniff(&png_fixture()), Some(Container::Png));
@@ -1203,6 +1418,113 @@ mod tests {
             .unwrap()
             .expect("the file carries a packet");
         assert!(packet.contains("trainedAlgorithmicMedia"));
+    }
+
+    #[test]
+    fn a_configured_identity_that_did_not_load_fails_the_manifest_half() {
+        // The distinction the third state exists for. An installation
+        // that configured a certificate and got nothing out of it is not
+        // one that configured none, and reporting the export the same
+        // way would tell whoever reads the record that the deployment is
+        // doing exactly what it was set up to do.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.png");
+        std::fs::write(&path, png_fixture()).unwrap();
+
+        let reason = "reading /etc/asterism/cert.pem: No such file or directory";
+        let outcome = DisclosureWriter::unavailable(reason)
+            .apply(&path, &record())
+            .unwrap();
+
+        assert_eq!(
+            outcome.xmp,
+            Half::Written,
+            "the half that needs no certificate still lands — the whole reason a \
+             failure lives in the value rather than the error channel"
+        );
+        assert_eq!(outcome.manifest, Half::Failed(reason.to_string()));
+        assert!(
+            outcome.discloses(),
+            "a file carrying one mark is a disclosed file, whatever went wrong beside it"
+        );
+        assert_eq!(
+            outcome.failures(),
+            vec![reason],
+            "and this is the list a caller reads to decide whether to tell anybody"
+        );
+    }
+
+    #[test]
+    fn strict_signing_refuses_what_a_trust_list_would_not_carry() {
+        let (cert, key) = self_signed_pair();
+        let err = SigningIdentity::from_bytes(
+            cert.clone(),
+            key.clone(),
+            "es256",
+            None,
+            Strictness::Strict,
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        for expected in ["c2pa-kp-claimSigning", "organisation", "chain"] {
+            assert!(
+                message.contains(expected),
+                "strict refusal should name {expected}: {message}"
+            );
+        }
+        assert!(
+            message.contains("It can sign"),
+            "and must not read as 'this cannot sign', which is a different and \
+             untrue statement: {message}"
+        );
+
+        SigningIdentity::from_bytes(cert, key, "es256", None, Strictness::Permissive)
+            .expect("the same certificate signs with strict signing off");
+    }
+
+    #[test]
+    fn strict_signing_does_not_tell_an_unreadable_bundle_to_turn_it_off() {
+        // The branch reachable because `inspect_certificate` passes
+        // bytes it cannot parse: no refusals, no warnings, and then the
+        // strict block. Advising "use it with strict signing off" here
+        // would send an operator whose file is DER rather than PEM to a
+        // configuration that fails on every export instead of once.
+        let err = SigningIdentity::from_bytes(
+            b"-----BEGIN CERTIFICATE-----\nnot base64 at all\n-----END CERTIFICATE-----\n".to_vec(),
+            b"key".to_vec(),
+            "es256",
+            None,
+            Strictness::Strict,
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("could not read a certificate"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("It can sign"),
+            "nothing established that it can: {message}"
+        );
+    }
+
+    #[test]
+    fn strict_signing_accepts_a_certificate_shaped_like_an_issued_one() {
+        // Strict has to be reachable, or it is a switch that turns
+        // signing off. This fixture carries what the warnings ask for —
+        // the claim-signing usage, an organisation in the subject — and
+        // arrives with a second certificate behind it.
+        //
+        // Unrelated certificates, deliberately: the chain requirement is
+        // a count and not a verification. Whether a chain links is a
+        // validator's question asked against a trust list, and this side
+        // cannot answer it — what it can see is that a bundle carrying
+        // one certificate has had its chain dropped or never had one.
+        let (cert, key) = issued_shaped_pair();
+        SigningIdentity::from_bytes(cert, key, "es256", None, Strictness::Strict)
+            .expect("nothing here is a reason a trust list would refuse it");
     }
 
     #[test]
@@ -1283,7 +1605,14 @@ mod tests {
                     subject=C2PA Test Signing Cert\n\
                     -----END CERTIFICATE-----\n"
             .to_vec();
-        let err = SigningIdentity::from_bytes(pem, b"key".to_vec(), "es256", None).unwrap_err();
+        let err = SigningIdentity::from_bytes(
+            pem,
+            b"key".to_vec(),
+            "es256",
+            None,
+            Strictness::Permissive,
+        )
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("test certificate"), "{message}");
         assert!(
@@ -1312,8 +1641,14 @@ mod tests {
         let pem = format!("-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n");
         assert!(!names_a_test_certificate(pem.as_bytes()));
         // It fails on the algorithm instead, which is the next check.
-        let err = SigningIdentity::from_bytes(pem.into_bytes(), b"key".to_vec(), "nonsense", None)
-            .unwrap_err();
+        let err = SigningIdentity::from_bytes(
+            pem.into_bytes(),
+            b"key".to_vec(),
+            "nonsense",
+            None,
+            Strictness::Permissive,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("unknown signing algorithm"));
     }
 
@@ -1535,8 +1870,14 @@ mod tests {
             rcgen::IsCa::ExplicitNoCa,
             Some("Example Ltd"),
         );
-        let err = SigningIdentity::from_bytes(wrong_usage, b"key".to_vec(), "es256", None)
-            .expect_err("a certificate that signs nothing is not an identity");
+        let err = SigningIdentity::from_bytes(
+            wrong_usage,
+            b"key".to_vec(),
+            "es256",
+            None,
+            Strictness::Permissive,
+        )
+        .expect_err("a certificate that signs nothing is not an identity");
         let message = err.to_string();
         assert!(message.contains("cannot sign a C2PA claim"), "{message}");
         assert!(message.contains("IPTC/XMP disclosure"), "{message}");
