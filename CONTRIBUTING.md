@@ -24,6 +24,21 @@ through `just rust-test` — never a hand-rolled `cargo test --workspace`.
 Report what was actually run; "I did not verify X" is a usable report,
 a green claim resting on a recipe nobody ran is not.
 
+While iterating, run `just rust-test-pkg <crate>…` and name the crates
+the change touches. The workspace run links every test binary at once —
+one linker process each, gigabytes resident each, as many at a time as
+`jobs` allows — which on a shared or memory-tight machine is enough to
+push the box into swap and take down whatever else is running on it.
+Reach for it when the change is workspace-wide, when CI reports
+something a targeted run cannot reproduce, or when the machine has the
+room.
+
+**Opening a pull request does not wait on a full local run.** CI runs
+`just check` — the workspace suite included — on every push, so the full
+result reaches the PR either way. What the targeted run is for is the
+loop before that: knowing the crates you touched are green before you
+ask anyone to look. Say which of the two you ran, as above.
+
 ## Preferred commit format
 
 ```text
