@@ -1,23 +1,29 @@
 # The gates, run where the repository can state their result.
 #
-# `just check` is the definition of green (`Justfile:279`) and this
-# workflow's job is to run it, not to restate it. That is why the six
-# recipes are one step rather than six: splitting them would buy per-gate
+# The Justfile's `check` recipe is the definition of green, and this
+# workflow's job is to run it, not to restate it. That is why the gates
+# are one step rather than one each: splitting them would buy per-gate
 # timing in the run summary and pay for it with a copy of `check`'s
 # composition living here, where a recipe added to `check` later would
 # silently not be picked up. `just` names the recipe that failed in its own
 # error line, so a failing gate is still identifiable without the split.
 #
+# Recipes are named here rather than cited by line. Every line number
+# this file used to carry had drifted off its target by the time anyone
+# followed it — `Justfile:279`, offered as the definition of green,
+# landed inside a UI recipe — and a reference that silently rots is
+# worse than the paragraph it was meant to shorten.
+#
 # What this does **not** cover, stated here rather than left to be inferred
 # from its absence:
 #
-#   - `just ui-e2e` (`Justfile:446`) builds a second Tauri binary with the
+#   - `just ui-e2e` builds a second Tauri binary with the
 #     `wdio` feature and drives a real window. It is out of `check` for that
 #     reason and out of here until someone has established that a hosted
 #     runner can give it a window and that the minutes are worth it. Until
 #     then the drag surface and the sidebar markup are covered locally or
 #     not at all.
-#   - `just collation-jsc` (`Justfile:475`) runs the collation corpus
+#   - `just collation-jsc` runs the collation corpus
 #     through JavaScriptCore. It exits 0 with a skip notice where `jsc` is
 #     missing, so on any runner but macOS it would contribute a green step
 #     that checked nothing. Run it locally when sort order or the corpus
@@ -74,9 +80,11 @@ jobs:
     #
     # Where the time is, measured on a warm run on 2026-08-15 (run
     # 31906361509): the test build was 2 m 25 s of an 11 m 01 s job,
-    # spent emitting debug info and linking it into the 81 test binaries
-    # `Justfile:702` counts. The clippy and `bindings-check` passes ahead
-    # of it link nothing, so the saving is bounded by that one step.
+    # spent emitting debug info and linking it into every test binary in
+    # the workspace — upwards of eighty, and the figure moves with the
+    # crate count, so it is not written down here. The clippy and
+    # `bindings-check` passes ahead of it link nothing, so the saving is
+    # bounded by that one step.
     #
     # Set here rather than in a profile: a `Cargo.toml` override would
     # follow everyone home, and locally the full information is worth
@@ -131,7 +139,7 @@ jobs:
       # toolchain moves under the workflow. Deliberate, for now: clippy had
       # never run against this workspace until 2026-08-02, when a bump to
       # clippy 1.95 surfaced 46 violations across 26 files at once
-      # (`Justfile:301-306`). A CI that follows stable meets the next bump on
+      # (`rust-clippy`'s own comment records it). A CI that follows stable meets the next bump on
       # the day it lands, in a run nobody had to remember to start. The cost
       # belongs in the record too: a red run is then not always about the
       # change that triggered it. Pin here and in `[workspace.package]` if
@@ -332,8 +340,9 @@ jobs:
       # runs as the real gate it is everywhere else.
       #
       # `ASTERISM_AIDOC_REGENERATED` is what tells `aidoc-guard` that
-      # this happened; `Justfile:387` states what it does with it and
-      # why the check it skips could not have failed.
+      # this happened; the comment above that recipe lists the four
+      # checks it stands down from and which step reaches each of them
+      # first.
       - name: Regenerate docs/aidoc and commit what moved
         if: >-
           github.event_name != 'pull_request' ||
@@ -341,16 +350,21 @@ jobs:
         run: |
           just aidoc
           echo 'ASTERISM_AIDOC_REGENERATED=1' >> "$GITHUB_ENV"
-          # Staged before the comparison, not after it. `git diff` reads
-          # tracked paths only, so a *new* artifact — the file a new
-          # crate or a new public module produces, which is the whole
-          # "an addition skips the inventory" hole `aidoc-check` exists
-          # for (`Justfile:352-357`) — left the tree looking unchanged.
-          # The step then reported "already current" and pushed nothing,
-          # and the artifact never reached the repository. `git add -A`
-          # sees untracked and deleted paths as well; comparing the
-          # index against `HEAD` is then the question actually being
-          # asked.
+          # Staged before the comparison rather than after it. The
+          # ordering is the fix: `git diff` against the working tree
+          # reads tracked paths only, so a difference visible only in an
+          # untracked path left the tree looking unchanged, the step
+          # reported "already current", and the artifact never reached
+          # the repository. Comparing the index against `HEAD` is the
+          # question actually being asked.
+          #
+          # The case that reaches: an artifact deleted by hand while the
+          # module it describes still exists. Regeneration recreates it
+          # as an untracked file and no tracked file moves. An added
+          # crate or module was never affected — those also modify a
+          # tracked index page, which the old comparison saw. `-A` is
+          # for the deletions a human made, since plain `git add` on a
+          # directory already covers the untracked half.
           git config user.name 'github-actions[bot]'
           git config user.email \
             '41898282+github-actions[bot]@users.noreply.github.com'
