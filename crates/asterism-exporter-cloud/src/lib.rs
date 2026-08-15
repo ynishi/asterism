@@ -39,9 +39,13 @@
 //! that went looking for dotenv files itself would make "which file did
 //! this credential come from" invisible to the profile that named it.
 //!
-//! The one place the resolved value could leak back out is the recorded
-//! exchange, so the recording redacts the auth header by name *and*
-//! scrubs any other occurrence of the value (see [`Exchange`]).
+//! Where the resolved value could leak back out is anything this
+//! adapter writes down about the call: the recorded exchange, and the
+//! note the harvest puts on each produced asset. The recording redacts
+//! the auth header by name *and* scrubs any other occurrence of the
+//! value (see [`Exchange`]); the note scrubs what it copies for the same
+//! reason, in one place, because a platform that echoes the request is
+//! how a query-string credential comes back (see [`call_note`]).
 //!
 //! ## The profile declares its own deadline
 //!
@@ -52,16 +56,42 @@
 //! [`EXPIRY_PREFIX`] — distinguishable from a backend failure, which is
 //! reported in the backend's own words.
 //!
-//! ## The raw exchange is kept when asked for
+//! ## The call is recorded, and it arrives with the artefact
 //!
-//! With `"record_exchange": true` the request as sent and the response
-//! as received are kept on the dispatch row, in the exporter-owned
-//! handle payload the runner already persists and hands back. That is
-//! the cheapest thing that satisfies "on the dispatch row rather than
-//! on a Derived", and it is an assumption: a dedicated column is the
-//! obvious alternative, and the measurement that would force it is a
-//! generation payload large enough that carrying it through every poll
-//! is the wrong shape. Recorded here rather than assumed away.
+//! The request as sent and the response as received are kept on the
+//! dispatch row, in the exporter-owned handle payload the runner already
+//! persists and hands back — and the harvest copies that record onto
+//! every [`Derived`] it returns, under `extra.cloud.call`, together with
+//! the finished job's response whole. The reified asset therefore
+//! carries how it was made rather than only a dispatch id to go and ask,
+//! and it carries the part that is easiest to lose: the seed the
+//! platform ran with and the prompt as it rewrote them are siblings of
+//! the artefacts array, so keeping the selected item alone would drop
+//! exactly the two values a hosted call cannot reconstruct.
+//!
+//! Both halves are unconditional, and that is a change from the first
+//! cut of this adapter, where recording was a profile flag defaulting to
+//! off. A hosted platform hands back a result URL and little else: the
+//! model may be an ambient default the provider updates, the seed is an
+//! input that is usually not echoed, and an enhanced prompt is not the
+//! prompt that was sent. None of it is in the bytes, and none of it can
+//! be recovered later by parsing them — the moment of the call is the
+//! only moment it exists. A switch that turns off the one capture point
+//! turns off the record entirely, and its default decided that for
+//! nearly every profile. A profile that still carries the retired flag
+//! keeps parsing, whichever way it is set — including `false`, which
+//! this build no longer honours.
+//!
+//! What it costs is honest: a submit body and a submit response ride
+//! along in the handle payload the poll loop reads on every tick, and a
+//! copy of the record lands on each produced asset. That second copy is
+//! per artefact and carries the whole harvest response, so a job with
+//! several outputs stores the envelope once per output — for a hosted
+//! generation call, kilobytes each. A generation payload large enough to
+//! make that the wrong shape would be the measurement that forces a
+//! dedicated column, and this adapter has not met one; the ComfyUI-scale
+//! workflow blob that would is carried by a different exporter, against
+//! a backend that embeds it in the file anyway.
 
 pub mod custody;
 pub mod grammar;
@@ -129,10 +159,6 @@ pub struct CloudDispatchParams {
     /// recorded as expired. Required — see the crate doc for why there
     /// is no default.
     pub deadline_seconds: u64,
-    /// Keep the request as sent and the response as received on the
-    /// dispatch row.
-    #[serde(default)]
-    pub record_exchange: bool,
 }
 
 /// Where the credential comes from and how it is presented.
@@ -288,7 +314,10 @@ pub struct CloudHandlePayload {
     /// When the backend accepted the job — the deadline is measured
     /// from here, so it has to survive a restart with the handle.
     pub submitted_at_ms: i64,
-    /// The recorded exchange, when the profile asked for one.
+    /// The recorded exchange. Written on every submit; optional only so
+    /// that a job submitted before recording became unconditional still
+    /// rehydrates on the poll after the upgrade, rather than failing as
+    /// a corrupt handle for want of a field its submit never wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exchange: Option<Exchange>,
 }
@@ -431,7 +460,7 @@ impl Exporter for CloudExporter {
                 ))
             })?;
 
-        let exchange = params.record_exchange.then(|| Exchange {
+        let exchange = Some(Exchange {
             request: RecordedRequest {
                 method: params.submit.method.clone(),
                 // Scrubbed, not copied: query-parameter auth is a real
@@ -543,6 +572,10 @@ impl Exporter for CloudExporter {
 
         let items = grammar.select(&response, &params.harvest.items_path);
         let now = Utc::now();
+        // Built once and cloned per item: every artefact of one job came
+        // out of the same call, and re-deriving it inside the loop would
+        // invite the two copies to drift.
+        let call = call_note(&grammar, &payload, response);
         let mut out: Vec<Derived> = Vec::with_capacity(items.len());
 
         for (index, item) in items.iter().enumerate() {
@@ -599,6 +632,13 @@ impl Exporter for CloudExporter {
                     "cloud": {
                         "item": grammar.scrub(item.clone()),
                         "source_url": grammar.scrub_text(&source_url),
+                        // How this artefact was asked for, travelling
+                        // with the artefact. The same record is on the
+                        // dispatch row; it is repeated here because an
+                        // asset that has to resolve an id to say what
+                        // made it is one whose answer can go missing
+                        // separately from it.
+                        "call": call.clone(),
                     }
                 }),
                 batch_hint: None,
@@ -620,6 +660,58 @@ fn parse_params(ctx: &DispatchContext<'_>) -> Result<CloudDispatchParams, Export
 fn parse_handle_payload(handle: &Handle) -> Result<CloudHandlePayload, ExporterError> {
     serde_json::from_value(handle.payload.clone())
         .map_err(|e| ExporterError::BackendRejected(format!("corrupt cloud handle: {e}")))
+}
+
+/// The call that produced a harvest, as it is written onto every
+/// artefact that came out of it.
+///
+/// A projection of the handle payload rather than the payload itself:
+/// the payload is this adapter's working state, and what an asset should
+/// carry is the record of the call — which job the platform gave us,
+/// when we asked, what we sent, what came back. Serialising the payload
+/// wholesale would put the first shape on assets and make every later
+/// working-state field a wire change nobody asked for.
+///
+/// `result` is the harvest response whole, and not only because it is
+/// cheap to keep: the fields a re-run would need are routinely *outside*
+/// the items array. The seed the platform actually used, the prompt as
+/// it rewrote it, the timings — these are siblings of the array, so an
+/// adapter that kept the selected item and dropped the envelope would
+/// discard the two values a hosted call is least able to reconstruct.
+/// The item stays beside it because which of the returned artefacts this
+/// asset is cannot be read back off the envelope.
+///
+/// `request` and `response` are absent together, and only for a job
+/// submitted before recording became unconditional. Absent here is the
+/// literal "this handle predates the record" rather than a claim about
+/// the call, and it is written as a missing key rather than a null for
+/// the reason the disclosure vocabulary states: a null reads as a value
+/// somebody wrote.
+///
+/// # Why the scrub happens here and not at each caller
+///
+/// The two values this builds from that have not already been through
+/// the grammar are the harvest response and the handle, and the handle
+/// is the one that does not look like it needs it. `submit.handle_from`
+/// defaults to `$` — the whole submit response — and a platform that
+/// echoes the request it was sent then puts a `{{secret}}` rendered into
+/// a query string or a body field inside the value this note copies onto
+/// an asset. Taking both raw and scrubbing them in one place is what
+/// stops the next field added here from being the one that forgets.
+fn call_note(grammar: &CloudGrammar, payload: &CloudHandlePayload, result: Value) -> Value {
+    let mut note = serde_json::json!({
+        "handle": grammar.scrub(payload.handle.clone()),
+        "submitted_at_ms": payload.submitted_at_ms,
+        "result": grammar.scrub(result),
+    });
+    if let (Some(exchange), Some(map)) = (payload.exchange.as_ref(), note.as_object_mut()) {
+        map.insert(
+            "request".into(),
+            serde_json::to_value(&exchange.request).expect("a recorded request serialises"),
+        );
+        map.insert("response".into(), exchange.response.clone());
+    }
+    note
 }
 
 fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
@@ -765,7 +857,6 @@ mod tests {
         let params = params_fixture();
         assert_eq!(params.auth.secret_ref, "FAL_KEY");
         assert_eq!(params.deadline_seconds, 86_400);
-        assert!(params.record_exchange);
         assert_eq!(params.submit.handle_from, "$.request_id");
         assert_eq!(params.harvest.items_path, "$.images[*]");
         assert_eq!(params.harvest.map.source_url, "{{item.url}}");
@@ -819,6 +910,171 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    /// Recording used to be `"record_exchange": true` in the profile.
+    /// The field is gone, and a profile in the field that still carries
+    /// it has to keep working — it says the thing this build now does
+    /// anyway, and failing a live profile over a retired flag would be
+    /// this change breaking the configurations that had already asked
+    /// for the behaviour it makes unconditional.
+    ///
+    /// `false` is the arm worth pinning: that profile said "do not
+    /// record", and this build records anyway. Parsing it rather than
+    /// refusing it is the decision — a live profile is not failed over a
+    /// setting that no longer exists — and the operator learns the
+    /// behaviour changed from the changelog, not from a broken dispatch.
+    #[test]
+    fn a_profile_still_carrying_the_retired_flag_parses() {
+        for setting in [true, false] {
+            let mut raw: Value =
+                serde_json::from_str(params_example_json()).expect("example parses");
+            raw.as_object_mut()
+                .expect("the example is an object")
+                .insert("record_exchange".into(), Value::Bool(setting));
+            let params: CloudDispatchParams =
+                serde_json::from_value(raw).expect("a retired flag is ignored, not refused");
+            assert_eq!(params.deadline_seconds, 86_400);
+        }
+    }
+
+    fn grammar_fixture() -> CloudGrammar {
+        CloudGrammar::new("sk-live-not-a-real-key".into())
+    }
+
+    fn exchange_fixture() -> Exchange {
+        Exchange {
+            request: RecordedRequest {
+                method: "POST".into(),
+                url: "https://queue.example/run".into(),
+                headers: BTreeMap::from([("authorization".into(), REDACTED.into())]),
+                body: Some(serde_json::json!({ "prompt": "a portrait", "seed": 7 })),
+            },
+            response: serde_json::json!({ "request_id": "req-1", "status": "IN_QUEUE" }),
+        }
+    }
+
+    /// Shaped like a hosted platform's finished job: the artefacts in an
+    /// array, and the two values a re-run would need — the seed it
+    /// actually used, the prompt as it rewrote it — outside that array.
+    fn harvest_result_fixture() -> Value {
+        serde_json::json!({
+            "images": [{ "url": "https://cdn.example/a.png" }],
+            "seed": 913_224,
+            "prompt": "photo studio portrait, soft key light, 85mm",
+        })
+    }
+
+    /// What the artefact has to carry away from the call: the platform's
+    /// own id for the job, when it was asked for, the request as sent —
+    /// the only place the prompt and the seed exist, since the file will
+    /// not have them — and the response that named the job.
+    #[test]
+    fn the_call_note_carries_what_was_sent_and_what_came_back() {
+        let note = call_note(
+            &grammar_fixture(),
+            &CloudHandlePayload {
+                handle: serde_json::json!("req-1"),
+                submitted_at_ms: 42,
+                exchange: Some(exchange_fixture()),
+            },
+            harvest_result_fixture(),
+        );
+
+        assert_eq!(note["handle"], serde_json::json!("req-1"));
+        assert_eq!(note["submitted_at_ms"], serde_json::json!(42));
+        assert_eq!(note["request"]["body"]["prompt"], "a portrait");
+        assert_eq!(note["request"]["body"]["seed"], 7);
+        assert_eq!(note["response"]["request_id"], "req-1");
+        // The redaction happened when the exchange was recorded; the
+        // note must not undo it by reaching past the recorded copy.
+        assert_eq!(note["request"]["headers"]["authorization"], REDACTED);
+    }
+
+    /// The envelope, not just the item that became this asset: what the
+    /// platform decided — the seed it ran with, the prompt it rewrote —
+    /// sits beside the artefacts array and is gone from every other
+    /// surface once the job ages out.
+    #[test]
+    fn the_call_note_keeps_what_the_platform_decided_beside_the_artefacts() {
+        let note = call_note(
+            &grammar_fixture(),
+            &CloudHandlePayload {
+                handle: serde_json::json!("req-1"),
+                submitted_at_ms: 42,
+                exchange: Some(exchange_fixture()),
+            },
+            harvest_result_fixture(),
+        );
+
+        assert_eq!(note["result"]["seed"], 913_224);
+        assert_eq!(
+            note["result"]["prompt"],
+            "photo studio portrait, soft key light, 85mm"
+        );
+    }
+
+    /// A job submitted by the previous build and harvested by this one
+    /// has no recorded exchange. It still gets a note — the job id and
+    /// the submit time are on the handle either way — and the two keys
+    /// it cannot fill stay absent rather than landing as nulls that read
+    /// as "the platform returned nothing".
+    #[test]
+    fn a_handle_from_before_the_record_notes_the_call_it_can() {
+        let note = call_note(
+            &grammar_fixture(),
+            &CloudHandlePayload {
+                handle: serde_json::json!("req-old"),
+                submitted_at_ms: 7,
+                exchange: None,
+            },
+            harvest_result_fixture(),
+        );
+
+        assert_eq!(note["handle"], serde_json::json!("req-old"));
+        assert_eq!(note["submitted_at_ms"], serde_json::json!(7));
+        // The harvest is this build's, so its half of the record lands
+        // even when the submit's half cannot.
+        assert_eq!(note["result"]["seed"], 913_224);
+        let map = note.as_object().expect("the note is an object");
+        assert!(!map.contains_key("request"), "{note}");
+        assert!(!map.contains_key("response"), "{note}");
+    }
+
+    /// The note is written onto an asset, so it is held to what the
+    /// recorded exchange is held to. Two ways the credential reaches it
+    /// without anyone putting it there: `submit.handle_from` defaults to
+    /// `$`, which makes the handle the whole submit response, and a
+    /// platform is free to echo the request — including a URL a profile
+    /// rendered `{{secret}}` into.
+    #[test]
+    fn the_note_cannot_carry_the_credential_a_platform_echoed_back() {
+        let secret = "sk-live-not-a-real-key";
+        let note = call_note(
+            &grammar_fixture(),
+            &CloudHandlePayload {
+                handle: serde_json::json!({
+                    "request_id": "req-1",
+                    "echo": { "url": format!("https://queue.example/run?key={secret}") },
+                }),
+                submitted_at_ms: 42,
+                exchange: Some(exchange_fixture()),
+            },
+            serde_json::json!({
+                "images": [{ "url": format!("https://cdn.example/a.png?token={secret}") }],
+                "seed": 913_224,
+            }),
+        );
+
+        let rendered = note.to_string();
+        assert!(
+            !rendered.contains(secret),
+            "the credential reached an asset's note: {rendered}"
+        );
+        // Scrubbed, not dropped: what the platform said still has to be
+        // readable, or the note stops being the record it exists to be.
+        assert_eq!(note["handle"]["request_id"], "req-1");
+        assert_eq!(note["result"]["seed"], 913_224);
     }
 
     /// The runner rehydrates this from the row on every tick, so a
