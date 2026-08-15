@@ -303,23 +303,23 @@ jobs:
       # Two costs, stated rather than left to be found.
       #
       # The head commit carries no check of its own, because the check
-      # is attached to the commit before it. Nothing requires one today
-      # — `main` has no branch protection and the sole ruleset is
-      # disabled — but a rule demanding a passing check on the head SHA
-      # would have to be reconciled with this first, and a skipped
-      # workflow's checks stay *pending* rather than absent, so such a
-      # rule would block the merge rather than quietly pass it.
+      # is attached to the commit before it. A rule that demanded a
+      # passing check on the head SHA would have to be reconciled with
+      # this before it was turned on: a skipped workflow's checks stay
+      # *pending* rather than absent, so such a rule would block the
+      # merge rather than quietly pass it.
       #
-      # The second is the one to watch. This repository allows squash
-      # and rebase merges as well as merge commits, and both of those
-      # carry a branch commit's message into `main`: squash composes the
-      # body from the branch's messages, rebase replays the commit
-      # itself. Either lands `[skip ci]` on `main`'s head, and the
-      # `push: main` run — the one the concurrency block above exists to
-      # protect, because it is what gives a merged tree its verdict —
-      # does not start. A merge commit takes its message from the pull
-      # request title and does not carry the token, so merging that way
-      # avoids it. Whether a merge commit is enough is not settled:
+      # The second is the one to watch, and it is why the merge button
+      # matters here. Two of the three merge methods carry a branch
+      # commit's message into `main`: a squash composes its body from
+      # the branch's messages, a rebase replays the commit itself.
+      # Either lands `[skip ci]` on `main`'s head, and the `push: main`
+      # run — the one the concurrency block above exists to protect,
+      # because it is what gives a merged tree its verdict — does not
+      # start. A merge commit takes its message from the pull request
+      # title and carries no branch message at all, which is the reason
+      # to merge that way and to leave the other two off. Whether a
+      # merge commit is enough is not settled:
       # GitHub's own wording is that the token skips a workflow when it
       # appears "in a push", which may or may not mean only the head
       # commit of one. The first merge after this lands answers it —
