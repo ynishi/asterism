@@ -74,62 +74,46 @@
 //! interpolates `{{handle}}`; a `handle_from` of `"$"` keeps the whole
 //! response body and the path would read `{{handle.job_id}}` instead.
 //!
-//! ### Template placeholders
+//! ### Templates and JSONPath
 //!
-//! Simple `{{...}}` substitution, no arithmetic. Supported roots:
+//! Both grammars are the shared adapter machinery, documented where
+//! they are defined: [`asterism_exporter_common::template`] for the
+//! `{{...}}` roots, the optional-`?` suffix and which of them resolve in
+//! which phase, and [`asterism_exporter_common::jsonpath`] for the path
+//! subset. They are not restated here — a grammar with two write-ups
+//! grows two meanings, and a profile author cannot tell which one their
+//! adapter implements.
 //!
-//! - `{{selection_id}}`, `{{dispatch_id}}`, `{{persona_id}}`,
-//!   `{{action}}` — dispatch-context ids.
-//! - `{{input[N].<field>}}` — indexed input asset field. Supported
-//!   fields: `id`, `persona_id`, `source_locator`, `source_kind`,
-//!   `modality`, `cover`.
-//! - `{{params.<dot.path>}}` — deep dot-access into the params JSON
-//!   itself (so the caller can define its own "extra fields" section
-//!   in params and reference it from templates).
-//! - `{{handle.<dot.path>}}` — deep dot-access into the handle JSON.
-//!   Only available in `poll` / `harvest` templates (the exporter
-//!   panics on this in `dispatch`, when no handle exists yet).
-//! - `{{item.<dot.path>}}` — dot-access into the current
-//!   `harvest.items_path` element. Only available inside
-//!   `harvest.map`.
+//! This exporter reaches them through the
+//! [`TemplateAdapter`] / [`ResponsePath`] traits and is parameterised on
+//! the implementation, defaulting to
+//! [`CommonExportAdapter`][asterism_exporter_common::CommonExportAdapter].
+//! `HttpExporter::new()` therefore keeps meaning what it meant, and an
+//! adapter that needs a placeholder root this one must not have — a
+//! credential resolved outside the params blob, say — supplies its own
+//! grammar rather than widening this one.
 //!
-//! A trailing `?` on a placeholder (`{{item.caption?}}`) means
-//! "resolve to empty string when the path is missing" instead of
-//! failing with `BackendRejected`.
-//!
-//! Params are persisted unedited. The blob handed to
-//! `CreateDispatchCommand` is stored whole as
+//! One consequence of the params blob being a template namespace is
+//! worth repeating at the point of use, because it decides what may go
+//! in the example above. Params are persisted unedited: the blob handed
+//! to `CreateDispatchCommand` is stored whole as
 //! `dispatch_job.params_json` and handed back out as
-//! `DispatchDto.params_json` on every read of the dispatch — nothing
-//! on that path filters, redacts, or drops a field. A credential
-//! reached by `{{params.…}}` (the `extras.api_key` above) is
-//! therefore readable by anything that can list dispatches; put one
-//! there only where that visibility is acceptable.
-//!
-//! ### JSONPath
-//!
-//! Minimal subset — enough to steer the state machine and pluck out
-//! items:
-//!
-//! - `$.foo`             — object field.
-//! - `$.foo.bar`         — dot chain.
-//! - `$.arr[0]`          — array index.
-//! - `$.arr[*]`          — array wildcard (only the last segment can
-//!   be a wildcard; matches the shape of every documented example).
-//!
-//! Anything outside this grammar is rejected up front with
-//! `BackendRejected`.
+//! `DispatchDto.params_json` on every read of the dispatch, and nothing
+//! on that path filters, redacts, or drops a field. A credential reached
+//! by `{{params.…}}` — the `extras.api_key` above — is therefore
+//! readable by anything that can list dispatches. Put one there only
+//! where that visibility is acceptable.
 
 use std::collections::BTreeMap;
 
-use asterism_contract::dto::AssetCardDto;
 use asterism_dispatch_sdk::{
     Derived, DispatchContext, DispatchState, Exporter, ExporterError, Handle, ProgressHint,
 };
+use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter, TemplateEnv};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 /// Slug the registry uses for this exporter.
 pub const SLUG: &str = "http";
@@ -289,9 +273,14 @@ struct HttpHandlePayload {
 }
 
 /// HTTP-backed schema-driven [`Exporter`].
+///
+/// `A` is the profile grammar — substitution and path selection — and
+/// defaults to the shipped [`CommonExportAdapter`], so the ordinary
+/// constructors name no type parameter at all.
 #[derive(Debug, Clone)]
-pub struct HttpExporter {
+pub struct HttpExporter<A = CommonExportAdapter> {
     http: reqwest::Client,
+    grammar: A,
 }
 
 impl Default for HttpExporter {
@@ -303,23 +292,45 @@ impl Default for HttpExporter {
 impl HttpExporter {
     /// Builds an exporter with a default `reqwest::Client`.
     pub fn new() -> Self {
-        Self {
-            http: reqwest::Client::builder()
+        Self::with_client(
+            reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .expect("reqwest client build"),
-        }
+        )
     }
 
     /// Uses a caller-supplied `reqwest::Client` (integration tests
     /// pass a mocked one).
     pub fn with_client(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            grammar: CommonExportAdapter,
+        }
+    }
+}
+
+impl<A: TemplateAdapter + ResponsePath> HttpExporter<A> {
+    /// Uses a caller-supplied grammar in place of the shipped one.
+    pub fn with_grammar(http: reqwest::Client, grammar: A) -> Self {
+        Self { http, grammar }
+    }
+
+    /// Evaluates a poll predicate against a response body.
+    ///
+    /// A path that matches nothing is false rather than an error: on a
+    /// poll that is "not yet", which is the answer a job in flight
+    /// should produce.
+    fn match_rule(&self, rule: &MatchRule, resp: &Value) -> bool {
+        match self.grammar.select_first(resp, &rule.path) {
+            Some(actual) => actual == rule.equals,
+            None => false,
+        }
     }
 }
 
 #[async_trait]
-impl Exporter for HttpExporter {
+impl<A: TemplateAdapter + ResponsePath + Send + Sync> Exporter for HttpExporter<A> {
     fn slug(&self) -> &str {
         SLUG
     }
@@ -335,19 +346,15 @@ impl Exporter for HttpExporter {
     async fn dispatch(&self, ctx: DispatchContext<'_>) -> Result<Handle, ExporterError> {
         let params = parse_params(&ctx)?;
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(
-            &params.dispatch.path,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
+        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
+        let path = self.grammar.render(&params.dispatch.path, &env)?;
         let url = format!("{base}{path}");
-        let body = substitute_json_leaves(
-            &params.dispatch.body_template,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
-        let headers = render_headers(
-            &params.dispatch.headers,
-            &TemplateEnv::pre_handle(&ctx, ctx.params),
-        )?;
+        let body = self
+            .grammar
+            .render_json(&params.dispatch.body_template, &env)?;
+        let headers = self
+            .grammar
+            .render_headers(&params.dispatch.headers, &env)?;
         let resp = send_request(
             &self.http,
             &params.dispatch.method,
@@ -356,8 +363,10 @@ impl Exporter for HttpExporter {
             Some(body),
         )
         .await?;
-        let handle_value =
-            jsonpath_first(&resp, &params.dispatch.handle_from).ok_or_else(|| {
+        let handle_value = self
+            .grammar
+            .select_first(&resp, &params.dispatch.handle_from)
+            .ok_or_else(|| {
                 ExporterError::BackendRejected(format!(
                     "dispatch response missing handle_from path {:?}",
                     params.dispatch.handle_from
@@ -382,31 +391,31 @@ impl Exporter for HttpExporter {
         let payload = parse_handle_payload(handle)?;
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &payload.handle);
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(&params.poll.path, &env)?;
+        let path = self.grammar.render(&params.poll.path, &env)?;
         let url = format!("{base}{path}");
-        let headers = render_headers(&params.poll.headers, &env)?;
+        let headers = self.grammar.render_headers(&params.poll.headers, &env)?;
         let resp = send_request(&self.http, &params.poll.method, &url, &headers, None).await?;
 
-        if match_rule(&params.poll.failed_when, &resp) {
+        if self.match_rule(&params.poll.failed_when, &resp) {
             let message = params
                 .poll
                 .failed_when
                 .message_path
                 .as_deref()
-                .and_then(|p| jsonpath_first(&resp, p))
-                .and_then(value_to_display_string)
+                .and_then(|p| self.grammar.select_first(&resp, p))
+                .and_then(|v| self.grammar.display_string(v))
                 .unwrap_or_else(|| "backend reported failure".into());
             return Ok(DispatchState::Failed { message });
         }
-        if match_rule(&params.poll.done_when, &resp) {
+        if self.match_rule(&params.poll.done_when, &resp) {
             return Ok(DispatchState::Done);
         }
         let message = params
             .poll
             .progress_message_path
             .as_deref()
-            .and_then(|p| jsonpath_first(&resp, p))
-            .and_then(value_to_display_string);
+            .and_then(|p| self.grammar.select_first(&resp, p))
+            .and_then(|v| self.grammar.display_string(v));
         Ok(DispatchState::Running(ProgressHint {
             current: None,
             total: None,
@@ -424,41 +433,45 @@ impl Exporter for HttpExporter {
         let payload = parse_handle_payload(handle)?;
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &payload.handle);
         let base = trim_trailing_slash(&params.endpoint);
-        let path = render_template(&params.harvest.path, &env)?;
+        let path = self.grammar.render(&params.harvest.path, &env)?;
         let url = format!("{base}{path}");
-        let headers = render_headers(&params.harvest.headers, &env)?;
+        let headers = self.grammar.render_headers(&params.harvest.headers, &env)?;
         let resp = send_request(&self.http, &params.harvest.method, &url, &headers, None).await?;
-        let items = jsonpath_many(&resp, &params.harvest.items_path);
+        let items = self.grammar.select(&resp, &params.harvest.items_path);
         let now = Utc::now();
         let mut out: Vec<Derived> = Vec::with_capacity(items.len());
         for item in items {
             let item_env = env.with_item(&item);
-            let modality = render_template(&params.harvest.map.modality, &item_env)?;
-            let locator = render_template(&params.harvest.map.locator, &item_env)?;
+            let modality = self
+                .grammar
+                .render(&params.harvest.map.modality, &item_env)?;
+            let locator = self
+                .grammar
+                .render(&params.harvest.map.locator, &item_env)?;
             let cover_hint = params
                 .harvest
                 .map
                 .cover_hint
                 .as_deref()
-                .map(|t| render_template(t, &item_env))
+                .map(|t| self.grammar.render(t, &item_env))
                 .transpose()?;
             let register_note = params
                 .harvest
                 .map
                 .register_note
                 .as_deref()
-                .map(|t| render_template(t, &item_env))
+                .map(|t| self.grammar.render(t, &item_env))
                 .transpose()?;
             let mut labels: Vec<String> = Vec::new();
             for tmpl in &params.harvest.map.labels_static {
-                labels.push(render_template(tmpl, &item_env)?);
+                labels.push(self.grammar.render(tmpl, &item_env)?);
             }
             if let Some(path) = &params.harvest.map.labels_path {
-                for v in jsonpath_many(
+                for v in self.grammar.select(
                     &item,
                     path.trim_start_matches("$.item").trim_start_matches("$"),
                 ) {
-                    if let Some(s) = value_to_display_string(v) {
+                    if let Some(s) = self.grammar.display_string(v) {
                         labels.push(s);
                     }
                 }
@@ -550,307 +563,10 @@ async fn send_request(
     })
 }
 
-fn render_headers(
-    headers: &BTreeMap<String, String>,
-    env: &TemplateEnv<'_>,
-) -> Result<BTreeMap<String, String>, ExporterError> {
-    let mut out = BTreeMap::new();
-    for (k, v) in headers {
-        out.insert(k.clone(), render_template(v, env)?);
-    }
-    Ok(out)
-}
-
-fn value_to_display_string(v: Value) -> Option<String> {
-    match v {
-        Value::Null => None,
-        Value::String(s) => Some(s),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Array(_) | Value::Object(_) => Some(v.to_string()),
-    }
-}
-
-fn match_rule(rule: &MatchRule, resp: &Value) -> bool {
-    match jsonpath_first(resp, &rule.path) {
-        Some(actual) => actual == rule.equals,
-        None => false,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Template substitution — {{...}}.
-// ---------------------------------------------------------------------------
-
-/// Environment used to resolve `{{...}}` placeholders during
-/// template rendering. Kept opaque to callers.
-struct TemplateEnv<'a> {
-    ctx: &'a DispatchContext<'a>,
-    params: &'a Value,
-    handle: Option<&'a Value>,
-    item: Option<&'a Value>,
-}
-
-impl<'a> TemplateEnv<'a> {
-    fn pre_handle(ctx: &'a DispatchContext<'a>, params: &'a Value) -> Self {
-        Self {
-            ctx,
-            params,
-            handle: None,
-            item: None,
-        }
-    }
-
-    fn with_handle(ctx: &'a DispatchContext<'a>, params: &'a Value, handle: &'a Value) -> Self {
-        Self {
-            ctx,
-            params,
-            handle: Some(handle),
-            item: None,
-        }
-    }
-
-    fn with_item<'b: 'a>(&'b self, item: &'a Value) -> TemplateEnv<'a> {
-        TemplateEnv {
-            ctx: self.ctx,
-            params: self.params,
-            handle: self.handle,
-            item: Some(item),
-        }
-    }
-
-    fn resolve(&self, key: &str, optional: bool) -> Result<String, ExporterError> {
-        let value = self.lookup(key);
-        match value {
-            Some(v) => Ok(value_to_display_string(v).unwrap_or_default()),
-            None if optional => Ok(String::new()),
-            None => Err(ExporterError::BackendRejected(format!(
-                "template placeholder {{{{{key}}}}} did not resolve"
-            ))),
-        }
-    }
-
-    fn lookup(&self, key: &str) -> Option<Value> {
-        // Top-level context ids.
-        match key {
-            "selection_id" => return Some(Value::String(self.ctx.selection_id.into())),
-            "dispatch_id" => return Some(Value::String(self.ctx.dispatch_id.into())),
-            "persona_id" => return Some(Value::String(self.ctx.persona_id.into())),
-            "action" => return Some(Value::String(self.ctx.action.into())),
-            _ => {}
-        }
-        // input[N].<field>
-        if let Some(rest) = key.strip_prefix("input[")
-            && let Some(bracket_end) = rest.find(']')
-        {
-            let (idx_str, tail) = rest.split_at(bracket_end);
-            let tail = &tail[1..]; // skip `]`
-            let idx: usize = idx_str.parse().ok()?;
-            let input = self.ctx.inputs.get(idx)?;
-            let field = tail.strip_prefix('.').unwrap_or(tail);
-            return input_field(input, field);
-        }
-        // params.<dot.path>
-        if let Some(rest) = key.strip_prefix("params.") {
-            return dot_path(self.params, rest);
-        }
-        if key == "params" {
-            return Some(self.params.clone());
-        }
-        // handle.<dot.path>
-        if let Some(rest) = key.strip_prefix("handle.") {
-            return self.handle.and_then(|h| dot_path(h, rest));
-        }
-        if key == "handle" {
-            return self.handle.cloned();
-        }
-        // item.<dot.path>
-        if let Some(rest) = key.strip_prefix("item.") {
-            return self.item.and_then(|i| dot_path(i, rest));
-        }
-        if key == "item" {
-            return self.item.cloned();
-        }
-        None
-    }
-}
-
-fn input_field(input: &AssetCardDto, field: &str) -> Option<Value> {
-    match field {
-        "" | "id" => Some(Value::String(input.id.clone())),
-        "persona_id" => Some(Value::String(input.persona_id.clone())),
-        "source_locator" => Some(Value::String(input.source_locator.clone())),
-        // Unclassified inputs (asset-model v4) template as "".
-        "modality" => Some(Value::String(input.modality.clone().unwrap_or_default())),
-        "cover" => input.cover.clone().map(Value::String),
-        _ => None,
-    }
-}
-
-fn dot_path(root: &Value, path: &str) -> Option<Value> {
-    let mut cur = root;
-    for seg in path.split('.') {
-        // Support `arr[0]` inside the dot chain.
-        if let Some(open) = seg.find('[') {
-            let field = &seg[..open];
-            let rest = &seg[open + 1..];
-            let close = rest.find(']')?;
-            let idx: usize = rest[..close].parse().ok()?;
-            let after_bracket = &rest[close + 1..];
-            if !field.is_empty() {
-                cur = cur.get(field)?;
-            }
-            cur = cur.get(idx)?;
-            if !after_bracket.is_empty() {
-                // Additional trailing chain like `[0].name` — recurse
-                // on the remainder starting after the `].` we just
-                // consumed.
-                return dot_path(cur, after_bracket.trim_start_matches('.'));
-            }
-        } else {
-            cur = cur.get(seg)?;
-        }
-    }
-    Some(cur.clone())
-}
-
-fn render_template(template: &str, env: &TemplateEnv<'_>) -> Result<String, ExporterError> {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    // Byte offset where the current literal run started. Literals are
-    // copied as `&str` slices rather than byte-by-byte so multi-byte
-    // UTF-8 sequences survive intact. Every byte of a multi-byte
-    // sequence is >= 0x80 — lead bytes (0xC2-0xF4) as well as
-    // continuation bytes (0x80-0xBF) — so none can equal `b'{'`, and
-    // `i` is a char boundary whenever a placeholder opens.
-    // `literal_start` is a boundary for the same reason: it is either 0
-    // or the offset just past a `}}`, both of which sit outside any
-    // multi-byte sequence.
-    let mut literal_start = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-            out.push_str(&template[literal_start..i]);
-            let end = template[i + 2..].find("}}").ok_or_else(|| {
-                ExporterError::BackendRejected(format!(
-                    "unterminated template placeholder starting at byte {i}"
-                ))
-            })?;
-            let raw = &template[i + 2..i + 2 + end];
-            let key = raw.trim();
-            let (real_key, optional) = match key.strip_suffix('?') {
-                Some(k) => (k.trim(), true),
-                None => (key, false),
-            };
-            out.push_str(&env.resolve(real_key, optional)?);
-            i += 2 + end + 2;
-            literal_start = i;
-        } else {
-            i += 1;
-        }
-    }
-    out.push_str(&template[literal_start..]);
-    Ok(out)
-}
-
-fn substitute_json_leaves(value: &Value, env: &TemplateEnv<'_>) -> Result<Value, ExporterError> {
-    match value {
-        Value::String(s) => Ok(Value::String(render_template(s, env)?)),
-        Value::Array(arr) => arr
-            .iter()
-            .map(|v| substitute_json_leaves(v, env))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        Value::Object(obj) => {
-            let mut out = Map::with_capacity(obj.len());
-            for (k, v) in obj {
-                out.insert(k.clone(), substitute_json_leaves(v, env)?);
-            }
-            Ok(Value::Object(out))
-        }
-        other => Ok(other.clone()),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Minimal JSONPath — $.foo.bar[0] and $.foo.bar[*]
-// ---------------------------------------------------------------------------
-
-fn parse_jsonpath(expr: &str) -> Vec<PathSeg> {
-    let mut segs: Vec<PathSeg> = Vec::new();
-    let expr = expr.trim();
-    let expr = expr.strip_prefix('$').unwrap_or(expr);
-    let expr = expr.strip_prefix('.').unwrap_or(expr);
-    for raw in expr.split('.') {
-        if raw.is_empty() {
-            continue;
-        }
-        // Possible forms: `foo`, `foo[0]`, `foo[*]`, `[0]`, `[*]`
-        let (field, index_part) = match raw.find('[') {
-            None => (raw, ""),
-            Some(open) => (&raw[..open], &raw[open..]),
-        };
-        if !field.is_empty() {
-            segs.push(PathSeg::Field(field.to_string()));
-        }
-        if !index_part.is_empty() {
-            let inner = index_part.trim_start_matches('[').trim_end_matches(']');
-            if inner == "*" {
-                segs.push(PathSeg::Wildcard);
-            } else if let Ok(idx) = inner.parse::<usize>() {
-                segs.push(PathSeg::Index(idx));
-            } else {
-                // Unsupported index form — leave as a literal field
-                // fallback so grammar errors are visible.
-                segs.push(PathSeg::Field(inner.to_string()));
-            }
-        }
-    }
-    segs
-}
-
-enum PathSeg {
-    Field(String),
-    Index(usize),
-    Wildcard,
-}
-
-fn jsonpath_many(root: &Value, expr: &str) -> Vec<Value> {
-    let segs = parse_jsonpath(expr);
-    let mut frontier: Vec<&Value> = vec![root];
-    for seg in &segs {
-        let mut next: Vec<&Value> = Vec::new();
-        for v in &frontier {
-            match seg {
-                PathSeg::Field(name) => {
-                    if let Some(child) = v.get(name) {
-                        next.push(child);
-                    }
-                }
-                PathSeg::Index(idx) => {
-                    if let Some(child) = v.get(*idx) {
-                        next.push(child);
-                    }
-                }
-                PathSeg::Wildcard => match v {
-                    Value::Array(arr) => next.extend(arr.iter()),
-                    Value::Object(obj) => next.extend(obj.values()),
-                    _ => {}
-                },
-            }
-        }
-        frontier = next;
-    }
-    frontier.into_iter().cloned().collect()
-}
-
-fn jsonpath_first(root: &Value, expr: &str) -> Option<Value> {
-    jsonpath_many(root, expr).into_iter().next()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use asterism_contract::dto::AssetCardDto;
 
     fn card_fixture(id: &str, source_locator: &str) -> AssetCardDto {
         AssetCardDto {
@@ -904,135 +620,30 @@ mod tests {
         assert!(exp.accepts("any-slug"));
     }
 
-    #[test]
-    fn render_template_substitutes_context_and_params() {
-        let params = serde_json::json!({ "prompt": "cats" });
-        let input = card_fixture("asset-uuid", "/tmp/photo.png");
-        let inputs = vec![input];
-        let ctx = DispatchContext {
-            inputs: &inputs,
-            selection_id: "sel-1",
-            dispatch_id: "disp-1",
-            persona_id: "persona-1",
-            action: "run",
-            params: &params,
-        };
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        assert_eq!(
-            render_template(
-                "{{selection_id}}/{{input[0].source_locator}}?p={{params.prompt}}",
-                &env
-            )
-            .unwrap(),
-            "sel-1//tmp/photo.png?p=cats"
-        );
-        // Optional placeholder silently resolves to empty string.
-        assert_eq!(render_template("{{params.missing?}}", &env).unwrap(), "");
-        // Non-optional missing placeholder errors.
-        assert!(render_template("{{params.missing}}", &env).is_err());
-    }
-
-    #[test]
-    fn render_template_keeps_non_ascii_literals_free_of_mojibake() {
-        let params = serde_json::json!({ "extras": { "prompt": "夜の街" } });
-        let inputs = vec![card_fixture("asset-uuid", "/tmp/写真.png")];
-        let ctx = stub_ctx(&inputs, &params);
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        // Multi-byte literals sit between the placeholders, and the
-        // placeholders themselves open at byte 0 and close at the end —
-        // exercising the empty leading slice and the empty trailing
-        // slice on top of the multi-byte runs. A byte-wise copy would
-        // widen each literal byte into its own Latin-1 char.
-        assert_eq!(
-            render_template(
-                "{{params.extras.prompt}}、対象 {{input[0].source_locator}} — 完了{{selection_id}}",
-                &env
-            )
-            .unwrap(),
-            "夜の街、対象 /tmp/写真.png — 完了sel-1"
-        );
-        // Template that is nothing but a non-ASCII literal.
-        assert_eq!(
-            render_template("絵文字🎨も壊さない", &env).unwrap(),
-            "絵文字🎨も壊さない"
-        );
-    }
-
-    #[test]
-    fn render_template_unterminated_offset_is_a_byte_index() {
-        let params = serde_json::json!({ "extras": { "prompt": "夜の街" } });
-        let inputs = vec![card_fixture("asset-uuid", "/tmp/写真.png")];
-        let ctx = stub_ctx(&inputs, &params);
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        // `夜` is 3 bytes, so the unterminated `{{` opens at byte 3 —
-        // the reported offset indexes bytes, not chars.
-        let err = render_template("夜{{a", &env).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("byte 3"), "unexpected message: {msg}");
-    }
-
-    #[test]
-    fn jsonpath_first_and_many_navigate_the_documented_subset() {
-        let doc = serde_json::json!({
-            "status": "done",
-            "outputs": [
-                {"url": "https://a", "tags": ["cat"]},
-                {"url": "https://b", "tags": ["dog"]}
-            ]
-        });
-        assert_eq!(
-            jsonpath_first(&doc, "$.status"),
-            Some(Value::String("done".into()))
-        );
-        assert_eq!(
-            jsonpath_first(&doc, "$.outputs[0].url"),
-            Some(Value::String("https://a".into()))
-        );
-        assert_eq!(jsonpath_many(&doc, "$.outputs[*]").len(), 2);
-    }
+    // The template and JSONPath mechanics are tested where they are
+    // defined (`asterism_exporter_common::template` / `::jsonpath`).
+    // What stays here is what this crate owns: the params schema, the
+    // shipped example, and the state-machine rules read out of a
+    // response. The example is exercised through the same grammar the
+    // exporter holds, so a test cannot pass against a spelling the
+    // exporter does not use.
 
     #[test]
     fn match_rule_fires_only_on_equal_value() {
+        let exp = HttpExporter::new();
         let doc = serde_json::json!({ "status": "done" });
         let rule = MatchRule {
             path: "$.status".into(),
             equals: Value::String("done".into()),
             message_path: None,
         };
-        assert!(match_rule(&rule, &doc));
+        assert!(exp.match_rule(&rule, &doc));
         let rule_neg = MatchRule {
             path: "$.status".into(),
             equals: Value::String("failed".into()),
             message_path: None,
         };
-        assert!(!match_rule(&rule_neg, &doc));
-    }
-
-    #[test]
-    fn substitute_json_leaves_walks_nested_shapes() {
-        let params = serde_json::json!({ "prompt": "cats" });
-        let input = card_fixture("a", "/x");
-        let inputs = vec![input];
-        let ctx = DispatchContext {
-            inputs: &inputs,
-            selection_id: "s",
-            dispatch_id: "d",
-            persona_id: "p",
-            action: "run",
-            params: &params,
-        };
-        let env = TemplateEnv::pre_handle(&ctx, ctx.params);
-        let body = serde_json::json!({
-            "top": "{{params.prompt}}",
-            "arr": ["{{input[0].source_locator}}", 42, true],
-            "nested": { "field": "{{selection_id}}" }
-        });
-        let out = substitute_json_leaves(&body, &env).unwrap();
-        assert_eq!(out["top"], "cats");
-        assert_eq!(out["arr"][0], "/x");
-        assert_eq!(out["arr"][1], 42);
-        assert_eq!(out["arr"][2], true);
-        assert_eq!(out["nested"]["field"], "s");
+        assert!(!exp.match_rule(&rule_neg, &doc));
     }
 
     /// The shipped example is what `asterism-server schema print
@@ -1062,12 +673,13 @@ mod tests {
         let params: HttpDispatchParams = serde_json::from_value(raw.clone()).unwrap();
         let inputs = vec![card_fixture("asset-uuid", "/tmp/photo.png")];
         let ctx = stub_ctx(&inputs, &raw);
+        let g = CommonExportAdapter;
 
         // dispatch — no handle exists yet.
         let pre = TemplateEnv::pre_handle(&ctx, ctx.params);
-        render_template(&params.dispatch.path, &pre).unwrap();
-        render_headers(&params.dispatch.headers, &pre).unwrap();
-        let body = substitute_json_leaves(&params.dispatch.body_template, &pre).unwrap();
+        g.render(&params.dispatch.path, &pre).unwrap();
+        g.render_headers(&params.dispatch.headers, &pre).unwrap();
+        let body = g.render_json(&params.dispatch.body_template, &pre).unwrap();
         assert_eq!(body["input_url"], "/tmp/photo.png");
         assert_eq!(body["prompt"], "photo studio portrait");
         assert_eq!(body["client_id"], "disp-1");
@@ -1075,32 +687,29 @@ mod tests {
         // poll / harvest — the handle is in play.
         let handle = Value::String("job-1".into());
         let env = TemplateEnv::with_handle(&ctx, ctx.params, &handle);
-        assert_eq!(
-            render_template(&params.poll.path, &env).unwrap(),
-            "/jobs/job-1"
-        );
-        render_headers(&params.poll.headers, &env).unwrap();
-        render_template(&params.harvest.path, &env).unwrap();
-        render_headers(&params.harvest.headers, &env).unwrap();
+        assert_eq!(g.render(&params.poll.path, &env).unwrap(), "/jobs/job-1");
+        g.render_headers(&params.poll.headers, &env).unwrap();
+        g.render(&params.harvest.path, &env).unwrap();
+        g.render_headers(&params.harvest.headers, &env).unwrap();
 
         // harvest.map — the only place `{{item.…}}` resolves.
         let item = serde_json::json!({ "url": "https://renders.test/a.png" });
         let item_env = env.with_item(&item);
         assert_eq!(
-            render_template(&params.harvest.map.locator, &item_env).unwrap(),
+            g.render(&params.harvest.map.locator, &item_env).unwrap(),
             "https://renders.test/a.png"
         );
-        render_template(&params.harvest.map.modality, &item_env).unwrap();
+        g.render(&params.harvest.map.modality, &item_env).unwrap();
         // The example's cover hint is optional (`?`); this item has no
         // caption, so it has to resolve to empty rather than error.
         let cover = params.harvest.map.cover_hint.as_deref().unwrap();
-        assert_eq!(render_template(cover, &item_env).unwrap(), "");
+        assert_eq!(g.render(cover, &item_env).unwrap(), "");
         let labels: Vec<String> = params
             .harvest
             .map
             .labels_static
             .iter()
-            .map(|t| render_template(t, &item_env).unwrap())
+            .map(|t| g.render(t, &item_env).unwrap())
             .collect();
         // The runner prepends `exporter:{slug}` to every Derived's
         // label list and does not dedupe
@@ -1115,11 +724,12 @@ mod tests {
     /// the file is JSONPath, and nothing had ever evaluated one — a
     /// `$.ouputs[*]` typo would harvest zero items against a backend
     /// doing everything right, silently. Every path the example ships
-    /// is evaluated here through the same `jsonpath_first` /
-    /// `jsonpath_many` the exporter calls.
+    /// is evaluated here through the same grammar the exporter holds.
     #[test]
     fn params_example_jsonpaths_resolve_against_a_representative_response() {
         let params: HttpDispatchParams = serde_json::from_str(params_example_json()).unwrap();
+        let exp = HttpExporter::new();
+        let g = CommonExportAdapter;
         // One document standing in for all three phases: the fields
         // the paths reach are disjoint, so a single response exercises
         // every path without pretending the backend returns this shape
@@ -1138,22 +748,22 @@ mod tests {
         // dispatch.handle_from — what gets persisted on the Handle and
         // interpolated into every later path.
         assert_eq!(
-            jsonpath_first(&resp, &params.dispatch.handle_from),
+            g.select_first(&resp, &params.dispatch.handle_from),
             Some(Value::String("job-1".into()))
         );
 
         // poll.done_when / failed_when — both sides of the state
         // machine read the same field and differ only in `equals`.
         assert_eq!(
-            jsonpath_first(&resp, &params.poll.done_when.path),
+            g.select_first(&resp, &params.poll.done_when.path),
             Some(Value::String("succeeded".into()))
         );
-        assert!(match_rule(&params.poll.done_when, &resp));
+        assert!(exp.match_rule(&params.poll.done_when, &resp));
         assert_eq!(
-            jsonpath_first(&resp, &params.poll.failed_when.path),
+            g.select_first(&resp, &params.poll.failed_when.path),
             Some(Value::String("succeeded".into()))
         );
-        assert!(!match_rule(&params.poll.failed_when, &resp));
+        assert!(!exp.match_rule(&params.poll.failed_when, &resp));
         let message_path = params
             .poll
             .failed_when
@@ -1161,7 +771,7 @@ mod tests {
             .as_deref()
             .expect("the example ships a failure message path");
         assert_eq!(
-            jsonpath_first(&resp, message_path),
+            g.select_first(&resp, message_path),
             Some(Value::String("upstream refused the workflow".into()))
         );
 
@@ -1172,13 +782,13 @@ mod tests {
             .as_deref()
             .expect("the example ships a progress path");
         assert_eq!(
-            jsonpath_first(&resp, progress_path),
+            g.select_first(&resp, progress_path),
             Some(Value::String("step 12/30".into()))
         );
 
         // harvest.items_path — one Derived per element, and the map's
         // locator has to resolve against each of them.
-        let items = jsonpath_many(&resp, &params.harvest.items_path);
+        let items = g.select(&resp, &params.harvest.items_path);
         assert_eq!(items.len(), 2, "the wildcard has to reach every output");
 
         let raw: Value = serde_json::from_str(params_example_json()).unwrap();
@@ -1189,7 +799,7 @@ mod tests {
         let mut locators: Vec<String> = Vec::new();
         for item in &items {
             let item_env = env.with_item(item);
-            locators.push(render_template(&params.harvest.map.locator, &item_env).unwrap());
+            locators.push(g.render(&params.harvest.map.locator, &item_env).unwrap());
         }
         assert_eq!(
             locators,

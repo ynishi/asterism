@@ -1,0 +1,23 @@
+[package]
+name        = "asterism-exporter-common"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+homepage.workspace    = true
+description = "Shared machinery for schema-driven Asterism exporters — the {{...}} substitution and JSONPath subset a profile is written in, behind traits the concrete adapters take in"
+publish     = false
+
+[lib]
+
+[dependencies]
+# Depends on the port, never the reverse. `TemplateEnv` resolves
+# against a `DispatchContext` and reports through `ExporterError`, so
+# this crate sits between the SDK and the concrete adapters: the SDK
+# stays the contract a backend author reads, this crate stays the
+# implementation two adapters happen to share.
+asterism-contract     = { path = "../asterism-contract" }
+asterism-dispatch-sdk = { path = "../asterism-dispatch-sdk" }
+
+serde_json = { workspace = true }

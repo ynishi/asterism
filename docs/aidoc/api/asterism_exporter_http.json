@@ -25,7 +25,7 @@
     {
       "path": "asterism_exporter_http::HttpExporter",
       "kind": "struct",
-      "docs": "HTTP-backed schema-driven [`Exporter`]."
+      "docs": "HTTP-backed schema-driven [`Exporter`].\n\n`A` is the profile grammar — substitution and path selection — and\ndefaults to the shipped [`CommonExportAdapter`], so the ordinary\nconstructors name no type parameter at all."
     },
     {
       "path": "asterism_exporter_http::MatchRule",

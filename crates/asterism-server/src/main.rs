@@ -123,7 +123,7 @@ enum SchemaAction {
 /// Every schema `schema list` / `schema print` can serve.
 ///
 /// Statically composed at compile time from the SDK's
-/// [`asterism_dispatch_sdk::SDK_SCHEMAS`] plus the three exporters
+/// [`asterism_dispatch_sdk::SDK_SCHEMAS`] plus the four exporters
 /// currently in the workspace. Phase 2 will replace the exporter
 /// entries with a runtime walk over the `ExporterRegistry` so new
 /// adapters register themselves; Phase 1 keeps the composition
@@ -142,6 +142,10 @@ fn all_schemas() -> Vec<asterism_dispatch_sdk::SdkSchemaEntry> {
     out.push((
         asterism_exporter_http::SCHEMA_NAME,
         asterism_exporter_http::params_example_json,
+    ));
+    out.push((
+        asterism_exporter_cloud::SCHEMA_NAME,
+        asterism_exporter_cloud::params_example_json,
     ));
     out
 }
