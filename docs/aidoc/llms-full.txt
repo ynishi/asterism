@@ -600,6 +600,7 @@ the private design notes.
 - [`domain::constellation`](domain__constellation.md): Constellation edge planning — pure domain logic that decides how a
 - [`domain::content_hash`](domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [`domain::content_region`](domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
+- [`domain::derived_text`](domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
@@ -608,6 +609,7 @@ the private design notes.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
+- [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -2573,6 +2575,107 @@ exactly that collision.
 - `UNSUPPORTED_PREFIX` — Tag on every value that says "no digest on this axis, use the file
 
 
+<!-- asterism_core/domain__derived_text.md -->
+# asterism-core::domain::derived_text
+
+Derived text — the one string an asset offers a full-text index,
+assembled from everything the row already says about itself.
+
+# The gap this fills
+
+Until this module existed, "what does search see" had exactly one
+answer: the bytes of the original, when those bytes were text. A
+conversation transcript was searchable and a picture was not, and
+the picture was not searchable *even though the library already
+held sentences about it* — a title somebody typed, the alt text an
+importer lifted out of the page it came from, the keywords the
+auto-tag pass wrote, the generation prompt sitting in a PNG `tEXt`
+chunk, a note a person left in the comment thread. Every one of
+those is text, on the row, already stored. None of them reached the
+index, so the honest description of the search surface was "text
+files only", and a library that is mostly pictures had mostly
+nothing to search.
+
+The fix is not a new store. It is to stop treating "the body" as a
+synonym for "the file's bytes": the body an index wants is a
+*projection* of the asset, and the file is one field of it.
+
+# Why a pure function
+
+Composition happens here, in the domain, and not in the job that
+writes the index, for the ordinary reason — the rule for what is
+searchable about an asset is a statement about assets, and a rule
+that lives inside an infrastructure handler can only be tested by
+standing up a queue. The handler's job is to *fetch* (the file, the
+comment thread) and to *write* (the body cache, the two indexes);
+deciding what the text is belongs to the entity that has the
+fields.
+
+The two inputs the asset cannot supply itself are arguments rather
+than ports, for the same reason: `file_body` lives behind a reader
+of the outside world and `comment_bodies` behind a second
+aggregate's repository. Handing them in keeps this function total,
+synchronous, and free of a trait object.
+
+# What is deliberately left out
+
+- **`_trace` apart from `meta`.** The trace bag holds Album's own
+  bookkeeping — provenance claims, a declared hash and its verdict,
+  resolution flags. Those are assertions *about the record*, not
+  words about the subject, and indexing them would put an internal
+  status word in the same haystack as a person's sentence. Only
+  [`album_meta::META_KEY`] — the zone whose whole purpose is "a
+  statement somebody made, under a name they chose" — is read.
+- **The `source` / `operator` / `declared_at_ms` fields of a
+  declared-meta entry.** They describe the statement, not its
+  content; `manual` appearing in every document is a term that
+  matches everything and distinguishes nothing.
+- **Identifiers.** No `AssetId`, no locator, no persona id. A UUID
+  is not a word, and a locator is already the address the row is
+  found by.
+- **Tags.** The one exclusion here that is a *judgement* rather than
+  a type argument, so it is written down. A tag is already a precise
+  instrument: the sidebar filters on it, `tag_counts` counts it, and
+  a person who tagged something can get back exactly the set they
+  tagged. Full text is the opposite instrument — it exists for the
+  words somebody would guess, which is why a picture needs it and a
+  tag does not [Furnas et al. 1987: two people choose the same term
+  for one thing under 20% of the time, which is the case *for*
+  indexing prose and *against* diluting it with a controlled
+  vocabulary that already answers exactly]. Folding tags in would
+  also make every tag rename a re-composition of every document that
+  carried it.
+
+  Reversing this is a decision somebody may make, and it is not a
+  one-line change: it needs [`COMPOSITION_VERSION`] raised (so the
+  walk re-composes the library) and a re-index wired into all seven
+  tag verbs on `AssetService` — `attach_tag`, `detach_tag`, their two
+  batch forms, `rename_tag`, `delete_tag` and `merge_tags` — since
+  none of them touches the asset row today.
+
+# Ordering
+
+Sections come out in a fixed order — file body, title, cover,
+labels, keywords, register note, material metadata (recovered text
+then the digest's body), declared meta, comments — so the derived
+string is a function of the asset's state
+and nothing else. Two runs over an unchanged row produce the same
+bytes, which is what makes "the body cache is stale" a decidable
+question rather than a diff of two orderings.
+
+Nothing here is a ranking signal: the joined string is one flat
+field, so a title does not outweigh a comment. Field-weighted
+scoring is a change to the index schema, not to this function.
+
+## Functions
+
+- `derive_text` — Builds the indexable text for one asset, or `None` when the row has
+
+## Constants
+
+- `COMPOSITION_VERSION` — Which reading of an asset a cached body was composed by.
+
+
 <!-- asterism_core/domain__dir.md -->
 # asterism-core::domain::dir
 
@@ -2977,6 +3080,72 @@ not stored here — they are derived from the `asset_tag` table on demand.
 - `EdgeDirection` — Which side of a [`ConstellationEdge`] a given asset sits on.
 - `EdgeKind` — Axis along which an edge is created.
 - `IncidentEdge` — An edge as seen from one endpoint's perspective — the pair
+
+
+<!-- asterism_core/domain__embedded_text.md -->
+# asterism-core::domain::embedded_text
+
+`embedded_text` — the words a container wrote *into* an artefact,
+recovered for search rather than for identity.
+
+# Why this is not [`material_meta`](crate::domain::material_meta)
+
+The two read the same chunks off the same bytes and answer different
+questions, and the difference is the reason both exist.
+
+`material_meta` defines a **digest**. Its reading of a file has to be
+total and frozen: two equal metadata sets must render identically or
+the axis stops grouping, so that module fixes one decoding, reads
+`tEXt` and nothing else, and says so — "a different answer is a `m2-`
+generation rather than an edit". Widening it would silently redefine
+what every stored `meta_hash` meant.
+
+This module defines a **document**. Nothing downstream compares two
+of its outputs for equality; the output is tokenised and thrown into
+a haystack. So it can be generous where the digest cannot:
+
+- **`zTXt` and `iTXt` are read.** Compressed and international text
+  were excluded from both stored axes — "a stated gap rather than a
+  silent one" — and the gap is only defensible for a digest. A
+  caption a person can see in their image viewer and cannot find by
+  searching for it is the whole complaint this answers.
+- **Latin-1 is recovered rather than replaced.** `tEXt` is Latin-1
+  by the spec and arbitrary bytes in practice, so the digest side
+  reads it with [`String::from_utf8_lossy`], which turns every byte
+  above 0x7F that is not part of a valid UTF-8 sequence into
+  U+FFFD — a total function, which is what a digest needs, and a
+  shredder for the accented words in `Café` or `Größe`. Here the
+  bytes are tried as UTF-8 first (what generators actually write,
+  spec or no spec) and read as Latin-1 when that fails, so no byte
+  is lost either way.
+- **A malformed tail keeps what came before it.** The digest side
+  refuses a chunk sequence that never reaches `IEND`, because what
+  it collected is part of a file rather than a file. A truncated
+  file's caption is still a caption, so the walk stops and keeps.
+
+# PNG only
+
+The same bound its two siblings carry. EXIF, XMP and ID3 all hold
+words about their artefact and none of them is read here — the
+recovery is per-container-format work, and this is the format the
+corpus's text actually travels in. [`walks_format`] is what a caller
+asks before spending a read.
+
+# Where the bytes come from
+
+From the caller, as a slice, and only ever from the pass that is
+already holding them: `fingerprint::hash_artefact` reads an artefact
+once and answers every axis off that one buffer, and this is a third
+walk over memory already paid for. Nothing on the indexing path
+opens a file for this — the recovered text is stored on the material
+(`material.meta_text`), and a job that re-composes a document reads
+the column.
+
+## Functions
+
+- `recover` — Recovers every text annotation an artefact carries, keyed by the
+- `render` — Renders recovered fields the way the column stores them.
+- `walks_format` — Whether a declared format has a recovery walk here — the question a
 
 
 <!-- asterism_core/domain__group.md -->
@@ -7831,6 +8000,7 @@ for later modalities.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
+- `material_text` — Recovers `material.meta_text` for the library that predates the
 - `observation_sweep` — Expires observations past their stream's declared retention.
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:

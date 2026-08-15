@@ -58,6 +58,7 @@
 - [asterism-core::domain::constellation](asterism_core/domain__constellation.md): Constellation edge planning — pure domain logic that decides how a
 - [asterism-core::domain::content_hash](asterism_core/domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [asterism-core::domain::content_region](asterism_core/domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
+- [asterism-core::domain::derived_text](asterism_core/domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [asterism-core::domain::dir](asterism_core/domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [asterism-core::domain::disclosure](asterism_core/domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
 - [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
@@ -66,6 +67,7 @@
 - [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
+- [asterism-core::domain::embedded_text](asterism_core/domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
