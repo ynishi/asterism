@@ -1954,9 +1954,21 @@ pub struct RedispatchCommand {
 /// the intent up front. An empty pursuit that never receives work is
 /// an honest record, closable as abandoned.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct OpenPursuitCommand {
     /// Owner persona id.
     pub persona_id: String,
+    /// Id to create the pursuit at, instead of a minted one. The
+    /// repair case the server cannot solve alone: an artefact came
+    /// back naming a pursuit that does not exist here (a sidecar
+    /// written on another machine, a restore that outran its
+    /// pursuit), the claim was recorded unresolved, and creating the
+    /// pursuit under that exact id is what lets the re-resolve sweep
+    /// join the two. `None` mints one, which is the ordinary path.
+    /// Taken as given, never checked for meaning: an id already in use
+    /// is refused as a conflict rather than merged into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
     /// Pursuit this one is spawned from — set at creation, immutable,
     /// same persona. `None` for a root pursuit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1967,12 +1979,19 @@ pub struct OpenPursuitCommand {
     /// One short free-text slot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Caller-asserted operator slug, like
+    /// [`CreateDispatchCommand::operator_ai`]. Recorded on the pursuit
+    /// row so a line of work an agent opened says so; omitting it
+    /// records nothing rather than the owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
 }
 
 /// Closes a pursuit (#29): records a one-way lifecycle fact, never a
 /// status write. A repeat close is a new fact — standing re-derives
 /// from the latest event.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ClosePursuitCommand {
     /// The pursuit to close.
     pub pursuit_id: String,
@@ -1989,17 +2008,27 @@ pub struct ClosePursuitCommand {
     /// One short free-text slot on the event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Caller-asserted operator slug, recorded on the event — who
+    /// concluded the line of work, in the same sense as
+    /// [`OpenPursuitCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
 }
 
 /// Reopens a pursuit (#29). Legal on an already-open pursuit: the
 /// fact is recorded and standing does not change.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ReopenPursuitCommand {
     /// The pursuit to reopen.
     pub pursuit_id: String,
     /// One short free-text slot on the event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Caller-asserted operator slug, recorded on the event — see
+    /// [`OpenPursuitCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
 }
 
 /// Moves a dispatch's pursuit filing — the restamp repair verb (#29),
@@ -2013,11 +2042,17 @@ pub struct ReopenPursuitCommand {
 /// (compare-and-swap against the caller's own read is a possible
 /// later addition, not a promise this verb makes).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct RestampDispatchCommand {
     /// The dispatch round to re-file.
     pub dispatch_id: String,
     /// The pursuit to file it under.
     pub to_pursuit_id: String,
+    /// Caller-asserted operator slug, recorded on the restamp row —
+    /// who filed the correction, which is a different question from
+    /// who ran the round being moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
 }
 
 /// Creates a Query Group — a Group whose membership is the

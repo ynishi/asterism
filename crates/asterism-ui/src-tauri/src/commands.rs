@@ -13,36 +13,38 @@
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
-    AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, CreateDirCommand,
-    CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
-    CreateQueryGroupCommand, CreateSnapshotCommand, CreateThreadCommand, DeleteAssetCommentCommand,
-    DeleteChapterMarkCommand, DeleteDirCommand, DeleteMaterialLayerCommand,
-    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
-    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSessionCommand,
-    DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
-    DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
-    EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
-    MoveDirCommand, MoveGroupToDirCommand, PasteImageImportCommand, PatchSessionMetadataCommand,
+    AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, ClosePursuitCommand,
+    CreateDirCommand, CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand,
+    CreateModalityCommand, CreateQueryGroupCommand, CreateSnapshotCommand, CreateThreadCommand,
+    DeleteAssetCommentCommand, DeleteChapterMarkCommand, DeleteDirCommand,
+    DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
+    DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
+    DeleteSessionCommand, DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult,
+    DetachTagCommand, DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand,
+    EditMaterialMarkCommand, EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand,
+    MergeAssetsCommand, MergeGroupsCommand, MoveDirCommand, MoveGroupToDirCommand,
+    OpenPursuitCommand, PasteImageImportCommand, PatchSessionMetadataCommand,
     PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
     PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
     PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
     PurgePersonaCommand, RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand,
-    RenameDirCommand, RenameGroupCommand, RenameSessionCommand, ReorderGroupAssetsCommand,
-    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
-    ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
-    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
-    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
-    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand,
+    RenameDirCommand, RenameGroupCommand, RenameSessionCommand, ReopenPursuitCommand,
+    ReorderGroupAssetsCommand, ReorderGroupChildrenCommand, ReorderPersonasCommand,
+    ResetSettingCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetPageDto,
     AssetTextDto, ChapterMarkDto, ConstellationItemDto, DirDto, DispatchDto, DuplicateConflictDto,
     DuplicateReportDto, DuplicateResolutionDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto,
     MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto,
-    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, RetrievedPageDto, SessionDto,
-    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto,
+    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, PursuitDto, PursuitEventDto,
+    PursuitViewDto, RetrievedPageDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto,
+    TagCountDto, TagDto, ThreadDto,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::domain::attribution::AttributionContext;
@@ -1615,6 +1617,114 @@ pub async fn redispatch(
         .dispatch_service
         .redispatch(command, &AttributionContext::owner_surface())
         .await?)
+}
+
+// ---------------------------------------------------------------------------
+// Pursuit — the line of work a dispatch files itself under (#29).
+//
+// Attribution is `owner_surface` throughout, like every other command in
+// this file: a write arriving here came from the person sitting in front
+// of the window. The commands carry an `operator_ai` field for the
+// remote surfaces, and it is deliberately not read here — an agent slug
+// stated to the desktop app would be a claim about somebody else.
+// ---------------------------------------------------------------------------
+
+/// Opens a pursuit and names what it is for, ahead of the first round.
+///
+/// Not required to have one: a dispatch started without a `pursuit_id`
+/// mints its own. This is the "start a new line of work" affordance, and
+/// the path that creates a pursuit at an id a returning artefact already
+/// claims.
+#[tauri::command]
+pub async fn open_pursuit(
+    state: State<'_, AppState>,
+    command: OpenPursuitCommand,
+) -> Result<PursuitDto, UiError> {
+    Ok(state
+        .pursuit_service
+        .open(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Records that a pursuit concluded — `satisfied` (freezing the kept set
+/// into a snapshot the event references) or `abandoned`.
+///
+/// An event, not a status write: closing twice records two facts and
+/// standing derives from the later one, and nothing happens to the
+/// assets themselves.
+#[tauri::command]
+pub async fn close_pursuit(
+    state: State<'_, AppState>,
+    command: ClosePursuitCommand,
+) -> Result<PursuitEventDto, UiError> {
+    Ok(state
+        .pursuit_service
+        .close(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Records that a pursuit carried on after a close. Legal on one that is
+/// already open, where it leaves a fact and changes no standing.
+#[tauri::command]
+pub async fn reopen_pursuit(
+    state: State<'_, AppState>,
+    command: ReopenPursuitCommand,
+) -> Result<PursuitEventDto, UiError> {
+    Ok(state
+        .pursuit_service
+        .reopen(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Re-files a dispatch round under another pursuit, recording the filing
+/// it replaced. The repair verb for work that landed in the wrong line;
+/// what happened in the round is untouched and the move never crosses
+/// personas.
+#[tauri::command]
+pub async fn restamp_dispatch(
+    state: State<'_, AppState>,
+    command: RestampDispatchCommand,
+) -> Result<DispatchDto, UiError> {
+    Ok(state
+        .pursuit_service
+        .restamp_dispatch(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// One pursuit with its standing derived from the latest event.
+#[tauri::command]
+pub async fn get_pursuit(state: State<'_, AppState>, id: String) -> Result<PursuitDto, UiError> {
+    Ok(state.pursuit_service.get(&id).await?)
+}
+
+/// A persona's pursuits, most-recent first, each with its standing —
+/// the multi-pursuit overview's read.
+#[tauri::command]
+pub async fn list_pursuits(
+    state: State<'_, AppState>,
+    persona_id: String,
+    limit: u32,
+) -> Result<Vec<PursuitDto>, UiError> {
+    Ok(state.pursuit_service.list(&persona_id, limit).await?)
+}
+
+/// A pursuit's lifecycle facts, oldest first.
+#[tauri::command]
+pub async fn pursuit_events(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<PursuitEventDto>, UiError> {
+    Ok(state.pursuit_service.events(&id).await?)
+}
+
+/// One pursuit opened up: the row and its standing, the rounds filed
+/// under it, the returns that resolved to it, and its events.
+#[tauri::command]
+pub async fn pursuit_view(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<PursuitViewDto, UiError> {
+    Ok(state.pursuit_service.view(&id).await?)
 }
 
 // ---------------------------------------------------------------------------

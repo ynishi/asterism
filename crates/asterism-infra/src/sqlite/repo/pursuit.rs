@@ -221,7 +221,20 @@ impl PursuitRepository for SqlitePursuitRepository {
                 Ok(())
             })
             .await
-            .map_err(infra_err)
+            .map_err(|err| {
+                // Primary-key violation → `Conflict` (409 at the HTTP
+                // boundary), the modality adapter's mapping. Unreachable
+                // while every id is minted; it stops being unreachable
+                // with the caller-chosen id the repair path opens, and a
+                // taken id is a real answer to give back rather than a
+                // 500.
+                let msg = err.to_string();
+                if msg.contains("UNIQUE") || msg.contains("unique") {
+                    DomainError::Conflict(format!("pursuit {id} already exists"))
+                } else {
+                    infra_err(err)
+                }
+            })
     }
 
     async fn find(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {

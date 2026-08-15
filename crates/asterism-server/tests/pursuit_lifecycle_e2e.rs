@@ -108,9 +108,11 @@ async fn open(
         .open(
             OpenPursuitCommand {
                 persona_id: persona_id.to_string(),
+                pursuit_id: None,
                 parent_pursuit_id: parent.map(str::to_string),
                 title: title.map(str::to_string),
                 note: None,
+                operator_ai: None,
             },
             &unattributed(),
         )
@@ -131,6 +133,7 @@ async fn close(
                 outcome: outcome.into(),
                 kept_asset_ids: kept,
                 note: None,
+                operator_ai: None,
             },
             &unattributed(),
         )
@@ -158,9 +161,11 @@ async fn open_names_intent_and_walls_parenthood() {
         .open(
             OpenPursuitCommand {
                 persona_id: stranger.id.clone(),
+                pursuit_id: None,
                 parent_pursuit_id: Some(root.id.clone()),
                 title: None,
                 note: None,
+                operator_ai: None,
             },
             &unattributed(),
         )
@@ -284,6 +289,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
             ReopenPursuitCommand {
                 pursuit_id: pursuit.id.clone(),
                 note: Some("second thoughts".into()),
+                operator_ai: None,
             },
             &unattributed(),
         )
@@ -369,6 +375,7 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
             RestampDispatchCommand {
                 dispatch_id: round.id.clone(),
                 to_pursuit_id: target.id.clone(),
+                operator_ai: None,
             },
             &unattributed(),
         )
@@ -384,6 +391,7 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
             RestampDispatchCommand {
                 dispatch_id: round.id.clone(),
                 to_pursuit_id: foreign.id.clone(),
+                operator_ai: None,
             },
             &unattributed(),
         )
