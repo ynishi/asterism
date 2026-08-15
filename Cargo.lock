@@ -375,6 +375,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "asterism-exporter-cloud"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "asterism-contract",
+ "asterism-dispatch-sdk",
+ "asterism-exporter-common",
+ "async-trait",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "asterism-exporter-comfy"
 version = "0.0.0"
 dependencies = [
@@ -609,6 +626,7 @@ dependencies = [
  "asterism-contract",
  "asterism-core",
  "asterism-dispatch-sdk",
+ "asterism-exporter-cloud",
  "asterism-exporter-comfy",
  "asterism-exporter-file",
  "asterism-exporter-http",
@@ -619,6 +637,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "dotenvy",
  "http-body-util",
  "reqwest 0.12.28",
  "rmcp",
