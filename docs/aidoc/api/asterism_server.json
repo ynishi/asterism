@@ -45,7 +45,7 @@
     {
       "path": "asterism_server::http",
       "kind": "module",
-      "docs": "HTTP transport — axum router.\n\nRoute conventions: RPC-style endpoints that mirror the Tauri command\nsurface (for example `POST /asterism/assets/add`). Contract DTOs are\nreused verbatim so the same shape flows through the HTTP body, the\nTauri IPC bridge, and the MCP tool schemas (`crate::mcp`, nested on\nthis router at `/mcp`).\n\nThe server is bound to loopback in v1 and does not authenticate\nrequests."
+      "docs": "HTTP transport — axum router.\n\nRoute conventions: RPC-style endpoints that mirror the Tauri command\nsurface (for example `POST /asterism/assets/add`). Contract DTOs are\nreused verbatim so the same shape flows through the HTTP body, the\nTauri IPC bridge, and the MCP tool schemas (`crate::mcp`, nested on\nthis router at `/mcp`).\n\nThe server is bound to loopback in v1 and does not authenticate\nrequests.\n\n# Why the pursuit routes are plural\n\n`dispatch` is singular here and `snapshots` is plural, so the\npursuit family had to pick one rather than match whichever\nneighbour was read last. It is plural (`/asterism/pursuits/...`)\nbecause it has the shape the plural families have and `dispatch`\ndoes not: a collection read that answers with many rows\n(`GET /asterism/pursuits?persona_id=…`, the multi-pursuit overview\nthe design calls a first-class need) alongside the per-id reads.\n`personas`, `assets`, `groups`, `snapshots` and `threads` are all\nspelled that way; `dispatch` is the outlier, and one outlier is not\na convention to extend."
     },
     {
       "path": "asterism_server::http::record_webview_diag",
@@ -101,6 +101,11 @@
       "path": "asterism_server::mcp::MaterialMarksParams",
       "kind": "struct",
       "docs": "`material_marks` input."
+    },
+    {
+      "path": "asterism_server::mcp::PursuitViewParams",
+      "kind": "struct",
+      "docs": "`pursuit_view` input."
     },
     {
       "path": "asterism_server::mcp::streamable_service",

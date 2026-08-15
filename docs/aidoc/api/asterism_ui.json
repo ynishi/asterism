@@ -103,6 +103,11 @@
       "docs": "Bulk attach / detach of asset↔group pairs. Returns\n`[attached, detached]` written-row counts."
     },
     {
+      "path": "asterism_ui::commands::close_pursuit",
+      "kind": "function",
+      "docs": "Records that a pursuit concluded — `satisfied` (freezing the kept set\ninto a snapshot the event references) or `abandoned`.\n\nAn event, not a status write: closing twice records two facts and\nstanding derives from the later one, and nothing happens to the\nassets themselves."
+    },
+    {
       "path": "asterism_ui::commands::create_dir",
       "kind": "function",
       "docs": "Creates a Dir under the given persona."
@@ -258,6 +263,11 @@
       "docs": "Fetches the persona's UI chrome (wallpaper reference). `None`\nmeans no custom theme is set."
     },
     {
+      "path": "asterism_ui::commands::get_pursuit",
+      "kind": "function",
+      "docs": "One pursuit with its standing derived from the latest event."
+    },
+    {
       "path": "asterism_ui::commands::get_session",
       "kind": "function",
       "docs": "Fetches one Session by surrogate id (`None` when absent). Used\nby SessionsView after an inline edit to re-hydrate the tile\nwithout a full `list_sessions` round-trip. Contract:\n[`SessionService::get`](asterism_core::application::SessionService::get)."
@@ -393,6 +403,11 @@
       "docs": "Lists every persona (used to render the sidebar)."
     },
     {
+      "path": "asterism_ui::commands::list_pursuits",
+      "kind": "function",
+      "docs": "A persona's pursuits, most-recent first, each with its standing —\nthe multi-pursuit overview's read."
+    },
+    {
       "path": "asterism_ui::commands::list_sessions",
       "kind": "function",
       "docs": "Sessions view — one row per `session_id` in the query scope.\nSame `ListAssetsQuery` shape as the Messages view; the UI wires\nits view-mode toggle to swap `list_assets` ↔ `list_sessions`."
@@ -441,6 +456,11 @@
       "path": "asterism_ui::commands::move_group_to_dir",
       "kind": "function",
       "docs": "Files a Group under a Dir (`None` = back to the root)."
+    },
+    {
+      "path": "asterism_ui::commands::open_pursuit",
+      "kind": "function",
+      "docs": "Opens a pursuit and names what it is for, ahead of the first round.\n\nNot required to have one: a dispatch started without a `pursuit_id`\nmints its own. This is the \"start a new line of work\" affordance, and\nthe path that creates a pursuit at an id a returning artefact already\nclaims."
     },
     {
       "path": "asterism_ui::commands::paste_image_import",
@@ -496,6 +516,16 @@
       "path": "asterism_ui::commands::purge_persona",
       "kind": "function",
       "docs": "Permanently deletes an already-trashed persona and everything it\nholds. Conflicts when the persona is still live."
+    },
+    {
+      "path": "asterism_ui::commands::pursuit_events",
+      "kind": "function",
+      "docs": "A pursuit's lifecycle facts, oldest first."
+    },
+    {
+      "path": "asterism_ui::commands::pursuit_view",
+      "kind": "function",
+      "docs": "One pursuit opened up: the row and its standing, the rounds filed\nunder it, the returns that resolved to it, and its events."
     },
     {
       "path": "asterism_ui::commands::random_assets",
@@ -558,6 +588,11 @@
       "docs": "Renames a Session (title-only write). Passing `title: null`\nclears the title back to the untitled state — this is the sole\npath that expresses NULL because\n[`patch_session_metadata`] treats per-field `null` as \"leave\nunchanged\"."
     },
     {
+      "path": "asterism_ui::commands::reopen_pursuit",
+      "kind": "function",
+      "docs": "Records that a pursuit carried on after a close. Legal on one that is\nalready open, where it leaves a fact and changes no standing."
+    },
+    {
       "path": "asterism_ui::commands::reorder_group_assets",
       "kind": "function",
       "docs": "Rewrites the front-to-back order of a Group's assets after a drag."
@@ -581,6 +616,11 @@
       "path": "asterism_ui::commands::resolve_duplicate_conflict",
       "kind": "function",
       "docs": "Answers one duplicate question — `folded` (queues the fold onto\n`keeper_id`, which must be one of the pair) or `kept` (both rows\nstay). Refused when the row was already answered or when either\nside has since been folded away or trashed."
+    },
+    {
+      "path": "asterism_ui::commands::restamp_dispatch",
+      "kind": "function",
+      "docs": "Re-files a dispatch round under another pursuit, recording the filing\nit replaced. The repair verb for work that landed in the wrong line;\nwhat happened in the round is untouched and the move never crosses\npersonas."
     },
     {
       "path": "asterism_ui::commands::restore_asset",

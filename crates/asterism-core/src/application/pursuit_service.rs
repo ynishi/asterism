@@ -100,14 +100,30 @@ impl PursuitService {
                 Some(id)
             }
         };
-        let pursuit = Pursuit::new(
-            persona_id,
-            parent_id,
-            command.title,
-            command.note,
-            Utc::now(),
-            attribution,
-        );
+        // A caller-chosen id is the repair path (a returning artefact
+        // claimed a pursuit that has no row here); absent, the id is
+        // minted like every other open. Either way the create is a
+        // create — an id already taken collides at the repository
+        // rather than adopting the row that is there.
+        let pursuit = match command.pursuit_id.as_deref() {
+            None => Pursuit::new(
+                persona_id,
+                parent_id,
+                command.title,
+                command.note,
+                Utc::now(),
+                attribution,
+            ),
+            Some(wire) => Pursuit::new_at(
+                parse_pursuit_id(wire)?,
+                persona_id,
+                parent_id,
+                command.title,
+                command.note,
+                Utc::now(),
+                attribution,
+            ),
+        };
         self.pursuits.create(&pursuit).await?;
         // Fresh row, no events yet: standing is open by definition.
         Ok(pursuit_to_dto(&pursuit, "open"))

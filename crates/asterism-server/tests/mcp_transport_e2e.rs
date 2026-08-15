@@ -248,6 +248,11 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "material_layers",
             "material_mark_add",
             "material_marks",
+            "pursuit_close",
+            "pursuit_open",
+            "pursuit_reopen",
+            "pursuit_restamp_dispatch",
+            "pursuit_view",
         ],
         "the curated tool vocabulary changed"
     );
@@ -505,4 +510,141 @@ async fn mcp_tools_read_and_write_the_same_ledger_as_http() {
         error["kind"], "NotFound",
         "tool errors carry the HTTP boundary's kind: {error}"
     );
+}
+
+/// The agent-facing half of the pursuit surface: name the line of work,
+/// file a round under it, and read back what is in it.
+///
+/// The dispatch itself is started over HTTP because there is no tool for
+/// it — which is the point of the read: an agent that named the pursuit
+/// can see the round somebody else filed under it, because both surfaces
+/// write the same rows.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let corpus = tmp.path().join("corpus");
+    std::fs::create_dir_all(&corpus).expect("corpus dir");
+    let file = corpus.join("plate.md");
+    std::fs::write(&file, "# plate\n").expect("write file");
+
+    let (core, router) = harness(tmp.path()).await;
+    let unattributed = asterism_core::domain::attribution::AttributionContext::asserted(None, None)
+        .expect("stating no author and no operator is always valid");
+    let persona = core
+        .persona_service
+        .register(
+            RegisterPersonaCommand {
+                name: "MCP Pursuit".into(),
+                pack_id: Some("e2e-mcp-pursuit".into()),
+            },
+            &unattributed,
+        )
+        .await
+        .expect("register persona");
+    let source = core
+        .asset_service
+        .add(
+            add_command(&persona.id, file.to_str().unwrap()),
+            &unattributed,
+        )
+        .await
+        .expect("add source asset");
+
+    let (session, _) = handshake(&router).await;
+
+    let opened = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            20,
+            "pursuit_open",
+            serde_json::json!({
+                "persona_id": persona.id,
+                "title": "variants for the cover",
+                "operator_ai": "claude-code",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(opened["standing"], "open");
+    let pursuit_id = opened["id"].as_str().expect("pursuit id").to_owned();
+
+    // A round filed under the pursuit the agent just named, through the
+    // surface that has the verb.
+    let snapshot = core
+        .snapshot_service
+        .create(
+            asterism_contract::command::CreateSnapshotCommand {
+                persona_id: persona.id.clone(),
+                asset_ids: vec![source.id.clone()],
+            },
+            &unattributed,
+        )
+        .await
+        .expect("freeze");
+    let round = core
+        .dispatch_service
+        .create(
+            asterism_contract::command::CreateDispatchCommand {
+                snapshot_id: snapshot.id.clone(),
+                exporter_slug: "file".into(),
+                action: "write".into(),
+                params_json: String::new(),
+                operator_ai: Some("claude-code".into()),
+                pursuit_id: Some(pursuit_id.clone()),
+            },
+            &unattributed,
+        )
+        .await
+        .expect("dispatch under the named pursuit");
+    assert_eq!(round.pursuit_id.as_deref(), Some(pursuit_id.as_str()));
+
+    let view = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            21,
+            "pursuit_view",
+            serde_json::json!({ "pursuit_id": pursuit_id }),
+        )
+        .await,
+    );
+    assert_eq!(view["pursuit"]["standing"], "open");
+    let rounds = view["rounds"].as_array().expect("rounds array");
+    assert_eq!(rounds.len(), 1, "the round reads back: {view}");
+    assert_eq!(rounds[0]["id"], serde_json::json!(round.id));
+
+    // Concluding it is a recorded act with a frozen kept set, and the
+    // standing the next read gives back.
+    let closed = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            22,
+            "pursuit_close",
+            serde_json::json!({
+                "pursuit_id": pursuit_id,
+                "outcome": "satisfied",
+                "kept_asset_ids": [source.id],
+                "operator_ai": "claude-code",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(closed["kind"], "closed_satisfied");
+    assert!(
+        closed["snapshot_id"].is_string(),
+        "a satisfied close freezes what it kept: {closed}"
+    );
+    let after = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            23,
+            "pursuit_view",
+            serde_json::json!({ "pursuit_id": pursuit_id }),
+        )
+        .await,
+    );
+    assert_eq!(after["pursuit"]["standing"], "closed_satisfied");
 }

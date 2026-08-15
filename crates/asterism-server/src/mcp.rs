@@ -29,8 +29,9 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    AddAssetCommand, DeclareAssetMetaCommand, MergeAssetsCommand, PostAssetCommentCommand,
-    PostMaterialMarkCommand, ResolveDuplicateConflictCommand,
+    AddAssetCommand, ClosePursuitCommand, DeclareAssetMetaCommand, MergeAssetsCommand,
+    OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand, ReopenPursuitCommand,
+    ResolveDuplicateConflictCommand, RestampDispatchCommand,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
@@ -132,6 +133,15 @@ pub struct DispatchGetParams {
     /// Dispatch id (returned by the export that created it, and
     /// stamped on derived assets' provenance).
     pub dispatch_id: String,
+}
+
+/// `pursuit_view` input.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct PursuitViewParams {
+    /// Pursuit id — returned by `pursuit_open`, stamped on every
+    /// dispatch (`pursuit_id`), and carried in exporter sidecars.
+    pub pursuit_id: String,
 }
 
 /// `duplicate_conflicts` input — the same persona / limit pair the
@@ -483,6 +493,96 @@ impl AsterismMcp {
             Err(err) => Ok(domain_error(err)),
         }
     }
+
+    #[tool(
+        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. Optional: a dispatch that arrives unstamped mints one anyway, so this is for naming the line of work up front and then passing `pursuit_id` on the dispatches you start. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
+    )]
+    async fn pursuit_open(
+        &self,
+        Parameters(command): Parameters<OpenPursuitCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self.ctx.pursuit_service.open(command, &attribution).await {
+            Ok(pursuit) => ok_json(&pursuit),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` freezes `kept_asset_ids` into a snapshot the event references — the conclusion as a set, immediately usable as the input of a next dispatch; order does not matter (the server sorts and dedupes) and an empty list is the defined \"concluded with nothing kept\". `outcome: \"abandoned\"` records the ending and must keep nothing. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; a later round can still file under this pursuit."
+    )]
+    async fn pursuit_close(
+        &self,
+        Parameters(command): Parameters<ClosePursuitCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self.ctx.pursuit_service.close(command, &attribution).await {
+            Ok(event) => ok_json(&event),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Record that a closed pursuit carried on. Appends a fact and re-derives standing to open; doing it to an already-open pursuit is legal and changes nothing but the log."
+    )]
+    async fn pursuit_reopen(
+        &self,
+        Parameters(command): Parameters<ReopenPursuitCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self.ctx.pursuit_service.reopen(command, &attribution).await {
+            Ok(event) => ok_json(&event),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Re-file a dispatch round under a different pursuit: the repair verb for work that landed in the wrong line, including a round you filed yourself under a pursuit you had just minted by accident. The move is recorded with the filing it replaced, the round's returns follow through the dispatch join, and nothing about what happened in the round changes. A target in another persona is refused. Correcting a mis-filing is itself on the record — which is the point; do not use it to re-file rounds whose filing you did not put there without being asked to."
+    )]
+    async fn pursuit_restamp_dispatch(
+        &self,
+        Parameters(command): Parameters<RestampDispatchCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self
+            .ctx
+            .pursuit_service
+            .restamp_dispatch(command, &attribution)
+            .await
+        {
+            Ok(dispatch) => ok_json(&dispatch),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), every dispatch round filed under it, the returning assets that resolved to it, and the lifecycle events oldest-first. This is how to check what is already in a line of work before starting another round in it."
+    )]
+    async fn pursuit_view(
+        &self,
+        Parameters(params): Parameters<PursuitViewParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.ctx.pursuit_service.view(&params.pursuit_id).await {
+            Ok(view) => ok_json(&view),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
 }
 
 /// Onboarding guide body. Kept in one place so `list_resources` and
@@ -550,6 +650,18 @@ loopback HTTP on the same port.
    are two separate things and leaves both rows alone. A pair is asked
    about once: whichever answer is given, it is not raised again.
 10. `dispatch_get` — one outbound dispatch's persisted state.
+11. `pursuit_open` / `pursuit_view` / `pursuit_close` / `pursuit_reopen`
+    — the line of work rounds and returns are filed under. Every
+    dispatch belongs to one whether or not anybody named it: start a
+    dispatch without a `pursuit_id` and the server mints a pursuit for
+    it. So the useful order is to open one first, name what it is for,
+    and pass its id on the rounds you start; `pursuit_view` then answers
+    "what is already in here" (standing, rounds, returns, events) before
+    you add another. Closing is a recorded fact, not a lock — `satisfied`
+    freezes the kept set into a snapshot you can dispatch from, closing
+    twice leaves two facts, and a later round can still file under a
+    closed pursuit. `pursuit_restamp_dispatch` moves a round that landed
+    in the wrong line; the move is recorded with the filing it replaced.
 
 ## Beyond the tool set
 

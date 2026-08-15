@@ -8,16 +8,29 @@
 //!
 //! The server is bound to loopback in v1 and does not authenticate
 //! requests.
+//!
+//! # Why the pursuit routes are plural
+//!
+//! `dispatch` is singular here and `snapshots` is plural, so the
+//! pursuit family had to pick one rather than match whichever
+//! neighbour was read last. It is plural (`/asterism/pursuits/...`)
+//! because it has the shape the plural families have and `dispatch`
+//! does not: a collection read that answers with many rows
+//! (`GET /asterism/pursuits?persona_id=…`, the multi-pursuit overview
+//! the design calls a first-class need) alongside the per-id reads.
+//! `personas`, `assets`, `groups`, `snapshots` and `threads` are all
+//! spelled that way; `dispatch` is the outlier, and one outlier is not
+//! a convention to extend.
 
 use std::sync::Arc;
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
-    AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, CreateDirCommand,
-    CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
-    CreateQueryGroupCommand, CreateSeriesStrategyCommand, CreateSnapshotCommand,
-    CreateThreadCommand, DeclareAssetMetaCommand, DeclareProvenanceCommand,
+    AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, ClosePursuitCommand,
+    CreateDirCommand, CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand,
+    CreateModalityCommand, CreateQueryGroupCommand, CreateSeriesStrategyCommand,
+    CreateSnapshotCommand, CreateThreadCommand, DeclareAssetMetaCommand, DeclareProvenanceCommand,
     DeleteAssetCommentCommand, DeleteChapterMarkCommand, DeleteDirCommand,
     DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
     DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
@@ -25,21 +38,21 @@ use asterism_contract::command::{
     DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
     DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
     EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
-    MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand,
+    MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand, OpenPursuitCommand,
     OrganizeByLocationCommand, OrganizeByLocationResult, PatchSessionMetadataCommand,
     PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
     PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
     PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
     PurgePersonaCommand, RecordDiagCommand, RecordEventCommand, RedispatchCommand,
     RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
-    RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
-    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
-    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
-    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
-    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
-    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
-    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
-    UpdateSeriesStrategyCommand,
+    RenameSessionCommand, RenameTagCommand, ReopenPursuitCommand, ReorderGroupAssetsCommand,
+    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
+    ResolveDuplicateConflictCommand, RestampDispatchCommand, RestoreAssetCommand,
+    RestoreGroupCommand, RestorePersonaCommand, SetDefaultMaterialLayerCommand,
+    SetPersonaProfileCommand, SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand,
+    TrashGroupCommand, TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
@@ -48,8 +61,9 @@ use asterism_contract::dto::{
     GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
     MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
     ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
-    RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
-    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto, VideoPreviewDto,
+    PursuitDto, PursuitEventDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
+    SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto,
+    ThreadDto, VideoPreviewDto,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -373,6 +387,22 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             post(promote_snapshot_to_group),
         )
         .route("/asterism/dispatch/{id}", get(get_dispatch))
+        // Pursuit — the unit of work every dispatch files itself
+        // under. Always-mint means these rows exist whether or not a
+        // caller ever names one, so the lifecycle verbs are what make
+        // them nameable, closable and repairable from outside the
+        // process. Plural, for the reason the module doc gives.
+        .route("/asterism/pursuits", get(list_pursuits))
+        .route("/asterism/pursuits/open", post(open_pursuit))
+        .route("/asterism/pursuits/close", post(close_pursuit))
+        .route("/asterism/pursuits/reopen", post(reopen_pursuit))
+        .route(
+            "/asterism/pursuits/restamp-dispatch",
+            post(restamp_dispatch),
+        )
+        .route("/asterism/pursuits/{id}", get(get_pursuit))
+        .route("/asterism/pursuits/{id}/events", get(pursuit_events))
+        .route("/asterism/pursuits/{id}/view", get(pursuit_view))
         .route("/asterism/exporters", get(list_exporters))
         // App-level Threads primitive.
         // UI and Claude Code / agents both hit the same rows via
@@ -2634,6 +2664,129 @@ async fn promote_volatile_selection(
 
 async fn list_exporters(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<Vec<String>> {
     Ok(Json(ctx.exporter_registry.slugs()))
+}
+
+// -----------------------------------------------------------------
+// Pursuit — lifecycle verbs and reads (#29 substrate, #34 surface).
+//
+// Attribution: `asserted` with only the operator the command states.
+// A remote caller cannot claim owner-ness (the constructor refuses
+// it), so a pursuit opened over HTTP records the agent that said it
+// was there and nothing else — which is the honest reading of a
+// loopback request that authenticates nobody.
+// -----------------------------------------------------------------
+
+/// Query for `GET /asterism/pursuits`.
+#[derive(Deserialize)]
+struct ListPursuitsQuery {
+    /// Owner persona. Required — pursuits are persona-scoped and a
+    /// cross-persona listing is not a view this domain has.
+    persona_id: String,
+    #[serde(default = "default_pursuit_limit")]
+    limit: u32,
+}
+
+/// Rows returned by `GET /asterism/pursuits` when the caller names no
+/// limit. Matches the dispatch listing's default: the overview this
+/// serves is "what is open and what moved recently", not an export.
+fn default_pursuit_limit() -> u32 {
+    50
+}
+
+/// `GET /asterism/pursuits` — a persona's pursuits, most-recent first,
+/// each with its derived standing.
+async fn list_pursuits(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<ListPursuitsQuery>,
+) -> ApiResult<Vec<PursuitDto>> {
+    Ok(Json(
+        ctx.pursuit_service.list(&q.persona_id, q.limit).await?,
+    ))
+}
+
+/// `POST /asterism/pursuits/open` — name a line of work before the
+/// first round, or create one at an id a returning artefact already
+/// claims.
+async fn open_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<OpenPursuitCommand>,
+) -> ApiResult<PursuitDto> {
+    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
+    Ok(Json(ctx.pursuit_service.open(command, &attribution).await?))
+}
+
+/// `POST /asterism/pursuits/close` — record a conclusion. `satisfied`
+/// freezes the kept set into a snapshot the event references;
+/// `abandoned` records the fact and keeps nothing. Repeatable: a
+/// second close is a second fact, never an overwrite.
+async fn close_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<ClosePursuitCommand>,
+) -> ApiResult<PursuitEventDto> {
+    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
+    Ok(Json(
+        ctx.pursuit_service.close(command, &attribution).await?,
+    ))
+}
+
+/// `POST /asterism/pursuits/reopen` — record that the line of work
+/// carried on. Legal on an already-open pursuit, where it changes no
+/// standing and still leaves a fact.
+async fn reopen_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<ReopenPursuitCommand>,
+) -> ApiResult<PursuitEventDto> {
+    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
+    Ok(Json(
+        ctx.pursuit_service.reopen(command, &attribution).await?,
+    ))
+}
+
+/// `POST /asterism/pursuits/restamp-dispatch` — re-file a round under
+/// another pursuit, recorded with the filing it replaced. The repair
+/// verb for a surface that lost the context, not an edit: what
+/// happened in the round is untouched, and the move never crosses
+/// personas.
+async fn restamp_dispatch(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<RestampDispatchCommand>,
+) -> ApiResult<DispatchDto> {
+    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
+    Ok(Json(
+        ctx.pursuit_service
+            .restamp_dispatch(command, &attribution)
+            .await?,
+    ))
+}
+
+/// `GET /asterism/pursuits/{id}` — one pursuit with its standing
+/// derived from the latest event.
+async fn get_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<PursuitDto> {
+    Ok(Json(ctx.pursuit_service.get(&id).await?))
+}
+
+/// `GET /asterism/pursuits/{id}/events` — the lifecycle facts, oldest
+/// first. An unknown pursuit is a 404; a pursuit that never closed is
+/// an empty list.
+async fn pursuit_events(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<PursuitEventDto>> {
+    Ok(Json(ctx.pursuit_service.events(&id).await?))
+}
+
+/// `GET /asterism/pursuits/{id}/view` — the pursuit opened up: the
+/// row, its rounds, the returns filed under it, and its events. One
+/// read because that is what a caller asking "what is in this line of
+/// work" wants; the pieces stay separately readable above.
+async fn pursuit_view(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<PursuitViewDto> {
+    Ok(Json(ctx.pursuit_service.view(&id).await?))
 }
 
 // -----------------------------------------------------------------

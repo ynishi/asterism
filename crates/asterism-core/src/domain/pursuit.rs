@@ -95,8 +95,46 @@ impl Pursuit {
         now: DateTime<Utc>,
         attribution: &AttributionContext,
     ) -> Self {
+        Self::new_at(
+            PursuitId::new(),
+            persona_id,
+            parent_id,
+            title,
+            note,
+            now,
+            attribution,
+        )
+    }
+
+    /// Builds a pursuit at an id the caller names, rather than a
+    /// minted one — [`new`](Self::new) with the mint taken out.
+    ///
+    /// This exists for one shape: an id that is already recorded
+    /// somewhere else and has no row here. A returning artefact's
+    /// sidecar claims a `pursuit_id` written on another machine, the
+    /// ingest records the claim unresolved because nothing answers to
+    /// that id, and creating the pursuit *under that id* is the only
+    /// thing that lets the re-resolve sweep join them; minting a new
+    /// one and telling the operator to re-file would leave the claim
+    /// broken forever.
+    ///
+    /// It is not an upsert and it is not a merge: a chosen id already
+    /// in use collides at the repository, which is the honest answer —
+    /// the row that is there was written by something, and this call
+    /// knows nothing about it. Nor is the id inspected for meaning;
+    /// a pursuit id is a surrogate, so there is nothing in one to
+    /// validate beyond its form.
+    pub fn new_at(
+        id: PursuitId,
+        persona_id: PersonaId,
+        parent_id: Option<PursuitId>,
+        title: Option<String>,
+        note: Option<String>,
+        now: DateTime<Utc>,
+        attribution: &AttributionContext,
+    ) -> Self {
         Self {
-            id: PursuitId::new(),
+            id,
             persona_id,
             parent_id,
             title: normalized(title),
