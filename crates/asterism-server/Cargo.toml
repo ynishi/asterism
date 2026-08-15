@@ -46,9 +46,17 @@ asterism-core           = { path = "../asterism-core" }
 asterism-infra          = { path = "../asterism-infra" }
 asterism-contract       = { path = "../asterism-contract", features = ["json-schema"] }
 asterism-dispatch-sdk   = { path = "../asterism-dispatch-sdk" }
+asterism-exporter-cloud = { path = "../asterism-exporter-cloud" }
 asterism-exporter-comfy = { path = "../asterism-exporter-comfy" }
 asterism-exporter-file  = { path = "../asterism-exporter-file" }
 asterism-exporter-http  = { path = "../asterism-exporter-http" }
+
+# Reads `<asterism_home>/.env` at the composition root so a profile
+# that names a credential (`auth.secret_ref`) can find it without the
+# launching shell having exported it — the Finder-launched app has no
+# such shell. Loading is additive: a variable already in the process
+# environment wins, so an explicit export still overrides the file.
+dotenvy = "0.15"
 
 # Needed at the composition root to express the trash retention period
 # the AssetService takes as an argument.

@@ -76,49 +76,33 @@ With `"$.job_id"` the handle *is* the id string, so the poll path
 interpolates `{{handle}}`; a `handle_from` of `"$"` keeps the whole
 response body and the path would read `{{handle.job_id}}` instead.
 
-### Template placeholders
+### Templates and JSONPath
 
-Simple `{{...}}` substitution, no arithmetic. Supported roots:
+Both grammars are the shared adapter machinery, documented where
+they are defined: [`asterism_exporter_common::template`] for the
+`{{...}}` roots, the optional-`?` suffix and which of them resolve in
+which phase, and [`asterism_exporter_common::jsonpath`] for the path
+subset. They are not restated here — a grammar with two write-ups
+grows two meanings, and a profile author cannot tell which one their
+adapter implements.
 
-- `{{selection_id}}`, `{{dispatch_id}}`, `{{persona_id}}`,
-  `{{action}}` — dispatch-context ids.
-- `{{input[N].<field>}}` — indexed input asset field. Supported
-  fields: `id`, `persona_id`, `source_locator`, `source_kind`,
-  `modality`, `cover`.
-- `{{params.<dot.path>}}` — deep dot-access into the params JSON
-  itself (so the caller can define its own "extra fields" section
-  in params and reference it from templates).
-- `{{handle.<dot.path>}}` — deep dot-access into the handle JSON.
-  Only available in `poll` / `harvest` templates (the exporter
-  panics on this in `dispatch`, when no handle exists yet).
-- `{{item.<dot.path>}}` — dot-access into the current
-  `harvest.items_path` element. Only available inside
-  `harvest.map`.
+This exporter reaches them through the
+[`TemplateAdapter`] / [`ResponsePath`] traits and is parameterised on
+the implementation, defaulting to
+[`CommonExportAdapter`][asterism_exporter_common::CommonExportAdapter].
+`HttpExporter::new()` therefore keeps meaning what it meant, and an
+adapter that needs a placeholder root this one must not have — a
+credential resolved outside the params blob, say — supplies its own
+grammar rather than widening this one.
 
-A trailing `?` on a placeholder (`{{item.caption?}}`) means
-"resolve to empty string when the path is missing" instead of
-failing with `BackendRejected`.
-
-Params are persisted unedited. The blob handed to
-`CreateDispatchCommand` is stored whole as
+One consequence of the params blob being a template namespace is
+worth repeating at the point of use, because it decides what may go
+in the example above. Params are persisted unedited: the blob handed
+to `CreateDispatchCommand` is stored whole as
 `dispatch_job.params_json` and handed back out as
-`DispatchDto.params_json` on every read of the dispatch — nothing
-on that path filters, redacts, or drops a field. A credential
-reached by `{{params.…}}` (the `extras.api_key` above) is
-therefore readable by anything that can list dispatches; put one
-there only where that visibility is acceptable.
-
-### JSONPath
-
-Minimal subset — enough to steer the state machine and pluck out
-items:
-
-- `$.foo`             — object field.
-- `$.foo.bar`         — dot chain.
-- `$.arr[0]`          — array index.
-- `$.arr[*]`          — array wildcard (only the last segment can
-  be a wildcard; matches the shape of every documented example).
-
-Anything outside this grammar is rejected up front with
-`BackendRejected`.
+`DispatchDto.params_json` on every read of the dispatch, and nothing
+on that path filters, redacts, or drops a field. A credential reached
+by `{{params.…}}` — the `extras.api_key` above — is therefore
+readable by anything that can list dispatches. Put one there only
+where that visibility is acceptable.
 

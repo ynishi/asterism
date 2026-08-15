@@ -68,6 +68,19 @@ example-JSON artifacts under [`schema`]. Mirrors the harvest
 importer pattern where `asterism-importer-harvest
 --print-schema` streams the canonical ingest shape.
 
+## What this crate is not
+
+It is the port, so it holds the trait, the types crossing it, and
+the schema artifacts that describe them — and nothing an adapter
+merely finds convenient. Machinery shared *between* adapters, such
+as the `{{...}}` substitution and path grammar a schema-driven
+exporter is configured with, sits one layer out in
+`asterism-exporter-common`, which depends on this crate rather than
+the other way round. Putting it here would make every backend
+author consuming the port read a grammar their adapter may never
+use, and would let a change in one adapter's convenience reach the
+contract every other adapter is written against.
+
 ## Modules
 
 - [`derived`](derived.md): Re-export shim for the shared boundary type

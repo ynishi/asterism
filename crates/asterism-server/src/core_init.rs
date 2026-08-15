@@ -33,6 +33,7 @@ use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
 use asterism_dispatch_sdk::Exporter;
+use asterism_exporter_cloud::CloudExporter;
 use asterism_exporter_comfy::ComfyHttpExporter;
 use asterism_exporter_file::FileExporter;
 use asterism_exporter_http::HttpExporter;
@@ -1033,14 +1034,37 @@ pub async fn init_core_with(
         snapshot_service.clone(),
     ));
 
-    // Register the built-in exporters (`comfy` / `file` / `http`).
+    // Register the built-in exporters (`comfy` / `file` / `http` /
+    // `cloud`).
+    //
+    // `cloud` is the one that needs an argument: it takes custody of
+    // the files a hosted platform produces, and where it puts them is
+    // the profile-local application directory rather than anything the
+    // dispatch params could name — a params-supplied path would let a
+    // dispatch write outside the profile that ran it.
     let comfy: Arc<dyn Exporter> = Arc::new(ComfyHttpExporter::new());
     let file: Arc<dyn Exporter> = Arc::new(FileExporter::new());
     let http: Arc<dyn Exporter> = Arc::new(HttpExporter::new());
+    let home = asterism_infra::paths::asterism_home()?;
+
+    // A profile names an environment variable; this is where the
+    // process gets a chance to have one. Profile-local rather than
+    // CWD-relative, because the two binaries that reach this line are
+    // launched differently — a Finder-launched app has no shell that
+    // exported anything, and no meaningful working directory either —
+    // and because "which file did this credential come from" should
+    // have one answer per profile. Absent file, unreadable file and
+    // malformed line are all non-fatal: the dispatch that needs the
+    // variable fails naming it, which is a better place to find out
+    // than a server that refuses to start.
+    let _ = dotenvy::from_path(home.join(".env"));
+
+    let cloud: Arc<dyn Exporter> = Arc::new(CloudExporter::new(home.join("custody")));
     let mut exporters: HashMap<String, Arc<dyn Exporter>> = HashMap::new();
     exporters.insert(comfy.slug().to_string(), comfy);
     exporters.insert(file.slug().to_string(), file);
     exporters.insert(http.slug().to_string(), http);
+    exporters.insert(cloud.slug().to_string(), cloud);
     let exporter_registry = ExporterRegistry::new(exporters);
 
     // The AI disclosure for what a dispatch mints.

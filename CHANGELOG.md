@@ -134,6 +134,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves evidence rather than being inferred from the absence of an
   error.
 
+- **A cloud exporter: the bytes are fetched, the secret is named, and the
+  deadline belongs to the profile** (#35) — a hosted generation API is a
+  JSON profile rather than a Rust crate, as with the HTTP exporter, but
+  three things there do not survive contact with one. The platform's URL
+  expires (ten minutes to thirty days, across the platforms surveyed),
+  so a `fetch` step pulls the bytes into
+  `<asterism_home>/custody/dispatch/<id>/` before the harvest returns and
+  the locator names the file we hold. `auth.secret_ref` holds an
+  environment variable *name* — the value is resolved per call and never
+  enters the params blob, which is persisted unedited and readable by
+  anything that can list dispatches. And the deadline is per profile with
+  no default, because a constant would be wrong nearly everywhere;
+  exceeding it fails the job with a message starting `deadline exceeded`,
+  so an expiry is distinguishable from a backend failure.
+
+  With `"record_exchange": true` the request as sent and the response as
+  received are kept on the dispatch row, with the credential redacted on
+  the way in. The first profile is fal.ai, streamed by
+  `asterism-server schema print exporter:cloud:params`.
+
+- **The adapter template and JSONPath grammars are shared, behind traits**
+  (#35) — `asterism-exporter-common` holds the `{{...}}` substitution and
+  the path subset a schema-driven exporter is configured with, and the two
+  adapters reach them through `TemplateAdapter` / `ResponsePath` rather
+  than calling the engine. Not in `asterism-dispatch-sdk`: that crate is
+  the port every backend author reads, and machinery there is read by
+  authors who never template anything. The traits are what let the cloud
+  adapter have a `{{secret}}` root the HTTP adapter must not have —
+  one overridden method, with the JSON-leaf and header traversals
+  inherited, instead of a shared engine growing a root one of its callers
+  cannot safely have.
+
 - **The disclosure vocabulary moved into the core, and `provenance` stopped
   naming two things** (#14, #23) — `provenance` was already the
   derived-from claim graph, whose own documentation says this
