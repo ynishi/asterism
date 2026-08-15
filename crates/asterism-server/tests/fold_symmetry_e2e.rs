@@ -133,13 +133,38 @@ fn delta(before: &BTreeMap<String, u64>, after: &BTreeMap<String, u64>) -> BTree
     out
 }
 
-/// **The two entry points enqueue the same work.**
+/// **The two entry points enqueue the same fold, and neither owes less
+/// than the other.**
 ///
 /// Two pairs under one persona, folded two different ways, and the
 /// queue delta around each call is compared. A fix to one path only
-/// fails here, whichever path it was: the two deltas are asserted
-/// against each other *and* against the literal `asset_fold: 1`, so
-/// "both do nothing" cannot pass either.
+/// fails here, whichever path it was: each delta is asserted against a
+/// literal, so "both do nothing" cannot pass either.
+///
+/// # The one place the deltas differ, and why it is not a divergence
+///
+/// A fold moves text onto the keeper — the headstone's keywords, its
+/// labels, its comment thread — so the keeper's search document
+/// describes a row that has since grown, and somebody owes a
+/// re-composition. Both paths pay it; they differ in *when*, and this
+/// test counts at the instant of the call.
+///
+/// The automatic path pays it from inside the `asset_fold` job, on the
+/// branch that performed the fold. The manual path folds inside its own
+/// transaction, so the job it enqueues arrives to find the work already
+/// done and takes `FoldRefusal::AlreadyFolded` — the branch that stands
+/// the headstone down and, by construction, never saw a keeper absorb
+/// anything. `merge_assets` therefore enqueues the re-composition
+/// itself, inline, once for the whole ruling rather than once per
+/// folded row.
+///
+/// So the automatic delta is the fold job alone and the manual delta is
+/// that job plus one `index_rebuild`. Asserting the deltas equal would
+/// require either dropping the manual path's enqueue (the keeper's
+/// document would then stay stale until somebody edited the row) or
+/// moving it into the `AlreadyFolded` branch (an N-discard merge would
+/// queue N re-compositions of one document). Both are worse than the
+/// asymmetry, so it is written down here instead.
 #[tokio::test(flavor = "multi_thread")]
 async fn both_fold_entry_points_leave_the_same_work_behind() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -269,9 +294,15 @@ async fn both_fold_entry_points_leave_the_same_work_behind() {
          had one"
     );
     assert_eq!(
-        manual, automatic,
-        "the two entry points to a fold owe the same after-effects, and \
-         say so through the same job"
+        manual,
+        BTreeMap::from([
+            ("asset_fold".to_string(), 1),
+            ("index_rebuild".to_string(), 1),
+        ]),
+        "the manual path owes the automatic path's fold job, plus the \
+         keeper re-composition the job it enqueues cannot pay on its \
+         behalf — see this test's doc for why that asymmetry is the \
+         cheaper of the three options"
     );
 
     // A preview asks for none of it: nothing was written, so there is

@@ -2255,7 +2255,7 @@ mod tests {
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
                 disclosure: Arc::new(std::sync::OnceLock::new()),
             },
-            queue: open_queue(pool).await.unwrap(),
+            queue: open_queue(pool.clone()).await.unwrap(),
         };
 
         let message = handlers::asset_fold(
@@ -2270,6 +2270,29 @@ mod tests {
         assert!(
             message.contains("unindexed=true"),
             "the handler reports what it did to the index: {message}"
+        );
+
+        // The other half of a fold, and the half the handler's message
+        // does not report: the keeper now holds the headstone's
+        // keywords, labels and comment thread, so its document was
+        // composed from less than the row says. Asserted here because
+        // nothing else can — `fold_symmetry_e2e` counts the queue at
+        // the instant of each service call, which is before this job
+        // has run, and the manual path's own enqueue is the one it
+        // sees. Delete the enqueue in `handlers::asset_fold` and this
+        // is the test that fails.
+        let recomposed: Vec<String> = sqlx::query_scalar(
+            "SELECT json_extract(job, '$.payload.asset_id') FROM Jobs \
+              WHERE json_extract(job, '$.kind') = 'index_rebuild'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            recomposed,
+            vec![keeper.to_string()],
+            "the keeper of an automatic fold is queued for re-composition, \
+             and the headstone is not"
         );
 
         let after = probe(tantivy_dir.path().to_path_buf()).await;

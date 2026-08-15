@@ -2609,6 +2609,23 @@ pub async fn asset_fold(env: &JobEnv, payload: &serde_json::Value) -> Result<Str
                     error = %err,
                     "the keeper of a fold was not queued for re-composition"
                 );
+                // The same fallback `AssetService::reindex` and
+                // `AssetCommentService::reindex` take, for the same
+                // reason: the backfill walk selects bodies composed by
+                // an *older* reading, and this keeper's body carries
+                // the current stamp, so the walk passes straight over
+                // it. Clearing the stamp is what puts it back in front
+                // of the walk. If that write fails too, the queue and
+                // the database are both refusing writes and there is
+                // nothing further to try from here.
+                if let Err(err) = env.deps.asset_bodies.unstamp(&keeper).await {
+                    tracing::warn!(
+                        event = "diag.fold.keeper_unstamp_failed",
+                        asset_id = %keeper,
+                        error = %err,
+                        "a fold's keeper keeps a document composed before it absorbed"
+                    );
+                }
             }
 
             Ok(format!(
