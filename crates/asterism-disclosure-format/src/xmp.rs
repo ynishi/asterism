@@ -19,7 +19,7 @@
 //! nothing else, which is what a hand-written template is and a
 //! serialiser is not obliged to be.
 //!
-//! The scope also does not justify a dependency: five properties, all
+//! The scope also does not justify a dependency: four properties, all
 //! simple text or a URI, all in one namespace, none of them a container
 //! (no `rdf:Alt` / `rdf:Bag` / `rdf:Seq`), no language alternatives.
 //!
@@ -97,9 +97,8 @@ pub fn render(record: &DisclosureRecord) -> Option<String> {
     if let Some(prompt) = &record.prompt {
         push_property(&mut properties, "AIPromptInformation", prompt);
     }
-    if let Some(writer) = &record.prompt_writer {
-        push_property(&mut properties, "AIPromptWriterName", writer);
-    }
+    // No `AIPromptWriterName`: the record does not carry a prompt writer,
+    // and the reason it does not is in its own module docs.
 
     // `x:xmptk` names the toolkit that wrote the packet. It is
     // documentation for whoever opens the file, not an identifier
@@ -221,7 +220,7 @@ mod tests {
         DisclosureRecord::for_asset("asset-1")
             .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
             .with_ai_system("ComfyUI", Some("0.3.0".into()))
-            .with_prompt("1girl, purple eyes", Some("owner".into()))
+            .with_prompt("1girl, purple eyes")
     }
 
     #[test]
@@ -230,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn the_packet_carries_every_2025_1_property_under_the_iptc_namespace() {
+    fn the_packet_carries_every_property_this_application_discloses() {
         let packet = render(&full_record()).expect("a full record renders");
         assert!(packet.contains(IPTC_EXT_NS), "namespace is declared");
         assert!(packet.contains(
@@ -248,10 +247,17 @@ mod tests {
             "<Iptc4xmpExt:AIPromptInformation>1girl, purple eyes\
              </Iptc4xmpExt:AIPromptInformation>"
         ));
-        assert!(
-            packet
-                .contains("<Iptc4xmpExt:AIPromptWriterName>owner</Iptc4xmpExt:AIPromptWriterName>")
-        );
+    }
+
+    #[test]
+    fn no_packet_names_a_prompt_writer() {
+        // The property exists in 2025.1 and is deliberately not written:
+        // it names a person, and nothing in this application states who
+        // wrote a prompt (`DisclosureRecord` module docs). A record that
+        // discloses everything it can is the case that would carry it if
+        // anything did.
+        let packet = render(&full_record()).unwrap();
+        assert!(!packet.contains("AIPromptWriterName"));
     }
 
     #[test]
@@ -294,8 +300,7 @@ mod tests {
         // makes the whole packet unparseable, which takes the disclosure
         // down with it.
         let packet = render(
-            &DisclosureRecord::for_asset("asset-1")
-                .with_prompt("a & b <tag> \"quoted\" 'single'", None),
+            &DisclosureRecord::for_asset("asset-1").with_prompt("a & b <tag> \"quoted\" 'single'"),
         )
         .unwrap();
         assert!(packet.contains(
@@ -311,14 +316,13 @@ mod tests {
         // so the choice is between losing the character and losing the
         // packet.
         let packet =
-            render(&DisclosureRecord::for_asset("a").with_prompt("before\u{0}\u{1}after", None))
-                .unwrap();
+            render(&DisclosureRecord::for_asset("a").with_prompt("before\u{0}\u{1}after")).unwrap();
         assert!(packet.contains(">beforeafter<"));
         assert!(!packet.contains('\u{0}'));
 
         // Tab / newline / carriage return are legal and are what a
         // multi-line prompt is made of.
-        let kept = render(&DisclosureRecord::for_asset("a").with_prompt("a\nb\tc", None)).unwrap();
+        let kept = render(&DisclosureRecord::for_asset("a").with_prompt("a\nb\tc")).unwrap();
         assert!(kept.contains("a\nb\tc"));
 
         // DEL and the C1 block are kept, and the boundary is where the
@@ -327,17 +331,15 @@ mod tests {
         // fed it U+0000 and U+0001 could not tell the two readings
         // apart. They are legal XML 1.0 characters, so keeping them
         // costs nothing this filter is for.
-        let high =
-            render(&DisclosureRecord::for_asset("a").with_prompt("d\u{7f}e\u{80}f\u{9f}g", None))
-                .unwrap();
+        let high = render(&DisclosureRecord::for_asset("a").with_prompt("d\u{7f}e\u{80}f\u{9f}g"))
+            .unwrap();
         assert!(
             high.contains("d\u{7f}e\u{80}f\u{9f}g"),
             "DEL and C1 survive: {high}"
         );
 
         // …and the character immediately below the boundary does not.
-        let boundary =
-            render(&DisclosureRecord::for_asset("a").with_prompt("h\u{1f}i", None)).unwrap();
+        let boundary = render(&DisclosureRecord::for_asset("a").with_prompt("h\u{1f}i")).unwrap();
         assert!(boundary.contains(">hi<"), "U+001F is dropped: {boundary}");
     }
 
@@ -353,10 +355,9 @@ mod tests {
         // but passes a valid encoding of U+FFFF through untouched, so
         // three bytes in somebody else's prompt chunk were enough. The
         // packet was written, reported as written, and unreadable.
-        let packet = render(
-            &DisclosureRecord::for_asset("a").with_prompt("before\u{FFFE}\u{FFFF}after", None),
-        )
-        .unwrap();
+        let packet =
+            render(&DisclosureRecord::for_asset("a").with_prompt("before\u{FFFE}\u{FFFF}after"))
+                .unwrap();
         assert!(packet.contains(">beforeafter<"), "{packet}");
         assert!(!packet.contains('\u{FFFE}'));
         assert!(!packet.contains('\u{FFFF}'));
@@ -364,10 +365,9 @@ mod tests {
         // The neighbouring non-characters are legal `Char`s and stay.
         // Dropping them would be a rule about which characters a value
         // may hold, which is not what this filter is for.
-        let kept = render(
-            &DisclosureRecord::for_asset("a").with_prompt("j\u{FFFD}k\u{FDD0}l\u{1FFFE}m", None),
-        )
-        .unwrap();
+        let kept =
+            render(&DisclosureRecord::for_asset("a").with_prompt("j\u{FFFD}k\u{FDD0}l\u{1FFFE}m"))
+                .unwrap();
         assert!(
             kept.contains("j\u{FFFD}k\u{FDD0}l\u{1FFFE}m"),
             "only the two XML cannot represent are dropped: {kept}"

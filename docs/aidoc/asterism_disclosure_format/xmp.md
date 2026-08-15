@@ -21,7 +21,7 @@ packet this crate writes has to be a function of the record and
 nothing else, which is what a hand-written template is and a
 serialiser is not obliged to be.
 
-The scope also does not justify a dependency: five properties, all
+The scope also does not justify a dependency: four properties, all
 simple text or a URI, all in one namespace, none of them a container
 (no `rdf:Alt` / `rdf:Bag` / `rdf:Seq`), no language alternatives.
 

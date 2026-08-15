@@ -40,6 +40,28 @@
 //! (`asterism-contract::sidecar`), so nothing is lost by keeping them
 //! out of the packet.
 //!
+//! # Who wrote the prompt is not disclosed
+//!
+//! IPTC 2025.1 defines `AIPromptWriterName`, and this record does not
+//! carry it. The property names a person, and IPTC is explicit that the
+//! person who wrote the prompt is not thereby the image's creator —
+//! which is why it has a field of its own rather than riding
+//! `dc:creator`. Nothing in this application states who wrote a prompt:
+//! the prompt reaching a record is read back out of the container the
+//! file arrived in, and a dispatch may run against text written by
+//! somebody else, generated, or rewritten across rounds. Filling the
+//! property from the asset's author or from the operator would assert
+//! something nobody stated, in a file that cannot be taken back once
+//! published — the asymmetry [`PromptDisclosure`] already turns on, and
+//! a name is a stronger claim than the text is.
+//!
+//! So the field, its setter argument and the emitter branch are absent
+//! rather than present-and-unreachable. If a surface for stating it ever
+//! exists, this is where it returns, under the same withholding control
+//! the prompt has.
+//!
+//! [`PromptDisclosure`]: super::PromptDisclosure
+//!
 //! # A human pass is asserted, never inferred
 //!
 //! [`DigitalSourceType::HumanEdits`] is the one value a caller has to
@@ -77,10 +99,6 @@ pub struct DisclosureRecord {
     /// out of a file already published. The emitters here write it when
     /// it is present and never populate it themselves.
     pub prompt: Option<String>,
-    /// `Iptc4xmpExt:AIPromptWriterName` — who wrote the prompt. IPTC is
-    /// explicit that this person is not thereby the image's creator,
-    /// which is why it is a field of its own rather than a `dc:creator`.
-    pub prompt_writer: Option<String>,
     /// Asterism's id for the asset this file is. Manifest-only (module
     /// docs).
     pub asset_id: String,
@@ -123,13 +141,13 @@ impl DisclosureRecord {
         self
     }
 
-    /// Sets the prompt, and who wrote it.
+    /// Sets the prompt.
     ///
     /// See the field docs: reaching for this is a disclosure decision,
-    /// and it is the caller's.
-    pub fn with_prompt(mut self, prompt: impl Into<String>, writer: Option<String>) -> Self {
+    /// and it is the caller's. Who wrote the prompt is not part of it —
+    /// the module docs say why there is no argument for it here.
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = Some(prompt.into());
-        self.prompt_writer = writer;
         self
     }
 
@@ -164,7 +182,6 @@ impl DisclosureRecord {
             || self.ai_system.is_some()
             || self.ai_system_version.is_some()
             || self.prompt.is_some()
-            || self.prompt_writer.is_some()
     }
 
     /// The same record with everything but the obligation dropped.
@@ -198,7 +215,6 @@ impl DisclosureRecord {
             ai_system: self.ai_system.clone(),
             ai_system_version: self.ai_system_version.clone(),
             prompt: None,
-            prompt_writer: None,
             asset_id: self.asset_id.clone(),
             dispatch_id: self.dispatch_id.clone(),
             parents: self.parents.clone(),
@@ -234,7 +250,7 @@ mod tests {
         let record = DisclosureRecord::for_asset("asset-1")
             .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
             .with_ai_system("ComfyUI", Some("0.3.0".into()))
-            .with_prompt("a very long prompt", Some("owner".into()))
+            .with_prompt("a very long prompt")
             .with_parents(vec!["parent-1".into()])
             .with_dispatch("dispatch-1");
 
@@ -247,7 +263,6 @@ mod tests {
         assert_eq!(reduced.ai_system.as_deref(), Some("ComfyUI"));
         assert_eq!(reduced.ai_system_version.as_deref(), Some("0.3.0"));
         assert_eq!(reduced.prompt, None);
-        assert_eq!(reduced.prompt_writer, None);
         // The manifest half is untouched: the size limit being fallen
         // back from is JPEG's APP1 segment, which the manifest does not
         // travel in.
@@ -259,7 +274,7 @@ mod tests {
     fn essential_is_idempotent_so_a_second_fallback_cannot_erode_further() {
         let record = DisclosureRecord::for_asset("asset-1")
             .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
-            .with_prompt("p", None);
+            .with_prompt("p");
         assert_eq!(record.essential(), record.essential().essential());
     }
 }

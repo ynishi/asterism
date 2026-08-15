@@ -7,5 +7,5 @@
 - API detail lives in RustDoc (`cargo doc`) and `docs/aidoc/`; code documentation outranks stale issue text.
 - Green is `just check`; the full Rust suite runs only via `just rust-test` (never hand-rolled `cargo test --workspace`).
 - Never work on `main`; one worktree per issue under `.worktrees/`, and run `just branch-check` before implementing.
-- Agents do not push, publish, or open PRs — prepare the branch and hand over the literal commands.
+- Agents do not push, publish, or open PRs. They do run `git fetch origin` then `just pre-push` themselves, write the PR body to a file under `workspace/`, and hand over the two literal commands — the ordering is in [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests) and putting `just pre-push` in the handed-over block is the mistake it exists to stop.
 - Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) on the diff before every commit.

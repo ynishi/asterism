@@ -238,7 +238,7 @@ mod tests {
         // defined for it. Writing it twice would make a file where the
         // two copies can be edited apart — and the signed copy is the
         // one nobody can correct afterwards.
-        let record = DisclosureRecord::for_asset("asset-1").with_prompt("1girl", Some("o".into()));
+        let record = DisclosureRecord::for_asset("asset-1").with_prompt("1girl");
         let rendered = definition(&record).to_string();
         assert!(!rendered.contains("1girl"));
     }

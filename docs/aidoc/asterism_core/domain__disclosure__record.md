@@ -42,6 +42,28 @@ identifiers in the clear for the receiver that has no C2PA reader
 (`asterism-contract::sidecar`), so nothing is lost by keeping them
 out of the packet.
 
+# Who wrote the prompt is not disclosed
+
+IPTC 2025.1 defines `AIPromptWriterName`, and this record does not
+carry it. The property names a person, and IPTC is explicit that the
+person who wrote the prompt is not thereby the image's creator —
+which is why it has a field of its own rather than riding
+`dc:creator`. Nothing in this application states who wrote a prompt:
+the prompt reaching a record is read back out of the container the
+file arrived in, and a dispatch may run against text written by
+somebody else, generated, or rewritten across rounds. Filling the
+property from the asset's author or from the operator would assert
+something nobody stated, in a file that cannot be taken back once
+published — the asymmetry [`PromptDisclosure`] already turns on, and
+a name is a stronger claim than the text is.
+
+So the field, its setter argument and the emitter branch are absent
+rather than present-and-unreachable. If a surface for stating it ever
+exists, this is where it returns, under the same withholding control
+the prompt has.
+
+[`PromptDisclosure`]: super::PromptDisclosure
+
 # A human pass is asserted, never inferred
 
 [`DigitalSourceType::HumanEdits`] is the one value a caller has to

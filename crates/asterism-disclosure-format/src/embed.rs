@@ -1059,7 +1059,7 @@ mod tests {
         // export would drop the Article 50 mark to preserve context,
         // which is the wrong way round.
         let huge = "x".repeat(JPEG_MAX_PACKET + 1);
-        let record = record().with_prompt(huge, Some("owner".into()));
+        let record = record().with_prompt(huge);
         let stamped = stamp(&jpeg_fixture(), &record).unwrap().unwrap();
         let packet = read_xmp(&stamped).unwrap().unwrap();
         assert!(
@@ -1084,7 +1084,7 @@ mod tests {
         // one now — see `png::MAX_PACKET` — and a test asserting the
         // absence of a limit would now be asserting something false.
         let long = "y".repeat(JPEG_MAX_PACKET + 1);
-        let record = record().with_prompt(long, None);
+        let record = record().with_prompt(long);
         let stamped = stamp(&png_fixture(), &record).unwrap().unwrap();
         let packet = read_xmp(&stamped).unwrap().unwrap();
         assert!(packet.contains("AIPromptInformation"));

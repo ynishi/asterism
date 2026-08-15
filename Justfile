@@ -457,9 +457,28 @@ branch-check:
     @git merge-base --is-ancestor origin/main HEAD || { echo "HEAD does not descend from origin/main: wrong base — rebuild the branch from origin/main"; exit 1; }
     @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
 
-# What a human runs before pushing. Agents never reach this: push is
-# denied to them outright (.claude/settings.json), so the recipe exists
-# for the hand the branch is handed over to.
+# The last gate before a branch is handed over, and the agent that built
+# the branch is the one that runs it. It writes to nothing remote — it
+# is `branch-check` plus `check` — so being denied `git push`
+# (.claude/settings.json) is no reason to skip it. `git fetch origin`
+# belongs immediately before it: `branch-check` is offline on purpose.
+#
+# This does not contradict `rust-test` staying out of `allow-agent`;
+# that exclusion, and its reasoning, are in `rust-clippy`'s comment
+# below ("handing it over invites a full suite where a narrow run was
+# the right tool"). It is about reaching for the whole suite
+# mid-development. This is the run over the tree that is actually
+# handed over. The group annotation is unchanged here: whether
+# `pre-push` should carry `allow-agent` is a permissions decision, not
+# a documentation one.
+#
+# 2026-08-15 (the hand-over of the #39 branch, not the `branch-check`
+# divergence dated above): this comment used to say a human runs it and
+# that agents never reach it. An agent duly put `just pre-push` into
+# the command block it handed over, instead of running it and
+# reporting what it found.
+#
+# Run every gate over the tree being handed over.
 [group('check')]
 pre-push: branch-check check
 
