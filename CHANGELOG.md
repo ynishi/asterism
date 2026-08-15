@@ -312,6 +312,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI answers a pull request in one run instead of two and a manual
+  click.** The regeneration step pushes `docs/aidoc/` back to the branch
+  under test, and the comment here used to say that a `GITHUB_TOKEN`
+  push starts no workflow run. It does. On pull request #50 that push
+  created a second run which GitHub parked as `action_required`: a human
+  clicked "Approve and run" five minutes later, the approved run spent
+  eleven minutes repeating settled work, and the concurrency group
+  cancelled the original nine minutes in — after it had pushed, and
+  midway through the `just check` it existed to run. The bot commit now
+  carries `[skip ci]`, so the run that regenerates the artifacts is the
+  run that judges them, which is what the arrangement always claimed to
+  be.
+
+  Two consequences are written down beside it rather than left to be
+  discovered. The head commit carries no check of its own, and a
+  skipped workflow's checks stay *pending* rather than absent, so a
+  future required check would block a merge here rather than quietly
+  pass it. And the token can reach `main`: a squash merge concatenates
+  the branch's commit messages into the squash commit, and a rebase
+  replays the bot's commit as it stands, so either lands `[skip ci]` on
+  `main`'s head and skips the run that gives a merged tree its verdict.
+  A merge commit takes its message from the pull request title and does
+  not carry it — but whether that is enough is **not settled**, because
+  GitHub's own wording is that the token skips a workflow when it
+  appears "in a push", which may mean any commit in the pushed range.
+  The first merge after this lands answers it: check that `main` got a
+  run.
+
+  Two further costs, and one saving. `aidoc-guard` no longer re-checks,
+  inside `just check`, the artifacts the same job regenerated minutes
+  earlier — it cannot report drift against a regeneration of the same
+  tree, and it spent a second rustdoc pass over the workspace saying
+  so. That skip is only sound because `just aidoc` now runs `--strict`,
+  so the doc lints the guard enforces are met by the tool that writes
+  the artifacts rather than by a gate downstream of it. The cost of
+  that move is where a lint failure now lands: at the first step of the
+  job rather than the last member of `check`, so a missing module doc
+  now masks the result of clippy, the tests and the UI gates for that
+  run — and `just aidoc` is now a recipe that can exit non-zero.
+  Locally it means the same lint is reported while the author is still
+  looking at the module. CI builds also carry `line-tables-only` debug
+  info: panic messages and backtraces still name file and line, and
+  nothing on a runner opens a debugger. The saving is the dependency
+  cache moving ahead of the `cargo-aidoc` install — the tool ships no
+  release binaries, so it is built from source every run, and from
+  there it is cached like any other dependency.
+
+- **CI commits a regenerated doc artifact that no tracked file
+  announces.** The regeneration step compared with `git diff` *before*
+  staging, so a difference visible only in an untracked or deleted path
+  — a committed artifact removed by hand while the module it describes
+  still exists, which regeneration then recreates — left the tree
+  looking unchanged. The step printed "already current", pushed
+  nothing, and the artifact never returned to the repository. It stages
+  first and compares the index against `HEAD`, which is the question it
+  meant to ask. (An added crate or module was never the missed case:
+  those also modify a tracked index page.)
+
+- **The gate before a hand-over costs what the change costs, not what
+  the workspace costs.** `just pre-push` was `branch-check` plus
+  `check`, and `check` reaches two gates that scale with the repository
+  rather than the diff: `rust-test`, which links every test binary in
+  the workspace at once — one linker process each, gigabytes resident
+  each — and `rust-clippy`, which compiles every target in every crate.
+  On 2026-08-15 both were run on a shared machine for a branch whose
+  entire diff was a workflow file and two comments.
+
+  `pre-push` is now `branch-check` plus `check-shared` plus
+  `rust-clippy-changed` and `rust-test-changed`. Both narrow gates call
+  a new `changed-packages`, which reads the paths the branch changed
+  against `origin/main` plus anything uncommitted and maps them to the
+  workspace members that own them; it prints `--workspace` instead of a
+  list when the change reaches the root manifest, the lockfile or the
+  toolchain, and both callers then say there is no narrow run to make
+  rather than quietly starting the run they exist to avoid.
+  `check-shared` holds the gates whose cost does not move with the
+  workspace — formatting, the bindings check, the three frontend
+  recipes — plus `aidoc-guard`, which does read the whole tree but
+  cannot be narrowed by package, since the artifacts it checks are one
+  inventory of all of it.
+
+  `check` is unchanged and still means the workspace-wide pair: it is
+  CI's entry point, and CI is a runner nobody else is sitting on. What
+  the narrow gates give up is the crates a change did not edit — they
+  cover what was edited, not what depends on it — and CI reports those
+  on the same push. `rust-test` stays as the one sanctioned way to run
+  the suite when it is genuinely wanted, now says on the way in what it
+  is about to cost, and nothing depends on it any more except `check`.
+
 - **A disclosure's two halves report their own outcome, so one failing no
   longer cancels the other** (#14) — applying a record writes an IPTC/XMP
   packet and signs a C2PA manifest, and the writer has argued from the

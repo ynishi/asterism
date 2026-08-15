@@ -329,10 +329,24 @@ bench-scroll jumps="200" seed="42": ffmpeg-sidecar
 # would bake the branch slug into a committed artifact — and then
 # `aidoc-check` reports drift from every other checkout.
 #
+# `--strict` promotes the doc lints from warnings to errors, which is
+# what `aidoc-check` and `aidoc-guard` have always done. Writing without
+# it produced artifacts that the very next gate rejected: the lints are
+# `missing-crate-doc`, `short-crate-doc`, `missing-module-doc` and
+# `llms-full-too-large`, none of which regenerating can fix, so the
+# difference was only ever *where* the author found out. Failing at the
+# point of writing says which crate or module is missing its doc block
+# while the person is still looking at it.
+#
+# It also matters now that CI regenerates: `aidoc-guard` steps aside
+# when this recipe has already run in the same job, and it may only do
+# that because this recipe applies the same bar. Drop `--strict` here
+# and that skip starts hiding lint failures — see `aidoc-guard`.
+#
 # Run this after changing any public API or doc comment, and commit
 # the diff.
 aidoc:
-    cargo aidoc --workspace-root "{{ project_root }}" --title asterism
+    cargo aidoc --workspace-root "{{ project_root }}" --strict --title asterism
 
 # Fail when docs/aidoc/ no longer matches the tree (exit 2 on drift).
 #
@@ -370,6 +384,35 @@ aidoc-check:
 aidoc-guard:
     #!/usr/bin/env bash
     set -uo pipefail
+    # The fifth way this cannot run, and the only one that is nobody's
+    # fault: the artifacts were regenerated earlier in this same run.
+    # CI does that (`.github/workflows/check.yml`) and sets this, and
+    # from here the check would compare a regeneration against the
+    # regeneration that produced it — it cannot report drift, and it
+    # spends a second rustdoc pass over the workspace saying so. That
+    # pass was 39 s of an 11 min run when it was measured on
+    # 2026-08-15.
+    #
+    # This is only sound because `just aidoc` runs every check this
+    # recipe would, and reaches each of them first:
+    #
+    #   - drift — impossible against a regeneration of the same tree;
+    #   - target mismatch — `just aidoc` refuses to write and exits
+    #     non-zero rather than retargeting the artifacts;
+    #   - rustdoc format mismatch — raised before either mode branches;
+    #   - the doc lints — `--strict`, which `just aidoc` carries for
+    #     this reason among others. Without it there would be a real
+    #     gate here and this skip would swallow it, since `--strict`
+    #     runs nowhere else by default: on a developer machine the
+    #     guard exits 0 unless the pinned nightly is installed.
+    #
+    # Said out loud rather than skipped quietly, on the same terms as
+    # the four warnings below — with the difference that here the
+    # artifacts *were* checked, by the tool that wrote them.
+    if [ -n "${ASTERISM_AIDOC_REGENERATED:-}" ]; then
+        echo "docs/aidoc/ was regenerated earlier in this run; not re-checked." >&2
+        exit 0
+    fi
     if ! command -v cargo-aidoc >/dev/null 2>&1; then
         echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc is not installed." >&2
         echo "         cargo install cargo-aidoc" >&2
@@ -430,9 +473,39 @@ aidoc-guard:
     fi
     exit "$status"
 
-# Run all Rust and frontend checks.
+# The gates that are the same whoever runs them.
+#
+# Split out so that `check` and `pre-push` share one list rather than
+# each carrying a copy: `check` is this plus `rust-clippy` and
+# `rust-test`, `pre-push` is this plus their `-changed` counterparts. A
+# gate added here is picked up by both, which a duplicated list would
+# not do.
+#
+# What is *not* in here is exactly what scales with the size of the
+# workspace rather than the size of the change. `rust-fmt-check` reads
+# files and compiles nothing; `bindings-check` builds one package;
+# `ui-test`, `ui-check` and `ui-build` are seconds of Node. The two
+# left out — clippy and the test suite — compile every crate, and one
+# of them links every test binary.
+#
+# `aidoc-guard` sits here rather than with those two despite doing a
+# rustdoc pass over the workspace: it is not narrowable by package,
+# since the artifacts it checks are one inventory of the whole tree.
+#
+# Every gate whose cost does not scale with the workspace.
 [group('check')]
-check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build aidoc-guard
+check-shared: rust-fmt-check bindings-check ui-test ui-check ui-build aidoc-guard
+
+# Run all Rust and frontend checks. CI's definition of green.
+#
+# This is the full-workspace shape, and CI is where it belongs: every
+# push runs it on a hosted runner whose load nobody else shares. Before
+# handing a branch over, run `pre-push`, which substitutes
+# `rust-test-changed` for `rust-test`.
+#
+# Run all Rust and frontend checks (the full workspace suite; CI's).
+[group('check')]
+check: check-shared rust-clippy rust-test
 
 # Fail unless the current branch is a worktree branch cut from
 # origin/main. The incident this exists for (2026-08-15): a branch cut
@@ -458,19 +531,24 @@ branch-check:
     @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
 
 # The last gate before a branch is handed over, and the agent that built
-# the branch is the one that runs it. It writes to nothing remote — it
-# is `branch-check` plus `check` — so being denied `git push`
-# (.claude/settings.json) is no reason to skip it. `git fetch origin`
-# belongs immediately before it: `branch-check` is offline on purpose.
+# the branch is the one that runs it. It writes to nothing remote — so
+# being denied `git push` (.claude/settings.json) is no reason to skip
+# it. `git fetch origin` belongs immediately before it: `branch-check`
+# and `changed-packages`, which the two narrow gates call, both read
+# `origin/main` offline.
 #
-# This does not contradict `rust-test` staying out of `allow-agent`;
-# that exclusion, and its reasoning, are in `rust-clippy`'s comment
-# below ("handing it over invites a full suite where a narrow run was
-# the right tool"). It is about reaching for the whole suite
-# mid-development. This is the run over the tree that is actually
-# handed over. The group annotation is unchanged here: whether
-# `pre-push` should carry `allow-agent` is a permissions decision, not
-# a documentation one.
+# It is `branch-check` plus `check-shared` plus `rust-clippy-changed`
+# and `rust-test-changed`, and those two substitutions are the point.
+# It used to be `branch-check` plus `check`, which reached `rust-test`
+# and linked all 21 crates' test binaries — one linker process each,
+# gigabytes resident each — and `rust-clippy`, which compiled every
+# target in every crate, on whoever's machine the branch happened to be
+# built on. On 2026-08-15 that machine was shared, and the branch under
+# test had changed a workflow file and two comments.
+#
+# Neither is a weaker gate for running in CI; they are gates run where
+# the load belongs. What is lost locally is the crates a change did not
+# edit, and CI reports those on the same push.
 #
 # 2026-08-15 (the hand-over of the #39 branch, not the `branch-check`
 # divergence dated above): this comment used to say a human runs it and
@@ -480,7 +558,7 @@ branch-check:
 #
 # Run every gate over the tree being handed over.
 [group('check')]
-pre-push: branch-check check
+pre-push: branch-check check-shared rust-clippy-changed rust-test-changed
 
 # Fail when any Rust file is not rustfmt-clean.
 #
@@ -598,9 +676,9 @@ bindings-check:
 # This is not a weaker gate, it is a narrower one, and it is the one to
 # reach for while iterating: the full suite runs in CI on every push, so
 # opening a PR does not wait on a workspace run happening here first.
-# Run `rust-test` locally when the change is workspace-wide, when CI has
-# reported something a targeted run cannot reproduce, or when the
-# machine has the room — otherwise let CI be the one that runs it.
+# `rust-test-changed` picks the arguments for you from the branch diff,
+# and is what `pre-push` runs; reach for this one when you already know
+# which crates you care about.
 #
 # Keeps `--no-fail-fast` and its own exit status per package for the
 # reason the full recipe does: one crate failing must not hide the rest.
@@ -626,12 +704,181 @@ rust-test-pkg +packages:
     fi
     exit "$status"
 
-# Run the Rust workspace tests, keeping the whole output.
+# Print the workspace members this branch touched, one per line.
 #
-# The heavy half of the pair with `rust-test-pkg`, and the only
-# sanctioned way to run the full suite — see that recipe for when the
-# narrow one is the right tool, and for why a pull request does not wait
-# on this having run here. `cargo test --workspace`
+# The shared half of `rust-test-changed` and `rust-clippy-changed`, and
+# the reason both exist: `pre-push` used to reach `rust-test` and
+# `rust-clippy` through `check`, so the gate before a hand-over linked
+# all 21 crates' test binaries *and* compiled every target in the
+# workspace, on whatever machine the branch was built on. On 2026-08-15
+# that was a shared box, and a branch whose entire diff was a workflow
+# file and two comments paid for both. Neither is the wrong thing to
+# run — they are the wrong thing to run *here*. CI runs them on every
+# push, on a runner nobody else is sitting on.
+#
+# What counts as touched: the paths this branch changed against
+# `origin/main`, plus anything uncommitted, mapped to the workspace
+# member whose directory contains them.
+#
+# Prints the literal `--workspace` instead of a list when the change
+# reaches the root manifest, the lockfile or the toolchain. Every crate
+# is in scope then, so there is no narrow run to make, and the callers
+# say so rather than quietly starting the run they exist to avoid. No
+# member is named `--workspace`, so the sentinel cannot collide with a
+# real answer.
+#
+# Empty output means no member changed, which is a normal result and
+# not an error — a documentation or CI-only branch reaches it.
+#
+# `origin/main` is read offline, so its freshness is the last `git
+# fetch origin` — the same assumption `branch-check` states, and the
+# reason CONTRIBUTING puts the fetch immediately before `pre-push`.
+#
+# Print the workspace members this branch touched.
+[group('check')]
+[group('allow-agent')]
+changed-packages:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{ project_root }}"
+
+    # Committed against the merge base, plus whatever is not committed
+    # yet. `--porcelain` covers staged, unstaged and untracked in one
+    # pass; its path is the last space-separated field, which is right
+    # for every status code here except a rename, where the last field
+    # is the new path — also the one worth testing.
+    changed=$(
+        {
+            git diff --name-only origin/main...HEAD
+            git status --porcelain | awk '{print $NF}'
+        } | sort -u
+    )
+
+    if [ -z "$changed" ]; then
+        exit 0
+    fi
+
+    # A change to any of these is not attributable to one member.
+    if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/)'; then
+        echo "Workspace-wide change (manifest, lockfile or toolchain):" >&2
+        printf '%s\n' "$changed" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/)' | sed 's/^/  /' >&2
+        echo "--workspace"
+        exit 0
+    fi
+
+    # Member directory -> package name, read from each manifest rather
+    # than assumed from the directory: they agree today, and a recipe
+    # that depends on them agreeing breaks silently the day one is
+    # renamed.
+    members=$(
+        awk '/^members *= *\[/ {inside=1; next} inside && /^\]/ {exit} inside' Cargo.toml \
+            | tr -d ' ",'
+    )
+
+    packages=""
+    for dir in $members; do
+        [ -f "$dir/Cargo.toml" ] || continue
+        name=$(
+            awk '/^\[package\]/ {inside=1; next}
+                 /^\[/ {inside=0}
+                 inside && /^name *=/ {gsub(/^name *= *"|"$/, ""); print; exit}' \
+                "$dir/Cargo.toml"
+        )
+        [ -n "$name" ] || continue
+        # Each member claims its own directory and nothing above it.
+        # `crates/asterism-ui` is not itself a member — only
+        # `crates/asterism-ui/src-tauri` is — so the Svelte sources
+        # beside it match nothing here, which is right: `ui-test` and
+        # `ui-check` are what cover them.
+        if printf '%s\n' "$changed" | grep -q "^$dir/"; then
+            packages="$packages $name"
+        fi
+    done
+
+    if [ -z "${packages// /}" ]; then
+        echo "No workspace member changed. Changed paths:" >&2
+        printf '%s\n' "$changed" | sed 's/^/  /' >&2
+        exit 0
+    fi
+
+    printf '%s\n' $packages | sort -u
+
+# Test the packages this branch touched (pre-push's narrow suite).
+#
+# One limit, stated because a narrower gate that reads as a full one is
+# worse than no gate: it names packages a change *edited*, not packages
+# that depend on them. Editing `asterism-core` does not test
+# `asterism-server` here, and it is CI that catches what that misses.
+[group('check')]
+[group('allow-agent')]
+rust-test-changed:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{ project_root }}"
+    packages=$(just changed-packages) || exit 1
+    if [ "$packages" = "--workspace" ]; then
+        echo "Every crate is in scope, so there is no narrow suite to run."
+        echo "CI runs the workspace suite on this push; it is not run here."
+        exit 0
+    fi
+    if [ -z "$packages" ]; then
+        echo "No workspace member changed; no Rust test to run."
+        exit 0
+    fi
+    echo "Testing what this branch touched:$(printf ' %s' $packages)"
+    echo "Dependents of these are not run here — CI covers them."
+    just rust-test-pkg $packages
+
+# Lint the packages this branch touched (pre-push's narrow clippy).
+#
+# `rust-clippy` is `--workspace --all-targets`, which compiles every
+# target in every crate. It links nothing, so it is cheaper than the
+# test suite, but it is still a whole-workspace build and it was still
+# running in `pre-push` after the test half had been narrowed — the
+# same defect, left half-fixed. Same scope rule, same limit: a lint
+# that fires in a dependent crate is CI's to report.
+[group('check')]
+[group('allow-agent')]
+rust-clippy-changed:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{ project_root }}"
+    packages=$(just changed-packages) || exit 1
+    if [ "$packages" = "--workspace" ]; then
+        echo "Every crate is in scope, so there is no narrow lint to run."
+        echo "CI runs clippy over the workspace on this push; not here."
+        exit 0
+    fi
+    if [ -z "$packages" ]; then
+        echo "No workspace member changed; no Rust lint to run."
+        exit 0
+    fi
+    echo "Linting what this branch touched:$(printf ' %s' $packages)"
+    status=0
+    for pkg in $packages; do
+        echo
+        echo "=== $pkg ==="
+        # `-D warnings` and `--all-targets` are `rust-clippy`'s terms,
+        # kept so that a lint passing here is one that passes there.
+        cargo clippy -p "$pkg" --all-targets -- -D warnings || status=1
+    done
+    exit "$status"
+
+# CI's recipe. Running it locally is discouraged, and no other recipe
+# depends on it any more except `check`, which is CI's own entry point.
+# It links every test binary in the workspace at once — one linker
+# process each, gigabytes resident each, as many at a time as `jobs`
+# allows. That is enough to put a machine into swap and take down
+# whatever else is running on it, which on 2026-08-15 is exactly what
+# it did to a shared box; but the shape of the cost is not specific to
+# that machine, and a laptop pays it too. Reach for `rust-test-changed`
+# or `rust-test-pkg` instead. This one is worth starting by hand when
+# CI has reported something a narrow run cannot reproduce, when the
+# change really is workspace-wide *and* the machine has the room, and
+# not otherwise.
+#
+# Still the only sanctioned way to run the full suite when it is run at
+# all. `cargo test --workspace`
 # by hand is what produced an unexplainable result on 2026-07-30: the run
 # reported 455 passed / 1 failed against 472 expected, the operator had
 # piped it through an aggregate `grep`, and the identity of the failing
@@ -647,10 +894,22 @@ rust-test-pkg +packages:
 #      killed mid-run prints no `test result:` line, and its passed
 #      tests simply vanish from any sum. That silent subtraction is the
 #      exact shape of the 2026-07-30 observation.
+#
+# Run the whole workspace suite — CI's job; heavy on any machine.
 [group('check')]
 rust-test: rust-fmt-check
     #!/usr/bin/env bash
     set -uo pipefail
+    # Said on the way in rather than in a comment nobody reads at the
+    # moment they type it. Not a prompt and not a refusal: someone with
+    # a reason to run this has one, and CI reaches it through `check`
+    # with `CI` set.
+    if [ -z "${CI:-}" ]; then
+        echo "NOTE: this links every test binary in the workspace, which is" >&2
+        echo "      minutes and gigabytes. 'just rust-test-changed' runs the" >&2
+        echo "      packages this branch touched; CI runs this one on push." >&2
+        echo >&2
+    fi
     # Point 3 above reads cargo's own output, so the output has to stay
     # plain. Coloured, `   Running` arrives as `ESC[1mESC[92m   Running`
     # and the anchored patterns below match nothing: the count comes back
