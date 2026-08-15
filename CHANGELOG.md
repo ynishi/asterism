@@ -370,27 +370,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   meant to ask. (An added crate or module was never the missed case:
   those also modify a tracked index page.)
 
-- **The gate before a hand-over tests what the branch touched instead of
-  linking the whole workspace.** `just pre-push` was `branch-check` plus
-  `check`, and `check` reaches `rust-test`, which links every test
-  binary in the workspace at once — one linker process each, gigabytes
-  resident each. That is minutes and gigabytes on any machine, and on
-  2026-08-15 it was run on a shared one for a branch whose entire diff
-  was a workflow file and two comments. It is now `branch-check` plus
-  `check-fast` plus a new `rust-test-changed`, which reads the paths the
-  branch changed against `origin/main` plus anything uncommitted, maps
-  them to the workspace members that own them, and tests those. A
-  workspace-wide change — the root manifest, the lockfile, the toolchain
-  — has no narrow run to make, so it says so and runs nothing rather
-  than starting the run it exists to avoid.
+- **The gate before a hand-over costs what the change costs, not what
+  the workspace costs.** `just pre-push` was `branch-check` plus
+  `check`, and `check` reaches two gates that scale with the repository
+  rather than the diff: `rust-test`, which links every test binary in
+  the workspace at once — one linker process each, gigabytes resident
+  each — and `rust-clippy`, which compiles every target in every crate.
+  On 2026-08-15 both were run on a shared machine for a branch whose
+  entire diff was a workflow file and two comments.
 
-  `check` is unchanged and still means the full suite: it is CI's entry
-  point, and CI is a runner nobody else is sitting on. What the narrow
-  run gives up is the crates a change did not edit — it tests what was
-  edited, not what depends on it — and CI reports those on the same
-  push. `rust-test` stays as the one sanctioned way to run the suite
-  when it is genuinely wanted, now says on the way in what it is about
-  to cost, and nothing depends on it any more except `check`.
+  `pre-push` is now `branch-check` plus `check-shared` plus
+  `rust-clippy-changed` and `rust-test-changed`. Both narrow gates call
+  a new `changed-packages`, which reads the paths the branch changed
+  against `origin/main` plus anything uncommitted and maps them to the
+  workspace members that own them; it prints `--workspace` instead of a
+  list when the change reaches the root manifest, the lockfile or the
+  toolchain, and both callers then say there is no narrow run to make
+  rather than quietly starting the run they exist to avoid.
+  `check-shared` holds the gates whose cost does not move with the
+  workspace — formatting, the bindings check, the three frontend
+  recipes — plus `aidoc-guard`, which does read the whole tree but
+  cannot be narrowed by package, since the artifacts it checks are one
+  inventory of all of it.
+
+  `check` is unchanged and still means the workspace-wide pair: it is
+  CI's entry point, and CI is a runner nobody else is sitting on. What
+  the narrow gates give up is the crates a change did not edit — they
+  cover what was edited, not what depends on it — and CI reports those
+  on the same push. `rust-test` stays as the one sanctioned way to run
+  the suite when it is genuinely wanted, now says on the way in what it
+  is about to cost, and nothing depends on it any more except `check`.
 
 - **A disclosure's two halves report their own outcome, so one failing no
   longer cancels the other** (#14) — applying a record writes an IPTC/XMP
