@@ -19,25 +19,37 @@ Remove the worktree once the branch is merged.
 
 ## Verification
 
-`just check` is the definition of green. The full Rust suite runs only
-through `just rust-test` — never a hand-rolled `cargo test --workspace`.
-Report what was actually run; "I did not verify X" is a usable report,
-a green claim resting on a recipe nobody ran is not.
+`just check` is the definition of green, and CI is where it runs. It
+reaches `just rust-test`, which links every test binary in the
+workspace at once — one linker process each, gigabytes resident each,
+as many at a time as `jobs` allows. That is minutes and gigabytes on
+any machine, and on a shared or memory-tight one it is enough to push
+the box into swap and take down whatever else is running there.
 
-While iterating, run `just rust-test-pkg <crate>…` and name the crates
-the change touches. The workspace run links every test binary at once —
-one linker process each, gigabytes resident each, as many at a time as
-`jobs` allows — which on a shared or memory-tight machine is enough to
-push the box into swap and take down whatever else is running on it.
-Reach for it when the change is workspace-wide, when CI reports
-something a targeted run cannot reproduce, or when the machine has the
-room.
+**Do not run the full suite locally as a matter of course.** Reach for
+`just rust-test` by hand only when CI has reported something a narrow
+run cannot reproduce, or when the change really is workspace-wide and
+the machine has the room. Never hand-roll `cargo test --workspace`;
+`rust-test` is the only sanctioned way to run it at all, for reasons
+its own comment gives.
+
+The two recipes to actually use:
+
+- `just rust-test-changed` — works out which workspace members this
+  branch touched, against `origin/main` plus anything uncommitted, and
+  tests those. This is what `pre-push` runs.
+- `just rust-test-pkg <crate>…` — the same thing with the crates named
+  by hand, for the loop while work is still moving.
+
+Both are narrower than the suite, not weaker: they test what a change
+edited, not what depends on it. CI closes that gap on every push.
 
 **Opening a pull request does not wait on a full local run.** CI runs
-`just check` — the workspace suite included — on every push, so the full
-result reaches the PR either way. What the targeted run is for is the
-loop before that: knowing the crates you touched are green before you
-ask anyone to look. Say which of the two you ran, as above.
+`just check` — the workspace suite included — on every push, so the
+full result reaches the PR either way. Report what was actually run;
+"I did not verify X" is a usable report, a green claim resting on a
+recipe nobody ran is not. When a narrow run is what happened, say
+which packages it covered.
 
 ## Preferred commit format
 
@@ -74,11 +86,12 @@ issue -> worktree (just branch-check) -> implement -> just check
       -> write the PR body to a file -> hand over push/PR
 ```
 
-The `just check` in the middle is what you iterate against while the
-work is still moving. The `pre-push` at the end is the gate: it runs
-after the last commit, over the tree that is actually handed over, and
-it is not the same recipe — it adds `branch-check`, which `check` never
-covers. Run it there even when the mid-loop run was green. A green run
+The `pre-push` at the end is the gate: it runs after the last commit,
+over the tree that is actually handed over. It is not `check` — it adds
+`branch-check`, which `check` never covers, and it substitutes
+`rust-test-changed` for the workspace suite, so the gate before a
+hand-over does not link every crate in the workspace on a developer's
+machine. Run it there even when a mid-loop run was green. A green run
 over a different tree is not a gate.
 
 Two agents ship with the repo, and we would appreciate a diff passing
@@ -100,10 +113,13 @@ An agent's part ends with everything that does not write to anything
 remote, and that includes the gate:
 
 1. `git fetch origin`, then `just pre-push` — the agent runs both.
-   `pre-push` is `branch-check` plus `check`, and neither writes to
-   anything remote, so being denied `git push` is no reason to skip it.
-   The fetch comes first because `branch-check` is offline by design:
-   its ancestry assertions are only as fresh as the last fetch.
+   `pre-push` is `branch-check` plus `check-fast` plus
+   `rust-test-changed`, and none of them writes to anything remote, so
+   being denied `git push` is no reason to skip it. The fetch comes
+   first because both `branch-check` and `rust-test-changed` read
+   `origin/main` offline: the first's ancestry assertions and the
+   second's idea of which packages the branch touched are only as fresh
+   as the last fetch.
    Report the result, including any recipe that reported it did not
    check anything — `aidoc-guard` says so out loud and still exits 0.
 2. **Write the PR body to a file** under `workspace/`, which is
