@@ -44,6 +44,46 @@ sets that window and defaults to 14. A malformed or non-positive value is
 refused at startup rather than silently replaced, because this number
 decides when data stops being recoverable.
 
+## Signing exported disclosures
+
+Every export carries the IPTC/XMP disclosure, which needs no key
+material. The C2PA manifest beside it is signed, and this repository
+ships no certificate — so out of the box the manifest half is reported as
+skipped, which is a supported state rather than a degraded one. An
+untrusted manifest makes a provenance claim a validator rejects, and that
+is worse than making none.
+
+A deployment supplies its own certificate through the environment:
+
+| Variable | Meaning |
+|---|---|
+| `ASTERISM_DISCLOSURE_CERT_CHAIN` | Path to the PEM certificate chain, end-entity first |
+| `ASTERISM_DISCLOSURE_PRIVATE_KEY` | Path to the PEM private key |
+| `ASTERISM_DISCLOSURE_SIGNING_ALG` | COSE algorithm name; defaults to `es256` |
+| `ASTERISM_DISCLOSURE_TSA_URL` | Timestamp authority (`http://` or `https://`); without one, a manifest stops verifying when the certificate expires |
+| `ASTERISM_DISCLOSURE_SIGNING_STRICT` | `true` also refuses a certificate a trust list would not carry, and requires the issuer's chain |
+
+Not settings-screen keys, deliberately. These are the operator's
+arrangement with an issuer rather than a user preference, and a settings
+key is both writable through `PUT /asterism/settings/{key}` and readable
+back with the value of every layer it has — which would publish the
+location of the private key and let that route choose which file this
+process opens. Keep the key readable by its owner alone (`0600`);
+Asterism warns at startup when it is not.
+
+Both path variables are needed together. A certificate that cannot be
+loaded does not stop the application — one issued under the C2PA
+conformance profile is valid for at most 366 days, so every signing
+deployment eventually meets an expired one — but it does not pass
+quietly either: the reason is logged at startup and recorded against
+every export as a failed manifest half, which is a different statement
+from the skip that means no certificate is configured.
+
+Nothing here makes a manifest *trusted*. That needs a certificate
+authority on the C2PA trust list, and a self-issued one validates as
+`signingCredential.untrusted` while C2PA's own validation state stays
+`Valid`.
+
 From the repository root, use `just dev` for the isolated Dev app,
 `just dogfood` to build and launch the production-shaped Dogfood app, and
 `just bench` for the large fixture. Run `just --list` for profile init,

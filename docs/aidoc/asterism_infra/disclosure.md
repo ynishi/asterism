@@ -89,4 +89,5 @@ that path; this note is why.
 - `DisclosureError` — What went wrong applying a record.
 - `DisclosureWriter` — Applies disclosure records to files.
 - `SigningIdentity` — The certificate and key a manifest is signed with.
+- `Strictness` — Whether a certificate no trust list would carry may still sign.
 
