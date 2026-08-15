@@ -25,3 +25,8 @@ AGENTS.md
 
 logs
 
+# `just check` transcripts, redirected locally. Two of them rode into
+# b323696 with a merge — neither parent had them — and 325 KB of build
+# output then travelled as repository content. The series is local
+# evidence of a local run; CI produces its own.
+/.check*.log
