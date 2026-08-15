@@ -5851,6 +5851,31 @@ CREATE INDEX idx_asset_trace_pursuit
  WHERE trace_pursuit_id IS NOT NULL;
 "#;
 
+/// Version 80 → 81: the words a container wrote into an artefact, and
+/// the reading that composed a search body.
+///
+/// Two columns, one feature (the derived search document):
+///
+/// - `material.meta_text` — the canonical rendering of the artefact's
+///   embedded text (`domain::embedded_text`), written by the same pass
+///   that fingerprints the bytes. `NULL` is "nobody has looked", which
+///   is what every existing row truthfully is — the recovery backfill
+///   (`JobKind::MaterialText`) walks exactly the `IS NULL` set, so no
+///   default is written here. `'{}'` ("read, and no words") is an
+///   answer only a walk may give.
+/// - `asset_body.derived_version` — which
+///   [`derived_text::COMPOSITION_VERSION`](asterism_core::domain::derived_text::COMPOSITION_VERSION)
+///   composed the cached body. `NULL` marks every pre-derivation body
+///   as stale, which is deliberate: those bodies are the file's bytes
+///   alone, and the backfill (`scan_stale_body`) exists to re-compose
+///   them with the sections that did not exist yet. Rows gain the
+///   stamp as they are re-composed; nothing is backfilled here.
+const V81_DERIVED_TEXT: &str = r#"
+ALTER TABLE material ADD COLUMN meta_text TEXT;
+
+ALTER TABLE asset_body ADD COLUMN derived_version INTEGER;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -5934,6 +5959,7 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v78_material_layers),
     Step::App(v79_pursuit),
     Step::Sql(V80_TRACE_LOOKUP),
+    Step::Sql(V81_DERIVED_TEXT),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

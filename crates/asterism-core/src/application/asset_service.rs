@@ -206,6 +206,11 @@ pub struct AssetService {
     /// `retriever` because these are different halves used by
     /// different paths, not one dependency used twice.
     indexer: Arc<dyn crate::domain::repository::AssetIndexer>,
+    /// Body cache, write side — held for exactly one purpose: taking
+    /// the composition stamp off a row whose re-index could not be
+    /// queued, so the backfill walk finds it. Nothing here composes a
+    /// body; that is the `IndexRebuild` handler's work.
+    asset_bodies: Arc<dyn crate::domain::repository::AssetBodyRepository>,
     /// Sort port — read-only use here. [`list`](Self::list) needs the whole
     /// filtered set carrying the columns the comparator reads
     /// (`fetch_sortable_assets`, no `LIMIT`) whenever the caller names an
@@ -257,6 +262,7 @@ impl AssetService {
         jobs: Arc<dyn JobQueue>,
         retriever: Arc<dyn crate::domain::repository::AssetRetriever>,
         indexer: Arc<dyn crate::domain::repository::AssetIndexer>,
+        asset_bodies: Arc<dyn crate::domain::repository::AssetBodyRepository>,
         query_groups: Arc<dyn crate::domain::repository::QueryGroupRepository>,
         query_group_invalidator: crate::application::query_group_invalidation::QueryGroupInvalidator,
         sessions: Arc<crate::application::SessionService>,
@@ -276,6 +282,7 @@ impl AssetService {
             jobs,
             retriever,
             indexer,
+            asset_bodies,
             query_groups,
             query_group_invalidator,
             sessions,
@@ -861,7 +868,63 @@ impl AssetService {
         }
         asset.updated_at = now;
         self.assets.save(&asset).await?;
+        // A declared statement is text somebody wrote about this asset,
+        // and the derived document is composed from exactly that
+        // population — so the index is stale the moment this returns.
+        self.reindex(&id).await;
         Ok(crate::application::mapping::asset_to_dto(&asset))
+    }
+
+    /// Re-composes one asset's search document after a write to a field
+    /// the document is derived from.
+    ///
+    /// The population is
+    /// [`derive_text`](crate::domain::derived_text::derive_text)'s: a
+    /// title, a cover, labels, keywords, a register note, declared meta.
+    /// Every verb that writes one of those leaves the index describing a
+    /// row that no longer exists, and for a picture those fields may be
+    /// the only text there is — which makes this the difference between
+    /// findable and not.
+    ///
+    /// Enqueue failure does not fail the write — the caller asked to
+    /// edit an asset, not to index one — but it is **not** swallowed
+    /// either, because nothing else would have noticed. The recovery
+    /// this used to claim ("the backfill walk will get it") was untrue
+    /// in exactly this case: the row's cached body carries the current
+    /// composition stamp, so the walk, which selects bodies composed by
+    /// an *older* reading, passes straight over it. The stale document
+    /// would have survived until somebody edited that asset again.
+    ///
+    /// So a failure clears the stamp instead, which is what puts the row
+    /// in front of the walk, and says so in the log. If that write fails
+    /// too there is nothing further to try from here: both the queue and
+    /// the database are refusing writes, and the caller's own write is
+    /// the thing that matters.
+    async fn reindex(&self, id: &AssetId) {
+        let Err(err) = self
+            .jobs
+            .enqueue(
+                JobKind::IndexRebuild,
+                serde_json::json!({ "asset_id": id.to_string() }),
+            )
+            .await
+        else {
+            return;
+        };
+        tracing::warn!(
+            event = "diag.index.enqueue_failed",
+            asset_id = %id,
+            error = %err,
+            "could not queue a re-index; falling back to the backfill walk"
+        );
+        if let Err(err) = self.asset_bodies.unstamp(id).await {
+            tracing::warn!(
+                event = "diag.index.unstamp_failed",
+                asset_id = %id,
+                error = %err,
+                "the row keeps a document composed from text that has changed"
+            );
+        }
     }
 
     /// Retries every provenance claim that is recorded but not yet
@@ -1700,6 +1763,14 @@ impl AssetService {
         // Metadata edits (modality flip, label change, memo, etc.)
         // change fields Query Group rules can filter on.
         self.notify_persona_touched(persona_id);
+        // Four of the fields this verb writes — title, cover, labels,
+        // register note — are sections of the derived document, so
+        // renaming an asset has to make it findable by the new name.
+        // Unconditional rather than gated on which fields the command
+        // carried: a rating-only edit costs one job that re-composes to
+        // the same bytes, and a gate here would be a second copy of
+        // `derive_text`'s field list, kept in step by hand.
+        self.reindex(&id).await;
         Ok(asset_to_dto(&asset))
     }
 
@@ -3185,6 +3256,19 @@ impl AssetService {
                     )
                     .await?;
             }
+            // The by-hand half, for the path a person just confirmed.
+            // The job above finishes the durable cleanup, but it is
+            // asynchronous, and a headstone answering a search between
+            // the commit and the job's turn is a hit the grid cannot
+            // open — so the retrieval documents leave now, inline, the
+            // same way `trash` takes its rows out.
+            self.unindex_removed_assets(&outcome.folded).await;
+            // And the keeper absorbed text it did not have — keywords,
+            // labels, the discards' comment threads — so its document
+            // predates its own row. Recomposition goes through the job
+            // for the reason `reindex` gives: the body is re-derived,
+            // not patched.
+            self.reindex(&plan.keeper()).await;
         }
 
         // The graph walk is the only thing the preview does beyond the

@@ -131,6 +131,7 @@ impl Fixture {
                         meta: "m1-sha256:0".into(),
                         meta_kv: Some(meta_kv.to_string()),
                         meta_raw: None,
+                        meta_text: None,
                     },
                 )
                 .await

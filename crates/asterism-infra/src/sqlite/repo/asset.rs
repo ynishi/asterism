@@ -1649,6 +1649,7 @@ struct MaterialRow {
     content_region_hash: Option<String>,
     meta_hash: Option<String>,
     meta_kv: Option<String>,
+    meta_text: Option<String>,
 }
 
 impl MaterialRow {
@@ -1658,7 +1659,7 @@ impl MaterialRow {
     /// each following column under the previous one's name.
     const COLUMNS: &'static str = "ord, locator, file_size_bytes, mime, content_hash, \
                                    created_at, updated_at, content_region_hash, \
-                                   meta_hash, meta_kv";
+                                   meta_hash, meta_kv, meta_text";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -1672,6 +1673,7 @@ impl MaterialRow {
             content_region_hash: row.get(7)?,
             meta_hash: row.get(8)?,
             meta_kv: row.get(9)?,
+            meta_text: row.get(10)?,
         })
     }
 
@@ -1705,6 +1707,7 @@ impl MaterialRow {
             content_region_hash: self.content_region_hash,
             meta_hash: self.meta_hash,
             meta_kv: self.meta_kv,
+            meta_text: self.meta_text,
             created_at: ms_to_datetime(self.created_at)?,
             updated_at: ms_to_datetime(self.updated_at)?,
         })
@@ -4144,13 +4147,15 @@ impl AssetRepository for SqliteAssetRepository {
         let meta = fingerprint.meta.clone();
         let meta_kv = fingerprint.meta_kv.clone();
         let meta_raw = fingerprint.meta_raw.clone();
+        let meta_text = fingerprint.meta_text.clone();
         self.isle
             .call(move |conn| {
                 conn.execute(
                     "UPDATE material SET content_hash = ?1, content_region_hash = ?2, \
-                                         meta_hash = ?3, meta_kv = ?4, meta_raw = ?5 \
-                      WHERE asset_id = ?6 AND ord = ?7",
-                    params![file, content, meta, meta_kv, meta_raw, uuid, ord],
+                                         meta_hash = ?3, meta_kv = ?4, meta_raw = ?5, \
+                                         meta_text = ?6 \
+                      WHERE asset_id = ?7 AND ord = ?8",
+                    params![file, content, meta, meta_kv, meta_raw, meta_text, uuid, ord],
                 )?;
                 Ok(())
             })
@@ -4370,6 +4375,87 @@ impl AssetRepository for SqliteAssetRepository {
                 },
             )
             .collect()
+    }
+
+    async fn scan_unrecovered_text(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<UnhashedMaterial>, DomainError> {
+        let cursor = after.map(|(id, ord)| (*id.as_uuid(), i64::from(ord)));
+        let limit = i64::from(limit);
+        let rows: Vec<(Uuid, i64, String, Option<String>)> = self
+            .isle
+            .call(move |conn| {
+                // `mime IS NOT NULL` rides along because a row whose
+                // format nothing guessed cannot pass the caller's format
+                // test either, and leaving it in the page would spend a
+                // locator parse per row to reach the same answer.
+                //
+                // Trashed rows stay in, on the same terms the hash walk
+                // states: a trashed asset can be restored, and reading
+                // its bytes later costs exactly what reading them now
+                // costs.
+                let sql = "SELECT m.asset_id, m.ord, m.locator, m.mime \
+                             FROM material m \
+                            WHERE m.meta_text IS NULL AND m.mime IS NOT NULL {CURSOR} \
+                            ORDER BY m.asset_id, m.ord \
+                            LIMIT ?1";
+                match cursor {
+                    None => {
+                        let mut stmt = conn.prepare(&sql.replace("{CURSOR}", ""))?;
+                        stmt.query_map(params![limit], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                    Some((uuid, ord)) => {
+                        let mut stmt = conn.prepare(&sql.replace(
+                            "{CURSOR}",
+                            "AND (m.asset_id > ?2 OR (m.asset_id = ?2 AND m.ord > ?3))",
+                        ))?;
+                        stmt.query_map(params![limit, uuid, ord], |r| {
+                            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                        })?
+                        .collect::<Result<_, _>>()
+                    }
+                }
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(
+                |(asset_id, ord, locator, mime): (_, i64, String, Option<String>)| {
+                    Ok(UnhashedMaterial {
+                        asset_id: AssetId::from_uuid(asset_id),
+                        ord: ord.max(0) as u32,
+                        locator: SourceLocator::try_from(locator.as_str())?,
+                        mime: mime.as_deref().map(MimeType::parse),
+                    })
+                },
+            )
+            .collect()
+    }
+
+    async fn set_material_embedded_text(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        meta_text: Option<&str>,
+    ) -> Result<(), DomainError> {
+        let uuid = *asset_id.as_uuid();
+        let ord = i64::from(ord);
+        let meta_text = meta_text.map(str::to_string);
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE material SET meta_text = ?1 WHERE asset_id = ?2 AND ord = ?3",
+                    params![meta_text, uuid, ord],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
     }
 
     async fn scan_dims_candidates(
@@ -4593,6 +4679,9 @@ impl AssetRepository for SqliteAssetRepository {
                         // writes the result back: `detect_duplicate`
                         // takes it and produces conflicts.
                         meta_raw: None,
+                        // Same reason, smaller column: the duplicate
+                        // walk never compares recovered text.
+                        meta_text: None,
                     },
                 },
             )
@@ -5631,11 +5720,36 @@ impl SqliteAssetRepository {
     /// target **or** share the target's session id. Keyword-overlap
     /// classification is done separately by the domain `plan_edges`.
     /// Backfill scan for the `IndexRebuild` job. Returns
-    /// [`BodyCandidate`] rows in id order
-    /// for assets **that do not yet have an `asset_body` row**
-    /// (LEFT JOIN filter), starting after `cursor` (exclusive).
-    /// `limit` is clamped by the caller; the SQL runs an anti-join
-    /// so re-runs stop as the body cache fills.
+    /// [`BodyCandidate`] rows in id order for assets whose cached body
+    /// is **missing or composed by an older reading**, starting after
+    /// `cursor` (exclusive). `limit` is clamped by the caller.
+    ///
+    /// # Two states, not one
+    ///
+    /// The anti-join alone ("no `asset_body` row") was the whole
+    /// predicate until derived text arrived, and it silently became half
+    /// of one. A picture has no body and is found by it; a *text* asset
+    /// indexed by an older build has a body — the file's bytes — and was
+    /// therefore invisible, so its title, keywords, cover and comment
+    /// thread never reached its own document. The second disjunct is
+    /// that half: `derived_version` below
+    /// [`COMPOSITION_VERSION`](asterism_core::domain::derived_text::COMPOSITION_VERSION),
+    /// or `NULL` for a row written before the column existed, is a body
+    /// composed from less than the asset now says.
+    ///
+    /// Re-runs still terminate, and for a sharper reason than before:
+    /// every row this returns is re-composed and stamped with the
+    /// current version, so it leaves the set. Raising the constant puts
+    /// the whole library back into it exactly once, which is the point
+    /// of having it.
+    ///
+    /// An asset that derives to nothing keeps no body (the handler drops
+    /// it), so it stays in this set and is re-visited by a later full
+    /// walk. That is the pre-existing shape of `skipped_no_body` rather
+    /// than a new cost: the walk pages forward on `id`, so it is bounded
+    /// within a run, and the alternative — a stored "composed to
+    /// nothing" row — would be a body cache holding the empty string,
+    /// which the port refuses for its own reasons.
     ///
     /// Trashed rows and headstones are both skipped: this scan decides
     /// what enters the full-text index, and a search hit that resolves
@@ -5643,13 +5757,14 @@ impl SqliteAssetRepository {
     /// have. The single-doc path enforces the same two rules in Rust
     /// (`jobs::handlers::index_rebuild`) because a row can be trashed
     /// or folded after its job was enqueued.
-    pub async fn scan_missing_body(
+    pub async fn scan_stale_body(
         &self,
         cursor: Option<&AssetId>,
         limit: u32,
     ) -> Result<Vec<BodyCandidate>, DomainError> {
         let cursor_bytes = cursor.map(|id| id.as_uuid().as_bytes().to_vec());
         let limit_i = limit.clamp(1, 5_000) as i64;
+        let composed_by = asterism_core::domain::derived_text::COMPOSITION_VERSION;
         let rows = self
             .isle
             .call(move |conn| {
@@ -5660,11 +5775,14 @@ impl SqliteAssetRepository {
                                   WHERE material.asset_id = asset.id AND material.ord = 0) \
                          FROM asset \
                          LEFT JOIN asset_body ON asset_body.asset_id = asset.id \
-                         WHERE asset_body.asset_id IS NULL AND asset.trashed_at IS NULL \
+                         WHERE (asset_body.asset_id IS NULL \
+                                OR asset_body.derived_version IS NULL \
+                                OR asset_body.derived_version < ?) \
+                           AND asset.trashed_at IS NULL \
                            AND asset.folded_into IS NULL \
                            AND asset.id > ? \
                          ORDER BY asset.id ASC LIMIT ?",
-                        vec![c.into(), limit_i.into()],
+                        vec![composed_by.into(), c.into(), limit_i.into()],
                     ),
                     None => (
                         "SELECT asset.id, asset.persona_id, asset.source_locator, \
@@ -5672,10 +5790,13 @@ impl SqliteAssetRepository {
                                   WHERE material.asset_id = asset.id AND material.ord = 0) \
                          FROM asset \
                          LEFT JOIN asset_body ON asset_body.asset_id = asset.id \
-                         WHERE asset_body.asset_id IS NULL AND asset.trashed_at IS NULL \
+                         WHERE (asset_body.asset_id IS NULL \
+                                OR asset_body.derived_version IS NULL \
+                                OR asset_body.derived_version < ?) \
+                           AND asset.trashed_at IS NULL \
                            AND asset.folded_into IS NULL \
                          ORDER BY asset.id ASC LIMIT ?",
-                        vec![limit_i.into()],
+                        vec![composed_by.into(), limit_i.into()],
                     ),
                 };
                 let mut stmt = conn.prepare(sql)?;
@@ -5821,6 +5942,7 @@ mod tests {
             meta: asterism_core::domain::material_meta::unsupported_format(None).stored_value(),
             meta_kv: None,
             meta_raw: None,
+            meta_text: None,
         }
     }
 
@@ -7926,6 +8048,7 @@ mod tests {
                     meta: UNHASHABLE.to_string(),
                     meta_kv: None,
                     meta_raw: None,
+                    meta_text: None,
                 },
             )
             .await
@@ -8432,6 +8555,7 @@ mod tests {
                     meta: content_region::EMPTY_SPAN.to_string(),
                     meta_kv: None,
                     meta_raw: None,
+                    meta_text: None,
                 },
             )
             .await
@@ -8665,6 +8789,7 @@ mod tests {
             meta: asterism_core::domain::material_meta::digest_of(canonical),
             meta_kv: Some(canonical.to_string()),
             meta_raw: Some(raw.to_string()),
+            meta_text: None,
         };
         repo.set_material_fingerprint(&asset.id, 0, &fingerprint)
             .await
@@ -8729,6 +8854,164 @@ mod tests {
                 after.materials[0].meta_hash.as_deref(),
             ),
             "the row the verb left behind is not work"
+        );
+    }
+
+    /// Teeth for the column the recovered text is stored in: what the
+    /// walk found has to survive the round trip, and its three states
+    /// have to stay distinguishable through it.
+    ///
+    /// The write path computes `meta_text` and the read path hands it to
+    /// `derive_text`; between them sits one column, and a column that is
+    /// written but never selected (or selected under a neighbour's name)
+    /// makes the whole recovery a value that is computed and dropped.
+    /// That is the state this file was in before the column existed, and
+    /// it is invisible to every test that only checks the digests.
+    #[tokio::test]
+    async fn recovered_text_survives_the_round_trip_in_all_three_states() {
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        let locator = "/pics/recovered.png";
+        let mut asset = Asset::new(
+            persona,
+            SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), locator).unwrap(),
+            None,
+            chrono::Utc::now(),
+            &nobody(),
+        );
+        asset.materials = vec![asterism_core::domain::material::Material::primary(
+            loc(locator),
+            Some(1),
+            chrono::Utc::now(),
+        )];
+        repo.save(&asset).await.unwrap();
+
+        // State one: nobody has looked.
+        let before = repo.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(before.materials[0].meta_text, None);
+
+        // State three: the words. Written beside a meta digest that does
+        // *not* contain them — the two columns are two readings of the
+        // same chunks, and this is the pair that shows they are stored
+        // separately rather than one being derived from the other.
+        let recovered = r#"{"comment":"Café window","parameters":"a lighthouse"}"#;
+        let digest_body = r#"{"Software":"a generator"}"#;
+        repo.set_material_fingerprint(
+            &asset.id,
+            0,
+            &MaterialFingerprint {
+                file: content_hash::of_bytes(b"the whole file"),
+                content: format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64)),
+                meta: asterism_core::domain::material_meta::digest_of(digest_body),
+                meta_kv: Some(digest_body.to_string()),
+                meta_raw: None,
+                meta_text: Some(recovered.to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let after = repo.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            after.materials[0].meta_text.as_deref(),
+            Some(recovered),
+            "the recovered text is read back under its own name"
+        );
+        assert_eq!(
+            after.materials[0].meta_kv.as_deref(),
+            Some(digest_body),
+            "and the digest's body is still its own column"
+        );
+
+        // State two: read, and these bytes carry no words. Distinct from
+        // state one, which is what keeps a text-free picture out of every
+        // later pass.
+        repo.set_material_fingerprint(
+            &asset.id,
+            0,
+            &MaterialFingerprint {
+                file: content_hash::of_bytes(b"the whole file"),
+                content: format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64)),
+                meta: asterism_core::domain::material_meta::digest_of(digest_body),
+                meta_kv: Some(digest_body.to_string()),
+                meta_raw: None,
+                meta_text: Some("{}".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        let emptied = repo.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            emptied.materials[0].meta_text.as_deref(),
+            Some("{}"),
+            "'looked and found nothing' is an answer, not an absence"
+        );
+    }
+
+    /// Teeth for the half of the backfill predicate that was missing: a
+    /// row with a body composed by an **older reading** is work.
+    ///
+    /// The fixture is the exact shape the defect had. Both assets are
+    /// text and both already have a cached body, so the anti-join alone
+    /// returns neither — which is what made a transcript's own title,
+    /// keywords and comment thread invisible to the walk while every
+    /// picture was found. What separates them here is only
+    /// `derived_version`, so a scan that went back to the old predicate
+    /// fails on the row it is supposed to find rather than on a count.
+    #[tokio::test]
+    async fn a_body_composed_by_an_older_reading_is_still_work() {
+        use asterism_core::domain::derived_text::COMPOSITION_VERSION;
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        let stale = item(persona, "/notes/composed-by-an-older-build.md");
+        let current = item(persona, "/notes/composed-by-this-build.md");
+        for asset in [&stale, &current] {
+            repo.save(asset).await.unwrap();
+        }
+
+        let stale_id = *stale.id.as_uuid();
+        let current_id = *current.id.as_uuid();
+        isle.call(move |conn| {
+            // The row a build without derived text left: a body, and no
+            // statement about what composed it.
+            conn.execute(
+                "INSERT INTO asset_body (asset_id, body_text, body_bytes, indexed_at) \
+                 VALUES (?1, 'the file bytes, and nothing about the row', 39, 0)",
+                rusqlite::params![stale_id],
+            )?;
+            conn.execute(
+                "INSERT INTO asset_body \
+                 (asset_id, body_text, body_bytes, indexed_at, derived_version) \
+                 VALUES (?1, 'composed from everything the row says', 37, 0, ?2)",
+                rusqlite::params![current_id, COMPOSITION_VERSION],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let page = repo.scan_stale_body(None, 10).await.unwrap();
+        assert_eq!(
+            page.iter().map(|row| row.asset_id).collect::<Vec<_>>(),
+            vec![stale.id],
+            "the unstamped body is work and the current one is not"
+        );
+
+        // And the walk terminates: re-composing the row takes it out of
+        // the set, which is what makes the chained backfill stop.
+        use asterism_core::domain::repository::AssetBodyRepository;
+        let body = crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone());
+        body.upsert(&stale.id, "composed from everything the row says")
+            .await
+            .unwrap();
+        assert!(
+            repo.scan_stale_body(None, 10).await.unwrap().is_empty(),
+            "a re-composed row leaves the set"
         );
     }
 
@@ -9322,12 +9605,12 @@ mod tests {
             repo.save(asset).await.unwrap();
         }
 
-        let before = repo.scan_missing_body(None, 10).await.unwrap();
+        let before = repo.scan_stale_body(None, 10).await.unwrap();
         assert_eq!(before.len(), 2, "both are waiting to be indexed");
 
         fold_into(&isle, &headstone.id, &keeper.id).await;
 
-        let page = repo.scan_missing_body(None, 10).await.unwrap();
+        let page = repo.scan_stale_body(None, 10).await.unwrap();
         assert_eq!(
             page.iter().map(|row| row.asset_id).collect::<Vec<_>>(),
             vec![keeper.id],

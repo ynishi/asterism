@@ -55,8 +55,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::dispatch::run_dispatch_run;
 use crate::sqlite::repo::{
-    SqliteAssetBodyRepository, SqliteAssetRepository, SqliteEdgeRepository,
-    SqliteModalityRepository, SqliteTagRepository, SqliteThumbRepository,
+    SqliteAssetBodyRepository, SqliteAssetCommentRepository, SqliteAssetRepository,
+    SqliteEdgeRepository, SqliteModalityRepository, SqliteTagRepository, SqliteThumbRepository,
 };
 
 /// Queue payload — the job-kind slug (see [`JobKind::as_str`]) plus a
@@ -98,6 +98,12 @@ pub struct JobDeps {
     /// target of the `index_rebuild` handler; source of truth for
     /// the Tantivy projection.
     pub asset_bodies: SqliteAssetBodyRepository,
+    /// Comment thread repository — read by `index_rebuild`, which
+    /// composes the thread into the asset's derived text (a note left
+    /// on a picture is one of the few sentences the library holds
+    /// about it). Read-only from here: the write verbs belong to
+    /// `AssetCommentService`, which enqueues this job after each one.
+    pub comments: SqliteAssetCommentRepository,
     /// Write side of every text index an asset's body feeds — the SQL
     /// trigram index behind the Query-side `text_match` predicate and
     /// the Tantivy index behind Retrieval. Held as the port, not as
@@ -437,6 +443,7 @@ async fn handle_asterism_job(
         Ok(JobKind::EdgeRebuild) => (handlers::edge_rebuild(&env, &job.payload).await, false),
         Ok(JobKind::SessionRebuild) => (handlers::session_rebuild(&env, &job.payload).await, false),
         Ok(JobKind::IndexRebuild) => (handlers::index_rebuild(&env, &job.payload).await, false),
+        Ok(JobKind::MaterialText) => (handlers::material_text(&env, &job.payload).await, false),
         Ok(JobKind::DispatchRun) => match env.deps.dispatch.get() {
             Some(rt) => (run_dispatch_run(rt, &job.payload).await, false),
             None => (
@@ -929,6 +936,7 @@ mod tests {
                         serde_json::json!({ "Software": "ComfyUI", "workflow": "{}" }).to_string(),
                     ),
                     meta_raw: None,
+                    meta_text: None,
                 },
             )
             .await
@@ -1125,6 +1133,7 @@ mod tests {
             thumbs: SqliteThumbRepository::new(isle.clone()),
             modalities: SqliteModalityRepository::new(isle.clone()),
             asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+            comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
             search_index,
             source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
             dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -1195,6 +1204,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index,
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -1517,6 +1527,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -1653,6 +1664,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -1745,6 +1757,14 @@ mod tests {
         // Separate paths because `(source_kind, source_locator)` is
         // unique; the bytes are what has to match, and they do.
         const BODY: &str = "bytes that read perfectly well as text";
+        // The picture's only words: a cover somebody's job wrote. It
+        // shares no term with `BODY`, so "did the reader run" is a
+        // decidable question about the cached body.
+        const CAPTION: &str = "a caption naming what the picture shows";
+        // A second surface with no column of its own on `asset`: the
+        // thread. It has to reach the document through the repository
+        // the handler holds, not through the row it loaded.
+        const NOTE: &str = "the one we printed for the hallway";
         let corpus = tempfile::tempdir().unwrap();
         let picture_path = corpus.path().join("filed-as-a-picture.png");
         let text_path = corpus.path().join("filed-as-text.txt");
@@ -1759,11 +1779,13 @@ mod tests {
                 as_picture,
                 picture_path.to_string_lossy().to_string(),
                 "image/png",
+                Some(CAPTION),
             ),
             (
                 as_text,
                 text_path.to_string_lossy().to_string(),
                 "text/plain",
+                None,
             ),
         ];
         isle.call(move |conn| {
@@ -1772,13 +1794,14 @@ mod tests {
                  VALUES (?1, 'p', 'P', 0, 0)",
                 rusqlite::params![pid],
             )?;
-            for (id, locator, mime) in &rows {
+            for (id, locator, mime, cover) in &rows {
                 let stored = crate::sqlite::stored_locator(locator);
                 conn.execute(
                     "INSERT INTO asset (id, persona_id, source_kind, source_locator,
-                                        modality, labels, occurred_at, created_at, updated_at)
-                     VALUES (?1, ?2, 'fs', ?3, 'tape', '[]', 0, 0, 0)",
-                    rusqlite::params![id, pid, stored],
+                                        modality, labels, cover, occurred_at,
+                                        created_at, updated_at)
+                     VALUES (?1, ?2, 'fs', ?3, 'tape', '[]', ?4, 0, 0, 0)",
+                    rusqlite::params![id, pid, stored, cover],
                 )?;
                 conn.execute(
                     "INSERT INTO material (asset_id, ord, locator, mime,
@@ -1787,6 +1810,14 @@ mod tests {
                     rusqlite::params![id, stored, mime],
                 )?;
             }
+            // One note on the picture's thread — for a picture the
+            // thread is often the only prose the library holds, so it
+            // is part of the document or the picture is unfindable.
+            conn.execute(
+                "INSERT INTO asset_comment (id, asset_id, author_kind, body, created_at)
+                 VALUES (?1, ?2, 'user', ?3, 0)",
+                rusqlite::params![uuid::Uuid::now_v7(), as_picture, NOTE],
+            )?;
             Ok(())
         })
         .await
@@ -1817,6 +1848,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -1852,17 +1884,13 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            picture.contains("is not text"),
-            "a picture must not be read as a document: {picture}"
-        );
-        assert!(
-            !picture.starts_with("indexed asset"),
-            "and must not report itself indexed: {picture}"
+            picture.starts_with("indexed asset"),
+            "a picture with words about it is a document: {picture}"
         );
 
-        // The same bytes, filed as text, do get indexed — so the skip
-        // above is a decision about the format, not a reader that
-        // could not have succeeded.
+        // The same bytes, filed as text, are read — so what the
+        // picture's document is missing is a decision about the format,
+        // not a reader that could not have succeeded.
         let text =
             handlers::index_rebuild(&env, &serde_json::json!({"asset_id": as_text.to_string()}))
                 .await
@@ -1872,25 +1900,221 @@ mod tests {
             "identical bytes filed as text are indexable: {text}"
         );
 
-        // The durable half: no cached body for the picture, one for
-        // the text row.
-        assert_eq!(
-            env.deps
-                .asset_bodies
-                .get(&AssetId::from_uuid(as_picture))
-                .await
-                .unwrap(),
-            None,
-            "a picture leaves no body behind"
+        // The durable half, and the actual claim: the picture's cached
+        // body is what was said about it — the caption on the row and
+        // the note on its thread — and the file it points at was never
+        // opened, though it would have read perfectly.
+        let picture_body = env
+            .deps
+            .asset_bodies
+            .get(&AssetId::from_uuid(as_picture))
+            .await
+            .unwrap()
+            .expect("a picture with words about it caches a body");
+        assert!(
+            picture_body.contains(CAPTION),
+            "the row's own words are in the document: {picture_body}"
         );
         assert!(
-            env.deps
-                .asset_bodies
-                .get(&AssetId::from_uuid(as_text))
-                .await
-                .unwrap()
-                .is_some(),
-            "the text row is the control: it must actually cache"
+            picture_body.contains(NOTE),
+            "the thread reaches the document too: {picture_body}"
+        );
+        assert!(
+            !picture_body.contains(BODY),
+            "and the file was never opened: {picture_body}"
+        );
+        let text_body = env
+            .deps
+            .asset_bodies
+            .get(&AssetId::from_uuid(as_text))
+            .await
+            .unwrap()
+            .expect("the text row is the control: it must actually cache");
+        assert!(
+            text_body.contains(BODY),
+            "identical bytes filed as text are read: {text_body}"
+        );
+    }
+
+    /// The whole point of the axis, end to end: a prompt a generator
+    /// compressed into the file is findable.
+    ///
+    /// Every earlier test in this change covers one joint — the walk
+    /// recovers the chunk, the column round-trips, the composition reads
+    /// both metadata columns. None of them fails if the joints are wired
+    /// to each other wrongly, and that is exactly the state this work
+    /// started from: `hash_artefact` computed the recovered text and the
+    /// repository dropped it on the floor, so every unit test passed and
+    /// nothing reached a document.
+    ///
+    /// So this runs the real jobs in the real order —
+    /// `material_hash` (reads the bytes, writes the columns) then
+    /// `index_rebuild` (composes the document) — over a real PNG on
+    /// disk, and asserts on the cached body a search would be built
+    /// from.
+    ///
+    /// `zTXt` deliberately: the meta digest walk excludes compressed
+    /// chunks by definition, so a prompt stored this way exists in no
+    /// other column. If the recovery is not wired through, there is
+    /// nowhere else these words could come from and the assertion is
+    /// unambiguous.
+    #[tokio::test]
+    async fn a_compressed_prompt_reaches_the_body_cache_through_the_real_jobs() {
+        use asterism_core::domain::repository::{AssetBodyRepository, AssetRepository};
+        use asterism_core::domain::value::AssetId;
+
+        const PROMPT: &str = "a lighthouse at dusk, long exposure";
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+
+        let corpus = tempfile::tempdir().unwrap();
+        let picture_path = corpus.path().join("generated.png");
+        std::fs::write(
+            &picture_path,
+            pngmeta::test_util::PngBuilder::new()
+                .ztxt("parameters", PROMPT)
+                .build(),
+        )
+        .unwrap();
+
+        let pid = uuid::Uuid::now_v7();
+        let asset_uuid = uuid::Uuid::now_v7();
+        let stored = crate::sqlite::stored_locator(&picture_path.to_string_lossy());
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO persona (id, pack_id, name, created_at, updated_at) \
+                 VALUES (?1, 'p', 'P', 0, 0)",
+                rusqlite::params![pid],
+            )?;
+            conn.execute(
+                "INSERT INTO asset (id, persona_id, source_kind, source_locator, \
+                                    modality, labels, occurred_at, created_at, updated_at) \
+                 VALUES (?1, ?2, 'fs', ?3, 'tape', '[]', 0, 0, 0)",
+                rusqlite::params![asset_uuid, pid, stored],
+            )?;
+            // No hashes on the row: the hashing pass is what this test
+            // is asking to run, and a row that already had them would
+            // be skipped by it.
+            conn.execute(
+                "INSERT INTO material (asset_id, ord, locator, mime, created_at, updated_at) \
+                 VALUES (?1, 0, ?2, 'image/png', 0, 0)",
+                rusqlite::params![asset_uuid, stored],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let tantivy_dir = tempfile::tempdir().unwrap();
+        let search_index =
+            Arc::new(crate::search::TantivyIndex::open(tantivy_dir.path().to_path_buf()).unwrap());
+        let query_groups = Arc::new(
+            crate::sqlite::repo::query_group::SqliteQueryGroupRepository::new(isle.clone()),
+        );
+        let personas = Arc::new(crate::sqlite::repo::SqlitePersonaRepository::new(
+            isle.clone(),
+        ));
+        let assets_shared = Arc::new(SqliteAssetRepository::new(isle.clone()));
+        let groups_shared = Arc::new(crate::sqlite::repo::group::SqliteGroupRepository::new(
+            isle.clone(),
+        ));
+        let env = JobEnv {
+            deps: JobDeps {
+                emitter: Arc::new(RecordingEmitter {
+                    records: Mutex::new(Vec::new()),
+                    notify: tokio::sync::Notify::new(),
+                }),
+                assets: SqliteAssetRepository::new(isle.clone()),
+                tags: SqliteTagRepository::new(isle.clone()),
+                edges: SqliteEdgeRepository::new(isle.clone()),
+                thumbs: SqliteThumbRepository::new(isle.clone()),
+                modalities: SqliteModalityRepository::new(isle.clone()),
+                asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
+                search_index: search_index.clone(),
+                source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
+                dispatch: Arc::new(std::sync::OnceLock::new()),
+                query_group_refresh: Arc::new(
+                    asterism_core::application_support::QueryGroupRefreshService::new(
+                        query_groups.clone(),
+                        Arc::new(asterism_core::application::QueryGroupService::new(
+                            query_groups,
+                            personas,
+                            assets_shared,
+                            groups_shared,
+                        )),
+                    ),
+                ),
+                query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
+                retention_service: Arc::new(std::sync::OnceLock::new()),
+                series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
+                observations: crate::observe::ObservationStore::new(isle.clone()),
+                material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
+                    isle.clone(),
+                ),
+                chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
+                previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
+            },
+            queue: open_queue(pool).await.unwrap(),
+        };
+
+        let asset_id = AssetId::from_uuid(asset_uuid);
+        let hashed = handlers::material_hash(
+            &env,
+            &serde_json::json!({"asset_id": asset_uuid.to_string()}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            hashed.contains("hashed=1"),
+            "the pass has to read the bytes for anything downstream to exist: {hashed}"
+        );
+
+        // The joint that was missing: the reading survives as a column.
+        let stored_row = env
+            .deps
+            .assets
+            .find(&asset_id)
+            .await
+            .unwrap()
+            .expect("the row is there");
+        let recovered = stored_row.materials[0]
+            .meta_text
+            .as_deref()
+            .expect("the hashing pass writes what it recovered");
+        assert!(
+            recovered.contains(PROMPT),
+            "the compressed prompt is on the row: {recovered}"
+        );
+        assert_eq!(
+            stored_row.materials[0].meta_kv, None,
+            "and the digest's own column is empty, because the meta axis does not read zTXt \
+             — so the words below can only have come from the recovery"
+        );
+
+        let indexed = handlers::index_rebuild(
+            &env,
+            &serde_json::json!({"asset_id": asset_uuid.to_string()}),
+        )
+        .await
+        .unwrap();
+        assert!(
+            indexed.starts_with("indexed asset"),
+            "a picture whose file carries a prompt is a document: {indexed}"
+        );
+
+        let body = env
+            .deps
+            .asset_bodies
+            .get(&asset_id)
+            .await
+            .unwrap()
+            .expect("the composed document is cached");
+        assert!(
+            body.contains(PROMPT),
+            "the prompt somebody typed is what search is built from: {body}"
         );
     }
 
@@ -2005,6 +2229,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -2193,6 +2418,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -2284,6 +2510,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: search_index.clone(),
                 source_texts: Arc::new(crate::source_text::FsSourceTextReader::new()),
                 dispatch: Arc::new(std::sync::OnceLock::new()),
@@ -2369,6 +2596,7 @@ mod tests {
                 thumbs: SqliteThumbRepository::new(isle.clone()),
                 modalities: SqliteModalityRepository::new(isle.clone()),
                 asset_bodies: crate::sqlite::repo::SqliteAssetBodyRepository::new(isle.clone()),
+                comments: crate::sqlite::repo::SqliteAssetCommentRepository::new(isle.clone()),
                 search_index: Arc::new(
                     crate::search::TantivyIndex::open(search_dir.to_path_buf()).unwrap(),
                 ),

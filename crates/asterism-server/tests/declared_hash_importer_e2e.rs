@@ -240,6 +240,7 @@ async fn seed_artefact_digest(db_path: &std::path::Path, asset_id: &str, digest:
                 content: content_region::NOT_WALKED.to_string(),
                 meta: content_region::NOT_WALKED.to_string(),
                 meta_kv: None,
+                meta_text: None,
                 meta_raw: None,
             },
         )
