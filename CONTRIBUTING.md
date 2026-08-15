@@ -19,30 +19,35 @@ Remove the worktree once the branch is merged.
 
 ## Verification
 
-`just check` is the definition of green, and CI is where it runs. It
-reaches `just rust-test`, which links every test binary in the
-workspace at once — one linker process each, gigabytes resident each,
-as many at a time as `jobs` allows. That is minutes and gigabytes on
-any machine, and on a shared or memory-tight one it is enough to push
-the box into swap and take down whatever else is running there.
+`just check` is the definition of green, and CI is where it runs. Two
+of its gates cost what the workspace costs rather than what the change
+costs: `rust-test` links every test binary at once — one linker process
+each, gigabytes resident each, as many at a time as `jobs` allows — and
+`rust-clippy` compiles every target in every crate. That is minutes on
+any machine, and on a shared or memory-tight one the test half is
+enough to push the box into swap and take down whatever else is running
+there.
 
-**Do not run the full suite locally as a matter of course.** Reach for
-`just rust-test` by hand only when CI has reported something a narrow
-run cannot reproduce, or when the change really is workspace-wide and
-the machine has the room. Never hand-roll `cargo test --workspace`;
-`rust-test` is the only sanctioned way to run it at all, for reasons
-its own comment gives.
+**Do not run either over the whole workspace locally as a matter of
+course.** Reach for `just rust-test` by hand only when CI has reported
+something a narrow run cannot reproduce, or when the change really is
+workspace-wide and the machine has the room. Never hand-roll
+`cargo test --workspace`; `rust-test` is the only sanctioned way to run
+it at all, for reasons its own comment gives.
 
-The two recipes to actually use:
+The recipes to actually use:
 
-- `just rust-test-changed` — works out which workspace members this
-  branch touched, against `origin/main` plus anything uncommitted, and
-  tests those. This is what `pre-push` runs.
-- `just rust-test-pkg <crate>…` — the same thing with the crates named
-  by hand, for the loop while work is still moving.
+- `just rust-test-changed` and `just rust-clippy-changed` — each works
+  out which workspace members this branch touched, against
+  `origin/main` plus anything uncommitted, and runs only those. This
+  pair is what `pre-push` runs. `just changed-packages` prints the
+  list they share, if you want to see it.
+- `just rust-test-pkg <crate>…` — the tests with the crates named by
+  hand, for the loop while work is still moving.
 
-Both are narrower than the suite, not weaker: they test what a change
-edited, not what depends on it. CI closes that gap on every push.
+These are narrower than the workspace gates, not weaker: they cover
+what a change edited, not what depends on it. CI closes that gap on
+every push.
 
 **Opening a pull request does not wait on a full local run.** CI runs
 `just check` — the workspace suite included — on every push, so the
@@ -88,11 +93,11 @@ issue -> worktree (just branch-check) -> implement -> just check
 
 The `pre-push` at the end is the gate: it runs after the last commit,
 over the tree that is actually handed over. It is not `check` — it adds
-`branch-check`, which `check` never covers, and it substitutes
-`rust-test-changed` for the workspace suite, so the gate before a
-hand-over does not link every crate in the workspace on a developer's
-machine. Run it there even when a mid-loop run was green. A green run
-over a different tree is not a gate.
+`branch-check`, which `check` never covers, and it substitutes the two
+`-changed` gates for the workspace-wide clippy and test runs, so the
+gate before a hand-over costs what the change costs rather than what
+the workspace costs. Run it there even when a mid-loop run was green. A
+green run over a different tree is not a gate.
 
 Two agents ship with the repo, and we would appreciate a diff passing
 both before a pull request — recommended, not enforced:
@@ -113,12 +118,12 @@ An agent's part ends with everything that does not write to anything
 remote, and that includes the gate:
 
 1. `git fetch origin`, then `just pre-push` — the agent runs both.
-   `pre-push` is `branch-check` plus `check-fast` plus
-   `rust-test-changed`, and none of them writes to anything remote, so
-   being denied `git push` is no reason to skip it. The fetch comes
-   first because both `branch-check` and `rust-test-changed` read
-   `origin/main` offline: the first's ancestry assertions and the
-   second's idea of which packages the branch touched are only as fresh
+   `pre-push` is `branch-check` plus `check-shared` plus
+   `rust-clippy-changed` and `rust-test-changed`, and none of them
+   writes to anything remote, so being denied `git push` is no reason
+   to skip it. The fetch comes first because they read `origin/main`
+   offline: `branch-check`'s ancestry assertions and the two narrow
+   gates' idea of which packages the branch touched are only as fresh
    as the last fetch.
    Report the result, including any recipe that reported it did not
    check anything — `aidoc-guard` says so out loud and still exits 0.
