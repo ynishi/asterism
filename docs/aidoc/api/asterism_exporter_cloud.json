@@ -1,0 +1,116 @@
+{
+  "crate": "asterism-exporter-cloud",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_exporter_cloud::AuthSchema",
+      "kind": "struct",
+      "docs": "Where the credential comes from and how it is presented."
+    },
+    {
+      "path": "asterism_exporter_cloud::CloudDispatchParams",
+      "kind": "struct",
+      "docs": "One platform, as a profile."
+    },
+    {
+      "path": "asterism_exporter_cloud::CloudExporter",
+      "kind": "struct",
+      "docs": "Profile-driven exporter for hosted generation APIs."
+    },
+    {
+      "path": "asterism_exporter_cloud::CloudHandlePayload",
+      "kind": "struct",
+      "docs": "What this exporter persists between calls."
+    },
+    {
+      "path": "asterism_exporter_cloud::DerivedMap",
+      "kind": "struct",
+      "docs": "How one harvested item becomes one [`Derived`]."
+    },
+    {
+      "path": "asterism_exporter_cloud::EXPIRY_PREFIX",
+      "kind": "constant",
+      "docs": "Prefix on the `Failed` message when the profile's own deadline was\nexceeded rather than the backend reporting a failure.\n\nA prefix rather than a state variant because `DispatchState` is the\nSDK's vocabulary and one adapter's needs should not widen it before\na second adapter wants the same distinction. Public so a caller can\ntell the two apart without matching on prose."
+    },
+    {
+      "path": "asterism_exporter_cloud::Exchange",
+      "kind": "struct",
+      "docs": "The request as sent beside the response as received.\n\nRedaction happens on the way in, not on the way out: the auth header\nis replaced by name, and any other occurrence of the resolved secret\n— a profile is free to put `{{secret}}` in a query string or a body\nfield — is scrubbed from the recorded copy. A redaction applied at\nread time would mean the value had already been written down."
+    },
+    {
+      "path": "asterism_exporter_cloud::FetchSchema",
+      "kind": "struct",
+      "docs": "How the produced bytes are pulled into our custody."
+    },
+    {
+      "path": "asterism_exporter_cloud::HarvestSchema",
+      "kind": "struct",
+      "docs": "Schema for the harvest call."
+    },
+    {
+      "path": "asterism_exporter_cloud::MatchRule",
+      "kind": "struct",
+      "docs": "A poll predicate: the value at `path` equals `equals`."
+    },
+    {
+      "path": "asterism_exporter_cloud::PollSchema",
+      "kind": "struct",
+      "docs": "Schema for the poll call."
+    },
+    {
+      "path": "asterism_exporter_cloud::REDACTED",
+      "kind": "constant",
+      "docs": "What the recorded request substitutes for a redacted header value."
+    },
+    {
+      "path": "asterism_exporter_cloud::RecordedRequest",
+      "kind": "struct",
+      "docs": "One recorded HTTP request."
+    },
+    {
+      "path": "asterism_exporter_cloud::SCHEMA_NAME",
+      "kind": "constant",
+      "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:cloud:params`)."
+    },
+    {
+      "path": "asterism_exporter_cloud::SLUG",
+      "kind": "constant",
+      "docs": "Slug the registry uses for this exporter."
+    },
+    {
+      "path": "asterism_exporter_cloud::SubmitSchema",
+      "kind": "struct",
+      "docs": "Schema for the submit call."
+    },
+    {
+      "path": "asterism_exporter_cloud::custody",
+      "kind": "module",
+      "docs": "Where a produced file lands once we hold it.\n\n`<custody_root>/dispatch/<dispatch_id>/<nnn>-<name>`.\n\nDispatch-addressed rather than content-addressed. The question the\nharvest asks is \"which files did this dispatch produce\", and this\nlayout answers it by listing a directory — no index, no lookup, and\nit still answers after the platform's URL has expired and the\nresponse that named it is gone. Content addressing answers a\ndifferent question (is this the same file as that one), the core's\ndigest axes already answer that one, and a digest can be computed\nover these bytes later without moving them.\n\nWriting is idempotent by path: the index within the harvest and the\ndispatch id are both stable, so a re-collect after a failed fetch\noverwrites the same file rather than producing a second asset beside\nthe first."
+    },
+    {
+      "path": "asterism_exporter_cloud::custody::CustodyPaths",
+      "kind": "struct",
+      "docs": "Resolves custody paths under one root."
+    },
+    {
+      "path": "asterism_exporter_cloud::expiry_state",
+      "kind": "function",
+      "docs": "`Some(Failed)` once the profile's deadline has passed.\n\nSplit out and taking `now_ms` so the rule is testable without\nwaiting out a deadline or reaching for a clock abstraction the rest\nof the crate does not need."
+    },
+    {
+      "path": "asterism_exporter_cloud::grammar",
+      "kind": "module",
+      "docs": "The profile grammar this adapter uses: the shared one, plus\n`{{secret}}`.\n\nThis is the case [`asterism_exporter_common`]'s traits exist for. The\nHTTP exporter must **not** have a `{{secret}}` root — everything it\ncan reach comes out of the params blob, which is persisted unedited,\nso a root that resolved to a credential there would be a root that\nwrote one down. Here the credential is resolved from the environment\nat call time and never persisted, so the root is safe *in this\nadapter and not in that one*.\n\nOnly [`TemplateAdapter::render`] is overridden. The JSON-leaf and\nheader traversals are the trait's default methods, written in terms\nof `render`, so `{{secret}}` means the same thing in a header, in a\nbody field and in a query string without three implementations\nagreeing to."
+    },
+    {
+      "path": "asterism_exporter_cloud::grammar::CloudGrammar",
+      "kind": "struct",
+      "docs": "[`CommonExportAdapter`] plus the `{{secret}}` root."
+    },
+    {
+      "path": "asterism_exporter_cloud::params_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`CloudDispatchParams`] — streamed by\n`asterism-server schema print exporter:cloud:params`."
+    }
+  ]
+}
