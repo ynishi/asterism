@@ -134,54 +134,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves evidence rather than being inferred from the absence of an
   error.
 
-- **A cloud exporter: the bytes are fetched, the secret is named, and the
-  deadline belongs to the profile** (#35) — a hosted generation API is a
-  JSON profile rather than a Rust crate, as with the HTTP exporter, but
-  three things there do not survive contact with one. The platform's URL
-  expires (ten minutes to thirty days, across the platforms surveyed),
-  so a `fetch` step pulls the bytes into
-  `<asterism_home>/custody/dispatch/<id>/` before the harvest returns and
-  the locator names the file we hold. `auth.secret_ref` holds an
-  environment variable *name* — the value is resolved per call and never
-  enters the params blob, which is persisted unedited and readable by
-  anything that can list dispatches. And the deadline is per profile with
-  no default, because a constant would be wrong nearly everywhere;
-  exceeding it fails the job with a message starting `deadline exceeded`,
-  so an expiry is distinguishable from a backend failure.
+- **Hosted platforms are a profile of the HTTP exporter, not a second
+  adapter** (#35, #30) — a hosted generation API needs three things a
+  self-hosted backend does not, and they arrived first as their own
+  crate. That was the wrong axis: both speak the same job API — submit,
+  keep a handle, poll, collect — and whether the URL is `https`, where
+  the credential comes from, and how long to keep waiting are
+  configuration rather than adapter identity. The crate is gone and the
+  three are optional blocks on `exporter:http:params`:
+
+  `auth.secret_ref` holds an environment variable *name*; the value is
+  resolved per call, rendered into `{{secret}}`, and never enters the
+  params blob — which is persisted unedited and readable by anything
+  that can list dispatches. A profile without the block binds no secret,
+  and `{{secret}}` in one is refused rather than rendered away as an
+  empty string. `fetch` pulls the produced bytes into
+  `<asterism_home>/custody/dispatch/<id>/` before the harvest returns, so
+  the locator names the file we hold rather than a URL the backend is
+  expected to stop serving; without it the backend's own URL stays the
+  locator. `deadline_seconds` is per profile with no default, because
+  how long a job may take before its result is gone is a property of the
+  backend and the profile is where the backend is described; exceeding
+  it fails the job with a message starting `deadline exceeded`, so an
+  expiry is distinguishable from a backend failure, and a profile that
+  sets none polls until the backend answers.
 
   The request as sent and the response as received are kept on the
   dispatch row, with the credential redacted on the way in, and the
   harvest copies that record onto every produced asset under
-  `extra.cloud.call` (#30) — the job id the platform gave us, when we
+  `extra.http.call` (#30) — the job id the backend gave us, when we
   asked, what we sent, what came back, and the finished job's response
-  whole, because the seed a platform ran with and the prompt as it
-  rewrote them sit beside the artefacts array rather than inside it. The
-  note is scrubbed on the way out for the reason the exchange is: a
-  platform that echoes the request is how a credential rendered into a
-  query string comes back, and this copy lands on an asset.
+  whole, because the seed a backend ran with and the prompt as it
+  rewrote them sit beside the artefacts array rather than inside it.
+  Both are unconditional: a hosted platform hands back a URL and little
+  else, so the moment of the call is the only moment that record exists,
+  and the profile flag that used to gate it defaulted to discarding it.
+  The note is scrubbed where it is built — a backend that echoes the
+  request is how a credential rendered into a query string comes back,
+  and this copy lands on an asset. What no scrub reaches is a token a
+  profile interpolated out of its *own params*; `auth` is the way out of
+  that, and the crate doc says so where the pattern is documented.
 
-  Both halves are unconditional. A hosted platform hands back a URL and
-  little else: the model can be an ambient default, the seed is an input
-  that is usually not echoed, and an enhanced prompt is not the prompt
-  that was sent — none of it is in the bytes, so the moment of the call
-  is the only moment it exists, and the profile flag that used to gate
-  the recording defaulted to discarding it. A profile still carrying
-  `"record_exchange"` parses unchanged whichever way it is set; a profile
-  that set it to `false` is recorded anyway, and this paragraph is where
-  that is said. The first profile is fal.ai, streamed by
-  `asterism-server schema print exporter:cloud:params`.
+  Migration is by alias rather than flag day, because stored params are
+  re-read on every re-dispatch: `submit` accepts its old name
+  `dispatch`, the harvest map's `source_url` accepts `locator`, and the
+  merged adapter is registered under both `http` and `cloud` so existing
+  dispatch rows — and the `_dispatch.exporter_slug` on every asset they
+  produced — keep resolving. A handle stamped `cloud` by a job in flight
+  across the merge is still accepted. The shipped example is now a
+  hosted-shaped profile, streamed by `asterism-server schema print
+  exporter:http:params`.
 
 - **The adapter template and JSONPath grammars are shared, behind traits**
   (#35) — `asterism-exporter-common` holds the `{{...}}` substitution and
-  the path subset a schema-driven exporter is configured with, and the two
+  the path subset a schema-driven exporter is configured with, and the
   adapters reach them through `TemplateAdapter` / `ResponsePath` rather
   than calling the engine. Not in `asterism-dispatch-sdk`: that crate is
   the port every backend author reads, and machinery there is read by
-  authors who never template anything. The traits are what let the cloud
-  adapter have a `{{secret}}` root the HTTP adapter must not have —
-  one overridden method, with the JSON-leaf and header traversals
-  inherited, instead of a shared engine growing a root one of its callers
-  cannot safely have.
+  authors who never template anything. The traits are what let the HTTP
+  adapter add a `{{secret}}` root — one overridden method, with the
+  JSON-leaf and header traversals inherited, so the placeholder means the
+  same thing in a header, a body field and a query string without three
+  implementations agreeing to.
 
 - **The disclosure vocabulary moved into the core, and `provenance` stopped
   naming two things** (#14, #23) — `provenance` was already the
