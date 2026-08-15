@@ -46,7 +46,6 @@
   },
 
   "deadline_seconds": 86400,
-  "record_exchange": true,
 
   "extras": {
     "prompt": "photo studio portrait"
