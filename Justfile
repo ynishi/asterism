@@ -434,6 +434,35 @@ aidoc-guard:
 [group('check')]
 check: rust-fmt-check rust-clippy bindings-check rust-test ui-test ui-check ui-build aidoc-guard
 
+# Fail unless the current branch is a worktree branch cut from
+# origin/main. The incident this exists for (2026-08-15): a branch cut
+# from a local main that had silently diverged from origin/main carried
+# the entire pre-publication history into a push. Three facts, all
+# mechanical: not on main, origin/main is an ancestor of HEAD, and
+# local main holds nothing origin/main lacks (ancestry alone passes a
+# main that is merely *ahead* — unpushed commits ride along exactly as
+# in the incident). A stale remote-tracking ref weakens the last two;
+# the recipe stays offline on purpose, so fetch before relying on it.
+# Deliberately not a dependency of `check` — a human validating main
+# after a merge runs `check` on main legitimately; this gate is for the
+# start of work, not the end.
+#
+# Carries `allow-agent` on the same terms as the format checks: it
+# reads refs and writes nothing, and an agent that cannot run it can
+# only guess at its base.
+[group('check')]
+[group('allow-agent')]
+branch-check:
+    @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see .claude/CLAUDE.md)"; exit 1; }
+    @git merge-base --is-ancestor origin/main HEAD || { echo "HEAD does not descend from origin/main: wrong base — rebuild the branch from origin/main"; exit 1; }
+    @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
+
+# What a human runs before pushing. Agents never reach this: push is
+# denied to them outright (.claude/settings.json), so the recipe exists
+# for the hand the branch is handed over to.
+[group('check')]
+pre-push: branch-check check
+
 # Fail when any Rust file is not rustfmt-clean.
 #
 # Neither `check` nor `rust-test` used to look at formatting, so drift

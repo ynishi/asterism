@@ -2,10 +2,14 @@
 target
 .ryo
 
-# Local scratch: task workspace, git worktrees, AI CLI state
+# Local scratch: task workspace, git worktrees
 workspace
 .worktrees
-.claude
+
+# Agent configuration is committed (.claude/CLAUDE.md, agents/,
+# settings.json); only per-person local state stays out.
+.claude/settings.local.json
+.claude/CLAUDE.local.md
 
 # OS / editor
 .DS_Store
