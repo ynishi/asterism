@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A certificate is configuration, and a broken one says so** (#14) —
+  `SigningIdentity::from_files` had no caller and no way to reach it, so
+  no deployment could turn the manifest half on. Five environment
+  variables now do: `ASTERISM_DISCLOSURE_CERT_CHAIN`,
+  `ASTERISM_DISCLOSURE_PRIVATE_KEY`, `ASTERISM_DISCLOSURE_SIGNING_ALG`,
+  `ASTERISM_DISCLOSURE_TSA_URL` and `ASTERISM_DISCLOSURE_SIGNING_STRICT`,
+  resolved once at startup in the composition root.
+
+  Not `SETTING_REGISTRY` keys. That registry holds user preferences and
+  its own module doc records that mixing deployment configuration into
+  the namespace is what made an earlier resolution order wrong; beyond
+  that, a registry key is writable through
+  `PUT /asterism/settings/{key}` without going through any UI, and
+  readable back with the value and origin of every layer — so storing a
+  *path* there would hand that route the choice of which file this
+  process opens, and publish the location of the private key to the
+  settings screen. Signing is the operator's arrangement with an issuer.
+  What it costs is that the settings screen shows nothing about signing;
+  the startup log and the record beside an export are where it is read.
+
+  `DisclosureWriter` grew a third state to go with it. A build that
+  configured a certificate which then failed to load is not a build with
+  no certificate, and reporting both as
+  `Skipped(NoSigningIdentity)` tells whoever reads the record that the
+  deployment is doing exactly what it was set up to do — at the one
+  moment that is untrue. `DisclosureWriter::unavailable` carries a reason
+  into the manifest half as `Half::Failed`, which is where this type
+  already said an expired certificate belongs. Startup is not refused
+  over it: a conformance-profile certificate is valid for at most 366
+  days, so every signing deployment eventually meets an expired one, and
+  exiting there would answer an expiry by making the library unopenable.
+
+  That reason names no file. What it is handed reaches the disclosure
+  note persisted on every stamped asset's `extra._trace` and leaves
+  through `AssetDto::extra_json`, so a failure to read the key would
+  otherwise publish the key's path to every client that fetches the
+  asset — permanently, and by a wider route than the settings surface
+  this configuration avoided for that same reason. The path stays in the
+  startup log, where whoever fixes it is looking.
+
+  `Strictness::Strict` is the opt-in for an installation that publishes:
+  it promotes `inspect_certificate`'s warnings to refusals and requires
+  the bundle to carry an issuer chain rather than a lone certificate. It
+  cannot be the default — it signs nothing at all on a self-issued
+  credential, which the specification describes as a legitimate
+  arrangement. It also logs when it *accepts*, so that a passing check
+  leaves evidence rather than being inferred from the absence of an
+  error.
+
 - **The disclosure vocabulary moved into the core, and `provenance` stopped
   naming two things** (#14, #23) — `provenance` was already the
   derived-from claim graph, whose own documentation says this
