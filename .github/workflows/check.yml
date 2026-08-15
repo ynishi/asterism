@@ -77,6 +77,44 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # What `aidoc-guard` (inside `check`) needs, and the reason it is
+      # here rather than left to warn. That step warns instead of failing
+      # when it cannot run, which is right on a developer's machine — the
+      # workspace pins no toolchain, and somebody without nightly must
+      # still be able to run the full gate. On a runner it is wrong: a
+      # runner has whatever it is told to have, and a step that warns on
+      # every run is a step nobody reads. Installing these two is what
+      # makes `docs/aidoc/` drift a red run rather than a line in a log.
+      #
+      # The hole was not hypothetical: a change that deleted a crate and
+      # added another was committed with the artifacts still describing
+      # the deleted one, and `just check` was green at the time.
+      #
+      # The nightly is dated, and the date is not written here. rustdoc's
+      # JSON carries a `format_version`, every nightly emits exactly one,
+      # and it moves whenever rustdoc's types do — asking for the channel
+      # asks for whatever the schema is today, which failed here as
+      # `expected 60, found 61`. `cargo-aidoc` names the toolchain whose
+      # format it reads, so this asks the binary. A date pinned in this
+      # file would be a second place to remember and would go stale the
+      # moment the tool is upgraded.
+      #
+      # `rustup toolchain install` rather than a second
+      # `dtolnay/rust-toolchain` step: that action makes what it installs
+      # the default, so a nightly added that way would quietly move the
+      # whole build — clippy, the tests, everything — onto nightly. Only
+      # the rustdoc shell-out wants it.
+      #
+      # The floor on the tool is where this was found: `--title` and the
+      # `[lib] name` fix shipped in 0.2.1, the toolchain pin in 0.2.2.
+      - name: Install cargo-aidoc
+        run: cargo install cargo-aidoc --version '^0.2.2'
+
+      - name: Install the nightly cargo-aidoc reads
+        run: |
+          rustup toolchain install \
+            "$(cargo aidoc --print-required-toolchain)" --profile minimal
+
       # Caches `~/.cargo` and the dependency half of `target/`. The
       # workspace's own crates are deliberately not cached by this action,
       # so all 19 are recompiled and re-linted on every run — the verdict is

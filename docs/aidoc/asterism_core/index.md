@@ -55,6 +55,7 @@ the private design notes.
 - [`application::app_setting_service`](application__app_setting_service.md): `AppSettingService` — use cases for application settings.
 - [`application::asset_comment_service`](application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [`application::asset_service`](application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
+- [`application::disclosure_service`](application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
 - [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
@@ -62,7 +63,6 @@ the private design notes.
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [`application::modality_service`](application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [`application::provenance_service`](application__provenance_service.md): Building an artefact's disclosure out of the library, and putting it
 - [`application::pursuit_service`](application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
@@ -90,7 +90,10 @@ the private design notes.
 - [`domain::content_hash`](domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [`domain::content_region`](domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
-- [`domain::disclosure`](domain__disclosure.md): Turning what the library stored into what a file will disclose.
+- [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
+- [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
+- [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.

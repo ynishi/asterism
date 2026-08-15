@@ -39,7 +39,7 @@
 //! There is no `Unknown` variant. An artefact whose origin nothing
 //! established gets no `DigitalSourceType` property at all — the same
 //! doctrine
-//! [`attribution`](../../asterism_core/domain/attribution/index.html)
+//! [`attribution`](crate::domain::attribution)
 //! states for an absent author: absence is a question nobody has
 //! answered, and a vocabulary term meaning "we do not know" would be an
 //! answer. It also matters legally in the one direction that is not
@@ -139,7 +139,7 @@ impl DigitalSourceType {
     ///
     /// Unknown values are refused rather than mapped to a default, for
     /// the reason
-    /// [`ClaimRelation::parse`](../../asterism_core/domain/provenance/enum.ClaimRelation.html#method.parse)
+    /// [`ClaimRelation::parse`](crate::domain::provenance::ClaimRelation::parse)
     /// refuses its own: defaulting turns a typo into an assertion
     /// somebody has to disprove.
     pub fn parse(value: &str) -> Result<Self, UnknownSourceType> {

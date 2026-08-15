@@ -24,6 +24,17 @@
 //! that an export failure is the judgement this type exists to let
 //! somebody else make.
 
+/// Version tag carried inside a stored disclosure note.
+///
+/// Beside the payload rather than implied by where it is stored, on the
+/// same terms the custom manifest assertion and the export sidecar
+/// carry theirs: a note written today is read by a build that has moved
+/// on, and the reader needs to know which shape it is holding before it
+/// starts walking it. The row is the durable half of this feature —
+/// re-applying a disclosure is decided from it — so it is the one value
+/// here that will certainly be read by code that does not exist yet.
+pub const DISCLOSURE_NOTE_SCHEMA: &str = "asterism.disclosure-note/1";
+
 /// What became of one half of a disclosure.
 ///
 /// Three states rather than a `bool`, because "not written" is at least
@@ -55,6 +66,32 @@ impl Half {
     /// Whether this half put a mark in the file.
     pub fn written(&self) -> bool {
         matches!(self, Self::Written)
+    }
+
+    /// This half, as the value a caller records beside the artefact.
+    ///
+    /// Here rather than at the call site because the shape and the
+    /// meaning are the same question: a reader deciding whether to
+    /// re-apply needs to tell "no certificate was configured" from "the
+    /// certificate stopped working", and that distinction is this
+    /// type's, not the recording caller's.
+    ///
+    /// An object rather than a string so a reason can be added without
+    /// re-parsing what was written before — `{"state": "skipped",
+    /// "reason": "no_signing_identity"}` reads the same to something
+    /// that only knows about `state`.
+    pub fn to_note(&self) -> serde_json::Value {
+        match self {
+            Self::Written => serde_json::json!({ "state": "written" }),
+            Self::Skipped(why) => serde_json::json!({
+                "state": "skipped",
+                "reason": why.as_str(),
+            }),
+            Self::Failed(cause) => serde_json::json!({
+                "state": "failed",
+                "cause": cause,
+            }),
+        }
     }
 
     /// The failure, when this half was attempted and failed.
@@ -96,7 +133,22 @@ pub enum Skipped {
     NoSigningIdentity,
 }
 
-/// The result of writing a [`DisclosureRecord`](crate::DisclosureRecord)
+impl Skipped {
+    /// The reason, as it is recorded and read back.
+    ///
+    /// A stable string rather than a `Debug` rendering: it goes into a
+    /// row somebody will query on, so renaming the variant must not
+    /// silently rename the stored value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NothingToDisclose => "nothing_to_disclose",
+            Self::ContainerCannotCarryIt => "container_cannot_carry_it",
+            Self::NoSigningIdentity => "no_signing_identity",
+        }
+    }
+}
+
+/// The result of writing a [`DisclosureRecord`](super::DisclosureRecord)
 /// into a file.
 ///
 /// Every field is an outcome rather than an intention. The two halves
@@ -157,6 +209,26 @@ impl Stamped {
             .filter_map(Half::failure)
             .collect()
     }
+
+    /// This outcome, as the value a caller records beside the artefact.
+    ///
+    /// Carries no timestamp: when it happened is the recording caller's
+    /// to add, because this type is produced in places that do not
+    /// write anything down.
+    ///
+    /// [`discloses`](Self::discloses) is written out rather than left
+    /// to be re-derived. It is the question the obligation asks, and a
+    /// reader that computed it from the two halves would be a second
+    /// place the rule lives.
+    pub fn to_note(&self) -> serde_json::Value {
+        serde_json::json!({
+            "schema": DISCLOSURE_NOTE_SCHEMA,
+            "xmp": self.xmp.to_note(),
+            "manifest": self.manifest.to_note(),
+            "prompt_dropped": self.prompt_dropped,
+            "discloses": self.discloses(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -193,6 +265,31 @@ mod tests {
         // is the caller's call, and it has both facts to make it with.
         assert!(outcome.discloses());
         assert_eq!(outcome.failures(), vec!["the certificate expired"]);
+    }
+
+    #[test]
+    fn the_note_keeps_apart_what_the_type_keeps_apart() {
+        // The reason a reader re-applies or does not: "no certificate
+        // was configured" and "the certificate stopped working" are
+        // different answers, and a note that flattened both to `false`
+        // would be the boolean this type replaced.
+        let unconfigured = Stamped::new(Half::Written, Half::Skipped(Skipped::NoSigningIdentity));
+        let broken = Stamped::new(
+            Half::Written,
+            Half::Failed("the certificate expired".into()),
+        );
+
+        assert_eq!(
+            unconfigured.to_note()["manifest"],
+            serde_json::json!({ "state": "skipped", "reason": "no_signing_identity" })
+        );
+        assert_eq!(
+            broken.to_note()["manifest"],
+            serde_json::json!({ "state": "failed", "cause": "the certificate expired" })
+        );
+        // Both disclosed the file: the XMP half landed either way.
+        assert_eq!(unconfigured.to_note()["discloses"], serde_json::json!(true));
+        assert_eq!(broken.to_note()["discloses"], serde_json::json!(true));
     }
 
     #[test]

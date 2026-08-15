@@ -381,11 +381,11 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     ),
     // ---- provenance_service
     (
-        "provenance_service::record_for",
+        "disclosure_service::record_for",
         "read — assembles what an asset discloses out of rows it only reads",
     ),
     (
-        "provenance_service::apply_to",
+        "disclosure_service::apply_to",
         "writes a file, not a row — the artefact it stamps is outside the \
          library (an export's copy, or something returned from downstream), \
          and no aggregate here changes. What made the asset is the \

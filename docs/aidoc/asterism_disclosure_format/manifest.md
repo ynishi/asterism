@@ -1,4 +1,4 @@
-# asterism-provenance::manifest
+# asterism-disclosure-format::manifest
 
 The C2PA manifest *definition* — what would be signed, built as a
 value, with nothing here able to sign it.
@@ -16,7 +16,7 @@ certificate, which is every machine this repository has today.
 and its `digitalSourceType` is the same IPTC URI the XMP packet
 states. That is the half a validator understands.
 
-`io.github.ynishi.asterism.provenance` carries what the database
+`io.github.ynishi.asterism.disclosure` carries what the database
 knows and the standard has no field for: the asset id, the dispatch
 the file left through, and the ids it was derived from. A reader that
 has this Asterism instance can resolve those; a reader that does not

@@ -1,10 +1,11 @@
 //! Writing a [`DisclosureRecord`] into a file that already exists.
 //!
-//! This is the adapter half of AI-disclosure provenance. `asterism-provenance`
-//! decides *what is asserted* and renders both forms of it as values; this
-//! module puts them into a file on disk, in the one order that works, and
-//! signs the manifest when — and only when — a signing identity has been
-//! configured.
+//! This is the adapter half of AI disclosure. What is asserted is
+//! decided in [`asterism_core::domain::disclosure`];
+//! `asterism-disclosure-format` renders that decision into the two
+//! forms it can take, as values; this module puts them into a file on
+//! disk, in the one order that works, and signs the manifest when — and
+//! only when — a signing identity has been configured.
 //!
 //! # Why it happens here rather than inside the generator
 //!
@@ -26,7 +27,7 @@
 //! signing therefore invalidates the signature — IPTC's own 2025.1
 //! announcement carries a worked example whose caption records exactly
 //! that outcome, so this is documented behaviour rather than a
-//! deduction. [`ProvenanceWriter::apply`] does the two in this order and
+//! deduction. [`DisclosureWriter::apply`] does the two in this order and
 //! [`tests::the_packet_is_written_before_the_manifest_is_signed`] is what
 //! keeps them there.
 //!
@@ -61,7 +62,7 @@
 //! without a certificate. MP4 can carry XMP in a `uuid` box, but writing
 //! BMFF boxes is not something this module does — the manifest path goes
 //! through `c2pa`, which knows the container, and the packet path goes
-//! through `asterism-provenance::embed`, which knows PNG and JPEG. Until
+//! through `asterism-disclosure-format::embed`, which knows PNG and JPEG. Until
 //! one of those two grows the other's format, an unsigned video export
 //! carries no disclosure at all, and [`Stamped`] says so rather than
 //! reporting a success it did not have.
@@ -78,10 +79,10 @@
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use asterism_provenance::record::DisclosureRecord;
-use asterism_provenance::{Half, Skipped, Stamped, embed, manifest};
+use asterism_core::domain::disclosure::{DisclosureRecord, Half, Skipped, Stamped};
+use asterism_disclosure_format::{embed, manifest};
 
-/// A container this module can write provenance into.
+/// A container this module can write a disclosure into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
     /// PNG — XMP as an `iTXt` chunk, manifest as a JUMBF chunk.
@@ -111,7 +112,7 @@ impl Container {
     }
 
     /// Whether an XMP packet can be written into this container by
-    /// [`asterism_provenance::embed`].
+    /// [`asterism_disclosure_format::embed`].
     fn takes_xmp(&self) -> bool {
         matches!(self, Self::Png | Self::Jpeg)
     }
@@ -145,9 +146,9 @@ impl Container {
 
 /// What went wrong applying a record.
 #[derive(Debug, thiserror::Error)]
-pub enum ProvenanceError {
+pub enum DisclosureError {
     /// The file could not be read, written, or replaced.
-    #[error("provenance io on {path}: {source}")]
+    #[error("disclosure io on {path}: {source}")]
     Io {
         /// File the operation was against.
         path: PathBuf,
@@ -155,7 +156,7 @@ pub enum ProvenanceError {
         source: std::io::Error,
     },
     /// The bytes are not a container this module writes into.
-    #[error("{path} is not a container this build writes provenance into")]
+    #[error("{path} is not a container this build writes a disclosure into")]
     UnsupportedContainer {
         /// File that was offered.
         path: PathBuf,
@@ -177,13 +178,13 @@ pub enum ProvenanceError {
     /// defect in one of the two halves and has to surface as one.
     ///
     /// It was previously folded into
-    /// [`Stamped::prompt_dropped`](asterism_provenance::outcome::Stamped):
+    /// [`Stamped::prompt_dropped`](asterism_core::domain::disclosure::Stamped):
     /// a file carrying no readable disclosure at all was reported as a
     /// successful stamp that had merely shortened the prompt, and — when
     /// the record had no prompt to shorten — as an unqualified success.
     ///
     /// Nothing is known to reach it today. The one producer that was
-    /// found is fixed (`asterism-provenance`'s JPEG writer put the
+    /// found is fixed (`asterism-disclosure-format`'s JPEG writer put the
     /// packet after `EOI` for a file with no scan, where the reader
     /// cannot see it), and the two halves otherwise agree on where a
     /// packet goes. It stays as the guard that says so, because what
@@ -365,12 +366,12 @@ impl SigningIdentity {
         private_key: &Path,
         alg: &str,
         tsa_url: Option<String>,
-    ) -> Result<Self, ProvenanceError> {
+    ) -> Result<Self, DisclosureError> {
         let cert_chain = std::fs::read(cert_chain).map_err(|e| {
-            ProvenanceError::Identity(format!("reading {}: {e}", cert_chain.display()))
+            DisclosureError::Identity(format!("reading {}: {e}", cert_chain.display()))
         })?;
         let private_key = std::fs::read(private_key).map_err(|e| {
-            ProvenanceError::Identity(format!("reading {}: {e}", private_key.display()))
+            DisclosureError::Identity(format!("reading {}: {e}", private_key.display()))
         })?;
         Self::from_bytes(cert_chain, private_key, alg, tsa_url)
     }
@@ -383,9 +384,9 @@ impl SigningIdentity {
         private_key: Vec<u8>,
         alg: &str,
         tsa_url: Option<String>,
-    ) -> Result<Self, ProvenanceError> {
+    ) -> Result<Self, DisclosureError> {
         if names_a_test_certificate(&cert_chain) {
-            return Err(ProvenanceError::Identity(
+            return Err(DisclosureError::Identity(
                 "this is a C2PA test certificate: a manifest signed with it validates as \
                  untrusted, which claims a provenance a reader will reject. Configure a real \
                  signing identity, or export without a manifest — the IPTC/XMP disclosure is \
@@ -395,7 +396,7 @@ impl SigningIdentity {
         }
         let alg = alg
             .parse::<c2pa::crypto::raw_signature::SigningAlg>()
-            .map_err(|e| ProvenanceError::Identity(format!("unknown signing algorithm: {e}")))?;
+            .map_err(|e| DisclosureError::Identity(format!("unknown signing algorithm: {e}")))?;
 
         // What the certificate says about itself, after what it is
         // called. The name check above is a heuristic a rename defeats;
@@ -404,7 +405,7 @@ impl SigningIdentity {
         // reason rather than warned about first.
         let verdict = inspect_certificate(&cert_chain);
         if !verdict.refusals.is_empty() {
-            return Err(ProvenanceError::Identity(format!(
+            return Err(DisclosureError::Identity(format!(
                 "this certificate cannot sign a C2PA claim: {}. Nothing is written rather \
                  than a signature that will not hold — the IPTC/XMP disclosure is written \
                  either way",
@@ -418,7 +419,7 @@ impl SigningIdentity {
             // prefix, so an event addressed `diag.…` reaches neither
             // stderr nor the `diag_log` table.
             tracing::warn!(
-                event = "diag.provenance.identity",
+                event = "diag.disclosure.identity",
                 "signing certificate: {warning}"
             );
         }
@@ -472,7 +473,7 @@ impl SigningIdentity {
 /// signature and key algorithms, `digitalSignature` key usage, an
 /// authority key identifier, no `any` usage, no `ocspSigning` or
 /// `timeStamping` mixed with another usage. Those arrive as
-/// [`ProvenanceError::Sign`] instead, which is a worse message but not a
+/// [`DisclosureError::Sign`] instead, which is a worse message but not a
 /// wrong one — this check is a strict subset, so nothing it passes ends
 /// up in a *less* informative failure than it would have without it.
 ///
@@ -634,7 +635,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// Cheap to build and holds no file state; one is constructed per
 /// process from settings and shared.
 #[derive(Debug, Default)]
-pub struct ProvenanceWriter {
+pub struct DisclosureWriter {
     /// Behind an `Arc` so the port impl can hand a copy to a blocking
     /// task without duplicating key material on every call — a signing
     /// identity holds a private key, and the fewer copies of it exist in
@@ -642,7 +643,7 @@ pub struct ProvenanceWriter {
     identity: Option<std::sync::Arc<SigningIdentity>>,
 }
 
-impl ProvenanceWriter {
+impl DisclosureWriter {
     /// A writer that emits the IPTC/XMP half and no manifest.
     ///
     /// The state every install starts in, and a supported one rather
@@ -682,7 +683,7 @@ impl ProvenanceWriter {
     /// attempted**: the file cannot be read, or the container is not
     /// one this build writes into. Anything that goes wrong inside a
     /// half is reported as that half's
-    /// [`Half::Failed`](asterism_provenance::Half::Failed), and the
+    /// [`Half::Failed`](asterism_core::domain::disclosure::Half::Failed), and the
     /// other half proceeds regardless.
     ///
     /// This was not always so, and the way it failed is the reason for
@@ -702,8 +703,8 @@ impl ProvenanceWriter {
         &self,
         path: &Path,
         record: &DisclosureRecord,
-    ) -> Result<Stamped, ProvenanceError> {
-        let io = |source: std::io::Error| ProvenanceError::Io {
+    ) -> Result<Stamped, DisclosureError> {
+        let io = |source: std::io::Error| DisclosureError::Io {
             path: path.to_path_buf(),
             source,
         };
@@ -712,7 +713,7 @@ impl ProvenanceWriter {
         // is 8, JPEG's is 2, and a `ftyp` brand ends at 12.
         let head = read_head(path, 12).map_err(io)?;
         let container =
-            Container::sniff(&head).ok_or_else(|| ProvenanceError::UnsupportedContainer {
+            Container::sniff(&head).ok_or_else(|| DisclosureError::UnsupportedContainer {
                 path: path.to_path_buf(),
             })?;
 
@@ -738,7 +739,7 @@ impl ProvenanceWriter {
                 // or a container the writer chokes on. The manifest can
                 // still be signed over the original bytes.
                 Err(source) => Half::Failed(
-                    ProvenanceError::Xmp {
+                    DisclosureError::Xmp {
                         path: path.to_path_buf(),
                         source,
                     }
@@ -770,13 +771,13 @@ impl ProvenanceWriter {
                             Half::Written
                         }
                         Ok(None) => Half::Failed(
-                            ProvenanceError::XmpUnreadable {
+                            DisclosureError::XmpUnreadable {
                                 path: path.to_path_buf(),
                             }
                             .to_string(),
                         ),
                         Err(source) => Half::Failed(
-                            ProvenanceError::Xmp {
+                            DisclosureError::Xmp {
                                 path: path.to_path_buf(),
                                 source,
                             }
@@ -835,8 +836,8 @@ impl ProvenanceWriter {
         container: Container,
         record: &DisclosureRecord,
         staged: Option<&[u8]>,
-    ) -> Result<(), ProvenanceError> {
-        let signer = identity.signer().map_err(|source| ProvenanceError::Sign {
+    ) -> Result<(), DisclosureError> {
+        let signer = identity.signer().map_err(|source| DisclosureError::Sign {
             path: path.to_path_buf(),
             source: Box::new(source),
         })?;
@@ -848,7 +849,7 @@ impl ProvenanceWriter {
         let mut builder = c2pa::Builder::default();
         builder.definition =
             serde_json::from_value(manifest::definition(record)).map_err(|source| {
-                ProvenanceError::Definition {
+                DisclosureError::Definition {
                     path: path.to_path_buf(),
                     source,
                 }
@@ -883,7 +884,7 @@ impl ProvenanceWriter {
         // fail with `EBADF` on the video path under a version that
         // used it, which is why this is a real file handle rather than
         // a buffer.
-        let mut temporary = stage(path).map_err(|e| ProvenanceError::Io {
+        let mut temporary = stage(path).map_err(|e| DisclosureError::Io {
             // The target, not the temporary: the temporary is removed
             // when it drops, so naming it would hand the reader a
             // filename that no longer exists.
@@ -891,7 +892,7 @@ impl ProvenanceWriter {
             source: e,
         })?;
         let destination = temporary.as_file_mut();
-        let sign_failed = |failure: c2pa::Error| ProvenanceError::Sign {
+        let sign_failed = |failure: c2pa::Error| DisclosureError::Sign {
             path: path.to_path_buf(),
             source: Box::new(failure),
         };
@@ -914,7 +915,7 @@ impl ProvenanceWriter {
             // failed. Stream from the file, so neither end of a large
             // video is read into memory whole.
             None => match std::fs::File::open(path) {
-                Err(e) => Err(ProvenanceError::Io {
+                Err(e) => Err(DisclosureError::Io {
                     path: path.to_path_buf(),
                     source: e,
                 }),
@@ -927,7 +928,7 @@ impl ProvenanceWriter {
         // removes it, which is what stops a half-signed file being left
         // in an export directory an importer is watching.
         signing?;
-        commit(temporary, path).map_err(|source| ProvenanceError::Io {
+        commit(temporary, path).map_err(|source| DisclosureError::Io {
             path: path.to_path_buf(),
             source,
         })
@@ -935,7 +936,7 @@ impl ProvenanceWriter {
 }
 
 #[async_trait::async_trait]
-impl asterism_core::application::provenance_service::ProvenanceWriter for ProvenanceWriter {
+impl asterism_core::application::disclosure_service::DisclosureWriter for DisclosureWriter {
     /// Adapts the writer to the core's port.
     ///
     /// Two things happen at this boundary and both are deliberate.
@@ -958,14 +959,14 @@ impl asterism_core::application::provenance_service::ProvenanceWriter for Proven
     ) -> Result<Stamped, asterism_core::error::DomainError> {
         let path = path.to_path_buf();
         let record = record.clone();
-        let writer = ProvenanceWriter {
+        let writer = DisclosureWriter {
             identity: self.identity.clone(),
         };
         tokio::task::spawn_blocking(move || writer.apply(&path, &record))
             .await
             .map_err(|e| {
                 asterism_core::error::DomainError::Infra(anyhow::anyhow!(
-                    "provenance task did not finish: {e}"
+                    "disclosure task did not finish: {e}"
                 ))
             })?
             .map_err(|e| asterism_core::error::DomainError::Infra(anyhow::anyhow!("{e}")))
@@ -1051,9 +1052,9 @@ fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asterism_provenance::DigitalSourceType;
+    use asterism_core::domain::disclosure::DigitalSourceType;
 
-    /// The same hand-built 1×1 PNG the provenance crate's own tests use.
+    /// The same hand-built 1×1 PNG the format crate's own tests use.
     /// Built here rather than imported so this crate's tests do not
     /// depend on another crate's test module.
     fn png_fixture() -> Vec<u8> {
@@ -1186,7 +1187,7 @@ mod tests {
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
 
-        let outcome = ProvenanceWriter::unsigned()
+        let outcome = DisclosureWriter::unsigned()
             .apply(&path, &record())
             .unwrap();
         assert_eq!(outcome.xmp, Half::Written);
@@ -1211,7 +1212,7 @@ mod tests {
         let original = png_fixture();
         std::fs::write(&path, &original).unwrap();
 
-        let outcome = ProvenanceWriter::unsigned()
+        let outcome = DisclosureWriter::unsigned()
             .apply(&path, &DisclosureRecord::for_asset("asset-1"))
             .unwrap();
         assert!(!outcome.discloses());
@@ -1235,7 +1236,7 @@ mod tests {
         mp4.extend_from_slice(&[0; 8]);
         std::fs::write(&path, &mp4).unwrap();
 
-        let outcome = ProvenanceWriter::unsigned()
+        let outcome = DisclosureWriter::unsigned()
             .apply(&path, &record())
             .unwrap();
         assert_eq!(
@@ -1268,8 +1269,8 @@ mod tests {
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, b"not an image at all").unwrap();
         assert!(matches!(
-            ProvenanceWriter::unsigned().apply(&path, &record()),
-            Err(ProvenanceError::UnsupportedContainer { .. })
+            DisclosureWriter::unsigned().apply(&path, &record()),
+            Err(DisclosureError::UnsupportedContainer { .. })
         ));
     }
 
@@ -1549,7 +1550,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
-        ProvenanceWriter::unsigned()
+        DisclosureWriter::unsigned()
             .apply(&path, &record())
             .unwrap();
 
@@ -1589,7 +1590,7 @@ mod tests {
         let original = b"\x89PNG\r\n\x1a\nnot a chunk anybody can walk";
         std::fs::write(&path, original).unwrap();
 
-        let outcome = ProvenanceWriter::signed_with(throwaway_identity())
+        let outcome = DisclosureWriter::signed_with(throwaway_identity())
             .apply(&path, &DisclosureRecord::for_asset("asset-1"))
             .expect("a failed manifest is reported, not raised");
         assert!(
@@ -1618,7 +1619,7 @@ mod tests {
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
 
-        ProvenanceWriter::signed_with(throwaway_identity())
+        DisclosureWriter::signed_with(throwaway_identity())
             .apply(&path, &record())
             .unwrap();
 
@@ -1652,7 +1653,7 @@ mod tests {
         std::fs::write(&victim, b"not this file").unwrap();
         std::os::unix::fs::symlink(&victim, dir.path().join("shot.png.c2pa-partial")).unwrap();
 
-        ProvenanceWriter::unsigned()
+        DisclosureWriter::unsigned()
             .apply(&path, &record())
             .unwrap();
 
@@ -1678,7 +1679,7 @@ mod tests {
         std::fs::write(&path, png_fixture()).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
 
-        ProvenanceWriter::unsigned()
+        DisclosureWriter::unsigned()
             .apply(&path, &record())
             .unwrap();
 
@@ -1718,7 +1719,7 @@ mod tests {
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
 
-        let writer = ProvenanceWriter::signed_with(throwaway_identity());
+        let writer = DisclosureWriter::signed_with(throwaway_identity());
         assert!(writer.can_sign());
         let outcome = writer.apply(&path, &record()).unwrap();
         assert_eq!(outcome.xmp, Half::Written);
@@ -1732,7 +1733,7 @@ mod tests {
             "the actions assertion carries the IPTC URI: {json}"
         );
         assert!(
-            json.contains(asterism_provenance::manifest::ASTERISM_LABEL),
+            json.contains(asterism_disclosure_format::manifest::ASTERISM_LABEL),
             "the lineage assertion is there: {json}"
         );
         assert!(json.contains("asset-1"), "and names the asset: {json}");
@@ -1748,7 +1749,7 @@ mod tests {
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
 
-        ProvenanceWriter::signed_with(throwaway_identity())
+        DisclosureWriter::signed_with(throwaway_identity())
             .apply(&path, &record())
             .unwrap();
         let signed = std::fs::read(&path).unwrap();
@@ -1850,7 +1851,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = video_fixture(dir.path(), name);
 
-            let outcome = ProvenanceWriter::signed_with(throwaway_identity())
+            let outcome = DisclosureWriter::signed_with(throwaway_identity())
                 .apply(&path, &record())
                 .unwrap();
             assert_eq!(
@@ -1890,7 +1891,7 @@ mod tests {
         let path = dir.path().join("shot.png");
         std::fs::write(&path, png_fixture()).unwrap();
 
-        let outcome = ProvenanceWriter::signed_with(unusable_identity())
+        let outcome = DisclosureWriter::signed_with(unusable_identity())
             .apply(&path, &record())
             .expect("a manifest that fails is not the call failing");
 
@@ -1928,7 +1929,7 @@ mod tests {
         std::fs::write(&path, &jpeg).unwrap();
 
         let oversized = "x".repeat(embed::JPEG_MAX_PACKET + 1);
-        let outcome = ProvenanceWriter::unsigned()
+        let outcome = DisclosureWriter::unsigned()
             .apply(
                 &path,
                 &DisclosureRecord::for_asset("asset-1")
@@ -1963,7 +1964,7 @@ mod tests {
         std::fs::write(&path, &jpeg).unwrap();
 
         let huge = "x".repeat(embed::JPEG_MAX_PACKET + 1);
-        let outcome = ProvenanceWriter::unsigned()
+        let outcome = DisclosureWriter::unsigned()
             .apply(&path, &record().with_prompt(huge, None))
             .unwrap();
         assert_eq!(outcome.xmp, Half::Written);

@@ -39,6 +39,7 @@ this crate.
 
 ## Modules
 
+- [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
@@ -46,14 +47,11 @@ this crate.
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
 - [`jobs::preview_ffmpeg`](jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
-- [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
-- [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
 - [`probes::jpeg`](probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
 - [`probes::png`](probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
-- [`provenance`](provenance.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`search`](search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk

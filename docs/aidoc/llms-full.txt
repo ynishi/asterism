@@ -566,6 +566,7 @@ the private design notes.
 - [`application::app_setting_service`](application__app_setting_service.md): `AppSettingService` — use cases for application settings.
 - [`application::asset_comment_service`](application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [`application::asset_service`](application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
+- [`application::disclosure_service`](application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
 - [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
@@ -573,7 +574,6 @@ the private design notes.
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [`application::modality_service`](application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [`application::provenance_service`](application__provenance_service.md): Building an artefact's disclosure out of the library, and putting it
 - [`application::pursuit_service`](application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
@@ -601,7 +601,10 @@ the private design notes.
 - [`domain::content_hash`](domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [`domain::content_region`](domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
-- [`domain::disclosure`](domain__disclosure.md): Turning what the library stored into what a file will disclose.
+- [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
+- [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
+- [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
+- [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
@@ -809,6 +812,51 @@ semantic search lands, this decision can be revisited.
 ## Constants
 
 - `INBOX_LABEL` — Well-known label slug the Inbox / Review flow keys off. Assets
+
+
+<!-- asterism_core/application__disclosure_service.md -->
+# asterism-core::application::disclosure_service
+
+Building an artefact's disclosure out of the library, and putting it
+into a file.
+
+Two verbs, and the second is the one the acceptance criteria are
+really about:
+
+- [`record_for`](DisclosureService::record_for) — assemble what an
+  asset discloses from what is *stored*: the container metadata a
+  probe read, the `derived_from` edges the library recorded, the
+  asset's own title.
+- [`apply_to`](DisclosureService::apply_to) — write that record into
+  a file through the [`DisclosureWriter`] port.
+
+# Why this makes the database the source of truth
+
+Nothing here reads the target file's metadata. The record is derived
+entirely from rows, so a file that came back from a downstream
+conversion with its manifest stripped can be handed to
+[`apply_to`](DisclosureService::apply_to) and get the same disclosure
+again — the answer never lived in the file. That is the property a
+manifest cannot have on its own, since any re-encode removes it.
+
+# Why the port is here and not in `repository`
+
+[`DisclosureWriter`] is an outbound port like the repositories, and
+it lives in the core for the same reason they do — adapters
+implement traits, they do not define them (`asterism-infra`'s crate
+doc). It is declared beside its only caller rather than in
+[`repository`](crate::domain::repository) because it is not one: a
+repository owns the storage of an entity, and this one owns no
+entity at all — it takes a value and a path and modifies a file
+neither it nor this service owns.
+
+## Types
+
+- `DisclosureService` — Assembles and applies AI-disclosure provenance.
+
+## Traits
+
+- `DisclosureWriter` — Writes a disclosure into a file that already exists.
 
 
 <!-- asterism_core/application__dispatch_service.md -->
@@ -1152,51 +1200,6 @@ for why the argument is required anyway).
 ## Types
 
 - `PersonaService` — Persona use-case service. Shared as an `Arc` through Tauri state and
-
-
-<!-- asterism_core/application__provenance_service.md -->
-# asterism-core::application::provenance_service
-
-Building an artefact's disclosure out of the library, and putting it
-into a file.
-
-Two verbs, and the second is the one the acceptance criteria are
-really about:
-
-- [`record_for`](ProvenanceService::record_for) — assemble what an
-  asset discloses from what is *stored*: the container metadata a
-  probe read, the `derived_from` edges the library recorded, the
-  asset's own title.
-- [`apply_to`](ProvenanceService::apply_to) — write that record into
-  a file through the [`ProvenanceWriter`] port.
-
-# Why this makes the database the source of truth
-
-Nothing here reads the target file's metadata. The record is derived
-entirely from rows, so a file that came back from a downstream
-conversion with its manifest stripped can be handed to
-[`apply_to`](ProvenanceService::apply_to) and get the same disclosure
-again — the answer never lived in the file. That is the property a
-manifest cannot have on its own, since any re-encode removes it.
-
-# Why the port is here and not in `repository`
-
-[`ProvenanceWriter`] is an outbound port like the repositories, and
-it lives in the core for the same reason they do — adapters
-implement traits, they do not define them (`asterism-infra`'s crate
-doc). It is declared beside its only caller rather than in
-[`repository`](crate::domain::repository) because it is not one: a
-repository owns the storage of an entity, and this one owns no
-entity at all — it takes a value and a path and modifies a file
-neither it nor this service owns.
-
-## Types
-
-- `ProvenanceService` — Assembles and applies AI-disclosure provenance.
-
-## Traits
-
-- `ProvenanceWriter` — Writes a disclosure into a file that already exists.
 
 
 <!-- asterism_core/application__pursuit_service.md -->
@@ -2604,13 +2607,34 @@ the domain name and the table name coincide.
 <!-- asterism_core/domain__disclosure.md -->
 # asterism-core::domain::disclosure
 
-Turning what the library stored into what a file will disclose.
+What an artefact discloses about how it was made, and the rule that
+decides it.
 
-[`asterism_provenance`] owns the vocabulary and both renderings of
-it, and is deliberately unable to decide anything. This module is
-where the deciding happens: given the metadata a container carried
-and the edges the library recorded, which IPTC term is true of this
-artefact, and which of the 2025.1 AI properties can be filled in.
+Three things live here, and they are one concept: the vocabulary
+([`DigitalSourceType`], [`DisclosureRecord`], [`Stamped`]), the rule
+that turns stored metadata into a statement ([`record_for`]), and the
+policy the rule takes ([`PromptDisclosure`]). Rendering a record into
+an XMP packet or a C2PA manifest definition is not here — that is
+`asterism-disclosure-format`, and putting a packet's bytes beside the
+term it carries would be the container formats leaking into the
+vocabulary.
+
+# Why the vocabulary is in the core and not in a leaf crate
+
+It was in one, beside the renderers, and that was wrong in a way that
+only showed as the feature grew. The renderers need `pngmeta` and a
+CRC — a chunk walker — so the core's dependency graph acquired the
+container parser this crate's own manifest records evicting. And the
+read-back side ("what does this file currently say, and does it still
+match its bytes") has to be modelled in the core, because a port
+cannot return a type the core cannot name; with the write vocabulary
+in a leaf crate, one concept would have been split across two places
+the moment the second half arrived.
+
+The split that holds is by *reason to change*: what may be asserted
+changes with IPTC, and how a packet is written into a PNG changes
+with the container. The first is domain and is here; the second is an
+adapter concern and is not.
 
 # The database is the source of truth, not the file
 
@@ -2641,11 +2665,11 @@ one is a false statement, and only the second is unrecoverable.
 
 Two terms have no automatic producer and are not reachable from here
 at all.
-[`HumanEdits`](asterism_provenance::DigitalSourceType::HumanEdits)
+[`HumanEdits`](DigitalSourceType::HumanEdits)
 would have to be inferred from the *absence* of a machine, which
 manufactures exactly the evidence a copyright claim needs it to
 record.
-[`AlgorithmicMedia`](asterism_provenance::DigitalSourceType::AlgorithmicMedia)
+[`AlgorithmicMedia`](DigitalSourceType::AlgorithmicMedia)
 needs a producer that says so about itself, and none in this corpus
 does. Both remain assertable by hand.
 
@@ -2660,6 +2684,166 @@ does. Both remain assertable by hand.
 - `ContainerEvidence` — What a container's metadata establishes about how a file was made.
 - `ParentEvidence` — What a parent contributes to its child's disclosure.
 - `PromptDisclosure` — Whether an artefact's prompt is disclosed in the exported file.
+
+## Constants
+
+- `DISCLOSURE_NOTE_KEY` — Key under which what became of an artefact's disclosure is recorded,
+
+
+<!-- asterism_core/domain__disclosure__outcome.md -->
+# asterism-core::domain::disclosure::outcome
+
+What applying a record to a file actually achieved.
+
+Here rather than beside the writer that produces it, because two
+layers need to name it and neither may depend on the other: the port
+is declared in `asterism-core` (ports live in the core; adapters
+never define traits) and the implementation lives in
+`asterism-infra`. This crate is the one both can already see.
+
+# Why a failure lives in the value and not only in the error
+
+Applying a disclosure is two operations against one file, and either
+can fail without the other being affected. An error return can say
+only "the whole thing failed", so a writer that reports a failed
+manifest that way discards the packet it had already produced —
+which is how an expired certificate came to withhold the half that
+needs no certificate at all.
+
+So the two halves report their own outcome, including their own
+failure, and the error channel is left for the case where nothing
+could be attempted: the file could not be read, or its container is
+one this build does not write into. What a caller does with a
+half that failed is the caller's decision — a manifest that did not
+land while the packet did is still a disclosed file, and calling
+that an export failure is the judgement this type exists to let
+somebody else make.
+
+## Types
+
+- `Half` — What became of one half of a disclosure.
+- `Skipped` — Why a half was not attempted.
+- `Stamped` — The result of writing a [`DisclosureRecord`](super::DisclosureRecord)
+
+## Constants
+
+- `DISCLOSURE_NOTE_SCHEMA` — Version tag carried inside a stored disclosure note.
+
+
+<!-- asterism_core/domain__disclosure__record.md -->
+# asterism-core::domain::disclosure::record
+
+`DisclosureRecord` — everything one exported file is going to say
+about where it came from, decided before either emitter runs.
+
+The two emitters write into different places for different readers.
+The XMP packet carries the IPTC properties a platform reads to decide
+whether a file is synthetic; the C2PA manifest carries a signed claim
+plus the lineage this library holds. They must not disagree, and the
+cheapest way to make disagreement impossible is for both to be
+rendered from one value that was assembled once.
+
+# What is here and what is deliberately not
+
+This is a *statement*, not a projection of a row. The application
+service builds it out of what the database holds — material metadata
+for the generator and the prompt, derivation edges for the parents,
+attribution for the operator — and every judgement (is this
+synthetic, is the parent a photograph, may the prompt be disclosed)
+is made there, on the way in. Nothing downstream of this type
+re-decides anything: an emitter that had a policy would be a second
+place the answer could differ from the first.
+
+# The two audiences, and why the identifiers only reach one
+
+Asterism's own identifiers — the asset id, the dispatch the file left
+through, the parents it was made from — go into the C2PA manifest's
+custom assertion and **not** into the XMP packet. Two reasons, and
+the second is the load-bearing one:
+
+1. IPTC has no property for them. Inventing an `Iptc4xmpExt` field
+   would put a private vocabulary into a namespace that is not this
+   repository's to extend.
+2. The manifest is where lineage belongs by design, and it is signed.
+   An id in an unsigned XMP packet is an id anybody can rewrite,
+   which makes it useless for exactly the job it would be there for
+   — finding the row again — while still being present in every
+   published file.
+
+The sidecar the file exporter already writes carries the same
+identifiers in the clear for the receiver that has no C2PA reader
+(`asterism-contract::sidecar`), so nothing is lost by keeping them
+out of the packet.
+
+# A human pass is asserted, never inferred
+
+[`DigitalSourceType::HumanEdits`] is the one value a caller has to
+state. Nothing observable distinguishes "a person worked on this" from
+"no generator metadata was found", and the copyright question that
+makes the distinction worth recording turns on the human layer being
+evidenced rather than assumed. Deriving it from an absence would
+manufacture exactly the evidence it is supposed to record.
+
+## Types
+
+- `DisclosureRecord` — What one exported artefact will disclose.
+
+
+<!-- asterism_core/domain__disclosure__source_type.md -->
+# asterism-core::domain::disclosure::source_type
+
+`DigitalSourceType` — the one field a synthetic file is obliged to
+carry, and the closed set of values this corpus can honestly assert.
+
+The vocabulary is IPTC's, published as a controlled vocabulary at
+`cv.iptc.org/newscodes/digitalsourcetype`. The *value* is the term's
+URI, not its short name: that is what
+`Iptc4xmpExt:DigitalSourceType` is typed as (URI, per the IPTC Photo
+Metadata Standard 2025.1 specification), and it is what a C2PA
+`c2pa.actions` assertion carries in its `digitalSourceType` field.
+One string serves both, which is the reason this type exists at all
+rather than each emitter spelling its own.
+
+# Why a closed set, when `Modality` next door is an open slug
+
+An open slug is right when a new value is a data change with no code
+behind it. This is the opposite case twice over. Each value here is a
+*claim about how a file came to exist*, and the claims are not
+interchangeable — the difference between `trainedAlgorithmicMedia`
+and `compositeWithTrainedAlgorithmicMedia` is the difference between
+"a model made this" and "a model altered a photograph", and a caller
+that could pass an arbitrary string could assert either by typo.
+Second, the receiving side is closed too: a validator reads the URI
+against the published vocabulary, and a term IPTC does not define is
+not a weaker claim, it is an unreadable one.
+
+# Why these five and not the whole vocabulary
+
+IPTC defines more terms than this — film and print digitisation,
+several composite forms, a deprecated pair. A term is here when a
+file in this corpus can arrive with the fact it names, because a
+value nothing can produce is a value nothing tests. The three
+digitisation terms (`negativeFilm` / `positiveFilm` / `print`)
+describe a scanner Asterism has no knowledge of; they can be added
+when something can establish them, and adding one is this enum plus
+its URI.
+
+# Not asserting is a state
+
+There is no `Unknown` variant. An artefact whose origin nothing
+established gets no `DigitalSourceType` property at all — the same
+doctrine
+[`attribution`](crate::domain::attribution)
+states for an absent author: absence is a question nobody has
+answered, and a vocabulary term meaning "we do not know" would be an
+answer. It also matters legally in the one direction that is not
+symmetric: a missing mark on a synthetic file is a gap, while a wrong
+mark on one is a false statement.
+
+## Types
+
+- `DigitalSourceType` — How a file came to exist, in IPTC's vocabulary.
+- `UnknownSourceType` — A value that is not a term of the IPTC digital source type vocabulary.
 
 
 <!-- asterism_core/domain__dispatch.md -->
@@ -4425,6 +4609,302 @@ convert from this enum. Infrastructure-level failures are collapsed into
 ## Types
 
 - `DomainError` — Errors raised by the domain layer.
+
+
+<!-- asterism_disclosure_format/index.md -->
+# asterism-disclosure-format 0.0.0
+
+# asterism-disclosure-format
+
+How an AI disclosure is written down: the two renderings of a
+[`DisclosureRecord`](asterism_core::domain::disclosure::DisclosureRecord),
+as values.
+
+Nothing Asterism exported used to carry a machine-readable
+disclosure. The PNG text chunk a generator writes is a reproduction
+aid — it is unsigned, it is trivially editable, and it does not map
+onto the fields IPTC defines. This crate turns what the core decided
+into the bytes that carry it:
+
+| module | what it produces |
+|---|---|
+| [`xmp`] | the XMP packet, which needs no certificate |
+| [`embed`] | that packet inside a PNG or a JPEG, as a byte transform |
+| [`manifest`] | the C2PA manifest *definition*, ready for a signer this crate does not have |
+
+## Why the vocabulary is not here
+
+It was, and the split is by reason to change. What may be asserted
+about an artefact changes with IPTC and with what this library can
+establish — that is domain, and it lives in
+[`asterism_core::domain::disclosure`]. How a packet is written into a
+PNG changes with the container, which is this crate. Keeping both
+here put a chunk walker and a CRC into the core's dependency graph,
+the parser that crate's own manifest records evicting, and it left
+nowhere in the core to model reading a disclosure *back*.
+
+## Why an exporter cannot do this on its own
+
+Inside a generator only tensors move between nodes: running a signed
+image through a save node re-encodes it from pixels and strips the
+signature. Video is worse — the encode discards whatever frame-level
+record existed, so a manifest can only be attached after it. Signing
+is therefore only possible in a layer that holds the file *after* it
+has been written, which is this application rather than a plug-in
+inside the generator.
+
+## Two vocabularies, not one
+
+Both an IPTC XMP property and a C2PA manifest are emitted, and that
+is not redundancy. Platforms read inconsistently — some parse
+`Iptc4xmpExt:DigitalSourceType` and ignore C2PA, others do the
+reverse — and IPTC's own recommendation is to emit both. They also
+fail differently: XMP survives an ordinary metadata-preserving copy
+and is editable by anyone, while a manifest is tamper-evident and is
+removed by any re-encode.
+
+## The ordering constraint
+
+**XMP is written before the manifest is signed.** The manifest's hard
+binding covers the XMP packet, so editing the packet afterwards
+invalidates the signature — IPTC's own 2025.1 announcement carries a
+worked example whose caption records exactly that happening. The two
+emitters are one ordered operation, not two independent ones.
+
+## What this crate refuses to do
+
+- **Sign.** No key material, no cryptography backend, no `c2pa`
+  dependency. Signing lives in `asterism-infra`, where a certificate
+  is configuration rather than something this repository ships.
+- **Decide.** Whether a file is synthetic, whether a prompt may be
+  disclosed, which parent is which — those are read out of the
+  database by the application service and arrive here already
+  settled
+  ([`DisclosureRecord`](asterism_core::domain::disclosure::DisclosureRecord)).
+- **Decode pixels.** Every writer here is a byte transform over a
+  container. An export hands back the image it was given.
+
+## What it does not cover yet
+
+- **A watermark.** The industry pairs an invisible watermark with the
+  manifest precisely because the manifest does not survive a
+  re-encode. A watermark changes pixels, which is a different
+  contract from the one above, and it is tracked separately.
+- **ExtendedXMP.** A packet too large for a JPEG segment falls back
+  to a reduced record rather than being split ([`embed::stamp`]).
+- **Video containers.** [`embed`] writes into PNG and JPEG only. MP4
+  and MOV carry their manifest as a JUMBF box, which the signing
+  adapter writes through the `c2pa` crate; there is no XMP half for
+  them here.
+
+## Modules
+
+- [`embed`](embed.md): Putting an XMP packet into a container, and taking the old one out.
+- [`manifest`](manifest.md): The C2PA manifest *definition* — what would be signed, built as a
+- [`xmp`](xmp.md): The XMP packet — the half of the disclosure that needs no
+
+
+<!-- asterism_disclosure_format/embed.md -->
+# asterism-disclosure-format::embed
+
+Putting an XMP packet into a container, and taking the old one out.
+
+Two containers, because those are the two still-image formats this
+corpus arrives in. Both are handled as byte transforms over a whole
+file rather than as a decode/re-encode: an export must hand back the
+pixels it was given, and the only way to be sure of that is to never
+decode them. It also means a PNG whose ancillary chunks nothing here
+understands comes out with those chunks intact and in order.
+
+# Replace, never append
+
+Both containers permit a second XMP packet to sit next to the first,
+and neither says which one wins. Readers disagree in practice, so a
+file with two packets has a disclosure that depends on who opens it —
+the failure mode being that a stale `digitalSourceType` shadows a
+corrected one. Every writer here removes *every* packet it can see
+before adding its own, and the tests pin that a file arriving with
+two leaves with one.
+
+What a writer can see is what its walk covers: a PNG chunk after
+`IEND`, or a JPEG `APP1` after the scan, is neither collected nor
+dropped. Those positions are also outside what [`read_xmp`] reads,
+so no reader of this crate can be shown one — the promise is about
+the part of the file both halves agree on rather than about every
+byte present.
+
+# Where the packet goes
+
+Positions below are where a *new* packet lands. A file that already
+carries one keeps it where it is: the first packet is replaced in
+place, so a re-stamped file's chunk order does not drift with every
+export.
+
+PNG: an `iTXt` chunk before the first `IDAT`. The chunk is
+uncompressed — the compression flag exists, and the packet is small
+enough that a reader unable to inflate it would be a worse outcome
+than a few hundred spare bytes.
+
+JPEG: an `APP1` segment before the first non-`APPn` marker, so it
+lands after a JFIF `APP0` and after an EXIF `APP1` rather than
+displacing either. A metadata-only file that reaches `EOI` without
+any such marker takes the position before the `EOI`, so the segment
+is inside the image either way. (A *truncated* file has no `EOI`
+either, and is refused as malformed rather than written into.)
+
+# How much a packet may hold
+
+Both containers have a ceiling and only one of them is reachable.
+JPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP
+identifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a
+budget a generator prompt exhausts on its own, which is why
+[`DisclosureRecord::essential`](asterism_core::domain::disclosure::DisclosureRecord::essential)
+exists and why [`stamp`] falls back to it. PNG's is the
+specification's limit on a chunk's data field, about 2 GiB, which no
+record approaches; it is checked rather than assumed because the
+assumption used to be written as a silent truncation. Both refusals
+are [`EmbedError::PacketTooLarge`].
+
+## Functions
+
+- `embed_xmp` — Writes `packet` into `bytes`, replacing any packet already there.
+- `read_xmp` — Reads back the XMP packet a file carries, if it carries one.
+- `sniff` — Identifies the container from its own first bytes.
+- `stamp` — Convenience: renders the record and writes it, doing nothing when
+
+## Types
+
+- `Container` — A still-image container this module can write into.
+- `EmbedError` — What went wrong writing a packet.
+
+## Constants
+
+- `JPEG_MAX_PACKET` — Largest XMP packet a JPEG can carry in one segment.
+
+
+<!-- asterism_disclosure_format/manifest.md -->
+# asterism-disclosure-format::manifest
+
+The C2PA manifest *definition* — what would be signed, built as a
+value, with nothing here able to sign it.
+
+`c2pa::Builder::with_definition` takes a JSON document describing the
+manifest; producing that document is a mapping problem (what the
+database holds → what the manifest asserts) and producing a
+*signature* is a key-management problem. They are separated here so
+the mapping can be tested exhaustively on a machine with no
+certificate, which is every machine this repository has today.
+
+# Two assertions, and why the second one exists
+
+`c2pa.actions` carries the standard claim: this asset was created,
+and its `digitalSourceType` is the same IPTC URI the XMP packet
+states. That is the half a validator understands.
+
+`io.github.ynishi.asterism.disclosure` carries what the database
+knows and the standard has no field for: the asset id, the dispatch
+the file left through, and the ids it was derived from. A reader that
+has this Asterism instance can resolve those; a reader that does not
+at least learns that the lineage exists and is recorded somewhere.
+
+The label is reverse-DNS under a domain that resolves to the author,
+which is the convention the C2PA specification asks third-party
+assertions to follow. A label invented outside a controlled namespace
+is one that can collide with somebody else's meaning of the same
+words.
+
+# Why the parents are ids and not ingredients
+
+C2PA has a first-class way to say "this was made from that": an
+ingredient, which carries the parent's own hash and, where it has
+one, its manifest. That is a stronger statement than an id, and it is
+one this path cannot honestly make — signing happens over a file that
+has been exported, and the parents' bytes are not in hand at that
+moment (they may have been purged, and re-reading them would make an
+export's cost depend on the depth of its lineage). An ingredient
+constructed without the parent's bytes would be an assertion about a
+hash nobody computed.
+
+So the ids go in the custom assertion, where they are what they are:
+a pointer into the library that recorded the edge. Promoting them to
+ingredients is a later change that needs the parent files, not a
+detail left out.
+
+## Functions
+
+- `definition` — Renders the manifest definition for one record.
+
+## Constants
+
+- `ACTIONS_LABEL` — Label of the standard actions assertion.
+- `ASTERISM_ASSERTION_SCHEMA` — Version of the payload under [`ASTERISM_LABEL`].
+- `ASTERISM_LABEL` — Label of Asterism's own assertion (module docs on the namespace).
+
+
+<!-- asterism_disclosure_format/xmp.md -->
+# asterism-disclosure-format::xmp
+
+The XMP packet — the half of the disclosure that needs no
+certificate.
+
+IPTC Extension properties can only be carried in XMP; there is no
+EXIF or IIM spelling of them. So this packet is the entire IPTC side
+of the acceptance criteria, and it is the side that works today,
+unsigned, on a machine with no signing identity configured.
+
+# Why this is written by hand rather than by an RDF library
+
+An XMP packet is RDF/XML, and a general RDF serialiser would be
+entitled to emit any of several equivalent forms — properties as
+attributes instead of elements, a different namespace prefix, a
+different node ordering. Equivalent to a parser, not equivalent here:
+the bytes go inside a C2PA hard binding (see the module docs on
+ordering), so *which* equivalent form is produced decides whether a
+signature made over one rendering still verifies against another. A
+packet this crate writes has to be a function of the record and
+nothing else, which is what a hand-written template is and a
+serialiser is not obliged to be.
+
+The scope also does not justify a dependency: five properties, all
+simple text or a URI, all in one namespace, none of them a container
+(no `rdf:Alt` / `rdf:Bag` / `rdf:Seq`), no language alternatives.
+
+# Ordering against the C2PA manifest
+
+**The packet is written before the manifest is signed, never after.**
+The manifest's hard binding covers the XMP, so editing the packet
+afterwards invalidates the signature. This is not a deduction: IPTC's
+own 2025.1 announcement carries a worked example whose caption
+records that adding the new AI properties invalidated the C2PA
+metadata that was already in the file. The apply path enforces the
+order, and its tests are what hold it.
+
+# No padding
+
+The XMP specification suggests trailing whitespace so a packet can be
+rewritten in place without moving the bytes after it. This writes
+none, and marks the packet read-only (`<?xpacket end="r"?>`)
+accordingly. In-place rewriting is not something that can happen to a
+signed file anyway — any edit breaks the binding — and JPEG's APP1
+segment leaves the packet 65,504 bytes, which is a budget a generator
+prompt can exhaust on its own. Spending part of it on padding for an
+update path that cannot exist would be paying twice.
+
+(65,533 is the segment's payload, not the packet's: the 29-byte
+`http://ns.adobe.com/xap/1.0/\0` identifier is inside it and has to
+be paid first. The figure is
+[`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET), which is
+what the writer enforces and what
+[`EmbedError::PacketTooLarge`](crate::embed::EmbedError::PacketTooLarge)
+reports.)
+
+## Functions
+
+- `render` — Renders the record's IPTC properties as an XMP packet.
+
+## Constants
+
+- `IPTC_EXT_NS` — The IPTC Extension namespace, unchanged since 2008 and still the
 
 
 <!-- asterism_dispatch_sdk/index.md -->
@@ -6715,6 +7195,7 @@ this crate.
 
 ## Modules
 
+- [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
@@ -6722,14 +7203,11 @@ this crate.
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
 - [`jobs::preview_ffmpeg`](jobs__preview_ffmpeg.md): Preview-rendition transcode: an unplayable video in, an H.264 MP4
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
-- [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
-- [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
 - [`probes::jpeg`](probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
 - [`probes::png`](probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
-- [`provenance`](provenance.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`search`](search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
@@ -6766,6 +7244,100 @@ this crate.
 - [`sqlite::repo::thread`](sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [`sqlite::repo::thumb`](sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
 - [`telemetry`](telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
+
+
+<!-- asterism_infra/disclosure.md -->
+# asterism-infra::disclosure
+
+Writing a [`DisclosureRecord`] into a file that already exists.
+
+This is the adapter half of AI disclosure. What is asserted is
+decided in [`asterism_core::domain::disclosure`];
+`asterism-disclosure-format` renders that decision into the two
+forms it can take, as values; this module puts them into a file on
+disk, in the one order that works, and signs the manifest when — and
+only when — a signing identity has been configured.
+
+# Why it happens here rather than inside the generator
+
+Inside a generation graph only tensors move between nodes, so a signed
+image fed through a save node is re-encoded from pixels and comes out
+with the signature gone. Video is worse: the combine step discards
+whatever frame-level record existed, and the manifest can only be
+attached after the encode. Signing is therefore possible only in a
+layer that holds the finished file, which is this application.
+
+# The order is not a preference
+
+```text
+read → XMP packet → C2PA manifest → one write
+```
+
+The manifest's hard binding is computed over the file's bytes, and on
+a still image the XMP packet is part of them. Writing the packet after
+signing therefore invalidates the signature — IPTC's own 2025.1
+announcement carries a worked example whose caption records exactly
+that outcome, so this is documented behaviour rather than a
+deduction. [`DisclosureWriter::apply`] does the two in this order and
+[`tests::the_packet_is_written_before_the_manifest_is_signed`] is what
+keeps them there.
+
+# What happens with no certificate
+
+The IPTC/XMP half still lands. That is the half platforms read most
+widely, it needs no key material, and it is a legitimate disclosure on
+its own — IPTC's guidance is to emit the XMP property *or* a C2PA
+manifest, with both being better than either.
+
+The manifest half does not, and there is deliberately no fallback to
+the test certificates the C2PA tooling ships with. A manifest signed
+by them validates as untrusted, which is strictly worse than no
+manifest: an absent manifest says nothing, and an untrusted one makes
+a provenance claim that a validator actively rejects.
+
+[`SigningIdentity::from_files`] refuses them by the name they carry.
+That is a heuristic and a rename defeats it, which is why
+[`inspect_certificate`] reads the certificate's own extensions
+beside it — though not for the same question. It refuses what cannot
+sign at all and reports the rest, because the extended key usage a
+test certificate carries is one legitimate certificates carry too:
+the two are not told apart by structure.
+
+Neither check decides whether a certificate is *trusted*. That is a
+validator's question, asked against a published trust list, and not
+one a signer can answer about itself.
+
+# The gap this leaves on video
+
+A still gets its XMP packet either way; MP4 and MOV get nothing
+without a certificate. MP4 can carry XMP in a `uuid` box, but writing
+BMFF boxes is not something this module does — the manifest path goes
+through `c2pa`, which knows the container, and the packet path goes
+through `asterism-disclosure-format::embed`, which knows PNG and JPEG. Until
+one of those two grows the other's format, an unsigned video export
+carries no disclosure at all, and [`Stamped`] says so rather than
+reporting a success it did not have.
+
+# Renditions are not signed
+
+The preview rendition path re-encodes through ffmpeg, which produces
+a new file carrying none of the original's container tags, stream
+tags, manifest or XMP. A rendition therefore cannot inherit a
+signature and must not be given one of its own that would claim the
+original's provenance for a derived file. Nothing here is wired to
+that path; this note is why.
+
+## Functions
+
+- `inspect_certificate` — Reads a signing certificate's own extensions and reports what they
+
+## Types
+
+- `CertificateVerdict` — What reading a certificate's own extensions concluded.
+- `Container` — A container this module can write a disclosure into.
+- `DisclosureError` — What went wrong applying a record.
+- `DisclosureWriter` — Applies disclosure records to files.
+- `SigningIdentity` — The certificate and key a manifest is signed with.
 
 
 <!-- asterism_infra/dispatch.md -->
@@ -6933,13 +7505,13 @@ for later modalities.
 - `auto_tag` — Extracts keywords, materialises channel tags, and links them to the
 - `chapter_scan` — Reads a container's own chapter list into its imported structure
 - `cover_gen` — Auto-generates the card cover. Idempotent — if the cover column is
+- `disclosure_stamp` — Writes the AI disclosure into a file this library produced.
 - `duplicate_scan` — Re-derives duplicate conflicts from fingerprints already on the rows.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `observation_sweep` — Expires observations past their stream's declared retention.
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
-- `provenance_stamp` — Writes the AI disclosure into a file this library produced.
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:
 - `series_derive` — Derives `material_series` keys — applies every registered
 - `session_rebuild` — Session reconciliation stub — the precomputed rkyv snapshot was
@@ -7032,60 +7604,6 @@ Homebrew) plays video out of the box.
 ## Types
 
 - `VideoThumbRoute` — Which extractor owns a video mime.
-
-
-<!-- asterism_infra/jobs__thumb_macos.md -->
-# asterism-infra::jobs::thumb_macos
-
-ImageIO fast path for `thumb_gen` on macOS.
-
-`CGImageSourceCreateThumbnailAtIndex` reads a JPEG (or HEIC / PNG),
-resizes to a target longer edge, and returns a `CGImage` in one
-call. On Apple Silicon this route flips to the hardware JPEG
-decoder, keeping CPU load close to zero during a large import
-wave — the pure-Rust `image` crate path (see `handlers::make_thumb`
-fallback) burns a full core per decode even at `Lanczos3`.
-
-The returned bytes are JPEG-encoded via `CGImageDestination` so
-the DB blob shape stays identical across platforms.
-
-## Functions
-
-- `make_thumb` — Decodes the JPEG at `path_str`, resizes so the longer edge is
-
-
-<!-- asterism_infra/jobs__thumb_video.md -->
-# asterism-infra::jobs::thumb_video
-
-Video frame extraction for `thumb_gen` on macOS.
-
-A video has no thumbnail without this: ImageIO (`thumb_macos`) and
-the pure-Rust `image` crate both decode stills only, so before this
-path existed a video asset simply showed an empty tile in the grid.
-`AVAssetImageGenerator` pulls one frame as a `CGImage`, which
-`thumb_macos::encode_jpeg` then turns into the same JPEG blob every
-other thumbnail is stored as — the cache, the UI and the palette
-extractor cannot tell the two sources apart, which is the point.
-
-Format coverage is AVFoundation's, not the mime map's. `video/mp4`
-and `video/quicktime` open natively; `video/webm` does not (macOS
-ships no WebM demuxer), so those assets fail here and keep the
-empty tile they had before. The failure is soft — one logged job
-failure per enqueue, no retry storm (`jobs::mod` has no retry
-policy, and the UI stops re-kicking after its own budget) — but it
-means the extension→mime table in `domain::material` and this
-extractor's real capabilities are two lists that can drift apart.
-
-The generator's synchronous `copyCGImageAtTime` is deprecated in
-favour of the async form. It is the right call here anyway: the
-whole `thumb_gen` handler already runs inside `spawn_blocking`
-under a decode-slot semaphore, so blocking is the contract this
-path is called under, and an async completion handler would only
-add a channel round-trip to get back to it.
-
-## Functions
-
-- `make_thumb` — Extracts one frame from the video at `path_str`, scaled to fit a
 
 
 <!-- asterism_infra/observe.md -->
@@ -7932,99 +8450,6 @@ places.
 ## Types
 
 - `PngProbe` — PNG's reading of the content and meta axes.
-
-
-<!-- asterism_infra/provenance.md -->
-# asterism-infra::provenance
-
-Writing a [`DisclosureRecord`] into a file that already exists.
-
-This is the adapter half of AI-disclosure provenance. `asterism-provenance`
-decides *what is asserted* and renders both forms of it as values; this
-module puts them into a file on disk, in the one order that works, and
-signs the manifest when — and only when — a signing identity has been
-configured.
-
-# Why it happens here rather than inside the generator
-
-Inside a generation graph only tensors move between nodes, so a signed
-image fed through a save node is re-encoded from pixels and comes out
-with the signature gone. Video is worse: the combine step discards
-whatever frame-level record existed, and the manifest can only be
-attached after the encode. Signing is therefore possible only in a
-layer that holds the finished file, which is this application.
-
-# The order is not a preference
-
-```text
-read → XMP packet → C2PA manifest → one write
-```
-
-The manifest's hard binding is computed over the file's bytes, and on
-a still image the XMP packet is part of them. Writing the packet after
-signing therefore invalidates the signature — IPTC's own 2025.1
-announcement carries a worked example whose caption records exactly
-that outcome, so this is documented behaviour rather than a
-deduction. [`ProvenanceWriter::apply`] does the two in this order and
-[`tests::the_packet_is_written_before_the_manifest_is_signed`] is what
-keeps them there.
-
-# What happens with no certificate
-
-The IPTC/XMP half still lands. That is the half platforms read most
-widely, it needs no key material, and it is a legitimate disclosure on
-its own — IPTC's guidance is to emit the XMP property *or* a C2PA
-manifest, with both being better than either.
-
-The manifest half does not, and there is deliberately no fallback to
-the test certificates the C2PA tooling ships with. A manifest signed
-by them validates as untrusted, which is strictly worse than no
-manifest: an absent manifest says nothing, and an untrusted one makes
-a provenance claim that a validator actively rejects.
-
-[`SigningIdentity::from_files`] refuses them by the name they carry.
-That is a heuristic and a rename defeats it, which is why
-[`inspect_certificate`] reads the certificate's own extensions
-beside it — though not for the same question. It refuses what cannot
-sign at all and reports the rest, because the extended key usage a
-test certificate carries is one legitimate certificates carry too:
-the two are not told apart by structure.
-
-Neither check decides whether a certificate is *trusted*. That is a
-validator's question, asked against a published trust list, and not
-one a signer can answer about itself.
-
-# The gap this leaves on video
-
-A still gets its XMP packet either way; MP4 and MOV get nothing
-without a certificate. MP4 can carry XMP in a `uuid` box, but writing
-BMFF boxes is not something this module does — the manifest path goes
-through `c2pa`, which knows the container, and the packet path goes
-through `asterism-provenance::embed`, which knows PNG and JPEG. Until
-one of those two grows the other's format, an unsigned video export
-carries no disclosure at all, and [`Stamped`] says so rather than
-reporting a success it did not have.
-
-# Renditions are not signed
-
-The preview rendition path re-encodes through ffmpeg, which produces
-a new file carrying none of the original's container tags, stream
-tags, manifest or XMP. A rendition therefore cannot inherit a
-signature and must not be given one of its own that would claim the
-original's provenance for a derived file. Nothing here is wired to
-that path; this note is why.
-
-## Functions
-
-- `inspect_certificate` — Reads a signing certificate's own extensions and reports what they
-
-## Types
-
-- `CertificateVerdict` — What reading a certificate's own extensions concluded.
-- `Container` — A container this module can write provenance into.
-- `ProvenanceError` — What went wrong applying a record.
-- `ProvenanceWriter` — Applies disclosure records to files.
-- `SigningIdentity` — The certificate and key a manifest is signed with.
 
 
 <!-- asterism_infra/search.md -->
@@ -8897,445 +9322,6 @@ behind its end marker, so the walk yields four kinds of element where
 the PNG walk yields one. What the two share is the
 contract — boundaries out, judgement left to the caller — and that is
 the part worth having twice.
-
-
-<!-- asterism_provenance/index.md -->
-# asterism-provenance 0.0.0
-
-# asterism-provenance
-
-What an exported file says about where it came from, as values.
-
-Nothing Asterism exported used to carry machine-readable provenance.
-The PNG text chunk a generator writes is a reproduction aid — it is
-unsigned, it is trivially editable, and it does not map onto the
-disclosure fields IPTC defines. This crate is the vocabulary and the
-two renderings of it:
-
-| module | what it produces |
-|---|---|
-| [`source_type`] | the IPTC digital source type — the one field the obligation turns on |
-| [`record`] | [`DisclosureRecord`], everything one file is going to say, decided once |
-| [`xmp`] | the XMP packet, which needs no certificate |
-| [`embed`] | that packet inside a PNG or a JPEG, as a byte transform |
-| [`manifest`] | the C2PA manifest *definition*, ready for a signer this crate does not have |
-
-## Why an exporter cannot do this on its own
-
-Inside a generator only tensors move between nodes: running a signed
-image through a save node re-encodes it from pixels and strips the
-signature. Video is worse — the encode discards whatever frame-level
-record existed, so a manifest can only be attached after it. Signing
-is therefore only possible in a layer that holds the file *after* it
-has been written, which is this application rather than a plug-in
-inside the generator.
-
-## Two vocabularies, not one
-
-Both an IPTC XMP property and a C2PA manifest are emitted, and that
-is not redundancy. Platforms read inconsistently — some parse
-`Iptc4xmpExt:DigitalSourceType` and ignore C2PA, others do the
-reverse — and IPTC's own recommendation is to emit both. They also
-fail differently: XMP survives an ordinary metadata-preserving copy
-and is editable by anyone, while a manifest is tamper-evident and is
-removed by any re-encode.
-
-## The ordering constraint
-
-**XMP is written before the manifest is signed.** The manifest's hard
-binding covers the XMP packet, so editing the packet afterwards
-invalidates the signature — IPTC's own 2025.1 announcement carries a
-worked example whose caption records exactly that happening. The two
-emitters are one ordered operation, not two independent ones.
-
-## What this crate refuses to do
-
-- **Sign.** No key material, no cryptography backend, no `c2pa`
-  dependency. Signing lives in `asterism-infra`, where a certificate
-  is configuration rather than something this repository ships.
-- **Decide.** Whether a file is synthetic, whether a prompt may be
-  disclosed, which parent is which — those are read out of the
-  database by the application service and arrive here already
-  settled ([`record`] module docs).
-- **Decode pixels.** Every writer here is a byte transform over a
-  container. An export hands back the image it was given.
-
-## What it does not cover yet
-
-- **A watermark.** The industry pairs an invisible watermark with the
-  manifest precisely because the manifest does not survive a
-  re-encode. A watermark changes pixels, which is a different
-  contract from the one above, and it is tracked separately.
-- **ExtendedXMP.** A packet too large for a JPEG segment falls back
-  to a reduced record rather than being split ([`embed::stamp`]).
-- **Video containers.** [`embed`] writes into PNG and JPEG only. MP4
-  and MOV carry their manifest as a JUMBF box, which the signing
-  adapter writes through the `c2pa` crate; there is no XMP half for
-  them here.
-
-## Modules
-
-- [`embed`](embed.md): Putting an XMP packet into a container, and taking the old one out.
-- [`manifest`](manifest.md): The C2PA manifest *definition* — what would be signed, built as a
-- [`outcome`](outcome.md): What applying a record to a file actually achieved.
-- [`record`](record.md): `DisclosureRecord` — everything one exported file is going to say
-- [`source_type`](source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
-- [`xmp`](xmp.md): The XMP packet — the half of the disclosure that needs no
-
-
-<!-- asterism_provenance/embed.md -->
-# asterism-provenance::embed
-
-Putting an XMP packet into a container, and taking the old one out.
-
-Two containers, because those are the two still-image formats this
-corpus arrives in. Both are handled as byte transforms over a whole
-file rather than as a decode/re-encode: an export must hand back the
-pixels it was given, and the only way to be sure of that is to never
-decode them. It also means a PNG whose ancillary chunks nothing here
-understands comes out with those chunks intact and in order.
-
-# Replace, never append
-
-Both containers permit a second XMP packet to sit next to the first,
-and neither says which one wins. Readers disagree in practice, so a
-file with two packets has a disclosure that depends on who opens it —
-the failure mode being that a stale `digitalSourceType` shadows a
-corrected one. Every writer here removes *every* packet it can see
-before adding its own, and the tests pin that a file arriving with
-two leaves with one.
-
-What a writer can see is what its walk covers: a PNG chunk after
-`IEND`, or a JPEG `APP1` after the scan, is neither collected nor
-dropped. Those positions are also outside what [`read_xmp`] reads,
-so no reader of this crate can be shown one — the promise is about
-the part of the file both halves agree on rather than about every
-byte present.
-
-# Where the packet goes
-
-Positions below are where a *new* packet lands. A file that already
-carries one keeps it where it is: the first packet is replaced in
-place, so a re-stamped file's chunk order does not drift with every
-export.
-
-PNG: an `iTXt` chunk before the first `IDAT`. The chunk is
-uncompressed — the compression flag exists, and the packet is small
-enough that a reader unable to inflate it would be a worse outcome
-than a few hundred spare bytes.
-
-JPEG: an `APP1` segment before the first non-`APPn` marker, so it
-lands after a JFIF `APP0` and after an EXIF `APP1` rather than
-displacing either. A metadata-only file that reaches `EOI` without
-any such marker takes the position before the `EOI`, so the segment
-is inside the image either way. (A *truncated* file has no `EOI`
-either, and is refused as malformed rather than written into.)
-
-# How much a packet may hold
-
-Both containers have a ceiling and only one of them is reachable.
-JPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP
-identifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a
-budget a generator prompt exhausts on its own, which is why
-[`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential)
-exists and why [`stamp`] falls back to it. PNG's is the
-specification's limit on a chunk's data field, about 2 GiB, which no
-record approaches; it is checked rather than assumed because the
-assumption used to be written as a silent truncation. Both refusals
-are [`EmbedError::PacketTooLarge`].
-
-## Functions
-
-- `embed_xmp` — Writes `packet` into `bytes`, replacing any packet already there.
-- `read_xmp` — Reads back the XMP packet a file carries, if it carries one.
-- `sniff` — Identifies the container from its own first bytes.
-- `stamp` — Convenience: renders the record and writes it, doing nothing when
-
-## Types
-
-- `Container` — A still-image container this module can write into.
-- `EmbedError` — What went wrong writing a packet.
-
-## Constants
-
-- `JPEG_MAX_PACKET` — Largest XMP packet a JPEG can carry in one segment.
-
-
-<!-- asterism_provenance/manifest.md -->
-# asterism-provenance::manifest
-
-The C2PA manifest *definition* — what would be signed, built as a
-value, with nothing here able to sign it.
-
-`c2pa::Builder::with_definition` takes a JSON document describing the
-manifest; producing that document is a mapping problem (what the
-database holds → what the manifest asserts) and producing a
-*signature* is a key-management problem. They are separated here so
-the mapping can be tested exhaustively on a machine with no
-certificate, which is every machine this repository has today.
-
-# Two assertions, and why the second one exists
-
-`c2pa.actions` carries the standard claim: this asset was created,
-and its `digitalSourceType` is the same IPTC URI the XMP packet
-states. That is the half a validator understands.
-
-`io.github.ynishi.asterism.provenance` carries what the database
-knows and the standard has no field for: the asset id, the dispatch
-the file left through, and the ids it was derived from. A reader that
-has this Asterism instance can resolve those; a reader that does not
-at least learns that the lineage exists and is recorded somewhere.
-
-The label is reverse-DNS under a domain that resolves to the author,
-which is the convention the C2PA specification asks third-party
-assertions to follow. A label invented outside a controlled namespace
-is one that can collide with somebody else's meaning of the same
-words.
-
-# Why the parents are ids and not ingredients
-
-C2PA has a first-class way to say "this was made from that": an
-ingredient, which carries the parent's own hash and, where it has
-one, its manifest. That is a stronger statement than an id, and it is
-one this path cannot honestly make — signing happens over a file that
-has been exported, and the parents' bytes are not in hand at that
-moment (they may have been purged, and re-reading them would make an
-export's cost depend on the depth of its lineage). An ingredient
-constructed without the parent's bytes would be an assertion about a
-hash nobody computed.
-
-So the ids go in the custom assertion, where they are what they are:
-a pointer into the library that recorded the edge. Promoting them to
-ingredients is a later change that needs the parent files, not a
-detail left out.
-
-## Functions
-
-- `definition` — Renders the manifest definition for one record.
-
-## Constants
-
-- `ACTIONS_LABEL` — Label of the standard actions assertion.
-- `ASTERISM_ASSERTION_SCHEMA` — Version of the payload under [`ASTERISM_LABEL`].
-- `ASTERISM_LABEL` — Label of Asterism's own assertion (module docs on the namespace).
-
-
-<!-- asterism_provenance/outcome.md -->
-# asterism-provenance::outcome
-
-What applying a record to a file actually achieved.
-
-Here rather than beside the writer that produces it, because two
-layers need to name it and neither may depend on the other: the port
-is declared in `asterism-core` (ports live in the core; adapters
-never define traits) and the implementation lives in
-`asterism-infra`. This crate is the one both can already see.
-
-# Why a failure lives in the value and not only in the error
-
-Applying a disclosure is two operations against one file, and either
-can fail without the other being affected. An error return can say
-only "the whole thing failed", so a writer that reports a failed
-manifest that way discards the packet it had already produced —
-which is how an expired certificate came to withhold the half that
-needs no certificate at all.
-
-So the two halves report their own outcome, including their own
-failure, and the error channel is left for the case where nothing
-could be attempted: the file could not be read, or its container is
-one this build does not write into. What a caller does with a
-half that failed is the caller's decision — a manifest that did not
-land while the packet did is still a disclosed file, and calling
-that an export failure is the judgement this type exists to let
-somebody else make.
-
-## Types
-
-- `Half` — What became of one half of a disclosure.
-- `Skipped` — Why a half was not attempted.
-- `Stamped` — The result of writing a [`DisclosureRecord`](crate::DisclosureRecord)
-
-
-<!-- asterism_provenance/record.md -->
-# asterism-provenance::record
-
-`DisclosureRecord` — everything one exported file is going to say
-about where it came from, decided before either emitter runs.
-
-The two emitters write into different places for different readers.
-The XMP packet carries the IPTC properties a platform reads to decide
-whether a file is synthetic; the C2PA manifest carries a signed claim
-plus the lineage this library holds. They must not disagree, and the
-cheapest way to make disagreement impossible is for both to be
-rendered from one value that was assembled once.
-
-# What is here and what is deliberately not
-
-This is a *statement*, not a projection of a row. The application
-service builds it out of what the database holds — material metadata
-for the generator and the prompt, derivation edges for the parents,
-attribution for the operator — and every judgement (is this
-synthetic, is the parent a photograph, may the prompt be disclosed)
-is made there, on the way in. Nothing downstream of this type
-re-decides anything: an emitter that had a policy would be a second
-place the answer could differ from the first.
-
-# The two audiences, and why the identifiers only reach one
-
-Asterism's own identifiers — the asset id, the dispatch the file left
-through, the parents it was made from — go into the C2PA manifest's
-custom assertion and **not** into the XMP packet. Two reasons, and
-the second is the load-bearing one:
-
-1. IPTC has no property for them. Inventing an `Iptc4xmpExt` field
-   would put a private vocabulary into a namespace that is not this
-   repository's to extend.
-2. The manifest is where lineage belongs by design, and it is signed.
-   An id in an unsigned XMP packet is an id anybody can rewrite,
-   which makes it useless for exactly the job it would be there for
-   — finding the row again — while still being present in every
-   published file.
-
-The sidecar the file exporter already writes carries the same
-identifiers in the clear for the receiver that has no C2PA reader
-(`asterism-contract::sidecar`), so nothing is lost by keeping them
-out of the packet.
-
-# A human pass is asserted, never inferred
-
-[`DigitalSourceType::HumanEdits`] is the one value a caller has to
-state. Nothing observable distinguishes "a person worked on this" from
-"no generator metadata was found", and the copyright question that
-makes the distinction worth recording turns on the human layer being
-evidenced rather than assumed. Deriving it from an absence would
-manufacture exactly the evidence it is supposed to record.
-
-## Types
-
-- `DisclosureRecord` — What one exported artefact will disclose.
-
-
-<!-- asterism_provenance/source_type.md -->
-# asterism-provenance::source_type
-
-`DigitalSourceType` — the one field a synthetic file is obliged to
-carry, and the closed set of values this corpus can honestly assert.
-
-The vocabulary is IPTC's, published as a controlled vocabulary at
-`cv.iptc.org/newscodes/digitalsourcetype`. The *value* is the term's
-URI, not its short name: that is what
-`Iptc4xmpExt:DigitalSourceType` is typed as (URI, per the IPTC Photo
-Metadata Standard 2025.1 specification), and it is what a C2PA
-`c2pa.actions` assertion carries in its `digitalSourceType` field.
-One string serves both, which is the reason this type exists at all
-rather than each emitter spelling its own.
-
-# Why a closed set, when `Modality` next door is an open slug
-
-An open slug is right when a new value is a data change with no code
-behind it. This is the opposite case twice over. Each value here is a
-*claim about how a file came to exist*, and the claims are not
-interchangeable — the difference between `trainedAlgorithmicMedia`
-and `compositeWithTrainedAlgorithmicMedia` is the difference between
-"a model made this" and "a model altered a photograph", and a caller
-that could pass an arbitrary string could assert either by typo.
-Second, the receiving side is closed too: a validator reads the URI
-against the published vocabulary, and a term IPTC does not define is
-not a weaker claim, it is an unreadable one.
-
-# Why these five and not the whole vocabulary
-
-IPTC defines more terms than this — film and print digitisation,
-several composite forms, a deprecated pair. A term is here when a
-file in this corpus can arrive with the fact it names, because a
-value nothing can produce is a value nothing tests. The three
-digitisation terms (`negativeFilm` / `positiveFilm` / `print`)
-describe a scanner Asterism has no knowledge of; they can be added
-when something can establish them, and adding one is this enum plus
-its URI.
-
-# Not asserting is a state
-
-There is no `Unknown` variant. An artefact whose origin nothing
-established gets no `DigitalSourceType` property at all — the same
-doctrine
-[`attribution`](../../asterism_core/domain/attribution/index.html)
-states for an absent author: absence is a question nobody has
-answered, and a vocabulary term meaning "we do not know" would be an
-answer. It also matters legally in the one direction that is not
-symmetric: a missing mark on a synthetic file is a gap, while a wrong
-mark on one is a false statement.
-
-## Types
-
-- `DigitalSourceType` — How a file came to exist, in IPTC's vocabulary.
-- `UnknownSourceType` — A value that is not a term of the IPTC digital source type vocabulary.
-
-
-<!-- asterism_provenance/xmp.md -->
-# asterism-provenance::xmp
-
-The XMP packet — the half of the disclosure that needs no
-certificate.
-
-IPTC Extension properties can only be carried in XMP; there is no
-EXIF or IIM spelling of them. So this packet is the entire IPTC side
-of the acceptance criteria, and it is the side that works today,
-unsigned, on a machine with no signing identity configured.
-
-# Why this is written by hand rather than by an RDF library
-
-An XMP packet is RDF/XML, and a general RDF serialiser would be
-entitled to emit any of several equivalent forms — properties as
-attributes instead of elements, a different namespace prefix, a
-different node ordering. Equivalent to a parser, not equivalent here:
-the bytes go inside a C2PA hard binding (see the module docs on
-ordering), so *which* equivalent form is produced decides whether a
-signature made over one rendering still verifies against another. A
-packet this crate writes has to be a function of the record and
-nothing else, which is what a hand-written template is and a
-serialiser is not obliged to be.
-
-The scope also does not justify a dependency: five properties, all
-simple text or a URI, all in one namespace, none of them a container
-(no `rdf:Alt` / `rdf:Bag` / `rdf:Seq`), no language alternatives.
-
-# Ordering against the C2PA manifest
-
-**The packet is written before the manifest is signed, never after.**
-The manifest's hard binding covers the XMP, so editing the packet
-afterwards invalidates the signature. This is not a deduction: IPTC's
-own 2025.1 announcement carries a worked example whose caption
-records that adding the new AI properties invalidated the C2PA
-metadata that was already in the file. The apply path enforces the
-order, and its tests are what hold it.
-
-# No padding
-
-The XMP specification suggests trailing whitespace so a packet can be
-rewritten in place without moving the bytes after it. This writes
-none, and marks the packet read-only (`<?xpacket end="r"?>`)
-accordingly. In-place rewriting is not something that can happen to a
-signed file anyway — any edit breaks the binding — and JPEG's APP1
-segment leaves the packet 65,504 bytes, which is a budget a generator
-prompt can exhaust on its own. Spending part of it on padding for an
-update path that cannot exist would be paying twice.
-
-(65,533 is the segment's payload, not the packet's: the 29-byte
-`http://ns.adobe.com/xap/1.0/\0` identifier is inside it and has to
-be paid first. The figure is
-[`embed::JPEG_MAX_PACKET`](crate::embed::JPEG_MAX_PACKET), which is
-what the writer enforces and what
-[`EmbedError::PacketTooLarge`](crate::embed::EmbedError::PacketTooLarge)
-reports.)
-
-## Functions
-
-- `render` — Renders the record's IPTC properties as an XMP packet.
-
-## Constants
-
-- `IPTC_EXT_NS` — The IPTC Extension namespace, unchanged since 2008 and still the
 
 
 <!-- asterism_server/index.md -->

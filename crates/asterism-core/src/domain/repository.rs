@@ -1269,18 +1269,27 @@ pub trait AssetRepository: Send + Sync {
         fingerprint: &MaterialFingerprint,
     ) -> Result<(), DomainError>;
 
-    /// Narrow write — records what became of a caller's declared digest
-    /// under
-    /// `extra._trace.`[`declared_hash`](crate::domain::content_hash::DECLARED_HASH_NOTE_KEY),
+    /// Narrow write — records one field under
+    /// `extra.`[`_trace`](crate::domain::provenance::TRACE_KEY),
     /// touching no other column.
     ///
     /// Narrow for the same reason its neighbour above is, and then some.
-    /// The caller is the hash job: it runs on a worker while somebody
-    /// may be editing the same asset in the grid, so a read-modify-save
-    /// of the whole entity would write back every column as it stood
-    /// when the job started — a rating or a tag set applied in between
-    /// would vanish, and the loss would be silent because the job
-    /// succeeded.
+    /// The callers are background jobs: they run on a worker while
+    /// somebody may be editing the same asset in the grid, so a
+    /// read-modify-save of the whole entity would write back every
+    /// column as it stood when the job started — a rating or a tag set
+    /// applied in between would vanish, and the loss would be silent
+    /// because the job succeeded.
+    ///
+    /// `field` names the key inside the trace, and each one belongs to
+    /// the module that owns the concept rather than being spelled at
+    /// the call site:
+    /// [`declared_hash`](crate::domain::content_hash::DECLARED_HASH_NOTE_KEY)
+    /// for what became of a caller's declared digest, and
+    /// [`disclosure`](crate::domain::disclosure::DISCLOSURE_NOTE_KEY)
+    /// for what became of an artefact's AI disclosure. The trace is a
+    /// shared bag with several independent writers, so a field is
+    /// replaced and its neighbours are left alone.
     ///
     /// Returns whether the note landed. `false` means the `extra`
     /// column holds something this cannot merge into without destroying
@@ -1289,9 +1298,10 @@ pub trait AssetRepository: Send + Sync {
     /// out loud rather than overwriting somebody's bag to record a
     /// bookkeeping note. A row that has since been deleted is not an
     /// error either — the write matches no row and reports `false`.
-    async fn note_declared_hash(
+    async fn note_trace_field(
         &self,
         asset_id: &AssetId,
+        field: &str,
         note: serde_json::Value,
     ) -> Result<bool, DomainError>;
 

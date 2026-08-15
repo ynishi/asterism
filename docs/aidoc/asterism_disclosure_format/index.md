@@ -1,22 +1,33 @@
-# asterism-provenance 0.0.0
+# asterism-disclosure-format 0.0.0
 
-# asterism-provenance
+# asterism-disclosure-format
 
-What an exported file says about where it came from, as values.
+How an AI disclosure is written down: the two renderings of a
+[`DisclosureRecord`](asterism_core::domain::disclosure::DisclosureRecord),
+as values.
 
-Nothing Asterism exported used to carry machine-readable provenance.
-The PNG text chunk a generator writes is a reproduction aid — it is
-unsigned, it is trivially editable, and it does not map onto the
-disclosure fields IPTC defines. This crate is the vocabulary and the
-two renderings of it:
+Nothing Asterism exported used to carry a machine-readable
+disclosure. The PNG text chunk a generator writes is a reproduction
+aid — it is unsigned, it is trivially editable, and it does not map
+onto the fields IPTC defines. This crate turns what the core decided
+into the bytes that carry it:
 
 | module | what it produces |
 |---|---|
-| [`source_type`] | the IPTC digital source type — the one field the obligation turns on |
-| [`record`] | [`DisclosureRecord`], everything one file is going to say, decided once |
 | [`xmp`] | the XMP packet, which needs no certificate |
 | [`embed`] | that packet inside a PNG or a JPEG, as a byte transform |
 | [`manifest`] | the C2PA manifest *definition*, ready for a signer this crate does not have |
+
+## Why the vocabulary is not here
+
+It was, and the split is by reason to change. What may be asserted
+about an artefact changes with IPTC and with what this library can
+establish — that is domain, and it lives in
+[`asterism_core::domain::disclosure`]. How a packet is written into a
+PNG changes with the container, which is this crate. Keeping both
+here put a chunk walker and a CRC into the core's dependency graph,
+the parser that crate's own manifest records evicting, and it left
+nowhere in the core to model reading a disclosure *back*.
 
 ## Why an exporter cannot do this on its own
 
@@ -54,7 +65,8 @@ emitters are one ordered operation, not two independent ones.
 - **Decide.** Whether a file is synthetic, whether a prompt may be
   disclosed, which parent is which — those are read out of the
   database by the application service and arrive here already
-  settled ([`record`] module docs).
+  settled
+  ([`DisclosureRecord`](asterism_core::domain::disclosure::DisclosureRecord)).
 - **Decode pixels.** Every writer here is a byte transform over a
   container. An export hands back the image it was given.
 
@@ -75,8 +87,5 @@ emitters are one ordered operation, not two independent ones.
 
 - [`embed`](embed.md): Putting an XMP packet into a container, and taking the old one out.
 - [`manifest`](manifest.md): The C2PA manifest *definition* — what would be signed, built as a
-- [`outcome`](outcome.md): What applying a record to a file actually achieved.
-- [`record`](record.md): `DisclosureRecord` — everything one exported file is going to say
-- [`source_type`](source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
 - [`xmp`](xmp.md): The XMP packet — the half of the disclosure that needs no
 

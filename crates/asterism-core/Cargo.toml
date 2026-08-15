@@ -14,13 +14,6 @@ publish     = false
 
 [dependencies]
 asterism-contract     = { path = "../asterism-contract" }
-# The AI-disclosure vocabulary. A leaf crate that decides nothing and
-# performs no I/O, so the domain can hold the *judgement* — which IPTC
-# term is true of an artefact, given what the library stored — without
-# the core learning anything about XMP packets, JUMBF boxes or
-# certificates. The rendering and the signing both live downstream of
-# this crate, on the other side of a port.
-asterism-provenance   = { path = "../asterism-provenance" }
 # The core no longer depends on `asterism-dispatch-sdk`. Both sides
 # reach each other through the leaf contract crate instead: the SDK
 # once tried to depend on the core directly, and since the core

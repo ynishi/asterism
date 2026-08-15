@@ -1,4 +1,4 @@
-# asterism-provenance::embed
+# asterism-disclosure-format::embed
 
 Putting an XMP packet into a container, and taking the old one out.
 
@@ -51,7 +51,7 @@ Both containers have a ceiling and only one of them is reachable.
 JPEG's `APP1` segment carries 65,533 bytes, of which the 29-byte XMP
 identifier is one part, leaving the packet [`JPEG_MAX_PACKET`] — a
 budget a generator prompt exhausts on its own, which is why
-[`DisclosureRecord::essential`](crate::record::DisclosureRecord::essential)
+[`DisclosureRecord::essential`](asterism_core::domain::disclosure::DisclosureRecord::essential)
 exists and why [`stamp`] falls back to it. PNG's is the
 specification's limit on a chunk's data field, about 2 GiB, which no
 record approaches; it is checked rather than assumed because the

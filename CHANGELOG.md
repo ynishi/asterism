@@ -85,6 +85,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stamp answers — the copy can be stale after a restamp — so the
   disagreement never needs adjudication.
 
+- **The disclosure vocabulary moved into the core, and `provenance` stopped
+  naming two things** (#14, #23) — `provenance` was already the
+  derived-from claim graph, whose own documentation says this
+  application's lineage is "deliberately **not** a reading of any external
+  identity system — xmpMM, C2PA and the rest are channels a claim can
+  *arrive* on, never the substrate it is stored in". The AI-disclosure
+  feature then took the same word for the thing that stores C2PA.
+  `application::provenance_service` is `disclosure_service`,
+  `infra::provenance` is `infra::disclosure`, and the types follow
+  (`DisclosureService`, the `DisclosureWriter` port, `DisclosureError`).
+
+  The crate split with it. `asterism-provenance` held the vocabulary
+  *and* the renderers, so `asterism-core` reached `pngmeta` and a CRC
+  through it — the container parser its own manifest records evicting.
+  The vocabulary (`DigitalSourceType`, `DisclosureRecord`, `Stamped`) is
+  `asterism-core::domain::disclosure` now; the renderers are
+  `asterism-disclosure-format`, depending on the core rather than the
+  other way round. What forced it rather than leaving it as debt:
+  reading a disclosure *back* has to be modelled in the core, because a
+  port cannot return a type the core cannot name.
+
+  The job kind goes with it: `disclosure_stamp`, with the handler, the
+  dependency field and the operator-facing surface — the events are
+  `diag.disclosure*` and the error text a person reads says disclosure,
+  which is what the rename was for. A slug is a stored value and
+  renaming one is normally a migration; this one has never been in a
+  release, an unknown slug is skipped rather than fatal, and the cost of
+  a row queued on a development machine before the rename is one
+  artefact that stays unmarked until something re-fingerprints it.
+
+  The signed assertion label and its payload tag are
+  `io.github.ynishi.asterism.disclosure` and `asterism.disclosure/1`.
+  Renaming an identifier inside a tamper-evident document is normally
+  the one thing that cannot be undone — but nothing has ever been
+  signed, because no build has a certificate to sign with, so there is
+  no file to stay compatible with. The version stays `/1`: nothing has
+  read shape 1 under the old name.
+
+- **`just check` says when the committed doc artifacts went unchecked**
+  (#25) — `aidoc-check` needs a nightly toolchain this workspace does not
+  pin, so it sat outside the gate, and a change that deleted a crate left
+  `docs/aidoc/` describing it while `just check` went green. The new
+  `aidoc-guard` step runs the check when it can and fails on drift as
+  before; when the toolchain or `cargo-aidoc` is missing it prints what is
+  missing and continues. A gate nobody is told they skipped is not a gate.
+  The prerequisites are in the README, and CI installs them — a step that
+  warns on every run is a step nobody reads, so on the one machine that
+  runs `check` for every change, drift is red rather than a log line.
+
+- **The row records what became of an artefact's disclosure** (#14) —
+  stamping wrote a mark into a file and said so in a log line, leaving
+  the library unable to answer which artefacts carry one. A mark lives
+  in the file's bytes and a downstream conversion strips it, so the row
+  is the only place the answer survives, and it is what a re-apply would
+  be decided from. The note lands under `extra._trace.disclosure`,
+  beside the declared-hash verdict already there — which generalised the
+  narrow write those notes need: `note_declared_hash` becomes
+  `note_trace_field`, one transaction per key rather than a near-copy of
+  the method per key.
+
+  What the note holds is `Stamped`'s own account of itself, so that
+  "no certificate was configured" and "the certificate stopped working"
+  stay apart in the row as they do in the type. A failed note changes
+  nothing — the mark is already in the file or already not.
+
 - **What a dispatch produces is written with its AI disclosure** (#14) —
   the writer landed with nothing calling it; this calls it. Not where
   the work was planned to call it from: stamping immediately after
@@ -154,7 +219,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seed, checkpoint name and hash, and the name and hash of every LoRA —
   so a locally trained model named after a person or a client went into
   every published copy. `record_for` now takes a `PromptDisclosure`
-  (`Withhold` / `Embed`) and `ProvenanceService` takes one at
+  (`Withhold` / `Embed`) and `DisclosureService` takes one at
   construction. No `Default` and no default chosen: it belongs to the
   composition root, and the asymmetry that should decide it is the one
   the module already applies to terms — withholding can be undone by
@@ -273,15 +338,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (nightly-only, deliberately outside `check`) turning drift into a
   failing exit code.
 
-- **AI-disclosure provenance: the vocabulary, the emitters and the signer**
-  (#14) — a new `asterism-provenance` crate holds what an exported file
-  says about where it came from, as values: the IPTC digital source type
+- **AI disclosure: the vocabulary, the emitters and the signer**
+  (#14) — what an exported file says about how it was made, as values:
+  the IPTC digital source type
   (five terms, closed, refusing anything the vocabulary does not define),
   the XMP packet carrying `Iptc4xmpExt:DigitalSourceType` and the four AI
   properties IPTC added in Photo Metadata Standard 2025.1, that packet
   written into a PNG `iTXt` chunk or a JPEG `APP1` segment as a byte
   transform, and the C2PA manifest definition built from the same record
-  so the two cannot disagree. `asterism-infra::provenance` is the adapter
+  so the two cannot disagree. `asterism-infra::disclosure` is the adapter
   that puts them into a file and signs the manifest through `c2pa`,
   covering MP4 and MOV as well as stills — signing after the encode,
   which is the only point at which it is possible.
@@ -302,7 +367,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   established gets no term rather than one meaning "unknown".
   `compositeWithTrainedAlgorithmicMedia` turns on whether a recorded
   parent is itself synthetic, which the child's own metadata cannot say.
-  `application::provenance_service` does the reads and owns the port,
+  `application::disclosure_service` does the reads and owns the port,
   looking at no file metadata at all — which is what lets a file that came
   back from a downstream conversion with its manifest stripped be handed
   to `apply_to` and get the same disclosure again.
@@ -470,7 +535,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **A manifest that could not be built no longer blames the
   certificate.** A definition `c2pa` refuses came back as
-  `ProvenanceError::Identity`, which renders `signing identity: …` — so
+  `DisclosureError::Identity`, which renders `signing identity: …` — so
   a mapping defect in this crate sent whoever was reading the log to
   their key configuration. It happens strictly before signing, with the
   certificate already loaded, and now has its own variant.

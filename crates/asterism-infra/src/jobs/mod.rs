@@ -185,16 +185,16 @@ pub struct JobDeps {
     /// sandboxes the renditions with it (the same reasoning as the
     /// Tantivy index override).
     pub previews_dir: std::path::PathBuf,
-    /// Writes AI-disclosure provenance into a file this library
-    /// produced — the one thing `provenance_stamp` does.
+    /// Writes the AI disclosure into a file this library produced — the
+    /// one thing `disclosure_stamp` does.
     ///
     /// A cell, and empty is a supported state: a build that has not
     /// decided whether it wants its exports rewritten leaves it unset,
     /// and the handler skips with a message rather than failing. That
     /// is the same shape [`dispatch`](Self::dispatch) uses, for a
     /// different reason — this one is not late-bound, it is optional.
-    pub provenance: Arc<
-        std::sync::OnceLock<Arc<asterism_core::application::provenance_service::ProvenanceService>>,
+    pub disclosure: Arc<
+        std::sync::OnceLock<Arc<asterism_core::application::disclosure_service::DisclosureService>>,
     >,
 }
 
@@ -458,13 +458,13 @@ async fn handle_asterism_job(
         Ok(JobKind::AssetFold) => (handlers::asset_fold(&env, &job.payload).await, false),
         Ok(JobKind::PreviewGen) => (handlers::preview_gen(&env, &job.payload).await, false),
         Ok(JobKind::ChapterScan) => (handlers::chapter_scan(&env, &job.payload).await, false),
-        Ok(JobKind::ProvenanceStamp) => match env.deps.provenance.get() {
-            Some(_) => (handlers::provenance_stamp(&env, &job.payload).await, false),
+        Ok(JobKind::DisclosureStamp) => match env.deps.disclosure.get() {
+            Some(_) => (handlers::disclosure_stamp(&env, &job.payload).await, false),
             // Same shape as `DispatchRun` above: an unbound cell means
             // nothing was stamped, so it classifies as skipped rather
             // than as a run that did its work.
             None => (
-                Ok("provenance_stamp skipped: no writer configured".to_string()),
+                Ok("disclosure_stamp skipped: no writer configured".to_string()),
                 true,
             ),
         },
@@ -833,13 +833,13 @@ mod tests {
 
     /// The XMP packet a file on disk carries, if any.
     fn packet_of(path: &std::path::Path) -> Option<String> {
-        asterism_provenance::embed::read_xmp(&std::fs::read(path).unwrap()).unwrap()
+        asterism_disclosure_format::embed::read_xmp(&std::fs::read(path).unwrap()).unwrap()
     }
 
     /// **A dispatch's output comes back marked.**
     ///
     /// The acceptance criterion, asserted where it actually happens.
-    /// The chain is `reify` → `material_hash` → `provenance_stamp`, and
+    /// The chain is `reify` → `material_hash` → `disclosure_stamp`, and
     /// this drives the last link over the row state the middle one
     /// leaves behind: an artefact carrying the dispatch trace, a
     /// material whose `meta_kv` names a generator, and a real file on
@@ -934,12 +934,12 @@ mod tests {
             .await
             .unwrap();
 
-        let provenance = Arc::new(std::sync::OnceLock::new());
-        let _ = provenance.set(Arc::new(
-            asterism_core::application::provenance_service::ProvenanceService::new(
+        let disclosure = Arc::new(std::sync::OnceLock::new());
+        let _ = disclosure.set(Arc::new(
+            asterism_core::application::disclosure_service::DisclosureService::new(
                 assets.clone(),
                 edges.clone(),
-                Arc::new(crate::provenance::ProvenanceWriter::unsigned()),
+                Arc::new(crate::disclosure::DisclosureWriter::unsigned()),
                 // The composition root's answer, so the fixture exercises
                 // what a deployment runs rather than a friendlier setting.
                 PromptDisclosure::Withhold,
@@ -947,10 +947,10 @@ mod tests {
         ));
 
         let env = JobEnv {
-            deps: test_deps(&isle, provenance.clone()).await,
+            deps: test_deps(&isle, disclosure.clone()).await,
             queue: open_queue(pool).await.unwrap(),
         };
-        let outcome = handlers::provenance_stamp(
+        let outcome = handlers::disclosure_stamp(
             &env,
             &serde_json::json!({ "asset_id": asset.id.to_string() }),
         )
@@ -964,6 +964,105 @@ mod tests {
             packet.contains("trainedAlgorithmicMedia"),
             "and the packet says what the row established: {packet}"
         );
+
+        // And the row says so. A mark lives in the file's bytes, which
+        // a downstream conversion can strip; without this note there is
+        // nothing to ask about what happened and nothing to re-apply
+        // from.
+        let stored = assets.find(&asset.id).await.unwrap().unwrap();
+        let note = stored.extra["_trace"]["disclosure"].clone();
+        assert_eq!(note["discloses"], serde_json::json!(true), "{note}");
+        assert_eq!(
+            note["xmp"],
+            serde_json::json!({ "state": "written" }),
+            "{note}"
+        );
+        assert_eq!(
+            note["manifest"],
+            serde_json::json!({ "state": "skipped", "reason": "no_signing_identity" }),
+            "an unsigned build says why, rather than reporting a failure: {note}"
+        );
+        assert!(note["at"].is_i64(), "{note}");
+
+        // The dispatch trace it was written beside is still there: the
+        // narrow write replaces one field of a shared bag, and the key
+        // that decides whether this artefact may be stamped at all is
+        // one of its neighbours.
+        assert!(
+            stored.extra["_dispatch"]["dispatch_id"].is_string(),
+            "{}",
+            stored.extra
+        );
+    }
+
+    /// **Two writers of `_trace` do not evict each other.**
+    ///
+    /// The property the narrow write acquired when it stopped being
+    /// about one key. `_trace` is a shared bag whose writers do not
+    /// know about each other — the declared-hash verdict, the
+    /// disclosure note, a fold, an absorption — and the whole reason
+    /// the merge reads before it writes is that each of them must find
+    /// its neighbours intact afterwards. Nothing asserted that until
+    /// there were two keys to assert it with.
+    #[tokio::test]
+    async fn one_trace_writer_does_not_evict_another() {
+        use asterism_core::domain::asset::Asset;
+        use asterism_core::domain::attribution::AttributionContext;
+        use asterism_core::domain::content_hash::DECLARED_HASH_NOTE_KEY;
+        use asterism_core::domain::disclosure::DISCLOSURE_NOTE_KEY;
+        use asterism_core::domain::persona::Persona;
+        use asterism_core::domain::repository::{AssetRepository, PersonaRepository};
+        use asterism_core::domain::value::{SourceKind, SourceRef};
+
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let assets = SqliteAssetRepository::new(isle.clone());
+        let personas = crate::sqlite::repo::SqlitePersonaRepository::new(isle.clone());
+
+        let persona = Persona::new("P", None).unwrap();
+        personas.save(&persona).await.unwrap();
+        let asset = Asset::new(
+            persona.id,
+            SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), "/tmp/x.png").unwrap(),
+            None,
+            chrono::Utc::now(),
+            &AttributionContext::asserted(None, None).unwrap(),
+        );
+        assets.save(&asset).await.unwrap();
+
+        assert!(
+            assets
+                .note_trace_field(
+                    &asset.id,
+                    DECLARED_HASH_NOTE_KEY,
+                    serde_json::json!({ "agreed": true }),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            assets
+                .note_trace_field(
+                    &asset.id,
+                    DISCLOSURE_NOTE_KEY,
+                    serde_json::json!({ "discloses": true }),
+                )
+                .await
+                .unwrap()
+        );
+
+        let stored = assets.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            stored.extra["_trace"][DECLARED_HASH_NOTE_KEY],
+            serde_json::json!({ "agreed": true }),
+            "the first writer's key survived the second: {}",
+            stored.extra
+        );
+        assert_eq!(
+            stored.extra["_trace"][DISCLOSURE_NOTE_KEY],
+            serde_json::json!({ "discloses": true }),
+            "{}",
+            stored.extra
+        );
     }
 
     /// With no writer configured the handler skips, and the file it
@@ -976,7 +1075,7 @@ mod tests {
             deps: test_deps(&isle, Arc::new(std::sync::OnceLock::new())).await,
             queue: open_queue(pool).await.unwrap(),
         };
-        let outcome = handlers::provenance_stamp(
+        let outcome = handlers::disclosure_stamp(
             &env,
             &serde_json::json!({ "asset_id": uuid::Uuid::now_v7().to_string() }),
         )
@@ -989,9 +1088,9 @@ mod tests {
     /// they do not touch left inert.
     async fn test_deps(
         isle: &rusqlite_isle::AsyncIsle,
-        provenance: Arc<
+        disclosure: Arc<
             std::sync::OnceLock<
-                Arc<asterism_core::application::provenance_service::ProvenanceService>,
+                Arc<asterism_core::application::disclosure_service::DisclosureService>,
             >,
         >,
     ) -> JobDeps {
@@ -1042,7 +1141,7 @@ mod tests {
             material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone()),
             chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
             previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-            provenance,
+            disclosure,
         }
     }
 
@@ -1112,7 +1211,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             None,
         )
@@ -1444,7 +1543,7 @@ mod tests {
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1577,7 +1676,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1741,7 +1840,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1929,7 +2028,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2117,7 +2216,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2208,7 +2307,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2295,7 +2394,7 @@ mod tests {
                 ),
                 chapter_marks: crate::sqlite::repo::SqliteChapterMarkRepository::new(isle.clone()),
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
-                provenance: Arc::new(std::sync::OnceLock::new()),
+                disclosure: Arc::new(std::sync::OnceLock::new()),
             },
             queue: open_queue(pool).await.unwrap(),
         }

@@ -1,4 +1,4 @@
-# asterism-provenance::xmp
+# asterism-disclosure-format::xmp
 
 The XMP packet — the half of the disclosure that needs no
 certificate.

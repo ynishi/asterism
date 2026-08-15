@@ -1,4 +1,4 @@
-# asterism-provenance::record
+# asterism-core::domain::disclosure::record
 
 `DisclosureRecord` — everything one exported file is going to say
 about where it came from, decided before either emitter runs.
