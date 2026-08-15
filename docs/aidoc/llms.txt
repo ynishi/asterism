@@ -114,12 +114,6 @@
 - [asterism-dispatch-sdk::schema](asterism_dispatch_sdk/schema.md): Schema artifact registry — the SDK-owned half of the "SDK =
 - [asterism-dispatch-sdk::state](asterism_dispatch_sdk/state.md): Lifecycle state of a dispatch as seen by the exporter's
 
-## asterism-exporter-cloud 0.0.0
-
-- [asterism-exporter-cloud overview](asterism_exporter_cloud/index.md): # asterism-exporter-cloud
-- [asterism-exporter-cloud::custody](asterism_exporter_cloud/custody.md): Where a produced file lands once we hold it.
-- [asterism-exporter-cloud::grammar](asterism_exporter_cloud/grammar.md): The profile grammar this adapter uses: the shared one, plus
-
 ## asterism-exporter-comfy 0.0.0
 
 - [asterism-exporter-comfy overview](asterism_exporter_comfy/index.md): # asterism-exporter-comfy
@@ -137,6 +131,8 @@
 ## asterism-exporter-http 0.0.0
 
 - [asterism-exporter-http overview](asterism_exporter_http/index.md): # asterism-exporter-http
+- [asterism-exporter-http::custody](asterism_exporter_http/custody.md): Where a produced file lands once we hold it.
+- [asterism-exporter-http::secret](asterism_exporter_http/secret.md): The profile grammar this adapter uses: the shared one, plus
 
 ## asterism-importer 0.0.0
 

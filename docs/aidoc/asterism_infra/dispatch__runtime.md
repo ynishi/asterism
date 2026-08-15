@@ -15,7 +15,7 @@ specific backend.
 ## Types
 
 - `DispatchRunEnv` — Bundle of dependencies the runner needs on every tick.
-- `ExporterRegistry` — Registry of exporters keyed by their `Exporter::slug()`.
+- `ExporterRegistry` — Registry of exporters keyed by their `Exporter::slug()`, plus any
 - `QueueReEnqueue` — [`ReEnqueue`] impl that pushes another `DispatchRun` job through
 
 ## Traits

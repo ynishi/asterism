@@ -5127,131 +5127,6 @@ any).
 - `ProgressHint` — Optional soft progress signal returned alongside a
 
 
-<!-- asterism_exporter_cloud/index.md -->
-# asterism-exporter-cloud 0.0.0
-
-# asterism-exporter-cloud
-
-Profile-driven exporter for hosted generation APIs. Like
-[`asterism_exporter_http`][http] it is configured rather than
-written — a platform is a JSON profile, not a Rust crate — and it
-keeps that crate's grammars verbatim by sharing them
-([`asterism_exporter_common`]). What it adds is the four things a
-cloud platform needs and the HTTP exporter does not provide.
-
-[http]: https://github.com/ynishi/asterism
-
-## The bytes end up in our custody
-
-A hosted platform answers with a URL that expires — ten minutes at
-one vendor, thirty days at another. The HTTP exporter maps that URL
-straight into the Derived's locator, so the record names something
-that will not be there when it is next read. Here a [`FetchSchema`]
-step pulls the bytes to a path under the custody root before the
-harvest returns, and *that path* is the locator. The database
-indexes; the bytes are files.
-
-The path is dispatch-addressed —
-`<custody_root>/dispatch/<dispatch_id>/<nnn>-<name>` — because what
-the harvest needs to answer is "which files did this dispatch
-produce". Content addressing is a different question, already
-answered by the core's digest axes, and can be layered on top
-without moving anything. Writing is idempotent by path, so a
-re-collect after a failed fetch overwrites rather than producing a
-second asset.
-
-## The profile names its secret and never carries it
-
-[`AuthSchema::secret_ref`] holds an *environment variable name*. The
-value is read from the process environment at each call and used to
-render `{{secret}}` in the auth header — it is not in the params
-blob, so it is not on the dispatch row, which matters because params
-are persisted unedited and handed back on every read. Loading a
-`.env` file is the binary's job, done once at startup: an adapter
-that went looking for dotenv files itself would make "which file did
-this credential come from" invisible to the profile that named it.
-
-The one place the resolved value could leak back out is the recorded
-exchange, so the recording redacts the auth header by name *and*
-scrubs any other occurrence of the value (see [`Exchange`]).
-
-## The profile declares its own deadline
-
-No shared default: the measured range across platforms is ten
-minutes to thirty days, so a constant would be wrong nearly
-everywhere. [`CloudDispatchParams::deadline_seconds`] is required,
-and exceeding it fails the job with a message starting
-[`EXPIRY_PREFIX`] — distinguishable from a backend failure, which is
-reported in the backend's own words.
-
-## The raw exchange is kept when asked for
-
-With `"record_exchange": true` the request as sent and the response
-as received are kept on the dispatch row, in the exporter-owned
-handle payload the runner already persists and hands back. That is
-the cheapest thing that satisfies "on the dispatch row rather than
-on a Derived", and it is an assumption: a dedicated column is the
-obvious alternative, and the measurement that would force it is a
-generation payload large enough that carrying it through every poll
-is the wrong shape. Recorded here rather than assumed away.
-
-## Modules
-
-- [`custody`](custody.md): Where a produced file lands once we hold it.
-- [`grammar`](grammar.md): The profile grammar this adapter uses: the shared one, plus
-
-
-<!-- asterism_exporter_cloud/custody.md -->
-# asterism-exporter-cloud::custody
-
-Where a produced file lands once we hold it.
-
-`<custody_root>/dispatch/<dispatch_id>/<nnn>-<name>`.
-
-Dispatch-addressed rather than content-addressed. The question the
-harvest asks is "which files did this dispatch produce", and this
-layout answers it by listing a directory — no index, no lookup, and
-it still answers after the platform's URL has expired and the
-response that named it is gone. Content addressing answers a
-different question (is this the same file as that one), the core's
-digest axes already answer that one, and a digest can be computed
-over these bytes later without moving them.
-
-Writing is idempotent by path: the index within the harvest and the
-dispatch id are both stable, so a re-collect after a failed fetch
-overwrites the same file rather than producing a second asset beside
-the first.
-
-## Types
-
-- `CustodyPaths` — Resolves custody paths under one root.
-
-
-<!-- asterism_exporter_cloud/grammar.md -->
-# asterism-exporter-cloud::grammar
-
-The profile grammar this adapter uses: the shared one, plus
-`{{secret}}`.
-
-This is the case [`asterism_exporter_common`]'s traits exist for. The
-HTTP exporter must **not** have a `{{secret}}` root — everything it
-can reach comes out of the params blob, which is persisted unedited,
-so a root that resolved to a credential there would be a root that
-wrote one down. Here the credential is resolved from the environment
-at call time and never persisted, so the root is safe *in this
-adapter and not in that one*.
-
-Only [`TemplateAdapter::render`] is overridden. The JSON-leaf and
-header traversals are the trait's default methods, written in terms
-of `render`, so `{{secret}}` means the same thing in a header, in a
-body field and in a query string without three implementations
-agreeing to.
-
-## Types
-
-- `CloudGrammar` — [`CommonExportAdapter`] plus the `{{secret}}` root.
-
-
 <!-- asterism_exporter_comfy/index.md -->
 # asterism-exporter-comfy 0.0.0
 
@@ -5315,8 +5190,8 @@ into [`ComfyDispatchParams`]:
 What a *schema-driven* exporter needs in order to be configured
 rather than written: a `{{...}}` substitution over the dispatch
 ([`template`]) and a path grammar for reading the backend's answer
-([`jsonpath`]). Two adapters want both — `asterism-exporter-http`
-today, the cloud adapter next — and a grammar with two spellings is
+([`jsonpath`]). `asterism-exporter-http` wants both, any adapter
+configured the same way will, and a grammar with two spellings is
 worse than either spelling on its own.
 
 ## Why not in the SDK
@@ -5340,13 +5215,15 @@ site, and it buys the thing the direct call cannot: the grammar
 becomes substitutable per adapter without every adapter's call sites
 changing shape.
 
-That is not hypothetical. A cloud profile resolves its credential
-from the environment rather than out of the params blob, which means
-a placeholder root the HTTP adapter must not have — an adapter that
-wraps [`CommonExportAdapter`] and overrides [`TemplateAdapter::render`]
-adds it without touching the shared engine, and the JSON-leaf and
-header traversals keep working because they are default methods
-written in terms of `render`.
+That is not hypothetical. A profile that resolves its credential
+from the environment rather than out of the params blob needs a
+placeholder root for it, and the shared engine must not grow one:
+everything it can reach comes out of the params blob, so a `secret`
+root there would be a root that writes a credential down. The HTTP
+adapter's `SecretGrammar` wraps [`CommonExportAdapter`] and
+overrides [`TemplateAdapter::render`] to add exactly that root, and
+the JSON-leaf and header traversals keep working because they are
+default methods written in terms of `render`.
 
 ```no_run
 use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter};
@@ -5585,31 +5462,57 @@ without introducing a fake "waiting" phase.
 
 # asterism-exporter-http
 
-Schema-driven HTTP exporter. Where [`asterism_exporter_comfy`] hard-
-codes the ComfyUI protocol, this crate stays backend-agnostic:
-**the caller supplies the request / poll / harvest shapes as JSON
-schema in the dispatch params**. One deployable adapter, N backends.
+Schema-driven exporter for **HTTP job APIs**. Where
+[`asterism_exporter_comfy`] hard-codes the ComfyUI protocol, this
+crate stays backend-agnostic: **the caller supplies the submit / poll
+/ harvest shapes as JSON schema in the dispatch params**. One
+deployable adapter, N backends.
 
 Position in the workspace: mirror of `asterism-importer-sqlite`
 ("query + column map = whole importer") on the OUT side. Where the
 SQLite importer's caller writes SQL + a column mapping, this
 exporter's caller writes an HTTP shape + a JSON-path mapping.
 
+## Why there is no second adapter for hosted platforms
+
+There was one, for a while: `asterism-exporter-cloud`, carrying its
+own copy of this schema — the same poll predicates, the same harvest
+item map, the same handle — because a hosted platform needed three
+things this adapter had not grown yet. It was the wrong axis. A
+hosted platform and a self-hosted backend speak the same job API:
+submit, keep a handle, poll, collect. Whether the URL is `https`,
+whether the credential comes from the environment, and how long to
+keep waiting are configuration, not adapter identity, and splitting
+on them bought duplication while leaving this side stuck with the
+weaker credential story it had deferred.
+
+So the three arrived here as optional blocks, and "cloud" became a
+profile:
+
+| block | absent | present |
+|---|---|---|
+| [`auth`](AuthSchema) | the profile carries no credential, or reaches one through its own params | the credential is named by environment variable and never persisted |
+| [`fetch`](FetchSchema) | the backend's own URL is the locator | the bytes are pulled into custody first, and *that path* is the locator |
+| `deadline_seconds` | poll until the backend answers | a job past its deadline fails as expired |
+
+The distinction worth keeping is a different one: a backend reachable
+as an HTTP job API — which a profile covers — versus a backend that
+ships an SDK, which will not be a profile at all.
+
 ## Params schema
 
 `CreateDispatchCommand.params_json` deserialises into
-[`HttpDispatchParams`]. All three phases (`dispatch` /
-`poll` / `harvest`) are configured up front so the runner can
-drive the state machine without re-reading params on every tick.
+[`HttpDispatchParams`]. All three phases (`submit` / `poll` /
+`harvest`) are configured up front so the runner can drive the state
+machine without re-reading params on every tick.
 
 ```json
 {
   "endpoint": "http://backend.example.com",
 
-  "dispatch": {
+  "submit": {
     "method": "POST",
     "path": "/generate",
-    "headers": { "authorization": "Bearer {{params.extras.api_key}}" },
     "body_template": {
       "input_url": "{{input[0].source_locator}}",
       "prompt":    "{{params.extras.prompt}}",
@@ -5633,15 +5536,22 @@ drive the state machine without re-reading params on every tick.
     "items_path": "$.outputs[*]",
     "map": {
       "modality":      "image",
-      "locator":       "{{item.url}}",
+      "source_url":    "{{item.url}}",
       "cover_hint":    "{{item.caption?}}",
       "labels_static": ["batch:{{dispatch_id}}"]
     }
   },
 
+  "auth": {
+    "secret_ref":     "BACKEND_KEY",
+    "header":         "authorization",
+    "value_template": "Bearer {{secret}}"
+  },
+  "fetch": { "authenticated": false },
+  "deadline_seconds": 86400,
+
   "extras": {
-    "api_key": "put-your-token-here",
-    "prompt":  "photo studio portrait"
+    "prompt": "photo studio portrait"
   }
 }
 ```
@@ -5670,24 +5580,112 @@ grows two meanings, and a profile author cannot tell which one their
 adapter implements.
 
 This exporter reaches them through the
-[`TemplateAdapter`] / [`ResponsePath`] traits and is parameterised on
-the implementation, defaulting to
-[`CommonExportAdapter`][asterism_exporter_common::CommonExportAdapter].
-`HttpExporter::new()` therefore keeps meaning what it meant, and an
-adapter that needs a placeholder root this one must not have — a
-credential resolved outside the params blob, say — supplies its own
-grammar rather than widening this one.
+[`TemplateAdapter`] / [`ResponsePath`] traits, and the implementation
+it holds is [`SecretGrammar`] — the shared roots plus `{{secret}}`,
+bound per call from whatever the `auth` block names. A profile
+without that block binds nothing, and `{{secret}}` in one is refused
+rather than rendered away.
 
-One consequence of the params blob being a template namespace is
-worth repeating at the point of use, because it decides what may go
-in the example above. Params are persisted unedited: the blob handed
-to `CreateDispatchCommand` is stored whole as
-`dispatch_job.params_json` and handed back out as
-`DispatchDto.params_json` on every read of the dispatch, and nothing
-on that path filters, redacts, or drops a field. A credential reached
-by `{{params.…}}` — the `extras.api_key` above — is therefore
-readable by anything that can list dispatches. Put one there only
-where that visibility is acceptable.
+## Where a credential may live, and what that costs
+
+Params are persisted unedited: the blob handed to
+`CreateDispatchCommand` is stored whole as `dispatch_job.params_json`
+and handed back out as `DispatchDto.params_json` on every read of the
+dispatch, and nothing on that path filters, redacts, or drops a
+field. A credential reached by `{{params.…}}` is therefore readable
+by anything that can list dispatches — and, since the call is
+recorded (below), it also rides on the assets the job produced.
+
+`auth.secret_ref` is the way out, and it holds an environment
+variable *name*, never a value: the credential is resolved per call,
+rendered into `{{secret}}`, and is in neither the params blob nor
+anything written down. Loading a `.env` file is the binary's job,
+done once at startup — an adapter that went looking for dotenv files
+itself would make "which file did this credential come from"
+invisible to the profile that named it.
+
+## The call is recorded, and it arrives with the artefact
+
+The request as sent and the response as received are kept on the
+dispatch row, in the exporter-owned handle payload the runner already
+persists and hands back — and the harvest copies that record onto
+every [`Derived`] it returns, under `extra.http.call`, together with
+the finished job's response whole. A backend that answers with a
+result URL and little else is the ordinary case: the model can be an
+ambient default, the seed is an input that is usually not echoed, and
+an enhanced prompt is not the prompt that was sent. None of that is
+in the bytes, so the moment of the call is the only moment it exists.
+The response is kept whole because those values are siblings of the
+artefacts array rather than fields of an item.
+
+The recorded copy is scrubbed of the credential the `auth` block
+named, and its headers are redacted. What no scrub can reach is a
+token a profile interpolated out of its own params into a URL or a
+body: the adapter was never told it was a credential. That is the
+same trade the paragraph above describes, one surface further along.
+
+## Modules
+
+- [`custody`](custody.md): Where a produced file lands once we hold it.
+- [`secret`](secret.md): The profile grammar this adapter uses: the shared one, plus
+
+
+<!-- asterism_exporter_http/custody.md -->
+# asterism-exporter-http::custody
+
+Where a produced file lands once we hold it.
+
+`<custody_root>/dispatch/<dispatch_id>/<nnn>-<name>`.
+
+Dispatch-addressed rather than content-addressed. The question the
+harvest asks is "which files did this dispatch produce", and this
+layout answers it by listing a directory — no index, no lookup, and
+it still answers after the platform's URL has expired and the
+response that named it is gone. Content addressing answers a
+different question (is this the same file as that one), the core's
+digest axes already answer that one, and a digest can be computed
+over these bytes later without moving them.
+
+Writing is idempotent by path: the index within the harvest and the
+dispatch id are both stable, so a re-collect after a failed fetch
+overwrites the same file rather than producing a second asset beside
+the first.
+
+## Types
+
+- `CustodyPaths` — Resolves custody paths under one root.
+
+
+<!-- asterism_exporter_http/secret.md -->
+# asterism-exporter-http::secret
+
+The profile grammar this adapter uses: the shared one, plus
+`{{secret}}` when the profile names a credential.
+
+The root is bound per call, from the environment variable an `auth`
+block names, and the value is never written into the params blob —
+which matters because that blob is persisted unedited and handed back
+on every read of the dispatch. A profile that instead interpolates a
+token it stored in its own params (`{{params.extras.api_key}}`, the
+pattern this adapter shipped with before it had an `auth` block) is
+still allowed and still works; what it loses is exactly this: nothing
+can scrub a value the adapter was never told was a credential.
+
+A profile with no `auth` block binds no secret. `{{secret}}` is then
+an error rather than an empty string: rendering it away would send an
+unauthenticated request that looks like an authenticated one, and the
+backend's 401 is a worse place to learn it than the dispatch that
+refuses to start.
+
+Only [`TemplateAdapter::render`] is overridden. The JSON-leaf and
+header traversals are the trait's default methods, written in terms
+of `render`, so `{{secret}}` means the same thing in a header, in a
+body field and in a query string without three implementations
+agreeing to.
+
+## Types
+
+- `SecretGrammar` — [`CommonExportAdapter`] plus the `{{secret}}` root.
 
 
 <!-- asterism_importer/index.md -->
@@ -7678,7 +7676,7 @@ specific backend.
 ## Types
 
 - `DispatchRunEnv` — Bundle of dependencies the runner needs on every tick.
-- `ExporterRegistry` — Registry of exporters keyed by their `Exporter::slug()`.
+- `ExporterRegistry` — Registry of exporters keyed by their `Exporter::slug()`, plus any
 - `QueueReEnqueue` — [`ReEnqueue`] impl that pushes another `DispatchRun` job through
 
 ## Traits
