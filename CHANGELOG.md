@@ -261,6 +261,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   withheld — the two documented answers — and an unwired build skips
   rather than fails.
 
+- **`just rust-test-pkg <crate>…`, and a written answer to when the
+  workspace run is worth its cost** (#47) — the contributor docs ruled
+  out a hand-rolled `cargo test --workspace` without saying when the
+  sanctioned full run is called for, so the narrow run everybody
+  actually wants had no recipe and got hand-rolled instead. `rust-test`
+  links every test binary at once — one linker process each, gigabytes
+  resident each, as many at a time as `jobs` allows — which on a shared
+  or memory-tight machine is enough to push the box into swap and take
+  down whatever else is running on it. The new recipe runs the named
+  packages with `--no-fail-fast` and returns non-zero if any of them
+  failed; it keeps no log and counts no binaries, because those exist to
+  make a workspace run auditable and a two-crate run is read in the
+  terminal. `CONTRIBUTING.md` now says which of the two to reach for,
+  and that opening a pull request does not wait on a full local run —
+  CI runs `just check` on every push, so the full result reaches the PR
+  either way. `just check` is unchanged: the gate still means the whole
+  suite.
+
 ### Changed
 
 - **A disclosure's two halves report their own outcome, so one failing no
