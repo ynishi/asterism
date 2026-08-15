@@ -149,9 +149,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exceeding it fails the job with a message starting `deadline exceeded`,
   so an expiry is distinguishable from a backend failure.
 
-  With `"record_exchange": true` the request as sent and the response as
-  received are kept on the dispatch row, with the credential redacted on
-  the way in. The first profile is fal.ai, streamed by
+  The request as sent and the response as received are kept on the
+  dispatch row, with the credential redacted on the way in, and the
+  harvest copies that record onto every produced asset under
+  `extra.cloud.call` (#30) — the job id the platform gave us, when we
+  asked, what we sent, what came back, and the finished job's response
+  whole, because the seed a platform ran with and the prompt as it
+  rewrote them sit beside the artefacts array rather than inside it. The
+  note is scrubbed on the way out for the reason the exchange is: a
+  platform that echoes the request is how a credential rendered into a
+  query string comes back, and this copy lands on an asset.
+
+  Both halves are unconditional. A hosted platform hands back a URL and
+  little else: the model can be an ambient default, the seed is an input
+  that is usually not echoed, and an enhanced prompt is not the prompt
+  that was sent — none of it is in the bytes, so the moment of the call
+  is the only moment it exists, and the profile flag that used to gate
+  the recording defaulted to discarding it. A profile still carrying
+  `"record_exchange"` parses unchanged whichever way it is set; a profile
+  that set it to `false` is recorded anyway, and this paragraph is where
+  that is said. The first profile is fal.ai, streamed by
   `asterism-server schema print exporter:cloud:params`.
 
 - **The adapter template and JSONPath grammars are shared, behind traits**
