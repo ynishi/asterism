@@ -405,6 +405,23 @@ aidoc-guard:
     if [ "$status" -eq 0 ]; then
         exit 0
     fi
+    # The fourth way this cannot run, and the first that is about the
+    # machine rather than the tool. `docs/aidoc/` records the target it
+    # describes (cargo-aidoc 0.3.0), and two of `asterism-infra`'s job
+    # modules are behind `#[cfg(target_os = "macos")]` — from anywhere
+    # else, every diff this reports is `cfg` resolution rather than
+    # drift, and none of it is fixable from here. The tool says so with
+    # exit 3 instead of exit 2, which is the whole reason it can be
+    # told apart from the drift this recipe exists to fail on.
+    #
+    # CI regenerates on the recorded target before it checks
+    # (`.github/workflows/check.yml`), so this branch is about the
+    # machine somebody is typing on, not about the gate.
+    if [ "$status" -eq 3 ]; then
+        echo "WARNING: docs/aidoc/ NOT CHECKED — the artifacts describe another" >&2
+        echo "         target, and CI regenerates them on it." >&2
+        exit 0
+    fi
     if printf '%s' "$output" | grep -q 'rustdoc format version mismatch'; then
         echo "WARNING: docs/aidoc/ NOT CHECKED — cargo-aidoc and this nightly" >&2
         echo "         disagree on the rustdoc JSON format. Update cargo-aidoc," >&2
