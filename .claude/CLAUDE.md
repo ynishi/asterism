@@ -2,6 +2,7 @@
 
 - Architecture and crate layout: [README.md](../README.md)
 - Disclosure policy — read before anything ships: [PUBLIC_DEVELOPMENT.md](../PUBLIC_DEVELOPMENT.md)
+- Issue conventions: [CONTRIBUTING.md](../CONTRIBUTING.md#issue-conventions)
 - Branch, commit, and PR conventions (preferred commit format included): [CONTRIBUTING.md](../CONTRIBUTING.md)
 - Security reports: [SECURITY.md](../SECURITY.md)
 - API detail lives in RustDoc (`cargo doc`) and `docs/aidoc/`; code documentation outranks stale issue text.
