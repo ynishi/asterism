@@ -23,6 +23,23 @@
 //! and non-overlapping assets, so `affected_assets` and `already_tagged`
 //! are distinct non-zero numbers that a stubbed implementation cannot
 //! hit by accident.
+//!
+//! **Why `CoreMode::ReadOnly`.** Every assertion here reads a tag list
+//! or a tag count exactly, and `auto_tag` mines the asset's file stem
+//! for keywords and links a tag per token — so under a live worker the
+//! fixture's own name (`tag-delete-0` → `tag`, `delete`) lands on the
+//! asset it seeded and joins the list being compared. Whether that
+//! commits before or after the read is a race, and renaming the packs
+//! is not the way out of it: the miner keeps every token of two
+//! characters or more that holds a letter, so a name that mines
+//! nothing today sits one heuristic change away from mining something,
+//! and the exactness of these assertions is what would break. Nothing
+//! under test needs the worker — these routes fold inside their own
+//! transactions and no assertion reads a cover, an index or a keyword
+//! — so the queue is opened and left undrained. The two other ways out
+//! were a quiescence wait in the harness, a facility this suite has no
+//! use for, and weakening the assertions to "the deleted tag is
+//! absent", which would stop them catching what they exist for.
 
 use std::sync::Arc;
 
@@ -45,12 +62,14 @@ use tower::ServiceExt;
 
 /// Spins up a core over a tempdir and returns it with the router built
 /// on top. `init_core_with` keeps the Tantivy index inside the tempdir
-/// rather than the developer's active profile.
+/// rather than the developer's active profile, and `ReadOnly` opens the
+/// job queue without a worker — see the module note for what a live one
+/// does to these fixtures.
 async fn harness(tmp: &std::path::Path) -> (CoreCtx, Router) {
     let core = init_core_with(
         &tmp.join("asterism.db"),
         Arc::new(LogEmitter),
-        CoreMode::Full,
+        CoreMode::ReadOnly,
         Some(&tmp.join("tantivy")),
     )
     .await
