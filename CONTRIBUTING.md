@@ -4,6 +4,19 @@ Shared conventions for changes to this repository, for humans and
 coding agents alike. The disclosure policy in
 [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md) outranks this file.
 
+## Issue conventions
+
+### Labels
+
+Four categories. Assign at least one when you open an issue.
+
+| Label | The change |
+|---|---|
+| `bug` | behaviour contradicts what it promises |
+| `enhancement` | behaviour that does not exist yet |
+| `refactor` | behaviour unchanged |
+| `chore` | production code untouched — CI, tests, tooling, docs |
+
 ## Branches
 
 Never work on `main`. One worktree per issue, under the gitignored
