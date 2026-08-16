@@ -13,14 +13,20 @@
 //! # The loop
 //!
 //! ```text
-//!   Fork  ──> OUT ──> [ the work happens elsewhere ] ──> IN
-//!    │         │                                         │
-//!  pursuit  dispatch                              returns resolve
-//!  .parent_id  + frozen inputs + sidecar          through _trace
-//!    │                                                   │
-//!    └────────────> Culling ────> Merge ─────────────────┘
-//!                                pursuit_event
-//!                                .closed_satisfied + kept set
+//!   open
+//!     │
+//!     v
+//!   round ──> OUT ──> [ the work happens elsewhere ] ──> IN
+//!     ^        │                                          │
+//!     │     dispatch + frozen inputs + sidecar     returns resolve
+//!     │                                            through _trace
+//!     │                                                   │
+//!     └──── what survives feeds the next round <── culling
+//!                                                        │
+//!                                                        v
+//!                                                      close
+//!                          pursuit_event.closed_satisfied + kept set
+//!                          (or .closed_abandoned — nothing lands)
 //! ```
 //!
 //! [`pursuit`] is the minted unit of work and its lifecycle facts;
@@ -30,11 +36,13 @@
 //! forge does not hold a working copy, and there is no state to
 //! integrate at the end. What the close integrates is a *decision*.
 //!
-//! **Culling** — the narrowing between a return and a close — has no
-//! record of its own in this layer. It moves through the catalogue's
-//! working state (rating, labels, trash), and what survives it is the
-//! kept set the close freezes. Whether the act itself should be
-//! recorded, and out of which candidate set, is open (#22).
+//! **Culling** — the narrowing between a return and the next round or
+//! the close — has no record of its own in this layer yet. It moves
+//! through the catalogue's working state (rating, labels, trash), and
+//! what survives it is the next round's input, or the kept set the
+//! close freezes. The record it should leave — keep or reject, out of
+//! which candidate set, written just before the close — is drafted on
+//! #63, and #22 carries its implementation.
 //!
 //! # The boundary
 //!
@@ -43,8 +51,10 @@
 //!   ([`Snapshot`]) and ids. The one thing this layer puts on a core row
 //!   is the id that lets the two rejoin after a round trip — the
 //!   `_dispatch` stamp on a reified output, the `_trace` claim a
-//!   returning artefact carries. No table here holds a verdict row per
-//!   asset: that would put the forge's vocabulary on the core's rows and
+//!   returning artefact carries. What the forge has to say about an
+//!   asset — lifecycle events today, the cull record #63 drafts — lives
+//!   on forge rows that name core ids. A verdict written onto a core
+//!   row itself would put the forge's vocabulary on the core's rows and
 //!   hand every downstream reader (dedupe, lineage, restore) an
 //!   ambiguity to inherit.
 //! - **Intent lives only here.** `title`, `note`, and the actor triple
@@ -77,6 +87,8 @@
 //! surfaces both layers write to.
 //!
 //! Background: the workflow design on #21, implemented by #29 and #34.
+//! The full domain model this layer is growing toward — mainline,
+//! targeted IN, cull, merge-on-close — is drafted on #63.
 //!
 //! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
