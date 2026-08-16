@@ -622,6 +622,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed, which is the point — the function reads like a no-op and will
   invite deletion.
 
+### Fixed
+
+- **The profile guard no longer rejects an open it created itself**
+  (#56). Opening a named home creates a `.asterism-profile` marker when
+  none exists, and it did so with `std::fs::write` — a create-and-
+  truncate followed by a write, with the file existing and empty in
+  between. A second process reading it there got `Ok("")`, which is not
+  the profile name, so the guard refused a legitimate open with
+  `marker says ""`. Two application instances starting together reach
+  it; on 2026-08-16 a workspace CI run reached it too, and failed one
+  test that had nothing to do with profiles.
+
+  The contents are now written to a temporary file, flushed, and
+  published under the marker's name, so a reader sees the whole file or
+  no file. The publish is a `hard_link` rather than a `rename` — rename
+  replaces, and two processes opening one home under *different*
+  profiles both find no marker, so under rename both would succeed and
+  the second would erase the first, passing exactly the mistyped-launch
+  case the marker exists to refuse. A link fails instead, and the loser
+  re-reads and compares. Where the filesystem has no hard links — an
+  external volume is an ordinary place to point `$ASTERISM_HOME` — it
+  falls back to `create_new`, which keeps the refusal to replace and
+  gives up only the atomicity of the contents.
+
+  Two tests, and the second exists because the first is not enough: one
+  releases sixteen openers of one profile at a fresh home and requires
+  all of them to succeed, which a `rename` implementation also passes;
+  the other releases eight of each of two profiles and requires that the
+  marker agree with whichever won and that every opener of the other be
+  rejected, which `rename` fails. Both repeat eight times, because a
+  single round caught the original two times in five.
+
 ### Added
 
 - **A generated module inventory, and the end of the hand-written one**
