@@ -661,6 +661,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed, which is the point — the function reads like a no-op and will
   invite deletion.
 
+### Fixed
+
+- **The profile guard records who owns a home, and can no longer be
+  switched off by leaving a variable out** (#56). The
+  `.asterism-profile` marker is the last guard against a mistyped launch
+  pointing one profile's build at another's data. It failed at that in
+  two ways, and they are one defect: the marker did not reliably record
+  who owns a home.
+
+  **An omission disabled it.** `ASTERISM_HOME` without
+  `ASTERISM_PROFILE` resolved silently to `custom`, and `custom` writes
+  no marker — so it took no ownership. Open a home as `custom` and then
+  as `dev` and both were admitted, deterministically, two processes
+  against one database recording different environments. That `custom`
+  writes nothing is not the bug; an unguarded scratch home is what it is
+  for. Reaching it by forgetting a variable was. `custom` is now
+  selected by name (`ASTERISM_PROFILE=custom`, which requires
+  `ASTERISM_HOME`), and an explicit home with no profile named is
+  refused with a message naming both variables. Nothing in the
+  repository is affected: every producer of `ASTERISM_HOME` already
+  passes `ASTERISM_PROFILE` beside it — six recipes in the `Justfile`,
+  two scripts in `crates/asterism-ui/package.json`, and the WebDriver
+  config — while `asterism-benchgen` removes the variable outright and
+  the bench WebDriver config withholds it on purpose. CI sets neither.
+
+  Two things follow. `ASTERISM_PROFILE=custom` is now a valid value
+  where it used to be rejected, and the resolution table lives in
+  `select_profile`, which takes the two variables as arguments so it can
+  be tested without a process-wide `set_var`. And `Env::Custom` is no
+  longer what an observation is labelled when the profile cannot be
+  resolved at all — that is `Env::Unknown`, whose own documentation
+  claims the case; the two had been collapsed into one value no reader
+  could separate again.
+
+  **A marker could be read half-written.** Where one is written it was
+  written with `std::fs::write` — a create-and-truncate followed by a
+  write, with the file existing and empty in between. A second process
+  reading it there got `Ok("")`, which is not the profile name, so the
+  guard refused a legitimate open with `marker says ""`. Two application
+  instances starting together reach it; on 2026-08-16 a workspace CI run
+  reached it too, and failed one test that had nothing to do with
+  profiles — the worst shape it takes, since the red points at code that
+  is not at fault.
+
+  The contents are now written to a temporary file, flushed, and
+  published under the marker's name, so a reader sees the whole file or
+  no file. The publish is a `hard_link` rather than a `rename` — rename
+  replaces, and two processes opening one home under *different*
+  profiles both find no marker, so under rename both would succeed and
+  the second would erase the first, passing exactly the mistyped-launch
+  case the marker exists to refuse. A link fails instead, and the loser
+  re-reads and compares. Where the filesystem has no hard links — an
+  external volume is an ordinary place to point `$ASTERISM_HOME` — it
+  falls back to `create_new`, which keeps the refusal to replace and
+  gives up only the atomicity of the contents.
+
+  Three tests. One walks the whole resolution table, including the row
+  that used to yield `custom` silently. The other two are a pair, and
+  the second exists because the first is not enough: one releases
+  sixteen openers of a single profile at a fresh home and requires all
+  of them to succeed, which a `rename` implementation also passes; the
+  other releases eight of each of two profiles and requires that the
+  marker agree with whichever won and that every opener of the other be
+  rejected, which `rename` fails. Both repeat eight times, because on
+  the machine this was checked on — by restoring `std::fs::write` and
+  running the pair, an experiment the tree does not carry — a single
+  round caught the original only two runs in five.
+
 ### Added
 
 - **A generated module inventory, and the end of the hand-written one**

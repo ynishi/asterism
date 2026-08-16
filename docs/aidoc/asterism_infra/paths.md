@@ -9,11 +9,27 @@ durability requirements:
 - [`DataProfile::Dogfood`] — durable, real daily-use data.
 - [`DataProfile::Bench`] — reproducible large/stress datasets.
 
-Resolution order is `$ASTERISM_HOME` (explicit path) followed by
-`$ASTERISM_PROFILE`, then a build-mode default (`dev` for debug builds,
-`dogfood` for release builds). Named profiles live below
-`$HOME/.asterism/profiles/<profile>`. An explicit home without a profile
-is treated as `custom`, preserving scratch/test workflows.
+`$ASTERISM_PROFILE` names the profile and `$ASTERISM_HOME` overrides
+where it lives; with neither, the build decides (`dev` for debug,
+`dogfood` for release). Named profiles live below
+`$HOME/.asterism/profiles/<profile>`.
+
+An explicit home used to fall back to `custom` when the profile was
+absent, which made the unguarded mode something you reached by
+forgetting. It is now asked for by name, and the table is:
+
+| `$ASTERISM_HOME` | `$ASTERISM_PROFILE` | result |
+|---|---|---|
+| unset | unset | the build's default — `dev` in debug, `dogfood` in release |
+| unset | `dev` / `dogfood` / `bench` | that profile, under `$HOME/.asterism/profiles/` |
+| unset | `custom` | error: `custom` is a home, and none was given |
+| set | unset | error: name the profile too |
+| set | `dev` / `dogfood` / `bench` | that profile, at the explicit path |
+| set | `custom` | `custom` at the explicit path, unguarded |
+
+`$ASTERISM_PROFILE` alone is ordinary. It is the home-without-a-name
+direction that is refused, because that is the one that used to
+silently disable the marker.
 
 Named homes contain a `.asterism-profile` marker. Opening a home whose
 marker disagrees with `$ASTERISM_PROFILE` is rejected before SQLite or
