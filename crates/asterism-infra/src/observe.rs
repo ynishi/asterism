@@ -907,9 +907,15 @@ pub(crate) fn current_env() -> Env {
     use std::sync::OnceLock;
     static ENV: OnceLock<Env> = OnceLock::new();
     *ENV.get_or_init(|| {
+        // `Unknown`, not `Custom`. Its own documentation claims this
+        // case — "the profile could not be resolved when it was
+        // written" — and `Custom` means the opposite: a home named on
+        // purpose. Labelling a failed resolution `custom` put "ran
+        // against a scratch home" and "could not tell" under one value,
+        // where no reader could separate them again.
         crate::paths::active_profile()
             .map(Into::into)
-            .unwrap_or(Env::Custom)
+            .unwrap_or(Env::Unknown)
     })
 }
 

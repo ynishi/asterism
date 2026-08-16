@@ -110,7 +110,8 @@ pub enum Env {
     Dogfood,
     /// Reproducible large/stress dataset.
     Bench,
-    /// Explicit home with no named profile.
+    /// An explicit home, opened under `ASTERISM_PROFILE=custom` — asked
+    /// for by name, and unguarded by the profile marker on purpose.
     Custom,
     /// The record predates this column, or the profile could not be
     /// resolved when it was written.

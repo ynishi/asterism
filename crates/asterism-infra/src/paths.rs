@@ -7,11 +7,27 @@
 //! - [`DataProfile::Dogfood`] — durable, real daily-use data.
 //! - [`DataProfile::Bench`] — reproducible large/stress datasets.
 //!
-//! Resolution order is `$ASTERISM_HOME` (explicit path) followed by
-//! `$ASTERISM_PROFILE`, then a build-mode default (`dev` for debug builds,
-//! `dogfood` for release builds). Named profiles live below
-//! `$HOME/.asterism/profiles/<profile>`. An explicit home without a profile
-//! is treated as `custom`, preserving scratch/test workflows.
+//! `$ASTERISM_PROFILE` names the profile and `$ASTERISM_HOME` overrides
+//! where it lives; with neither, the build decides (`dev` for debug,
+//! `dogfood` for release). Named profiles live below
+//! `$HOME/.asterism/profiles/<profile>`.
+//!
+//! An explicit home used to fall back to `custom` when the profile was
+//! absent, which made the unguarded mode something you reached by
+//! forgetting. It is now asked for by name, and the table is:
+//!
+//! | `$ASTERISM_HOME` | `$ASTERISM_PROFILE` | result |
+//! |---|---|---|
+//! | unset | unset | the build's default — `dev` in debug, `dogfood` in release |
+//! | unset | `dev` / `dogfood` / `bench` | that profile, under `$HOME/.asterism/profiles/` |
+//! | unset | `custom` | error: `custom` is a home, and none was given |
+//! | set | unset | error: name the profile too |
+//! | set | `dev` / `dogfood` / `bench` | that profile, at the explicit path |
+//! | set | `custom` | `custom` at the explicit path, unguarded |
+//!
+//! `$ASTERISM_PROFILE` alone is ordinary. It is the home-without-a-name
+//! direction that is refused, because that is the one that used to
+//! silently disable the marker.
 //!
 //! Named homes contain a `.asterism-profile` marker. Opening a home whose
 //! marker disagrees with `$ASTERISM_PROFILE` is rejected before SQLite or
@@ -37,7 +53,9 @@ pub enum DataProfile {
     Dogfood,
     /// Reproducible large/stress dataset.
     Bench,
-    /// Explicit `$ASTERISM_HOME` with no named profile.
+    /// An explicit `$ASTERISM_HOME`, opened under
+    /// `$ASTERISM_PROFILE=custom`. The one profile the marker does not
+    /// guard, which is why it has to be asked for by name.
     Custom,
 }
 
@@ -53,6 +71,17 @@ impl DataProfile {
     }
 
     /// Default loopback HTTP port for this profile.
+    ///
+    /// `Custom` shares dogfood's, and that is now worth saying rather
+    /// than leaving in the match arm. It was written when `Custom` was
+    /// what you got by forgetting `$ASTERISM_PROFILE` — reached mostly
+    /// by invocations that pass `--port` anyway, so the default rarely
+    /// applied. It is now a scratch mode somebody selects while their
+    /// real library exists, and only one core binds a port per machine:
+    /// a scratch instance started first answers on the port dogfood's
+    /// clients use. Every recipe here passes `--port`, so nothing in the
+    /// repository depends on it; anyone running `custom` by hand should
+    /// pass one too.
     pub const fn default_http_port(self) -> u16 {
         match self {
             Self::Dogfood | Self::Custom => 8989,
@@ -90,9 +119,54 @@ fn parse_profile(raw: &str) -> Result<DataProfile, DomainError> {
         "dev" => Ok(DataProfile::Dev),
         "dogfood" => Ok(DataProfile::Dogfood),
         "bench" => Ok(DataProfile::Bench),
+        "custom" => Ok(DataProfile::Custom),
         other => Err(DomainError::Infra(anyhow::anyhow!(
-            "invalid {PROFILE_ENV}={other:?}; expected dev, dogfood, or bench"
+            "invalid {PROFILE_ENV}={other:?}; expected dev, dogfood, bench, or custom"
         ))),
+    }
+}
+
+/// Chooses the profile from the two environment variables, without
+/// reading them — `active_profile` does that and hands the answers here,
+/// the way `resolved_home` is handed its paths, so the table below can
+/// be tested without a process-wide `set_var`.
+///
+/// `Custom` is selected and never inferred. It used to be what an
+/// explicit `$ASTERISM_HOME` fell back to when `$ASTERISM_PROFILE` was
+/// absent, and that made it reachable by *forgetting* something — which
+/// matters because `Custom` writes no marker and so takes no ownership
+/// of the home it opens. A named profile can afterwards claim the same
+/// home and both are admitted, deterministically, with the two
+/// processes recording different [`Env`] values into one database. That
+/// is the outcome the marker exists to prevent, and the fallback was
+/// how you reached it without deciding to.
+///
+/// Asking for `custom` by name is still allowed, and still opts out of
+/// the guard for that home. The difference is that it is now a decision
+/// with a name on it rather than the consequence of an omission.
+///
+/// The table this implements is in the module documentation, where a
+/// reader can reach it — this function is private, so a link to it from
+/// there would resolve for nobody.
+fn select_profile(
+    profile_env: Option<&str>,
+    has_explicit_home: bool,
+) -> Result<DataProfile, DomainError> {
+    match profile_env {
+        Some(raw) => {
+            let profile = parse_profile(raw)?;
+            if profile == DataProfile::Custom && !has_explicit_home {
+                return Err(DomainError::Infra(anyhow::anyhow!(
+                    "{PROFILE_ENV}=custom names an explicit home, but {HOME_ENV} is not set"
+                )));
+            }
+            Ok(profile)
+        }
+        None if has_explicit_home => Err(DomainError::Infra(anyhow::anyhow!(
+            "{HOME_ENV} is set without {PROFILE_ENV}; name the profile that home holds \
+             (dev, dogfood, bench), or {PROFILE_ENV}=custom to open it unguarded"
+        ))),
+        None => Ok(default_profile()),
     }
 }
 
@@ -106,15 +180,10 @@ fn default_profile() -> DataProfile {
 
 /// Returns the active data profile without creating directories.
 pub fn active_profile() -> Result<DataProfile, DomainError> {
+    let has_explicit_home = std::env::var_os(HOME_ENV).is_some();
     match std::env::var(PROFILE_ENV) {
-        Ok(raw) => parse_profile(&raw),
-        Err(std::env::VarError::NotPresent) => {
-            if std::env::var_os(HOME_ENV).is_some() {
-                Ok(DataProfile::Custom)
-            } else {
-                Ok(default_profile())
-            }
-        }
+        Ok(raw) => select_profile(Some(&raw), has_explicit_home),
+        Err(std::env::VarError::NotPresent) => select_profile(None, has_explicit_home),
         Err(err) => Err(DomainError::Infra(anyhow::anyhow!(
             "cannot read {PROFILE_ENV}: {err}"
         ))),
@@ -138,23 +207,37 @@ fn resolved_home(
         .join(profile.as_str()))
 }
 
-/// One race is closed here and one is not, so both are named.
+/// `Custom` reads the marker and never writes one, so it takes no
+/// ownership of the home it opens: open an unmarked home as `Custom`
+/// and then as `dev`, and both are admitted. That is deliberate — it is
+/// what "unguarded scratch home" means — and it is why nobody arrives
+/// at `Custom` any more by leaving `$ASTERISM_PROFILE` out (the table in
+/// this module's documentation). Opting out of the guard is a thing you
+/// say; it is not a thing that happens to you.
 ///
-/// Closed: two openers of the same named profile, where the loser used
-/// to read the winner's marker between its creation and its contents.
-/// See [`publish_marker`].
-///
-/// Open: a `Custom` opener and a named opener of the same home. `Custom`
-/// never writes a marker, so an opener that reads `NotFound` before the
-/// named one publishes is admitted, and the two then run against one
-/// home recording different `Env` values into one database. Closing it
-/// would mean making `Custom` take part in the publish protocol rather
-/// than only reading, which is a wider change than the marker's own
-/// atomicity and is not attempted here.
+/// Between named profiles the guard is total, and [`publish_marker`] is
+/// what makes the ownership it records observable only once it is
+/// complete.
 fn verify_profile_marker(home: &Path, profile: DataProfile) -> Result<(), DomainError> {
     if profile == DataProfile::Custom {
         let marker = home.join(PROFILE_MARKER);
         return match std::fs::read_to_string(&marker) {
+            // A marker saying `custom` is a home nothing can open:
+            // `Custom` never publishes one, so it can only have been
+            // put there by hand or carried in by a copy, and both this
+            // branch and the named one below would refuse it. Worth its
+            // own sentence — the message for a named marker tells the
+            // reader to set `ASTERISM_PROFILE`, which is advice they
+            // have already taken.
+            Ok(existing) if existing.trim() == DataProfile::Custom.as_str() => {
+                Err(DomainError::Infra(anyhow::anyhow!(
+                    "profile guard rejected {}: its marker says {:?}, which no profile \
+                     publishes and none can open — remove the marker if this home is \
+                     meant to be scratch",
+                    home.display(),
+                    existing.trim()
+                )))
+            }
             Ok(existing) => Err(DomainError::Infra(anyhow::anyhow!(
                 "profile guard rejected {}: named home {:?} requires matching {PROFILE_ENV}",
                 home.display(),
@@ -393,10 +476,110 @@ mod tests {
     }
 
     #[test]
+    fn custom_is_selected_and_never_inferred() {
+        // The whole table from `select_profile`, because the row that
+        // used to be wrong is the one nobody would think to look at:
+        // an explicit home with no profile named silently became
+        // `Custom`, and `Custom` is the mode that opts out of the
+        // marker guard. Reaching it by omission is what made the guard
+        // avoidable by accident.
+        assert_eq!(select_profile(None, false).unwrap(), default_profile());
+        assert_eq!(
+            select_profile(Some("dev"), false).unwrap(),
+            DataProfile::Dev
+        );
+        assert_eq!(
+            select_profile(Some("dogfood"), true).unwrap(),
+            DataProfile::Dogfood
+        );
+        assert_eq!(
+            select_profile(Some("custom"), true).unwrap(),
+            DataProfile::Custom
+        );
+
+        // An explicit home with no profile named is now refused, where
+        // it used to yield `Custom`.
+        let err = select_profile(None, true).unwrap_err().to_string();
+        assert!(
+            err.contains(HOME_ENV) && err.contains(PROFILE_ENV),
+            "the refusal must name both variables so the fix is obvious: {err}"
+        );
+
+        // `custom` is a home. Asking for one without giving it is not a
+        // request this can honour.
+        let err = select_profile(Some("custom"), false)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains(HOME_ENV),
+            "the refusal must say which variable is missing: {err}"
+        );
+
+        // With a home given, so that a misspelling cannot be rescued by
+        // the missing-home refusal: both errors mention `custom`, and
+        // asserting on that substring alone let a `parse_profile` whose
+        // fallback returned `Ok(Custom)` pass this test — which is the
+        // defect this whole change is about, since it would open a
+        // mistyped `ASTERISM_PROFILE` as the one unguarded profile.
+        let err = select_profile(Some("nonsense"), true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("invalid"),
+            "an unknown value must be refused as invalid, not resolved: {err}"
+        );
+        assert!(
+            err.contains("custom"),
+            "and the refusal should say custom is selectable: {err}"
+        );
+    }
+
+    #[test]
+    fn custom_takes_no_ownership_of_the_home_it_opens() {
+        // Asserted rather than described, because it is the one place
+        // the guard deliberately does not hold and prose is where that
+        // turns back into a bug. `custom` writes no marker, so a named
+        // profile can claim the same home afterwards and both are
+        // admitted. That is what "unguarded scratch home" means; what
+        // makes it safe is `select_profile` refusing to reach `custom`
+        // by omission, which the test above covers.
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().to_path_buf();
+
+        verify_profile_marker(&home, DataProfile::Custom).expect("custom opens an unmarked home");
+        assert!(
+            !home.join(PROFILE_MARKER).exists(),
+            "custom must leave the home unmarked"
+        );
+        verify_profile_marker(&home, DataProfile::Dev)
+            .expect("a named profile may still claim a home custom left unmarked");
+        assert_eq!(
+            std::fs::read_to_string(home.join(PROFILE_MARKER)).unwrap(),
+            "dev\n"
+        );
+
+        // The reverse order is refused, which is the half that does hold.
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().to_path_buf();
+        verify_profile_marker(&home, DataProfile::Dev).unwrap();
+        let err = verify_profile_marker(&home, DataProfile::Custom).unwrap_err();
+        assert!(err.to_string().contains("profile guard rejected"));
+    }
+
+    #[test]
     fn profile_ports_do_not_collide() {
         assert_eq!(DataProfile::Dogfood.default_http_port(), 8989);
         assert_eq!(DataProfile::Dev.default_http_port(), 18_989);
         assert_eq!(DataProfile::Bench.default_http_port(), 28_989);
+        // The name of this test claims a property the fourth profile
+        // does not have, so the exception is asserted rather than left
+        // out — a reader who finds three of four covered cannot tell
+        // whether the fourth was considered.
+        assert_eq!(
+            DataProfile::Custom.default_http_port(),
+            DataProfile::Dogfood.default_http_port(),
+            "custom shares dogfood's port on purpose; see default_http_port"
+        );
     }
 
     #[test]

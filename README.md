@@ -17,7 +17,8 @@ stars, exactly what a hover-burst looks like.
 - Data is isolated by local profile: release builds default to
   `~/.asterism/profiles/dogfood/`, debug builds to
   `~/.asterism/profiles/dev/`, and stress runs may select `bench` with
-  `$ASTERISM_PROFILE` (`$ASTERISM_HOME` remains the explicit override).
+  `$ASTERISM_PROFILE` (`$ASTERISM_HOME` moves a named profile's home,
+  and is not a profile selector on its own).
 
 ## Local data profiles
 
@@ -31,10 +32,19 @@ fixtures physically separate:
 | `bench` | `~/.asterism/profiles/bench/` | 28989 | reproducible |
 
 Debug builds default to `dev`; release/bundled builds default to
-`dogfood`. Set `ASTERISM_PROFILE` to select a named profile or
-`ASTERISM_HOME` for an explicit scratch location. A named home contains
-a `.asterism-profile` marker and Asterism refuses to open it under a
-different named profile.
+`dogfood`. `ASTERISM_PROFILE` selects a profile and may be used alone;
+`ASTERISM_HOME` moves that profile's home somewhere other than the
+default path, and an explicit home with no profile named is refused
+rather than guessed at.
+
+A named home contains a `.asterism-profile` marker and Asterism refuses
+to open it under a different named profile. `ASTERISM_PROFILE=custom`
+opens an explicit home without that guard, for scratch work — it
+requires `ASTERISM_HOME`, since a custom home is the thing being named,
+and it shares dogfood's default port, so pass `--port` when a dogfood
+instance may also be running. It is spelled out because opting out of
+the guard should be something you say rather than something you get by
+leaving a variable unset.
 
 Deleting is two steps: **trash** hides an item and keeps everything about
 it (rating, comments, group filing, body text), and **purge** is the
