@@ -390,7 +390,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `pursuit` and `dispatch` now live under `domain::forge` with their
   services under `application::forge`, and that module's doc states the
-  loop (fork, out, in, culling, merge) and the contract: intent lives
+  loop (rounds out and in, culling between them, the close that lands
+  the kept set) and the contract: intent lives
   only in the forge, the core is complete without it — importing,
   deduplicating and rating need no pursuit — and what the forge writes
   onto a core row is a correlation id and nothing else. That last clause
@@ -401,9 +402,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a round trip. What does not go there is a verdict. Doctrine 6
   says the same in a paragraph.
 
-  Culling is named in the loop and has no record of its own; the module
-  doc says so rather than leaving the gap for a reader to discover, and
-  #22 is where it is being settled.
+  Culling is named in the loop and has no record of its own yet; the
+  module doc says so rather than leaving the gap for a reader to
+  discover. The record's shape — keep or reject, out of which candidate
+  set, written just before the close — is drafted on #63, and #22
+  carries its implementation.
 
   What stays in the core is as much of the point as what moved.
   `snapshot` is the handle the forge holds the core by;
