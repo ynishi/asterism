@@ -6,7 +6,7 @@
 //! together round-trip the variants without a JSON-tagged shape (the
 //! wire DTO does the same split).
 
-use asterism_core::domain::dispatch::{DispatchJob, DispatchState};
+use asterism_core::domain::forge::dispatch::{DispatchJob, DispatchState};
 use asterism_core::domain::repository::DispatchRepository;
 use asterism_core::domain::value::{AssetId, DispatchId, PersonaId, PursuitId, SnapshotId};
 use asterism_core::error::DomainError;

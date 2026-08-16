@@ -1232,7 +1232,7 @@ pub struct JobsSnapshotDto {
 
 /// One exporter invocation against a frozen [`SnapshotDto`].
 ///
-/// The wire form mirrors `asterism_core::domain::dispatch::DispatchJob`:
+/// The wire form mirrors `asterism_core::domain::forge::dispatch::DispatchJob`:
 /// `state` is the slug (`pending` / `running` / `done` / `failed` /
 /// `cancelled`); `output_asset_ids` is populated atomically with the
 /// transition to `done`. `state_message` carries the failure /

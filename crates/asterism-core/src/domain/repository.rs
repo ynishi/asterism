@@ -15,9 +15,10 @@ use crate::domain::asset::{Asset, AssetCard, AssetQuery};
 use crate::domain::asset_comment::AssetComment;
 use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::dir::Dir;
-use crate::domain::dispatch::DispatchJob;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
+use crate::domain::forge::dispatch::DispatchJob;
+use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
@@ -28,7 +29,6 @@ use crate::domain::modality::{ModalityDef, ModalityView};
 use crate::domain::persona::Persona;
 use crate::domain::persona_profile::PersonaProfile;
 use crate::domain::persona_theme::PersonaTheme;
-use crate::domain::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::series::{SeriesKey, Strategy};
 use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
@@ -2945,7 +2945,7 @@ pub trait PursuitRepository: Send + Sync {
 
     /// A pursuit's lifecycle facts in standing order —
     /// `(created_at, id)` ascending, so the last element is the one
-    /// [`standing`](crate::domain::pursuit::standing) lets win.
+    /// [`standing`](crate::domain::forge::pursuit::standing) lets win.
     async fn events_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitEvent>, DomainError>;
 
     /// Records a restamp and moves the stamp, atomically: the

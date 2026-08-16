@@ -2,7 +2,8 @@
 //! (#29): open, close, reopen, restamp, and the reads that derive
 //! standing.
 //!
-//! Always-mint lives in [`DispatchService`](super::DispatchService) —
+//! Always-mint lives in
+//! [`DispatchService`](super::dispatch_service::DispatchService) —
 //! a dispatch arriving unstamped mints its own pursuit there. This
 //! service is everything else: the explicit pre-create (naming intent
 //! up front), the one-way lifecycle facts (close / reopen — recorded,
@@ -34,7 +35,7 @@ use crate::application::mapping::{
     parse_snapshot_id,
 };
 use crate::domain::attribution::AttributionContext;
-use crate::domain::pursuit::{
+use crate::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject, standing,
 };
 use crate::domain::repository::{DispatchRepository, PersonaRepository, PursuitRepository};
@@ -48,7 +49,7 @@ pub struct PursuitService {
     /// The close freeze goes through the snapshot service rather than
     /// the repository so the kept ids get the same existence / persona
     /// / fold-redirect hydration every other freeze gets.
-    snapshots: Arc<super::SnapshotService>,
+    snapshots: Arc<crate::application::SnapshotService>,
 }
 
 impl PursuitService {
@@ -57,7 +58,7 @@ impl PursuitService {
         pursuits: Arc<dyn PursuitRepository>,
         personas: Arc<dyn PersonaRepository>,
         dispatches: Arc<dyn DispatchRepository>,
-        snapshots: Arc<super::SnapshotService>,
+        snapshots: Arc<crate::application::SnapshotService>,
     ) -> Self {
         Self {
             pursuits,
@@ -339,7 +340,7 @@ impl PursuitService {
         Ok(pursuits
             .iter()
             .map(|pursuit| {
-                let standing = crate::domain::pursuit::PursuitStanding::from_latest(
+                let standing = crate::domain::forge::pursuit::PursuitStanding::from_latest(
                     latest.get(&pursuit.id).copied(),
                 );
                 pursuit_to_dto(pursuit, standing.slug())

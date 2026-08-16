@@ -73,7 +73,7 @@ pub struct Pursuit {
     /// Creation time.
     pub created_at: DateTime<Utc>,
     /// Who opened the pursuit. Private as a triple, like
-    /// [`DispatchJob`](crate::domain::dispatch::DispatchJob)'s: set
+    /// [`DispatchJob`](crate::domain::forge::dispatch::DispatchJob)'s: set
     /// whole from the context at construction, restored whole by
     /// [`from_persisted`](Self::from_persisted). All `None` on
     /// migration-backfilled rows — nobody opened those, the migration
