@@ -372,6 +372,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reading, so a stamped row it could not queue would otherwise keep a
   stale document until somebody edited it again.
 
+- **Issue labels.** `CONTRIBUTING.md` names four categories — `bug`,
+  `enhancement`, `refactor`, `chore` — and asks for at least one on
+  every issue. `refactor` and `chore` are new to this repository.
+
 ### Changed
 
 - **A change that only edits prose no longer runs the build.** Pull
