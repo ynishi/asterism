@@ -138,6 +138,19 @@ fn resolved_home(
         .join(profile.as_str()))
 }
 
+/// One race is closed here and one is not, so both are named.
+///
+/// Closed: two openers of the same named profile, where the loser used
+/// to read the winner's marker between its creation and its contents.
+/// See [`publish_marker`].
+///
+/// Open: a `Custom` opener and a named opener of the same home. `Custom`
+/// never writes a marker, so an opener that reads `NotFound` before the
+/// named one publishes is admitted, and the two then run against one
+/// home recording different `Env` values into one database. Closing it
+/// would mean making `Custom` take part in the publish protocol rather
+/// than only reading, which is a wider change than the marker's own
+/// atomicity and is not attempted here.
 fn verify_profile_marker(home: &Path, profile: DataProfile) -> Result<(), DomainError> {
     if profile == DataProfile::Custom {
         let marker = home.join(PROFILE_MARKER);
@@ -155,27 +168,166 @@ fn verify_profile_marker(home: &Path, profile: DataProfile) -> Result<(), Domain
         };
     }
     let marker = home.join(PROFILE_MARKER);
-    match std::fs::read_to_string(&marker) {
-        Ok(existing) if existing.trim() == profile.as_str() => Ok(()),
-        Ok(existing) => Err(DomainError::Infra(anyhow::anyhow!(
-            "profile guard rejected {}: marker says {:?}, process requested {:?}",
-            home.display(),
-            existing.trim(),
-            profile.as_str()
-        ))),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::write(&marker, format!("{}\n", profile.as_str())).map_err(|e| {
-                DomainError::Infra(anyhow::anyhow!(
-                    "cannot create profile marker {}: {e}",
+    // Two passes, and the second one is the whole point. A marker that
+    // does not exist is created here, and two processes opening the same
+    // home at once both arrive at that branch. Whoever loses the race
+    // comes back around and reads what the winner wrote, rather than
+    // reporting a mismatch against a file it watched being born.
+    //
+    // Bounded at two deliberately: after `publish_marker` reports that
+    // another process holds the name, the marker exists with its full
+    // contents, so a third pass could not learn anything a second one
+    // did not. A loop without a bound here would be a spin on whatever
+    // unexpected state produced it — and reaching the bound at all
+    // means the marker was published and removed again underneath this
+    // process, twice, which is what the error below says.
+    for _ in 0..2 {
+        match std::fs::read_to_string(&marker) {
+            Ok(existing) if existing.trim() == profile.as_str() => return Ok(()),
+            Ok(existing) => {
+                return Err(DomainError::Infra(anyhow::anyhow!(
+                    "profile guard rejected {}: marker says {:?}, process requested {:?}",
+                    home.display(),
+                    existing.trim(),
+                    profile.as_str()
+                )));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                match publish_marker(&marker, profile) {
+                    Ok(Published::ByUs) => return Ok(()),
+                    // Someone else published first. Their contents are
+                    // already complete, so the next pass either agrees
+                    // with us or is a genuine cross-profile open.
+                    Ok(Published::ByAnother) => continue,
+                    Err(err) => {
+                        return Err(DomainError::Infra(anyhow::anyhow!(
+                            "cannot create profile marker {}: {err}",
+                            marker.display()
+                        )));
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(DomainError::Infra(anyhow::anyhow!(
+                    "cannot read profile marker {}: {err}",
                     marker.display()
-                ))
-            })
+                )));
+            }
         }
-        Err(err) => Err(DomainError::Infra(anyhow::anyhow!(
-            "cannot read profile marker {}: {err}",
-            marker.display()
-        ))),
     }
+    Err(DomainError::Infra(anyhow::anyhow!(
+        "profile guard could not settle {}: another process published the \
+         marker and removed it again, twice, while this one was opening \
+         the home",
+        marker.display()
+    )))
+}
+
+/// What [`publish_marker`] managed to do.
+///
+/// Separate from the `io::Error` it also returns, because the caller
+/// dispatches on "somebody else got there first" and that is not the
+/// only thing underneath which can raise `AlreadyExists` — the
+/// temporary file's own creation can too, when it exhausts its name
+/// retries. Conflating them would send the caller round the loop over a
+/// marker that was never published.
+enum Published {
+    /// This process created the marker.
+    ByUs,
+    /// Another process holds the name. Read it and compare.
+    ByAnother,
+}
+
+/// Creates the marker so that no reader can observe it half-written, and
+/// so that a concurrent creator cannot be overwritten.
+///
+/// `std::fs::write` is what used to be here, and it is two operations:
+/// a create-and-truncate, then a write. Between them the marker exists
+/// and is empty, and a second process reading it there gets `Ok("")` —
+/// which is not the profile name, so the guard rejected the open with
+/// `marker says ""`. That is a race between processes rather than a test
+/// artifact: the CI suite met it because a workspace run opens the `dev`
+/// home from many test binaries in quick succession, but two
+/// application instances starting together reach it the same way.
+///
+/// Writing the contents to a temporary file first and publishing it
+/// under the marker's name closes the window: the name appears already
+/// complete, or not at all.
+///
+/// `hard_link` rather than `rename`, even though rename is the more
+/// familiar atomic publish, because rename replaces. Two processes
+/// opening one home under different profiles both find no marker, and
+/// with rename both would succeed and the second would erase the first —
+/// the guard would then pass exactly the mistyped-launch case it exists
+/// to refuse. `hard_link` fails with `AlreadyExists` instead, which is
+/// the answer the caller needs: read what is there and compare.
+///
+/// Not every filesystem has hard links, and `$ASTERISM_HOME` may be
+/// pointed at any of them — an external exFAT volume is an ordinary
+/// place to put a media library. Where the link cannot be made, this
+/// falls back to `create_new`, which keeps the no-replace property that
+/// the guard depends on and gives up only the atomicity of the
+/// contents: the empty window returns, on exactly the filesystems where
+/// nothing can close it. Refusing to open the home there would be the
+/// worse trade.
+///
+/// The contents are flushed before either publish. Without that a crash
+/// can leave a zero-length marker behind, and an empty marker is not a
+/// transient the way the original race was — it is permanent, rejects
+/// every later open with the same `marker says ""`, and nothing here
+/// repairs it.
+///
+/// One deliberate change of behaviour: `NamedTempFile` creates at 0600,
+/// where `std::fs::write` created at 0666 masked by the umask. The
+/// marker lives in the user's own data home and is read by the same
+/// user, so the narrower mode is the right one; it is recorded here
+/// because it is a change to a file that ships.
+fn publish_marker(marker: &Path, profile: DataProfile) -> std::io::Result<Published> {
+    use std::io::Write as _;
+
+    let dir = marker.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "profile marker has no parent directory",
+        )
+    })?;
+    let contents = format!("{}\n", profile.as_str());
+
+    // Same directory as the marker, so the link cannot cross a
+    // filesystem boundary, and `NamedTempFile` keeps the name unique
+    // across the processes racing here.
+    let mut temp = tempfile::Builder::new()
+        .prefix(".asterism-profile.")
+        .tempfile_in(dir)?;
+    // Through the open handle rather than by re-opening `temp.path()`.
+    // This crate's manifest promoted `tempfile` out of dev-dependencies
+    // precisely so that a temporary is created with `O_EXCL` and 0600,
+    // and writing by path with `File::create` would hand that back.
+    temp.write_all(contents.as_bytes())?;
+    temp.as_file().sync_all()?;
+
+    match std::fs::hard_link(temp.path(), marker) {
+        Ok(()) => Ok(Published::ByUs),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(Published::ByAnother),
+        // No hard links here. `create_new` is the same refusal to
+        // replace, bought without them.
+        Err(_) => match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(marker)
+        {
+            Ok(mut file) => {
+                file.write_all(contents.as_bytes())?;
+                file.sync_all()?;
+                Ok(Published::ByUs)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(Published::ByAnother),
+            Err(err) => Err(err),
+        },
+    }
+    // `temp` drops here, unlinking itself. It has served its purpose
+    // once the marker holds the contents, and it must not be left behind
+    // when the publish failed.
 }
 
 /// Returns (creating on demand) the isolated Asterism home directory.
@@ -245,6 +397,150 @@ mod tests {
         assert_eq!(DataProfile::Dogfood.default_http_port(), 8989);
         assert_eq!(DataProfile::Dev.default_http_port(), 18_989);
         assert_eq!(DataProfile::Bench.default_http_port(), 28_989);
+    }
+
+    #[test]
+    fn concurrent_opens_of_one_home_all_succeed() {
+        // The failure this is here for: `just check` on `main` went red
+        // on 2026-08-16 with `profile guard rejected …: marker says "",
+        // process requested "dev"`, one test out of 1424. The marker was
+        // being read between its creation and its contents.
+        //
+        // Sixteen threads released together, because the window is the
+        // few microseconds between two syscalls and one pair of threads
+        // will not reliably land in it. Eight rounds on top of that: a
+        // single round caught the old implementation two times in five
+        // when this was checked by putting `std::fs::write` back, and a
+        // regression test that reports the bug two times in five is one
+        // nobody can act on. Eight rounds make that reliable on the
+        // machine it was measured on; a runner with fewer cores may be
+        // less sensitive, which costs false negatives rather than false
+        // alarms.
+        //
+        // A contended round is up to sixteen reads, up to fifteen
+        // temporaries created, written, failed to link and unlinked, and
+        // up to fifteen second reads — so the cost is milliseconds of
+        // thread spawning rather than the microseconds the syscalls
+        // take, and the whole test is still well under a tenth of a
+        // second.
+        for round in 0..8 {
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().to_path_buf();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+
+            let failures: Vec<String> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..16)
+                    .map(|_| {
+                        let home = home.clone();
+                        let barrier = std::sync::Arc::clone(&barrier);
+                        scope.spawn(move || {
+                            barrier.wait();
+                            verify_profile_marker(&home, DataProfile::Dev)
+                                .err()
+                                .map(|err| err.to_string())
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .filter_map(|handle| handle.join().unwrap())
+                    .collect()
+            });
+
+            assert!(
+                failures.is_empty(),
+                "round {round}: every opener of one home under one profile \
+                 must succeed; got: {failures:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(home.join(PROFILE_MARKER)).unwrap(),
+                "dev\n",
+                "round {round}: the surviving marker must hold exactly one \
+                 profile name"
+            );
+            assert_eq!(
+                std::fs::read_dir(&home).unwrap().count(),
+                1,
+                "round {round}: the losers' temporaries must not survive"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_opens_under_two_profiles_leave_one_winner() {
+        // The other half, and the one the first test cannot reach:
+        // swapping `hard_link` for `rename` in `publish_marker` keeps
+        // every assertion above green, because with one profile the
+        // losers agree with the winner either way. Rename replaces, so
+        // under it both profiles would publish and the second would
+        // erase the first — two processes then running against one home
+        // believing different things, which is the mistyped-launch case
+        // the module doc says the marker exists to refuse.
+        //
+        // Here the two profiles are released together. Whichever wins,
+        // its openers all succeed, the other profile's all fail, and the
+        // marker on disk agrees with the winners. Under `rename` the
+        // last of those breaks.
+        for round in 0..8 {
+            let temp = tempfile::tempdir().unwrap();
+            let home = temp.path().to_path_buf();
+            let barrier = std::sync::Barrier::new(16);
+
+            let results: Vec<(DataProfile, Result<(), String>)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..16)
+                    .map(|n| {
+                        let profile = if n % 2 == 0 {
+                            DataProfile::Dev
+                        } else {
+                            DataProfile::Dogfood
+                        };
+                        let home = &home;
+                        let barrier = &barrier;
+                        scope.spawn(move || {
+                            barrier.wait();
+                            let outcome =
+                                verify_profile_marker(home, profile).map_err(|err| err.to_string());
+                            (profile, outcome)
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect()
+            });
+
+            let marker = std::fs::read_to_string(home.join(PROFILE_MARKER)).unwrap();
+            let winner = marker.trim().to_string();
+            assert!(
+                winner == "dev" || winner == "dogfood",
+                "round {round}: the marker must hold one of the two profiles, got {winner:?}"
+            );
+
+            for (profile, outcome) in results {
+                if profile.as_str() == winner {
+                    assert!(
+                        outcome.is_ok(),
+                        "round {round}: an opener of the winning profile \
+                         {winner:?} was rejected: {outcome:?}"
+                    );
+                } else {
+                    let err = outcome.expect_err(
+                        "an opener of the losing profile must be rejected, not admitted",
+                    );
+                    assert!(
+                        err.contains("profile guard rejected"),
+                        "round {round}: the losing profile must be rejected by \
+                         the guard, got {err:?}"
+                    );
+                }
+            }
+            assert_eq!(
+                std::fs::read_dir(&home).unwrap().count(),
+                1,
+                "round {round}: the losers' temporaries must not survive"
+            );
+        }
     }
 
     #[test]
