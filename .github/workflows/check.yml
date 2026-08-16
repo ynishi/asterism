@@ -31,10 +31,98 @@
 
 name: check
 
+# The ignore list is what a change can touch without changing what
+# `just check` would answer. A pull request that edits only these gets no
+# run at all, which is the point: #57 changed eighteen lines across
+# `CONTRIBUTING.md`, `CHANGELOG.md` and `.claude/CLAUDE.md`, and bought
+# a workspace test suite, a clippy pass over every crate and a rustdoc
+# pass over all of them — 710 s of macOS runner, plus a second run of
+# the same on `main` behind the merge. Nothing in it could have had
+# anything to say about the prose that triggered it.
+#
+# This narrows CI and does not make `pre-push` and CI agree. On a
+# prose-only branch `pre-push` still runs `check-shared` — formatting,
+# the bindings check, the three frontend recipes, `aidoc-guard` — and
+# the two `-changed` gates, which report that no workspace member moved.
+# CI will now run none of that. What the two agree about is the
+# workspace suite: neither pays for it to answer a question about prose.
+#
+# `paths-ignore` skips only when *every* changed path matches, so a
+# branch that touches a crate and the changelog still runs in full. That
+# is the property this relies on — the list does not have to be a
+# judgement about which mixed changes are safe, because there are none.
+#
+# Deliberately absent, each for its own reason:
+#
+#   - `.github/**`. A change to this workflow has to be answered by this
+#     workflow; a filter that skipped it would be the one edit nobody
+#     could verify.
+#   - `Justfile`. It *is* the definition of green.
+#   - `docs/aidoc/**`. Generated, but `aidoc-guard` checks it, and a
+#     hand-edit there is exactly what that gate exists to catch.
+#   - `.gitignore`. It decides what is tracked, and both `aidoc-guard`
+#     and the `git add -A docs/aidoc` step below read tracked state.
+#   - `fixtures/**`. The collation corpus lives there, README included —
+#     and `README.md` on the list reaches only the root file, because
+#     these patterns match the whole path from the repository root. Were
+#     it otherwise, that entry would quietly defeat this one.
+#
+# `LICENSE-APACHE` and `LICENSE-MIT` are on the list for the same reason
+# the prose is: no step reads them. They are named rather than left to a
+# glob so that the list stays a list of files somebody decided about.
+#
+# Two costs, both of which matter later rather than now.
+#
+# A required check would block. GitHub creates no check run for a
+# skipped workflow: with none required, none is created and the check is
+# absent; the requirement is what turns that absence into a *pending*
+# check, and a prose-only pull request could never satisfy it. Stated
+# that way round on purpose — what the repository requires today is a
+# setting, and a comment that asserts a setting goes silently false the
+# day someone changes it. The documented remedy
+# is a second workflow of the same name carrying the inverse `paths`
+# filter and doing nothing but succeed, and whoever turns protection on
+# should reach for that rather than for this list. The `[skip ci]` note
+# below reaches the same place by the other road, so both would have to
+# be settled at once.
+#
+# A skipped commit cannot be asked for a verdict afterwards. No run
+# object exists, so there is nothing to re-run — hence `workflow_dispatch`
+# below, which is the whole escape hatch. It matters because `main`'s
+# run is not only an answer about the diff that triggered it: the
+# concurrency block treats it as the verdict on the merged tree, and a
+# prose-only merge landing behind a failing code merge would otherwise
+# leave `main`'s head with no check and no way to obtain one.
+#
+# The list is written twice because GitHub's workflow parser is not
+# documented to accept YAML anchors, and a fragment that silently failed
+# to expand would turn the filter off without saying so. Nothing keeps
+# the two copies equal: a path added to one and not the other skips the
+# branch but runs the merge, or the reverse, and neither says so. Edit
+# them together.
 on:
   pull_request:
+    paths-ignore:
+      - '.claude/**'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'LICENSE-APACHE'
+      - 'LICENSE-MIT'
+      - 'PUBLIC_DEVELOPMENT.md'
+      - 'README.md'
+      - 'SECURITY.md'
+  workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - '.claude/**'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'LICENSE-APACHE'
+      - 'LICENSE-MIT'
+      - 'PUBLIC_DEVELOPMENT.md'
+      - 'README.md'
+      - 'SECURITY.md'
 
 # On a pull request, a newer push makes the older run's answer irrelevant.
 # On `main` it does not: two merges in quick succession would cancel the
@@ -305,9 +393,12 @@ jobs:
       # The head commit carries no check of its own, because the check
       # is attached to the commit before it. A rule that demanded a
       # passing check on the head SHA would have to be reconciled with
-      # this before it was turned on: a skipped workflow's checks stay
-      # *pending* rather than absent, so such a rule would block the
-      # merge rather than quietly pass it.
+      # this before it was turned on: requiring a check is what turns a
+      # skipped workflow's absent check into a pending one, so such a
+      # rule would block the merge rather than quietly pass it. The path
+      # filter above reaches the same wall by the other road, and the
+      # remedy named there — a companion workflow with the inverse
+      # filter — is the one to reach for here too.
       #
       # The second is the one to watch, and it is why the merge button
       # matters here. Two of the three merge methods carry a branch

@@ -60,11 +60,17 @@ The recipes to actually use:
 
 These are narrower than the workspace gates, not weaker: they cover
 what a change edited, not what depends on it. CI closes that gap on
-every push.
+every push that changes code.
 
 **Opening a pull request does not wait on a full local run.** CI runs
-`just check` — the workspace suite included — on every push, so the
-full result reaches the PR either way. Report what was actually run;
+`just check` — the workspace suite included — on every push that
+changes code, so the full result reaches the PR either way. The
+exception is a change that touches nothing but prose: the workflow
+skips those outright (its `paths-ignore` names them), because the
+workspace has nothing to say about them. `pre-push` still runs its
+share locally, which is why the two are not the same list.
+
+Report what was actually run;
 "I did not verify X" is a usable report, a green claim resting on a
 recipe nobody ran is not. When a narrow run is what happened, say
 which packages it covered.
