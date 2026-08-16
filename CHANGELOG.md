@@ -374,6 +374,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A change that only edits prose no longer runs the build.** Pull
+  request #57 changed eighteen lines across `CONTRIBUTING.md`,
+  `CHANGELOG.md` and `.claude/CLAUDE.md`, and bought the workspace test
+  suite, clippy over every crate and a rustdoc pass over all of them —
+  710s of macOS runner, plus a second run of the same on `main` behind
+  the merge. The workflow now carries a `paths-ignore` list of what a
+  change can touch without changing what `just check` would answer: the
+  changelog, the contributing and disclosure documents, the readme, the
+  security policy, the two licences, and `.claude/`.
+
+  GitHub skips only when *every* changed path matches, so a branch that
+  touches a crate and the changelog still runs in full — the list never
+  has to be a judgement about which mixed changes are safe. Five things
+  are deliberately not on it: `.github/` (a change to the workflow has
+  to be answered by the workflow), the `Justfile` (it is the definition
+  of green), `docs/aidoc/` (generated, but `aidoc-guard` checks it, and
+  a hand-edit there is what that gate is for), `fixtures/` (the
+  collation corpus, README included), and `.gitignore` (it decides what
+  is tracked, which two steps of the job read).
+
+  This narrows CI rather than bringing it into line with `pre-push`.
+  On a prose-only branch `pre-push` still runs the formatting check, the
+  bindings check, the three frontend recipes and `aidoc-guard`; CI now
+  runs none of them. What the two agree about is the workspace suite.
+
+  Two costs. A skipped workflow produces no run object, so a skipped
+  commit cannot be asked for a verdict afterwards — `workflow_dispatch`
+  is added for that, and it matters because the `main` run is the
+  verdict on a merged tree and not only an answer about the diff that
+  triggered it. And once a check is *required*, the requirement is what
+  turns a skip into a pending check that a prose-only pull request can
+  never satisfy; the documented remedy is a companion workflow of the
+  same name with the inverse filter, which is also what the skip keyword
+  will need, so both would have to be settled together.
+
 - **CI answers a pull request in one run instead of two and a manual
   click.** The regeneration step pushes `docs/aidoc/` back to the branch
   under test, and the comment here used to say that a `GITHUB_TOKEN`
