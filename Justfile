@@ -499,7 +499,9 @@ check-shared: rust-fmt-check bindings-check ui-test ui-check ui-build aidoc-guar
 # Run all Rust and frontend checks. CI's definition of green.
 #
 # This is the full-workspace shape, and CI is where it belongs: every
-# push runs it on a hosted runner whose load nobody else shares. Before
+# push that changes code runs it on a hosted runner whose load nobody
+# else shares — a prose-only push starts no run, since there would be
+# nothing for the workspace to answer. Before
 # handing a branch over, run `pre-push`, which substitutes
 # `rust-test-changed` for `rust-test`.
 #
@@ -674,8 +676,10 @@ bindings-check:
 #   just rust-test-pkg asterism-core asterism-server
 #
 # This is not a weaker gate, it is a narrower one, and it is the one to
-# reach for while iterating: the full suite runs in CI on every push, so
-# opening a PR does not wait on a workspace run happening here first.
+# reach for while iterating: the full suite runs in CI on every push
+# that changes code, so opening a PR does not wait on a workspace run
+# happening here first. (A push that touches nothing but prose starts no
+# run at all — see the workflow's `paths-ignore`.)
 # `rust-test-changed` picks the arguments for you from the branch diff,
 # and is what `pre-push` runs; reach for this one when you already know
 # which crates you care about.
