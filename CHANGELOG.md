@@ -378,6 +378,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The forge has a name in the tree, and the boundary it keeps is
+  written down.** `pursuit` sat beside `tag` and `group` as one module
+  among forty-six, and the flatness cost something specific: the design
+  that introduced it said the core/forge split "already exists in the
+  codebase as doctrine 2", when doctrine 2 is about edges versus the
+  fold and conflict rulings — all of which are core. Nothing in the tree
+  stated the split, so the next step reached for the core's own shape to
+  answer a forge question, and proposed recording "this one is better"
+  through the fold that means "these are the same thing" (#22).
+
+  `pursuit` and `dispatch` now live under `domain::forge` with their
+  services under `application::forge`, and that module's doc states the
+  loop (fork, out, in, culling, merge) and the contract: intent lives
+  only in the forge, the core is complete without it — importing,
+  deduplicating and rating need no pursuit — and what the forge writes
+  onto a core row is a correlation id and nothing else. That last clause
+  is stated with its exceptions rather than as an absolute, because the
+  forge does write on core rows: the `_dispatch` stamp a reified output
+  carries and the `_trace` claim a returning artefact brings back are
+  both ids on `asset.extra`, and they are how the two layers rejoin
+  after a round trip. What does not go there is a verdict. Doctrine 6
+  says the same in a paragraph.
+
+  Culling is named in the loop and has no record of its own; the module
+  doc says so rather than leaving the gap for a reader to discover, and
+  #22 is where it is being settled.
+
+  What stays in the core is as much of the point as what moved.
+  `snapshot` is the handle the forge holds the core by;
+  `duplicate_conflict` answers identity, which the store asks of itself;
+  `provenance` is what a returning artefact declares about where it came
+  from — a claim the exporter writes and ingest resolves, with nobody
+  deciding anything, which is why it sits low and runs whether or not
+  anybody is pursuing anything.
+
+  No behaviour, no schema, no wire change. Four module paths did move:
+  `asterism_core::domain::{pursuit, dispatch}` and
+  `asterism_core::application::{pursuit_service, dispatch_service}` are
+  now under `forge`, and no compatibility re-export was left behind — two
+  paths to one module is the ambiguity this change exists to remove. The
+  service types keep their old names through
+  `application`'s re-exports.
+
 - **A pull request runs the tests its own diff calls for; `main` runs
   them all.** CI ran the full workspace suite on every push — every
   crate's test binaries linked, one linker process each — to answer a
