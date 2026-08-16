@@ -59,16 +59,28 @@ The recipes to actually use:
   hand, for the loop while work is still moving.
 
 These are narrower than the workspace gates, not weaker: they cover
-what a change edited, not what depends on it. CI closes that gap on
-every push that changes code.
+what a change edited, not what depends on it. `main` closes that gap on
+every merge.
 
-**Opening a pull request does not wait on a full local run.** CI runs
-`just check` — the workspace suite included — on every push that
-changes code, so the full result reaches the PR either way. The
-exception is a change that touches nothing but prose: the workflow
-skips those outright (its `paths-ignore` names them), because the
-workspace has nothing to say about them. `pre-push` still runs its
-share locally, which is why the two are not the same list.
+**Opening a pull request does not wait on a full local run**, and it
+does not wait on a full CI run either. A pull request runs
+`just check-changed`, which is `check` with the same two substitutions
+`pre-push` makes — so the hosted answer covers the crates the branch
+edited, and a branch that edits no crate links no test binary. A change
+no single crate owns (the manifest, the lockfile, the toolchain,
+`fixtures/`, `scripts/`) runs the full suite instead, since there is
+nothing narrower to run and no later run to defer to. `main` runs
+`just check` in full on every push, and that is where a dependent
+broken without being touched surfaces: one merge later than if every
+pull request had linked the whole workspace to look for it.
+
+That backstop assumes the merge reaches `main` with a run of its own,
+which is why the skip-keyword rule below matters more than it used to:
+a keyword in a pull request title now costs the only place that
+regression would be caught, not a duplicate verdict.
+
+A change touching nothing but prose starts no run at all — the
+workflow's `paths-ignore` names those files.
 
 Report what was actually run;
 "I did not verify X" is a usable report, a green claim resting on a

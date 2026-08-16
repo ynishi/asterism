@@ -390,8 +390,8 @@ aidoc-guard:
     # from here the check would compare a regeneration against the
     # regeneration that produced it — it cannot report drift, and it
     # spends a second rustdoc pass over the workspace saying so. That
-    # pass was 39 s of an 11 min run when it was measured on
-    # 2026-08-15.
+    # pass was 39 s of the 11 m 01 s run 31906361509, on 2026-08-15 —
+    # the same run the workflow names for its other timings.
     #
     # This is only sound because `just aidoc` runs every check this
     # recipe would, and reaches each of them first:
@@ -496,18 +496,61 @@ aidoc-guard:
 [group('check')]
 check-shared: rust-fmt-check bindings-check ui-test ui-check ui-build aidoc-guard
 
-# Run all Rust and frontend checks. CI's definition of green.
+# Run all Rust and frontend checks. The definition of green, and what
+# `main` gets.
 #
-# This is the full-workspace shape, and CI is where it belongs: every
-# push that changes code runs it on a hosted runner whose load nobody
-# else shares — a prose-only push starts no run, since there would be
-# nothing for the workspace to answer. Before
-# handing a branch over, run `pre-push`, which substitutes
-# `rust-test-changed` for `rust-test`.
+# This is the full-workspace shape, and a hosted runner whose load
+# nobody else shares is where it belongs. It runs on every push to
+# `main` — a prose-only push starts no run at all, since there would be
+# nothing for the workspace to answer.
 #
-# Run all Rust and frontend checks (the full workspace suite; CI's).
+# A pull request gets `check-changed` instead. Both are CI's; they
+# differ in what a run is asked about, not in how green is defined.
+#
+# A gate added here and not to `check-shared` will never run on a pull
+# request, because `check-changed` below is a separate list. Add to
+# `check-shared` unless the gate is genuinely `main`-only, and edit the
+# two together when it is not.
+#
+# Run all Rust and frontend checks (the full workspace suite).
 [group('check')]
 check: check-shared rust-clippy rust-test
+
+# What a pull request is asked: does what this branch changed still
+# hold?
+#
+# The same list as `check` with the two workspace-wide gates swapped for
+# their `-changed` counterparts — the substitution `pre-push` already
+# makes, now made in CI too. A pull request that edits one crate stops
+# paying for every crate's test binaries to be linked, and one that
+# edits no crate at all links no test binary and runs no lint:
+# `changed-packages` reports nothing and both gates say so and stop.
+# Not "no Rust" — `check-shared` still runs `bindings-check`, which
+# compiles `asterism-ui` and with it most of the workspace, and on a
+# fork `aidoc-guard` still makes its own rustdoc pass. What goes away
+# is the linking, which is where the load is.
+#
+# The sentinel is the case to watch. A change to the root manifest, the
+# lockfile, the toolchain, `fixtures/` or `scripts/` is attributable to
+# no single member, and both gates then run the full recipe *when `CI`
+# is set* — because deferring to CI is not available to CI. Locally
+# they still decline. Any dependency bump touches `Cargo.lock` and
+# therefore takes this path.
+#
+# What this gives up is a regression in a crate the branch did not
+# edit — a dependent that the change breaks without touching. `main`'s
+# own run is where that surfaces, one merge later than before. That is
+# a real delay and it is the trade: the alternative is every pull
+# request linking every test binary in the workspace to find the case
+# that is rare.
+#
+# It needs a base to compare against, which is why the workflow checks
+# out full history. `changed-packages` fails loudly when it cannot find
+# one rather than reporting that nothing changed.
+#
+# Run the checks the branch's own diff calls for (CI, pull requests).
+[group('check')]
+check-changed: check-shared rust-clippy-changed rust-test-changed
 
 # Fail unless the current branch is a worktree branch cut from
 # origin/main. The incident this exists for (2026-08-15): a branch cut
@@ -676,9 +719,11 @@ bindings-check:
 #   just rust-test-pkg asterism-core asterism-server
 #
 # This is not a weaker gate, it is a narrower one, and it is the one to
-# reach for while iterating: the full suite runs in CI on every push
-# that changes code, so opening a PR does not wait on a workspace run
-# happening here first. (A push that touches nothing but prose starts no
+# reach for while iterating: the full suite runs on every push to
+# `main` that changes code, so opening a PR does not wait on a workspace
+# run happening here first — and neither does the PR's own CI run, which
+# asks the same narrow question this recipe does. (A push that touches
+# nothing but prose starts no
 # run at all — see the workflow's `paths-ignore`.)
 # `rust-test-changed` picks the arguments for you from the branch diff,
 # and is what `pre-push` runs; reach for this one when you already know
@@ -686,8 +731,10 @@ bindings-check:
 #
 # Keeps `--no-fail-fast` and its own exit status per package for the
 # reason the full recipe does: one crate failing must not hide the rest.
-# It does not keep a log or count binaries — those exist to make a
-# workspace run auditable, and a two-crate run is read in the terminal.
+# It keeps no log. It counts binaries only when `CI` is set: that check
+# exists to make a run auditable, a two-crate run is read in the
+# terminal by the person who started it, and a runner has no such
+# person.
 #
 # Run the tests of the named packages (the narrow alternative to rust-test).
 [group('check')]
@@ -697,11 +744,40 @@ rust-test-pkg +packages:
     cd "{{ project_root }}"
     export CARGO_TERM_COLOR=never
     status=0
+    launched=0
+    reported=0
     for pkg in {{ packages }}; do
         echo
         echo "=== $pkg ==="
-        cargo test -p "$pkg" --no-fail-fast || status=1
+        # Counted, not just streamed, when nobody is watching the
+        # stream. `rust-test` checks that every launched binary reported
+        # a result because one killed mid-run prints no `test result:`
+        # line and its passes vanish from the sum — the shape of the
+        # 2026-07-30 observation, which is as much as anyone established
+        # about it. This recipe left that out on the grounds that a
+        # two-crate run is read in the terminal, which was true while a
+        # person was the only caller. CI runs this now, and a runner has
+        # no terminal anyone reads.
+        if [ -n "${CI:-}" ]; then
+            out=$(cargo test -p "$pkg" --no-fail-fast 2>&1) || status=1
+            printf '%s\n' "$out"
+            launched=$((launched + $(printf '%s\n' "$out" | grep -cE '^ +(Running|Doc-tests)')))
+            reported=$((reported + $(printf '%s\n' "$out" | grep -cE '^test result:')))
+        else
+            cargo test -p "$pkg" --no-fail-fast || status=1
+        fi
     done
+    if [ -n "${CI:-}" ]; then
+        echo
+        echo "binaries: $launched launched / $reported reported"
+        if [ "$launched" -ne "$reported" ]; then
+            echo
+            echo "MISSING: $((launched - reported)) binary/binaries never reported a" >&2
+            echo "result. Their tests are absent from the counts above — the totals" >&2
+            echo "are a floor, not a tally." >&2
+            status=1
+        fi
+    fi
     if [ "$status" -ne 0 ]; then
         echo
         echo "One or more packages failed; the output above is the whole run." >&2
@@ -746,6 +822,39 @@ changed-packages:
     set -uo pipefail
     cd "{{ project_root }}"
 
+    # Refuse to answer rather than answer "nothing" when the base is
+    # not there. Everything below reads as "no package changed" if
+    # `git diff` cannot resolve `origin/main` — it writes to stderr and
+    # produces no paths — and on a clean tree that is indistinguishable
+    # from a branch that touched no crate. A caller acting on that skips
+    # every test and calls itself green.
+    #
+    # It is reachable: a shallow clone has no `origin/main`, which is
+    # what `actions/checkout` produces by default, and CI is now a
+    # caller. The workflow asks for full history for this reason;
+    # this is what says so when it does not.
+    if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+        echo "cannot resolve origin/main, so which packages changed is unknown." >&2
+        echo "Run 'git fetch origin', and in CI check out with fetch-depth: 0." >&2
+        exit 1
+    fi
+    if ! git merge-base origin/main HEAD >/dev/null 2>&1; then
+        echo "origin/main and HEAD share no history — a shallow clone cannot" >&2
+        echo "answer which packages changed. Check out with fetch-depth: 0." >&2
+        exit 1
+    fi
+    # A shallow clone can have `origin/main` and still be missing the
+    # merge base's ancestors, in which case the diff is against the
+    # wrong point and reports too little. Refused rather than trusted:
+    # the two guards above ask whether the base is *there*, and this one
+    # asks whether the history behind it is.
+    if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+        echo "this is a shallow clone, so the merge base with origin/main may" >&2
+        echo "not be present and the diff would report too few packages." >&2
+        echo "Check out with fetch-depth: 0." >&2
+        exit 1
+    fi
+
     # Committed against the merge base, plus whatever is not committed
     # yet. `--porcelain` covers staged, unstaged and untracked in one
     # pass; its path is the last space-separated field, which is right
@@ -763,9 +872,18 @@ changed-packages:
     fi
 
     # A change to any of these is not attributable to one member.
-    if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/)'; then
+    #
+    # `fixtures/` and `scripts/` are here because the mapping below —
+    # "the member whose directory contains the path" — is a proxy for
+    # "which crates could this break", and these two are where the proxy
+    # is wrong. `asterism-core`'s collation tests read
+    # `fixtures/collation/`, and `asterism-infra`'s chapter-scan tests
+    # need what `scripts/gen-test-fixtures.py` produces. Neither lives
+    # under a member, so without this line a branch editing the corpus
+    # would run nothing that reads it.
+    if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)'; then
         echo "Workspace-wide change (manifest, lockfile or toolchain):" >&2
-        printf '%s\n' "$changed" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/)' | sed 's/^/  /' >&2
+        printf '%s\n' "$changed" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)' | sed 's/^/  /' >&2
         echo "--workspace"
         exit 0
     fi
@@ -778,6 +896,16 @@ changed-packages:
         awk '/^members *= *\[/ {inside=1; next} inside && /^\]/ {exit} inside' Cargo.toml \
             | tr -d ' ",'
     )
+    # An empty list is not an answer. This parse wants one member per
+    # line, so a `members = ["crates/a", "crates/b"]` written on one
+    # line yields nothing — and every path would then map to no member,
+    # which reads as "no crate changed" and would skip every test from
+    # then on, silently and forever.
+    if [ -z "$(printf '%s' "$members" | tr -d '[:space:]')" ]; then
+        echo "no workspace members parsed out of Cargo.toml, so no path can be" >&2
+        echo "attributed. Expected one member per line under 'members = ['." >&2
+        exit 1
+    fi
 
     packages=""
     for dir in $members; do
@@ -812,7 +940,8 @@ changed-packages:
 # One limit, stated because a narrower gate that reads as a full one is
 # worse than no gate: it names packages a change *edited*, not packages
 # that depend on them. Editing `asterism-core` does not test
-# `asterism-server` here, and it is CI that catches what that misses.
+# `asterism-server` here, and it is `main`'s own run that catches what
+# that misses — a pull request's run asks this same narrow question.
 [group('check')]
 [group('allow-agent')]
 rust-test-changed:
@@ -821,6 +950,22 @@ rust-test-changed:
     cd "{{ project_root }}"
     packages=$(just changed-packages) || exit 1
     if [ "$packages" = "--workspace" ]; then
+        # Every crate is in scope, so there is no narrow run to make —
+        # and what to do about that depends entirely on who is asking.
+        #
+        # Locally the answer is to decline: the workspace suite is what
+        # this recipe exists to keep off a developer's machine, and CI
+        # will run it. In CI that same sentence would be a lie about the
+        # process saying it, and the cost of the lie is the largest
+        # blast radius there is. `Cargo.lock` is inside the pattern that
+        # produces this sentinel, so *any* dependency bump takes this
+        # branch — and a bump that skips every test and reports green is
+        # the worst thing this file could do.
+        if [ -n "${CI:-}" ]; then
+            echo "Every crate is in scope; running the workspace suite."
+            just rust-test
+            exit "$?"
+        fi
         echo "Every crate is in scope, so there is no narrow suite to run."
         echo "CI runs the workspace suite on this push; it is not run here."
         exit 0
@@ -830,7 +975,7 @@ rust-test-changed:
         exit 0
     fi
     echo "Testing what this branch touched:$(printf ' %s' $packages)"
-    echo "Dependents of these are not run here — CI covers them."
+    echo "Dependents of these are not run here — main's run covers them."
     just rust-test-pkg $packages
 
 # Lint the packages this branch touched (pre-push's narrow clippy).
@@ -840,7 +985,7 @@ rust-test-changed:
 # test suite, but it is still a whole-workspace build and it was still
 # running in `pre-push` after the test half had been narrowed — the
 # same defect, left half-fixed. Same scope rule, same limit: a lint
-# that fires in a dependent crate is CI's to report.
+# that fires in a dependent crate is `main`'s run to report.
 [group('check')]
 [group('allow-agent')]
 rust-clippy-changed:
@@ -849,6 +994,13 @@ rust-clippy-changed:
     cd "{{ project_root }}"
     packages=$(just changed-packages) || exit 1
     if [ "$packages" = "--workspace" ]; then
+        # Same split as `rust-test-changed`, for the same reason: in CI
+        # there is no later run to defer to, so deferring is skipping.
+        if [ -n "${CI:-}" ]; then
+            echo "Every crate is in scope; linting the workspace."
+            just rust-clippy
+            exit "$?"
+        fi
         echo "Every crate is in scope, so there is no narrow lint to run."
         echo "CI runs clippy over the workspace on this push; not here."
         exit 0
