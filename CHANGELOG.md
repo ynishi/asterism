@@ -378,6 +378,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A pull request runs the tests its own diff calls for; `main` runs
+  them all.** CI ran the full workspace suite on every push — every
+  crate's test binaries linked, one linker process each — to answer a
+  question about however many crates a branch actually touched. Pull
+  request #60 touched two. `pre-push` had been taught to scale with the
+  diff; CI had not, which left the local gate and the hosted one
+  disagreeing about what a pull request is for.
+
+  A pull request now runs `check-changed`: the same list as `check` with
+  the two workspace-wide gates swapped for their `-changed`
+  counterparts. A branch that edits one crate tests one crate, and a
+  branch that edits no crate — a `Justfile` change, a workflow change —
+  links no test binary and runs no lint. Not "no Rust": `bindings-check`
+  still compiles `asterism-ui` and most of the workspace behind it. What
+  goes away is the linking, which is where the load is. `main` still
+  runs `check` in full on every push.
+
+  A change no single crate owns — the root manifest, the lockfile, the
+  toolchain, `fixtures/`, `scripts/` — has no narrow run to make, and
+  both gates then run the full recipe when `CI` is set. That branch is
+  the reason this is not simply "run less": deferring to CI is not
+  something CI can do, and `Cargo.lock` is in that set, so every
+  dependency bump would otherwise have tested nothing and reported
+  green.
+
+  What this gives up is a regression in a crate the branch did not edit:
+  a dependent broken without being touched. `main`'s own run catches it,
+  one merge later than before. That is the trade, and it is stated in
+  the recipe rather than left to be inferred — the alternative is every
+  pull request linking every test binary in the workspace to find the
+  case that is rare.
+
+  The workflow now checks out full history, because the answer comes
+  from the merge base with `origin/main` and the default checkout is a
+  single commit with neither. The failure that would otherwise follow is
+  the reason `changed-packages` gained a guard: a diff against a ref
+  that does not resolve produces no paths, which reads exactly like a
+  branch that changed no crate, so CI would have compiled nothing and
+  called itself green. It now refuses and names the setting instead —
+  verified by running it where `origin/main` does not resolve.
+
 - **A change that only edits prose no longer runs the build.** Pull
   request #57 changed eighteen lines across `CONTRIBUTING.md`,
   `CHANGELOG.md` and `.claude/CLAUDE.md`, and bought the workspace test
