@@ -222,6 +222,20 @@ jobs:
             ${{ (github.event_name == 'pull_request' &&
             github.event.pull_request.head.repo.full_name == github.repository)
             && github.event.pull_request.head.ref || '' }}
+          # Full history, because `check-changed` below asks which
+          # workspace members this branch touched and answers it from
+          # the merge base with `origin/main`. The default is a
+          # single-commit clone with no `origin/main` and no shared
+          # history to find a base in.
+          #
+          # The failure that would follow is why this is not left to be
+          # discovered: a diff against a ref that does not resolve
+          # produces no paths, which reads exactly like a branch that
+          # changed no crate, and CI would report green having compiled
+          # nothing. `changed-packages` refuses instead of answering,
+          # and names this setting when it does — but the refusal is a
+          # backstop, not the plan.
+          fetch-depth: 0
 
       # There is no `rust-toolchain.toml`, so this follows stable and the
       # toolchain moves under the workflow. Deliberate, for now: clippy had
@@ -483,5 +497,23 @@ jobs:
           git commit -m 'Regenerate docs/aidoc [skip ci]'
           git push
 
+      # Two steps naming two recipes, rather than one step and a
+      # conditional inside it. The composition of each stays in the
+      # Justfile, which is the rule the top of this file states; what
+      # lives here is only the choice between them.
+      #
+      # A pull request is asked whether what it changed still holds, and
+      # a branch that changed no crate links no test binary and runs no
+      # lint — `bindings-check` still compiles `asterism-ui` and the
+      # twelve members behind it. `main` is asked
+      # whether the merged tree holds, which is the whole workspace —
+      # including the dependent a branch broke without touching, the one
+      # case `check-changed` gives up. That case surfaces here, one
+      # merge later than it used to.
+      - name: just check-changed
+        if: github.event_name == 'pull_request'
+        run: just check-changed
+
       - name: just check
+        if: github.event_name != 'pull_request'
         run: just check
