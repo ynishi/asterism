@@ -76,6 +76,25 @@ Refs #<issue>
 - Update `CHANGELOG.md` under `## [Unreleased]` as its own commit.
 - Never commit `workspace/`, `.worktrees/`, or local agent state. If a
   commit needs `git add -f`, stop: something is filed wrong.
+- **Never write a CI skip keyword in a commit message or a pull request
+  title.** GitHub reads `[skip ci]`, `[ci skip]`, `[no ci]`,
+  `[skip actions]`, `[actions skip]` and a `skip-checks: true` trailer
+  anywhere in the message, and it does not care that you were writing
+  about them rather than asking for them. A `pull_request` run reads
+  the branch's head commit, so a branch whose tip discusses one of
+  these gets no CI at all; a pull request title reaches `main`'s merge
+  commit, so the same is true after the merge. The failure is silent —
+  a skipped workflow leaves its checks at *pending* rather than
+  failing, so nothing turns red and nothing is missing from the list.
+  Write "the skip keyword" or name the mechanism instead. This
+  happened: pull request #53 landed three commits whose prose quoted
+  one, and only the accident that none of them was a branch tip kept
+  its CI running.
+
+  File contents are not affected — `.github/workflows/check.yml`
+  quotes the keyword freely, and this bullet does too. The rule is
+  about commit messages and pull request titles, which is where GitHub
+  looks.
 
 ## Working with coding agents — the recommended pattern
 

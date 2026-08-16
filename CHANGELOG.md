@@ -334,11 +334,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replays the bot's commit as it stands, so either lands `[skip ci]` on
   `main`'s head and skips the run that gives a merged tree its verdict.
   A merge commit takes its message from the pull request title and does
-  not carry it — but whether that is enough is **not settled**, because
-  GitHub's own wording is that the token skips a workflow when it
-  appears "in a push", which may mean any commit in the pushed range.
-  The first merge after this lands answers it: check that `main` got a
-  run.
+  not carry it, which is why the merge button is restricted to that
+  method.
+
+  Whether a merge commit was *enough* was open when this was written,
+  because GitHub says the token skips a workflow when it appears "in a
+  push" without saying which commit of one. It is settled now, and by
+  accident: three of the commits merged here quote the literal token in
+  their prose, so under the broad reading `main` would have got no run
+  after the merge. It got run 31914528059. The scan reads the head
+  commit of a push, not the range behind it.
 
   Two further costs, and one saving. `aidoc-guard` no longer re-checks,
   inside `just check`, the artifacts the same job regenerated minutes
@@ -369,6 +374,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first and compares the index against `HEAD`, which is the question it
   meant to ask. (An added crate or module was never the missed case:
   those also modify a tracked index page.)
+
+- **CONTRIBUTING forbids writing a CI skip keyword in a commit message
+  or a pull request title.** GitHub reads those keywords anywhere in a
+  message and does not distinguish writing about one from asking for
+  one. A `pull_request` run reads the branch's head commit, so a branch
+  whose tip discusses the mechanism gets no CI; a pull request title
+  becomes the merge commit's body, so the same applies after a merge.
+  Neither failure is visible — a skipped workflow leaves its checks at
+  *pending* rather than failing, so nothing turns red and nothing is
+  absent from the list. The rule covers messages and titles only; file
+  contents quote the keywords freely, as the workflow comment and
+  CONTRIBUTING itself do.
 
 - **The gate before a hand-over costs what the change costs, not what
   the workspace costs.** `just pre-push` was `branch-check` plus

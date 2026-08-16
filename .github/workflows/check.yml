@@ -318,13 +318,29 @@ jobs:
       # because it is what gives a merged tree its verdict — does not
       # start. A merge commit takes its message from the pull request
       # title and carries no branch message at all, which is the reason
-      # to merge that way and to leave the other two off. Whether a
-      # merge commit is enough is not settled:
-      # GitHub's own wording is that the token skips a workflow when it
-      # appears "in a push", which may or may not mean only the head
-      # commit of one. The first merge after this lands answers it —
-      # check that `main` got a run, and if it did not, this workflow
-      # needs a different way to suppress the branch run.
+      # to merge that way and to leave the other two off.
+      #
+      # Whether a merge commit is enough was an open question when this
+      # was written, because GitHub says the token skips a workflow when
+      # it appears "in a push" without saying which commit of one, and
+      # its 2021 announcement said "any commit message in your push".
+      # It is settled now, and by accident rather than by design. Pull
+      # request #53 merged as a merge commit, and three commits in that
+      # push carried the literal token in their messages — prose about
+      # this very mechanism, written without thinking about what the
+      # words would do. Under the broad reading `main` would have got no
+      # run. It got run 31914528059. So the scan reads the head commit
+      # of a push and not the range behind it, and a merge commit is
+      # enough.
+      #
+      # That accident is also a hazard, and CONTRIBUTING carries the
+      # rule it produced: do not write the literal token in a commit
+      # message. On a push to `main` only the head commit is read, but a
+      # `pull_request` event reads the pull request's head commit, so a
+      # branch whose tip happens to discuss the token would have its own
+      # run silently skipped — and a skipped workflow's checks sit at
+      # pending rather than failing, which is not a state anyone
+      # notices. File contents are safe; this comment is proof of that.
       #
       # `just aidoc` fails rather than writes when the committed
       # artifacts name a different target (cargo-aidoc 0.3.0), so a
