@@ -56,14 +56,15 @@ the private design notes.
 - [`application::asset_comment_service`](application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [`application::asset_service`](application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
 - [`application::disclosure_service`](application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
-- [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
+- [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
+- [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [`application::modality_service`](application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [`application::pursuit_service`](application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
@@ -95,10 +96,12 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
-- [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
+- [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -116,7 +119,6 @@ the private design notes.
 - [`domain::probe`](domain__probe.md): `probe` — the port a format's identity measurement is written
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
-- [`domain::pursuit`](domain__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented

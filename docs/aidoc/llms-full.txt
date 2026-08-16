@@ -567,14 +567,15 @@ the private design notes.
 - [`application::asset_comment_service`](application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [`application::asset_service`](application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
 - [`application::disclosure_service`](application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
-- [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
+- [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
+- [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [`application::modality_service`](application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [`application::persona_service`](application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [`application::pursuit_service`](application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::query_group_invalidation`](application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [`application::query_group_service`](application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [`application::series_strategy_service`](application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
@@ -606,10 +607,12 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
-- [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
+- [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -627,7 +630,6 @@ the private design notes.
 - [`domain::probe`](domain__probe.md): `probe` — the port a format's identity measurement is written
 - [`domain::provenance`](domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [`domain::provenance::source`](domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
-- [`domain::pursuit`](domain__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::query_group_eval`](domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
 - [`domain::render`](domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [`domain::repository`](domain__repository.md): Repository ports — the persistence traits declared here and implemented
@@ -660,6 +662,10 @@ Application layer — use-case services.
 - [`fold_redirect`]   — the one place a surface holding its own id
   set redirects it through the folds that happened since (the
   "paths that name a row keep it" half of the fold read rule).
+- [`forge`]           — the verbs of a line of work: the pursuit
+  lifecycle and the rounds filed under it. Grouped because they are
+  the services whose writes carry intent rather than content
+  (doctrine 6).
 - `attribution_intake` — the single check on the attribution fields a
   command still carries (a remote caller's assertion arriving through
   the owner's own surface).
@@ -861,42 +867,6 @@ neither it nor this service owns.
 - `DisclosureWriter` — Writes a disclosure into a file that already exists.
 
 
-<!-- asterism_core/application__dispatch_service.md -->
-# asterism-core::application::dispatch_service
-
-`DispatchService` — the transport-fronted half of the outbound
-dispatch lifecycle.
-
-Every verb here is behind a Tauri command, an HTTP route, or both:
-
-- [`create`](DispatchService::create) — start a new dispatch from
-  an existing Snapshot, enqueueing an apalis `DispatchRun` job.
-- [`run`](DispatchService::run) / [`redispatch`](DispatchService::redispatch)
-  — freeze a live source (Group or volatile pick) and start it, or
-  re-run a previous freeze unchanged.
-- [`get`](DispatchService::get) / [`list`](DispatchService::list)
-  — read the persisted state (used by the UI polling endpoint and
-  an MCP tool).
-
-Each of the three start verbs takes an
-[`AttributionContext`](crate::domain::attribution::AttributionContext)
-and stamps it on the job row, because the run outlives its caller:
-the exporter is polled by a background job, and the moment the answer
-is needed (stamping the reified outputs) is minutes or hours after
-the request that supplied it.
-
-What the runner does to a dispatch in flight — `save_state` /
-`save_handle` / `reify` — is not here. Those live on
-[`DispatchRunnerService`](crate::application_support::DispatchRunnerService),
-reachable from the `DispatchRun` job's environment and from no
-transport context, so no handler can park a job in `Done` or mint
-assets from a wire payload.
-
-## Types
-
-- `DispatchService` — Outbound-dispatch use-case service.
-
-
 <!-- asterism_core/application__fold_redirect.md -->
 # asterism-core::application::fold_redirect
 
@@ -959,6 +929,95 @@ trash view's hydration depends on that.
 ## Types
 
 - `NamedCards` — An id set redirected through its folds, and the cards behind it.
+
+
+<!-- asterism_core/application__forge.md -->
+# asterism-core::application::forge
+
+Forge use cases — the verbs of a line of work.
+
+[`pursuit_service`] owns the lifecycle (open / close / reopen /
+restamp) and the reads over it; [`dispatch_service`] starts a round
+and files it under the pursuit it belongs to, minting one when the
+caller named none. They are together because they are the two halves
+of one story — a pursuit with no round records nothing, a round with
+no pursuit cannot exist (doctrine 5) — and apart from the rest
+because they are the only services here whose writes carry intent
+rather than content (doctrine 6; the layer itself is described in
+[`domain::forge`](crate::domain::forge)).
+
+Nothing in the catalogue is edited by either of them. Closing a
+pursuit freezes what was kept and touches no asset: no trash, no
+label, no rating. Integrating the conclusion back into the library is
+the catalogue's own business, and stays on the catalogue's verbs.
+
+
+<!-- asterism_core/application__forge__dispatch_service.md -->
+# asterism-core::application::forge::dispatch_service
+
+`DispatchService` — the transport-fronted half of the outbound
+dispatch lifecycle.
+
+Every verb here is behind a Tauri command, an HTTP route, or both:
+
+- [`create`](DispatchService::create) — start a new dispatch from
+  an existing Snapshot, enqueueing an apalis `DispatchRun` job.
+- [`run`](DispatchService::run) / [`redispatch`](DispatchService::redispatch)
+  — freeze a live source (Group or volatile pick) and start it, or
+  re-run a previous freeze unchanged.
+- [`get`](DispatchService::get) / [`list`](DispatchService::list)
+  — read the persisted state (used by the UI polling endpoint and
+  an MCP tool).
+
+Each of the three start verbs takes an
+[`AttributionContext`](crate::domain::attribution::AttributionContext)
+and stamps it on the job row, because the run outlives its caller:
+the exporter is polled by a background job, and the moment the answer
+is needed (stamping the reified outputs) is minutes or hours after
+the request that supplied it.
+
+What the runner does to a dispatch in flight — `save_state` /
+`save_handle` / `reify` — is not here. Those live on
+[`DispatchRunnerService`](crate::application_support::DispatchRunnerService),
+reachable from the `DispatchRun` job's environment and from no
+transport context, so no handler can park a job in `Done` or mint
+assets from a wire payload.
+
+## Types
+
+- `DispatchService` — Outbound-dispatch use-case service.
+
+
+<!-- asterism_core/application__forge__pursuit_service.md -->
+# asterism-core::application::forge::pursuit_service
+
+`PursuitService` — the lifecycle verbs of the minted unit of work
+(#29): open, close, reopen, restamp, and the reads that derive
+standing.
+
+Always-mint lives in
+[`DispatchService`](super::dispatch_service::DispatchService) —
+a dispatch arriving unstamped mints its own pursuit there. This
+service is everything else: the explicit pre-create (naming intent
+up front), the one-way lifecycle facts (close / reopen — recorded,
+never a status write), the close's single deliberate
+materialisation (the kept set frozen into a snapshot), and the
+restamp repair verb. Transport routes land in the next slice of
+#29; until then the service fronts the e2e surface through
+`CoreCtx`, the same way every service is reachable there.
+
+# The close freeze is a forge-side calling convention
+
+The core treats snapshot member order as part of snapshot identity
+(caller order, nothing sorts). The close path sorts the kept set
+ascending *itself* before freezing, so identical kept sets dedupe
+across closes; a close snapshot consequently does not dedupe with a
+pick-ordered input snapshot over the same members — correct, they
+are different statements.
+
+## Types
+
+- `PursuitService` — Pursuit lifecycle use-case service.
 
 
 <!-- asterism_core/application__mapping.md -->
@@ -1202,37 +1261,6 @@ for why the argument is required anyway).
 ## Types
 
 - `PersonaService` — Persona use-case service. Shared as an `Arc` through Tauri state and
-
-
-<!-- asterism_core/application__pursuit_service.md -->
-# asterism-core::application::pursuit_service
-
-`PursuitService` — the lifecycle verbs of the minted unit of work
-(#29): open, close, reopen, restamp, and the reads that derive
-standing.
-
-Always-mint lives in [`DispatchService`](super::DispatchService) —
-a dispatch arriving unstamped mints its own pursuit there. This
-service is everything else: the explicit pre-create (naming intent
-up front), the one-way lifecycle facts (close / reopen — recorded,
-never a status write), the close's single deliberate
-materialisation (the kept set frozen into a snapshot), and the
-restamp repair verb. Transport routes land in the next slice of
-#29; until then the service fronts the e2e surface through
-`CoreCtx`, the same way every service is reachable there.
-
-# The close freeze is a forge-side calling convention
-
-The core treats snapshot member order as part of snapshot identity
-(caller order, nothing sorts). The close path sorts the kept set
-ascending *itself* before freezing, so identical kept sets dedupe
-across closes; a close snapshot consequently does not dedupe with a
-pick-ordered input snapshot over the same members — correct, they
-are different statements.
-
-## Types
-
-- `PursuitService` — Pursuit lifecycle use-case service.
 
 
 <!-- asterism_core/application__query_group_invalidation.md -->
@@ -1888,7 +1916,7 @@ source lines):
 
 ```text
 awk '/^\/\/!$/ { nextfile } /^\/\/!/ { print FILENAME ": " substr($0, 5) }' \
-    crates/asterism-core/src/domain/*.rs
+    crates/asterism-core/src/domain/*.rs crates/asterism-core/src/domain/*/*.rs
 ```
 
 What follows is the part no index can generate: how the modules hang
@@ -1913,17 +1941,20 @@ question and [`merge_plan`] a person's ruling over a whole set.
 
 **The record layer.** [`snapshot`] freezes an ordered asset set —
 content-addressed, a git-tree analogue, fingerprinted by
-[`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
-a freeze; [`pursuit`] is the minted unit of work those invocations are
-stamped with — the line of rounds and verdicts toward one intent;
-[`provenance`] is the declared origin a re-ingested artefact
-carries back, and [`disclosure`] its outbound counterpart — the pure
+[`snapshot_hash`]; [`provenance`] is the declared origin a re-ingested
+artefact carries back, and [`disclosure`] its outbound counterpart — the pure
 judgement of which IPTC digital-source term the recorded evidence
 makes true of an artefact on its way out; [`edge`] holds typed
 asset↔asset facts — from derivation
 and identity to co-occurrence — that lineage walks and the hover burst
 renders; [`attribution`] types who a write is by, what operated on their
 behalf, and through which channel that answer arrived.
+
+**The forge layer.** [`forge`] is where intent lives: a line of work
+(`forge::pursuit`), the rounds it sends out (`forge::dispatch`), and
+the conclusion it freezes. Every other group above describes what is
+true of the stored bytes; this one describes what somebody was trying
+to do, and its own module doc states the boundary the two keep.
 
 **The annotation layer.** [`thread`] collects messages from humans and
 agents alike; [`asset_comment`] is the short-note thread on one asset;
@@ -1981,12 +2012,31 @@ cross-module view.
    do not mix.
 5. **The unit of work is minted, never derived.** Content identity
    changes whenever work is redone, so correlation by ancestry alone
-   cannot express succession, rejection, or abandonment. A [`pursuit`]
-   is identified by a minted id stamped on its events, work cannot
+   cannot express succession, rejection, or abandonment. A
+   [`pursuit`](forge::pursuit) is identified by a minted id stamped
+   on its events, work cannot
    happen outside one (a dispatch without a pursuit gets one minted in
    the same request; a mint stranded by a failed dispatch write is the
    legal pre-created-empty state, not debris), and everything else
    about it — standing, membership, rollups — is projection.
+6. **Two layers: the core states facts, the [`forge`] states intent.**
+   The core is what is true of the stored bytes — assets, freezes,
+   edges, the identity question and the outbound one — and it is
+   complete without the forge: importing, deduplicating, rating and
+   trashing need no pursuit, and the minting rule above binds the
+   forge's own events, not the catalogue. The forge is the operator's
+   account of a line of work, and it refers to content through frozen
+   sets and ids. **What it writes onto a core row is a correlation id
+   and nothing else** — the `_dispatch` stamp a reified output carries
+   and the `_trace` claim a returning artefact brings back
+   ([`provenance`]) — which say which event a row belongs to and never
+   what anyone thought of it. No verdict-per-asset table lives in the
+   forge for that reason; a core row may record who wrote it
+   (doctrine 2) but never why. The corollary that has been reached for
+   and is wrong: identity ("these are the same thing") is a core
+   question the store asks itself, and expressing worth ("this one is
+   better") through a fold makes every reader of `folded_into` inherit
+   the ambiguity.
 
 ## Aggregate boundaries
 
@@ -2971,49 +3021,6 @@ mark on one is a false statement.
 - `UnknownSourceType` — A value that is not a term of the IPTC digital source type vocabulary.
 
 
-<!-- asterism_core/domain__dispatch.md -->
-# asterism-core::domain::dispatch
-
-`DispatchJob` — one exporter invocation against a Snapshot.
-
-Aggregate root for a single outbound job's whole lifecycle
-(Pending → Running → Done/Failed/Cancelled). Everything the apalis
-`DispatchRun` runner needs to resume after restart is on this row:
-
-- `snapshot_id` — points back at the input Snapshot.
-- `exporter_slug` + `action` + `params_json` — how to reach the
-  backend.
-- `handle_json` — opaque bytes the exporter's `Handle` serialised
-  into; the runner rehydrates this to call `poll` / `harvest`
-  again.
-- `state_slug` — the lifecycle state (mirrors
-  `asterism_dispatch_sdk::DispatchState::slug()`).
-- `output_asset_ids` — populated during `harvest` so callers can
-  go "show me what this dispatch produced" without a follow-up
-  query.
-
-# Invariants
-
-1. `persona_id` is the persona the dispatch belongs to; the
-   Snapshot carries the same persona (application service
-   enforces).
-2. `state` transitions are one-way: Pending → Running →
-   (Done | Failed | Cancelled). Backwards transitions are rejected
-   at the service layer.
-3. `output_asset_ids` is empty until state is `Done`; setting it
-   is atomic with the transition to `Done` (the reify path writes
-   both in one save).
-
-## Types
-
-- `DispatchJob` — One dispatch invocation.
-- `DispatchState` — Lifecycle state persisted with the dispatch job.
-
-## Constants
-
-- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
-
-
 <!-- asterism_core/domain__duplicate_conflict.md -->
 # asterism-core::domain::duplicate_conflict
 
@@ -3146,6 +3153,187 @@ the column.
 - `recover` — Recovers every text annotation an artefact carries, keyed by the
 - `render` — Renders recovered fields the way the column stores them.
 - `walks_format` — Whether a declared format has a recovery walk here — the question a
+
+
+<!-- asterism_core/domain__forge.md -->
+# asterism-core::domain::forge
+
+The forge layer — the intentional history over the catalogue: a line
+of work, the rounds it sent out, and the conclusion it reached.
+
+Everything else in [`domain`](crate::domain) answers what is true of
+the stored bytes. This module answers what somebody was *trying to
+do*, and that is a different kind of statement: it has an actor, it
+has a beginning and an end, and it is the operator's account rather
+than the store's observation. Keeping the two apart is what stops
+intent from being smuggled into content facts — a fold that quietly
+means "this one was better", a rating pressed into service as a
+verdict — which is the failure mode this split exists to prevent.
+
+# The loop
+
+```text
+  Fork  ──> OUT ──> [ the work happens elsewhere ] ──> IN
+   │         │                                         │
+ pursuit  dispatch                              returns resolve
+ .parent_id  + frozen inputs + sidecar          through _trace
+   │                                                   │
+   └────────────> Culling ────> Merge ─────────────────┘
+                               pursuit_event
+                               .closed_satisfied + kept set
+```
+
+[`pursuit`] is the minted unit of work and its lifecycle facts;
+[`dispatch`] is one round — an exporter invocation against a frozen
+input set, stamped with the pursuit it files under. A round's outputs
+and the artefacts that come back are ordinary catalogue rows: the
+forge does not hold a working copy, and there is no state to
+integrate at the end. What the close integrates is a *decision*.
+
+**Culling** — the narrowing between a return and a close — has no
+record of its own in this layer. It moves through the catalogue's
+working state (rating, labels, trash), and what survives it is the
+kept set the close freezes. Whether the act itself should be
+recorded, and out of which candidate set, is open (#22).
+
+# The boundary
+
+- **The forge names the core; what it writes there is correlation,
+  never judgement.** A pursuit refers to content through frozen sets
+  ([`Snapshot`]) and ids. The one thing this layer puts on a core row
+  is the id that lets the two rejoin after a round trip — the
+  `_dispatch` stamp on a reified output, the `_trace` claim a
+  returning artefact carries. No table here holds a verdict row per
+  asset: that would put the forge's vocabulary on the core's rows and
+  hand every downstream reader (dedupe, lineage, restore) an
+  ambiguity to inherit.
+- **Intent lives only here.** `title`, `note`, and the actor triple
+  are forge properties. A core row may record who wrote it — that is
+  bookkeeping, and doctrine 2 already allows it — but never *why*.
+- **The core does not need the forge.** Importing, deduplicating,
+  rating and trashing all work with no pursuit in sight. The minting
+  rule (doctrine 5) binds the forge's own events, not the catalogue.
+
+# What is deliberately not here
+
+[`snapshot`](crate::domain::snapshot) is the handle the forge holds
+the core by, and belongs to the core: it is content-addressed,
+deduplicated persona-wide, and carries no story about who froze it.
+[`duplicate_conflict`](crate::domain::duplicate_conflict) and
+[`merge_plan`](crate::domain::merge_plan) answer identity ("are these
+the same thing"), which the store asks of itself without being told
+to — the shape rhymes with a gate, and the resemblance has misled
+before: worth is not identity, and a fold is not a selection.
+[`provenance`](crate::domain::provenance) is how a returning artefact
+reattaches to the round that produced it: what it declares about
+where it came from, and whether that resolved. It is a claim the
+artefact
+carries rather than a statement the operator makes: the exporter
+writes it beside the file, ingest resolves it on the way back in, and
+nobody decides anything. So it stays low in the stack, running
+whether or not anybody is pursuing anything.
+[`thread`](crate::domain::thread) and
+[`asset_comment`](crate::domain::asset_comment) are annotation
+surfaces both layers write to.
+
+Background: the workflow design on #21, implemented by #29 and #34.
+
+[`Snapshot`]: crate::domain::snapshot::Snapshot
+
+
+<!-- asterism_core/domain__forge__dispatch.md -->
+# asterism-core::domain::forge::dispatch
+
+`DispatchJob` — one exporter invocation against a Snapshot.
+
+Aggregate root for a single outbound job's whole lifecycle
+(Pending → Running → Done/Failed/Cancelled). Everything the apalis
+`DispatchRun` runner needs to resume after restart is on this row:
+
+- `snapshot_id` — points back at the input Snapshot.
+- `exporter_slug` + `action` + `params_json` — how to reach the
+  backend.
+- `handle_json` — opaque bytes the exporter's `Handle` serialised
+  into; the runner rehydrates this to call `poll` / `harvest`
+  again.
+- `state_slug` — the lifecycle state (mirrors
+  `asterism_dispatch_sdk::DispatchState::slug()`).
+- `output_asset_ids` — populated during `harvest` so callers can
+  go "show me what this dispatch produced" without a follow-up
+  query.
+
+# Invariants
+
+1. `persona_id` is the persona the dispatch belongs to; the
+   Snapshot carries the same persona (application service
+   enforces).
+2. `state` transitions are one-way: Pending → Running →
+   (Done | Failed | Cancelled). Backwards transitions are rejected
+   at the service layer.
+3. `output_asset_ids` is empty until state is `Done`; setting it
+   is atomic with the transition to `Done` (the reify path writes
+   both in one save).
+
+## Types
+
+- `DispatchJob` — One dispatch invocation.
+- `DispatchState` — Lifecycle state persisted with the dispatch job.
+
+## Constants
+
+- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
+
+
+<!-- asterism_core/domain__forge__pursuit.md -->
+# asterism-core::domain::forge::pursuit
+
+`Pursuit` — the minted unit of work: one line of generation and
+curation toward an intent, identified by a minted id that its events
+are stamped with (#29, design on #21).
+
+Content ancestry cannot express this unit: round N+1 built from the
+same sources with a new prompt shares no derivation edge with round
+N's outputs, rejected rounds have no descendants, and abandonment has
+no ancestry expression at all. So the identity is minted up front —
+the convergent form of every surviving forge (Gerrit's Change-Id,
+Jujutsu's change id, Radicle's COB ids) — and everything else about
+the pursuit is a projection over the stamped events.
+
+# Shape
+
+- [`Pursuit`] is a thin, immutable row: identity, persona, optional
+  parent, optional human label. No status column, no members.
+- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
+  **standing is derived on read** by [`standing`] — latest event by
+  `(created_at, id)` wins, no row means open. A repeat close is a new
+  fact, not an error.
+- [`PursuitRestamp`] records a move of a stamped event between
+  pursuits — the repair verb for mis-filed correlation. The stamped
+  column holds the current filing; the restamp row holds the move.
+
+# Invariants (service-enforced, entity-checked where local)
+
+- A stamped event's persona equals its pursuit's persona; `parent_id`
+  never crosses personas; a parent exists before its child. These are
+  cross-aggregate and live in the application service, like the
+  persona cascade.
+- `snapshot_id` may only accompany `closed_satisfied` (checked here):
+  it is the kept set frozen at close. `None` on a `closed_satisfied`
+  is a defined state — "concluded with nothing kept" — because an
+  empty snapshot is domain-rejected.
+
+## Functions
+
+- `standing` — Derives standing from a pursuit's events: latest by
+
+## Types
+
+- `Pursuit` — The minted unit of work. Thin and immutable: identity plus intent
+- `PursuitEvent` — One lifecycle fact about a pursuit.
+- `PursuitEventKind` — The closed set of lifecycle facts. One-way: no event edits another,
+- `PursuitRestamp` — One recorded move of a stamped event between pursuits — the repair
+- `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
+- `RestampSubject` — What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
 
 
 <!-- asterism_core/domain__group.md -->
@@ -3918,58 +4106,6 @@ no caller asserts it:
 - `EMBEDDED` — Claim detected in the artefact's own surroundings at ingest.
 - `MANUAL` — Claim declared after the fact on an existing asset.
 - `PUSHED` — Claim pushed with the ingest payload by the caller.
-
-
-<!-- asterism_core/domain__pursuit.md -->
-# asterism-core::domain::pursuit
-
-`Pursuit` — the minted unit of work: one line of generation and
-curation toward an intent, identified by a minted id that its events
-are stamped with (#29, design on #21).
-
-Content ancestry cannot express this unit: round N+1 built from the
-same sources with a new prompt shares no derivation edge with round
-N's outputs, rejected rounds have no descendants, and abandonment has
-no ancestry expression at all. So the identity is minted up front —
-the convergent form of every surviving forge (Gerrit's Change-Id,
-Jujutsu's change id, Radicle's COB ids) — and everything else about
-the pursuit is a projection over the stamped events.
-
-# Shape
-
-- [`Pursuit`] is a thin, immutable row: identity, persona, optional
-  parent, optional human label. No status column, no members.
-- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
-  **standing is derived on read** by [`standing`] — latest event by
-  `(created_at, id)` wins, no row means open. A repeat close is a new
-  fact, not an error.
-- [`PursuitRestamp`] records a move of a stamped event between
-  pursuits — the repair verb for mis-filed correlation. The stamped
-  column holds the current filing; the restamp row holds the move.
-
-# Invariants (service-enforced, entity-checked where local)
-
-- A stamped event's persona equals its pursuit's persona; `parent_id`
-  never crosses personas; a parent exists before its child. These are
-  cross-aggregate and live in the application service, like the
-  persona cascade.
-- `snapshot_id` may only accompany `closed_satisfied` (checked here):
-  it is the kept set frozen at close. `None` on a `closed_satisfied`
-  is a defined state — "concluded with nothing kept" — because an
-  empty snapshot is domain-rejected.
-
-## Functions
-
-- `standing` — Derives standing from a pursuit's events: latest by
-
-## Types
-
-- `Pursuit` — The minted unit of work. Thin and immutable: identity plus intent
-- `PursuitEvent` — One lifecycle fact about a pursuit.
-- `PursuitEventKind` — The closed set of lifecycle facts. One-way: no event edits another,
-- `PursuitRestamp` — One recorded move of a stamped event between pursuits — the repair
-- `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
-- `RestampSubject` — What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
 
 
 <!-- asterism_core/domain__query_group_eval.md -->
