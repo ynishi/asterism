@@ -13,6 +13,7 @@
 
 use asterism_core::domain::content_hash::{self, ContentHasher};
 use asterism_core::domain::content_region;
+use asterism_core::domain::embedded_text;
 use asterism_core::domain::material_meta;
 use asterism_core::domain::material_meta_raw::MetaRaw;
 use asterism_core::domain::repository::MaterialFingerprint;
@@ -60,6 +61,39 @@ const HASH_CHUNK_BYTES: usize = 64 * 1024;
 /// One buffer at a time — every caller is a sequential loop over one
 /// page — so this is the peak, not a per-page cost.
 pub(crate) const MAX_CONTENT_WALK_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Reads one artefact's embedded text and nothing else, rendered the
+/// way the column stores it.
+///
+/// The recovery walk's reader. `hash_artefact` above would answer this
+/// question too — it is one of the four axes it fills — but asking it
+/// here would mean hashing every byte of every picture in the library
+/// to recover a caption, and then throwing three digests away because
+/// the row already carries them. This reads the bytes once and walks
+/// them once.
+///
+/// `Ok(None)` means the file is over the ceiling: nobody has looked, and
+/// the row stays a candidate for a later pass under a larger one. A
+/// format this cannot read is the caller's question, asked before the
+/// file is opened — see
+/// [`embedded_text::walks_format`](asterism_core::domain::embedded_text::walks_format).
+pub(crate) fn recover_embedded_text(
+    path: &str,
+    declared_mime: Option<&MimeType>,
+    max_walk: u64,
+) -> std::io::Result<Option<String>> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > max_walk {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(Some(embedded_text::render(
+        embedded_text::recover(&bytes, declared_mime).as_ref(),
+    )))
+}
 
 /// Reads one artefact **once** and answers every axis.
 ///
@@ -119,7 +153,10 @@ pub(crate) fn hash_artefact(
     // costs. A format no probe handles never becomes a buffer, however
     // large it is — which is why the gate below is not the thing
     // protecting the process from a 4 GB video.
-    if !probes::walks_content(declared_mime) && !probes::walks_meta(declared_mime) {
+    if !probes::walks_content(declared_mime)
+        && !probes::walks_meta(declared_mime)
+        && !embedded_text::walks_format(declared_mime)
+    {
         return Ok(MaterialFingerprint {
             file: stream_digest(&mut file)?,
             content: content_region::unsupported_format(declared_mime).stored_value(),
@@ -131,6 +168,12 @@ pub(crate) fn hash_artefact(
             // container's. The two markers beside it already say who
             // declined and why.
             meta_raw: MetaRaw::Absent.stored_value(),
+            // No walk here has a reading of this format, so nobody has
+            // looked and `NULL` is the true answer. Writing `{}` would
+            // claim the bytes were read and carried no words, which
+            // would retire the row from a pass that learns the format
+            // later.
+            meta_text: None,
         });
     }
     if size > max_walk {
@@ -150,6 +193,10 @@ pub(crate) fn hash_artefact(
             // reader has to know is identical: bytes exist and this
             // build chose not to hold them.
             meta_raw: MetaRaw::TooLarge.stored_value(),
+            // Same again on the text side, and here the distinction
+            // has teeth: the file was not read, so the row stays a
+            // candidate for a later pass under a larger ceiling.
+            meta_text: None,
         });
     }
 
@@ -169,6 +216,22 @@ pub(crate) fn hash_artefact(
         // input would put a megabyte behind every value the meta axis
         // passes around.
         meta_raw: probes::meta_raw(&bytes, declared_mime).stored_value(),
+        // The walk whose output is a document rather than a digest.
+        // Written once the bytes are in hand — `{}` when they carry no
+        // words — because "read and empty" is what retires the row from
+        // the recovery walk, and a `NULL` there would leave every
+        // text-free picture in the library permanently pending.
+        //
+        // Gated on the format for the other half of that contract.
+        // Reaching this line does not mean *this* walk was the one that
+        // asked for the bytes: a JPEG is here because the content-region
+        // walker reads it, and answering `{}` for it would say a text
+        // recovery had looked at those bytes when none exists for that
+        // format. `NULL` keeps the row waiting for the reader that
+        // eventually handles it, which is the same rule the early
+        // returns above follow.
+        meta_text: embedded_text::walks_format(declared_mime)
+            .then(|| embedded_text::render(embedded_text::recover(&bytes, declared_mime).as_ref())),
     })
 }
 

@@ -84,6 +84,29 @@ pub enum JobKind {
     /// pay for a full re-read of the library before the first card
     /// appears.
     MaterialHash,
+    /// Recovers `material.meta_text` — the words a container wrote into
+    /// an artefact, read for search rather than for identity
+    /// ([`embedded_text`](crate::domain::embedded_text)).
+    ///
+    /// One payload shape, `{ "batch": true, "cursor": ... }`, and no
+    /// per-asset form: nothing asks for one. The ingest path already
+    /// fills this column, because the pass that hashes an artefact reads
+    /// the bytes once and answers every axis off that one buffer. What
+    /// this walk exists for is the library that was imported before the
+    /// column existed — a set that is fixed at upgrade time and shrinks
+    /// to nothing.
+    ///
+    /// Its predicate is `meta_text IS NULL` over the formats the
+    /// recovery reads, so a row is offered **once**, whatever came back:
+    /// `{}` ("read, and these bytes carry no words") retires a row as
+    /// firmly as a page of recovered prose does. A startup on a
+    /// recovered library therefore costs one query.
+    ///
+    /// Off the critical path and out of the migration chain for the
+    /// reason the two walks above are: it opens files. A migration would
+    /// pay that before the application serves anything, and it grows
+    /// with the corpus rather than with the change.
+    MaterialText,
     /// Measures `asset.width_px` / `height_px`.
     ///
     /// Two payload shapes, the same split
@@ -371,6 +394,7 @@ impl JobKind {
             Self::QueryGroupRefresh => "query_group_refresh",
             Self::TrashPurge => "trash_purge",
             Self::MaterialHash => "material_hash",
+            Self::MaterialText => "material_text",
             Self::AssetDims => "asset_dims",
             Self::DuplicateScan => "duplicate_scan",
             Self::AssetFold => "asset_fold",
@@ -397,6 +421,7 @@ impl JobKind {
             "query_group_refresh" => Ok(Self::QueryGroupRefresh),
             "trash_purge" => Ok(Self::TrashPurge),
             "material_hash" => Ok(Self::MaterialHash),
+            "material_text" => Ok(Self::MaterialText),
             "asset_dims" => Ok(Self::AssetDims),
             "duplicate_scan" => Ok(Self::DuplicateScan),
             "asset_fold" => Ok(Self::AssetFold),

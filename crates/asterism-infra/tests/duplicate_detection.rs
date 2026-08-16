@@ -108,6 +108,7 @@ fn artefact_only(digest: &str) -> MaterialFingerprint {
         meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
         meta_kv: None,
         meta_raw: None,
+        meta_text: None,
     }
 }
 
@@ -205,6 +206,7 @@ async fn hashed_row(
             meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
             meta_kv: None,
             meta_raw: None,
+            meta_text: None,
         },
         occurred_at,
         declared,
@@ -738,6 +740,7 @@ async fn markers_never_conflict_however_many_rows_share_them() {
                     content: marker.to_string(),
                     meta: marker.to_string(),
                     meta_kv: None,
+                    meta_text: None,
                     meta_raw: None,
                 },
                 DetectionOrigin::Ingest,
@@ -1889,6 +1892,9 @@ fn fingerprint_of(png: &[u8]) -> MaterialFingerprint {
         content: asterism_infra::probes::content(png, Some(&mime)).stored_value(),
         meta_kv: meta.canonical().map(str::to_string),
         meta: meta.stored_value(),
+        // Not a digest and not what these fixtures ask about: the
+        // recovered-text column plays no part in duplicate detection.
+        meta_text: None,
         meta_raw: asterism_infra::probes::meta_raw(png, Some(&mime)).stored_value(),
     }
 }

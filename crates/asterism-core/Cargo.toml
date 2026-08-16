@@ -40,14 +40,23 @@ chrono      = { workspace = true }
 sha2        = { workspace = true }
 base64      = { workspace = true }
 
-# `pngmeta` used to be here, for the PNG chunk walk in
-# `domain::content_region`. Both left together: the walk is a container
-# parser, one implementation per format, and it now sits behind
+# `pngmeta` left once, for the PNG chunk walk in
+# `domain::content_region`: the walk is a container parser, one
+# implementation per format, and it now sits behind
 # `domain::probe::ArtefactProbe` with the byte-level framing in
 # `asterism-media-probe` (which took the dependency, and the note that
 # went with it) and the region definition in `asterism-infra`'s probe
 # adapter. What stayed is the vocabulary — the markers, the three
 # outcomes, the canonical rendering — none of which reads a byte.
+#
+# `domain::embedded_text` brings it back, with `inflate` on. It is a
+# text layer inside this crate: it recovers the words a `zTXt` / `iTXt`
+# chunk carries so a picture can be found by them, and without the
+# feature every one of those chunks is an
+# `Error::CompressionUnsupported` instead of a sentence somebody wrote.
+# The module bounds what it decompresses itself (`MAX_RECOVERED_BYTES`,
+# beneath `pngmeta`'s own per-chunk ceiling).
+pngmeta     = { version = "0.2.1", features = ["inflate"] }
 #
 # `sha2` stays, and it is one of the two external crates the domain
 # layer takes for a measurement: what SHA-256 of these bytes is has one
@@ -72,3 +81,13 @@ icu_locale_core = { workspace = true }
 # mini-app-mcp     = { workspace = true }
 # outline-mcp-core = { workspace = true }
 # agent-block-core = { workspace = true }
+
+[dev-dependencies]
+# Fixture builder for `domain::embedded_text`'s tests — valid PNGs
+# carrying `zTXt`, `iTXt`, duplicate keywords and deliberately malformed
+# chunks. Building those by hand is the chunk-boundary arithmetic this
+# crate takes the dependency to avoid; writing it again in the tests
+# would put it back, and the fixtures would then agree with the walker
+# by construction rather than by test. The same reasoning
+# `asterism-importer-sdk` gives for the same dev-dependency.
+pngmeta     = { version = "0.2.1", features = ["inflate", "test-util"] }

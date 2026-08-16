@@ -623,6 +623,26 @@ pub struct MaterialFingerprint {
     /// the struct back, which is what keeps that omission from clearing
     /// the column.
     pub meta_raw: Option<String>,
+    /// The words the container wrote into the artefact, recovered for
+    /// search (`crate::domain::embedded_text`) — the canonical object,
+    /// or `None` when this pass did not look.
+    ///
+    /// Not a fourth axis and deliberately not a digest. Nothing groups
+    /// on it; it is the *document* side of the same chunks the meta
+    /// digest is taken over, read generously where that one has to be
+    /// frozen — `zTXt` and `iTXt` included, Latin-1 recovered rather
+    /// than replaced.
+    ///
+    /// Here rather than in a pass of its own because the bytes are
+    /// already in the buffer. The alternative is opening every picture
+    /// again from the job that composes documents, which is the read
+    /// this whole struct exists to avoid doing twice.
+    ///
+    /// `Some("{}")` is a real answer — "read, and these bytes carry no
+    /// words" — and is what keeps a backfill from reading such a file
+    /// on every pass. `None` reaches the column as SQL `NULL`, which
+    /// means nobody has looked.
+    pub meta_text: Option<String>,
 }
 
 /// A set of live assets that share one content fingerprint.
@@ -1326,6 +1346,51 @@ pub trait AssetRepository: Send + Sync {
         after: Option<(&AssetId, u32)>,
         limit: u32,
     ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Materials whose embedded text nobody has looked for yet
+    /// (`meta_text IS NULL`), oldest asset first, at most `limit` of
+    /// them — the recovery walk's page.
+    ///
+    /// Same row shape and same composite cursor as
+    /// [`scan_unhashed_materials`](Self::scan_unhashed_materials),
+    /// because it is the same table walked for the same kind of reason;
+    /// what differs is the question. That one asks "does this row owe a
+    /// digest", which is answered by a versioned vocabulary and can
+    /// therefore be re-asked when the vocabulary moves. This one asks
+    /// "has anything looked for words in these bytes", which the column
+    /// answers by existing at all — so the predicate is `IS NULL` and a
+    /// row leaves the set whatever the walk found in it, `{}` included.
+    ///
+    /// The format is **not** filtered here. A caller that reads bytes
+    /// decides what it can read
+    /// ([`embedded_text::walks_format`](crate::domain::embedded_text::walks_format)),
+    /// and pushing that list into SQL would put a second copy of it in a
+    /// string, to be re-typed the day the recovery learns a container.
+    async fn scan_unrecovered_text(
+        &self,
+        after: Option<(&AssetId, u32)>,
+        limit: u32,
+    ) -> Result<Vec<UnhashedMaterial>, DomainError>;
+
+    /// Writes one material's recovered text and nothing else.
+    ///
+    /// Narrow on purpose. The three digest columns beside it are one
+    /// measurement written by one statement
+    /// ([`set_material_fingerprint`](Self::set_material_fingerprint)),
+    /// and the recovery walk has no business restating any of them: it
+    /// did not compute them, the row already carries them, and writing
+    /// them back would make a text pass into a re-fingerprint of the
+    /// library under another name.
+    ///
+    /// `None` writes SQL `NULL` — "nobody has looked" — which is what a
+    /// walk records when it could not read the bytes at all, so the row
+    /// stays in the set for a later pass.
+    async fn set_material_embedded_text(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        meta_text: Option<&str>,
+    ) -> Result<(), DomainError>;
 
     /// Materials that **already carry** their fingerprints, oldest asset
     /// first, at most `limit` of them — the inverse of
@@ -2497,6 +2562,39 @@ pub trait AssetBodyRepository: Send + Sync {
     /// Fetches the body text of one asset (`None` when the row is
     /// missing — e.g. source unreadable at ingest time).
     async fn get(&self, asset_id: &AssetId) -> Result<Option<String>, DomainError>;
+    /// Drops the cached body for one asset, answering whether there was
+    /// one. Idempotent — a missing row is a no-op that returns `false`.
+    ///
+    /// The verb this port was missing. A body is composed from what an
+    /// asset says about itself
+    /// ([`derive_text`](crate::domain::derived_text::derive_text)), and
+    /// that population can *shrink* to nothing: a comment thread
+    /// emptied, a cover cleared, a title deleted. The indexer is told
+    /// to forget such a row, and until this verb existed the cache was
+    /// not — leaving a body behind that no longer describes anything,
+    /// which the next Tantivy rebuild would read back as truth.
+    ///
+    /// Deleting rather than writing an empty string, because the two
+    /// mean different things to the backfill scan: no row is "nothing
+    /// to say", and a row holding `""` would be a composed answer of
+    /// zero length.
+    ///
+    /// The answer is what lets a caller tell "this asset just stopped
+    /// having anything to say" from "this asset never had anything to
+    /// say" — the common case on a walk over a fresh library, where
+    /// retracting a document that was never written costs an index
+    /// write and a flush per row for no change.
+    async fn delete(&self, asset_id: &AssetId) -> Result<bool, DomainError>;
+    /// Clears the composition stamp on one asset's cached body, leaving
+    /// the text in place. A missing row is a no-op.
+    ///
+    /// What a writer calls when it changed the text an asset derives
+    /// from and could **not** get the re-index onto the queue. Without
+    /// it the row is invisible to recovery: its body was composed by the
+    /// current reading, so the backfill — which selects bodies composed
+    /// by an older one — passes over it, and the stale document survives
+    /// until somebody happens to edit that asset again.
+    async fn unstamp(&self, asset_id: &AssetId) -> Result<(), DomainError>;
     /// Bulk page scan for backfill jobs. Returns `(asset_id, body_text)`
     /// pairs in id order, starting from the given cursor (exclusive).
     /// Empty vec signals end of scan. `limit` clamps to a sane page.
@@ -3087,6 +3185,18 @@ pub trait AssetCommentRepository: Send + Sync {
     /// Fetches every comment attached to `asset_id`, oldest first
     /// (matches the natural conversation reading order).
     async fn list_by_asset(&self, asset_id: &AssetId) -> Result<Vec<AssetComment>, DomainError>;
+
+    /// Fetches one comment by its own id (`None` when it is not
+    /// there).
+    ///
+    /// The thread walk above cannot answer this: it is keyed by the
+    /// asset, and the one command that carries a comment id alone is
+    /// `delete`. What that command needs before the row goes is the
+    /// asset it was attached to — the comment is a section of that
+    /// asset's derived text, so deleting one makes the asset's search
+    /// document stale, and the id of the asset to re-index is only
+    /// readable while the row still exists.
+    async fn find(&self, id: &AssetCommentId) -> Result<Option<AssetComment>, DomainError>;
 
     /// Deletes a single comment. Idempotent — a missing id is a
     /// no-op.

@@ -89,6 +89,7 @@ the private design notes.
 - [`domain::constellation`](domain__constellation.md): Constellation edge planning — pure domain logic that decides how a
 - [`domain::content_hash`](domain__content_hash.md): `content_hash` — the fingerprint of an original artefact's bytes.
 - [`domain::content_region`](domain__content_region.md): `content_region` — what a reading of "the bytes that decide what
+- [`domain::derived_text`](domain__derived_text.md): Derived text — the one string an asset offers a full-text index,
 - [`domain::dir`](domain__dir.md): `Dir` — a persona-scoped folder tree for organising the sidebar.
 - [`domain::disclosure`](domain__disclosure.md): What an artefact discloses about how it was made, and the rule that
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
@@ -97,6 +98,7 @@ the private design notes.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
+- [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.

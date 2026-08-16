@@ -12,13 +12,14 @@ use asterism_core::application_support::duplicate_detection::{
 use asterism_core::domain::asset::{Asset, ContentFlags};
 use asterism_core::domain::constellation::plan_edges;
 use asterism_core::domain::content_hash::{self, UNHASHABLE};
+use asterism_core::domain::derived_text::derive_text;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
 use asterism_core::domain::provenance;
 use asterism_core::domain::render::render_policy;
 use asterism_core::domain::repository::{
-    AssetBodyRepository, AssetRepository, DimsProbe, DimsScope, DimsWritePolicy, EdgeRepository,
-    IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository, SeriesRepository,
-    SourceTextReader, TagRepository, TextLocator, ThumbRepository,
+    AssetBodyRepository, AssetCommentRepository, AssetRepository, DimsProbe, DimsScope,
+    DimsWritePolicy, EdgeRepository, IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository,
+    SeriesRepository, SourceTextReader, TagRepository, TextLocator, ThumbRepository,
 };
 use asterism_core::domain::series::SeriesKey;
 use asterism_core::domain::source_locator::SourceLocator;
@@ -207,6 +208,7 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
                     .assets
                     .set_cover(&asset.id, &CoverText::new(cover)?)
                     .await?;
+                enqueue_reindex(env, &asset.id).await?;
                 Ok("cover taken from earliest member".into())
             }
             None => Ok("container has no covered member yet, skipped".into()),
@@ -242,7 +244,27 @@ pub async fn cover_gen(env: &JobEnv, payload: &serde_json::Value) -> Result<Stri
         .assets
         .set_cover(&asset.id, &CoverText::new(cover)?)
         .await?;
+    enqueue_reindex(env, &asset.id).await?;
     Ok("cover generated".into())
+}
+
+/// Re-composes one asset's search document after a handler wrote a
+/// field the document is derived from.
+///
+/// Every fan-out at ingest enqueues `IndexRebuild` alongside the jobs
+/// below it, and those jobs then write the fields the document is made
+/// of — a cover, keywords, the metadata a container carried. Whichever
+/// order the queue drains them in, the document composed first was
+/// composed from less than the row now says, so the write is what has
+/// to re-enqueue.
+async fn enqueue_reindex(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::IndexRebuild,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
+    Ok(())
 }
 
 /// Reads the original artefact for a filesystem-backed asset. A read
@@ -342,6 +364,10 @@ pub async fn auto_tag(env: &JobEnv, payload: &serde_json::Value) -> Result<Strin
             serde_json::json!({ "asset_id": asset.id.to_string() }),
         )
         .await?;
+    // Same ordering argument on the search axis: keywords are one of
+    // the sections the derived text is composed from, and the document
+    // written at ingest was composed before this handler wrote them.
+    enqueue_reindex(env, &asset.id).await?;
     Ok(format!("{} keyword(s) tagged", names.len()))
 }
 
@@ -679,6 +705,14 @@ pub async fn material_hash(
             }
             HashOutcome::Skipped => skipped += 1,
         }
+    }
+    // Reading the bytes is also what writes `material.meta_kv` — the
+    // canonical metadata object a container carried, which for a
+    // generated image is where the prompt is. That is a section of the
+    // derived text, and it did not exist when the ingest-time document
+    // was composed, so a hashing pass that wrote anything re-indexes.
+    if hashed > 0 {
+        enqueue_reindex(env, &asset.id).await?;
     }
     Ok(format!(
         "material_hash: hashed={hashed} skipped={skipped} conflicts={conflicts} \
@@ -1139,6 +1173,156 @@ impl std::fmt::Display for DerivedTally {
             self.derived, self.empty, self.not_applicable, self.failed
         )
     }
+}
+
+/// Page size for the embedded-text recovery walk.
+///
+/// The same size the hash walk uses, because the shape of the work is
+/// the same: open a file, walk its bytes, write one column. It is
+/// cheaper per row (no digest over the whole buffer), which makes this
+/// page a conservative choice rather than a tuned one.
+const MATERIAL_TEXT_PAGE: u32 = 50;
+
+/// Recovers `material.meta_text` for the library that predates the
+/// column — [`JobKind::MaterialText`](asterism_core::domain::job::JobKind::MaterialText).
+///
+/// Batch only. The ingest path fills this column as a side effect of
+/// hashing, so the per-asset form would have no caller; what needs a
+/// walk is the set that was already on disk when the column arrived.
+///
+/// # What each row costs, and why the set shrinks
+///
+/// A row leaves the set as soon as anything is written to it, and
+/// something is written for every row the walk can *read* — `{}` when
+/// the bytes carry no words is an answer, not a gap. The rows that stay
+/// are the ones nothing looked at: a format this recovery does not
+/// read, a locator with no file behind it, a file over the walk ceiling
+/// or gone from disk. Those are `NULL` because that is true of them,
+/// and they cost one page scan on the next startup rather than a
+/// re-read.
+///
+/// # It re-composes what it recovers
+///
+/// Words on a row are not yet words in a document. A row that gained
+/// text here has a search document composed before that text existed,
+/// so the asset is queued for re-composition — but only when something
+/// was actually found, because a walk over a library of text-free
+/// pictures would otherwise enqueue one no-op job per picture.
+pub async fn material_text(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let cursor: Option<(AssetId, u32)> = match payload.get("cursor") {
+        Some(serde_json::Value::Object(o)) => {
+            let id = o
+                .get("asset_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .map(AssetId::from_uuid);
+            let ord = o.get("ord").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            id.map(|id| (id, ord))
+        }
+        _ => None,
+    };
+    let page = env
+        .deps
+        .assets
+        .scan_unrecovered_text(
+            cursor.as_ref().map(|(id, ord)| (id, *ord)),
+            MATERIAL_TEXT_PAGE,
+        )
+        .await?;
+    if page.is_empty() {
+        return Ok("material_text backfill: nothing left to recover".into());
+    }
+    let last = page
+        .last()
+        .map(|m| (m.asset_id, m.ord))
+        .expect("page is non-empty");
+    let full = page.len() as u32 == MATERIAL_TEXT_PAGE;
+
+    let mut recovered = 0usize;
+    let mut empty = 0usize;
+    let mut skipped_format = 0usize;
+    let mut unreadable = 0usize;
+    // One re-index per asset, not per material: an asset's RAW and its
+    // JPEG are two rows of this walk and one document.
+    let mut touched: std::collections::HashSet<AssetId> = std::collections::HashSet::new();
+
+    for row in page {
+        // Asked before anything is opened — this is what keeps the walk
+        // off every video and every text note in the library.
+        if !asterism_core::domain::embedded_text::walks_format(row.mime.as_ref()) {
+            skipped_format += 1;
+            continue;
+        }
+        let Some(path) = row.locator.local_path() else {
+            // A record inside a container or a remote address: there are
+            // no bytes here to look in, and saying "read, and empty"
+            // would retire a row nothing read.
+            unreadable += 1;
+            continue;
+        };
+        match crate::fingerprint::recover_embedded_text(
+            &path.to_string_lossy(),
+            row.mime.as_ref(),
+            crate::fingerprint::MAX_CONTENT_WALK_BYTES,
+        ) {
+            Ok(Some(rendered)) => {
+                let carried_words = rendered != "{}";
+                env.deps
+                    .assets
+                    .set_material_embedded_text(&row.asset_id, row.ord, Some(&rendered))
+                    .await?;
+                if carried_words {
+                    recovered += 1;
+                    touched.insert(row.asset_id);
+                } else {
+                    empty += 1;
+                }
+            }
+            // Over the ceiling: nobody looked, so the row keeps waiting.
+            Ok(None) => unreadable += 1,
+            Err(err) => {
+                unreadable += 1;
+                tracing::warn!(
+                    event = "diag.material_text.unreadable",
+                    asset_id = %row.asset_id,
+                    ord = %row.ord,
+                    error = %err,
+                    "left with no recovered text"
+                );
+            }
+        }
+    }
+
+    for asset_id in &touched {
+        enqueue_reindex(env, asset_id).await?;
+    }
+
+    // Chain only on a full page, for the reason the hash walk gives: a
+    // short page is the end of the scan, and the rows this pass cannot
+    // answer stay `NULL` by design — "nothing was recovered" is not a
+    // stop condition, "nothing was scanned" is.
+    if full {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::MaterialText,
+                serde_json::json!({
+                    "batch": true,
+                    "cursor": { "asset_id": last.0.to_string(), "ord": last.1 },
+                }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "material_text backfill page: recovered={recovered} empty={empty} \
+         skipped_format={skipped_format} unreadable={unreadable} \
+         reindexed={} next_cursor={}#{} more={full}",
+        touched.len(),
+        last.0,
+        last.1
+    ))
 }
 
 /// Page size for the dimension backfill.
@@ -1713,6 +1897,10 @@ async fn hash_material(
                     file: UNHASHABLE.to_string(),
                     content: UNHASHABLE.to_string(),
                     meta: UNHASHABLE.to_string(),
+                    // Nothing was read, so nobody has looked: `NULL`
+                    // rather than the `{}` that would retire the row
+                    // from a later pass.
+                    meta_text: None,
                     meta_kv: None,
                     meta_raw: None,
                 },
@@ -2406,6 +2594,40 @@ pub async fn asset_fold(env: &JobEnv, payload: &serde_json::Value) -> Result<Str
         FoldOutcome::Folded(report) => {
             let unindexed = retire_headstone(env, &headstone).await?;
 
+            // The other side of the fold. Everything the headstone held
+            // that is *text* — its keywords, its labels, the comment
+            // thread that followed it — is on the keeper now, so the
+            // keeper's document describes a row that has since grown.
+            // This is the automatic path's half of what `merge_assets`
+            // does by hand for the ruled path; without it a fold reached
+            // through duplicate detection leaves the absorbed words
+            // unfindable under the row that now holds them.
+            if let Err(err) = enqueue_reindex(env, &keeper).await {
+                tracing::warn!(
+                    event = "diag.fold.keeper_reindex_failed",
+                    asset_id = %keeper,
+                    error = %err,
+                    "the keeper of a fold was not queued for re-composition"
+                );
+                // The same fallback `AssetService::reindex` and
+                // `AssetCommentService::reindex` take, for the same
+                // reason: the backfill walk selects bodies composed by
+                // an *older* reading, and this keeper's body carries
+                // the current stamp, so the walk passes straight over
+                // it. Clearing the stamp is what puts it back in front
+                // of the walk. If that write fails too, the queue and
+                // the database are both refusing writes and there is
+                // nothing further to try from here.
+                if let Err(err) = env.deps.asset_bodies.unstamp(&keeper).await {
+                    tracing::warn!(
+                        event = "diag.fold.keeper_unstamp_failed",
+                        asset_id = %keeper,
+                        error = %err,
+                        "a fold's keeper keeps a document composed before it absorbed"
+                    );
+                }
+            }
+
             Ok(format!(
                 "asset_fold: {headstone} into {keeper} \
                  (edges {}→keeper, {} dropped; buckets {}; children {}; tags {}; \
@@ -2453,6 +2675,20 @@ async fn retire_headstone(
             false
         }
     };
+
+    // The durable half of the same removal. The body cache is what a
+    // Tantivy rebuild reads, so a headstone that keeps its body comes
+    // back as a hit the next time the index is rebuilt — the removal
+    // above would be undone by the very mechanism that exists to repair
+    // the index.
+    if let Err(err) = env.deps.asset_bodies.delete(headstone).await {
+        tracing::warn!(
+            event = "diag.fold.body_delete_failed",
+            asset_id = %headstone,
+            error = %err,
+            "a headstone kept its cached body after a fold"
+        );
+    }
 
     // Group membership and tag links both moved, and both are Query
     // Group rule inputs — so is the row leaving the live population at
@@ -2631,11 +2867,12 @@ const INDEX_BACKFILL_PAGE: u32 = 200;
 ///   body via [`SourceTextReader`], upserts `asset_body`, adds a
 ///   Tantivy document, and commits. Enqueued by `AssetService::add`
 ///   at ingest time.
-/// - `{ "batch": true }` — backfill mode. Scans `asset` LEFT JOIN
-///   `asset_body IS NULL`, processes one page (`INDEX_BACKFILL_PAGE`),
-///   then chain-enqueues itself for the next page when the page was
-///   full. Idempotent — re-running against a fully-indexed DB is a
-///   no-op (`scan_missing_body` returns empty).
+/// - `{ "batch": true }` — backfill mode. Scans for assets whose cached
+///   body is missing or was composed by an older reading of the asset,
+///   processes one page (`INDEX_BACKFILL_PAGE`), then chain-enqueues
+///   itself for the next page when the page was full. Idempotent —
+///   re-running against a fully-composed DB is a no-op
+///   (`scan_stale_body` returns empty).
 ///
 /// Failure per asset (locator unreadable, tantivy write error) is
 /// logged and skipped — the row simply lands without a body cache
@@ -2678,23 +2915,37 @@ pub async fn index_rebuild(
         ));
     }
     let locator = asset.source.locator.clone();
-    // Third axis, and the one the shape of this job used to be missing:
-    // the body cache and the full-text index are for text. A picture
-    // reaching the reader came back as its own bytes spelled as lossy
-    // UTF-8 — indexed, tokenised, and stored [measured 2026-08-05]. The
-    // enqueue side declines these too; this is the half that holds when
-    // a job was enqueued before the format was known.
-    let Some(text) = TextLocator::new(locator.clone(), primary_mime(&asset)) else {
-        return Ok(format!("{} is not text, skipped", locator.to_display()));
+    // The original's bytes are one *section* of the document, not the
+    // document. Reading them is still gated on the format — a picture
+    // reaching the text reader came back as its own bytes spelled as
+    // lossy UTF-8, indexed and tokenised [measured 2026-08-05] — but a
+    // failed gate no longer ends the job: the words about a picture
+    // (title / cover / labels / keywords / material metadata / declared
+    // meta / comments) are what `derive_text` composes, and they exist
+    // whether or not the file is readable as text.
+    let file_body = match TextLocator::new(locator.clone(), primary_mime(&asset)) {
+        Some(text) => env
+            .deps
+            .source_texts
+            .read_batch(std::slice::from_ref(&text))
+            .await?
+            .into_iter()
+            .next()
+            .flatten(),
+        None => None,
     };
-    let bodies = env
+    let comment_bodies: Vec<String> = env
         .deps
-        .source_texts
-        .read_batch(std::slice::from_ref(&text))
-        .await?;
-    let Some(Some(body)) = bodies.into_iter().next() else {
+        .comments
+        .list_by_asset(&asset.id)
+        .await?
+        .into_iter()
+        .map(|c| c.body)
+        .collect();
+    let Some(body) = derive_text(&asset, file_body.as_deref(), &comment_bodies) else {
+        retract_document(env, &asset.id, asset.persona_id).await?;
         return Ok(format!(
-            "no readable body for {}, skipped",
+            "no derivable text for {}, skipped",
             locator.to_display()
         ));
     };
@@ -2714,9 +2965,55 @@ pub async fn index_rebuild(
     Ok(format!("indexed asset {} ({} bytes)", asset.id, body.len()))
 }
 
+/// Takes one asset out of the search surface entirely — the cached
+/// body and the retrieval document together.
+///
+/// Called from both composing paths when an asset derives to nothing,
+/// so that the single-doc job and the backfill page leave a row in the
+/// same state. They did not, briefly: the page dropped the body and
+/// left the document, which is the worse half of the pair to leave
+/// behind, since Tantivy is what search actually answers from.
+///
+/// **The delete leads and its answer gates the rest.** A row that had
+/// no body had no document either — the two are written by the same
+/// handler in the same breath — so on a walk over a library of rows
+/// that never had anything to say, an unconditional retraction is one
+/// index write, one flush and one Query Group notification per row, all
+/// of them saying nothing changed. Asking the cache first turns that
+/// into one cheap `DELETE` that matches nothing.
+async fn retract_document(
+    env: &JobEnv,
+    asset_id: &AssetId,
+    persona_id: asterism_core::domain::value::PersonaId,
+) -> Result<(), DomainError> {
+    if !env.deps.asset_bodies.delete(asset_id).await? {
+        return Ok(());
+    }
+    env.deps.search_index.remove(asset_id).await?;
+    env.deps.search_index.flush().await?;
+    notify_query_groups(env, persona_id);
+    Ok(())
+}
+
 /// One page of the backfill scan. Chain-enqueues itself while the
 /// last page was full so the whole backlog drains without a driver
 /// process.
+///
+/// The scan (`scan_stale_body`) takes two states, and it needs both.
+/// "No `asset_body` row" is every picture ever imported, because the
+/// pre-derivation handler refused them all. "A body stamped with an
+/// older
+/// [`COMPOSITION_VERSION`](asterism_core::domain::derived_text::COMPOSITION_VERSION)"
+/// is the other half, and leaving it out is what made this walk look
+/// finished while it was not: a **text** asset indexed before derivation
+/// existed already had a body (the file's bytes), so it was invisible
+/// here and its own title, keywords and comment thread never reached its
+/// document.
+///
+/// Raising that constant is therefore the supported way to re-compose a
+/// library after teaching `derive_text` a new section — the walk finds
+/// every row exactly once and stops, with no predicate that means "read
+/// every source file again".
 async fn index_rebuild_batch(
     env: &JobEnv,
     payload: &serde_json::Value,
@@ -2735,38 +3032,96 @@ async fn index_rebuild_batch(
     let page = env
         .deps
         .assets
-        .scan_missing_body(cursor_id.as_ref(), INDEX_BACKFILL_PAGE)
+        .scan_stale_body(cursor_id.as_ref(), INDEX_BACKFILL_PAGE)
         .await?;
     if page.is_empty() {
         return Ok("index backfill: done (no more assets)".into());
     }
     // Batch-resolve source texts by container so a 200-message
     // Claude Code session costs one file pass. Rows whose bytes are
-    // not text drop out here rather than being read: the scan returns
-    // the format for exactly this decision.
+    // not text are not *read* — the scan returns the format for
+    // exactly that decision — but they stay in the page: a picture has
+    // no file body and is still the case this walk exists to index.
     let last_id_str: String = page.last().unwrap().asset_id.to_string();
-    let candidates: Vec<(
-        AssetId,
-        asterism_core::domain::value::PersonaId,
-        TextLocator,
-    )> = page
+    let rows: Vec<(AssetId, Option<TextLocator>)> = page
         .into_iter()
-        .filter_map(|row| {
-            TextLocator::new(row.locator, row.mime.as_ref())
-                .map(|locator| (row.asset_id, row.persona_id, locator))
+        .map(|row| {
+            let asset_id = row.asset_id;
+            (asset_id, TextLocator::new(row.locator, row.mime.as_ref()))
         })
         .collect();
-    let locators: Vec<TextLocator> = candidates.iter().map(|(_, _, l)| l.clone()).collect();
-    let bodies = env.deps.source_texts.read_batch(&locators).await?;
+    let locators: Vec<TextLocator> = rows.iter().filter_map(|(_, l)| l.clone()).collect();
+    let mut file_bodies = env
+        .deps
+        .source_texts
+        .read_batch(&locators)
+        .await?
+        .into_iter();
     let mut indexed = 0u64;
-    let mut skipped_no_body = 0u64;
+    let mut skipped_no_text = 0u64;
+    // Rows that were trashed or folded between the scan and their turn
+    // in the page. Counted rather than folded into `skipped_no_text`
+    // because they are a different event: those rows have plenty to say
+    // and are simply no longer part of the live population.
+    let mut skipped_gone = 0u64;
     // Personas whose search dimension this page changed — notified
     // once after the commit (W4-a); the per-persona debounce
     // additionally collapses across chained pages.
     let mut touched_personas = std::collections::HashSet::new();
-    for ((asset_id, persona_id, _), body_opt) in candidates.into_iter().zip(bodies) {
-        let Some(body) = body_opt else {
-            skipped_no_body += 1;
+    for (asset_id, locator) in rows {
+        // `read_batch` answers one slot per locator handed in, in
+        // order, so the reader's answers are drawn only for the rows
+        // that contributed a locator — pulling one per row would
+        // desynchronise the two sequences at the first picture.
+        let file_body = match locator {
+            Some(_) => file_bodies.next().flatten(),
+            None => None,
+        };
+        // The slim scan row carries the locator and the mime and
+        // nothing else; composing needs the whole asset (labels,
+        // keywords, cover, materials and their metadata), so the row
+        // is hydrated here. One `find` per asset is the cost of the
+        // walk seeing what the single-doc path sees.
+        let Some(asset) = env.deps.assets.find(&asset_id).await? else {
+            continue;
+        };
+        // The same two guards the single-doc path carries, for the same
+        // reason and against a shorter race: the scan excluded trashed
+        // rows and headstones in SQL, but a page is composed one row at
+        // a time after that query returned, and a trash or a fold
+        // landing in between would otherwise put a row into the index
+        // that the grid cannot show.
+        if asset.trashed_at.is_some() || asset.folded_into.is_some() {
+            skipped_gone += 1;
+            continue;
+        }
+        let persona_id = asset.persona_id;
+        let comment_bodies: Vec<String> = env
+            .deps
+            .comments
+            .list_by_asset(&asset_id)
+            .await?
+            .into_iter()
+            .map(|c| c.body)
+            .collect();
+        let Some(body) = derive_text(&asset, file_body.as_deref(), &comment_bodies) else {
+            skipped_no_text += 1;
+            // Now that the scan reaches rows that already have a body,
+            // "nothing to say" can be a *change* rather than a state the
+            // row was always in — the words that produced the cached
+            // body may have been deleted since. The retraction is the
+            // single-doc path's, verbatim, so a row ends this walk in
+            // the state that path would have left it in: no body **and**
+            // no document. A row that never had either pays one `DELETE`
+            // that matches nothing.
+            if let Err(err) = retract_document(env, &asset_id, persona_id).await {
+                tracing::warn!(
+                    event = "diag.retrieval.retract_failed",
+                    asset_id = %asset_id,
+                    error = %err,
+                    "a row with nothing left to say kept its search surface"
+                );
+            }
             continue;
         };
         if let Err(err) = env.deps.asset_bodies.upsert(&asset_id, &body).await {
@@ -2812,7 +3167,8 @@ async fn index_rebuild_batch(
         )
         .await?;
     Ok(format!(
-        "index backfill page: indexed={indexed} skipped_no_body={skipped_no_body} \
+        "index backfill page: indexed={indexed} skipped_no_text={skipped_no_text} \
+         skipped_gone={skipped_gone} \
          next_cursor={last_id_str}"
     ))
 }
@@ -3227,6 +3583,7 @@ mod tests {
             ),
             meta_kv: Some(r#"{"prompt":"a cat"}"#.to_string()),
             meta_raw: None,
+            meta_text: None,
         };
 
         for declared in [&fingerprint.file, &fingerprint.content, &fingerprint.meta] {
@@ -3294,6 +3651,7 @@ mod tests {
                 meta: marker.to_string(),
                 meta_kv: None,
                 meta_raw: None,
+                meta_text: None,
             };
             assert!(
                 declared_axis_value(&declared, &fingerprint).is_none(),
@@ -3314,6 +3672,7 @@ mod tests {
             meta: content_region::NOT_WALKED.to_string(),
             meta_kv: None,
             meta_raw: None,
+            meta_text: None,
         };
         let (axis, recomputed) =
             declared_axis_value(&declared, &measured).expect("a digest is checkable");
@@ -3331,6 +3690,7 @@ mod tests {
             meta: content_region::NOT_WALKED.to_string(),
             meta_kv: None,
             meta_raw: None,
+            meta_text: None,
         };
         let (axis, recomputed) =
             declared_axis_value(asterism_core::domain::content_hash::EMPTY, &empty)

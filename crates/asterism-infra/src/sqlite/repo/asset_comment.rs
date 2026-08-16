@@ -139,6 +139,30 @@ impl AssetCommentRepository for SqliteAssetCommentRepository {
         rows.into_iter().map(CommentRow::into_domain).collect()
     }
 
+    async fn find(&self, id: &AssetCommentId) -> Result<Option<AssetComment>, DomainError> {
+        let uuid = *id.as_uuid();
+        let row = self
+            .isle
+            .call(move |conn| {
+                conn.query_row(
+                    &format!(
+                        "SELECT {} FROM asset_comment WHERE id = ?1",
+                        CommentRow::COLUMNS
+                    ),
+                    params![uuid],
+                    CommentRow::from_row,
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })
+            })
+            .await
+            .map_err(infra_err)?;
+        row.map(CommentRow::into_domain).transpose()
+    }
+
     async fn delete(&self, id: &AssetCommentId) -> Result<(), DomainError> {
         let uuid = *id.as_uuid();
         self.isle

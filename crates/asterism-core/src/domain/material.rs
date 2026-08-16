@@ -132,6 +132,26 @@ pub struct Material {
     /// A marker has no object, and writing `{}` for one would say the
     /// container was read and carried nothing.
     pub meta_kv: Option<String>,
+    /// The words the container wrote into these bytes, recovered for
+    /// search (`crate::domain::embedded_text`) — the same canonical
+    /// object shape [`meta_kv`](Self::meta_kv) holds, so one reader
+    /// walks both.
+    ///
+    /// Its sibling above is the body of a digest and cannot move: two
+    /// equal metadata sets must render identically or the meta axis
+    /// stops grouping, which is why that reading is frozen at `tEXt`
+    /// read lossily. This column is a document. It carries the `zTXt`
+    /// and `iTXt` chunks that reading excludes, and the Latin-1 bytes
+    /// it replaces with U+FFFD — the sentences a person can see in
+    /// their image viewer and could not, until this column, find by
+    /// searching for.
+    ///
+    /// **`{}` is an answer here, and that is the difference from
+    /// `meta_kv`.** The three states are `NULL` (nobody has looked),
+    /// `{}` (looked, and these bytes carry no words) and an object.
+    /// Without the middle one every text-free PNG in the library is a
+    /// candidate for every backfill pass, forever.
+    pub meta_text: Option<String>,
     /// When this material record was created.
     pub created_at: DateTime<Utc>,
     /// Last modification timestamp.
@@ -159,6 +179,7 @@ impl Material {
             content_region_hash: None,
             meta_hash: None,
             meta_kv: None,
+            meta_text: None,
             created_at: now,
             updated_at: now,
         }

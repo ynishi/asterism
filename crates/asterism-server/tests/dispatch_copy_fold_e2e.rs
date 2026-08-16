@@ -387,6 +387,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         content: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
         meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
         meta_kv: None,
+        meta_text: None,
         meta_raw: None,
     };
     for id in [&original_id, &copy_id] {

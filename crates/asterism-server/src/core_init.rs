@@ -756,6 +756,7 @@ pub async fn init_core_with(
                     thumbs: thumbs.clone(),
                     modalities: modalities.clone(),
                     asset_bodies: asset_bodies.clone(),
+                    comments: (*asset_comments).clone(),
                     search_index: indexer.clone(),
                     source_texts: source_texts.clone(),
                     dispatch: dispatch_cell.clone(),
@@ -807,6 +808,7 @@ pub async fn init_core_with(
         // is the fan-out, so a trashed asset leaves both indexes.
         search_index.clone(),
         indexer.clone(),
+        Arc::new(asset_bodies.clone()),
         query_groups.clone(),
         query_group_invalidator.clone(),
         session_service.clone(),
@@ -1177,6 +1179,8 @@ pub async fn init_core_with(
             asset_comments,
             assets_arc.clone(),
             personas.clone(),
+            job_queue_arc.clone(),
+            Arc::new(asset_bodies.clone()),
         )),
         material_mark_service: Arc::new(MaterialMarkService::new(
             material_marks,

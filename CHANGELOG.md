@@ -310,6 +310,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   either way. `just check` is unchanged: the gate still means the whole
   suite.
 
+- **Recall by meaning — a picture's words become the body search reads**
+  (#32). "What does search see" had one answer: the bytes of the
+  original, when those bytes were text. A transcript was findable and a
+  picture was not — even though the library already held sentences
+  about it, a title somebody typed, the alt text an importer lifted out
+  of the page, the keywords the auto-tag pass wrote, the generation
+  prompt sitting in a PNG chunk, a note left in the comment thread.
+  None of them reached the index, so the honest description of the
+  search surface was "text files only" for a library that is mostly
+  pictures.
+
+  The fix is not a new store: it stops treating "the body" as a synonym
+  for "the file's bytes". `domain::derived_text::derive_text` is a pure
+  function that composes the projection — file body, declared meta,
+  recovered embedded text, comment threads — and it lives in the domain
+  because the rule for what is searchable about an asset is a statement
+  about assets, not about a queue. What it leaves out is written down
+  with its reasons: the `_trace` bag apart from `meta` (bookkeeping is
+  not words about the subject), identifiers (a UUID is not a word), and
+  tags — the one exclusion that is a judgement, since a tag is the
+  precise instrument full text deliberately is not.
+
+  `domain::embedded_text` recovers the words a container wrote into an
+  artefact, and it is not `material_meta`: that module defines a digest
+  and has to stay frozen and total, this one defines a document nothing
+  compares for equality, so it can be generous where the digest cannot.
+  `zTXt` and `iTXt` are read rather than skipped, `tEXt` bytes are tried
+  as UTF-8 and re-read as Latin-1 when that fails instead of being run
+  through a lossy replacement that shreds the accents in `Café`, and a
+  file that never reaches `IEND` keeps the caption it already yielded.
+  PNG only, capped at a mebibyte per artefact, walked over the buffer
+  `fingerprint::hash_artefact` is already holding — nothing on the
+  indexing path opens a file for this.
+
+  Two columns carry it (migration V81). `material.meta_text` holds the
+  recovered text, written by the fingerprint pass, where `NULL` means
+  "nobody has looked" and `'{}'` is an answer only a walk may give;
+  `asset_body.derived_version` stamps which `COMPOSITION_VERSION`
+  composed a cached body, so raising the constant re-composes the
+  library without re-reading a single source file. Neither column is
+  backfilled by the migration: `JobKind::MaterialText` walks the
+  `IS NULL` set for recovery, and `scan_stale_body` re-composes the
+  bodies that predate derivation.
+
+  A fold moves text onto the keeper — the headstone's keywords, its
+  labels, the comment thread that followed it — so both entry points
+  now re-compose it. The `asset_fold` job does that for the pair
+  duplicate detection raised, and also deletes the headstone's cached
+  body, since a body left behind is what a Tantivy rebuild would read
+  the retired row back in from. A manual merge folds inside its own
+  transaction, so the job it enqueues arrives to find the work done and
+  takes the refusal branch, which never sees a keeper absorb anything —
+  `merge_assets` therefore unindexes the folded rows and enqueues the
+  keeper's re-composition itself, once for the ruling rather than once
+  per folded row. Every other verb that writes a section of the
+  document (a rename, a declared statement, a cover, the auto-tag pass,
+  a hashing pass that recovered metadata) re-composes it too, and falls
+  back to clearing the composition stamp when the queue will not take
+  the job — the backfill walk only sees rows composed by an older
+  reading, so a stamped row it could not queue would otherwise keep a
+  stale document until somebody edited it again.
+
 ### Changed
 
 - **CI answers a pull request in one run instead of two and a manual
