@@ -127,10 +127,11 @@ cross-module view.
    and nothing else** — the `_dispatch` stamp a reified output carries
    and the `_trace` claim a returning artefact brings back
    ([`provenance`]) — which say which event a row belongs to and never
-   what anyone thought of it. No verdict-per-asset table lives in the
-   forge for that reason; a core row may record who wrote it
-   (doctrine 2) but never why. The corollary that has been reached for
-   and is wrong: identity ("these are the same thing") is a core
+   what anyone thought of it. Verdicts the forge records live on its
+   own rows and name core ids (#63 drafts that record); a core row may
+   record who wrote it (doctrine 2) but never why. The corollary that
+   has been reached for and is wrong: identity ("these are the same
+   thing") is a core
    question the store asks itself, and expressing worth ("this one is
    better") through a fold makes every reader of `folded_into` inherit
    the ambiguity.
