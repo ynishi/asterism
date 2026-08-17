@@ -75,13 +75,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than that directory's last build. Copies collide with nothing, and
   they do not queue behind cargo's build lock either.
 
-  The copy is made only on APFS, where it is a copy-on-write clone —
-  2.9 GB in under three seconds, no disk consumed until one side
-  writes, and mtimes preserved, which is what keeps cargo's
-  fingerprints meaningful. The volume is checked before copying rather
-  than judged by the outcome, because `cp -c` does not fail where
-  clonefile is unavailable: it falls back to a real byte copy, which
-  would cost more than the build it was meant to save.
+  The copy is made only where it is a copy-on-write clone. On APFS
+  that is 2.9 GB in under three seconds, no disk consumed until one
+  side writes, and mtimes preserved, which is what keeps cargo's
+  fingerprints meaningful; on Linux it is `cp --reflink=always` on
+  btrfs, bcachefs or XFS made with `reflink=1` — the same operation,
+  with no timing taken for it yet. ext4 clones nothing and is what most
+  distributions leave on `/`, so a Linux checkout hears "starts cold"
+  more often than a macOS one. The filesystem is asked before the copy
+  rather than judged by the outcome, because neither `cp` answers
+  usefully afterwards: `cp -c` does not fail where clonefile is
+  unavailable — it falls back to a real byte copy, which would cost
+  more than the build it was meant to save — and GNU
+  `cp --reflink=always` does fail, but once per file, and a full
+  `target/` here held 74,802 of them. Asking is one clone of one 8 KiB
+  file inside the new worktree, removed again before the recipe
+  returns, or named in a NOTE where it could not be.
 
 - **`just commit-msg-check` — the commit-message rules are checked
   rather than remembered** (#67). CONTRIBUTING asks for a body wrapped

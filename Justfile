@@ -572,18 +572,33 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # afternoon in a worktree cut this morning looks like. Copies collide
 # with nothing, and they do not queue behind cargo's build lock either.
 #
-# The copy is worth making only where it is copy-on-write. On APFS
-# `cp -c` clones: 2.9 GB in under three seconds, no disk consumed until
-# one side writes, and mtimes preserved — that last one is the point
-# rather than a detail, since cargo's fingerprints compare them and a
-# copy that reset them would rebuild everything and save nothing.
+# The copy is worth making only where it is copy-on-write, and which
+# filesystems those are is a per-OS question with a per-OS answer. On
+# APFS `cp -c` clones: 2.9 GB in under three seconds, no disk consumed
+# until one side writes, and mtimes preserved — that last one is the
+# point rather than a detail, since cargo's fingerprints compare them
+# and a copy that reset them would rebuild everything and save nothing.
+# On Linux the same clone is `cp --reflink=always`, and the filesystems
+# that answer to it are btrfs, bcachefs and XFS formatted with
+# `reflink=1`. ext4 is not among them, which is what a stock install of
+# most distributions leaves on `/` — so the Linux answer is more often
+# "no" than the macOS one, and it costs a line to say so rather than a
+# hundred gigabytes to find out.
 #
 # The filesystem is asked before the copy rather than inferred from the
-# exit status afterwards, because `cp -c` does not fail where
-# clonefile(2) is unavailable: it "will fallback to using copyfile(2)
-# instead to ensure the copy still succeeds" (man cp). That fallback is
-# a real multi-gigabyte byte copy — the outcome this recipe exists to
-# avoid — and it would report success while doing it.
+# exit status afterwards, and the two need that for opposite reasons.
+# `cp -c` does not fail where clonefile(2) is unavailable: it "will
+# fallback to using copyfile(2) instead to ensure the copy still
+# succeeds" (man cp). That fallback is a real multi-gigabyte byte copy
+# — the outcome this recipe exists to avoid — and it would report
+# success while doing it. GNU cp is the mirror image: with
+# `--reflink=always` it does not fall back, and instead will "report
+# the failure for each file and exit with a failure status" (info
+# coreutils). The status is honest, but `-a` implies `-R` and cp keeps
+# going after each failure, so the honesty arrives one line per file.
+# Measured on ext4: a tree of eight files produced eight error lines
+# and a complete directory skeleton holding none of them, and the
+# `target/` on that machine held 74,802 files.
 #
 # Not covered: a build running in this checkout while the copy reads
 # its `target/`. Cargo's own lock (`target/debug/.cargo-lock`) answers
@@ -610,10 +625,13 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # caller never wrote. As `$1` and `$2` the same argument is inert data
 # the guard can actually test.
 #
-# Nothing here deletes. Every path built below is somewhere this recipe
-# creates, so the worst a wrong one can do is put a directory in an odd
-# place — which is a thing to move by hand, not a thing to lose work
-# to. What it creates and where is in the body.
+# Nothing here deletes anything it did not just write. The only two
+# removals are the clone probe's pair of files and the directory
+# holding them, a few lines after the same block makes them, and every
+# other path built below is somewhere this recipe creates — so the
+# worst a wrong one can do is put a directory in an odd place, which is
+# a thing to move by hand, not a thing to lose work to. What it creates
+# and where is in the body.
 [group('worktree')]
 [group('allow-agent')]
 [positional-arguments]
@@ -665,10 +683,15 @@ worktree-new type slug:
     dest="{{ project_root }}/.worktrees/$slug"
     src="{{ project_root }}/target"
     git worktree add "$dest" -b "$kind/$slug" origin/main
+    # The flag that clones here, or empty for "nothing clones here" —
+    # in which case the reason has already been said. Which flag, and
+    # whether there is one at all, is the per-OS half; the two answers
+    # ahead of it hold on any of them.
+    clone_flag=""
     if [ ! -d "$src" ]; then
         echo "NOTE: no target/ in this checkout to copy; worktree starts cold." >&2
-    # Both sides, not just the source. `clonefile(2)` clones within one
-    # APFS volume and not across two, and the case that reaches this is
+    # Both sides, not just the source. A clone lands within one
+    # filesystem and not across two, and the case that reaches this is
     # not obvious from the paths: `.worktrees/` is free to be a symlink
     # or a mount of its own, and then the copy silently becomes the
     # multi-gigabyte one this whole branch exists to avoid.
@@ -677,14 +700,71 @@ worktree-new type slug:
         echo "NOTE: target/ and the new worktree are on different volumes, so" >&2
         echo "      there is no clone to make between them. Worktree starts" >&2
         echo "      cold." >&2
-    elif ! mount | grep -qE "^$(df -P "$src" | awk 'NR == 2 { print $1 }') on .*\(apfs"; then
-        echo "NOTE: target/ is not on an APFS volume, so copying it would be a" >&2
-        echo "      real multi-gigabyte copy rather than a clone, and would" >&2
-        echo "      cost more than the build it saves. Worktree starts cold." >&2
-    elif cp -ac "$src" "$dest/target.partial" \
-        && mv "$dest/target.partial" "$dest/target"; then
-        echo "cloned target/ into the worktree"
     else
+        case "$(uname -s)" in
+            Darwin)
+                if mount | grep -qE "^$(df -P "$src" | awk 'NR == 2 { print $1 }') on .*\(apfs"; then
+                    clone_flag="-c"
+                else
+                    echo "NOTE: target/ is not on an APFS volume, so copying it would be a" >&2
+                    echo "      real multi-gigabyte copy rather than a clone, and would" >&2
+                    echo "      cost more than the build it saves. Worktree starts cold." >&2
+                fi
+                ;;
+            Linux)
+                # Asked of the filesystem rather than of its name. btrfs
+                # and bcachefs always answer yes and ext4 always no, but
+                # XFS answers by how it was made — `reflink=1`, mkfs's
+                # default only since xfsprogs 5.1 — and a container
+                # layer or a network mount can differ from whatever the
+                # mount table suggests. One clone of one file settles
+                # it. 8 KiB rather than an empty file because btrfs
+                # keeps a small enough file inline in its metadata,
+                # where cloning is a different question from the one
+                # being asked.
+                probe=""
+                if probe="$(mktemp -d "$dest/.reflink-probe.XXXXXX")" \
+                    && head -c 8192 /dev/zero > "$probe/a" \
+                    && cp --reflink=always "$probe/a" "$probe/b" 2>/dev/null; then
+                    clone_flag="--reflink=always"
+                else
+                    # Three failures share this branch — the directory,
+                    # the file, the clone — so it says what it could not
+                    # establish rather than naming a cause it did not
+                    # measure. Only the clone's own error is silenced;
+                    # the other two print above.
+                    echo "NOTE: could not establish that target/ clones here. ext4" >&2
+                    echo "      does not, btrfs and bcachefs do, XFS does when it was" >&2
+                    echo "      made with reflink=1. Copying without one would be a" >&2
+                    echo "      real multi-gigabyte copy, which costs more than the" >&2
+                    echo "      build it saves, so the worktree starts cold." >&2
+                fi
+                # The two files the lines above wrote and the directory
+                # holding them, and nothing else: `rmdir` refuses a
+                # directory with anything else in it. Neither removal
+                # can take the recipe down — by this line the worktree
+                # exists, and a second run of this command could not
+                # make it again — so a probe that survives is announced
+                # instead, and announced with what it costs: it is
+                # untracked, and the `-changed` gates refuse a tree with
+                # anything untracked in it.
+                if [ -n "$probe" ]; then
+                    rm -f "$probe/a" "$probe/b" 2>/dev/null || :
+                    rmdir "$probe" 2>/dev/null || {
+                        echo "NOTE: left the clone probe at $probe — remove it" >&2
+                        echo "      before the -changed gates will answer." >&2
+                    }
+                fi
+                ;;
+            *)
+                echo "NOTE: this recipe knows the clone for macOS and for Linux," >&2
+                echo "      and $(uname -s) is neither, so copying target/ would" >&2
+                echo "      be a real multi-gigabyte copy rather than a clone." >&2
+                echo "      Worktree starts cold." >&2
+                ;;
+        esac
+    fi
+    if [ -n "$clone_flag" ]; then
         # Copied under a name cargo does not read, and renamed into
         # place only after cp says it finished. `-a` implies `-R`, and
         # in -R mode cp "will continue copying even if errors are
@@ -696,10 +776,15 @@ worktree-new type slug:
         #
         # Left where it is. It affects nothing, and clearing disk is
         # not worth a recipe that deletes.
-        echo "NOTE: copying target/ did not finish — cp's own error, if" >&2
-        echo "      any, is above. The worktree starts cold. An" >&2
-        echo "      incomplete copy may be left at" >&2
-        echo "      $dest/target.partial" >&2
+        if cp -a "$clone_flag" "$src" "$dest/target.partial" \
+            && mv "$dest/target.partial" "$dest/target"; then
+            echo "cloned target/ into the worktree"
+        else
+            echo "NOTE: copying target/ did not finish — cp's own error, if" >&2
+            echo "      any, is above. The worktree starts cold. An" >&2
+            echo "      incomplete copy may be left at" >&2
+            echo "      $dest/target.partial" >&2
+        fi
     fi
     cd "$dest" && just branch-check
     echo "worktree ready: $dest (branch $kind/$slug)"
