@@ -149,6 +149,19 @@ Refs #<issue>
   background — including why file contents are not affected; nothing
   can see a title.
 
+## Where prose wraps
+
+- **Commit message bodies — 72 columns.** `just commit-msg-check`
+  enforces it; `scripts/check-commit-msg.py` says why. Subjects are
+  exempt.
+- **Tracked prose — same width.** `README.md`, `CHANGELOG.md`, this
+  file, `PUBLIC_DEVELOPMENT.md`, `SECURITY.md`, `docs/`. Read in an
+  editor and in `git diff`, where re-flowing a paragraph is a
+  whole-paragraph diff. Tables excepted.
+- **Anything GitHub renders — no wrapping.** Pull request and issue
+  bodies, comments, titles. The renderer folds; one paragraph is one
+  line.
+
 ## Working with coding agents — the recommended pattern
 
 This repository ships its agent configuration in the open: pointer
