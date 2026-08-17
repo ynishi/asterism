@@ -11062,7 +11062,14 @@ mod tests {
 
         migrate(&mut conn).unwrap();
 
-        let rows: Vec<(Uuid, String, Option<String>, Option<String>, i64)> = {
+        struct LedgerRow {
+            asset_id: Uuid,
+            kind: String,
+            origin: Option<String>,
+            author_kind: Option<String>,
+            created_at: i64,
+        }
+        let rows: Vec<LedgerRow> = {
             let mut stmt = conn
                 .prepare(
                     "SELECT asset_id, kind, origin, author_kind, created_at \
@@ -11070,7 +11077,13 @@ mod tests {
                 )
                 .unwrap();
             stmt.query_map(params![pursuit], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok(LedgerRow {
+                    asset_id: r.get(0)?,
+                    kind: r.get(1)?,
+                    origin: r.get(2)?,
+                    author_kind: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
             })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
@@ -11078,16 +11091,16 @@ mod tests {
         };
         assert_eq!(rows.len(), 2, "one membership per asset, not per output");
         assert_eq!(
-            (rows[0].0, rows[0].4),
+            (rows[0].asset_id, rows[0].created_at),
             (a, 1_000),
             "the first dispatch to produce the asset names the entry's clock"
         );
-        assert_eq!((rows[1].0, rows[1].4), (b, 2_000));
-        for (_, kind, origin, author_kind, _) in &rows {
-            assert_eq!(kind, "in");
-            assert_eq!(origin.as_deref(), Some("generated"));
+        assert_eq!((rows[1].asset_id, rows[1].created_at), (b, 2_000));
+        for row in &rows {
+            assert_eq!(row.kind, "in");
+            assert_eq!(row.origin.as_deref(), Some("generated"));
             assert_eq!(
-                author_kind, &None,
+                row.author_kind, None,
                 "nobody recorded these entries; the migration did"
             );
         }
