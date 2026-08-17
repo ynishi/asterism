@@ -42,8 +42,8 @@ use asterism_contract::dto::DerivedDto as Derived;
 use chrono::{DateTime, Utc};
 
 use crate::domain::asset::Asset;
-use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::{ConstellationEdge, EdgeKind};
+use crate::domain::forge::dispatch::{DispatchJob, DispatchState};
 use crate::domain::job::JobKind;
 use crate::domain::repository::{
     AssetRepository, DispatchRepository, EdgeRepository, JobQueue, PersonaRepository,
@@ -466,15 +466,19 @@ fn reify_one(
     }
     match &mut extra {
         serde_json::Value::Object(map) => {
-            map.insert(crate::domain::dispatch::DISPATCH_TRACE_KEY.into(), trace);
+            map.insert(
+                crate::domain::forge::dispatch::DISPATCH_TRACE_KEY.into(),
+                trace,
+            );
         }
         serde_json::Value::Null => {
-            extra = serde_json::json!({ crate::domain::dispatch::DISPATCH_TRACE_KEY: trace });
+            extra =
+                serde_json::json!({ crate::domain::forge::dispatch::DISPATCH_TRACE_KEY: trace });
         }
         _ => {
             extra = serde_json::json!({
                 "_derived": extra,
-                crate::domain::dispatch::DISPATCH_TRACE_KEY: trace,
+                crate::domain::forge::dispatch::DISPATCH_TRACE_KEY: trace,
             });
         }
     }

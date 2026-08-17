@@ -2035,7 +2035,7 @@ async fn derive_series_after_hash(
 /// something to say, not that this library made the file.
 fn produced_by_dispatch(extra: &serde_json::Value) -> bool {
     extra
-        .get(asterism_core::domain::dispatch::DISPATCH_TRACE_KEY)
+        .get(asterism_core::domain::forge::dispatch::DISPATCH_TRACE_KEY)
         .is_some_and(|trace| trace.is_object())
 }
 
@@ -2047,7 +2047,7 @@ fn produced_by_dispatch(extra: &serde_json::Value) -> bool {
 /// rather than filled with something that is not a dispatch id.
 fn dispatch_id_of(extra: &serde_json::Value) -> Option<String> {
     extra
-        .get(asterism_core::domain::dispatch::DISPATCH_TRACE_KEY)?
+        .get(asterism_core::domain::forge::dispatch::DISPATCH_TRACE_KEY)?
         .get("dispatch_id")?
         .as_str()
         .map(str::to_string)
@@ -2201,7 +2201,7 @@ async fn note_disclosure(
 /// the feature; for one the user imported, it is this application
 /// editing somebody's original because it happened to walk past it. The
 /// dispatch trace
-/// ([`DISPATCH_TRACE_KEY`](asterism_core::domain::dispatch::DISPATCH_TRACE_KEY))
+/// ([`DISPATCH_TRACE_KEY`](asterism_core::domain::forge::dispatch::DISPATCH_TRACE_KEY))
 /// is what separates the two, and it costs the one read that answers
 /// it — paid here rather than in the handler so that a library-wide
 /// backfill does not put a job on the queue per asset to have it skip.

@@ -14,6 +14,10 @@ Application layer — use-case services.
 - [`fold_redirect`]   — the one place a surface holding its own id
   set redirects it through the folds that happened since (the
   "paths that name a row keep it" half of the fold read rule).
+- [`forge`]           — the verbs of a line of work: the pursuit
+  lifecycle and the rounds filed under it. Grouped because they are
+  the services whose writes carry intent rather than content
+  (doctrine 6).
 - `attribution_intake` — the single check on the attribution fields a
   command still carries (a remote caller's assertion arriving through
   the owner's own surface).

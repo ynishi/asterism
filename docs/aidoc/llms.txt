@@ -25,14 +25,15 @@
 - [asterism-core::application::asset_comment_service](asterism_core/application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [asterism-core::application::asset_service](asterism_core/application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
 - [asterism-core::application::disclosure_service](asterism_core/application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
-- [asterism-core::application::dispatch_service](asterism_core/application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [asterism-core::application::fold_redirect](asterism_core/application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
+- [asterism-core::application::forge](asterism_core/application__forge.md): Forge use cases — the verbs of a line of work.
+- [asterism-core::application::forge::dispatch_service](asterism_core/application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [asterism-core::application::forge::pursuit_service](asterism_core/application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [asterism-core::application::mapping](asterism_core/application__mapping.md): Conversion between domain types and contract DTOs.
 - [asterism-core::application::material_layer_service](asterism_core/application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [asterism-core::application::material_mark_service](asterism_core/application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
 - [asterism-core::application::modality_service](asterism_core/application__modality_service.md): `ModalityService` — use cases for the Modality master.
 - [asterism-core::application::persona_service](asterism_core/application__persona_service.md): `PersonaService` — use cases for the persona lifecycle.
-- [asterism-core::application::pursuit_service](asterism_core/application__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [asterism-core::application::query_group_invalidation](asterism_core/application__query_group_invalidation.md): Query Group invalidation — the W4 hook that translates a
 - [asterism-core::application::query_group_service](asterism_core/application__query_group_service.md): `QueryGroupService` — the Query Group evaluate-and-materialize
 - [asterism-core::application::series_strategy_service](asterism_core/application__series_strategy_service.md): `SeriesStrategyService` — registering, editing and removing the rules
@@ -64,10 +65,12 @@
 - [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [asterism-core::domain::disclosure::record](asterism_core/domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [asterism-core::domain::disclosure::source_type](asterism_core/domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
-- [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [asterism-core::domain::embedded_text](asterism_core/domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
+- [asterism-core::domain::forge](asterism_core/domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [asterism-core::domain::forge::dispatch](asterism_core/domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [asterism-core::domain::forge::pursuit](asterism_core/domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -85,7 +88,6 @@
 - [asterism-core::domain::probe](asterism_core/domain__probe.md): `probe` — the port a format's identity measurement is written
 - [asterism-core::domain::provenance](asterism_core/domain__provenance.md): `ProvenanceRef` — how a re-ingested artefact names where it came from.
 - [asterism-core::domain::provenance::source](asterism_core/domain__provenance__source.md): `_trace.source` vocabulary — which channel a provenance claim
-- [asterism-core::domain::pursuit](asterism_core/domain__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [asterism-core::domain::query_group_eval](asterism_core/domain__query_group_eval.md): Query Group evaluation — the pure pieces of the materialize pipeline.
 - [asterism-core::domain::render](asterism_core/domain__render.md): How an asset is rendered — thumbnail eligibility, media path, and
 - [asterism-core::domain::repository](asterism_core/domain__repository.md): Repository ports — the persistence traits declared here and implemented

@@ -665,7 +665,7 @@
     {
       "path": "asterism_contract::dto::DispatchDto",
       "kind": "struct",
-      "docs": "One exporter invocation against a frozen [`SnapshotDto`].\n\nThe wire form mirrors `asterism_core::domain::dispatch::DispatchJob`:\n`state` is the slug (`pending` / `running` / `done` / `failed` /\n`cancelled`); `output_asset_ids` is populated atomically with the\ntransition to `done`. `state_message` carries the failure /\ncancellation reason for terminal error states, `progress_*` fields\ncarry the running-state hint."
+      "docs": "One exporter invocation against a frozen [`SnapshotDto`].\n\nThe wire form mirrors `asterism_core::domain::forge::dispatch::DispatchJob`:\n`state` is the slug (`pending` / `running` / `done` / `failed` /\n`cancelled`); `output_asset_ids` is populated atomically with the\ntransition to `done`. `state_message` carries the failure /\ncancellation reason for terminal error states, `progress_*` fields\ncarry the running-state hint."
     },
     {
       "path": "asterism_contract::dto::DuplicateAxis",

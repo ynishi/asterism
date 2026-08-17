@@ -12,6 +12,10 @@
 //! - [`fold_redirect`]   — the one place a surface holding its own id
 //!   set redirects it through the folds that happened since (the
 //!   "paths that name a row keep it" half of the fold read rule).
+//! - [`forge`]           — the verbs of a line of work: the pursuit
+//!   lifecycle and the rounds filed under it. Grouped because they are
+//!   the services whose writes carry intent rather than content
+//!   (doctrine 6).
 //! - `attribution_intake` — the single check on the attribution fields a
 //!   command still carries (a remote caller's assertion arriving through
 //!   the owner's own surface).
@@ -54,14 +58,13 @@ pub mod asset_comment_service;
 pub mod asset_service;
 pub(crate) mod attribution_intake;
 pub mod disclosure_service;
-pub mod dispatch_service;
 pub mod fold_redirect;
+pub mod forge;
 pub mod mapping;
 pub mod material_layer_service;
 pub mod material_mark_service;
 pub mod modality_service;
 pub mod persona_service;
-pub mod pursuit_service;
 pub mod query_group_invalidation;
 pub mod query_group_service;
 pub mod series_strategy_service;
@@ -74,12 +77,12 @@ pub mod thumb_service;
 pub use app_setting_service::AppSettingService;
 pub use asset_comment_service::AssetCommentService;
 pub use asset_service::{AssetService, INBOX_LABEL, OriginalFileRef};
-pub use dispatch_service::DispatchService;
+pub use forge::dispatch_service::DispatchService;
+pub use forge::pursuit_service::PursuitService;
 pub use material_layer_service::MaterialLayerService;
 pub use material_mark_service::MaterialMarkService;
 pub use modality_service::ModalityService;
 pub use persona_service::PersonaService;
-pub use pursuit_service::PursuitService;
 pub use query_group_service::QueryGroupService;
 pub use series_strategy_service::SeriesStrategyService;
 pub use session_service::SessionService;

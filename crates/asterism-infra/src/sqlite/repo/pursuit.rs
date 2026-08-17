@@ -7,7 +7,7 @@
 //! and "the stamp moved" must not be separable facts.
 
 use asterism_core::domain::attribution::PersistedAttribution;
-use asterism_core::domain::pursuit::{
+use asterism_core::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject,
 };
 use asterism_core::domain::repository::PursuitRepository;
@@ -563,7 +563,7 @@ mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
     use asterism_core::domain::attribution::AttributionContext;
-    use asterism_core::domain::pursuit::{PursuitStanding, standing};
+    use asterism_core::domain::forge::pursuit::{PursuitStanding, standing};
     use asterism_core::domain::value::DispatchId;
     use chrono::{Duration, TimeZone, Utc};
 

@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! awk '/^\/\/!$/ { nextfile } /^\/\/!/ { print FILENAME ": " substr($0, 5) }' \
-//!     crates/asterism-core/src/domain/*.rs
+//!     crates/asterism-core/src/domain/*.rs crates/asterism-core/src/domain/*/*.rs
 //! ```
 //!
 //! What follows is the part no index can generate: how the modules hang
@@ -36,17 +36,20 @@
 //!
 //! **The record layer.** [`snapshot`] freezes an ordered asset set —
 //! content-addressed, a git-tree analogue, fingerprinted by
-//! [`snapshot_hash`]. [`dispatch`] is one exporter invocation against such
-//! a freeze; [`pursuit`] is the minted unit of work those invocations are
-//! stamped with — the line of rounds and verdicts toward one intent;
-//! [`provenance`] is the declared origin a re-ingested artefact
-//! carries back, and [`disclosure`] its outbound counterpart — the pure
+//! [`snapshot_hash`]; [`provenance`] is the declared origin a re-ingested
+//! artefact carries back, and [`disclosure`] its outbound counterpart — the pure
 //! judgement of which IPTC digital-source term the recorded evidence
 //! makes true of an artefact on its way out; [`edge`] holds typed
 //! asset↔asset facts — from derivation
 //! and identity to co-occurrence — that lineage walks and the hover burst
 //! renders; [`attribution`] types who a write is by, what operated on their
 //! behalf, and through which channel that answer arrived.
+//!
+//! **The forge layer.** [`forge`] is where intent lives: a line of work
+//! (`forge::pursuit`), the rounds it sends out (`forge::dispatch`), and
+//! the conclusion it freezes. Every other group above describes what is
+//! true of the stored bytes; this one describes what somebody was trying
+//! to do, and its own module doc states the boundary the two keep.
 //!
 //! **The annotation layer.** [`thread`] collects messages from humans and
 //! agents alike; [`asset_comment`] is the short-note thread on one asset;
@@ -104,12 +107,32 @@
 //!    do not mix.
 //! 5. **The unit of work is minted, never derived.** Content identity
 //!    changes whenever work is redone, so correlation by ancestry alone
-//!    cannot express succession, rejection, or abandonment. A [`pursuit`]
-//!    is identified by a minted id stamped on its events, work cannot
+//!    cannot express succession, rejection, or abandonment. A
+//!    [`pursuit`](forge::pursuit) is identified by a minted id stamped
+//!    on its events, work cannot
 //!    happen outside one (a dispatch without a pursuit gets one minted in
 //!    the same request; a mint stranded by a failed dispatch write is the
 //!    legal pre-created-empty state, not debris), and everything else
 //!    about it — standing, membership, rollups — is projection.
+//! 6. **Two layers: the core states facts, the [`forge`] states intent.**
+//!    The core is what is true of the stored bytes — assets, freezes,
+//!    edges, the identity question and the outbound one — and it is
+//!    complete without the forge: importing, deduplicating, rating and
+//!    trashing need no pursuit, and the minting rule above binds the
+//!    forge's own events, not the catalogue. The forge is the operator's
+//!    account of a line of work, and it refers to content through frozen
+//!    sets and ids. **What it writes onto a core row is a correlation id
+//!    and nothing else** — the `_dispatch` stamp a reified output carries
+//!    and the `_trace` claim a returning artefact brings back
+//!    ([`provenance`]) — which say which event a row belongs to and never
+//!    what anyone thought of it. Verdicts the forge records live on its
+//!    own rows and name core ids (#63 drafts that record); a core row may
+//!    record who wrote it (doctrine 2) but never why. The corollary that
+//!    has been reached for and is wrong: identity ("these are the same
+//!    thing") is a core
+//!    question the store asks itself, and expressing worth ("this one is
+//!    better") through a fold makes every reader of `folded_into` inherit
+//!    the ambiguity.
 //!
 //! ## Aggregate boundaries
 //!
@@ -143,10 +166,10 @@ pub mod content_region;
 pub mod derived_text;
 pub mod dir;
 pub mod disclosure;
-pub mod dispatch;
 pub mod duplicate_conflict;
 pub mod edge;
 pub mod embedded_text;
+pub mod forge;
 pub mod group;
 pub mod instance;
 pub mod job;
@@ -163,7 +186,6 @@ pub mod persona_profile;
 pub mod persona_theme;
 pub mod probe;
 pub mod provenance;
-pub mod pursuit;
 pub mod query_group_eval;
 pub mod render;
 pub mod repository;
