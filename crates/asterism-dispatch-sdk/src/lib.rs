@@ -79,12 +79,14 @@
 //! use, and would let a change in one adapter's convenience reach the
 //! contract every other adapter is written against.
 
+pub mod attempt;
 pub mod derived;
 pub mod exporter;
 pub mod handle;
 pub mod schema;
 pub mod state;
 
+pub use attempt::{AttemptRecord, AttemptRecorder, DISCARD_ATTEMPTS, DiscardAttempts};
 pub use derived::{COVER_MAX_CHARS, Derived, REGISTER_MAX_CHARS};
 pub use exporter::{DispatchContext, Exporter, ExporterError};
 pub use handle::Handle;

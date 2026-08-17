@@ -18,10 +18,18 @@
 //!    with `parent_ids` = the Selection's inputs, `session_id` =
 //!    `DispatchJob.id`, and `source_kind` = `format!("dispatch:{}",
 //!    exporter_slug)`.
+//!
+//! All three take the same [`DispatchContext`], and it carries one
+//! outbound channel beside the read-only slices:
+//! [`attempt`](DispatchContext::attempt), where the exporter records
+//! what a call sent and what came back. That record survives an error
+//! return, which is what makes a refused submit as readable as an
+//! accepted one.
 
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::attempt::AttemptRecorder;
 use crate::derived::Derived;
 use crate::handle::Handle;
 use crate::state::DispatchState;
@@ -66,10 +74,16 @@ pub enum ExporterError {
 /// every method call.
 ///
 /// Carries **references only** — the core owns the entity storage
-/// and lets exporters borrow read-only slices for the duration of
-/// the call. `inputs` is materialised from `Selection::asset_ids`
-/// (which is why an exporter never has to talk to the AssetRepo
-/// itself).
+/// and lets exporters borrow it for the duration of the call.
+/// `inputs` is materialised from `Selection::asset_ids` (which is why
+/// an exporter never has to talk to the AssetRepo itself).
+///
+/// Every field but one is a read-only slice.
+/// [`attempt`](Self::attempt) is the exception, and it goes the other
+/// way: the exporter writes its record of the call there, and the core
+/// persists it. It is on the context rather than in a return type
+/// because the case that needs it is the one where the return type is
+/// an error.
 ///
 /// `Copy` because every field is a shared borrow — the runner
 /// hands the same context to `dispatch` → `poll` → `harvest` on
@@ -111,6 +125,20 @@ pub struct DispatchContext<'a> {
     pub params: &'a Value,
     /// Persona bucket the whole dispatch belongs to.
     pub persona_id: &'a str,
+    /// Where to write what this call sent and what came back
+    /// ([`AttemptRecord`](crate::AttemptRecord)).
+    ///
+    /// The one field an exporter *writes to* rather than reads. It is
+    /// here because the record has to survive the arm that returns an
+    /// error: a refused submit produces no [`Handle`], so without a
+    /// second channel the request as sent and the backend's answer leave
+    /// with the error and the row keeps only a message.
+    ///
+    /// Nothing is required of an exporter that has nothing to record —
+    /// the core writes down whatever landed here and no more. A caller
+    /// driving an exporter outside the dispatch state machine passes
+    /// [`DISCARD_ATTEMPTS`](crate::DISCARD_ATTEMPTS).
+    pub attempt: &'a dyn AttemptRecorder,
 }
 
 /// The single trait every outbound adapter implements.

@@ -174,7 +174,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use asterism_dispatch_sdk::{
-    Derived, DispatchContext, DispatchState, Exporter, ExporterError, Handle, ProgressHint,
+    AttemptRecord, Derived, DispatchContext, DispatchState, Exporter, ExporterError, Handle,
+    ProgressHint,
 };
 use asterism_exporter_common::{ResponsePath, TemplateAdapter, TemplateEnv};
 use async_trait::async_trait;
@@ -453,12 +454,44 @@ pub struct HttpHandlePayload {
 /// — a profile is free to put `{{secret}}` in a query string or a body
 /// field — is scrubbed from the recorded copy. A redaction applied at
 /// read time would mean the value had already been written down.
+///
+/// The secret the `auth` block named, that is. A token a profile
+/// interpolated out of its own params into a URL or a body is out of
+/// reach here as it is everywhere else — the adapter was never told it
+/// was a credential (the crate doc states the trade). This record is one
+/// more surface it can land on, and the poll and harvest requests it
+/// carries are surfaces nothing recorded before.
+///
+/// Recorded whichever way the call went. A refused submit is the case a
+/// reader has the most questions about — which endpoint, with which
+/// body, and what the backend actually said — and it is the case that
+/// produces no handle to carry the answer, so this shape also travels
+/// through [`DispatchContext::attempt`] onto the row itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Exchange {
     /// Submit request, as sent.
     pub request: RecordedRequest,
-    /// Submit response, as received.
+    /// Status the backend answered with.
+    ///
+    /// Absent on a record written for a call that never reached one
+    /// (see `error`), and on a handle from before the field existed. It
+    /// is what separates a backend that rejected the request from one
+    /// that was not there — different questions, and a reader should not
+    /// have to infer which they are looking at from the shape of the
+    /// body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// Response as received: the parsed document when the answer was
+    /// JSON, the raw text as a string when it was not, and `null` when
+    /// nothing answered.
     pub response: Value,
+    /// Why no answer arrived — DNS failure, refused connection, timeout.
+    ///
+    /// Present only on a call the backend never answered, which is the
+    /// same thing `status` being absent says. Both are written because
+    /// "not reached" is the state a reader most wants a sentence for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// One recorded HTTP request.
@@ -592,7 +625,7 @@ impl Exporter for HttpExporter {
         let url = format!("{base}{path}");
         let body = grammar.render_json(&params.submit.body_template, &env)?;
         let headers = self.headers(&grammar, &params, &params.submit.headers, &env)?;
-        let resp = send_request(
+        let answer = send_request(
             &self.http,
             &params.submit.method,
             &url,
@@ -601,22 +634,25 @@ impl Exporter for HttpExporter {
         )
         .await
         .map_err(|e| grammar.scrub_error(e))?;
+        // Recorded before the answer is judged, because the judgement is
+        // where a refusal stops being something this method can hand
+        // back: it leaves as an error, and the error is a sentence. What
+        // the row keeps of a refused submit is written here or nowhere.
+        let exchange = record_exchange(
+            &grammar,
+            params.auth.as_ref().map(|auth| auth.header.as_str()),
+            &params.submit.method,
+            &url,
+            &headers,
+            Some(&body),
+            &answer,
+        );
+        ctx.attempt
+            .record(AttemptRecord::new(SLUG, attempt_payload(&exchange)));
+        let resp = answer
+            .into_body(&params.submit.method, &url)
+            .map_err(|e| grammar.scrub_error(e))?;
         let handle_value = handle_from_response(&grammar, &resp, &params.submit.handle_from)?;
-        let exchange = Exchange {
-            request: RecordedRequest {
-                method: params.submit.method.clone(),
-                // Scrubbed, not copied: query-parameter auth is a real
-                // shape, so a profile may legitimately have rendered
-                // `{{secret}}` into this string.
-                url: grammar.scrub_text(&url),
-                headers: grammar.redact_headers(
-                    &headers,
-                    params.auth.as_ref().map(|auth| auth.header.as_str()),
-                ),
-                body: Some(grammar.scrub(body)),
-            },
-            response: grammar.scrub(resp),
-        };
         Ok(Handle::new(
             SLUG,
             serde_json::to_value(HttpHandlePayload {
@@ -652,10 +688,35 @@ impl Exporter for HttpExporter {
         // past the deadline — the platform has forgotten the job, which
         // is what a deadline predicts — the expiry is the more useful
         // explanation than the 404.
-        let resp = match send_request(&self.http, &params.poll.method, &url, &headers, None).await {
-            Ok(resp) => resp,
-            Err(err) => return expiry.ok_or_else(|| grammar.scrub_error(err)),
-        };
+        let auth_header = params.auth.as_ref().map(|auth| auth.header.as_str());
+        let (resp, exchange) =
+            match send_request(&self.http, &params.poll.method, &url, &headers, None).await {
+                Ok(answer) => {
+                    let exchange = record_exchange(
+                        &grammar,
+                        auth_header,
+                        &params.poll.method,
+                        &url,
+                        &headers,
+                        None,
+                        &answer,
+                    );
+                    match answer.into_body(&params.poll.method, &url) {
+                        Ok(resp) => (resp, exchange),
+                        Err(err) => {
+                            // A poll that cannot be read is the same
+                            // unanswered question a refused submit is,
+                            // and the handle it could write onto holds
+                            // the *submit* — overwriting that would
+                            // trade one record for another.
+                            ctx.attempt
+                                .record(AttemptRecord::new(SLUG, attempt_payload(&exchange)));
+                            return expiry.ok_or_else(|| grammar.scrub_error(err));
+                        }
+                    }
+                }
+                Err(err) => return expiry.ok_or_else(|| grammar.scrub_error(err)),
+            };
 
         if self.match_rule(&grammar, &params.poll.failed_when, &resp) {
             let message = params
@@ -666,6 +727,11 @@ impl Exporter for HttpExporter {
                 .and_then(|p| grammar.select_first(&resp, p))
                 .and_then(|v| grammar.display_string(v))
                 .unwrap_or_else(|| "backend reported failure".into());
+            // The backend answered, and the answer is that the job is
+            // over. Same reason as above: this is the call that ends the
+            // run, so it is the one a reader will come back to.
+            ctx.attempt
+                .record(AttemptRecord::new(SLUG, attempt_payload(&exchange)));
             return Ok(DispatchState::Failed { message });
         }
         if self.match_rule(&grammar, &params.poll.done_when, &resp) {
@@ -704,9 +770,29 @@ impl Exporter for HttpExporter {
         let path = grammar.render(&params.harvest.path, &env)?;
         let url = format!("{base}{path}");
         let headers = self.headers(&grammar, &params, &params.harvest.headers, &env)?;
-        let resp = send_request(&self.http, &params.harvest.method, &url, &headers, None)
+        let answer = send_request(&self.http, &params.harvest.method, &url, &headers, None)
             .await
             .map_err(|e| grammar.scrub_error(e))?;
+        let exchange = record_exchange(
+            &grammar,
+            params.auth.as_ref().map(|auth| auth.header.as_str()),
+            &params.harvest.method,
+            &url,
+            &headers,
+            None,
+            &answer,
+        );
+        let resp = match answer.into_body(&params.harvest.method, &url) {
+            Ok(resp) => resp,
+            Err(err) => {
+                // The job ran and the collection failed, which is the
+                // one thing a reader cannot reconstruct from the
+                // artefacts: there are none to read the call off.
+                ctx.attempt
+                    .record(AttemptRecord::new(SLUG, attempt_payload(&exchange)));
+                return Err(grammar.scrub_error(err));
+            }
+        };
         let items = grammar.select(&resp, &params.harvest.items_path);
         let now = Utc::now();
         // Built once and cloned per item: every artefact of one job came
@@ -843,6 +929,54 @@ fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
         });
     }
     Ok(())
+}
+
+/// The call as it will be written down: the request as sent, and
+/// whatever came back of it.
+///
+/// Takes the [`Answer`] rather than a judgement of it, which is the
+/// whole point — a rejection and an unreachable host are both recorded
+/// here, and both are cases where the caller is about to return an error
+/// and have nothing left to record from.
+///
+/// Everything is scrubbed on the way in, for the reason [`Exchange`]
+/// states: a redaction applied at read time would mean the value had
+/// already been written down.
+fn record_exchange(
+    grammar: &SecretGrammar,
+    auth_header: Option<&str>,
+    method: &str,
+    url: &str,
+    headers: &BTreeMap<String, String>,
+    body: Option<&Value>,
+    answer: &Answer,
+) -> Exchange {
+    let (status, response, error) = answer.recorded(grammar);
+    Exchange {
+        request: RecordedRequest {
+            method: method.to_string(),
+            // Scrubbed, not copied: query-parameter auth is a real
+            // shape, so a profile may legitimately have rendered
+            // `{{secret}}` into this string.
+            url: grammar.scrub_text(url),
+            headers: grammar.redact_headers(headers, auth_header),
+            body: body.map(|body| grammar.scrub(body.clone())),
+        },
+        status,
+        response,
+        error,
+    }
+}
+
+/// The exchange as an [`AttemptRecord`] payload.
+///
+/// Under the same `exchange` key the handle payload uses, so the record
+/// of a refused submit and the record of an accepted one are read the
+/// same way — which is the property the whole path exists for.
+fn attempt_payload(exchange: &Exchange) -> Value {
+    serde_json::json!({
+        "exchange": serde_json::to_value(exchange).expect("a recorded exchange serialises"),
+    })
 }
 
 /// The call that produced a harvest, as it is written onto every
@@ -993,13 +1127,85 @@ fn trim_trailing_slash(s: &str) -> &str {
     s.trim_end_matches('/')
 }
 
+/// What one call came back as, before anything has been decided about
+/// it.
+///
+/// [`send_request`] used to answer `Result<Value, ExporterError>`, which
+/// is the shape of the *judgement* rather than of the answer: a rejection
+/// arrived as a sentence with the status and the body already formatted
+/// into it, and nothing downstream could record what came back because
+/// nothing downstream still had it. Splitting the two lets the same call
+/// feed the record and the verdict.
+enum Answer {
+    /// The backend answered.
+    Answered {
+        /// Status line, kept whole so the message a rejection produces
+        /// reads as it always did.
+        status: reqwest::StatusCode,
+        /// Body as received.
+        text: String,
+        /// The body parsed, or why it would not parse.
+        json: Result<Value, String>,
+    },
+    /// Nothing answered — DNS, refused connection, timeout, a body that
+    /// stopped mid-read.
+    Unreachable {
+        /// What the transport said.
+        error: String,
+    },
+}
+
+impl Answer {
+    /// The parsed body of a call that succeeded — what every caller here
+    /// wants, and the errors they raised before [`Answer`] existed.
+    fn into_body(self, method: &str, url: &str) -> Result<Value, ExporterError> {
+        match self {
+            Answer::Unreachable { error } => Err(ExporterError::Other(anyhow::anyhow!(error))),
+            Answer::Answered { status, text, json } => {
+                if !status.is_success() {
+                    return Err(ExporterError::BackendRejected(format!(
+                        "http {method} {url} HTTP {status}: {text}"
+                    )));
+                }
+                json.map_err(|e| {
+                    ExporterError::BackendRejected(format!(
+                        "http {method} {url} response not JSON: {e}"
+                    ))
+                })
+            }
+        }
+    }
+
+    /// The answer as it is written down: the status, the body, and the
+    /// transport's own words when there was no body to have.
+    ///
+    /// A non-JSON body is recorded as the string it was rather than
+    /// dropped — an HTML error page is frequently the most informative
+    /// thing a misconfigured endpoint returns.
+    fn recorded(&self, grammar: &SecretGrammar) -> (Option<u16>, Value, Option<String>) {
+        match self {
+            Answer::Unreachable { error } => (None, Value::Null, Some(grammar.scrub_text(error))),
+            Answer::Answered { status, text, json } => {
+                let body = match json {
+                    Ok(value) => grammar.scrub(value.clone()),
+                    Err(_) => Value::String(grammar.scrub_text(text)),
+                };
+                (Some(status.as_u16()), body, None)
+            }
+        }
+    }
+}
+
 async fn send_request(
     http: &reqwest::Client,
     method: &str,
     url: &str,
     headers: &BTreeMap<String, String>,
     body: Option<Value>,
-) -> Result<Value, ExporterError> {
+) -> Result<Answer, ExporterError> {
+    // The one failure that is not an answer and not a transport error:
+    // no call goes out at all, because the profile named a method this
+    // adapter does not send.
     let http_method = match method.to_ascii_uppercase().as_str() {
         "GET" => reqwest::Method::GET,
         "POST" => reqwest::Method::POST,
@@ -1019,20 +1225,29 @@ async fn send_request(
     if let Some(body) = body {
         req = req.json(&body);
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| ExporterError::Other(anyhow::anyhow!("http {method} {url}: {e}")))?;
+    let resp = match req.send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            return Ok(Answer::Unreachable {
+                error: format!("http {method} {url}: {e}"),
+            });
+        }
+    };
     let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(ExporterError::BackendRejected(format!(
-            "http {method} {url} HTTP {status}: {text}"
-        )));
-    }
-    resp.json::<Value>().await.map_err(|e| {
-        ExporterError::BackendRejected(format!("http {method} {url} response not JSON: {e}"))
-    })
+    // Read as text and parse here rather than asking reqwest for JSON:
+    // the raw body is what a rejection's message carries and what a
+    // non-JSON answer is recorded as, and `json()` consumes the response
+    // without leaving either behind.
+    let text = match resp.text().await {
+        Ok(text) => text,
+        Err(e) => {
+            return Ok(Answer::Unreachable {
+                error: format!("http {method} {url}: {e}"),
+            });
+        }
+    };
+    let json = serde_json::from_str::<Value>(&text).map_err(|e| e.to_string());
+    Ok(Answer::Answered { status, text, json })
 }
 
 #[cfg(test)]
@@ -1082,6 +1297,11 @@ mod tests {
             persona_id: "persona-1",
             action: "run",
             params,
+            // Nothing here drives a call through `dispatch`, so nothing
+            // records; what the recorder carries out of a real call is
+            // asserted end to end
+            // (`asterism-server/tests/dispatch_remote_backend_e2e.rs`).
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         }
     }
 
@@ -1349,7 +1569,9 @@ mod tests {
                     headers: BTreeMap::from([("authorization".into(), REDACTED.into())]),
                     body: Some(serde_json::json!({ "prompt": "a portrait", "seed": 7 })),
                 },
+                status: Some(200),
                 response: serde_json::json!({ "job_id": "job-1", "status": "queued" }),
+                error: None,
             }),
         }
     }
@@ -1544,5 +1766,221 @@ mod tests {
                 "{phase}.method {method:?} is not one of {ACCEPTED:?}"
             );
         }
+    }
+
+    fn sent_headers() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("authorization".into(), "Bearer sk-not-a-real-key".into()),
+            ("content-type".into(), "application/json".into()),
+        ])
+    }
+
+    /// A backend that answers with a rejection has said something, and
+    /// what it said is the answer to the question a refused submit
+    /// leaves behind (#76).
+    #[test]
+    fn a_refusal_is_recorded_with_its_status_and_what_it_said() {
+        let answer = Answer::Answered {
+            status: reqwest::StatusCode::UNAUTHORIZED,
+            text: r#"{"error":"invalid api key"}"#.into(),
+            json: Ok(serde_json::json!({ "error": "invalid api key" })),
+        };
+
+        let exchange = record_exchange(
+            &SecretGrammar::unauthenticated(),
+            None,
+            "POST",
+            "http://backend.test/generate",
+            &sent_headers(),
+            Some(&serde_json::json!({ "prompt": "a portrait" })),
+            &answer,
+        );
+
+        assert_eq!(exchange.status, Some(401));
+        assert_eq!(exchange.response["error"], "invalid api key");
+        assert!(
+            exchange.error.is_none(),
+            "a backend that answered was reached"
+        );
+        assert_eq!(exchange.request.method, "POST");
+        assert_eq!(exchange.request.url, "http://backend.test/generate");
+        assert_eq!(
+            exchange.request.body.expect("the body as sent")["prompt"],
+            "a portrait"
+        );
+        // And the judgement the same answer produces is unchanged: the
+        // sentence on the row stays a sentence.
+        match answer.into_body("POST", "http://backend.test/generate") {
+            Err(ExporterError::BackendRejected(message)) => {
+                assert!(message.contains("HTTP 401"), "{message}");
+                assert!(message.contains("invalid api key"), "{message}");
+            }
+            other => panic!("a 401 is a rejection, not {other:?}"),
+        }
+    }
+
+    /// "The endpoint said no" and "there is nothing at that endpoint"
+    /// are different questions, so the record answers them differently:
+    /// a status and a body against neither, plus the transport's words.
+    #[test]
+    fn a_backend_never_reached_is_recorded_as_not_reached() {
+        let answer = Answer::Unreachable {
+            error: "http POST http://backend.test/generate: connection refused".into(),
+        };
+
+        let exchange = record_exchange(
+            &SecretGrammar::unauthenticated(),
+            None,
+            "POST",
+            "http://backend.test/generate",
+            &sent_headers(),
+            None,
+            &answer,
+        );
+
+        assert!(exchange.status.is_none());
+        assert_eq!(exchange.response, Value::Null);
+        assert!(
+            exchange
+                .error
+                .expect("the transport says why")
+                .contains("connection refused")
+        );
+    }
+
+    /// A misconfigured endpoint answers with an error page as often as
+    /// with JSON, and that page is frequently the most informative thing
+    /// about the refusal. Kept as the string it was rather than dropped
+    /// for failing to parse.
+    #[test]
+    fn an_answer_that_is_not_json_is_recorded_as_what_it_was() {
+        let answer = Answer::Answered {
+            status: reqwest::StatusCode::BAD_GATEWAY,
+            text: "<html><body>upstream unavailable</body></html>".into(),
+            json: Err("expected value at line 1 column 1".into()),
+        };
+
+        let exchange = record_exchange(
+            &SecretGrammar::unauthenticated(),
+            None,
+            "POST",
+            "http://backend.test/generate",
+            &sent_headers(),
+            None,
+            &answer,
+        );
+
+        assert_eq!(exchange.status, Some(502));
+        assert_eq!(
+            exchange.response,
+            Value::String("<html><body>upstream unavailable</body></html>".into())
+        );
+    }
+
+    /// The refused path is held to what the accepted one is held to.
+    /// Three ways the credential reaches this record without anyone
+    /// putting it there: the auth header it was sent in, a URL a profile
+    /// rendered `{{secret}}` into, and a backend that quotes the request
+    /// it just rejected.
+    #[test]
+    fn nothing_recorded_about_a_refusal_carries_the_credential() {
+        let secret = "test-credential-not-a-real-key";
+        let grammar = SecretGrammar::new(secret.into());
+        let answer = Answer::Answered {
+            status: reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            text: String::new(),
+            json: Ok(serde_json::json!({
+                "error": "unusable request",
+                "echoed": { "url": format!("http://backend.test/generate?key={secret}") },
+            })),
+        };
+
+        let exchange = record_exchange(
+            &grammar,
+            Some("authorization"),
+            "POST",
+            &format!("http://backend.test/generate?key={secret}"),
+            &BTreeMap::from([("authorization".into(), format!("Bearer {secret}"))]),
+            Some(&serde_json::json!({ "prompt": "a portrait", "key": secret })),
+            &answer,
+        );
+
+        let rendered = attempt_payload(&exchange).to_string();
+        assert!(
+            !rendered.contains(secret),
+            "the credential reached the record of a refused submit: {rendered}"
+        );
+        // Scrubbed, not dropped: the record has to stay readable or it
+        // stops answering the questions it exists for.
+        assert_eq!(exchange.status, Some(422));
+        assert_eq!(exchange.response["error"], "unusable request");
+        assert_eq!(exchange.request.headers["authorization"], REDACTED);
+    }
+
+    /// The record of a refused submit and the record of an accepted one
+    /// are read the same way — same key, same shape — which is the
+    /// property that makes the two cases equally legible (#76).
+    #[test]
+    fn the_attempt_payload_speaks_the_handles_own_shape() {
+        let exchange = record_exchange(
+            &SecretGrammar::unauthenticated(),
+            None,
+            "POST",
+            "http://backend.test/generate",
+            &sent_headers(),
+            None,
+            &Answer::Answered {
+                status: reqwest::StatusCode::OK,
+                text: r#"{"job_id":"job-1"}"#.into(),
+                json: Ok(serde_json::json!({ "job_id": "job-1" })),
+            },
+        );
+
+        let payload = attempt_payload(&exchange);
+        let from_attempt: Exchange =
+            serde_json::from_value(payload["exchange"].clone()).expect("the record round-trips");
+        let handle_payload = HttpHandlePayload {
+            handle: serde_json::json!("job-1"),
+            submitted_at_ms: Some(42),
+            exchange: Some(exchange),
+        };
+        let from_handle: Exchange = serde_json::from_value(
+            serde_json::to_value(&handle_payload).expect("the handle serialises")["exchange"]
+                .clone(),
+        )
+        .expect("the handle's copy round-trips");
+
+        assert_eq!(from_attempt.status, from_handle.status);
+        assert_eq!(from_attempt.response, from_handle.response);
+        assert_eq!(from_attempt.request.url, from_handle.request.url);
+    }
+
+    /// A handle written before the record grew a status still
+    /// rehydrates. A job submitted under the old shape is in flight when
+    /// the process carrying this code starts polling it, and a handle
+    /// that fails to parse is a job lost to a struct change.
+    #[test]
+    fn a_handle_from_before_the_status_existed_still_parses() {
+        let legacy = serde_json::json!({
+            "handle": "job-1",
+            "submitted_at_ms": 42,
+            "exchange": {
+                "request": {
+                    "method": "POST",
+                    "url": "http://backend.test/jobs",
+                    "headers": {},
+                },
+                "response": { "job_id": "job-1" },
+            },
+        });
+
+        let payload: HttpHandlePayload =
+            serde_json::from_value(legacy).expect("an older handle still rehydrates");
+        let exchange = payload.exchange.expect("it carried an exchange");
+        assert!(
+            exchange.status.is_none(),
+            "absent, because nothing recorded one"
+        );
+        assert_eq!(exchange.response["job_id"], "job-1");
     }
 }

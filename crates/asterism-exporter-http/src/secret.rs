@@ -207,6 +207,7 @@ mod tests {
             persona_id: "persona-1",
             action: "txt2img",
             params,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         }
     }
 

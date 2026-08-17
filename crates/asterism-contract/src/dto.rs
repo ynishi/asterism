@@ -1289,6 +1289,29 @@ pub struct DispatchDto {
     /// wire chose.
     #[serde(default)]
     pub handle_json: Option<String>,
+    /// The exporter's record of the call it last made (opaque JSON
+    /// string). `None` on a row whose exporter recorded nothing.
+    ///
+    /// This is where a *refused* submit is readable. A backend that
+    /// accepts a job leaves the exchange on the handle above; one that
+    /// rejects it returns no handle at all, and what a reader wants to
+    /// know — which endpoint, with which body, and what the backend
+    /// answered — used to survive only as the sentence in
+    /// `state_message`. The HTTP adapter records the same `exchange`
+    /// shape here whichever way the submit went, so the two cases read
+    /// alike, and a backend that was never reached is distinguishable
+    /// from one that answered with a rejection.
+    ///
+    /// Opaque for the reason `handle_json` is: the shape belongs to the
+    /// exporter that wrote it, and `exporter_slug` names which.
+    ///
+    /// One record, not a log. It is the latest attempt on this row; a
+    /// re-run is a row of its own, so the sequence a reader wants is
+    /// already the sequence of dispatches.
+    ///
+    /// Serialised as `null` rather than omitted, matching `handle_json`.
+    #[serde(default)]
+    pub attempt_json: Option<String>,
     /// Lifecycle-state slug (`pending` / `running` / `done` /
     /// `failed` / `cancelled`).
     pub state: String,

@@ -130,6 +130,25 @@ pub struct DispatchJob {
     /// the payload so the runner can double-check it matches
     /// `exporter_slug` on rehydrate.
     pub handle_kind: Option<String>,
+    /// Opaque record of the exporter's latest call — what it sent and
+    /// what came back (`AttemptRecord::payload` in the dispatch SDK).
+    ///
+    /// Beside [`handle`](Self::handle) rather than inside it, because
+    /// the case it exists for is the one with no handle: a submit the
+    /// backend refused returns an error, and everything a reader would
+    /// ask about it — which endpoint, with which body, what the backend
+    /// said — used to leave with that error. The handle stays what it
+    /// is, the exporter's reference to a job that exists.
+    ///
+    /// One record per row: the latest attempt replaces the one before
+    /// it. A re-run after a refusal is a fresh row
+    /// ([`DispatchService::redispatch`](crate::application::DispatchService::redispatch)),
+    /// so the history a reader wants is already a sequence of rows.
+    pub attempt: Option<serde_json::Value>,
+    /// Kind slug for [`attempt`](Self::attempt) (mirrors
+    /// `AttemptRecord::kind`) — which exporter's grammar the record is
+    /// written in.
+    pub attempt_kind: Option<String>,
     /// Reified-derived Asset ids. Populated atomically with the
     /// transition to `Done`.
     pub output_asset_ids: Vec<AssetId>,
@@ -233,6 +252,8 @@ impl DispatchJob {
             state: DispatchState::Pending,
             handle: None,
             handle_kind: None,
+            attempt: None,
+            attempt_kind: None,
             output_asset_ids: Vec::new(),
             source_group_id: None,
             source_query_json: None,
@@ -277,6 +298,8 @@ impl DispatchJob {
             state: DispatchState::Pending,
             handle: None,
             handle_kind: None,
+            attempt: None,
+            attempt_kind: None,
             output_asset_ids: Vec::new(),
             source_group_id: None,
             source_query_json: None,
