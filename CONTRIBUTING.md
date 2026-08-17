@@ -212,8 +212,12 @@ Two agents ship with the repo, and we would appreciate a diff passing
 both before a pull request — recommended, not enforced:
 
 - `pub-checker` — applies the disclosure policy to the diff.
-- `reviewer` — checks the diff against the issue's acceptance criteria,
-  redistribution, gates, and the commit message format.
+- `reviewer` — checks the branch against the issue's acceptance
+  criteria, redistribution, gates, and the commit message format. Give
+  it the issue number and it takes the rest: the diff against `main`,
+  and its own rounds from `workspace/review-<issue>.md`. It stops
+  without an issue, and it reviews a branch twice — a branch too large
+  for that is an issue to split.
 
 The same recommendation extends past the PR: releases and publishes
 (crates, packages, the repository's own settings) are best performed
@@ -241,7 +245,11 @@ remote, and that includes the gate:
    gitignored, and say where it is. Not a summary in the chat, not "a
    draft" — a file, so that the command handed over can be
    `--body-file <path>` and the human reads the same bytes that will be
-   posted.
+   posted. The review record — `workspace/review-<issue>.md`, the
+   rounds and what became of each finding — goes into that body. A
+   finding declined there is a decision the pull request is making, so
+   it travels with it rather than staying in a worktree that is about
+   to be deleted.
 3. Hand over the literal commands. These two are the only ones that
    write to anything remote:
 
