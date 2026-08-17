@@ -1,0 +1,17 @@
+{
+  "name": "prose-shape",
+  "version": "0.1.0",
+  "description": "Refuses a write that gives a file the wrong prose shape: hard wrapping in a body GitHub renders, over-long lines in prose read in an editor and in git diff. The widths live in the check, not in guidance an agent reads and then applies to everything it writes.",
+  "author": {
+    "name": "Yutaka Nishimura"
+  },
+  "homepage": "https://github.com/ynishi/asterism",
+  "repository": "https://github.com/ynishi/asterism",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "asterism",
+    "hooks",
+    "prose",
+    "formatting"
+  ]
+}

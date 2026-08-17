@@ -176,9 +176,22 @@ Refs #<issue>
 ## Working with coding agents — the recommended pattern
 
 This repository ships its agent configuration in the open: pointer
-memory (`.claude/CLAUDE.md`), guard agents (`.claude/agents/`), and
-permission settings that deny push/PR to agents outright. If you
-develop here with a coding agent, the loop that works is:
+memory (`.claude/CLAUDE.md`), guard agents (`.claude/agents/`),
+permission settings that deny push/PR to agents outright, and a plugin
+worth installing:
+
+```text
+/plugin marketplace add ynishi/asterism
+/plugin install prose-shape@asterism
+```
+
+`prose-shape` is a hook. It refuses a write that gives a file the wrong
+prose shape — a paragraph hand-wrapped into a body GitHub renders and
+folds itself, a line too wide for prose that is read in an editor and
+in `git diff` — and names the file and the line as the write is
+attempted. Nothing about it is installed by cloning; it is two commands
+you run once. If you develop here with a coding agent, the loop that
+works is:
 
 ```text
 issue -> just worktree-new -> implement -> just check
