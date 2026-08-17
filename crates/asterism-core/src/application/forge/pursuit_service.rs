@@ -342,7 +342,15 @@ impl PursuitService {
             .ok_or_else(|| DomainError::not_found("pursuit", &command.pursuit_id))?;
         let asset_id = parse_asset_id(&command.asset_id)?;
         let kind = match (command.kind.as_str(), command.origin.as_deref()) {
-            ("in", Some(origin)) => PursuitTxKind::In(TxOrigin::parse(origin)?),
+            // Aim and scope stay unset here: this command cannot yet
+            // carry them, and a targeted IN is the filing verb's to
+            // record (#63 decision 4) once a pursuit has a project
+            // whose entries it could be aiming at.
+            ("in", Some(origin)) => PursuitTxKind::In {
+                origin: TxOrigin::parse(origin)?,
+                target: None,
+                out_of_scope: false,
+            },
             ("in", None) => {
                 return Err(DomainError::Validation(
                     "an 'in' names its origin: generated, imported, or existing".into(),
@@ -370,7 +378,7 @@ impl PursuitService {
         let txs = self.pursuits.txs_of(&pursuit.id).await?;
         let state = ledger(&txs);
         match kind {
-            PursuitTxKind::In(_) => {
+            PursuitTxKind::In { .. } => {
                 let asset = self
                     .assets
                     .find(&asset_id)
@@ -421,7 +429,7 @@ impl PursuitService {
                     )));
                 }
             },
-            PursuitTxKind::Update => unreachable!("refused above"),
+            PursuitTxKind::Update { .. } => unreachable!("refused above"),
         }
         let tx = PursuitTx::new(
             pursuit.id,
@@ -431,7 +439,7 @@ impl PursuitService {
             command.note,
             Utc::now(),
             attribution,
-        );
+        )?;
         self.pursuits.append_tx(&tx).await?;
         Ok(tx_to_dto(&tx))
     }

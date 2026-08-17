@@ -19,7 +19,8 @@ use asterism_core::domain::forge::pursuit::{
 use asterism_core::domain::forge::tx::{PursuitTx, PursuitTxKind};
 use asterism_core::domain::repository::PursuitRepository;
 use asterism_core::domain::value::{
-    AssetId, CullId, PersonaId, ProjectId, PursuitEventId, PursuitId, PursuitTxId, SnapshotId,
+    AssetId, CullId, LineEntryId, LineEventId, PersonaId, ProjectId, PursuitEventId, PursuitId,
+    PursuitTxId, SnapshotId,
 };
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
@@ -194,6 +195,10 @@ struct TxRow {
     kind: String,
     asset_id: Uuid,
     origin: Option<String>,
+    target_entry_id: Option<Uuid>,
+    base_event_id: Option<Uuid>,
+    out_of_scope: bool,
+    supersedes_asset_id: Option<Uuid>,
     note: Option<String>,
     author_kind: Option<String>,
     author_subject: Option<String>,
@@ -203,7 +208,9 @@ struct TxRow {
 }
 
 impl TxRow {
-    const COLUMNS: &'static str = "id, pursuit_id, persona_id, kind, asset_id, origin, note,
+    const COLUMNS: &'static str = "id, pursuit_id, persona_id, kind, asset_id, origin,
+                                   target_entry_id, base_event_id, out_of_scope,
+                                   supersedes_asset_id, note,
                                    author_kind, author_subject, operator_ai, attributed_via,
                                    created_at";
 
@@ -215,12 +222,16 @@ impl TxRow {
             kind: row.get(3)?,
             asset_id: row.get(4)?,
             origin: row.get(5)?,
-            note: row.get(6)?,
-            author_kind: row.get(7)?,
-            author_subject: row.get(8)?,
-            operator_ai: row.get(9)?,
-            attributed_via: row.get(10)?,
-            created_at: row.get(11)?,
+            target_entry_id: row.get(6)?,
+            base_event_id: row.get(7)?,
+            out_of_scope: row.get(8)?,
+            supersedes_asset_id: row.get(9)?,
+            note: row.get(10)?,
+            author_kind: row.get(11)?,
+            author_subject: row.get(12)?,
+            operator_ai: row.get(13)?,
+            attributed_via: row.get(14)?,
+            created_at: row.get(15)?,
         })
     }
 
@@ -235,7 +246,14 @@ impl TxRow {
             PursuitTxId::from_uuid(self.id),
             PursuitId::from_uuid(self.pursuit_id),
             PersonaId::from_uuid(self.persona_id),
-            PursuitTxKind::from_columns(&self.kind, self.origin.as_deref())?,
+            PursuitTxKind::from_columns(
+                &self.kind,
+                self.origin.as_deref(),
+                self.target_entry_id.map(LineEntryId::from_uuid),
+                self.base_event_id.map(LineEventId::from_uuid),
+                self.out_of_scope,
+                self.supersedes_asset_id.map(AssetId::from_uuid),
+            )?,
             AssetId::from_uuid(self.asset_id),
             self.note,
             ms_to_datetime(self.created_at)?,
@@ -711,6 +729,11 @@ impl PursuitRepository for SqlitePursuitRepository {
         let persona_id = *tx.persona_id.as_uuid();
         let kind = tx.kind.kind_slug().to_string();
         let origin = tx.kind.origin_slug().map(str::to_string);
+        let target = tx.kind.target();
+        let target_entry_id = target.map(|t| *t.entry_id.as_uuid());
+        let base_event_id = target.and_then(|t| t.base_event_id).map(|e| *e.as_uuid());
+        let out_of_scope = tx.kind.out_of_scope();
+        let supersedes_asset_id = tx.kind.supersedes_asset_id().map(|a| *a.as_uuid());
         let asset_id = *tx.asset_id.as_uuid();
         let note = tx.note.clone();
         let (author_kind, author_subject, operator_ai, attributed_via) =
@@ -720,10 +743,13 @@ impl PursuitRepository for SqlitePursuitRepository {
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO pursuit_tx
-                         (id, pursuit_id, persona_id, kind, asset_id, origin, note,
+                         (id, pursuit_id, persona_id, kind, asset_id, origin,
+                          target_entry_id, base_event_id, out_of_scope,
+                          supersedes_asset_id, note,
                           author_kind, author_subject, operator_ai, attributed_via,
                           created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                             ?15, ?16)",
                     params![
                         id,
                         pursuit_id,
@@ -731,6 +757,10 @@ impl PursuitRepository for SqlitePursuitRepository {
                         kind,
                         asset_id,
                         origin,
+                        target_entry_id,
+                        base_event_id,
+                        out_of_scope,
+                        supersedes_asset_id,
                         note,
                         author_kind,
                         author_subject,
@@ -1017,6 +1047,60 @@ mod tests {
         ProjectId::from_uuid(project)
     }
 
+    /// One line entry with one `add` behind it, so a targeted IN has
+    /// something real to aim at and to pin. Both columns carry foreign
+    /// keys, so the whole chain has to exist: a line under the project,
+    /// an entry on the line, and a merge for the event to land under.
+    ///
+    /// **Closes the pursuit as a side effect.** A merge hangs on a
+    /// satisfied close, so one is written for `pursuit` — harmless for
+    /// a caller reading the ledger, wrong for one reading standing.
+    async fn seed_entry_and_event(
+        isle: &AsyncIsle,
+        persona: PersonaId,
+        project: ProjectId,
+        pursuit: PursuitId,
+    ) -> (LineEntryId, LineEventId) {
+        let line = Uuid::now_v7();
+        let entry = Uuid::now_v7();
+        let close = Uuid::now_v7();
+        let merge = Uuid::now_v7();
+        let event = Uuid::now_v7();
+        let persona_uuid = *persona.as_uuid();
+        let project_uuid = *project.as_uuid();
+        let pursuit_uuid = *pursuit.as_uuid();
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO line (id, project_id, name, created_at) VALUES (?1, ?2, 'main', 0)",
+                params![line, project_uuid],
+            )?;
+            conn.execute(
+                "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
+                 VALUES (?1, ?2, ?3, 0)",
+                params![entry, line, persona_uuid],
+            )?;
+            conn.execute(
+                "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
+                 VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
+                params![close, pursuit_uuid, persona_uuid],
+            )?;
+            conn.execute(
+                "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
+                 VALUES (?1, ?2, ?3, 0)",
+                params![merge, close, persona_uuid],
+            )?;
+            conn.execute(
+                "INSERT INTO line_event \
+                     (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
+                 VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
+                params![event, entry, persona_uuid, Uuid::now_v7(), merge],
+            )
+        })
+        .await
+        .unwrap();
+        (LineEntryId::from_uuid(entry), LineEventId::from_uuid(event))
+    }
+
     /// One asset row with a caller-supplied `_trace` note (raw JSON)
     /// and clock — the shape the ingest writes, seeded directly so the
     /// membership probes are tested against the storage contract.
@@ -1101,6 +1185,77 @@ mod tests {
             "most-recent first"
         );
         assert_eq!(listed[0].parent_id, Some(parent.id));
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A targeted IN survives the round trip with its aim intact.
+    /// `target_entry_id`, `base_event_id` and `supersedes_asset_id` are
+    /// three nullable uuid columns sitting together in the SELECT list,
+    /// the positional reads and the INSERT, and every other ledger test
+    /// leaves all three `None` — so a slip among them is invisible
+    /// everywhere but here. Each is given a distinct value, and the
+    /// unaimed gesture beside it is asserted to stay unaimed rather
+    /// than picking anything up.
+    #[tokio::test]
+    async fn a_targeted_in_round_trips_its_aim_and_leaves_a_plain_one_unaimed() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = seed_persona(&isle).await;
+        let project = seed_project(&isle, persona).await;
+        let repo = SqlitePursuitRepository::new(isle.clone());
+        let ctx = AttributionContext::owner_surface();
+        let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
+
+        let pursuit = Pursuit::new(persona, Some(project), None, None, None, t0, &ctx);
+        repo.create(&pursuit).await.unwrap();
+        let (entry, base_event) = seed_entry_and_event(&isle, persona, project, pursuit.id).await;
+
+        let aimed = PursuitTx::new(
+            pursuit.id,
+            persona,
+            PursuitTxKind::In {
+                origin: asterism_core::domain::forge::tx::TxOrigin::Existing,
+                target: Some(asterism_core::domain::forge::tx::TxTarget {
+                    entry_id: entry,
+                    base_event_id: Some(base_event),
+                }),
+                out_of_scope: true,
+            },
+            AssetId::new(),
+            None,
+            t0,
+            &ctx,
+        )
+        .unwrap();
+        repo.append_tx(&aimed).await.unwrap();
+
+        let plain = PursuitTx::new(
+            pursuit.id,
+            persona,
+            PursuitTxKind::In {
+                origin: asterism_core::domain::forge::tx::TxOrigin::Generated,
+                target: None,
+                out_of_scope: false,
+            },
+            AssetId::new(),
+            None,
+            t0 + Duration::seconds(1),
+            &ctx,
+        )
+        .unwrap();
+        repo.append_tx(&plain).await.unwrap();
+
+        let read = repo.txs_of(&pursuit.id).await.unwrap();
+        assert_eq!(read, vec![aimed.clone(), plain.clone()]);
+
+        let back = read[0].kind.target().expect("the aim came back");
+        assert_eq!(back.entry_id, entry);
+        assert_eq!(back.base_event_id, Some(base_event));
+        assert!(read[0].kind.out_of_scope());
+        assert_eq!(read[0].kind.supersedes_asset_id(), None);
+
+        assert_eq!(read[1].kind.target(), None);
+        assert!(!read[1].kind.out_of_scope());
 
         driver.shutdown().await.unwrap();
     }
