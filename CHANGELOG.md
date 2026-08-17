@@ -42,8 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scope, and anything but an `update` superseding a member are all
   states the domain cannot express; only "just an existing `in` may
   aim" needs a check. Purging a persona now sweeps its project and
-  lines with everything else. Still no write path: nothing sets any of
-  it yet.
+  lines with everything else.
+
+- **The filing verb — a project to work under** (P2 of #63). `project_open`
+  opens one and mints the `main` line with it in the same transaction,
+  `project_get` and `project_list` read them back, and `pursuit_open`
+  takes a `project_id` that puts the pursuit's satisfied close on that
+  project's line. Two rules the schema cannot hold live in the service:
+  a project name is unique among one persona's projects, checked by
+  reading first, so two simultaneous opens of one name can both land;
+  and filing never crosses personas, which no foreign key can say
+  because `project` carries its own persona and the column references
+  only the project. A parent's filing is not inherited — a child says
+  where it files or files nowhere. The close still lands nothing: what
+  a filed pursuit does at close is P3.
 
 - **The ledger and the cull — selection is recorded** (#22, model on
   #63). Keeping or discarding a generated asset used to move through
