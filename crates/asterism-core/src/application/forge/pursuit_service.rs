@@ -25,9 +25,12 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    ClosePursuitCommand, OpenPursuitCommand, ReopenPursuitCommand, RestampDispatchCommand,
+    ClosePursuitCommand, OpenPursuitCommand, RecordPursuitTxCommand, ReopenPursuitCommand,
+    RestampDispatchCommand,
 };
-use asterism_contract::dto::{DispatchDto, PursuitDto, PursuitEventDto};
+use asterism_contract::dto::{
+    AssetCullDto, CullDto, CullMemberDto, DispatchDto, PursuitDto, PursuitEventDto, PursuitTxDto,
+};
 use chrono::Utc;
 
 use crate::application::mapping::{
@@ -35,10 +38,17 @@ use crate::application::mapping::{
     parse_snapshot_id,
 };
 use crate::domain::attribution::AttributionContext;
+use crate::domain::forge::cull::{
+    Cull, CullMember, CullVerdict, RequestedVerdict, resolve_verdicts,
+};
 use crate::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject, standing,
 };
-use crate::domain::repository::{DispatchRepository, PersonaRepository, PursuitRepository};
+use crate::domain::forge::tx::{PursuitTx, PursuitTxKind, TxOrigin, ledger};
+use crate::domain::repository::{
+    AssetRepository, DispatchRepository, PersonaRepository, PursuitRepository,
+};
+use crate::domain::value::{AssetId, PersonaId, SnapshotId};
 use crate::error::DomainError;
 
 /// Pursuit lifecycle use-case service.
@@ -46,9 +56,12 @@ pub struct PursuitService {
     pursuits: Arc<dyn PursuitRepository>,
     personas: Arc<dyn PersonaRepository>,
     dispatches: Arc<dyn DispatchRepository>,
-    /// The close freeze goes through the snapshot service rather than
-    /// the repository so the kept ids get the same existence / persona
-    /// / fold-redirect hydration every other freeze gets.
+    /// The ledger's `in` names an asset row; the existence and persona
+    /// checks read it here.
+    assets: Arc<dyn AssetRepository>,
+    /// The close freezes go through the snapshot service rather than
+    /// the repository so the frozen ids get the same existence /
+    /// persona / fold-redirect hydration every other freeze gets.
     snapshots: Arc<crate::application::SnapshotService>,
 }
 
@@ -58,12 +71,14 @@ impl PursuitService {
         pursuits: Arc<dyn PursuitRepository>,
         personas: Arc<dyn PersonaRepository>,
         dispatches: Arc<dyn DispatchRepository>,
+        assets: Arc<dyn AssetRepository>,
         snapshots: Arc<crate::application::SnapshotService>,
     ) -> Self {
         Self {
             pursuits,
             personas,
             dispatches,
+            assets,
             snapshots,
         }
     }
@@ -133,14 +148,25 @@ impl PursuitService {
     /// Records a close. One-way and repeatable: a second close is a
     /// new fact and standing re-derives; nothing is edited.
     ///
-    /// `satisfied` freezes the kept set at this moment (ascending, see
-    /// the module doc) into a snapshot the event references — the
-    /// merge-product analogue, immediately usable as the input of a
-    /// next dispatch or a child pursuit. An empty kept set records
-    /// `None`: "concluded with nothing kept" is a defined state,
-    /// because an empty snapshot is domain-rejected. The rejected side
-    /// is deliberately not snapshotted — its rows stay live and
-    /// restorable.
+    /// `satisfied` is where the cull is recorded (#22, model on #63).
+    /// The candidate set is derived from the pursuit's own ledger —
+    /// never supplied by the caller — and frozen into a snapshot; the
+    /// command's verdicts are resolved against it (removed and
+    /// unspoken culls as `reject`, untouched and unspoken gets no
+    /// row); and the kept set the event freezes is exactly the `keep`
+    /// verdicts (ascending, see the module doc) — the merge-product
+    /// analogue, immediately usable as the input of a next dispatch or
+    /// a child pursuit. No keeps records `None`: "concluded with
+    /// nothing kept" is a defined state, because an empty snapshot is
+    /// domain-rejected. The rejected side is deliberately not
+    /// snapshotted — its rows stay live and restorable, judged in the
+    /// cull. A close with no verdicts to record writes no cull row.
+    ///
+    /// The event and the cull land in one repository transaction; the
+    /// two freezes happen first and are content-addressed, so a close
+    /// that fails between them leaves only unreferenced snapshots
+    /// behind — harmless, shared with any later freeze of the same
+    /// sets.
     pub async fn close(
         &self,
         command: ClosePursuitCommand,
@@ -161,79 +187,324 @@ impl PursuitService {
                 )));
             }
         };
-        if kind == PursuitEventKind::ClosedAbandoned && !command.kept_asset_ids.is_empty() {
-            return Err(DomainError::Validation(
-                "an abandoned close keeps nothing; kept_asset_ids must be empty".into(),
-            ));
+        if kind == PursuitEventKind::ClosedAbandoned {
+            // Applies nothing — no cull, no freeze (#63): the
+            // GitHub-shaped close-without-merging.
+            if !command.verdicts.is_empty() {
+                return Err(DomainError::Validation(
+                    "an abandoned close decides nothing; verdicts must be empty".into(),
+                ));
+            }
+            let event = PursuitEvent::new(
+                pursuit.id,
+                pursuit.persona_id,
+                kind,
+                None,
+                command.note,
+                Utc::now(),
+                attribution,
+            )?;
+            self.pursuits.append_close(&event, None).await?;
+            return Ok(event_to_dto(&event));
         }
-        let snapshot_id = if command.kept_asset_ids.is_empty() {
+        let requested = command
+            .verdicts
+            .iter()
+            .map(|entry| {
+                Ok(RequestedVerdict {
+                    asset_id: parse_asset_id(&entry.asset_id)?,
+                    verdict: CullVerdict::parse(&entry.verdict)?,
+                    note: entry.note.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, DomainError>>()?;
+        let txs = self.pursuits.txs_of(&pursuit.id).await?;
+        let state = ledger(&txs);
+        let resolved = resolve_verdicts(&state, &requested)?;
+        // The ledger is history and history outlives the asset (its
+        // rows carry no FK) — but a freeze cannot hold what no longer
+        // exists, and the snapshot service refuses dead ids. So
+        // existence is read once per member: a purged member can
+        // still be *rejected* (the verdict row outlives the asset
+        // too), a `keep` of one is refused — a kept set that silently
+        // dropped a keep would misstate "kept = the keep verdicts" —
+        // and the freezes hold the surviving members.
+        let mut existing: std::collections::BTreeSet<AssetId> = std::collections::BTreeSet::new();
+        for asset_id in state.keys() {
+            if self.assets.find(asset_id).await?.is_some() {
+                existing.insert(*asset_id);
+            }
+        }
+        for verdict in &resolved {
+            if verdict.verdict == CullVerdict::Keep && !existing.contains(&verdict.asset_id) {
+                return Err(DomainError::Validation(format!(
+                    "keep of {}: the asset no longer exists; a purged member \
+                     can only be rejected",
+                    verdict.asset_id
+                )));
+            }
+        }
+        let kept: Vec<AssetId> = resolved
+            .iter()
+            .filter(|r| r.verdict == CullVerdict::Keep)
+            .map(|r| r.asset_id)
+            .collect();
+        let kept_snapshot = if kept.is_empty() {
             None
         } else {
-            // Sort by parsed id, not by string: the convention is
-            // "asset id ascending", and the wire strings happen to
-            // sort the same for hyphenated UUIDs but the id is the
-            // contract. Dedup after sorting — the same asset named
-            // twice is one membership.
-            let mut kept = command
-                .kept_asset_ids
-                .iter()
-                .map(|s| parse_asset_id(s))
-                .collect::<Result<Vec<_>, _>>()?;
-            kept.sort();
-            kept.dedup();
-            let mut frozen = self
-                .snapshots
-                .create(
-                    asterism_contract::command::CreateSnapshotCommand {
-                        persona_id: pursuit.persona_id.to_string(),
-                        asset_ids: kept.iter().map(|a| a.to_string()).collect(),
-                    },
-                    attribution,
-                )
-                .await?;
-            // The freeze redirects fold headstones to their keepers in
-            // place, preserving position — which can un-sort the set
-            // this path just sorted (and two headstones can collapse
-            // onto one keeper, duplicating a member). The convention
-            // is over the *effective* members, so when redirection
-            // changed the shape, re-freeze once over the post-redirect
-            // ids, canonicalised. The first freeze's row stays as an
-            // unreferenced content-addressed snapshot — harmless, and
-            // shared with anything else that ever freezes that exact
-            // sequence.
-            let post: Vec<_> = frozen
-                .asset_ids
-                .iter()
-                .map(|s| parse_asset_id(s))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut canonical = post.clone();
-            canonical.sort();
-            canonical.dedup();
-            if canonical != post {
-                frozen = self
-                    .snapshots
-                    .create(
-                        asterism_contract::command::CreateSnapshotCommand {
-                            persona_id: pursuit.persona_id.to_string(),
-                            asset_ids: canonical.iter().map(|a| a.to_string()).collect(),
-                        },
-                        attribution,
-                    )
-                    .await?;
-            }
-            Some(parse_snapshot_id(&frozen.id)?)
+            Some(
+                self.freeze_canonical(pursuit.persona_id, kept, attribution)
+                    .await?,
+            )
         };
+        let now = Utc::now();
         let event = PursuitEvent::new(
             pursuit.id,
             pursuit.persona_id,
             kind,
-            snapshot_id,
+            kept_snapshot,
+            command.note,
+            now,
+            attribution,
+        )?;
+        // The candidate set is everything the ledger admitted that
+        // still exists — removed members included (removal is a
+        // verdict input, not an exit), purged members excluded (see
+        // above; their verdict rows still name them). A close whose
+        // surviving candidate set is empty writes no cull: there is
+        // no set left to say "out of".
+        let candidates: Vec<AssetId> = state
+            .keys()
+            .filter(|id| existing.contains(id))
+            .copied()
+            .collect();
+        let cull_payload = if resolved.is_empty() || candidates.is_empty() {
+            None
+        } else {
+            let candidate_snapshot = self
+                .freeze_canonical(pursuit.persona_id, candidates, attribution)
+                .await?;
+            let cull = Cull::new(
+                pursuit.id,
+                pursuit.persona_id,
+                event.id,
+                candidate_snapshot,
+                command.cull_note,
+                now,
+                attribution,
+            );
+            let members: Vec<CullMember> = resolved
+                .into_iter()
+                .map(|r| CullMember {
+                    cull_id: cull.id,
+                    asset_id: r.asset_id,
+                    verdict: r.verdict,
+                    note: r.note,
+                })
+                .collect();
+            Some((cull, members))
+        };
+        self.pursuits
+            .append_close(
+                &event,
+                cull_payload
+                    .as_ref()
+                    .map(|(cull, members)| (cull, members.as_slice())),
+            )
+            .await?;
+        Ok(event_to_dto(&event))
+    }
+
+    /// Appends one membership gesture to a pursuit's ledger (#22).
+    /// Refusals, not repairs: an `in` of a present member (`unremove`
+    /// is the re-entry verb for a removed one), a `remove` of a
+    /// non-member, an `unremove` of an unremoved one — each names a
+    /// gesture that misunderstands the ledger, and recording it would
+    /// record the misunderstanding.
+    pub async fn record_tx(
+        &self,
+        command: RecordPursuitTxCommand,
+        attribution: &AttributionContext,
+    ) -> Result<PursuitTxDto, DomainError> {
+        let pursuit_id = parse_pursuit_id(&command.pursuit_id)?;
+        let pursuit = self
+            .pursuits
+            .find(&pursuit_id)
+            .await?
+            .ok_or_else(|| DomainError::not_found("pursuit", &command.pursuit_id))?;
+        let asset_id = parse_asset_id(&command.asset_id)?;
+        let kind = match (command.kind.as_str(), command.origin.as_deref()) {
+            ("in", Some(origin)) => PursuitTxKind::In(TxOrigin::parse(origin)?),
+            ("in", None) => {
+                return Err(DomainError::Validation(
+                    "an 'in' names its origin: generated, imported, or existing".into(),
+                ));
+            }
+            ("update", _) => {
+                return Err(DomainError::Validation(
+                    "'update' is the reserved round-trip verb (#63); nothing records it yet".into(),
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(DomainError::Validation(
+                    "origin rides 'in' and nothing else".into(),
+                ));
+            }
+            ("remove", None) => PursuitTxKind::Remove,
+            ("unremove", None) => PursuitTxKind::Unremove,
+            (other, None) => {
+                return Err(DomainError::Validation(format!(
+                    "unknown pursuit tx kind {other:?}: expected \"in\", \"remove\" or \
+                     \"unremove\""
+                )));
+            }
+        };
+        let txs = self.pursuits.txs_of(&pursuit.id).await?;
+        let state = ledger(&txs);
+        match kind {
+            PursuitTxKind::In(_) => {
+                let asset = self
+                    .assets
+                    .find(&asset_id)
+                    .await?
+                    .ok_or_else(|| DomainError::not_found("asset", &command.asset_id))?;
+                if asset.persona_id != pursuit.persona_id {
+                    return Err(DomainError::Validation(
+                        "asset belongs to a different persona than the pursuit".into(),
+                    ));
+                }
+                match state.get(&asset_id) {
+                    None => {}
+                    Some(member) if member.removed => {
+                        return Err(DomainError::Validation(
+                            "a removed member re-enters by 'unremove', not a second 'in'".into(),
+                        ));
+                    }
+                    Some(_) => {
+                        return Err(DomainError::Conflict(format!(
+                            "asset {asset_id} is already a member of this pursuit"
+                        )));
+                    }
+                }
+            }
+            PursuitTxKind::Remove => match state.get(&asset_id) {
+                Some(member) if !member.removed => {}
+                Some(_) => {
+                    return Err(DomainError::Validation(format!(
+                        "asset {asset_id} is already removed"
+                    )));
+                }
+                None => {
+                    return Err(DomainError::Validation(format!(
+                        "asset {asset_id} is not a member of this pursuit"
+                    )));
+                }
+            },
+            PursuitTxKind::Unremove => match state.get(&asset_id) {
+                Some(member) if member.removed => {}
+                Some(_) => {
+                    return Err(DomainError::Validation(format!(
+                        "asset {asset_id} is not removed"
+                    )));
+                }
+                None => {
+                    return Err(DomainError::Validation(format!(
+                        "asset {asset_id} is not a member of this pursuit"
+                    )));
+                }
+            },
+            PursuitTxKind::Update => unreachable!("refused above"),
+        }
+        let tx = PursuitTx::new(
+            pursuit.id,
+            pursuit.persona_id,
+            kind,
+            asset_id,
             command.note,
             Utc::now(),
             attribution,
-        )?;
-        self.pursuits.append_event(&event).await?;
-        Ok(event_to_dto(&event))
+        );
+        self.pursuits.append_tx(&tx).await?;
+        Ok(tx_to_dto(&tx))
+    }
+
+    /// Every verdict ever recorded about one asset, most-recent first
+    /// — the acceptance read of #22: who decided to keep or drop it,
+    /// out of which set, in which line of work.
+    pub async fn asset_culls(
+        &self,
+        asset_id: &str,
+        limit: u32,
+    ) -> Result<Vec<AssetCullDto>, DomainError> {
+        let asset = parse_asset_id(asset_id)?;
+        let rows = self.pursuits.culls_for_asset(&asset, limit).await?;
+        Ok(rows
+            .into_iter()
+            .map(|(cull, member)| AssetCullDto {
+                cull_id: cull.id.to_string(),
+                pursuit_id: cull.pursuit_id.to_string(),
+                candidate_snapshot_id: cull.candidate_snapshot_id.to_string(),
+                verdict: member.verdict.slug().to_string(),
+                note: member.note,
+                author_kind: cull.author().map(|a| a.kind_slug().to_string()),
+                operator_ai: cull.operator_ai().map(|o| o.as_str().to_string()),
+                created_at_ms: cull.created_at.timestamp_millis(),
+            })
+            .collect())
+    }
+
+    /// Freezes a canonical (ascending, deduplicated) set through the
+    /// snapshot service, re-freezing once when fold-redirect changed
+    /// the shape — see the comment inside; the first freeze's row
+    /// stays as an unreferenced content-addressed snapshot, harmless.
+    async fn freeze_canonical(
+        &self,
+        persona_id: PersonaId,
+        mut ids: Vec<AssetId>,
+        attribution: &AttributionContext,
+    ) -> Result<SnapshotId, DomainError> {
+        // Sort by parsed id, not by string: the convention is "asset
+        // id ascending", and the id is the contract. Dedup after
+        // sorting — the same asset named twice is one membership.
+        ids.sort();
+        ids.dedup();
+        let mut frozen = self
+            .snapshots
+            .create(
+                asterism_contract::command::CreateSnapshotCommand {
+                    persona_id: persona_id.to_string(),
+                    asset_ids: ids.iter().map(|a| a.to_string()).collect(),
+                },
+                attribution,
+            )
+            .await?;
+        // The freeze redirects fold headstones to their keepers in
+        // place, preserving position — which can un-sort the set this
+        // path just sorted (and two headstones can collapse onto one
+        // keeper, duplicating a member). The convention is over the
+        // *effective* members, so when redirection changed the shape,
+        // re-freeze once over the post-redirect ids, canonicalised.
+        let post: Vec<_> = frozen
+            .asset_ids
+            .iter()
+            .map(|s| parse_asset_id(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut canonical = post.clone();
+        canonical.sort();
+        canonical.dedup();
+        if canonical != post {
+            frozen = self
+                .snapshots
+                .create(
+                    asterism_contract::command::CreateSnapshotCommand {
+                        persona_id: persona_id.to_string(),
+                        asset_ids: canonical.iter().map(|a| a.to_string()).collect(),
+                    },
+                    attribution,
+                )
+                .await?;
+        }
+        parse_snapshot_id(&frozen.id)
     }
 
     /// Records a reopen. Legal on an already-open pursuit — the fact
@@ -366,11 +637,15 @@ impl PursuitService {
         let events = self.pursuits.events_of(&pursuit_id).await?;
         let rounds = self.dispatches.list_rounds(&pursuit_id).await?;
         let returns = self.pursuits.returns_of(&pursuit_id).await?;
+        let txs = self.pursuits.txs_of(&pursuit_id).await?;
+        let culls = self.pursuits.culls_of(&pursuit_id).await?;
         Ok(asterism_contract::dto::PursuitViewDto {
             pursuit: pursuit_to_dto(&pursuit, standing(&events).slug()),
             rounds: rounds.iter().map(dispatch_to_dto).collect(),
             returns: returns.iter().map(|a| a.to_string()).collect(),
             events: events.iter().map(event_to_dto).collect(),
+            txs: txs.iter().map(tx_to_dto).collect(),
+            culls: culls.iter().map(cull_to_dto).collect(),
         })
     }
 }
@@ -398,5 +673,45 @@ fn event_to_dto(event: &PursuitEvent) -> PursuitEventDto {
         snapshot_id: event.snapshot_id.map(|s| s.to_string()),
         note: event.note.clone(),
         created_at_ms: event.created_at.timestamp_millis(),
+    }
+}
+
+/// Projects one ledger gesture into the wire shape — attribution
+/// included, because a gesture is a statement somebody made.
+fn tx_to_dto(tx: &PursuitTx) -> PursuitTxDto {
+    PursuitTxDto {
+        id: tx.id.to_string(),
+        pursuit_id: tx.pursuit_id.to_string(),
+        kind: tx.kind.kind_slug().to_string(),
+        origin: tx.kind.origin_slug().map(str::to_string),
+        asset_id: tx.asset_id.to_string(),
+        note: tx.note.clone(),
+        author_kind: tx.author().map(|a| a.kind_slug().to_string()),
+        operator_ai: tx.operator_ai().map(|o| o.as_str().to_string()),
+        created_at_ms: tx.created_at.timestamp_millis(),
+    }
+}
+
+/// Projects one cull with its member verdicts into the wire shape.
+/// The attribution is the "who decided" of #22's acceptance question,
+/// so it rides every read of the act.
+fn cull_to_dto((cull, members): &(Cull, Vec<CullMember>)) -> CullDto {
+    CullDto {
+        id: cull.id.to_string(),
+        pursuit_id: cull.pursuit_id.to_string(),
+        pursuit_event_id: cull.pursuit_event_id.to_string(),
+        candidate_snapshot_id: cull.candidate_snapshot_id.to_string(),
+        note: cull.note.clone(),
+        author_kind: cull.author().map(|a| a.kind_slug().to_string()),
+        operator_ai: cull.operator_ai().map(|o| o.as_str().to_string()),
+        created_at_ms: cull.created_at.timestamp_millis(),
+        members: members
+            .iter()
+            .map(|member| CullMemberDto {
+                asset_id: member.asset_id.to_string(),
+                verdict: member.verdict.slug().to_string(),
+                note: member.note.clone(),
+            })
+            .collect(),
     }
 }

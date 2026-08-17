@@ -17,8 +17,10 @@ use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::dir::Dir;
 use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, DuplicateConflict};
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
+use crate::domain::forge::cull::{Cull, CullMember};
 use crate::domain::forge::dispatch::DispatchJob;
 use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
+use crate::domain::forge::tx::PursuitTx;
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
@@ -2984,6 +2986,42 @@ pub trait PursuitRepository: Send + Sync {
         &self,
         persona_id: &PersonaId,
     ) -> Result<Vec<(PursuitId, PursuitEventKind)>, DomainError>;
+
+    /// Appends one membership gesture to the ledger (#22). Append-only:
+    /// gestures are never edited, membership re-derives.
+    async fn append_tx(&self, tx: &PursuitTx) -> Result<(), DomainError>;
+
+    /// A pursuit's ledger, `(created_at, id)` ascending — the order
+    /// [`ledger`](crate::domain::forge::tx::ledger) derives over.
+    async fn txs_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitTx>, DomainError>;
+
+    /// Appends a close event together with its cull, atomically: "the
+    /// pursuit closed" and "this is what that close decided, out of
+    /// what" must not be separable facts. `None` is a close with
+    /// nothing to record — an abandoned close, or a satisfied close of
+    /// a pursuit whose ledger is empty.
+    async fn append_close(
+        &self,
+        event: &PursuitEvent,
+        cull: Option<(&Cull, &[CullMember])>,
+    ) -> Result<(), DomainError>;
+
+    /// A pursuit's culls with their member verdicts, oldest first —
+    /// one cull per close event, so a repeat close reads as a second
+    /// record, not an overwrite.
+    async fn culls_of(
+        &self,
+        pursuit_id: &PursuitId,
+    ) -> Result<Vec<(Cull, Vec<CullMember>)>, DomainError>;
+
+    /// Every verdict ever recorded about one asset, most-recent first,
+    /// capped at `limit` — the acceptance read of #22: who decided to
+    /// keep or drop this, out of which set, in which line of work.
+    async fn culls_for_asset(
+        &self,
+        asset_id: &AssetId,
+        limit: u32,
+    ) -> Result<Vec<(Cull, CullMember)>, DomainError>;
 }
 
 /// Persistence port for the Query Group evaluation core.

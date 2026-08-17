@@ -47,7 +47,7 @@ use crate::domain::forge::dispatch::{DispatchJob, DispatchState};
 use crate::domain::job::JobKind;
 use crate::domain::repository::{
     AssetRepository, DispatchRepository, EdgeRepository, JobQueue, PersonaRepository,
-    SnapshotRepository,
+    PursuitRepository, SnapshotRepository,
 };
 use crate::domain::value::{
     AssetId, BundleId, CoverText, DispatchId, Label, Modality, PersonaId, RegisterNote, SnapshotId,
@@ -98,10 +98,18 @@ pub struct DispatchRunnerService {
     /// until a restart's backfill walk reaches them, which is precisely
     /// the gap this injection closes.
     jobs: Arc<dyn JobQueue>,
+    /// The ledger port — a reified output *entered its pursuit*, and
+    /// the entry is recorded where every other membership gesture is
+    /// (#22): one `in`/`generated` row per output, written by the same
+    /// pass that minted the asset, for the injection reason `jobs`
+    /// documents above — reify is where generated membership comes
+    /// into existence, so reify owes the ledger the row.
+    pursuits: Arc<dyn PursuitRepository>,
 }
 
 impl DispatchRunnerService {
     /// Wires the runner around its ports.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dispatches: Arc<dyn DispatchRepository>,
         snapshots: Arc<dyn SnapshotRepository>,
@@ -110,6 +118,7 @@ impl DispatchRunnerService {
         personas: Arc<dyn PersonaRepository>,
         asset_service: Arc<crate::application::AssetService>,
         jobs: Arc<dyn JobQueue>,
+        pursuits: Arc<dyn PursuitRepository>,
     ) -> Self {
         Self {
             dispatches,
@@ -119,6 +128,7 @@ impl DispatchRunnerService {
             personas,
             asset_service,
             jobs,
+            pursuits,
         }
     }
 
@@ -293,6 +303,28 @@ impl DispatchRunnerService {
         job.updated_at = now;
         job.completed_at = Some(now);
         self.dispatches.save(&job).await?;
+
+        // Each output entered its pursuit — one ledger row per asset
+        // (#22), under the same attribution the job carries. Guarded
+        // on the stamp being present: every dispatch minted since V79
+        // has one (always-mint), and a legacy NULL means there is no
+        // pursuit to enter.
+        if let Some(pursuit_id) = job.pursuit_id {
+            for asset_id in &job.output_asset_ids {
+                let entry = crate::domain::forge::tx::PursuitTx::new(
+                    pursuit_id,
+                    job.persona_id,
+                    crate::domain::forge::tx::PursuitTxKind::In(
+                        crate::domain::forge::tx::TxOrigin::Generated,
+                    ),
+                    *asset_id,
+                    None,
+                    now,
+                    &attribution,
+                );
+                self.pursuits.append_tx(&entry).await?;
+            }
+        }
 
         // New outputs are exactly what a pending provenance claim has
         // been waiting for — an artefact ingested with

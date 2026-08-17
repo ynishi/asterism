@@ -379,6 +379,10 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "pursuit_service::view",
         "read — one pursuit with its rounds, returns and events",
     ),
+    (
+        "pursuit_service::asset_culls",
+        "read — one asset's verdict history across culls",
+    ),
     // ---- provenance_service
     (
         "disclosure_service::record_for",

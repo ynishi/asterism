@@ -175,7 +175,7 @@ define_uuid_id!(
 );
 define_uuid_id!(
     /// Surrogate id for a `Pursuit` — the minted unit of work that
-    /// dispatches and judgments are stamped with (#29). Minted, never
+    /// dispatches and culls are stamped with (#29). Minted, never
     /// derived from content: content identity changes whenever work is
     /// redone, so succession, rejection, and abandonment need an id
     /// that survives rework. UUID v7 so `(created_at, id)` totally
@@ -195,6 +195,23 @@ define_uuid_id!(
     /// correlation, #29). The row is the fact of the move; the stamped
     /// column holds only the current filing.
     PursuitRestampId
+);
+define_uuid_id!(
+    /// Surrogate id for a `PursuitTx` — one entry in a pursuit's
+    /// append-only membership ledger (#22, model on #63): an asset
+    /// entering, a mid-work removal, or its reversal. Membership is
+    /// derived by "latest tx per asset wins" over `(created_at, id)`;
+    /// the id tie-break makes that answer total and stable when two
+    /// gestures share a millisecond, though within one it is an
+    /// ordering, not a causal claim.
+    PursuitTxId
+);
+define_uuid_id!(
+    /// Surrogate id for a `Cull` — the record of one close's
+    /// narrowing (#22): which candidate set was decided over, written
+    /// at the close it belongs to. One cull per close event; verdicts
+    /// are per member on `cull_member`.
+    CullId
 );
 /// Declares a non-empty text newtype (returns `Validation` if the value is
 /// blank after trimming).

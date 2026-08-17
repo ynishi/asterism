@@ -1949,10 +1949,10 @@ pub struct RedispatchCommand {
 }
 
 /// Opens a pursuit explicitly — the "start new pursuit" affordance
-/// (#29). Optional: a dispatch or judgment arriving unstamped mints
-/// one anyway (always-mint); pre-creating simply lets the caller name
-/// the intent up front. An empty pursuit that never receives work is
-/// an honest record, closable as abandoned.
+/// (#29). Optional: a dispatch arriving unstamped mints one anyway
+/// (always-mint); pre-creating simply lets the caller name the intent
+/// up front. An empty pursuit that never receives work is an honest
+/// record, closable as abandoned.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct OpenPursuitCommand {
@@ -1987,9 +1987,16 @@ pub struct OpenPursuitCommand {
     pub operator_ai: Option<String>,
 }
 
-/// Closes a pursuit (#29): records a one-way lifecycle fact, never a
-/// status write. A repeat close is a new fact — standing re-derives
-/// from the latest event.
+/// Closes a pursuit (#29, verdicts on #22): records a one-way
+/// lifecycle fact, never a status write. A repeat close is a new fact
+/// — standing re-derives from the latest event.
+///
+/// A `satisfied` close is where the cull is recorded: the candidate
+/// set is derived from the pursuit's own ledger (never supplied
+/// here), frozen into a snapshot, and the verdicts below are resolved
+/// against it — a member removed mid-work and not spoken for culls as
+/// `reject`, an untouched member without a verdict gets no row, and
+/// the kept set the event freezes is exactly the `keep` verdicts.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ClosePursuitCommand {
@@ -1997,19 +2004,68 @@ pub struct ClosePursuitCommand {
     pub pursuit_id: String,
     /// `satisfied` or `abandoned`.
     pub outcome: String,
-    /// `satisfied` only: the kept set, frozen at this moment into a
-    /// snapshot the event references. The server sorts the ids
-    /// ascending before freezing (a forge-side convention, so
-    /// identical kept sets dedupe across closes) — order here does not
-    /// matter. Empty means "concluded with nothing kept", a defined
-    /// state. Must be empty for `abandoned`.
+    /// `satisfied` only: verdicts over the ledger's candidates. Empty
+    /// is a defined state — a close that recorded no decisions (and,
+    /// with no mid-work removals, freezes nothing). Must be empty for
+    /// `abandoned`, which applies nothing.
     #[serde(default)]
-    pub kept_asset_ids: Vec<String>,
+    pub verdicts: Vec<CullVerdictEntry>,
     /// One short free-text slot on the event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// One short free-text slot on the cull record itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cull_note: Option<String>,
     /// Caller-asserted operator slug, recorded on the event — who
     /// concluded the line of work, in the same sense as
+    /// [`OpenPursuitCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// One requested verdict within a `satisfied` close (#22).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct CullVerdictEntry {
+    /// The asset spoken for — must be a candidate of the pursuit's
+    /// ledger.
+    pub asset_id: String,
+    /// `keep` or `reject`. An `existing`-origin member takes `reject`
+    /// only (keeping what the library already holds is the untouched
+    /// default), except as salvage: a `keep` on a removed member
+    /// cancels the removal's default reject.
+    pub verdict: String,
+    /// The grounds, when stated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Appends one gesture to a pursuit's membership ledger (#22): an
+/// asset entering (`in`, with its origin), a mid-work removal, or its
+/// reversal. Append-only — membership derives on read, latest gesture
+/// per asset wins. `update` is the model's reserved round-trip verb
+/// and is refused here until that slice lands.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct RecordPursuitTxCommand {
+    /// The pursuit whose ledger this writes.
+    pub pursuit_id: String,
+    /// `in` / `remove` / `unremove`.
+    pub kind: String,
+    /// The asset the gesture is about. Must exist in the pursuit's
+    /// persona for `in`; must currently be a member for `remove`, and
+    /// a removed one for `unremove`.
+    pub asset_id: String,
+    /// `in` only, required there: `generated` / `imported` /
+    /// `existing` — where the asset came from. (`generated` entries
+    /// are ordinarily written by the dispatch reify itself; the verb
+    /// accepts the origin for completeness.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// One short free-text slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Caller-asserted operator slug, recorded on the row — see
     /// [`OpenPursuitCommand::operator_ai`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,

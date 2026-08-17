@@ -30,8 +30,8 @@ use std::sync::Arc;
 
 use asterism_contract::command::{
     AddAssetCommand, ClosePursuitCommand, DeclareAssetMetaCommand, MergeAssetsCommand,
-    OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand, ReopenPursuitCommand,
-    ResolveDuplicateConflictCommand, RestampDispatchCommand,
+    OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand, RecordPursuitTxCommand,
+    ReopenPursuitCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
@@ -142,6 +142,16 @@ pub struct PursuitViewParams {
     /// Pursuit id — returned by `pursuit_open`, stamped on every
     /// dispatch (`pursuit_id`), and carried in exporter sidecars.
     pub pursuit_id: String,
+}
+
+/// `asset_culls` input.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct AssetCullsParams {
+    /// Asset id whose verdict history to read.
+    pub asset_id: String,
+    /// Maximum rows (0 or absent = the default 50).
+    pub limit: u32,
 }
 
 /// `duplicate_conflicts` input — the same persona / limit pair the
@@ -513,7 +523,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` freezes `kept_asset_ids` into a snapshot the event references — the conclusion as a set, immediately usable as the input of a next dispatch; order does not matter (the server sorts and dedupes) and an empty list is the defined \"concluded with nothing kept\". `outcome: \"abandoned\"` records the ending and must keep nothing. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; a later round can still file under this pursuit."
+        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` records the cull: each entry in `verdicts` says `keep` or `reject` about a member of the pursuit's ledger (what entered via dispatch outputs and `pursuit_tx`), the candidate set is derived from that ledger and frozen — never supplied here — and the kept set the event freezes is exactly the `keep` verdicts. Defaults: a member removed mid-work and not spoken for culls as `reject`; an untouched member without a verdict gets no row (the act said nothing about it); an `existing`-origin member takes `reject` only, except a `keep` on a removed one (salvage). `outcome: \"abandoned\"` records the ending and applies nothing — verdicts must be empty. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; a later round can still file under this pursuit."
     )]
     async fn pursuit_close(
         &self,
@@ -572,7 +582,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), every dispatch round filed under it, the returning assets that resolved to it, and the lifecycle events oldest-first. This is how to check what is already in a line of work before starting another round in it."
+        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), every dispatch round filed under it, the returning assets that resolved to it, the lifecycle events oldest-first, the membership ledger (`txs`), and the culls recorded at its closes. This is how to check what is already in a line of work before starting another round in it, and what a close would be deciding over."
     )]
     async fn pursuit_view(
         &self,
@@ -580,6 +590,48 @@ impl AsterismMcp {
     ) -> Result<CallToolResult, McpError> {
         match self.ctx.pursuit_service.view(&params.pursuit_id).await {
             Ok(view) => ok_json(&view),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Append one membership gesture to a pursuit's ledger. `kind: \"in\"` records an asset entering the line of work and requires `origin` — `generated` (a round produced it; ordinarily written by the dispatch itself), `imported` (came from outside), or `existing` (brought in from the library). `kind: \"remove\"` is the mid-work removal — reversible with `kind: \"unremove\"` until close, at which point an unreversed removal culls as `reject` unless salvaged. Append-only: membership derives on read, and illegal gestures (an `in` of a present member, a `remove` of a non-member) are refused rather than recorded."
+    )]
+    async fn pursuit_tx(
+        &self,
+        Parameters(command): Parameters<RecordPursuitTxCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self
+            .ctx
+            .pursuit_service
+            .record_tx(command, &attribution)
+            .await
+        {
+            Ok(tx) => ok_json(&tx),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Read every verdict ever recorded about one asset, most-recent first: who decided to keep or drop it, out of which frozen candidate set, in which line of work. The answer to \"why is this asset still here\" when the asset's own state (rating, labels, trash) says nothing."
+    )]
+    async fn asset_culls(
+        &self,
+        Parameters(params): Parameters<AssetCullsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let limit = if params.limit == 0 { 50 } else { params.limit };
+        match self
+            .ctx
+            .pursuit_service
+            .asset_culls(&params.asset_id, limit)
+            .await
+        {
+            Ok(rows) => ok_json(&rows),
             Err(err) => Ok(domain_error(err)),
         }
     }

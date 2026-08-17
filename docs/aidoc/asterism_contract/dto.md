@@ -12,6 +12,7 @@ the domain types.
 - `AssetCardDto` — Lightweight card representation used on the grid (wire form of
 - `AssetCommentDto` — One comment attached to an Asset.
 - `AssetCountEntryDto` — One row of a sidebar count aggregation — `(key, asset_count)`.
+- `AssetCullDto` — One verdict about one asset, joined to the cull it belongs to
 - `AssetDetailDto` — Composite response for the detail view (asset + tags + edges).
 - `AssetDto` — Full asset payload used on the detail view.
 - `AssetIndexEntryDto` — Index-only wire form for 6-figure grids.
@@ -20,6 +21,8 @@ the domain types.
 - `AssetTextDto` — Full source text of one asset, resolved from the original
 - `ChapterMarkDto` — One named section of a material — an entry in a chapter list.
 - `ConstellationItemDto` — One hover-burst item — an edge paired with the card it lands on.
+- `CullDto` — The record of one close's narrowing (#22): who decided what, out
+- `CullMemberDto` — One member's verdict within a cull (#22).
 - `DerivedDto` — One thing an exporter produced, ready for the core to reify
 - `DiagDto` — One persisted diagnostic (`GET /asterism/diag`).
 - `DirDto` — A sidebar organisation folder. Dirs contain dirs and groups —
@@ -59,6 +62,7 @@ the domain types.
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `PursuitDto` — The minted unit of work (#29): one line of generation and curation
 - `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
+- `PursuitTxDto` — One gesture in a pursuit's append-only membership ledger (#22):
 - `PursuitViewDto` — One pursuit, opened up (#29): the thin row plus everything the
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the

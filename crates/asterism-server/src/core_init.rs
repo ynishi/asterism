@@ -823,6 +823,7 @@ pub async fn init_core_with(
         personas.clone(),
         asset_service.clone(),
         job_queue_arc.clone(),
+        pursuits.clone(),
     ));
     // Kick one retention sweep per `Full` startup. The sweep is
     // self-chaining while pages come back full, so this single enqueue
@@ -1032,6 +1033,7 @@ pub async fn init_core_with(
         pursuits.clone(),
         personas.clone(),
         dispatches.clone(),
+        assets_arc.clone(),
         snapshot_service.clone(),
     ));
 

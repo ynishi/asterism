@@ -100,8 +100,10 @@ the private design notes.
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
+- [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.

@@ -128,8 +128,8 @@ cross-module view.
    and the `_trace` claim a returning artefact brings back
    ([`provenance`]) — which say which event a row belongs to and never
    what anyone thought of it. Verdicts the forge records live on its
-   own rows and name core ids (#63 drafts that record); a core row may
-   record who wrote it (doctrine 2) but never why. The corollary that
+   own rows and name core ids (the cull, #22, model on #63); a core
+   row may record who wrote it (doctrine 2) but never why. The corollary that
    has been reached for and is wrong: identity ("these are the same
    thing") is a core
    question the store asks itself, and expressing worth ("this one is

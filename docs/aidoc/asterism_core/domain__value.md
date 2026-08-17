@@ -31,6 +31,7 @@ Design notes:
 - `ChapterMarkId` — Surrogate id for a `ChapterMark` — one entry in a structure
 - `CoverTemplate` — The template `cover_gen` applies to derive card cover text. A
 - `CoverText` — Text shown on the grid card for an asset (produced by the CoverGen
+- `CullId` — Surrogate id for a `Cull` — the record of one close's
 - `DirId` — Surrogate id for `Dir` (sidebar organisation folder).
 - `DispatchId` — Surrogate id for a `DispatchJob` — one exporter invocation
 - `DuplicateConflictId` — Surrogate id for a `DuplicateConflict` — one raised "are these
@@ -58,6 +59,7 @@ Design notes:
 - `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
 - `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
 - `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a
+- `PursuitTxId` — Surrogate id for a `PursuitTx` — one entry in a pursuit's
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed

@@ -69,8 +69,10 @@
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [asterism-core::domain::embedded_text](asterism_core/domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [asterism-core::domain::forge](asterism_core/domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [asterism-core::domain::forge::cull](asterism_core/domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [asterism-core::domain::forge::dispatch](asterism_core/domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::forge::pursuit](asterism_core/domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
+- [asterism-core::domain::forge::tx](asterism_core/domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -244,7 +246,7 @@
 - [asterism-infra::sqlite::repo::persona](asterism_infra/sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [asterism-infra::sqlite::repo::persona_profile](asterism_infra/sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [asterism-infra::sqlite::repo::persona_theme](asterism_infra/sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
-- [asterism-infra::sqlite::repo::pursuit](asterism_infra/sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29).
+- [asterism-infra::sqlite::repo::pursuit](asterism_infra/sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [asterism-infra::sqlite::repo::query_group](asterism_infra/sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [asterism-infra::sqlite::repo::series](asterism_infra/sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [asterism-infra::sqlite::repo::session](asterism_infra/sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
