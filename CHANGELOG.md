@@ -273,9 +273,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the profile flag that used to gate it defaulted to discarding it.
   The note is scrubbed where it is built — a backend that echoes the
   request is how a credential rendered into a query string comes back,
-  and this copy lands on an asset. What no scrub reaches is a token a
-  profile interpolated out of its *own params*; `auth` is the way out of
-  that, and the crate doc says so where the pattern is documented.
+  and this copy lands on an asset. So is the handle, on the way into
+  the payload: `handle_from` defaults to the whole submit response, so
+  the same echo comes to rest on the dispatch row, and that row is now
+  read by callers rather than only by the runner. What no scrub reaches
+  is a token a profile interpolated out of its *own params*; `auth` is
+  the way out of that, and the crate doc says so where the pattern is
+  documented.
+
+  That record is readable without a database. `DispatchDto.handle_json`
+  carries the exporter's handle payload as JSON text, beside the
+  `params_json` it is the other half of — for an HTTP dispatch the
+  recorded exchange is under `exchange`, and a submit that produced no
+  artefact still answers what it sent and what came back, which no
+  asset could. Opaque, because the shape belongs to the exporter that
+  issued it; absent while the backend has not accepted the job, and for
+  one that failed or was cancelled before it ever did.
 
   Migration is by alias rather than flag day, because stored params are
   re-read on every re-dispatch: `submit` accepts its old name
