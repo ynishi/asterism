@@ -1948,6 +1948,11 @@
       "docs": "Port for pushing job progress to the UI. In Tauri, the adapter emits\n`job:progress:{id}` events; in the standalone server it logs."
     },
     {
+      "path": "asterism_core::domain::repository::ProjectRepository",
+      "kind": "trait",
+      "docs": "Persistence port for the forge's project and its lines (#63\ndecisions 1–2).\n\nSeparate from [`PursuitRepository`] rather than folded into it,\nbecause the two answer different questions: a pursuit is one\nattempt and its record, a project is the shared context attempts\nfile under and the canonical set they land on. They meet at exactly\none column (`pursuit.project_id`), which is a filing rather than an\naggregate boundary being crossed."
+    },
+    {
       "path": "asterism_core::domain::repository::PursuitRepository",
       "kind": "trait",
       "docs": "Persistence port for the pursuit family (#29): the minted unit of\nwork, its lifecycle facts, and the restamp record.\n\nOne port for the three tables rather than three: they are one\ncohesive concern (the correlation layer over the record), share\nevery caller, and the two write verbs that must be atomic across\ntables (`restamp`) could not live on a single-table port. The\npursuit row itself has no update and no delete — it is immutable,\nstanding is derived from the events, and the only deletion path is\nthe persona purge, which is hand-rolled in the adapter."

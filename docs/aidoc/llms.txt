@@ -248,6 +248,7 @@
 - [asterism-infra::sqlite::repo::persona](asterism_infra/sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [asterism-infra::sqlite::repo::persona_profile](asterism_infra/sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [asterism-infra::sqlite::repo::persona_theme](asterism_infra/sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
+- [asterism-infra::sqlite::repo::project](asterism_infra/sqlite__repo__project.md): SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
 - [asterism-infra::sqlite::repo::pursuit](asterism_infra/sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [asterism-infra::sqlite::repo::query_group](asterism_infra/sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [asterism-infra::sqlite::repo::series](asterism_infra/sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's

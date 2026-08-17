@@ -14,12 +14,21 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`], [`super::dispatch`]
-and [`super::pursuit`] (all three pursuit-family tables), at the
-point where the values about to be bound are visible as the columns
-themselves.
+Called by the row builders in [`super::asset`], [`super::dispatch`],
+[`super::pursuit`] and [`super::project`], at the point where the
+values about to be bound are visible as the columns themselves.
+
+[`attribution_columns`] lives here for the same reason: it is the
+encoding half of the same concern, wanted by every table that
+carries the triple, and a home in any one adapter would make the
+next one reach sideways into a sibling.
 
 ## Functions
 
 - `assert_channel_recorded` — Rejects a row that records somebody without recording how that
+- `attribution_columns` — Encodes an entity's attribution triple into the column values,
+
+## Types
+
+- `AttributionColumns` — The four attribution column values in write order:
 

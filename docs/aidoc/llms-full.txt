@@ -4479,6 +4479,7 @@ projection instead of full `Asset` entities.
 - `PersonaRepository` — Persistence port for [`Persona`].
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
+- `ProjectRepository` — Persistence port for the forge's project and its lines (#63
 - `PursuitRepository` — Persistence port for the pursuit family (#29): the minted unit of
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
@@ -8106,6 +8107,7 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
+- [`sqlite::repo::project`](sqlite__repo__project.md): SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
 - [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
@@ -9831,14 +9833,23 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`], [`super::dispatch`]
-and [`super::pursuit`] (all three pursuit-family tables), at the
-point where the values about to be bound are visible as the columns
-themselves.
+Called by the row builders in [`super::asset`], [`super::dispatch`],
+[`super::pursuit`] and [`super::project`], at the point where the
+values about to be bound are visible as the columns themselves.
+
+[`attribution_columns`] lives here for the same reason: it is the
+encoding half of the same concern, wanted by every table that
+carries the triple, and a home in any one adapter would make the
+next one reach sideways into a sibling.
 
 ## Functions
 
 - `assert_channel_recorded` — Rejects a row that records somebody without recording how that
+- `attribution_columns` — Encodes an entity's attribution triple into the column values,
+
+## Types
+
+- `AttributionColumns` — The four attribution column values in write order:
 
 
 <!-- asterism_infra/sqlite__repo__chapter_mark.md -->
@@ -9993,6 +10004,23 @@ SQLite adapter for the `PersonaThemeRepository` port.
 ## Types
 
 - `SqlitePersonaThemeRepository` — SQLite adapter for `PersonaThemeRepository` (uses a writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__project.md -->
+# asterism-infra::sqlite::repo::project
+
+SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
+
+Two tables: `project` (thin, immutable, insert-only, like `pursuit`)
+and `line`, which is the same but owned by a project rather than a
+persona. The pair is written in one transaction — a project whose
+line is missing has nothing a merge could land on, and no later
+read would notice the difference between that and a project nobody
+has merged into yet.
+
+## Types
+
+- `SqliteProjectRepository` — SQLite adapter for `ProjectRepository`.
 
 
 <!-- asterism_infra/sqlite__repo__pursuit.md -->
