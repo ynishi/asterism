@@ -13,19 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   place to land** (P1 of #63). The forge could say what a pursuit
   tried and what a close kept, but not what anything landed on. Now
   the project is the repo of the forge's git analogy — per persona,
-  deliberately opened, one `main` line each (the `mainline` table
-  admits named siblings before the code does) — and above raw asset
-  ids sits the mainline entry: the identity that stays "the living
-  one" while replacement and renaming move beneath it. Four merge
+  deliberately opened, one `main` line each (the `line` table admits
+  named siblings before the code does, so "the mainline" is a
+  description, not a type) — and above raw asset ids sits the line
+  entry: the identity that stays "the living one" while replacement
+  and renaming move beneath it. Four merge
   verbs (`add` / `replace` / `delete` / `rename`) move an entry as an
   append-only sequence; liveness, current name, and current version
   all derive on read, latest-wins per axis, so history is the verb
   sequence itself. The merge row binds a satisfied close to what it
   landed — approval *is* the merge event, so an approved entry can
   never silently hold unapproved bytes. This slice is schema and
-  domain only (V83, `project.rs`, `mainline.rs`, derives, tests): no
-  write path yet, every mainline starts empty, and a pursuit that
-  files under no project behaves exactly as before.
+  domain only (V83, `project.rs`, `line.rs`, derives, tests): no
+  write path yet, every line starts empty, and a pursuit that files
+  under no project behaves exactly as before.
 
 - **The ledger and the cull — selection is recorded** (#22, model on
   #63). Keeping or discarding a generated asset used to move through
