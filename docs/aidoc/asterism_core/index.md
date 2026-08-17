@@ -102,6 +102,8 @@ the private design notes.
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [`domain::forge::mainline`](domain__forge__mainline.md): `Mainline` — a project's canonical set, and the forge identity that
+- [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.

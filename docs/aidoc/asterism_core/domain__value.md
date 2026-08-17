@@ -44,9 +44,13 @@ Design notes:
 - `JobId` — Surrogate id for `Job`.
 - `Keyword` — Raw keyword extracted by the auto-tag pipeline; a `Tag` may be
 - `Label` — Free-form annotation attached to an asset.
+- `MainlineEntryId` — Surrogate id for a `MainlineEntry` — the name-like forge
+- `MainlineEventId` — Surrogate id for a `MainlineEvent` — one merge verb applied to
+- `MainlineId` — Surrogate id for a `Mainline` — one named line of a project.
 - `MaterialLayerId` — Surrogate id for a `MaterialLayer` — one band of marks over an
 - `MaterialMarkId` — Surrogate id for a `MaterialMark` — one mark in an Asset's
 - `MediaKind` — Media-render variant selected by a [`ContentKind`].
+- `MergeId` — Surrogate id for a `Merge` — the record that one satisfied
 - `MessageId` — Surrogate id for a `Message` — one entry appended to a
 - `MimeType` — What an asset's bytes are, parsed once at the mapping boundary.
 - `Modality` — Primary modality slug for an asset (open slug).
@@ -56,6 +60,7 @@ Design notes:
 - `PersonaId` — Surrogate id for `Persona`. The natural key (external pack id) is
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
+- `ProjectId` — Surrogate id for a `Project` — the repo of the forge's git
 - `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
 - `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
 - `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a

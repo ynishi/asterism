@@ -1243,6 +1243,56 @@
       "docs": "Lifecycle state persisted with the dispatch job.\n\nKept as a domain enum so callers can pattern-match without having\nto depend on `asterism-dispatch-sdk` (the runner does the\nSDK-side ↔ domain-side mapping)."
     },
     {
+      "path": "asterism_core::domain::forge::mainline",
+      "kind": "module",
+      "docs": "`Mainline` — a project's canonical set, and the forge identity that\nmakes \"the living one\" a derivable fact (#63 decisions 1–3).\n\nRaw asset ids are one-off: a replacement is a different row, and\nnothing in the core says the new row *is* the old thing, newer. The\nentry is that statement — a minted identity above asset ids — and\nthe four merge verbs (add / replace / delete / rename) are the only\nthings that ever move it. Liveness, current name, and current\nversion all derive on read from the verb sequence, exactly like\n`PursuitStanding`: latest event per entry wins, and history is the\nsequence itself, not a second record of it.\n\n# Shape\n\n- [`Mainline`] is one named line of a project. v1 mints exactly one\n  per project, named [`Mainline::MAIN`] (application-enforced); the\n  row exists so \"mainline\" is a branch rather than a hard-coded\n  place, and the schema admits siblings before the code does (the\n  V82 admit-ahead stance).\n- [`MainlineEntry`] is the identity; it carries no name column —\n  the current name is the latest naming verb's, so renames are\n  history like everything else.\n- [`MainlineEvent`] is one verb applied to one entry.\n  [`MainlineVerb`] carries each verb's payload so a caller cannot\n  file an add without a name or a delete with an asset (the\n  `RestampSubject` stance); storage enforces the same pairing with\n  two-way CHECKs.\n- [`Merge`] is the record that one satisfied close applied its\n  verbs — approval *is* the merge event, so every event names the\n  merge it landed under, and who approved derives through the\n  close event's attribution rather than being copied here.\n\n# The boundary, restated\n\nThe mainline *references* asset ids; it never annotates or mutates\nan asset (the PR #62 rule). A dead entry's asset row stays live and\nrestorable — `delete` is a statement about the canonical set, not\nabout bytes, the same distance `CullVerdict::Reject` keeps from\ntrash.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- Verb payload pairing and non-blank names are checked here.\n- Living-name uniqueness within a mainline is an application rule\n  checked at merge time — dead names are reusable, so it cannot be\n  a schema constraint.\n- An entry's first event is an `add`; later events land on an\n  existing entry. The write path (P3) enforces this; on read the\n  derive tolerates a dangling tail by answering `None` on the axes\n  the missing `add` would have filled. That tolerance is *weaker*\n  than the ledger's, which drops a dangling gesture's asset from\n  membership outright (`tx.rs`) — deliberately so: an event row\n  names an entry that exists, so deriving its presence states\n  nothing false, where a membership would."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::EntryState",
+      "kind": "struct",
+      "docs": "One entry's derived position: alive or dead, and what it currently\nanswers to. All three axes derive independently — liveness from the\nlatest event of any verb, the name from the latest naming verb, the\nversion from the latest asset-bearing verb — so a delete does not\nerase what the entry was called (dead names are readable, merely\nreusable)."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::Mainline",
+      "kind": "struct",
+      "docs": "One named line of a project. v1 restricts a project to exactly one,\nnamed [`Self::MAIN`] and minted in the same transaction as the\nproject — an application rule, so the day named lines arrive the\nschema is already there."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::MainlineEntry",
+      "kind": "struct",
+      "docs": "The forge identity above raw asset ids (#63 decision 1). Deliberately\nname-less and version-less: both derive from the verb sequence."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::MainlineEvent",
+      "kind": "struct",
+      "docs": "One verb applied to one entry, filed under the merge that landed it."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::MainlineVerb",
+      "kind": "enum",
+      "docs": "The closed set of merge verbs, payload included (#63 decision 2).\nAn enum rather than `(kind, Option, Option)` columns so a caller\ncannot file an `add` without a name or a `delete` carrying an asset\n— the `RestampSubject` stance; the schema states the same pairing\nas two-way CHECKs."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::Merge",
+      "kind": "struct",
+      "docs": "The record that one satisfied close applied its verbs (#63 decision\n3). One per close event (UNIQUE in storage); an empty merge — a\nsatisfied close that landed nothing — is a defined state, not a\nmissing row, so \"this close was an approval act\" stays readable\neven when nothing changed.\n\nNo attribution triple here: who approved *is* who closed, and the\nclose event already carries the triple — copying it would mint a\nsecond author for one act."
+    },
+    {
+      "path": "asterism_core::domain::forge::mainline::entry_state",
+      "kind": "function",
+      "docs": "Derives one entry's state from its events: latest by\n`(created_at, id)` wins, per axis. The input does not need to be\nsorted. A sequence that never saw an `add` is a dangling tail —\nthe write path refuses to create one; on read it derives with\n`None` where the missing `add` would have answered, and yields no\nphantom liveness beyond what its verbs state."
+    },
+    {
+      "path": "asterism_core::domain::forge::project",
+      "kind": "module",
+      "docs": "`Project` — the repo of the forge's git analogy (#63): the shared\ncontext pursuits file under, and the owner of a mainline.\n\nThe pursuit answers \"one line of work\"; the project answers \"one\nbody of work\" — the unit a mainline is canonical *for*. Without it\nthe mainline would be a persona-wide singleton, and two unrelated\nefforts would fight over one namespace of living names. With it,\nscope has a referent (an `In(Existing)` of another project's living\nasset is cross-project contamination, catchable at IN time) and\n\"the canonical set\" means canonical for something in particular.\n\n# Shape\n\n- [`Project`] is a thin, immutable row: identity, persona, a\n  required human name, an optional note. No status column, no\n  members — what belongs to a project derives through its pursuits\n  and its mainline, never from a membership table.\n- [`Mainline`](crate::domain::forge::mainline::Mainline) rows are\n  the project's lines. v1 mints exactly one, named\n  [`MAIN`](crate::domain::forge::mainline::Mainline::MAIN), in the\n  same transaction as the project (application-enforced); the\n  schema admits more so a later multi-line model is an enum's\n  worth of change, not a migration.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- `name` is non-blank (checked here); uniqueness among one\n  persona's projects is an application rule, checked where both\n  rows are visible — like living-name uniqueness on a mainline,\n  and unlike a schema UNIQUE, so a later archival verb can free\n  names without a migration.\n- A pursuit filing under a project shares its persona\n  (cross-aggregate, application service — the persona cascade\n  rule every forge pairing states)."
+    },
+    {
+      "path": "asterism_core::domain::forge::project::Project",
+      "kind": "struct",
+      "docs": "The repo above the pursuits. Thin and immutable: identity plus a\nhuman name — never content, never status."
+    },
+    {
       "path": "asterism_core::domain::forge::pursuit",
       "kind": "module",
       "docs": "`Pursuit` — the minted unit of work: one line of generation and\ncuration toward an intent, identified by a minted id that its events\nare stamped with (#29, design on #21).\n\nContent ancestry cannot express this unit: round N+1 built from the\nsame sources with a new prompt shares no derivation edge with round\nN's outputs, rejected rounds have no descendants, and abandonment has\nno ancestry expression at all. So the identity is minted up front —\nthe convergent form of every surviving forge (Gerrit's Change-Id,\nJujutsu's change id, Radicle's COB ids) — and everything else about\nthe pursuit is a projection over the stamped events.\n\n# Shape\n\n- [`Pursuit`] is a thin, immutable row: identity, persona, optional\n  parent, optional human label. No status column, no members.\n- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);\n  **standing is derived on read** by [`standing`] — latest event by\n  `(created_at, id)` wins, no row means open. A repeat close is a new\n  fact, not an error.\n- [`PursuitRestamp`] records a move of a stamped event between\n  pursuits — the repair verb for mis-filed correlation. The stamped\n  column holds the current filing; the restamp row holds the move.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- A stamped event's persona equals its pursuit's persona; `parent_id`\n  never crosses personas; a parent exists before its child. These are\n  cross-aggregate and live in the application service, like the\n  persona cascade.\n- `snapshot_id` may only accompany `closed_satisfied` (checked here):\n  it is the kept set frozen at close. `None` on a `closed_satisfied`\n  is a defined state — \"concluded with nothing kept\" — because an\n  empty snapshot is domain-rejected."
@@ -2318,6 +2368,21 @@
       "docs": "Free-form annotation attached to an asset.\n\nLabels intentionally accept anything short (status hints, category\nnotes, secondary modality tags) rather than restricting to a fixed\nvocabulary — the empirical usage in real footprints is heterogeneous."
     },
     {
+      "path": "asterism_core::domain::value::MainlineEntryId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `MainlineEntry` — the name-like forge\nidentity above raw asset ids (#63 decision 1): the thing that\nstays \"the living one\" while replacement and renaming move\nbeneath it. Raw asset ids stay one-off; the entry is what a\ntargeted IN declares."
+    },
+    {
+      "path": "asterism_core::domain::value::MainlineEventId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `MainlineEvent` — one merge verb applied to\nan entry (add / replace / delete / rename, #63 decision 2).\nLiveness and naming derive on read by \"latest event per entry\nwins\" over `(created_at, id)`; the v7 tie-break makes that\nanswer total when two verbs share a millisecond."
+    },
+    {
+      "path": "asterism_core::domain::value::MainlineId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `Mainline` — one named line of a project.\nv1 restricts a project to exactly one, named `main`; the id\nexists so \"mainline\" is a branch rather than a hard-coded\nplace (the V82 admit-ahead stance: schema admits, code\nrestricts)."
+    },
+    {
       "path": "asterism_core::domain::value::MaterialLayerId",
       "kind": "struct",
       "docs": "Surrogate id for a `MaterialLayer` — one band of marks over an\nAsset's material (the imported chapter list, a user's own pass\nover it, a machine's). Layers are ordered by their `ord` column\nrather than by mint time, so the v7 timestamp carries no meaning\nhere beyond being a stable tie-break."
@@ -2331,6 +2396,11 @@
       "path": "asterism_core::domain::value::MediaKind",
       "kind": "enum",
       "docs": "Media-render variant selected by a [`ContentKind`]."
+    },
+    {
+      "path": "asterism_core::domain::value::MergeId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `Merge` — the record that one satisfied\nclose applied its verbs (#63 decision 3: approval *is* the\nmerge event). One merge per close event; the verbs group under\nit on `mainline_event`."
     },
     {
       "path": "asterism_core::domain::value::MessageId",
@@ -2376,6 +2446,11 @@
       "path": "asterism_core::domain::value::Progress",
       "kind": "struct",
       "docs": "Job progress payload; the `ProgressEmitter` forwards it to the UI."
+    },
+    {
+      "path": "asterism_core::domain::value::ProjectId",
+      "kind": "struct",
+      "docs": "Surrogate id for a `Project` — the repo of the forge's git\nanalogy (#63): the shared context pursuits file under and the\nowner of a mainline. Minted, like a pursuit's: a project is a\ndeliberate act, not a derived fact."
     },
     {
       "path": "asterism_core::domain::value::PursuitEventId",
