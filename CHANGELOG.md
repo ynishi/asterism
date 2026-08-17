@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A refused submit records what it sent** (#76, carried from #41). The
+  record of a call existed only where the call succeeded: the HTTP
+  adapter builds the exchange — the request as sent beside the response
+  as received — on its way to a handle, and a submit the backend refuses
+  returns an error instead, so everything a reader would ask about it
+  left with that error. What stayed on the row was one sentence. That is
+  backwards from where the questions are: a job that ran produced an
+  artefact carrying its own call note, and a job that was refused is the
+  one with nothing to read.
+
+  Exporters now record a call through `DispatchContext.attempt`, and the
+  runner writes down whatever landed there after every exporter call —
+  on the arm that returned a handle and on the arm that returned an
+  error alike. The record is its own column pair
+  (`dispatch_job.attempt_kind` / `attempt_payload`, schema V83) beside
+  the handle rather than inside it, because a handle means "a job exists
+  over there" and a refused submit has no such job; it reaches a caller
+  as `DispatchDto.attempt_json`, the same read a successful dispatch is
+  inspected through. The HTTP adapter writes the same `exchange` shape
+  either way, now carrying the status it was answered with and, when
+  nothing answered, the transport's own words — so a backend that
+  rejected the request reads differently from one that was never there.
+  The failure message on the row is unchanged, and the credential
+  discipline is the one already in place: the secret an `auth` block
+  named is scrubbed out of everything recorded, on the way in, including
+  a backend's echo of the request it rejected. Unchanged in its limit
+  too — a token a profile interpolates out of its own params into a URL
+  or a body was never named as a credential, and this record is one more
+  surface it can reach.
+
+  Poll and harvest record on the same channel, for the calls that end a
+  job — a routine poll's exchange answers nothing the row does not
+  already say. One record per row, replaced by the latest attempt: a
+  re-run is a fresh dispatch, so the sequence a reader wants is already
+  the sequence of rows. Rows written before the columns read as "nothing
+  recorded"; there is no backfill, because the calls they describe are
+  over and were never written down to recover from.
+
 - **The ledger and the cull — selection is recorded** (#22, model on
   #63). Keeping or discarding a generated asset used to move through
   four unrelated routes — trash, a low rating, the inbox label, a fold
