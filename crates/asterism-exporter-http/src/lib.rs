@@ -157,10 +157,15 @@
 //! artefacts array rather than fields of an item.
 //!
 //! The recorded copy is scrubbed of the credential the `auth` block
-//! named, and its headers are redacted. What no scrub can reach is a
-//! token a profile interpolated out of its own params into a URL or a
-//! body: the adapter was never told it was a credential. That is the
-//! same trade the paragraph above describes, one surface further along.
+//! named, and its headers are redacted. So is the handle itself, on the
+//! way into the payload: `submit.handle_from` defaults to the whole
+//! submit response, a backend is free to echo the request it was sent,
+//! and that payload is handed back out on every read of the dispatch —
+//! including to a caller that never touches the database. What no scrub
+//! can reach is a token a profile interpolated out of its own params
+//! into a URL or a body: the adapter was never told it was a
+//! credential. That is the same trade the paragraph above describes,
+//! one surface further along.
 
 pub mod custody;
 pub mod secret;
@@ -596,14 +601,7 @@ impl Exporter for HttpExporter {
         )
         .await
         .map_err(|e| grammar.scrub_error(e))?;
-        let handle_value = grammar
-            .select_first(&resp, &params.submit.handle_from)
-            .ok_or_else(|| {
-                ExporterError::BackendRejected(format!(
-                    "submit response missing handle_from path {:?}",
-                    params.submit.handle_from
-                ))
-            })?;
+        let handle_value = handle_from_response(&grammar, &resp, &params.submit.handle_from)?;
         let exchange = Exchange {
             request: RecordedRequest {
                 method: params.submit.method.clone(),
@@ -874,13 +872,14 @@ fn check_kind(handle: &Handle) -> Result<(), ExporterError> {
 ///
 /// # Why the scrub happens here and not at each caller
 ///
-/// The two values this builds from that have not already been through
-/// the grammar are the harvest response and the handle, and the handle
-/// is the one that does not look like it needs it. `submit.handle_from`
-/// defaults to `$` — the whole submit response — and a backend that
-/// echoes the request it was sent then puts a `{{secret}}` rendered into
-/// a query string or a body field inside the value this note copies onto
-/// an asset. Taking both raw and scrubbing them in one place is what
+/// The harvest response arrives raw and is scrubbed here. The handle
+/// was scrubbed on the way into the payload, and is scrubbed again on
+/// the way out — not because the first pass is in doubt, but because a
+/// job submitted before that pass existed is still in flight, and its
+/// handle is the whole submit response of a backend that may have
+/// echoed the request it was sent. The scrub is idempotent, so the
+/// second pass costs a walk of a small document and covers the case the
+/// first cannot reach. Taking everything through one place is what
 /// stops the next field added here from being the one that forgets.
 fn call_note(grammar: &SecretGrammar, payload: &HttpHandlePayload, result: Value) -> Value {
     let mut note = serde_json::json!({
@@ -901,6 +900,40 @@ fn call_note(grammar: &SecretGrammar, payload: &HttpHandlePayload, result: Value
         map.insert("response".into(), exchange.response.clone());
     }
     note
+}
+
+/// The handle as it will be persisted: what the profile's `handle_from`
+/// path selects out of the submit response, scrubbed before it is
+/// anything else.
+///
+/// The scrub is not belt-and-braces here. `handle_from` defaults to `$`,
+/// so the handle is routinely the whole submit response, and a backend
+/// that echoes the request it was sent hands back whatever the profile
+/// rendered `{{secret}}` into. The core persists this payload verbatim
+/// and hands it out on every read of the dispatch — including to a
+/// caller with no database access — so the raw copy is where a
+/// credential would outlive the call.
+///
+/// Scrubbed rather than dropped, because the poll templates
+/// `{{handle.…}}` off this same value and has to be able to reach the
+/// backend again: a job id is untouched, and only the echo changes.
+///
+/// Split out from `dispatch` so the property is checkable without
+/// standing up a backend or setting a process-wide environment
+/// variable, in the way [`expiry_state`] takes its clock as an argument.
+fn handle_from_response(
+    grammar: &SecretGrammar,
+    resp: &Value,
+    handle_from: &str,
+) -> Result<Value, ExporterError> {
+    grammar
+        .select_first(resp, handle_from)
+        .map(|value| grammar.scrub(value))
+        .ok_or_else(|| {
+            ExporterError::BackendRejected(format!(
+                "submit response missing handle_from path {handle_from:?}"
+            ))
+        })
 }
 
 /// `Some(Failed)` once the profile's deadline has passed.
@@ -1422,6 +1455,57 @@ mod tests {
         // readable, or the note stops being the record it exists to be.
         assert_eq!(note["handle"]["job_id"], "job-1");
         assert_eq!(note["result"]["seed"], 913_224);
+    }
+
+    /// The same echo, one surface earlier. The note above is what lands
+    /// on an asset; this is what lands on the dispatch row, is read back
+    /// on every poll, and now reaches every reader of the dispatch
+    /// through `DispatchDto.handle_json`. A scrub at the note boundary
+    /// alone would leave the credential on the row it came to rest on.
+    #[test]
+    fn the_persisted_handle_cannot_carry_the_credential_a_backend_echoed_back() {
+        let secret = "test-credential-not-a-real-key";
+        let grammar = SecretGrammar::new(secret.into());
+        let resp = serde_json::json!({
+            "job_id": "job-1",
+            "echo": { "url": format!("http://backend.test/jobs?key={secret}") },
+        });
+
+        // `$` is `handle_from`'s default, so this is the ordinary case
+        // rather than a profile doing something unusual.
+        let handle = handle_from_response(&grammar, &resp, "$")
+            .expect("the whole document is what `$` selects");
+        let rendered = handle.to_string();
+        assert!(
+            !rendered.contains(secret),
+            "the credential reached the persisted handle: {rendered}"
+        );
+        // Scrubbed, not dropped: the poll renders `{{handle.…}}` off
+        // this value, so it still has to name the job.
+        assert_eq!(handle["job_id"], "job-1");
+    }
+
+    /// A profile naming a path the backend does not answer with is a
+    /// profile the backend has rejected, and the message says which
+    /// path. Checked beside the scrub because both now live in one
+    /// function, and the error is the half that predates it.
+    #[test]
+    fn a_handle_path_that_resolves_to_nothing_names_itself() {
+        let err = handle_from_response(
+            &SecretGrammar::unauthenticated(),
+            &serde_json::json!({ "id": "job-1" }),
+            "$.job_id",
+        )
+        .expect_err("the response has no `job_id`");
+        match err {
+            ExporterError::BackendRejected(message) => {
+                assert!(
+                    message.contains("$.job_id"),
+                    "the rejection has to name the path that failed: {message}"
+                );
+            }
+            other => panic!("a missing handle path is a backend rejection, not {other:?}"),
+        }
     }
 
     /// The handle a job in flight across the merge carries says `cloud`,
