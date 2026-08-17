@@ -13,7 +13,8 @@ use std::sync::Arc;
 
 use asterism_contract::command::{
     AddAssetCommand, ClosePursuitCommand, CreateDispatchCommand, CreateSnapshotCommand,
-    OpenPursuitCommand, RegisterPersonaCommand, ReopenPursuitCommand, RestampDispatchCommand,
+    CullVerdictEntry, OpenPursuitCommand, RecordPursuitTxCommand, RegisterPersonaCommand,
+    ReopenPursuitCommand, RestampDispatchCommand,
 };
 use asterism_contract::dto::PersonaDto;
 use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
@@ -120,19 +121,48 @@ async fn open(
         .expect("open pursuit")
 }
 
+/// Brings an asset into a pursuit's ledger (`in` / `imported` — the
+/// seeded fixtures came from outside).
+async fn tx_in(core: &CoreCtx, pursuit_id: &str, asset_id: &str) {
+    core.pursuit_service
+        .record_tx(
+            RecordPursuitTxCommand {
+                pursuit_id: pursuit_id.to_string(),
+                kind: "in".into(),
+                asset_id: asset_id.to_string(),
+                origin: Some("imported".into()),
+                note: None,
+                operator_ai: None,
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("record in");
+}
+
+/// A `keep` verdict entry.
+fn keep(asset_id: &str) -> CullVerdictEntry {
+    CullVerdictEntry {
+        asset_id: asset_id.to_string(),
+        verdict: "keep".into(),
+        note: None,
+    }
+}
+
 async fn close(
     core: &CoreCtx,
     pursuit_id: &str,
     outcome: &str,
-    kept: Vec<String>,
+    verdicts: Vec<CullVerdictEntry>,
 ) -> Result<asterism_contract::dto::PursuitEventDto, asterism_core::DomainError> {
     core.pursuit_service
         .close(
             ClosePursuitCommand {
                 pursuit_id: pursuit_id.to_string(),
                 outcome: outcome.into(),
-                kept_asset_ids: kept,
+                verdicts,
                 note: None,
+                cull_note: None,
                 operator_ai: None,
             },
             &unattributed(),
@@ -182,15 +212,20 @@ async fn close_satisfied_freezes_the_kept_set_canonically() {
     let a = seed_asset(&core, &tmp, &persona.id, "a.md").await;
     let b = seed_asset(&core, &tmp, &persona.id, "b.md").await;
 
-    // Two pursuits, same kept members, opposite input orders: the
-    // close path sorts ascending before freezing, so both conclusions
-    // are one snapshot row — the dedupe the convention buys.
+    // Two pursuits, same kept members, opposite verdict orders: the
+    // close path derives the kept set from the `keep` verdicts and
+    // freezes ascending, so both conclusions are one snapshot row —
+    // the dedupe the convention buys.
     let first = open(&core, &persona.id, None, None).await;
     let second = open(&core, &persona.id, None, None).await;
-    let forward = close(&core, &first.id, "satisfied", vec![a.clone(), b.clone()])
+    for pursuit in [&first, &second] {
+        tx_in(&core, &pursuit.id, &a).await;
+        tx_in(&core, &pursuit.id, &b).await;
+    }
+    let forward = close(&core, &first.id, "satisfied", vec![keep(&a), keep(&b)])
         .await
         .expect("close forward");
-    let backward = close(&core, &second.id, "satisfied", vec![b.clone(), a.clone()])
+    let backward = close(&core, &second.id, "satisfied", vec![keep(&b), keep(&a)])
         .await
         .expect("close backward");
     let frozen = forward.snapshot_id.expect("a kept set freezes");
@@ -223,18 +258,18 @@ async fn close_satisfied_freezes_the_kept_set_canonically() {
         "core keeps caller order as identity; the ascending close is the forge's own convention"
     );
 
-    // The kept set gets the same hydration every freeze gets: an
-    // asset the library does not hold is refused.
+    // A verdict names a candidate: an asset the ledger never admitted
+    // is refused, whether or not the library holds it.
     let ghost = close(
         &core,
         &first.id,
         "satisfied",
-        vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
+        vec![keep("0198c1c2-beef-7000-8000-00000000beef")],
     )
     .await;
     assert!(
         ghost.is_err(),
-        "keeping an asset the library does not hold is refused: {ghost:?}"
+        "judging what never entered is refused: {ghost:?}"
     );
 }
 
@@ -247,12 +282,12 @@ async fn abandonment_keeps_nothing_and_the_empty_conclusion_is_defined() {
         &core,
         &pursuit.id,
         "abandoned",
-        vec!["0198c1c2-beef-7000-8000-00000000beef".into()],
+        vec![keep("0198c1c2-beef-7000-8000-00000000beef")],
     )
     .await;
     assert!(
         kept_on_abandon.is_err(),
-        "an abandoned close keeps nothing: {kept_on_abandon:?}"
+        "an abandoned close decides nothing: {kept_on_abandon:?}"
     );
 
     let nothing_kept = close(&core, &pursuit.id, "satisfied", Vec::new())

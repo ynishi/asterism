@@ -250,6 +250,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         Arc::new(sqlite::repo::SqlitePersonaRepository::new(isle.clone())),
         core.asset_service.clone(),
         queue.clone(),
+        Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone())),
     ));
     let env = DispatchRunEnv {
         registry: ExporterRegistry::single(Arc::new(FileExporter::new())),

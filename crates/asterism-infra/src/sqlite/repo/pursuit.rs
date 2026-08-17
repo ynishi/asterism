@@ -1,17 +1,26 @@
-//! SQLite adapter for the `PursuitRepository` port (#29).
+//! SQLite adapter for the `PursuitRepository` port (#29, extended by
+//! #22).
 //!
-//! Three tables, one concern: `pursuit` (thin, immutable, insert-only),
-//! `pursuit_event` (append-only lifecycle facts), and `pursuit_restamp`
-//! (the recorded repair verb). The one multi-table write — restamp —
-//! runs in a single transaction here, because "the move is recorded"
-//! and "the stamp moved" must not be separable facts.
+//! Six tables, one concern: `pursuit` (thin, immutable, insert-only),
+//! `pursuit_event` (append-only lifecycle facts), `pursuit_restamp`
+//! (the recorded repair verb), `pursuit_tx` (the append-only
+//! membership ledger), and `cull` / `cull_member` (the record of a
+//! close's narrowing). The multi-table writes — restamp, and the
+//! close-with-cull — each run in a single transaction here, because
+//! "the move is recorded" and "the stamp moved" (respectively "the
+//! pursuit closed" and "this is what it decided") must not be
+//! separable facts.
 
 use asterism_core::domain::attribution::PersistedAttribution;
+use asterism_core::domain::forge::cull::{Cull, CullMember, CullVerdict};
 use asterism_core::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject,
 };
+use asterism_core::domain::forge::tx::{PursuitTx, PursuitTxKind};
 use asterism_core::domain::repository::PursuitRepository;
-use asterism_core::domain::value::{AssetId, PersonaId, PursuitEventId, PursuitId, SnapshotId};
+use asterism_core::domain::value::{
+    AssetId, CullId, PersonaId, PursuitEventId, PursuitId, PursuitTxId, SnapshotId,
+};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -173,6 +182,140 @@ impl EventRow {
             attribution,
         ))
     }
+}
+
+struct TxRow {
+    id: Uuid,
+    pursuit_id: Uuid,
+    persona_id: Uuid,
+    kind: String,
+    asset_id: Uuid,
+    origin: Option<String>,
+    note: Option<String>,
+    author_kind: Option<String>,
+    author_subject: Option<String>,
+    operator_ai: Option<String>,
+    attributed_via: Option<String>,
+    created_at: i64,
+}
+
+impl TxRow {
+    const COLUMNS: &'static str = "id, pursuit_id, persona_id, kind, asset_id, origin, note,
+                                   author_kind, author_subject, operator_ai, attributed_via,
+                                   created_at";
+
+    fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
+        Ok(Self {
+            id: row.get(0)?,
+            pursuit_id: row.get(1)?,
+            persona_id: row.get(2)?,
+            kind: row.get(3)?,
+            asset_id: row.get(4)?,
+            origin: row.get(5)?,
+            note: row.get(6)?,
+            author_kind: row.get(7)?,
+            author_subject: row.get(8)?,
+            operator_ai: row.get(9)?,
+            attributed_via: row.get(10)?,
+            created_at: row.get(11)?,
+        })
+    }
+
+    fn into_domain(self) -> Result<PursuitTx, DomainError> {
+        let attribution = PersistedAttribution::from_columns(
+            self.author_kind.as_deref(),
+            self.author_subject.as_deref(),
+            self.operator_ai.as_deref(),
+            self.attributed_via.as_deref(),
+        )?;
+        Ok(PursuitTx::from_persisted(
+            PursuitTxId::from_uuid(self.id),
+            PursuitId::from_uuid(self.pursuit_id),
+            PersonaId::from_uuid(self.persona_id),
+            PursuitTxKind::from_columns(&self.kind, self.origin.as_deref())?,
+            AssetId::from_uuid(self.asset_id),
+            self.note,
+            ms_to_datetime(self.created_at)?,
+            attribution,
+        ))
+    }
+}
+
+struct CullRow {
+    id: Uuid,
+    pursuit_id: Uuid,
+    persona_id: Uuid,
+    pursuit_event_id: Uuid,
+    candidate_snapshot_id: Uuid,
+    note: Option<String>,
+    author_kind: Option<String>,
+    author_subject: Option<String>,
+    operator_ai: Option<String>,
+    attributed_via: Option<String>,
+    created_at: i64,
+}
+
+impl CullRow {
+    const COLUMNS: &'static str =
+        "id, pursuit_id, persona_id, pursuit_event_id, candidate_snapshot_id, note,
+         author_kind, author_subject, operator_ai, attributed_via, created_at";
+
+    fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
+        Ok(Self {
+            id: row.get(0)?,
+            pursuit_id: row.get(1)?,
+            persona_id: row.get(2)?,
+            pursuit_event_id: row.get(3)?,
+            candidate_snapshot_id: row.get(4)?,
+            note: row.get(5)?,
+            author_kind: row.get(6)?,
+            author_subject: row.get(7)?,
+            operator_ai: row.get(8)?,
+            attributed_via: row.get(9)?,
+            created_at: row.get(10)?,
+        })
+    }
+
+    fn into_domain(self) -> Result<Cull, DomainError> {
+        let attribution = PersistedAttribution::from_columns(
+            self.author_kind.as_deref(),
+            self.author_subject.as_deref(),
+            self.operator_ai.as_deref(),
+            self.attributed_via.as_deref(),
+        )?;
+        Ok(Cull::from_persisted(
+            CullId::from_uuid(self.id),
+            PursuitId::from_uuid(self.pursuit_id),
+            PersonaId::from_uuid(self.persona_id),
+            PursuitEventId::from_uuid(self.pursuit_event_id),
+            SnapshotId::from_uuid(self.candidate_snapshot_id),
+            self.note,
+            ms_to_datetime(self.created_at)?,
+            attribution,
+        ))
+    }
+}
+
+/// Maps a `cull_member` row into the domain shape. Standalone rather
+/// than a `Row` struct: the member has no attribution and no clock of
+/// its own — it is a line item of its cull.
+fn member_from_row(
+    row: &rusqlite::Row<'_>,
+) -> Result<(Uuid, Uuid, String, Option<String>), rusqlite::Error> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+/// Finishes the member mapping outside the closure, where the verdict
+/// parse can be a domain error.
+fn member_into_domain(
+    (cull_id, asset_id, verdict, note): (Uuid, Uuid, String, Option<String>),
+) -> Result<CullMember, DomainError> {
+    Ok(CullMember {
+        cull_id: CullId::from_uuid(cull_id),
+        asset_id: AssetId::from_uuid(asset_id),
+        verdict: CullVerdict::parse(&verdict)?,
+        note,
+    })
 }
 
 /// What the restamp transaction saw, carried out of the `isle` closure
@@ -349,8 +492,8 @@ impl PursuitRepository for SqlitePursuitRepository {
             attribution_columns("pursuit_restamp", &restamp.persisted_attribution())?;
         let created = datetime_to_ms(&restamp.created_at);
         // The stamped column lives on the subject's own table; today
-        // that is only `dispatch_job` (the `judgment` variant arrives
-        // with its table).
+        // that is only `dispatch_job` (the CHECK's `cull` value is
+        // pre-paid vocabulary, not yet a movable subject).
         let RestampSubject::Dispatch(_) = restamp.subject;
         let outcome = self
             .isle
@@ -554,6 +697,275 @@ impl PursuitRepository for SqlitePursuitRepository {
             .map_err(infra_err)?;
         rows.into_iter()
             .map(|(id, kind)| Ok((PursuitId::from_uuid(id), PursuitEventKind::parse(&kind)?)))
+            .collect()
+    }
+
+    async fn append_tx(&self, tx: &PursuitTx) -> Result<(), DomainError> {
+        let id = *tx.id.as_uuid();
+        let pursuit_id = *tx.pursuit_id.as_uuid();
+        let persona_id = *tx.persona_id.as_uuid();
+        let kind = tx.kind.kind_slug().to_string();
+        let origin = tx.kind.origin_slug().map(str::to_string);
+        let asset_id = *tx.asset_id.as_uuid();
+        let note = tx.note.clone();
+        let (author_kind, author_subject, operator_ai, attributed_via) =
+            attribution_columns("pursuit_tx", &tx.persisted_attribution())?;
+        let created = datetime_to_ms(&tx.created_at);
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO pursuit_tx
+                         (id, pursuit_id, persona_id, kind, asset_id, origin, note,
+                          author_kind, author_subject, operator_ai, attributed_via,
+                          created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        id,
+                        pursuit_id,
+                        persona_id,
+                        kind,
+                        asset_id,
+                        origin,
+                        note,
+                        author_kind,
+                        author_subject,
+                        operator_ai,
+                        attributed_via,
+                        created,
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn txs_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitTx>, DomainError> {
+        let uuid = *pursuit_id.as_uuid();
+        let rows = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {} FROM pursuit_tx WHERE pursuit_id = ?1 \
+                     ORDER BY created_at ASC, id ASC",
+                    TxRow::COLUMNS
+                ))?;
+                let rows = stmt
+                    .query_map(params![uuid], TxRow::from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter().map(TxRow::into_domain).collect()
+    }
+
+    async fn append_close(
+        &self,
+        event: &PursuitEvent,
+        cull: Option<(&Cull, &[CullMember])>,
+    ) -> Result<(), DomainError> {
+        let event_id = *event.id.as_uuid();
+        let event_pursuit = *event.pursuit_id.as_uuid();
+        let event_persona = *event.persona_id.as_uuid();
+        let event_kind = event.kind.slug().to_string();
+        let event_snapshot = event.snapshot_id.map(|s| *s.as_uuid());
+        let event_note = event.note.clone();
+        let (e_author_kind, e_author_subject, e_operator_ai, e_attributed_via) =
+            attribution_columns("pursuit_event", &event.persisted_attribution())?;
+        let event_created = datetime_to_ms(&event.created_at);
+        let cull_row = cull
+            .map(|(cull, members)| -> Result<_, DomainError> {
+                let (c_author_kind, c_author_subject, c_operator_ai, c_attributed_via) =
+                    attribution_columns("cull", &cull.persisted_attribution())?;
+                Ok((
+                    *cull.id.as_uuid(),
+                    *cull.pursuit_id.as_uuid(),
+                    *cull.persona_id.as_uuid(),
+                    *cull.pursuit_event_id.as_uuid(),
+                    *cull.candidate_snapshot_id.as_uuid(),
+                    cull.note.clone(),
+                    c_author_kind,
+                    c_author_subject,
+                    c_operator_ai,
+                    c_attributed_via,
+                    datetime_to_ms(&cull.created_at),
+                    members
+                        .iter()
+                        .map(|m| {
+                            (
+                                *m.asset_id.as_uuid(),
+                                m.verdict.slug().to_string(),
+                                m.note.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .transpose()?;
+        self.isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                tx.execute(
+                    "INSERT INTO pursuit_event
+                         (id, pursuit_id, persona_id, kind, snapshot_id, note,
+                          author_kind, author_subject, operator_ai, attributed_via,
+                          created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    params![
+                        event_id,
+                        event_pursuit,
+                        event_persona,
+                        event_kind,
+                        event_snapshot,
+                        event_note,
+                        e_author_kind,
+                        e_author_subject,
+                        e_operator_ai,
+                        e_attributed_via,
+                        event_created,
+                    ],
+                )?;
+                if let Some((
+                    cull_id,
+                    cull_pursuit,
+                    cull_persona,
+                    cull_event,
+                    candidate_snapshot,
+                    cull_note,
+                    c_author_kind,
+                    c_author_subject,
+                    c_operator_ai,
+                    c_attributed_via,
+                    cull_created,
+                    members,
+                )) = cull_row
+                {
+                    tx.execute(
+                        "INSERT INTO cull
+                             (id, pursuit_id, persona_id, pursuit_event_id,
+                              candidate_snapshot_id, note,
+                              author_kind, author_subject, operator_ai, attributed_via,
+                              created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        params![
+                            cull_id,
+                            cull_pursuit,
+                            cull_persona,
+                            cull_event,
+                            candidate_snapshot,
+                            cull_note,
+                            c_author_kind,
+                            c_author_subject,
+                            c_operator_ai,
+                            c_attributed_via,
+                            cull_created,
+                        ],
+                    )?;
+                    let mut insert = tx.prepare(
+                        "INSERT INTO cull_member (cull_id, asset_id, verdict, note)
+                         VALUES (?1, ?2, ?3, ?4)",
+                    )?;
+                    for (asset_id, verdict, note) in members {
+                        insert.execute(params![cull_id, asset_id, verdict, note])?;
+                    }
+                    drop(insert);
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn culls_of(
+        &self,
+        pursuit_id: &PursuitId,
+    ) -> Result<Vec<(Cull, Vec<CullMember>)>, DomainError> {
+        let uuid = *pursuit_id.as_uuid();
+        let (cull_rows, member_rows) = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {} FROM cull WHERE pursuit_id = ?1 \
+                     ORDER BY created_at ASC, id ASC",
+                    CullRow::COLUMNS
+                ))?;
+                let culls = stmt
+                    .query_map(params![uuid], CullRow::from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut stmt = conn.prepare(
+                    "SELECT m.cull_id, m.asset_id, m.verdict, m.note \
+                       FROM cull_member m JOIN cull c ON c.id = m.cull_id \
+                      WHERE c.pursuit_id = ?1 \
+                      ORDER BY m.cull_id, m.asset_id",
+                )?;
+                let members = stmt
+                    .query_map(params![uuid], member_from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((culls, members))
+            })
+            .await
+            .map_err(infra_err)?;
+        let members = member_rows
+            .into_iter()
+            .map(member_into_domain)
+            .collect::<Result<Vec<_>, _>>()?;
+        cull_rows
+            .into_iter()
+            .map(|row| {
+                let cull = row.into_domain()?;
+                let own = members
+                    .iter()
+                    .filter(|m| m.cull_id == cull.id)
+                    .cloned()
+                    .collect();
+                Ok((cull, own))
+            })
+            .collect()
+    }
+
+    async fn culls_for_asset(
+        &self,
+        asset_id: &AssetId,
+        limit: u32,
+    ) -> Result<Vec<(Cull, CullMember)>, DomainError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let uuid = *asset_id.as_uuid();
+        let rows = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT {}, m.cull_id, m.asset_id, m.verdict, m.note \
+                       FROM cull_member m JOIN cull c ON c.id = m.cull_id \
+                      WHERE m.asset_id = ?1 \
+                      ORDER BY c.created_at DESC, c.id DESC LIMIT ?2",
+                    CullRow::COLUMNS
+                        .split(',')
+                        .map(|c| format!("c.{}", c.trim()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))?;
+                let rows = stmt
+                    .query_map(params![uuid, limit], |row| {
+                        let cull = CullRow::from_row(row)?;
+                        let member = (
+                            row.get::<_, Uuid>(11)?,
+                            row.get::<_, Uuid>(12)?,
+                            row.get::<_, String>(13)?,
+                            row.get::<_, Option<String>>(14)?,
+                        );
+                        Ok((cull, member))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(|(cull, member)| Ok((cull.into_domain()?, member_into_domain(member)?)))
             .collect()
     }
 }

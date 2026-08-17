@@ -1376,6 +1376,117 @@ pub struct PursuitViewDto {
     pub returns: Vec<String>,
     /// The lifecycle facts, oldest first.
     pub events: Vec<PursuitEventDto>,
+    /// The membership ledger, oldest first — every entry, removal and
+    /// reversal, one row per gesture (#22).
+    pub txs: Vec<PursuitTxDto>,
+    /// The culls, oldest first — one per close event that had
+    /// something to record.
+    pub culls: Vec<CullDto>,
+}
+
+/// One gesture in a pursuit's append-only membership ledger (#22):
+/// an asset entering (`in`, with its origin), a mid-work removal, or
+/// its reversal. Membership is derived on read — latest gesture per
+/// asset wins.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PursuitTxDto {
+    /// Tx id (UUID hyphenated).
+    pub id: String,
+    /// Pursuit the gesture belongs to.
+    pub pursuit_id: String,
+    /// `in` / `update` / `remove` / `unremove`.
+    pub kind: String,
+    /// `in` only: `generated` / `imported` / `existing` — where the
+    /// asset came from.
+    pub origin: Option<String>,
+    /// The asset the gesture is about.
+    pub asset_id: String,
+    /// One short free-text slot.
+    pub note: Option<String>,
+    /// Kind of the recorded author (`owner` / `persona` / …) — who
+    /// made the gesture. Absent means unrecorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// Agent that made the gesture — the same open slug
+    /// [`AssetDto::operator_ai`] carries. Absent means unrecorded;
+    /// caller-asserted, never authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+    /// When the gesture was recorded (unix epoch ms).
+    pub created_at_ms: i64,
+}
+
+/// The record of one close's narrowing (#22): who decided what, out
+/// of which frozen candidate set. One cull per close event; a repeat
+/// close reads as a second record, never an overwrite.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct CullDto {
+    /// Cull id (UUID hyphenated).
+    pub id: String,
+    /// Pursuit whose close this records.
+    pub pursuit_id: String,
+    /// The close event the cull belongs to.
+    pub pursuit_event_id: String,
+    /// The candidate set — derived from the ledger and frozen at
+    /// close. What every verdict below is "out of".
+    pub candidate_snapshot_id: String,
+    /// One short free-text slot for the act.
+    pub note: Option<String>,
+    /// Kind of the recorded author (`owner` / `persona` / …) — who
+    /// made the act. Absent means unrecorded. This is the "who
+    /// decided" half of #22's acceptance question; the verdicts below
+    /// are its "what, out of what".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// Agent that made the act — the same open slug
+    /// [`AssetDto::operator_ai`] carries. Absent means unrecorded;
+    /// caller-asserted, never authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+    /// When the act was recorded (unix epoch ms).
+    pub created_at_ms: i64,
+    /// The member verdicts, asset id ascending. Absence of a
+    /// candidate here means the act said nothing about it.
+    pub members: Vec<CullMemberDto>,
+}
+
+/// One member's verdict within a cull (#22).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct CullMemberDto {
+    /// The judged asset.
+    pub asset_id: String,
+    /// `keep` / `reject` — two values, no third; "unjudged" is the
+    /// absence of a row.
+    pub verdict: String,
+    /// One short free-text slot — the grounds, when stated.
+    pub note: Option<String>,
+}
+
+/// One verdict about one asset, joined to the cull it belongs to
+/// (#22) — the acceptance read: who decided to keep or drop this
+/// asset, out of which set, in which line of work.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AssetCullDto {
+    /// The cull the verdict belongs to.
+    pub cull_id: String,
+    /// The line of work.
+    pub pursuit_id: String,
+    /// The candidate set the verdict was out of.
+    pub candidate_snapshot_id: String,
+    /// `keep` / `reject`.
+    pub verdict: String,
+    /// The grounds, when stated.
+    pub note: Option<String>,
+    /// Kind of the recorded author of the act (`owner` / `persona` /
+    /// …) — the "who decided" of #22. Absent means unrecorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// Agent that made the act. Absent means unrecorded;
+    /// caller-asserted, never authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+    /// When the act was recorded (unix epoch ms).
+    pub created_at_ms: i64,
 }
 
 /// One thing an exporter produced, ready for the core to reify

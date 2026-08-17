@@ -37,12 +37,13 @@
 //! integrate at the end. What the close integrates is a *decision*.
 //!
 //! **Culling** — the narrowing between a return and the next round or
-//! the close — has no record of its own in this layer yet. It moves
-//! through the catalogue's working state (rating, labels, trash), and
-//! what survives it is the next round's input, or the kept set the
-//! close freezes. The record it should leave — keep or reject, out of
-//! which candidate set, written just before the close — is drafted on
-//! #63, and #22 carries its implementation.
+//! the close — is recorded (#22, model on #63). Mid-work it moves
+//! through the ledger ([`tx`]): every entry, removal and reversal is
+//! an append-only gesture, and membership derives on read. At a
+//! satisfied close the [`cull`] converts the final state into
+//! verdicts — keep or reject, out of the candidate set the ledger
+//! accumulated, frozen at that moment — and what survives is the next
+//! round's input, or the kept set the close freezes.
 //!
 //! # The boundary
 //!
@@ -52,7 +53,7 @@
 //!   is the id that lets the two rejoin after a round trip — the
 //!   `_dispatch` stamp on a reified output, the `_trace` claim a
 //!   returning artefact carries. What the forge has to say about an
-//!   asset — lifecycle events today, the cull record #63 drafts — lives
+//!   asset — lifecycle events, ledger gestures, cull verdicts — lives
 //!   on forge rows that name core ids. A verdict written onto a core
 //!   row itself would put the forge's vocabulary on the core's rows and
 //!   hand every downstream reader (dedupe, lineage, restore) an
@@ -92,5 +93,7 @@
 //!
 //! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
+pub mod cull;
 pub mod dispatch;
 pub mod pursuit;
+pub mod tx;

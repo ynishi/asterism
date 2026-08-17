@@ -203,6 +203,24 @@ async fn the_lifecycle_round_trips_over_http() {
     assert_eq!(rows.len(), 1, "one pursuit, one row: {listed}");
     assert_eq!(str_at(&rows[0], "id"), pursuit_id);
 
+    // The kept asset enters the ledger first — a verdict names a
+    // candidate, and the candidate set is derived, never supplied.
+    let (status, entered) = call(
+        &router,
+        post(
+            "/asterism/pursuits/tx",
+            serde_json::json!({
+                "pursuit_id": pursuit_id,
+                "kind": "in",
+                "asset_id": kept,
+                "origin": "imported",
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "tx in: {entered}");
+    assert_eq!(entered.get("kind").and_then(|v| v.as_str()), Some("in"));
+
     let (status, closed) = call(
         &router,
         post(
@@ -210,7 +228,7 @@ async fn the_lifecycle_round_trips_over_http() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "kept_asset_ids": [kept],
+                "verdicts": [{ "asset_id": kept, "verdict": "keep" }],
                 "note": "this one",
             }),
         ),
@@ -230,7 +248,8 @@ async fn the_lifecycle_round_trips_over_http() {
         "standing re-derives from the event just written"
     );
 
-    // Closing again is a second fact, not an overwrite.
+    // Closing again is a second fact, not an overwrite — the ledger
+    // still holds the candidate, so the same verdict stands again.
     let (status, _) = call(
         &router,
         post(
@@ -238,7 +257,7 @@ async fn the_lifecycle_round_trips_over_http() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "kept_asset_ids": [kept],
+                "verdicts": [{ "asset_id": kept, "verdict": "keep" }],
             }),
         ),
     )
@@ -345,13 +364,36 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
     let (_, second) = call(&router, open("second")).await;
     let (_, empty_handed) = call(&router, open("empty-handed")).await;
 
+    for pursuit in [&first, &second] {
+        for asset in [&a, &b] {
+            let (status, entered) = call(
+                &router,
+                post(
+                    "/asterism/pursuits/tx",
+                    serde_json::json!({
+                        "pursuit_id": str_at(pursuit, "id"),
+                        "kind": "in",
+                        "asset_id": asset,
+                        "origin": "imported",
+                    }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "tx in: {entered}");
+        }
+    }
+
     let close = |pursuit: &str, kept: Vec<&str>| {
+        let verdicts: Vec<serde_json::Value> = kept
+            .iter()
+            .map(|a| serde_json::json!({ "asset_id": a, "verdict": "keep" }))
+            .collect();
         post(
             "/asterism/pursuits/close",
             serde_json::json!({
                 "pursuit_id": pursuit,
                 "outcome": "satisfied",
-                "kept_asset_ids": kept,
+                "verdicts": verdicts,
             }),
         )
     };
@@ -370,7 +412,7 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
             serde_json::json!({
                 "pursuit_id": str_at(&empty_handed, "id"),
                 "outcome": "satisfied",
-                "kept_asset_ids": [],
+                "verdicts": [],
             }),
         ),
     )
@@ -382,8 +424,8 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
         "concluding with nothing kept is a state, not an empty snapshot"
     );
 
-    // An abandoned close that claims to keep something is refused
-    // before anything is frozen.
+    // An abandoned close that carries verdicts is refused before
+    // anything is frozen.
     let (status, refused) = call(
         &router,
         post(
@@ -391,7 +433,7 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
             serde_json::json!({
                 "pursuit_id": str_at(&first, "id"),
                 "outcome": "abandoned",
-                "kept_asset_ids": [a],
+                "verdicts": [{ "asset_id": a, "verdict": "keep" }],
             }),
         ),
     )
@@ -399,7 +441,7 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,
-        "an abandoned close keeps nothing: {refused}"
+        "an abandoned close decides nothing: {refused}"
     );
 }
 

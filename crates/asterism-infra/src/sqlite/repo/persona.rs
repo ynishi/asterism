@@ -302,18 +302,24 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // abort. Remove the restricting references explicitly, in
                 // order, inside one transaction before the persona row (and
                 // its remaining cascades) go:
-                //   dispatch_job → pursuit_restamp → pursuit_event →
-                //   pursuit → bucket.origin clear → snapshot → persona.
+                //   dispatch_job → pursuit_restamp → cull_member → cull →
+                //   pursuit_event → pursuit_tx → pursuit →
+                //   bucket.origin clear → snapshot → persona.
                 //
-                // The pursuit tables (V79) are RESTRICT on *everything* —
-                // persona, snapshot, and each other — so their slot in the
-                // order is pinned on both sides: after `dispatch_job`
-                // (whose `pursuit_id` restricts `pursuit`), before
-                // `snapshot` (which `pursuit_event.snapshot_id` restricts).
-                // `pursuit_restamp` carries no persona column; it is swept
-                // through the pursuits it points at (`from`/`to` never
-                // cross personas, service-enforced). `parent_id` is a
-                // self-FK RESTRICT, so parents are unhooked before the
+                // The pursuit tables (V79, extended by V82) are RESTRICT
+                // on *everything* — persona, snapshot, and each other —
+                // so their slots in the order are pinned on both sides:
+                // after `dispatch_job` (whose `pursuit_id` restricts
+                // `pursuit`), before `snapshot` (which
+                // `pursuit_event.snapshot_id` and
+                // `cull.candidate_snapshot_id` restrict). `cull` restricts
+                // `pursuit_event` (`pursuit_event_id`), so it goes first
+                // of the two; `cull_member` restricts `cull` and carries
+                // no persona column, so it is swept through its cull.
+                // `pursuit_restamp` carries no persona column either; it
+                // is swept through the pursuits it points at (`from`/`to`
+                // never cross personas, service-enforced). `parent_id` is
+                // a self-FK RESTRICT, so parents are unhooked before the
                 // single DELETE — the bucket.origin_snapshot_id precedent,
                 // cheaper than ordering the delete children-first.
                 let tx = conn.transaction()?;
@@ -351,7 +357,17 @@ impl PersonaRepository for SqlitePersonaRepository {
                     params![uuid],
                 )?;
                 tx.execute(
+                    "DELETE FROM cull_member WHERE cull_id IN \
+                     (SELECT id FROM cull WHERE persona_id = ?1)",
+                    params![uuid],
+                )?;
+                tx.execute("DELETE FROM cull WHERE persona_id = ?1", params![uuid])?;
+                tx.execute(
                     "DELETE FROM pursuit_event WHERE persona_id = ?1",
+                    params![uuid],
+                )?;
+                tx.execute(
+                    "DELETE FROM pursuit_tx WHERE persona_id = ?1",
                     params![uuid],
                 )?;
                 tx.execute(
@@ -514,6 +530,36 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 'g', 0, 0, ?3)",
                 params![bucket, persona, snapshot],
             )?;
+            // The V82 additions: pursuit_tx → pursuit / persona, cull →
+            // pursuit / persona / pursuit_event / snapshot, cull_member
+            // → cull — all RESTRICT, all edges the extended order has
+            // to unhook.
+            conn.execute(
+                "INSERT INTO pursuit_tx
+                     (id, pursuit_id, persona_id, kind, asset_id, origin, created_at)
+                 VALUES (?1, ?2, ?3, 'in', ?4, 'generated', 0)",
+                params![Uuid::now_v7(), child_pursuit, persona, asset],
+            )?;
+            let event = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO pursuit_event
+                     (id, pursuit_id, persona_id, kind, created_at)
+                 VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
+                params![event, child_pursuit, persona],
+            )?;
+            let cull = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO cull
+                     (id, pursuit_id, persona_id, pursuit_event_id,
+                      candidate_snapshot_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                params![cull, child_pursuit, persona, event, snapshot],
+            )?;
+            conn.execute(
+                "INSERT INTO cull_member (cull_id, asset_id, verdict)
+                 VALUES (?1, ?2, 'keep')",
+                params![cull, asset],
+            )?;
             Ok(())
         })
         .await
@@ -560,6 +606,22 @@ mod delete_order_tests {
             counts,
             (0, 0, 0, 0, 0, 0, 0, 0),
             "persona + snapshot + members + dispatch + bucket + pursuit family all swept"
+        );
+        let ledger_counts: (i64, i64, i64) = isle
+            .call(|conn| {
+                let txs: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM pursuit_tx", [], |r| r.get(0))?;
+                let culls: i64 = conn.query_row("SELECT COUNT(*) FROM cull", [], |r| r.get(0))?;
+                let cull_members: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM cull_member", [], |r| r.get(0))?;
+                Ok((txs, culls, cull_members))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            ledger_counts,
+            (0, 0, 0),
+            "the ledger and the cull swept with them"
         );
         driver.shutdown().await.unwrap();
     }

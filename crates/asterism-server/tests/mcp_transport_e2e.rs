@@ -235,6 +235,7 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "asset_add",
             "asset_comment_add",
             "asset_comments",
+            "asset_culls",
             "asset_declare_meta",
             "asset_get",
             "asset_lineage",
@@ -252,6 +253,7 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "pursuit_open",
             "pursuit_reopen",
             "pursuit_restamp_dispatch",
+            "pursuit_tx",
             "pursuit_view",
         ],
         "the curated tool vocabulary changed"
@@ -614,8 +616,32 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     assert_eq!(rounds.len(), 1, "the round reads back: {view}");
     assert_eq!(rounds[0]["id"], serde_json::json!(round.id));
 
+    // The source enters the ledger over the same transport — a
+    // verdict names a candidate, and the candidate set is derived,
+    // never supplied.
+    let entered = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            24,
+            "pursuit_tx",
+            serde_json::json!({
+                "pursuit_id": pursuit_id,
+                "kind": "in",
+                "asset_id": source.id,
+                "origin": "existing",
+                "operator_ai": "claude-code",
+            }),
+        )
+        .await,
+    );
+    assert_eq!(entered["kind"], "in", "the gesture reads back: {entered}");
+
     // Concluding it is a recorded act with a frozen kept set, and the
-    // standing the next read gives back.
+    // standing the next read gives back. The source entered as
+    // `existing`, so the statement it takes is `reject` — and the
+    // close still freezes nothing, which is the point being asserted:
+    // kept is the keep verdicts, not the survivors.
     let closed = tool_json(
         &tool_call(
             &router,
@@ -625,7 +651,7 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "kept_asset_ids": [source.id],
+                "verdicts": [{ "asset_id": source.id, "verdict": "reject" }],
                 "operator_ai": "claude-code",
             }),
         )
@@ -633,9 +659,23 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     );
     assert_eq!(closed["kind"], "closed_satisfied");
     assert!(
-        closed["snapshot_id"].is_string(),
-        "a satisfied close freezes what it kept: {closed}"
+        closed["snapshot_id"].is_null(),
+        "no keep verdicts, nothing frozen: {closed}"
     );
+    let history = tool_json(
+        &tool_call(
+            &router,
+            &session,
+            25,
+            "asset_culls",
+            serde_json::json!({ "asset_id": source.id }),
+        )
+        .await,
+    );
+    let verdicts = history.as_array().expect("verdict rows");
+    assert_eq!(verdicts.len(), 1, "one act judged this asset: {history}");
+    assert_eq!(verdicts[0]["verdict"], "reject");
+    assert_eq!(verdicts[0]["pursuit_id"], serde_json::json!(pursuit_id));
     let after = tool_json(
         &tool_call(
             &router,

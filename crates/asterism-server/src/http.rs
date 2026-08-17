@@ -43,27 +43,28 @@ use asterism_contract::command::{
     PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
     PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
     PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
-    PurgePersonaCommand, RecordDiagCommand, RecordEventCommand, RedispatchCommand,
-    RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
-    RenameSessionCommand, RenameTagCommand, ReopenPursuitCommand, ReorderGroupAssetsCommand,
-    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
-    ResolveDuplicateConflictCommand, RestampDispatchCommand, RestoreAssetCommand,
-    RestoreGroupCommand, RestorePersonaCommand, SetDefaultMaterialLayerCommand,
-    SetPersonaProfileCommand, SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand,
-    TrashGroupCommand, TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
+    PurgePersonaCommand, RecordDiagCommand, RecordEventCommand, RecordPursuitTxCommand,
+    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
+    RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReopenPursuitCommand,
+    ReorderGroupAssetsCommand, ReorderGroupChildrenCommand, ReorderPersonasCommand,
+    ResetSettingCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
-    AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
-    AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto, DirDto, DispatchDto,
-    DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto, EventDto, GroupDto,
-    GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
+    AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetCullDto, AssetDetailDto, AssetDto,
+    AssetIndexPageDto, AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
+    DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
     MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
     ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
-    PursuitDto, PursuitEventDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto,
-    SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto,
-    ThreadDto, VideoPreviewDto,
+    PursuitDto, PursuitEventDto, PursuitTxDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto,
+    SampledPageDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto,
+    TagCountDto, TagDto, ThreadDto, VideoPreviewDto,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -400,9 +401,11 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             "/asterism/pursuits/restamp-dispatch",
             post(restamp_dispatch),
         )
+        .route("/asterism/pursuits/tx", post(record_pursuit_tx))
         .route("/asterism/pursuits/{id}", get(get_pursuit))
         .route("/asterism/pursuits/{id}/events", get(pursuit_events))
         .route("/asterism/pursuits/{id}/view", get(pursuit_view))
+        .route("/asterism/assets/{id}/culls", get(asset_culls))
         .route("/asterism/exporters", get(list_exporters))
         // App-level Threads primitive.
         // UI and Claude Code / agents both hit the same rows via
@@ -2716,9 +2719,11 @@ async fn open_pursuit(
 }
 
 /// `POST /asterism/pursuits/close` — record a conclusion. `satisfied`
-/// freezes the kept set into a snapshot the event references;
-/// `abandoned` records the fact and keeps nothing. Repeatable: a
-/// second close is a second fact, never an overwrite.
+/// records the cull: verdicts resolve against the pursuit's own
+/// ledger, the candidate set is frozen from it, and the kept set the
+/// event freezes is the `keep` verdicts. `abandoned` records the fact
+/// and applies nothing. Repeatable: a second close is a second fact,
+/// never an overwrite.
 async fn close_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Json(command): Json<ClosePursuitCommand>,
@@ -2727,6 +2732,38 @@ async fn close_pursuit(
     Ok(Json(
         ctx.pursuit_service.close(command, &attribution).await?,
     ))
+}
+
+/// `POST /asterism/pursuits/tx` — append one membership gesture to a
+/// pursuit's ledger: an asset entering (`in`, with its origin), a
+/// mid-work removal, or its reversal. Append-only; membership derives
+/// on read.
+async fn record_pursuit_tx(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<RecordPursuitTxCommand>,
+) -> ApiResult<PursuitTxDto> {
+    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
+    Ok(Json(
+        ctx.pursuit_service.record_tx(command, &attribution).await?,
+    ))
+}
+
+/// Query for `GET /asterism/assets/{id}/culls`.
+#[derive(Deserialize)]
+struct AssetCullsQuery {
+    #[serde(default = "default_pursuit_limit")]
+    limit: u32,
+}
+
+/// `GET /asterism/assets/{id}/culls` — every verdict ever recorded
+/// about one asset, most-recent first: who decided to keep or drop
+/// it, out of which set, in which line of work (#22).
+async fn asset_culls(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Query(q): Query<AssetCullsQuery>,
+) -> ApiResult<Vec<AssetCullDto>> {
+    Ok(Json(ctx.pursuit_service.asset_culls(&id, q.limit).await?))
 }
 
 /// `POST /asterism/pursuits/reopen` — record that the line of work
