@@ -44,9 +44,9 @@ Design notes:
 - `JobId` — Surrogate id for `Job`.
 - `Keyword` — Raw keyword extracted by the auto-tag pipeline; a `Tag` may be
 - `Label` — Free-form annotation attached to an asset.
-- `MainlineEntryId` — Surrogate id for a `MainlineEntry` — the name-like forge
-- `MainlineEventId` — Surrogate id for a `MainlineEvent` — one merge verb applied to
-- `MainlineId` — Surrogate id for a `Mainline` — one named line of a project.
+- `LineEntryId` — Surrogate id for a `LineEntry` — the name-like forge identity
+- `LineEventId` — Surrogate id for a `LineEvent` — one merge verb applied to an
+- `LineId` — Surrogate id for a `Line` — one named line of a project, the
 - `MaterialLayerId` — Surrogate id for a `MaterialLayer` — one band of marks over an
 - `MaterialMarkId` — Surrogate id for a `MaterialMark` — one mark in an Asset's
 - `MediaKind` — Media-render variant selected by a [`ContentKind`].

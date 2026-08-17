@@ -619,7 +619,7 @@ the private design notes.
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
-- [`domain::forge::mainline`](domain__forge__mainline.md): `Mainline` — a project's canonical set, and the forge identity that
+- [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
@@ -3353,10 +3353,10 @@ Aggregate root for a single outbound job's whole lifecycle
 - `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
 
 
-<!-- asterism_core/domain__forge__mainline.md -->
-# asterism-core::domain::forge::mainline
+<!-- asterism_core/domain__forge__line.md -->
+# asterism-core::domain::forge::line
 
-`Mainline` — a project's canonical set, and the forge identity that
+`Line` — a project's canonical set, and the forge identity that
 makes "the living one" a derivable fact (#63 decisions 1–3).
 
 Raw asset ids are one-off: a replacement is a different row, and
@@ -3370,16 +3370,17 @@ sequence itself, not a second record of it.
 
 # Shape
 
-- [`Mainline`] is one named line of a project. v1 mints exactly one
-  per project, named [`Mainline::MAIN`] (application-enforced); the
-  row exists so "mainline" is a branch rather than a hard-coded
-  place, and the schema admits siblings before the code does (the
-  V82 admit-ahead stance).
-- [`MainlineEntry`] is the identity; it carries no name column —
+- [`Line`] is one named line of a project — the branch of the git
+  analogy. v1 mints exactly one per project, named [`Line::MAIN`]
+  (application-enforced), so "the mainline" is a description — the
+  line named `main` — rather than a type of its own, and the
+  schema admits siblings before the code does (the V82 admit-ahead
+  stance).
+- [`LineEntry`] is the identity; it carries no name column —
   the current name is the latest naming verb's, so renames are
   history like everything else.
-- [`MainlineEvent`] is one verb applied to one entry.
-  [`MainlineVerb`] carries each verb's payload so a caller cannot
+- [`LineEvent`] is one verb applied to one entry.
+  [`LineVerb`] carries each verb's payload so a caller cannot
   file an add without a name or a delete with an asset (the
   `RestampSubject` stance); storage enforces the same pairing with
   two-way CHECKs.
@@ -3390,7 +3391,7 @@ sequence itself, not a second record of it.
 
 # The boundary, restated
 
-The mainline *references* asset ids; it never annotates or mutates
+A line *references* asset ids; it never annotates or mutates
 an asset (the PR #62 rule). A dead entry's asset row stays live and
 restorable — `delete` is a statement about the canonical set, not
 about bytes, the same distance `CullVerdict::Reject` keeps from
@@ -3399,7 +3400,7 @@ trash.
 # Invariants (service-enforced, entity-checked where local)
 
 - Verb payload pairing and non-blank names are checked here.
-- Living-name uniqueness within a mainline is an application rule
+- Living-name uniqueness within a line is an application rule
   checked at merge time — dead names are reusable, so it cannot be
   a schema constraint.
 - An entry's first event is an `add`; later events land on an
@@ -3418,10 +3419,10 @@ trash.
 ## Types
 
 - `EntryState` — One entry's derived position: alive or dead, and what it currently
-- `Mainline` — One named line of a project. v1 restricts a project to exactly one,
-- `MainlineEntry` — The forge identity above raw asset ids (#63 decision 1). Deliberately
-- `MainlineEvent` — One verb applied to one entry, filed under the merge that landed it.
-- `MainlineVerb` — The closed set of merge verbs, payload included (#63 decision 2).
+- `Line` — One named line of a project. v1 restricts a project to exactly one,
+- `LineEntry` — The forge identity above raw asset ids (#63 decision 1). Deliberately
+- `LineEvent` — One verb applied to one entry, filed under the merge that landed it.
+- `LineVerb` — The closed set of merge verbs, payload included (#63 decision 2).
 - `Merge` — The record that one satisfied close applied its verbs (#63 decision
 
 
@@ -3445,18 +3446,18 @@ asset is cross-project contamination, catchable at IN time) and
   required human name, an optional note. No status column, no
   members — what belongs to a project derives through its pursuits
   and its mainline, never from a membership table.
-- [`Mainline`](crate::domain::forge::mainline::Mainline) rows are
-  the project's lines. v1 mints exactly one, named
-  [`MAIN`](crate::domain::forge::mainline::Mainline::MAIN), in the
-  same transaction as the project (application-enforced); the
-  schema admits more so a later multi-line model is an enum's
-  worth of change, not a migration.
+- [`Line`](crate::domain::forge::line::Line) rows are the
+  project's lines. v1 mints exactly one, named
+  [`MAIN`](crate::domain::forge::line::Line::MAIN), in the same
+  transaction as the project (application-enforced); the schema
+  admits more so a later multi-line model is an enum's worth of
+  change, not a migration.
 
 # Invariants (service-enforced, entity-checked where local)
 
 - `name` is non-blank (checked here); uniqueness among one
   persona's projects is an application rule, checked where both
-  rows are visible — like living-name uniqueness on a mainline,
+  rows are visible — like living-name uniqueness on a line,
   and unlike a schema UNIQUE, so a later archival verb can free
   names without a migration.
 - A pursuit filing under a project shares its persona
@@ -5121,9 +5122,9 @@ Design notes:
 - `JobId` — Surrogate id for `Job`.
 - `Keyword` — Raw keyword extracted by the auto-tag pipeline; a `Tag` may be
 - `Label` — Free-form annotation attached to an asset.
-- `MainlineEntryId` — Surrogate id for a `MainlineEntry` — the name-like forge
-- `MainlineEventId` — Surrogate id for a `MainlineEvent` — one merge verb applied to
-- `MainlineId` — Surrogate id for a `Mainline` — one named line of a project.
+- `LineEntryId` — Surrogate id for a `LineEntry` — the name-like forge identity
+- `LineEventId` — Surrogate id for a `LineEvent` — one merge verb applied to an
+- `LineId` — Surrogate id for a `Line` — one named line of a project, the
 - `MaterialLayerId` — Surrogate id for a `MaterialLayer` — one band of marks over an
 - `MaterialMarkId` — Surrogate id for a `MaterialMark` — one mark in an Asset's
 - `MediaKind` — Media-render variant selected by a [`ContentKind`].

@@ -71,7 +71,7 @@
 - [asterism-core::domain::forge](asterism_core/domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [asterism-core::domain::forge::cull](asterism_core/domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [asterism-core::domain::forge::dispatch](asterism_core/domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
-- [asterism-core::domain::forge::mainline](asterism_core/domain__forge__mainline.md): `Mainline` — a project's canonical set, and the forge identity that
+- [asterism-core::domain::forge::line](asterism_core/domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [asterism-core::domain::forge::project](asterism_core/domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [asterism-core::domain::forge::pursuit](asterism_core/domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [asterism-core::domain::forge::tx](asterism_core/domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,

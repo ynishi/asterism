@@ -1243,49 +1243,49 @@
       "docs": "Lifecycle state persisted with the dispatch job.\n\nKept as a domain enum so callers can pattern-match without having\nto depend on `asterism-dispatch-sdk` (the runner does the\nSDK-side ↔ domain-side mapping)."
     },
     {
-      "path": "asterism_core::domain::forge::mainline",
+      "path": "asterism_core::domain::forge::line",
       "kind": "module",
-      "docs": "`Mainline` — a project's canonical set, and the forge identity that\nmakes \"the living one\" a derivable fact (#63 decisions 1–3).\n\nRaw asset ids are one-off: a replacement is a different row, and\nnothing in the core says the new row *is* the old thing, newer. The\nentry is that statement — a minted identity above asset ids — and\nthe four merge verbs (add / replace / delete / rename) are the only\nthings that ever move it. Liveness, current name, and current\nversion all derive on read from the verb sequence, exactly like\n`PursuitStanding`: latest event per entry wins, and history is the\nsequence itself, not a second record of it.\n\n# Shape\n\n- [`Mainline`] is one named line of a project. v1 mints exactly one\n  per project, named [`Mainline::MAIN`] (application-enforced); the\n  row exists so \"mainline\" is a branch rather than a hard-coded\n  place, and the schema admits siblings before the code does (the\n  V82 admit-ahead stance).\n- [`MainlineEntry`] is the identity; it carries no name column —\n  the current name is the latest naming verb's, so renames are\n  history like everything else.\n- [`MainlineEvent`] is one verb applied to one entry.\n  [`MainlineVerb`] carries each verb's payload so a caller cannot\n  file an add without a name or a delete with an asset (the\n  `RestampSubject` stance); storage enforces the same pairing with\n  two-way CHECKs.\n- [`Merge`] is the record that one satisfied close applied its\n  verbs — approval *is* the merge event, so every event names the\n  merge it landed under, and who approved derives through the\n  close event's attribution rather than being copied here.\n\n# The boundary, restated\n\nThe mainline *references* asset ids; it never annotates or mutates\nan asset (the PR #62 rule). A dead entry's asset row stays live and\nrestorable — `delete` is a statement about the canonical set, not\nabout bytes, the same distance `CullVerdict::Reject` keeps from\ntrash.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- Verb payload pairing and non-blank names are checked here.\n- Living-name uniqueness within a mainline is an application rule\n  checked at merge time — dead names are reusable, so it cannot be\n  a schema constraint.\n- An entry's first event is an `add`; later events land on an\n  existing entry. The write path (P3) enforces this; on read the\n  derive tolerates a dangling tail by answering `None` on the axes\n  the missing `add` would have filled. That tolerance is *weaker*\n  than the ledger's, which drops a dangling gesture's asset from\n  membership outright (`tx.rs`) — deliberately so: an event row\n  names an entry that exists, so deriving its presence states\n  nothing false, where a membership would."
+      "docs": "`Line` — a project's canonical set, and the forge identity that\nmakes \"the living one\" a derivable fact (#63 decisions 1–3).\n\nRaw asset ids are one-off: a replacement is a different row, and\nnothing in the core says the new row *is* the old thing, newer. The\nentry is that statement — a minted identity above asset ids — and\nthe four merge verbs (add / replace / delete / rename) are the only\nthings that ever move it. Liveness, current name, and current\nversion all derive on read from the verb sequence, exactly like\n`PursuitStanding`: latest event per entry wins, and history is the\nsequence itself, not a second record of it.\n\n# Shape\n\n- [`Line`] is one named line of a project — the branch of the git\n  analogy. v1 mints exactly one per project, named [`Line::MAIN`]\n  (application-enforced), so \"the mainline\" is a description — the\n  line named `main` — rather than a type of its own, and the\n  schema admits siblings before the code does (the V82 admit-ahead\n  stance).\n- [`LineEntry`] is the identity; it carries no name column —\n  the current name is the latest naming verb's, so renames are\n  history like everything else.\n- [`LineEvent`] is one verb applied to one entry.\n  [`LineVerb`] carries each verb's payload so a caller cannot\n  file an add without a name or a delete with an asset (the\n  `RestampSubject` stance); storage enforces the same pairing with\n  two-way CHECKs.\n- [`Merge`] is the record that one satisfied close applied its\n  verbs — approval *is* the merge event, so every event names the\n  merge it landed under, and who approved derives through the\n  close event's attribution rather than being copied here.\n\n# The boundary, restated\n\nA line *references* asset ids; it never annotates or mutates\nan asset (the PR #62 rule). A dead entry's asset row stays live and\nrestorable — `delete` is a statement about the canonical set, not\nabout bytes, the same distance `CullVerdict::Reject` keeps from\ntrash.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- Verb payload pairing and non-blank names are checked here.\n- Living-name uniqueness within a line is an application rule\n  checked at merge time — dead names are reusable, so it cannot be\n  a schema constraint.\n- An entry's first event is an `add`; later events land on an\n  existing entry. The write path (P3) enforces this; on read the\n  derive tolerates a dangling tail by answering `None` on the axes\n  the missing `add` would have filled. That tolerance is *weaker*\n  than the ledger's, which drops a dangling gesture's asset from\n  membership outright (`tx.rs`) — deliberately so: an event row\n  names an entry that exists, so deriving its presence states\n  nothing false, where a membership would."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::EntryState",
+      "path": "asterism_core::domain::forge::line::EntryState",
       "kind": "struct",
       "docs": "One entry's derived position: alive or dead, and what it currently\nanswers to. All three axes derive independently — liveness from the\nlatest event of any verb, the name from the latest naming verb, the\nversion from the latest asset-bearing verb — so a delete does not\nerase what the entry was called (dead names are readable, merely\nreusable)."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::Mainline",
+      "path": "asterism_core::domain::forge::line::Line",
       "kind": "struct",
       "docs": "One named line of a project. v1 restricts a project to exactly one,\nnamed [`Self::MAIN`] and minted in the same transaction as the\nproject — an application rule, so the day named lines arrive the\nschema is already there."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::MainlineEntry",
+      "path": "asterism_core::domain::forge::line::LineEntry",
       "kind": "struct",
       "docs": "The forge identity above raw asset ids (#63 decision 1). Deliberately\nname-less and version-less: both derive from the verb sequence."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::MainlineEvent",
+      "path": "asterism_core::domain::forge::line::LineEvent",
       "kind": "struct",
       "docs": "One verb applied to one entry, filed under the merge that landed it."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::MainlineVerb",
+      "path": "asterism_core::domain::forge::line::LineVerb",
       "kind": "enum",
       "docs": "The closed set of merge verbs, payload included (#63 decision 2).\nAn enum rather than `(kind, Option, Option)` columns so a caller\ncannot file an `add` without a name or a `delete` carrying an asset\n— the `RestampSubject` stance; the schema states the same pairing\nas two-way CHECKs."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::Merge",
+      "path": "asterism_core::domain::forge::line::Merge",
       "kind": "struct",
       "docs": "The record that one satisfied close applied its verbs (#63 decision\n3). One per close event (UNIQUE in storage); an empty merge — a\nsatisfied close that landed nothing — is a defined state, not a\nmissing row, so \"this close was an approval act\" stays readable\neven when nothing changed.\n\nNo attribution triple here: who approved *is* who closed, and the\nclose event already carries the triple — copying it would mint a\nsecond author for one act."
     },
     {
-      "path": "asterism_core::domain::forge::mainline::entry_state",
+      "path": "asterism_core::domain::forge::line::entry_state",
       "kind": "function",
       "docs": "Derives one entry's state from its events: latest by\n`(created_at, id)` wins, per axis. The input does not need to be\nsorted. A sequence that never saw an `add` is a dangling tail —\nthe write path refuses to create one; on read it derives with\n`None` where the missing `add` would have answered, and yields no\nphantom liveness beyond what its verbs state."
     },
     {
       "path": "asterism_core::domain::forge::project",
       "kind": "module",
-      "docs": "`Project` — the repo of the forge's git analogy (#63): the shared\ncontext pursuits file under, and the owner of a mainline.\n\nThe pursuit answers \"one line of work\"; the project answers \"one\nbody of work\" — the unit a mainline is canonical *for*. Without it\nthe mainline would be a persona-wide singleton, and two unrelated\nefforts would fight over one namespace of living names. With it,\nscope has a referent (an `In(Existing)` of another project's living\nasset is cross-project contamination, catchable at IN time) and\n\"the canonical set\" means canonical for something in particular.\n\n# Shape\n\n- [`Project`] is a thin, immutable row: identity, persona, a\n  required human name, an optional note. No status column, no\n  members — what belongs to a project derives through its pursuits\n  and its mainline, never from a membership table.\n- [`Mainline`](crate::domain::forge::mainline::Mainline) rows are\n  the project's lines. v1 mints exactly one, named\n  [`MAIN`](crate::domain::forge::mainline::Mainline::MAIN), in the\n  same transaction as the project (application-enforced); the\n  schema admits more so a later multi-line model is an enum's\n  worth of change, not a migration.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- `name` is non-blank (checked here); uniqueness among one\n  persona's projects is an application rule, checked where both\n  rows are visible — like living-name uniqueness on a mainline,\n  and unlike a schema UNIQUE, so a later archival verb can free\n  names without a migration.\n- A pursuit filing under a project shares its persona\n  (cross-aggregate, application service — the persona cascade\n  rule every forge pairing states)."
+      "docs": "`Project` — the repo of the forge's git analogy (#63): the shared\ncontext pursuits file under, and the owner of a mainline.\n\nThe pursuit answers \"one line of work\"; the project answers \"one\nbody of work\" — the unit a mainline is canonical *for*. Without it\nthe mainline would be a persona-wide singleton, and two unrelated\nefforts would fight over one namespace of living names. With it,\nscope has a referent (an `In(Existing)` of another project's living\nasset is cross-project contamination, catchable at IN time) and\n\"the canonical set\" means canonical for something in particular.\n\n# Shape\n\n- [`Project`] is a thin, immutable row: identity, persona, a\n  required human name, an optional note. No status column, no\n  members — what belongs to a project derives through its pursuits\n  and its mainline, never from a membership table.\n- [`Line`](crate::domain::forge::line::Line) rows are the\n  project's lines. v1 mints exactly one, named\n  [`MAIN`](crate::domain::forge::line::Line::MAIN), in the same\n  transaction as the project (application-enforced); the schema\n  admits more so a later multi-line model is an enum's worth of\n  change, not a migration.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- `name` is non-blank (checked here); uniqueness among one\n  persona's projects is an application rule, checked where both\n  rows are visible — like living-name uniqueness on a line,\n  and unlike a schema UNIQUE, so a later archival verb can free\n  names without a migration.\n- A pursuit filing under a project shares its persona\n  (cross-aggregate, application service — the persona cascade\n  rule every forge pairing states)."
     },
     {
       "path": "asterism_core::domain::forge::project::Project",
@@ -2368,19 +2368,19 @@
       "docs": "Free-form annotation attached to an asset.\n\nLabels intentionally accept anything short (status hints, category\nnotes, secondary modality tags) rather than restricting to a fixed\nvocabulary — the empirical usage in real footprints is heterogeneous."
     },
     {
-      "path": "asterism_core::domain::value::MainlineEntryId",
+      "path": "asterism_core::domain::value::LineEntryId",
       "kind": "struct",
-      "docs": "Surrogate id for a `MainlineEntry` — the name-like forge\nidentity above raw asset ids (#63 decision 1): the thing that\nstays \"the living one\" while replacement and renaming move\nbeneath it. Raw asset ids stay one-off; the entry is what a\ntargeted IN declares."
+      "docs": "Surrogate id for a `LineEntry` — the name-like forge identity\nabove raw asset ids (#63 decision 1): the thing that stays\n\"the living one\" while replacement and renaming move beneath\nit. Raw asset ids stay one-off; the entry is what a targeted\nIN declares."
     },
     {
-      "path": "asterism_core::domain::value::MainlineEventId",
+      "path": "asterism_core::domain::value::LineEventId",
       "kind": "struct",
-      "docs": "Surrogate id for a `MainlineEvent` — one merge verb applied to\nan entry (add / replace / delete / rename, #63 decision 2).\nLiveness and naming derive on read by \"latest event per entry\nwins\" over `(created_at, id)`; the v7 tie-break makes that\nanswer total when two verbs share a millisecond."
+      "docs": "Surrogate id for a `LineEvent` — one merge verb applied to an\nentry (add / replace / delete / rename, #63 decision 2).\nLiveness and naming derive on read by \"latest event per entry\nwins\" over `(created_at, id)`; the v7 tie-break makes that\nanswer total when two verbs share a millisecond."
     },
     {
-      "path": "asterism_core::domain::value::MainlineId",
+      "path": "asterism_core::domain::value::LineId",
       "kind": "struct",
-      "docs": "Surrogate id for a `Mainline` — one named line of a project.\nv1 restricts a project to exactly one, named `main`; the id\nexists so \"mainline\" is a branch rather than a hard-coded\nplace (the V82 admit-ahead stance: schema admits, code\nrestricts)."
+      "docs": "Surrogate id for a `Line` — one named line of a project, the\nbranch of the forge's git analogy. v1 restricts a project to\nexactly one, named `main`, so \"the mainline\" is a description\nrather than a type (the V82 admit-ahead stance: schema admits\nsiblings, code restricts)."
     },
     {
       "path": "asterism_core::domain::value::MaterialLayerId",
@@ -2400,7 +2400,7 @@
     {
       "path": "asterism_core::domain::value::MergeId",
       "kind": "struct",
-      "docs": "Surrogate id for a `Merge` — the record that one satisfied\nclose applied its verbs (#63 decision 3: approval *is* the\nmerge event). One merge per close event; the verbs group under\nit on `mainline_event`."
+      "docs": "Surrogate id for a `Merge` — the record that one satisfied\nclose applied its verbs (#63 decision 3: approval *is* the\nmerge event). One merge per close event; the verbs group under\nit on `line_event`."
     },
     {
       "path": "asterism_core::domain::value::MessageId",
