@@ -304,7 +304,7 @@ export type MessageDto = { id: string; thread_id: string; author_kind: string; a
 
 export type MessageRefDto = { kind: string; id: string; };
 
-export type OpenPursuitCommand = { persona_id: string; pursuit_id: string | null; parent_pursuit_id: string | null; title: string | null; note: string | null; operator_ai: string | null; };
+export type OpenPursuitCommand = { persona_id: string; pursuit_id: string | null; project_id: string | null; parent_pursuit_id: string | null; title: string | null; note: string | null; operator_ai: string | null; };
 
 export type ClosePursuitCommand = { pursuit_id: string; outcome: string; verdicts: { asset_id: string; verdict: string; note: string | null; }[]; note: string | null; cull_note: string | null; operator_ai: string | null; };
 
@@ -316,11 +316,11 @@ export type ReopenPursuitCommand = { pursuit_id: string; note: string | null; op
 
 export type RestampDispatchCommand = { dispatch_id: string; to_pursuit_id: string; operator_ai: string | null; };
 
-export type PursuitDto = { id: string; persona_id: string; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; };
+export type PursuitDto = { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; };
 
 export type PursuitEventDto = { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; };
 
-export type PursuitViewDto = { pursuit: { id: string; persona_id: string; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; }; rounds: { id: string; snapshot_id: string; persona_id: string; pursuit_id: string | null; exporter_slug: string; action: string; params_json: string; handle_json: string | null; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; }[]; returns: string[]; events: { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; }[]; txs: { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; }[]; culls: { id: string; pursuit_id: string; pursuit_event_id: string; candidate_snapshot_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; members: { asset_id: string; verdict: string; note: string | null; }[]; }[]; };
+export type PursuitViewDto = { pursuit: { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; }; rounds: { id: string; snapshot_id: string; persona_id: string; pursuit_id: string | null; exporter_slug: string; action: string; params_json: string; handle_json: string | null; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; }[]; returns: string[]; events: { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; }[]; txs: { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; }[]; culls: { id: string; pursuit_id: string; pursuit_event_id: string; candidate_snapshot_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; members: { asset_id: string; verdict: string; note: string | null; }[]; }[]; };
 
 export type PursuitTxDto = { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; };
 
