@@ -190,6 +190,12 @@ Removal still happens. It is mitigation evidence, not the resolution.
 Write down the exposure window, the reach, and every takedown attempted. That
 record is what the obligations above are answered with.
 
+Where that record is public it is an issue, and it closes once everything it
+describes is done — the takedowns, and the obligations the content carried,
+which outlast them. What it says stays readable and searchable after it
+closes; an issue left open says instead that the disclosure is still being
+dealt with.
+
 ## Internal references
 
 Internal tracking and public explanation serve different purposes and may
