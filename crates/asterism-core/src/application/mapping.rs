@@ -1091,6 +1091,14 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
             serde_json::Value::Null => "{}".into(),
             other => other.to_string(),
         },
+        // A pending job has no handle, and a JSON `null` payload is a
+        // handle that says nothing — both are "the backend has not
+        // answered yet", and neither deserves to arrive as the string
+        // `"null"` for a reader to special-case.
+        handle_json: match &job.handle {
+            None | Some(serde_json::Value::Null) => None,
+            Some(handle) => Some(handle.to_string()),
+        },
         state: job.state.slug().to_string(),
         state_message,
         progress_current,
@@ -1507,5 +1515,56 @@ mod tests {
         assert_eq!(domain.duration_min_ms, Some(u64::MAX));
         assert_eq!(domain.size_min_bytes, Some(u64::MAX));
         assert_eq!(domain.pixels_min, Some(u64::MAX));
+    }
+
+    /// A dispatch with a handle on it.
+    fn dispatch_with_handle(handle: Option<serde_json::Value>) -> DispatchJob {
+        let mut job = DispatchJob::new(
+            SnapshotId::new(),
+            PersonaId::new(),
+            "http",
+            "render",
+            serde_json::json!({ "endpoint": "http://backend.test" }),
+            Utc::now(),
+            &AttributionContext::unrecorded(),
+        )
+        .expect("a slug and an action is all the constructor asks for");
+        job.handle = handle;
+        job
+    }
+
+    /// The recorded exchange arrives on the wire shape, so a reader
+    /// asking what a dispatch sent and what came back of it does not
+    /// have to open the database to find out.
+    #[test]
+    fn dispatch_dto_carries_the_handle_payload() {
+        let payload = serde_json::json!({
+            "handle": "job-1",
+            "exchange": {
+                "request": { "method": "POST", "body": { "prompt": "a plate" } },
+                "response": { "job_id": "job-1" }
+            }
+        });
+        let dto = dispatch_to_dto(&dispatch_with_handle(Some(payload.clone())));
+        let carried: serde_json::Value =
+            serde_json::from_str(&dto.handle_json.expect("an issued handle reaches the wire"))
+                .expect("what the column holds is JSON, and stays JSON");
+        assert_eq!(carried, payload);
+    }
+
+    /// Two ways of having no handle — no payload at all, and a payload
+    /// that is the JSON value `null` — and they answer alike, because
+    /// both say the backend has not been heard from. Neither arrives as
+    /// the string `"null"` for every reader to special-case.
+    #[test]
+    fn a_dispatch_without_a_handle_carries_none() {
+        assert_eq!(
+            dispatch_to_dto(&dispatch_with_handle(None)).handle_json,
+            None
+        );
+        assert_eq!(
+            dispatch_to_dto(&dispatch_with_handle(Some(serde_json::Value::Null))).handle_json,
+            None
+        );
     }
 }

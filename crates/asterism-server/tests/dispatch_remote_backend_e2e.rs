@@ -1682,6 +1682,32 @@ async fn a_profile_that_asks_for_custody_lands_the_bytes_and_the_record() {
         call["submitted_at_ms"].is_i64(),
         "the submit moment is what a deadline is measured from: {call}"
     );
+
+    // The same record read the other way: off the dispatch row, which
+    // is where it lives, rather than off an artefact it was copied to.
+    // A reader asking what this call sent and what came back of it gets
+    // there through the wire shape — no SQL, and no asset needed, which
+    // matters most for a submit that produced none.
+    let row = core
+        .dispatch_service
+        .get(&export.dispatch_id)
+        .await
+        .expect("dispatch get");
+    let handle: serde_json::Value = serde_json::from_str(
+        row.handle_json
+            .as_deref()
+            .expect("a dispatch the backend accepted carries the handle it was issued"),
+    )
+    .expect("the handle payload reaches the wire as JSON text");
+    assert_eq!(handle["handle"], json!(HTTP_JOB_ID));
+    assert_eq!(
+        handle["exchange"]["request"]["body"]["prompt"], "a test plate",
+        "the request as sent is readable without opening the database"
+    );
+    assert_eq!(
+        handle["exchange"]["response"]["job_id"], HTTP_JOB_ID,
+        "and the response as received beside it"
+    );
 }
 
 /// The schema-driven half of the failure story: the reason the row
