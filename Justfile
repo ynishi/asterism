@@ -954,9 +954,75 @@ commit-msg-check *args:
 # both answer questions no build can change, and a branch that fails
 # either fails it just as surely after twenty minutes of compiling.
 #
+# A branch that edits nothing but prose stops after those two. CI
+# already works that way — `paths-ignore` in `.github/workflows/check.yml`
+# starts no run for a push that touches only those files — so a local
+# run of the build gates over such a branch is minutes of a shared
+# machine spent reproducing a verdict nobody asked for and nothing
+# reads. The list is read from the workflow rather than copied here, so
+# the two cannot drift; the workflow's own comment is where the
+# reasoning for each entry lives, including which files are deliberately
+# absent from it.
+#
+# What a prose branch is left with is the two assertions above and a
+# reading of the diff — `pub-checker` for the disclosure policy,
+# `reviewer` for the rest. Neither is a recipe, and neither is
+# something `pre-push` can stand in for.
+#
 # Run every gate over the tree being handed over.
 [group('check')]
-pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD") check-shared rust-clippy-changed rust-test-changed
+pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ project_root }}"
+    changed=$(git diff --name-only origin/main...HEAD)
+    if [ -z "$changed" ]; then
+        echo "no commits on this branch that origin/main does not have." >&2
+        exit 1
+    fi
+    # The workflow's patterns are glob, and `**` there means what `*`
+    # means to bash once the path separator is not special to it.
+    mapfile -t ignored < <(
+        awk '/paths-ignore:/ { f = 1; next }
+             f && /^[[:space:]]*-[[:space:]]/ {
+                 gsub(/^[[:space:]]*-[[:space:]]*/, "")
+                 gsub(/^.|.$/, "")
+                 print
+                 next
+             }
+             f { exit }' .github/workflows/check.yml
+    )
+    if [ "${#ignored[@]}" -eq 0 ]; then
+        echo "could not read paths-ignore from .github/workflows/check.yml;" >&2
+        echo "running every gate rather than guessing." >&2
+        prose_only=false
+    else
+        prose_only=true
+        while IFS= read -r path; do
+            matched=false
+            for pattern in "${ignored[@]}"; do
+                # shellcheck disable=SC2053
+                if [[ "$path" == ${pattern/\*\*/\*} ]]; then
+                    matched=true
+                    break
+                fi
+            done
+            if [ "$matched" = false ]; then
+                prose_only=false
+                break
+            fi
+        done <<< "$changed"
+    fi
+    if [ "$prose_only" = true ]; then
+        echo
+        echo "This branch edits only files the CI workflow's paths-ignore covers:"
+        printf '  %s\n' $changed
+        echo "No run starts for them there, so none runs here either. Read the"
+        echo "diff instead — pub-checker for the disclosure policy, reviewer for"
+        echo "the rest."
+        exit 0
+    fi
+    just check-shared rust-clippy-changed rust-test-changed
 
 # Fail when any Rust file is not rustfmt-clean.
 #
