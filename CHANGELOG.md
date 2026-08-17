@@ -28,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write path yet, every line starts empty, and a pursuit that files
   under no project behaves exactly as before.
 
+- **Filing, and the columns a targeted IN needs** (P2 of #63). A
+  pursuit can now say which project it files under, and the ledger can
+  say which line entry an `in` is aimed at, which version of that entry
+  the caller saw when it aimed, whether the aim reached into another
+  project, and which member an `update` revises (V84). Filing is
+  nullable because filing is what mints a pursuit once exploration
+  moves below the forge — a pursuit with no project is what the
+  always-mint rule left behind, not a mode, and those rows are left as
+  they are rather than given a project they never had. The aim rides
+  on the gesture that carries it rather than in four loose columns, so
+  a pin with nothing pinned, a `remove` claiming it reached out of
+  scope, and anything but an `update` superseding a member are all
+  states the domain cannot express; only "just an existing `in` may
+  aim" needs a check. Purging a persona now sweeps its project and
+  lines with everything else. Still no write path: nothing sets any of
+  it yet.
+
 - **The ledger and the cull — selection is recorded** (#22, model on
   #63). Keeping or discarding a generated asset used to move through
   four unrelated routes — trash, a low rating, the inbox label, a fold
