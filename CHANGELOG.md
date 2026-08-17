@@ -111,6 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regenerates it and it is 18 GB of the 111. A worktree cut this way
   builds 4 to 16 crates where a cold one builds the 753-crate graph.
 
+  The copy is the slow half — 45 seconds with the tree in page cache,
+  six minutes reading it cold — so it runs in the background and the
+  recipe returns in about two seconds. Nothing reads `target/` until
+  something compiles, and the staging happens under `workspace/`,
+  where being gitignored keeps an unfinished copy from making the tree
+  dirty and blocking the branch's own `-changed` gates.
+  `workspace/target-staging.log` says when it lands; a build that
+  starts first gets a cold `target/` of its own and keeps it.
+
 - **`just commit-msg-check` — the commit-message rules are checked
   rather than remembered** (#67). CONTRIBUTING asks for a body wrapped
   at 72 columns and for no CI skip keyword anywhere in a message; both
