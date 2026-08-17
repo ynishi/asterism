@@ -531,11 +531,11 @@ check: check-shared rust-clippy rust-test
 # is the linking, which is where the load is.
 #
 # The sentinel is the case to watch. A change to the root manifest, the
-# lockfile, the toolchain, `fixtures/` or `scripts/` is attributable to
-# no single member, and both gates then run the full recipe *when `CI`
-# is set* — because deferring to CI is not available to CI. Locally
-# they still decline. Any dependency bump touches `Cargo.lock` and
-# therefore takes this path.
+# lockfile, the toolchain, `fixtures/` or a `scripts/` file the build
+# reads is attributable to no single member, and both gates then run
+# the full recipe *when `CI` is set* — because deferring to CI is not
+# available to CI. Locally they still decline. Any dependency bump
+# touches `Cargo.lock` and therefore takes this path.
 #
 # What this gives up is a regression in a crate the branch did not
 # edit — a dependent that the change breaks without touching. `main`'s
@@ -551,6 +551,158 @@ check: check-shared rust-clippy rust-test
 # Run the checks the branch's own diff calls for (CI, pull requests).
 [group('check')]
 check-changed: check-shared rust-clippy-changed rust-test-changed
+
+# Cut the worktree for an issue, and hand it a warm target directory.
+#
+# The two git commands are the ones the Branches section of
+# CONTRIBUTING.md already prescribes. What this adds is the copy: a
+# fresh worktree has no `target/`, so its first gate rebuilds the whole
+# dependency graph — 21 crates' worth of work this machine may have
+# done an hour ago, one directory away. Measured on `asterism-infra`
+# (753 dependencies): `cargo check` took 1 min 17 s in a cold worktree
+# against 39 s in a copied one.
+#
+# A copy and deliberately not a shared directory. Cargo treats path
+# dependencies carrying the same name, version and workspace-relative
+# path as the same crate even across checkouts (rust-lang/cargo#12516,
+# open on 1.95), which every crate here satisfies against every other
+# worktree. Point two worktrees at one target directory and a gate can
+# go green against the other branch's binaries — silently, whenever its
+# sources are older than that directory's last build, which is what an
+# afternoon in a worktree cut this morning looks like. Copies collide
+# with nothing, and they do not queue behind cargo's build lock either.
+#
+# The copy is worth making only where it is copy-on-write. On APFS
+# `cp -c` clones: 2.9 GB in under three seconds, no disk consumed until
+# one side writes, and mtimes preserved — that last one is the point
+# rather than a detail, since cargo's fingerprints compare them and a
+# copy that reset them would rebuild everything and save nothing.
+#
+# The filesystem is asked before the copy rather than inferred from the
+# exit status afterwards, because `cp -c` does not fail where
+# clonefile(2) is unavailable: it "will fallback to using copyfile(2)
+# instead to ensure the copy still succeeds" (man cp). That fallback is
+# a real multi-gigabyte byte copy — the outcome this recipe exists to
+# avoid — and it would report success while doing it.
+#
+# Not covered: a build running in this checkout while the copy reads
+# its `target/`. Cargo's own lock (`target/debug/.cargo-lock`) answers
+# that question and this recipe does not consult it. A torn snapshot
+# does not fail the copy; it surfaces later as an artifact sitting
+# behind a fingerprint that says fresh. Cut worktrees between builds.
+#
+# Carries `allow-agent`: cutting the worktree is the first thing an
+# agent does with an issue. It is not confined the way most of that
+# group is — `git fetch` reaches the network and moves remote-tracking
+# refs, and `git worktree add -b` creates a branch — so it sits here on
+# `ui-e2e`'s half of the group's reasoning rather than the format
+# checks': an agent without it cannot start.
+
+# Cut a worktree for an issue, with a target directory cloned into it.
+#
+# `[positional-arguments]` rather than `{{ }}` inside the body, because
+# `{{ slug }}` is a textual substitution: `just` writes the argument
+# into the script and bash parses the result, so a slug carrying
+# `$(...)` runs before any guard below can look at it — including at
+# the `case` that exists to reject it, which is itself a substitution
+# site. Measured: `worktree-new feat 'x$(echo hi >&2)y'` printed `hi`
+# three times, passed the guard, and made a worktree at a path the
+# caller never wrote. As `$1` and `$2` the same argument is inert data
+# the guard can actually test.
+#
+# Nothing here deletes. Every path built below is somewhere this recipe
+# creates, so the worst a wrong one can do is put a directory in an odd
+# place — which is a thing to move by hand, not a thing to lose work
+# to. What it creates and where is in the body.
+[group('worktree')]
+[group('allow-agent')]
+[positional-arguments]
+worktree-new type slug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kind="$1"
+    slug="$2"
+    # A worktree cannot cut another one. Nothing stops git from nesting
+    # `.worktrees/` inside a worktree, which is the trap: it succeeds,
+    # and what it hands back is a copy of a copy on a branch nobody
+    # meant to stack.
+    if [ "$(git rev-parse --absolute-git-dir)" \
+       != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
+        echo "worktree-new runs in the main checkout, not inside a worktree." >&2
+        exit 1
+    fi
+    # `slug` becomes a directory name below, and both halves become a
+    # branch name, so each has to be one ordinary segment. Stated as
+    # what is allowed rather than as a list of what is not: the
+    # characters a directory and a branch can both carry without
+    # quoting, and nothing else.
+    case "$slug" in
+        ""|*[!A-Za-z0-9._-]*|.*|*..*)
+            echo "slug must be one segment of [A-Za-z0-9._-], not starting" >&2
+            echo "with a dot and containing no '..': got '$slug'" >&2
+            exit 1
+            ;;
+    esac
+    case "$kind" in
+        ""|*[!A-Za-z0-9._-]*|.*)
+            echo "type must be one segment of [A-Za-z0-9._-]: got '$kind'" >&2
+            echo "CONTRIBUTING.md names the ones in use: ci, fix, feat, docs." >&2
+            exit 1
+            ;;
+    esac
+    git fetch origin
+    # `branch-check`'s third assertion, hoisted ahead of the worktree.
+    # It fails on the state of local `main` rather than on anything
+    # about the branch being cut, and failing it after the worktree and
+    # its copy exist would leave both behind with this command no
+    # longer re-runnable — `git worktree add` refuses a branch and a
+    # directory that are already there.
+    if ! git merge-base --is-ancestor main origin/main; then
+        echo "local main carries commits origin/main does not have:" >&2
+        echo "reset it to origin/main before cutting branches." >&2
+        exit 1
+    fi
+    dest="{{ project_root }}/.worktrees/$slug"
+    src="{{ project_root }}/target"
+    git worktree add "$dest" -b "$kind/$slug" origin/main
+    if [ ! -d "$src" ]; then
+        echo "NOTE: no target/ in this checkout to copy; worktree starts cold." >&2
+    # Both sides, not just the source. `clonefile(2)` clones within one
+    # APFS volume and not across two, and the case that reaches this is
+    # not obvious from the paths: `.worktrees/` is free to be a symlink
+    # or a mount of its own, and then the copy silently becomes the
+    # multi-gigabyte one this whole branch exists to avoid.
+    elif [ "$(df -P "$src" | awk 'NR == 2 { print $1 }')" \
+        != "$(df -P "$dest" | awk 'NR == 2 { print $1 }')" ]; then
+        echo "NOTE: target/ and the new worktree are on different volumes, so" >&2
+        echo "      there is no clone to make between them. Worktree starts" >&2
+        echo "      cold." >&2
+    elif ! mount | grep -qE "^$(df -P "$src" | awk 'NR == 2 { print $1 }') on .*\(apfs"; then
+        echo "NOTE: target/ is not on an APFS volume, so copying it would be a" >&2
+        echo "      real multi-gigabyte copy rather than a clone, and would" >&2
+        echo "      cost more than the build it saves. Worktree starts cold." >&2
+    elif cp -ac "$src" "$dest/target.partial" \
+        && mv "$dest/target.partial" "$dest/target"; then
+        echo "cloned target/ into the worktree"
+    else
+        # Copied under a name cargo does not read, and renamed into
+        # place only after cp says it finished. `-a` implies `-R`, and
+        # in -R mode cp "will continue copying even if errors are
+        # detected" (man cp), so a failure partway through leaves a tree
+        # with files missing while the fingerprints beside them say
+        # fresh — and an interrupt leaves the same thing with nothing to
+        # announce it. Under the staged name neither is a `target/` at
+        # all, so cargo never reads one.
+        #
+        # Left where it is. It affects nothing, and clearing disk is
+        # not worth a recipe that deletes.
+        echo "NOTE: copying target/ did not finish — cp's own error, if" >&2
+        echo "      any, is above. The worktree starts cold. An" >&2
+        echo "      incomplete copy may be left at" >&2
+        echo "      $dest/target.partial" >&2
+    fi
+    cd "$dest" && just branch-check
+    echo "worktree ready: $dest (branch $kind/$slug)"
 
 # Fail unless the current branch is a worktree branch cut from
 # origin/main. The incident this exists for (2026-08-15): a branch cut
@@ -574,6 +726,20 @@ branch-check:
     @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see .claude/CLAUDE.md)"; exit 1; }
     @git merge-base --is-ancestor origin/main HEAD || { echo "HEAD does not descend from origin/main: wrong base — rebuild the branch from origin/main"; exit 1; }
     @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
+
+# Check commit message bodies against the 72 columns CONTRIBUTING asks
+# for. `scripts/check-commit-msg.py` carries the reasoning, including
+# why the count is Python's rather than a shell tool's.
+#
+# Takes a file, a revision range, or both — the file for a message
+# written but not yet committed, the range for what a branch already
+# carries. `pre-push` calls it with `origin/main..HEAD`.
+
+# Check that commit message bodies wrap at 72 columns.
+[group('check')]
+[group('allow-agent')]
+commit-msg-check *args:
+    python3 "{{ project_root }}/scripts/check-commit-msg.py" {{ args }}
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
@@ -601,9 +767,13 @@ branch-check:
 # the command block it handed over, instead of running it and
 # reporting what it found.
 #
+# The two cheap assertions come first and in this order on purpose:
+# both answer questions no build can change, and a branch that fails
+# either fails it just as surely after twenty minutes of compiling.
+#
 # Run every gate over the tree being handed over.
 [group('check')]
-pre-push: branch-check check-shared rust-clippy-changed rust-test-changed
+pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD") check-shared rust-clippy-changed rust-test-changed
 
 # Fail when any Rust file is not rustfmt-clean.
 #
@@ -796,9 +966,11 @@ rust-test-pkg +packages:
 # run — they are the wrong thing to run *here*. CI runs them on every
 # push, on a runner nobody else is sitting on.
 #
-# What counts as touched: the paths this branch changed against
-# `origin/main`, plus anything uncommitted, mapped to the workspace
-# member whose directory contains them.
+# What counts as touched: the paths the commits on this branch changed
+# against `origin/main`, mapped to the workspace member whose directory
+# contains them. The working tree is not consulted — CI asks this about
+# a commit, and an answer that moves with uncommitted state is an
+# answer local and CI disagree on.
 #
 # Prints the literal `--workspace` instead of a list when the change
 # reaches the root manifest, the lockfile or the toolchain. Every crate
@@ -855,19 +1027,78 @@ changed-packages:
         exit 1
     fi
 
-    # Committed against the merge base, plus whatever is not committed
-    # yet. `--porcelain` covers staged, unstaged and untracked in one
-    # pass; its path is the last space-separated field, which is right
-    # for every status code here except a rename, where the last field
-    # is the new path — also the one worth testing.
-    changed=$(
-        {
-            git diff --name-only origin/main...HEAD
-            git status --porcelain | awk '{print $NF}'
-        } | sort -u
-    )
+    # The commits this branch carries, against the merge base. Nothing
+    # else: what CI asks this recipe is a question about a commit, and
+    # the working tree is not part of the answer there — the checkout
+    # is clean and always will be.
+    #
+    # It used to union in `git status --porcelain`, and that made the
+    # verdict depend on state no commit records. An untracked file
+    # under one of the sentinel paths below flipped a branch carrying
+    # no commits at all to `--workspace` (2026-08-17, this branch and
+    # its own new script). Local and CI then answer differently about
+    # the same commit, which is the one property a pre-push gate cannot
+    # have.
+    #
+    # What that gives up is the edit loop, and it is given up loudly. A
+    # dirty tree is refused rather than answered narrowly: an edit not
+    # yet committed maps to no member, and "no member changed" reaching
+    # a caller as exit 0 is a green report from a suite that never ran —
+    # the worse of the two mistakes, by the same reasoning the sentinel
+    # below is written around. Commit first, which is the order
+    # `pre-push` imposes anyway, or run `just rust-test-pkg <crate>`
+    # while editing.
+    #
+    # Not refused under `CI`, where the checkout is clean by
+    # construction and any dirt is something a step in the same job
+    # produced. Failing there would be a new way for CI to break in the
+    # place that must not, and the branch has commits to answer for in
+    # any case.
+    changed=$(git diff --name-only origin/main...HEAD | sort -u)
+
+    dirty=$(git status --porcelain)
+    if [ -n "$dirty" ]; then
+        if [ -z "${CI:-}" ]; then
+            echo "the working tree is dirty, so this cannot answer for it —" >&2
+            echo "it reports the commits on this branch and nothing else." >&2
+            echo "Commit, or run 'just rust-test-pkg <crate>' while editing:" >&2
+            printf '%s\n' "$dirty" | sed 's/^/  /' >&2
+            exit 1
+        fi
+        echo "NOTE: uncommitted changes in a CI checkout are not attributed." >&2
+    fi
 
     if [ -z "$changed" ]; then
+        exit 0
+    fi
+
+    # Paths under a sentinel directory that no part of the build reads.
+    #
+    # Named one at a time, and the default stays workspace-wide,
+    # because the two mistakes are not the same size: a build-feeding
+    # script left off this list costs a run that was too big, and one
+    # wrongly on it costs a green report from a suite that never ran.
+    #
+    # `check-commit-msg.py` reads commit messages. No crate compiles it,
+    # no test invokes it, and no fixture comes out of it — it is on the
+    # `scripts/` path and nothing else, which was enough to make a
+    # change to it compile all 21 crates and link every test binary.
+    attributable=$(
+        printf '%s\n' "$changed" \
+            | grep -vxF 'scripts/check-commit-msg.py' || true
+    )
+
+    # Said where it is applied. An exemption nobody sees reads as
+    # coverage — the same reason `check-commit-msg.py` announces the
+    # commits it skips.
+    exempt=$(printf '%s\n' "$changed" | grep -xF 'scripts/check-commit-msg.py' || true)
+    if [ -n "$exempt" ]; then
+        echo "Exempt from the workspace-wide sentinel (the build reads none" >&2
+        echo "of these):" >&2
+        printf '%s\n' "$exempt" | sed 's/^/  /' >&2
+    fi
+
+    if [ -z "$attributable" ]; then
         exit 0
     fi
 
@@ -881,9 +1112,9 @@ changed-packages:
     # need what `scripts/gen-test-fixtures.py` produces. Neither lives
     # under a member, so without this line a branch editing the corpus
     # would run nothing that reads it.
-    if printf '%s\n' "$changed" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)'; then
+    if printf '%s\n' "$attributable" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)'; then
         echo "Workspace-wide change (manifest, lockfile or toolchain):" >&2
-        printf '%s\n' "$changed" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)' | sed 's/^/  /' >&2
+        printf '%s\n' "$attributable" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)' | sed 's/^/  /' >&2
         echo "--workspace"
         exit 0
     fi
@@ -922,14 +1153,14 @@ changed-packages:
         # `crates/asterism-ui/src-tauri` is — so the Svelte sources
         # beside it match nothing here, which is right: `ui-test` and
         # `ui-check` are what cover them.
-        if printf '%s\n' "$changed" | grep -q "^$dir/"; then
+        if printf '%s\n' "$attributable" | grep -q "^$dir/"; then
             packages="$packages $name"
         fi
     done
 
     if [ -z "${packages// /}" ]; then
         echo "No workspace member changed. Changed paths:" >&2
-        printf '%s\n' "$changed" | sed 's/^/  /' >&2
+        printf '%s\n' "$attributable" | sed 's/^/  /' >&2
         exit 0
     fi
 

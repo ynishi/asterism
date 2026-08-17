@@ -55,6 +55,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slice has not landed. `pursuit_restamp` now reserves `cull` where
   it reserved `judgment`, the withdrawn spec's name.
 
+- **`just worktree-new <type> <slug>` — a worktree that starts with a
+  target directory** (#67). A fresh worktree has no `target/`, so its
+  first gate rebuilt the whole dependency graph: `cargo check -p
+  asterism-infra` measured 1 min 17 s cold against 39 s with a copy of
+  this checkout's `target/` in place. The recipe is the three commands
+  the Branches section already prescribed — fetch, `git worktree add`
+  from `origin/main`, `branch-check` — with that copy added between the
+  second and the third, plus a refusal to run inside a worktree, since
+  nothing in git stops `.worktrees/` from nesting.
+
+  A copy, and not the one shared target directory that was the first
+  proposal. Cargo treats path dependencies carrying the same name,
+  version and workspace-relative path as the same crate even across
+  checkouts (rust-lang/cargo#12516, open), which every crate in this
+  workspace satisfies against every other worktree; two worktrees
+  pointed at one directory can therefore report a gate green against
+  the other branch's binaries, silently, whenever the sources are older
+  than that directory's last build. Copies collide with nothing, and
+  they do not queue behind cargo's build lock either.
+
+  The copy is made only on APFS, where it is a copy-on-write clone —
+  2.9 GB in under three seconds, no disk consumed until one side
+  writes, and mtimes preserved, which is what keeps cargo's
+  fingerprints meaningful. The volume is checked before copying rather
+  than judged by the outcome, because `cp -c` does not fail where
+  clonefile is unavailable: it falls back to a real byte copy, which
+  would cost more than the build it was meant to save.
+
+- **`just commit-msg-check` — the commit-message rules are checked
+  rather than remembered** (#67). CONTRIBUTING asks for a body wrapped
+  at 72 columns and for no CI skip keyword anywhere in a message; both
+  were rules a reader had to hold. `scripts/check-commit-msg.py` takes
+  a message file, a revision range, or both, and `pre-push` runs it
+  over `origin/main..HEAD` — second, right after `branch-check`, since
+  neither assertion's answer changes for having compiled the workspace
+  first.
+
+  Python rather than a line of shell, because the count has to be in
+  characters: macOS `awk`'s `length()` counts bytes whatever `LC_ALL`
+  says, reads an em dash as three columns, and calls a 71-column line
+  73. That is a wrong answer in the direction that invents work.
+
+  Two kinds of commit are announced as unchecked rather than judged: the
+  CI bot's, since the aidoc job pushes a regenerated-docs commit whose
+  subject names the skip keyword deliberately, onto branches, and
+  rewriting a pushed commit is not a move the report could ask for; and
+  merges, whose message GitHub generates from a pull request title over
+  an author who typed none of it.
+
+  The skip keyword in a *title* is still a human rule — a title reaches
+  `main`'s merge commit and is read the same way, and nothing here can
+  see one. The failure it produces is silent: a skipped workflow leaves
+  its checks *pending* rather than failing, so nothing turns red and
+  nothing is missing from the list. File contents are unaffected, which
+  is why this reads messages and not a diff.
+
 - **The pursuit — a minted unit of work over the dispatch loop** (#29,
   design on #21). Content ancestry cannot say "these rounds were one
   attempt at one thing": regeneration shares no derivation edge with
@@ -795,6 +851,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invite deletion.
 
 ### Fixed
+
+- **`changed-packages` answers for the branch's commits, and a script
+  nothing in the build reads no longer selects every crate** (#67). Two
+  defects in one recipe, and both reach the gates built on it —
+  `rust-test-changed`, `rust-clippy-changed`, and through them
+  `check-changed` and `pre-push`.
+
+  **The working tree counted.** The path list was this branch's diff
+  against the merge base *unioned with* `git status --porcelain`, so
+  staged, unstaged and untracked files moved the answer. An untracked
+  file under a sentinel path took a branch carrying no commits at all
+  to `--workspace`; the branch adding `scripts/check-commit-msg.py` did
+  exactly that to itself. A CI checkout is clean and always will be, so
+  local and CI answered differently about the same commit — which is
+  the one property a pre-push gate cannot have. The working tree is no
+  longer read, and a dirty one now says out loud that it is not being
+  attributed rather than quietly widening the answer.
+
+  **`scripts/` was a sentinel wholesale.** It is on that list because
+  `asterism-infra`'s chapter-scan tests need what
+  `scripts/gen-test-fixtures.py` produces — a reason belonging to that
+  file rather than to the directory above it.
+  `scripts/check-commit-msg.py` reads commit messages: no crate
+  compiles it, no test invokes it, no fixture comes out of it, and a
+  change to it compiled all 21 crates and linked every test binary.
+  Exemptions are now named one file at a time and the default stays
+  workspace-wide, because the two mistakes are not the same size — a
+  build-feeding script left off the list costs a run that was too big,
+  one wrongly on it costs a green report from a suite that never ran.
 
 - **The profile guard records who owns a home, and can no longer be
   switched off by leaving a variable out** (#56). The

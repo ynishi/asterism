@@ -23,12 +23,34 @@ Never work on `main`. One worktree per issue, under the gitignored
 `.worktrees/`:
 
 ```bash
-git fetch origin
-git worktree add .worktrees/<slug> -b <type>/<slug> origin/main   # ci/, fix/, feat/, docs/
-just branch-check   # verifies the base before you build on it
+just worktree-new <type> <slug>   # ci/, fix/, feat/, docs/
 ```
 
-Remove the worktree once the branch is merged.
+That is `git fetch origin`, then `git worktree add .worktrees/<slug> -b
+<type>/<slug> origin/main`, then `just branch-check` to verify the base
+before you build on it. What the recipe adds to those three is a copy of
+`target/` into the new worktree, so its first gate is not a rebuild of
+the whole dependency graph. Measured on `asterism-infra`: `cargo check`
+took 1 min 17 s in a cold worktree against 39 s in a copied one.
+
+A copy, and deliberately not one shared target directory. Cargo treats
+path dependencies with the same name, version and workspace-relative
+path as the same crate even across checkouts
+([cargo#12516](https://github.com/rust-lang/cargo/issues/12516)), which
+every crate here satisfies against every other worktree — so two
+worktrees pointed at one directory can report a gate green against the
+other branch's binaries, with no error to notice. Copies collide with
+nothing. On APFS a copy is copy-on-write and costs about three seconds
+and no disk. The recipe asks the volume before copying rather than
+judging by the result: `cp -c` does not fail where clonefile is
+unavailable — it falls back to a real byte copy "to ensure the copy
+still succeeds" (`man cp`), which would cost more than the build it is
+meant to save. Off APFS it skips the copy and says so, and the worktree
+starts cold, which is where it would have started regardless.
+
+Run it from the main checkout — a worktree cannot cut another one, and
+the recipe stops rather than nest one. Remove the worktree once the
+branch is merged.
 
 ## Verification
 
@@ -51,12 +73,16 @@ it at all, for reasons its own comment gives.
 The recipes to actually use:
 
 - `just rust-test-changed` and `just rust-clippy-changed` — each works
-  out which workspace members this branch touched, against
-  `origin/main` plus anything uncommitted, and runs only those. This
-  pair is what `pre-push` runs. `just changed-packages` prints the
-  list they share, if you want to see it.
+  out which workspace members the commits on this branch touched,
+  against `origin/main`, and runs only those. This pair is what
+  `pre-push` runs. `just changed-packages` prints the list they share,
+  if you want to see it. A dirty tree is refused rather than answered:
+  an uncommitted edit belongs to no commit, so it maps to no member,
+  and "no member changed" is not a thing to hear while a suite goes
+  unrun. Commit, then ask.
 - `just rust-test-pkg <crate>…` — the tests with the crates named by
-  hand, for the loop while work is still moving.
+  hand, for the loop while work is still moving. This is the one to
+  reach for before the commit lands.
 
 These are narrower than the workspace gates, not weaker: they cover
 what a change edited, not what depends on it. `main` closes that gap on
@@ -103,29 +129,19 @@ Refs #<issue>
 - No AI attribution of any kind — no `Co-Authored-By`, no "Generated
   with", no `Signed-off-by`.
 - `cargo fmt` output and clippy fixes go in their own commits, separate
-  from behaviour changes.
+  from behaviour changes. `check-shared` running `rust-fmt-check` is a
+  different question: it says the tree is formatted, not that the
+  formatting belongs in the commit next to the behaviour it touched.
 - Update `CHANGELOG.md` under `## [Unreleased]` as its own commit.
 - Never commit `workspace/`, `.worktrees/`, or local agent state. If a
   commit needs `git add -f`, stop: something is filed wrong.
-- **Never write a CI skip keyword in a commit message or a pull request
-  title.** GitHub reads `[skip ci]`, `[ci skip]`, `[no ci]`,
-  `[skip actions]`, `[actions skip]` and a `skip-checks: true` trailer
-  anywhere in the message, and it does not care that you were writing
-  about them rather than asking for them. A `pull_request` run reads
-  the branch's head commit, so a branch whose tip discusses one of
-  these gets no CI at all; a pull request title reaches `main`'s merge
-  commit, so the same is true after the merge. The failure is silent —
-  a skipped workflow leaves its checks at *pending* rather than
-  failing, so nothing turns red and nothing is missing from the list.
-  Write "the skip keyword" or name the mechanism instead. This
-  happened: pull request #53 landed three commits whose prose quoted
-  one, and only the accident that none of them was a branch tip kept
-  its CI running.
-
-  File contents are not affected — `.github/workflows/check.yml`
-  quotes the keyword freely, and this bullet does too. The rule is
-  about commit messages and pull request titles, which is where GitHub
-  looks.
+- A pull request title reaches `main`'s merge commit, and GitHub reads
+  a CI skip keyword there the same way it reads one in a message: the
+  run is skipped, its checks stay *pending* rather than failing, and
+  nothing looks wrong. Write "the skip keyword" instead, or name the
+  mechanism. `commit-msg-check` covers the messages and carries the
+  background — including why file contents are not affected; nothing
+  can see a title.
 
 ## Working with coding agents — the recommended pattern
 
@@ -135,7 +151,7 @@ permission settings that deny push/PR to agents outright. If you
 develop here with a coding agent, the loop that works is:
 
 ```text
-issue -> worktree (just branch-check) -> implement -> just check
+issue -> just worktree-new -> implement -> just check
       -> reviewer agent on the diff -> commit
       -> git fetch origin -> just pre-push
       -> write the PR body to a file -> hand over push/PR
@@ -168,13 +184,14 @@ An agent's part ends with everything that does not write to anything
 remote, and that includes the gate:
 
 1. `git fetch origin`, then `just pre-push` — the agent runs both.
-   `pre-push` is `branch-check` plus `check-shared` plus
-   `rust-clippy-changed` and `rust-test-changed`, and none of them
-   writes to anything remote, so being denied `git push` is no reason
-   to skip it. The fetch comes first because they read `origin/main`
-   offline: `branch-check`'s ancestry assertions and the two narrow
-   gates' idea of which packages the branch touched are only as fresh
-   as the last fetch.
+   `pre-push` is `branch-check` and `commit-msg-check` — the two that
+   answer before anything compiles — then `check-shared`,
+   `rust-clippy-changed` and `rust-test-changed`. None of them writes
+   to anything remote, so being denied `git push` is no reason to skip
+   it. The fetch comes first because they read `origin/main` offline:
+   `branch-check`'s ancestry assertions, the range the message check
+   walks, and the two narrow gates' idea of which packages the branch
+   touched are only as fresh as the last fetch.
    Report the result, including any recipe that reported it did not
    check anything — `aidoc-guard` says so out loud and still exits 0.
 2. **Write the PR body to a file** under `workspace/`, which is
