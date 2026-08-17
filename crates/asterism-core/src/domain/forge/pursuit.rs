@@ -13,7 +13,8 @@
 //! # Shape
 //!
 //! - [`Pursuit`] is a thin, immutable row: identity, persona, optional
-//!   parent, optional human label. No status column, no members.
+//!   filing, optional parent, optional human label. No status column,
+//!   no members.
 //! - [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
 //!   **standing is derived on read** by [`standing`] — latest event by
 //!   `(created_at, id)` wins, no row means open. A repeat close is a new
@@ -28,6 +29,11 @@
 //!   never crosses personas; a parent exists before its child. These are
 //!   cross-aggregate and live in the application service, like the
 //!   persona cascade.
+//! - `project_id` never crosses personas either, and the foreign key
+//!   cannot say so: `project` carries its own `persona_id`, and
+//!   `pursuit.project_id` references only `project(id)`. So filing
+//!   under someone else's project is refused where both rows are
+//!   visible — the same place, and for the same reason, as `parent_id`.
 //! - `snapshot_id` may only accompany `closed_satisfied` (checked here):
 //!   it is the kept set frozen at close. `None` on a `closed_satisfied`
 //!   is a defined state — "concluded with nothing kept" — because an
@@ -38,7 +44,7 @@ use uuid::Uuid;
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
 use crate::domain::value::{
-    DispatchId, PersonaId, PursuitEventId, PursuitId, PursuitRestampId, SnapshotId,
+    DispatchId, PersonaId, ProjectId, PursuitEventId, PursuitId, PursuitRestampId, SnapshotId,
 };
 use crate::error::DomainError;
 
@@ -51,8 +57,8 @@ fn normalized(value: Option<String>) -> Option<String> {
 }
 
 /// The minted unit of work. Thin and immutable: identity plus intent
-/// (`title` / `note`) plus lineage of work (`parent_id`) — never
-/// content, never status.
+/// (`title` / `note`) plus lineage of work (`parent_id`) plus filing
+/// (`project_id`) — never content, never status.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pursuit {
     /// Surrogate id (UUID v7) — minted, never derived from content.
@@ -64,6 +70,22 @@ pub struct Pursuit {
     /// rewritten. A closed parent with open children is legal; rollups
     /// are projections.
     pub parent_id: Option<PursuitId>,
+    /// The project this work files under — what makes it forge work,
+    /// and what a merge derives its target line from.
+    ///
+    /// `None` on every row today: nothing sets this yet, and
+    /// always-mint still opens a pursuit for each dispatch that
+    /// arrives without one. The column is nullable for what comes
+    /// after that rule is retired (#63) rather than for today — filing
+    /// becomes what mints a pursuit, so an unfiled row is residue
+    /// rather than a mode, and residue is left as it is instead of
+    /// being given a project it never had.
+    ///
+    /// Set at creation and never rewritten, like `parent_id`. Restamp
+    /// does not reach it — that verb moves a *dispatch* between
+    /// pursuits — so work filed under the wrong project is re-opened
+    /// under the right one with its rounds restamped across.
+    pub project_id: Option<ProjectId>,
     /// Short human label — provenance of intent, not state. `None` for
     /// an anonymous (implicitly minted) pursuit; display names for
     /// those are synthesized by the read side, not stored.
@@ -89,6 +111,7 @@ impl Pursuit {
     /// service, which is the only caller that can see both rows.
     pub fn new(
         persona_id: PersonaId,
+        project_id: Option<ProjectId>,
         parent_id: Option<PursuitId>,
         title: Option<String>,
         note: Option<String>,
@@ -98,6 +121,7 @@ impl Pursuit {
         Self::new_at(
             PursuitId::new(),
             persona_id,
+            project_id,
             parent_id,
             title,
             note,
@@ -124,9 +148,11 @@ impl Pursuit {
     /// knows nothing about it. Nor is the id inspected for meaning;
     /// a pursuit id is a surrogate, so there is nothing in one to
     /// validate beyond its form.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_at(
         id: PursuitId,
         persona_id: PersonaId,
+        project_id: Option<ProjectId>,
         parent_id: Option<PursuitId>,
         title: Option<String>,
         note: Option<String>,
@@ -136,6 +162,7 @@ impl Pursuit {
         Self {
             id,
             persona_id,
+            project_id,
             parent_id,
             title: normalized(title),
             note: normalized(note),
@@ -148,9 +175,11 @@ impl Pursuit {
 
     /// Read-path twin of [`new`](Self::new): restores a stored row as a
     /// fact rather than a request to accept.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_persisted(
         id: PursuitId,
         persona_id: PersonaId,
+        project_id: Option<ProjectId>,
         parent_id: Option<PursuitId>,
         title: Option<String>,
         note: Option<String>,
@@ -160,6 +189,7 @@ impl Pursuit {
         Self {
             id,
             persona_id,
+            project_id,
             parent_id,
             title,
             note,
@@ -645,6 +675,7 @@ mod tests {
         let p = Pursuit::new(
             PersonaId::new(),
             None,
+            None,
             Some("  ".into()),
             Some(" keep ".into()),
             Utc::now(),
@@ -652,6 +683,27 @@ mod tests {
         );
         assert_eq!(p.title, None);
         assert_eq!(p.note, Some("keep".into()));
+    }
+
+    /// Filing rides with the pursuit rather than being derived from
+    /// anything it holds: what is passed in is what comes back, and an
+    /// unfiled pursuit says so rather than guessing a project.
+    #[test]
+    fn a_pursuit_carries_the_filing_it_was_opened_under() {
+        let project = ProjectId::new();
+        let filed = Pursuit::new(
+            PersonaId::new(),
+            Some(project),
+            None,
+            None,
+            None,
+            Utc::now(),
+            &ctx(),
+        );
+        assert_eq!(filed.project_id, Some(project));
+
+        let unfiled = Pursuit::new(PersonaId::new(), None, None, None, None, Utc::now(), &ctx());
+        assert_eq!(unfiled.project_id, None);
     }
 
     #[test]

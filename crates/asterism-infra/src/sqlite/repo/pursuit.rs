@@ -19,7 +19,7 @@ use asterism_core::domain::forge::pursuit::{
 use asterism_core::domain::forge::tx::{PursuitTx, PursuitTxKind};
 use asterism_core::domain::repository::PursuitRepository;
 use asterism_core::domain::value::{
-    AssetId, CullId, PersonaId, PursuitEventId, PursuitId, PursuitTxId, SnapshotId,
+    AssetId, CullId, PersonaId, ProjectId, PursuitEventId, PursuitId, PursuitTxId, SnapshotId,
 };
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
@@ -80,6 +80,7 @@ fn attribution_columns(
 struct PursuitRow {
     id: Uuid,
     persona_id: Uuid,
+    project_id: Option<Uuid>,
     parent_id: Option<Uuid>,
     title: Option<String>,
     note: Option<String>,
@@ -91,7 +92,7 @@ struct PursuitRow {
 }
 
 impl PursuitRow {
-    const COLUMNS: &'static str = "id, persona_id, parent_id, title, note,
+    const COLUMNS: &'static str = "id, persona_id, project_id, parent_id, title, note,
                                    author_kind, author_subject, operator_ai, attributed_via,
                                    created_at";
 
@@ -99,14 +100,15 @@ impl PursuitRow {
         Ok(Self {
             id: row.get(0)?,
             persona_id: row.get(1)?,
-            parent_id: row.get(2)?,
-            title: row.get(3)?,
-            note: row.get(4)?,
-            author_kind: row.get(5)?,
-            author_subject: row.get(6)?,
-            operator_ai: row.get(7)?,
-            attributed_via: row.get(8)?,
-            created_at: row.get(9)?,
+            project_id: row.get(2)?,
+            parent_id: row.get(3)?,
+            title: row.get(4)?,
+            note: row.get(5)?,
+            author_kind: row.get(6)?,
+            author_subject: row.get(7)?,
+            operator_ai: row.get(8)?,
+            attributed_via: row.get(9)?,
+            created_at: row.get(10)?,
         })
     }
 
@@ -120,6 +122,7 @@ impl PursuitRow {
         Ok(Pursuit::from_persisted(
             PursuitId::from_uuid(self.id),
             PersonaId::from_uuid(self.persona_id),
+            self.project_id.map(ProjectId::from_uuid),
             self.parent_id.map(PursuitId::from_uuid),
             self.title,
             self.note,
@@ -334,6 +337,7 @@ impl PursuitRepository for SqlitePursuitRepository {
     async fn create(&self, pursuit: &Pursuit) -> Result<(), DomainError> {
         let id = *pursuit.id.as_uuid();
         let persona_id = *pursuit.persona_id.as_uuid();
+        let project_id = pursuit.project_id.map(|p| *p.as_uuid());
         let parent_id = pursuit.parent_id.map(|p| *p.as_uuid());
         let title = pursuit.title.clone();
         let note = pursuit.note.clone();
@@ -344,13 +348,14 @@ impl PursuitRepository for SqlitePursuitRepository {
             .call(move |conn| {
                 conn.execute(
                     "INSERT INTO pursuit
-                         (id, persona_id, parent_id, title, note,
+                         (id, persona_id, project_id, parent_id, title, note,
                           author_kind, author_subject, operator_ai, attributed_via,
                           created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         id,
                         persona_id,
+                        project_id,
                         parent_id,
                         title,
                         note,
@@ -993,6 +998,25 @@ mod tests {
         PersonaId::from_uuid(persona)
     }
 
+    /// One project row for the persona, seeded directly. `project_id`
+    /// carries a foreign key and the pool runs with `foreign_keys` on,
+    /// so a filing test cannot invent an id — it needs a project that
+    /// is really there.
+    async fn seed_project(isle: &AsyncIsle, persona: PersonaId) -> ProjectId {
+        let project = Uuid::now_v7();
+        let persona = *persona.as_uuid();
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO project (id, persona_id, name, created_at) \
+                 VALUES (?1, ?2, 'album', 0)",
+                params![project, persona],
+            )
+        })
+        .await
+        .unwrap();
+        ProjectId::from_uuid(project)
+    }
+
     /// One asset row with a caller-supplied `_trace` note (raw JSON)
     /// and clock — the shape the ingest writes, seeded directly so the
     /// membership probes are tested against the storage contract.
@@ -1048,6 +1072,7 @@ mod tests {
         let parent = Pursuit::new(
             persona,
             None,
+            None,
             Some("line".into()),
             None,
             t0,
@@ -1056,6 +1081,7 @@ mod tests {
         repo.create(&parent).await.unwrap();
         let child = Pursuit::new(
             persona,
+            None,
             Some(parent.id),
             None,
             Some("spawned".into()),
@@ -1079,6 +1105,52 @@ mod tests {
         driver.shutdown().await.unwrap();
     }
 
+    /// The filing survives the round trip, and it survives it *as the
+    /// filing*. `project_id` and `parent_id` are the row's only two
+    /// nullable uuid columns and they sit next to each other in the
+    /// SELECT list, the positional reads, and the INSERT — so a
+    /// one-place slip swaps them and every other test still passes,
+    /// because every other test leaves both `None`. This is the one
+    /// that sets them to different values and looks.
+    #[tokio::test]
+    async fn a_filed_pursuit_round_trips_its_project_without_taking_the_parent() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = seed_persona(&isle).await;
+        let project = seed_project(&isle, persona).await;
+        let repo = SqlitePursuitRepository::new(isle.clone());
+        let ctx = AttributionContext::owner_surface();
+        let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
+
+        let parent = Pursuit::new(persona, Some(project), None, None, None, t0, &ctx);
+        repo.create(&parent).await.unwrap();
+        let child = Pursuit::new(
+            persona,
+            Some(project),
+            Some(parent.id),
+            None,
+            None,
+            t0 + Duration::seconds(1),
+            &ctx,
+        );
+        repo.create(&child).await.unwrap();
+
+        let found = repo.find(&child.id).await.unwrap().unwrap();
+        assert_eq!(found, child);
+        assert_eq!(found.project_id, Some(project));
+        assert_eq!(found.parent_id, Some(parent.id));
+
+        // The unfiled case reads back unfiled rather than inheriting
+        // anything from the rows beside it.
+        let loose = Pursuit::new(persona, None, None, None, None, t0, &ctx);
+        repo.create(&loose).await.unwrap();
+        assert_eq!(
+            repo.find(&loose.id).await.unwrap().unwrap().project_id,
+            None
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn events_append_in_standing_order_and_derive() {
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
@@ -1087,7 +1159,7 @@ mod tests {
         let ctx = AttributionContext::owner_surface();
 
         let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
-        let pursuit = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let pursuit = Pursuit::new(persona, None, None, None, None, t0, &ctx);
         repo.create(&pursuit).await.unwrap();
         assert_eq!(
             standing(&repo.events_of(&pursuit.id).await.unwrap()),
@@ -1133,7 +1205,7 @@ mod tests {
         let ctx = AttributionContext::owner_surface();
 
         let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
-        let target = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let target = Pursuit::new(persona, None, None, None, None, t0, &ctx);
         repo.create(&target).await.unwrap();
         let dispatch = seed_dispatch(&isle, persona).await;
 
@@ -1166,7 +1238,7 @@ mod tests {
         let stale = PursuitRestamp::new(
             RestampSubject::Dispatch(dispatch),
             None,
-            Pursuit::new(persona, None, None, None, t0, &ctx).id,
+            Pursuit::new(persona, None, None, None, None, t0, &ctx).id,
             t0 + Duration::seconds(2),
             &ctx,
         )
@@ -1184,7 +1256,7 @@ mod tests {
         let ghost = PursuitRestamp::new(
             RestampSubject::Dispatch(DispatchId::new()),
             Some(target.id),
-            Pursuit::new(persona, None, None, None, t0, &ctx).id,
+            Pursuit::new(persona, None, None, None, None, t0, &ctx).id,
             t0 + Duration::seconds(3),
             &ctx,
         )
@@ -1210,8 +1282,8 @@ mod tests {
         let ctx = AttributionContext::owner_surface();
 
         let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
-        let home = Pursuit::new(persona_a, None, None, None, t0, &ctx);
-        let foreign = Pursuit::new(persona_b, None, None, None, t0, &ctx);
+        let home = Pursuit::new(persona_a, None, None, None, None, t0, &ctx);
+        let foreign = Pursuit::new(persona_b, None, None, None, None, t0, &ctx);
         repo.create(&home).await.unwrap();
         repo.create(&foreign).await.unwrap();
         let dispatch = seed_dispatch(&isle, persona_a).await;
@@ -1260,8 +1332,8 @@ mod tests {
         let ctx = AttributionContext::owner_surface();
         let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
 
-        let home = Pursuit::new(persona, None, None, None, t0, &ctx);
-        let other = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let home = Pursuit::new(persona, None, None, None, None, t0, &ctx);
+        let other = Pursuit::new(persona, None, None, None, None, t0, &ctx);
         repo.create(&home).await.unwrap();
         repo.create(&other).await.unwrap();
         let dispatch = seed_dispatch(&isle, persona).await;
@@ -1367,9 +1439,9 @@ mod tests {
         let ctx = AttributionContext::owner_surface();
         let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
 
-        let closed = Pursuit::new(persona, None, None, None, t0, &ctx);
-        let tied = Pursuit::new(persona, None, None, None, t0, &ctx);
-        let untouched = Pursuit::new(persona, None, None, None, t0, &ctx);
+        let closed = Pursuit::new(persona, None, None, None, None, t0, &ctx);
+        let tied = Pursuit::new(persona, None, None, None, None, t0, &ctx);
+        let untouched = Pursuit::new(persona, None, None, None, None, t0, &ctx);
         for p in [&closed, &tied, &untouched] {
             repo.create(p).await.unwrap();
         }

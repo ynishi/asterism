@@ -169,7 +169,7 @@ pub async fn run(args: MeasurePursuitArgs) -> Result<()> {
     let mut pursuit_ids: Vec<PursuitId> = Vec::with_capacity(args.pursuits as usize);
     let mut cursor = 0usize;
     for _ in 0..args.pursuits {
-        let pursuit = Pursuit::new(persona_id, None, None, None, now, &ctx);
+        let pursuit = Pursuit::new(persona_id, None, None, None, None, now, &ctx);
         pursuits.create(&pursuit).await?;
 
         let mut round_ids = Vec::with_capacity(args.rounds_per as usize);

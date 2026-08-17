@@ -121,9 +121,16 @@ impl PursuitService {
         // minted like every other open. Either way the create is a
         // create — an id already taken collides at the repository
         // rather than adopting the row that is there.
+        //
+        // Filing is `None` here because this command cannot yet carry
+        // one, not because a child declines its parent's project. The
+        // parent is in scope on the branch above and whether its filing
+        // descends is the filing verb's call to make explicitly (#63);
+        // inheriting it silently now would settle that by accident.
         let pursuit = match command.pursuit_id.as_deref() {
             None => Pursuit::new(
                 persona_id,
+                None,
                 parent_id,
                 command.title,
                 command.note,
@@ -133,6 +140,7 @@ impl PursuitService {
             Some(wire) => Pursuit::new_at(
                 parse_pursuit_id(wire)?,
                 persona_id,
+                None,
                 parent_id,
                 command.title,
                 command.note,
