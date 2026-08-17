@@ -572,18 +572,50 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # afternoon in a worktree cut this morning looks like. Copies collide
 # with nothing, and they do not queue behind cargo's build lock either.
 #
-# The copy is worth making only where it is copy-on-write, and which
-# filesystems those are is a per-OS question with a per-OS answer. On
-# APFS `cp -c` clones: 2.9 GB in under three seconds, no disk consumed
-# until one side writes, and mtimes preserved — that last one is the
-# point rather than a detail, since cargo's fingerprints compare them
-# and a copy that reset them would rebuild everything and save nothing.
-# On Linux the same clone is `cp --reflink=always`, and the filesystems
-# that answer to it are btrfs, bcachefs and XFS formatted with
-# `reflink=1`. ext4 is not among them, which is what a stock install of
-# most distributions leaves on `/` — so the Linux answer is more often
-# "no" than the macOS one, and it costs a line to say so rather than a
-# hundred gigabytes to find out.
+# What makes the copy worth making is that it is not a copy of the
+# bytes, and which mechanism does that is a per-OS question. On APFS
+# `cp -c` clones: 2.9 GB in under three seconds, no disk consumed until
+# one side writes, and mtimes preserved — that last one is the point
+# rather than a detail, since cargo's fingerprints compare them and a
+# copy that reset them would rebuild everything and save nothing. On
+# Linux the clone is `cp --reflink=always`, and the filesystems that
+# answer to it are btrfs, bcachefs and XFS formatted with `reflink=1`.
+# ext4 is not among them, which is what a stock install of most
+# distributions leaves on `/`.
+#
+# Where Linux has no clone this hardlinks, which is the one remaining
+# way to hand over a target directory without copying it. Measured on
+# ext4: `cp -al` over a 111 GB target of 74,802 files took 1.4 seconds
+# and consumed no disk, against 6.3 minutes and 111 GB for the byte
+# copy of the same tree. The byte copy is not just slower — two
+# worktrees' worth of it does not fit beside a checkout that already
+# holds one.
+#
+# The part of it that is a real copy — see below — runs in the
+# background, and the recipe returns in about two seconds. Measured on
+# this checkout: 45 seconds for the copy with the tree in page cache,
+# and six minutes reading it cold.
+#
+# A hardlink shares the inode, so a write through one path is a write
+# to the other, and only one part of a target directory is safe to
+# share on those terms: the large artifacts under `deps/`. Cargo names
+# those by a hash of what went into them and replaces them by unlinking
+# its own copy first, so a build here leaves the other side's bytes
+# alone. Everything else has a writer that opens the existing file:
+# rustc truncates its dep-info in place, cargo rewrites its own
+# fingerprints and `.rustc_info.json`, build scripts re-run into an
+# `OUT_DIR` cargo does not clear first, rustdoc overwrites its JSON,
+# and `.cargo-lock` is the inode two checkouts would queue on. So the
+# split is `deps/` at a megabyte and up — 2,307 files, 85.56 GiB —
+# shared, and the remaining 33,368 files of 10.44 GiB copied. Nothing
+# new falls on the sharing side by accident: it has to be large and it
+# has to be in `deps/`.
+#
+# `incremental/` is dropped rather than either, since cargo
+# regenerates it and it is 18 GB of the 111. Staged that way, a
+# worktree cut here builds 4 to 16 crates where a cold one builds the
+# 753-crate graph. Linux only, because Linux is where the fallback was
+# needed.
 #
 # The filesystem is asked before the copy rather than inferred from the
 # exit status afterwards, and the two need that for opposite reasons.
@@ -625,13 +657,16 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 # caller never wrote. As `$1` and `$2` the same argument is inert data
 # the guard can actually test.
 #
-# Nothing here deletes anything it did not just write. The only two
-# removals are the clone probe's pair of files and the directory
-# holding them, a few lines after the same block makes them, and every
-# other path built below is somewhere this recipe creates — so the
-# worst a wrong one can do is put a directory in an odd place, which is
-# a thing to move by hand, not a thing to lose work to. What it creates
-# and where is in the body.
+# Nothing here deletes anything it did not just write. The removals
+# are the clone probe's pair of files, and the directories inside the
+# staged link tree whose links have to be broken — both of them a few
+# lines after the same block makes them, and the second kind holding
+# nothing but links made moments earlier, so unlinking them leaves the
+# main checkout's bytes where they were. Every other path built below
+# is somewhere this recipe creates, so the worst a wrong one can do is
+# put a directory in an odd place, which is a thing to move by hand,
+# not a thing to lose work to. What it creates and where is in the
+# body.
 [group('worktree')]
 [group('allow-agent')]
 [positional-arguments]
@@ -683,11 +718,13 @@ worktree-new type slug:
     dest="{{ project_root }}/.worktrees/$slug"
     src="{{ project_root }}/target"
     git worktree add "$dest" -b "$kind/$slug" origin/main
-    # The flag that clones here, or empty for "nothing clones here" —
-    # in which case the reason has already been said. Which flag, and
-    # whether there is one at all, is the per-OS half; the two answers
-    # ahead of it hold on any of them.
+    # How this worktree gets its target directory. `clone_flag` is the
+    # cp flag that clones where the filesystem clones; `stage_mode`
+    # names the fallback where it does not. Both empty means neither is
+    # available and the reason has already been said. Which one applies
+    # is the per-OS half; the two answers ahead of it hold on any OS.
     clone_flag=""
+    stage_mode=""
     if [ ! -d "$src" ]; then
         echo "NOTE: no target/ in this checkout to copy; worktree starts cold." >&2
     # Both sides, not just the source. A clone lands within one
@@ -729,15 +766,11 @@ worktree-new type slug:
                     clone_flag="--reflink=always"
                 else
                     # Three failures share this branch — the directory,
-                    # the file, the clone — so it says what it could not
-                    # establish rather than naming a cause it did not
-                    # measure. Only the clone's own error is silenced;
-                    # the other two print above.
-                    echo "NOTE: could not establish that target/ clones here. ext4" >&2
-                    echo "      does not, btrfs and bcachefs do, XFS does when it was" >&2
-                    echo "      made with reflink=1. Copying without one would be a" >&2
-                    echo "      real multi-gigabyte copy, which costs more than the" >&2
-                    echo "      build it saves, so the worktree starts cold." >&2
+                    # the file, the clone — and all three mean the same
+                    # thing here, so none of them is named as a cause
+                    # that was not measured. Only the clone's own error
+                    # is silenced; the other two print above.
+                    stage_mode="hardlink"
                 fi
                 # The two files the lines above wrote and the directory
                 # holding them, and nothing else: `rmdir` refuses a
@@ -764,27 +797,92 @@ worktree-new type slug:
                 ;;
         esac
     fi
+    # Staged under a name cargo does not read, and renamed into place
+    # only once the copy says it finished. `-a` implies `-R`, and in -R
+    # mode cp "will continue copying even if errors are detected" (man
+    # cp), so a failure partway through leaves a tree with files missing
+    # while the fingerprints beside them say fresh — and an interrupt
+    # leaves the same thing with nothing to announce it. Under the
+    # staged name neither is a `target/` at all, so cargo never reads
+    # one, and a half-made one is inert rather than wrong.
+    #
+    # Inside `workspace/`, which `.gitignore` covers, because a staged
+    # tree at the worktree's root would be untracked — and the
+    # `-changed` gates refuse a tree with anything untracked in it,
+    # which would make an unfinished copy block the branch's own gates.
+    mkdir -p "$dest/workspace"
+    staged="$dest/workspace/target.partial"
     if [ -n "$clone_flag" ]; then
-        # Copied under a name cargo does not read, and renamed into
-        # place only after cp says it finished. `-a` implies `-R`, and
-        # in -R mode cp "will continue copying even if errors are
-        # detected" (man cp), so a failure partway through leaves a tree
-        # with files missing while the fingerprints beside them say
-        # fresh — and an interrupt leaves the same thing with nothing to
-        # announce it. Under the staged name neither is a `target/` at
-        # all, so cargo never reads one.
+        # Seconds, so it happens here rather than behind the prompt.
         #
-        # Left where it is. It affects nothing, and clearing disk is
-        # not worth a recipe that deletes.
-        if cp -a "$clone_flag" "$src" "$dest/target.partial" \
-            && mv "$dest/target.partial" "$dest/target"; then
+        # A failed one is left where it is. It affects nothing, and
+        # clearing disk is not worth a recipe that deletes.
+        if cp -a "$clone_flag" "$src" "$staged" \
+            && mv "$staged" "$dest/target"; then
             echo "cloned target/ into the worktree"
         else
             echo "NOTE: copying target/ did not finish — cp's own error, if" >&2
             echo "      any, is above. The worktree starts cold. An" >&2
-            echo "      incomplete copy may be left at" >&2
-            echo "      $dest/target.partial" >&2
+            echo "      incomplete copy may be left at $staged" >&2
         fi
+    elif [ "$stage_mode" = hardlink ]; then
+        # In the background, because this half is minutes rather than
+        # seconds — 10 GB of small files, at whatever a shared disk
+        # gives — and nothing reads `target/` until something compiles.
+        # What follows cutting a worktree is reading the issue and the
+        # code and settling on an approach, so the copy runs through
+        # that and is there before the first build asks for it. Cargo
+        # cannot see a half-made tree under the staged name, so the
+        # window costs nothing but a cold build to anything that does
+        # compile inside it.
+        #
+        # SIGHUP ignored so that closing the terminal that ran this does
+        # not leave the copy half-done.
+        log="$dest/workspace/target-staging.log"
+        {
+        trap '' HUP
+        broke=0
+        if ! cp -al "$src" "$staged"; then
+            broke=1
+        else
+            # Dropped rather than copied: cargo regenerates it, and it
+            # is the one large thing here that nothing needs carried
+            # over — 18 GB of the 111.
+            find "$staged" -type d -name incremental -prune -exec rm -rf {} + || broke=1
+            # Then everything that is not a large artifact under
+            # `deps/` gets a copy of its own. `--parents` keeps each
+            # file's path under the staged root, so this is one pass
+            # over the tree, and `--remove-destination` unlinks the
+            # shared inode before writing rather than writing through
+            # it — which is the entire point, and is not cp's default.
+            ( cd "$src" \
+                && find . -type d -name incremental -prune -o \
+                          -type f -path '*/deps/*' ! -size -1048576c -o \
+                          -type f -print0 \
+                   | xargs -0 -r cp -a --remove-destination --parents \
+                           --target-directory="$staged" ) \
+                || broke=1
+        fi
+        if [ "$broke" != 0 ]; then
+            echo "linking target/ did not finish — the error, if any, is above."
+            echo "the worktree stays cold; what was staged is at $staged"
+        elif [ -e "$dest/target" ]; then
+            # Something compiled before this landed. That build's
+            # `target/` is the one cargo has been writing fingerprints
+            # into, and replacing it underneath a running or finished
+            # build is how a tree ends up half from one place and half
+            # from another.
+            echo "the worktree already has a target/ — a build got there first,"
+            echo "so this staging stands down. What it staged is at $staged"
+        elif mv "$staged" "$dest/target"; then
+            echo "target/ is in place: the large artifacts under deps/ shared"
+            echo "with the main checkout, everything else copied"
+        else
+            echo "could not move the staged tree into place; it is at $staged"
+        fi
+        } > "$log" 2>&1 &
+        echo "staging target/ in the background — until it lands this worktree"
+        echo "builds cold, and $log says when it is done."
     fi
     cd "$dest" && just branch-check
     echo "worktree ready: $dest (branch $kind/$slug)"
