@@ -29,6 +29,7 @@ use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
+use crate::sqlite::repo::attribution_guard::attribution_columns;
 
 /// SQLite adapter for `PursuitRepository`.
 #[derive(Clone)]
@@ -41,41 +42,6 @@ impl SqlitePursuitRepository {
     pub fn new(isle: AsyncIsle) -> Self {
         Self { isle }
     }
-}
-
-/// The four attribution column values in write order:
-/// `(author_kind, author_subject, operator_ai, attributed_via)`.
-type AttributionColumns = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
-/// Encodes an entity's attribution triple into the three column values,
-/// running the same write-side channel guard as `asset` /
-/// `dispatch_job` (a row that records somebody records the channel the
-/// answer arrived through).
-fn attribution_columns(
-    table: &'static str,
-    attribution: &PersistedAttribution,
-) -> Result<AttributionColumns, DomainError> {
-    let (author_kind, author_subject) = match attribution.author() {
-        Some(author) => {
-            let (kind, subject) = author.encode();
-            (Some(kind.to_string()), subject.map(str::to_string))
-        }
-        None => (None, None),
-    };
-    let operator_ai = attribution.operator_ai().map(|o| o.as_str().to_string());
-    let attributed_via = attribution.attributed_via().map(|c| c.slug().to_string());
-    super::attribution_guard::assert_channel_recorded(
-        table,
-        author_kind.as_deref(),
-        operator_ai.as_deref(),
-        attributed_via.as_deref(),
-    )?;
-    Ok((author_kind, author_subject, operator_ai, attributed_via))
 }
 
 struct PursuitRow {
