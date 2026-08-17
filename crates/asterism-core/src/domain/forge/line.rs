@@ -1,4 +1,4 @@
-//! `Mainline` — a project's canonical set, and the forge identity that
+//! `Line` — a project's canonical set, and the forge identity that
 //! makes "the living one" a derivable fact (#63 decisions 1–3).
 //!
 //! Raw asset ids are one-off: a replacement is a different row, and
@@ -12,16 +12,17 @@
 //!
 //! # Shape
 //!
-//! - [`Mainline`] is one named line of a project. v1 mints exactly one
-//!   per project, named [`Mainline::MAIN`] (application-enforced); the
-//!   row exists so "mainline" is a branch rather than a hard-coded
-//!   place, and the schema admits siblings before the code does (the
-//!   V82 admit-ahead stance).
-//! - [`MainlineEntry`] is the identity; it carries no name column —
+//! - [`Line`] is one named line of a project — the branch of the git
+//!   analogy. v1 mints exactly one per project, named [`Line::MAIN`]
+//!   (application-enforced), so "the mainline" is a description — the
+//!   line named `main` — rather than a type of its own, and the
+//!   schema admits siblings before the code does (the V82 admit-ahead
+//!   stance).
+//! - [`LineEntry`] is the identity; it carries no name column —
 //!   the current name is the latest naming verb's, so renames are
 //!   history like everything else.
-//! - [`MainlineEvent`] is one verb applied to one entry.
-//!   [`MainlineVerb`] carries each verb's payload so a caller cannot
+//! - [`LineEvent`] is one verb applied to one entry.
+//!   [`LineVerb`] carries each verb's payload so a caller cannot
 //!   file an add without a name or a delete with an asset (the
 //!   `RestampSubject` stance); storage enforces the same pairing with
 //!   two-way CHECKs.
@@ -32,7 +33,7 @@
 //!
 //! # The boundary, restated
 //!
-//! The mainline *references* asset ids; it never annotates or mutates
+//! A line *references* asset ids; it never annotates or mutates
 //! an asset (the PR #62 rule). A dead entry's asset row stays live and
 //! restorable — `delete` is a statement about the canonical set, not
 //! about bytes, the same distance `CullVerdict::Reject` keeps from
@@ -41,7 +42,7 @@
 //! # Invariants (service-enforced, entity-checked where local)
 //!
 //! - Verb payload pairing and non-blank names are checked here.
-//! - Living-name uniqueness within a mainline is an application rule
+//! - Living-name uniqueness within a line is an application rule
 //!   checked at merge time — dead names are reusable, so it cannot be
 //!   a schema constraint.
 //! - An entry's first event is an `add`; later events land on an
@@ -57,8 +58,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::domain::value::{
-    AssetId, MainlineEntryId, MainlineEventId, MainlineId, MergeId, PersonaId, ProjectId,
-    PursuitEventId,
+    AssetId, LineEntryId, LineEventId, LineId, MergeId, PersonaId, ProjectId, PursuitEventId,
 };
 use crate::error::DomainError;
 
@@ -79,9 +79,9 @@ fn required_name(name: String, what: &str) -> Result<String, DomainError> {
 /// project — an application rule, so the day named lines arrive the
 /// schema is already there.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Mainline {
+pub struct Line {
     /// Surrogate id (UUID v7).
-    pub id: MainlineId,
+    pub id: LineId,
     /// The project this line belongs to.
     pub project_id: ProjectId,
     /// Line name, unique within the project (schema-enforced — lines
@@ -92,7 +92,7 @@ pub struct Mainline {
     pub created_at: DateTime<Utc>,
 }
 
-impl Mainline {
+impl Line {
     /// The one line name v1 mints.
     pub const MAIN: &'static str = "main";
 
@@ -101,7 +101,7 @@ impl Mainline {
     /// author.
     pub fn main(project_id: ProjectId, now: DateTime<Utc>) -> Self {
         Self {
-            id: MainlineId::new(),
+            id: LineId::new(),
             project_id,
             name: Self::MAIN.to_string(),
             created_at: now,
@@ -110,7 +110,7 @@ impl Mainline {
 
     /// Read-path twin: restores a stored row as a fact.
     pub fn from_persisted(
-        id: MainlineId,
+        id: LineId,
         project_id: ProjectId,
         name: String,
         created_at: DateTime<Utc>,
@@ -127,11 +127,11 @@ impl Mainline {
 /// The forge identity above raw asset ids (#63 decision 1). Deliberately
 /// name-less and version-less: both derive from the verb sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MainlineEntry {
+pub struct LineEntry {
     /// Surrogate id (UUID v7).
-    pub id: MainlineEntryId,
+    pub id: LineEntryId,
     /// The line this identity lives on.
-    pub mainline_id: MainlineId,
+    pub line_id: LineId,
     /// Redundant persona copy (the `pursuit_event.persona_id`
     /// precedent).
     pub persona_id: PersonaId,
@@ -139,12 +139,12 @@ pub struct MainlineEntry {
     pub created_at: DateTime<Utc>,
 }
 
-impl MainlineEntry {
+impl LineEntry {
     /// Builds a fresh entry, minted alongside the `add` that names it.
-    pub fn new(mainline_id: MainlineId, persona_id: PersonaId, now: DateTime<Utc>) -> Self {
+    pub fn new(line_id: LineId, persona_id: PersonaId, now: DateTime<Utc>) -> Self {
         Self {
-            id: MainlineEntryId::new(),
-            mainline_id,
+            id: LineEntryId::new(),
+            line_id,
             persona_id,
             created_at: now,
         }
@@ -152,14 +152,14 @@ impl MainlineEntry {
 
     /// Read-path twin: restores a stored row as a fact.
     pub fn from_persisted(
-        id: MainlineEntryId,
-        mainline_id: MainlineId,
+        id: LineEntryId,
+        line_id: LineId,
         persona_id: PersonaId,
         created_at: DateTime<Utc>,
     ) -> Self {
         Self {
             id,
-            mainline_id,
+            line_id,
             persona_id,
             created_at,
         }
@@ -172,7 +172,7 @@ impl MainlineEntry {
 /// — the `RestampSubject` stance; the schema states the same pairing
 /// as two-way CHECKs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MainlineVerb {
+pub enum LineVerb {
     /// A new entry enters the canonical set, named.
     Add {
         /// The version that enters as the living one.
@@ -196,7 +196,7 @@ pub enum MainlineVerb {
     },
 }
 
-impl MainlineVerb {
+impl LineVerb {
     /// Storage slug for the `verb` column.
     pub fn kind_slug(&self) -> &'static str {
         match self {
@@ -232,7 +232,7 @@ impl MainlineVerb {
         name: Option<String>,
     ) -> Result<Self, DomainError> {
         let mismatch = |what: &str| {
-            DomainError::Validation(format!("mainline verb {verb:?}: payload mismatch ({what})"))
+            DomainError::Validation(format!("line verb {verb:?}: payload mismatch ({what})"))
         };
         match (verb, asset_id, name) {
             ("add", Some(asset), Some(name)) => Ok(Self::Add {
@@ -250,7 +250,7 @@ impl MainlineVerb {
                 if name.is_some() { "present" } else { "absent" },
             ))),
             (other, _, _) => Err(DomainError::Validation(format!(
-                "unknown mainline verb: {other:?}"
+                "unknown line verb: {other:?}"
             ))),
         }
     }
@@ -258,47 +258,47 @@ impl MainlineVerb {
 
 /// One verb applied to one entry, filed under the merge that landed it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MainlineEvent {
+pub struct LineEvent {
     /// Surrogate id (UUID v7) — the tie-break that makes "latest event"
     /// total when two verbs share a `created_at`.
-    pub id: MainlineEventId,
+    pub id: LineEventId,
     /// The entry this verb moves.
-    pub entry_id: MainlineEntryId,
+    pub entry_id: LineEntryId,
     /// Redundant persona copy.
     pub persona_id: PersonaId,
     /// What happened, payload included.
-    pub verb: MainlineVerb,
+    pub verb: LineVerb,
     /// The merge this verb landed under. Every event has one —
     /// approval is the merge event, and there is no other author of
-    /// mainline change.
+    /// line change.
     pub merge_id: MergeId,
     /// Creation time.
     pub created_at: DateTime<Utc>,
 }
 
-impl MainlineEvent {
+impl LineEvent {
     /// Builds a fresh event. Names arriving on the verb are trimmed
     /// and must be non-blank — a nameless add has nothing to answer
     /// "what is alive" with.
     pub fn new(
-        entry_id: MainlineEntryId,
+        entry_id: LineEntryId,
         persona_id: PersonaId,
-        verb: MainlineVerb,
+        verb: LineVerb,
         merge_id: MergeId,
         now: DateTime<Utc>,
     ) -> Result<Self, DomainError> {
         let verb = match verb {
-            MainlineVerb::Add { asset_id, name } => MainlineVerb::Add {
+            LineVerb::Add { asset_id, name } => LineVerb::Add {
                 asset_id,
                 name: required_name(name, "entry")?,
             },
-            MainlineVerb::Rename { name } => MainlineVerb::Rename {
+            LineVerb::Rename { name } => LineVerb::Rename {
                 name: required_name(name, "entry")?,
             },
             other => other,
         };
         Ok(Self {
-            id: MainlineEventId::new(),
+            id: LineEventId::new(),
             entry_id,
             persona_id,
             verb,
@@ -310,10 +310,10 @@ impl MainlineEvent {
     /// Read-path twin: restores a stored row as a fact rather than a
     /// request to accept.
     pub fn from_persisted(
-        id: MainlineEventId,
-        entry_id: MainlineEntryId,
+        id: LineEventId,
+        entry_id: LineEntryId,
         persona_id: PersonaId,
-        verb: MainlineVerb,
+        verb: LineVerb,
         merge_id: MergeId,
         created_at: DateTime<Utc>,
     ) -> Self {
@@ -407,14 +407,14 @@ pub struct EntryState {
 /// phantom liveness beyond what its verbs state.
 pub fn entry_state<'a, I>(events: I) -> EntryState
 where
-    I: IntoIterator<Item = &'a MainlineEvent>,
+    I: IntoIterator<Item = &'a LineEvent>,
 {
-    let mut latest: Option<(DateTime<Utc>, MainlineEventId, bool)> = None;
-    let mut latest_name: Option<(DateTime<Utc>, MainlineEventId, &str)> = None;
-    let mut latest_asset: Option<(DateTime<Utc>, MainlineEventId, &AssetId)> = None;
+    let mut latest: Option<(DateTime<Utc>, LineEventId, bool)> = None;
+    let mut latest_name: Option<(DateTime<Utc>, LineEventId, &str)> = None;
+    let mut latest_asset: Option<(DateTime<Utc>, LineEventId, &AssetId)> = None;
     for event in events {
         let key = (event.created_at, event.id);
-        let dead = matches!(event.verb, MainlineVerb::Delete);
+        let dead = matches!(event.verb, LineVerb::Delete);
         if latest.map(|(t, i, _)| key > (t, i)).unwrap_or(true) {
             latest = Some((key.0, key.1, dead));
         }
@@ -445,9 +445,9 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 8, 17, 12, minute, 0).unwrap()
     }
 
-    fn event(verb: MainlineVerb, minute: u32) -> MainlineEvent {
-        MainlineEvent::new(
-            MainlineEntryId::from_uuid(Uuid::nil()),
+    fn event(verb: LineVerb, minute: u32) -> LineEvent {
+        LineEvent::new(
+            LineEntryId::from_uuid(Uuid::nil()),
             PersonaId::new(),
             verb,
             MergeId::new(),
@@ -456,12 +456,12 @@ mod tests {
         .unwrap()
     }
 
-    fn add(name: &str, minute: u32) -> (AssetId, MainlineEvent) {
+    fn add(name: &str, minute: u32) -> (AssetId, LineEvent) {
         let asset = AssetId::new();
         (
             asset,
             event(
-                MainlineVerb::Add {
+                LineVerb::Add {
                     asset_id: asset,
                     name: name.into(),
                 },
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn a_delete_kills_but_keeps_the_name_readable_and_a_later_add_revives() {
         let (_, born) = add("key visual", 0);
-        let deleted = event(MainlineVerb::Delete, 1);
+        let deleted = event(LineVerb::Delete, 1);
         let state = entry_state([&born, &deleted]);
         assert!(!state.alive);
         assert_eq!(state.name.as_deref(), Some("key visual"));
@@ -515,13 +515,13 @@ mod tests {
         let (_, born) = add("draft", 0);
         let replacement = AssetId::new();
         let replaced = event(
-            MainlineVerb::Replace {
+            LineVerb::Replace {
                 asset_id: replacement,
             },
             1,
         );
         let renamed = event(
-            MainlineVerb::Rename {
+            LineVerb::Rename {
                 name: "final".into(),
             },
             2,
@@ -540,9 +540,9 @@ mod tests {
     #[test]
     fn a_shared_timestamp_falls_back_to_the_id_tie_break() {
         let (_, born) = add("draft", 0);
-        let a = event(MainlineVerb::Delete, 1);
+        let a = event(LineVerb::Delete, 1);
         let b = event(
-            MainlineVerb::Replace {
+            LineVerb::Replace {
                 asset_id: AssetId::new(),
             },
             1,
@@ -558,7 +558,7 @@ mod tests {
     fn a_dangling_tail_answers_none_where_the_missing_add_would_have() {
         let replacement = AssetId::new();
         let tail = event(
-            MainlineVerb::Replace {
+            LineVerb::Replace {
                 asset_id: replacement,
             },
             0,
@@ -568,16 +568,16 @@ mod tests {
         assert_eq!(state.name, None, "nothing ever named this entry");
         assert_eq!(state.asset_id, Some(replacement));
 
-        let deleted = event(MainlineVerb::Delete, 0);
+        let deleted = event(LineVerb::Delete, 0);
         assert!(!entry_state([&deleted]).alive);
     }
 
     #[test]
     fn a_blank_name_is_refused_on_add_and_rename() {
-        let refused = MainlineEvent::new(
-            MainlineEntryId::new(),
+        let refused = LineEvent::new(
+            LineEntryId::new(),
             PersonaId::new(),
-            MainlineVerb::Add {
+            LineVerb::Add {
                 asset_id: AssetId::new(),
                 name: "   ".into(),
             },
@@ -585,10 +585,10 @@ mod tests {
             at(0),
         );
         assert!(refused.is_err());
-        let refused = MainlineEvent::new(
-            MainlineEntryId::new(),
+        let refused = LineEvent::new(
+            LineEntryId::new(),
             PersonaId::new(),
-            MainlineVerb::Rename { name: "".into() },
+            LineVerb::Rename { name: "".into() },
             MergeId::new(),
             at(0),
         );
@@ -598,21 +598,21 @@ mod tests {
     #[test]
     fn from_columns_is_a_closed_set_and_refuses_mismatched_payloads() {
         let asset = Uuid::now_v7();
-        assert!(MainlineVerb::from_columns("add", Some(asset), Some("a".into())).is_ok());
-        assert!(MainlineVerb::from_columns("replace", Some(asset), None).is_ok());
-        assert!(MainlineVerb::from_columns("delete", None, None).is_ok());
-        assert!(MainlineVerb::from_columns("rename", None, Some("b".into())).is_ok());
+        assert!(LineVerb::from_columns("add", Some(asset), Some("a".into())).is_ok());
+        assert!(LineVerb::from_columns("replace", Some(asset), None).is_ok());
+        assert!(LineVerb::from_columns("delete", None, None).is_ok());
+        assert!(LineVerb::from_columns("rename", None, Some("b".into())).is_ok());
 
-        assert!(MainlineVerb::from_columns("add", Some(asset), None).is_err());
-        assert!(MainlineVerb::from_columns("replace", None, None).is_err());
-        assert!(MainlineVerb::from_columns("delete", Some(asset), None).is_err());
-        assert!(MainlineVerb::from_columns("rename", None, None).is_err());
-        assert!(MainlineVerb::from_columns("fold", None, None).is_err());
+        assert!(LineVerb::from_columns("add", Some(asset), None).is_err());
+        assert!(LineVerb::from_columns("replace", None, None).is_err());
+        assert!(LineVerb::from_columns("delete", Some(asset), None).is_err());
+        assert!(LineVerb::from_columns("rename", None, None).is_err());
+        assert!(LineVerb::from_columns("fold", None, None).is_err());
     }
 
     #[test]
     fn the_main_line_is_named_main() {
-        let line = Mainline::main(ProjectId::new(), at(0));
-        assert_eq!(line.name, Mainline::MAIN);
+        let line = Line::main(ProjectId::new(), at(0));
+        assert_eq!(line.name, Line::MAIN);
     }
 }

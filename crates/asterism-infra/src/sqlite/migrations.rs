@@ -6066,37 +6066,37 @@ CREATE INDEX idx_pursuit_restamp_from
     ON pursuit_restamp(from_pursuit_id);
 "#;
 
-/// V83 — the project and its mainline (#63 decisions 1–3): the repo
-/// of the forge's git analogy, the named line it lands on, the entry
+/// V83 — the project and its lines (#63 decisions 1–3): the repo of
+/// the forge's git analogy, the named line it lands on, the entry
 /// identity above raw asset ids, the verb sequence that moves it, and
 /// the merge record that makes approval and landing one act.
 ///
 /// Shapes worth naming:
 ///
-/// - **`mainline` is a table, not a place**: v1 mints exactly one row
-///   per project, named `main` (application-enforced), and the UNIQUE
-///   on `(project_id, name)` is honest because lines have no death —
-///   unlike living entry names, whose uniqueness is an application
-///   rule precisely so dead names free up without a migration.
-/// - **`mainline_event.asset_id` carries no FK** — the
-///   `cull_member.asset_id` stance: the mainline's history outlives
-///   the asset rows it names.
+/// - **`line` is the branch, and "mainline" is a description**: v1
+///   mints exactly one row per project, named `main`
+///   (application-enforced), and the UNIQUE on `(project_id, name)`
+///   is honest because lines have no death — unlike living entry
+///   names, whose uniqueness is an application rule precisely so dead
+///   names free up without a migration.
+/// - **`line_event.asset_id` carries no FK** — the
+///   `cull_member.asset_id` stance: a line's history outlives the
+///   asset rows it names.
 /// - **Two-way CHECKs pair verb and payload** (the `pursuit_tx`
 ///   `(kind, origin)` precedent): an `add` without a name or a
 ///   `delete` with an asset is a corrupt row the schema refuses.
-/// - **`mainline_merge`, not `merge`**: the Group/`bucket` precedent —
+/// - **`line_merge`, not `merge`**: the Group/`bucket` precedent —
 ///   `MERGE` is a statement in enough dialects (SQL Server, Oracle,
 ///   PostgreSQL 15+) that quoting forever is the fragile choice. The
 ///   domain type stays `Merge`.
-/// - **No attribution triple on `mainline_merge`** — who approved is
+/// - **No attribution triple on `line_merge`** — who approved is
 ///   who closed, and the close event carries the triple; a copy here
 ///   would mint a second author for one act. `project` carries it
 ///   (opening one is a statement, the fourth wave of the
 ///   channel-carrier list).
-/// - **Every mainline starts empty** — no backfill from historical
-///   kept snapshots, which would invent approval events nobody
-///   performed.
-const V83_FORGE_PROJECT_MAINLINE: &str = r#"
+/// - **Every line starts empty** — no backfill from historical kept
+///   snapshots, which would invent approval events nobody performed.
+const V83_FORGE_PROJECT_LINE: &str = r#"
 CREATE TABLE project (
     id             BLOB PRIMARY KEY,
     persona_id     BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
@@ -6111,54 +6111,54 @@ CREATE TABLE project (
 
 CREATE INDEX idx_project_persona ON project(persona_id);
 
-CREATE TABLE mainline (
+CREATE TABLE line (
     id         BLOB PRIMARY KEY,
     project_id BLOB NOT NULL REFERENCES project(id) ON DELETE RESTRICT,
     name       TEXT NOT NULL,
     created_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE UNIQUE INDEX idx_mainline_project_name ON mainline(project_id, name);
+CREATE UNIQUE INDEX idx_line_project_name ON line(project_id, name);
 
-CREATE TABLE mainline_entry (
-    id          BLOB PRIMARY KEY,
-    mainline_id BLOB NOT NULL REFERENCES mainline(id) ON DELETE RESTRICT,
-    persona_id  BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
-    created_at  INTEGER NOT NULL
+CREATE TABLE line_entry (
+    id         BLOB PRIMARY KEY,
+    line_id    BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    persona_id BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
+    created_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE INDEX idx_mainline_entry_line ON mainline_entry(mainline_id);
-CREATE INDEX idx_mainline_entry_persona ON mainline_entry(persona_id);
+CREATE INDEX idx_line_entry_line ON line_entry(line_id);
+CREATE INDEX idx_line_entry_persona ON line_entry(persona_id);
 
-CREATE TABLE mainline_merge (
+CREATE TABLE line_merge (
     id               BLOB PRIMARY KEY,
     pursuit_event_id BLOB NOT NULL REFERENCES pursuit_event(id) ON DELETE RESTRICT,
     persona_id       BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
     created_at       INTEGER NOT NULL
 ) STRICT;
 
-CREATE UNIQUE INDEX idx_mainline_merge_event ON mainline_merge(pursuit_event_id);
-CREATE INDEX idx_mainline_merge_persona ON mainline_merge(persona_id);
+CREATE UNIQUE INDEX idx_line_merge_event ON line_merge(pursuit_event_id);
+CREATE INDEX idx_line_merge_persona ON line_merge(persona_id);
 
-CREATE TABLE mainline_event (
+CREATE TABLE line_event (
     id         BLOB PRIMARY KEY,
-    entry_id   BLOB NOT NULL REFERENCES mainline_entry(id) ON DELETE RESTRICT,
+    entry_id   BLOB NOT NULL REFERENCES line_entry(id) ON DELETE RESTRICT,
     persona_id BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
     verb       TEXT NOT NULL
         CHECK (verb IN ('add', 'replace', 'delete', 'rename')),
     asset_id   BLOB,
     name       TEXT,
-    merge_id   BLOB NOT NULL REFERENCES mainline_merge(id) ON DELETE RESTRICT,
+    merge_id   BLOB NOT NULL REFERENCES line_merge(id) ON DELETE RESTRICT,
     created_at INTEGER NOT NULL,
     CHECK ((verb IN ('add', 'replace')) = (asset_id IS NOT NULL)),
     CHECK ((verb IN ('add', 'rename')) = (name IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX idx_mainline_event_entry_created
-    ON mainline_event(entry_id, created_at, id);
-CREATE INDEX idx_mainline_event_merge ON mainline_event(merge_id);
-CREATE INDEX idx_mainline_event_asset ON mainline_event(asset_id);
-CREATE INDEX idx_mainline_event_persona ON mainline_event(persona_id);
+CREATE INDEX idx_line_event_entry_created
+    ON line_event(entry_id, created_at, id);
+CREATE INDEX idx_line_event_merge ON line_event(merge_id);
+CREATE INDEX idx_line_event_asset ON line_event(asset_id);
+CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 "#;
 
 /// Migrations in application order. **Append only** — never rewrite an
@@ -6246,7 +6246,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V80_TRACE_LOOKUP),
     Step::Sql(V81_DERIVED_TEXT),
     Step::App(v82_cull_record),
-    Step::Sql(V83_FORGE_PROJECT_MAINLINE),
+    Step::Sql(V83_FORGE_PROJECT_LINE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -9522,9 +9522,9 @@ mod tests {
     /// makes (#22: "who decided"), so they carry the triple;
     /// `cull_member` deliberately does not (a line item of its cull,
     /// not a statement of its own). Fourth wave: the project (V83) —
-    /// opening one is a statement; `mainline_merge` deliberately does
+    /// opening one is a statement; `line_merge` deliberately does
     /// not carry the triple (who approved is who closed, and the
-    /// close event already says so), and the mainline tables are
+    /// close event already says so), and the line tables are
     /// derivation surfaces, not statements.
     #[test]
     fn only_settled_tables_carry_a_channel_column() {
@@ -9565,7 +9565,7 @@ mod tests {
     /// verb's payload columns travel with the verb (two two-way
     /// CHECKs), a project holds one line per name, and a close event
     /// carries at most one merge. Asserted at insert level because
-    /// `MainlineVerb::from_columns` only guards the Rust side — a typo
+    /// `LineVerb::from_columns` only guards the Rust side — a typo
     /// inside the SQL CHECK text would otherwise go unseen until the
     /// write path arrives (the `v78_holds_the_two_rules` precedent:
     /// the schema is where the property actually lives).
@@ -9585,7 +9585,7 @@ mod tests {
         let line = Uuid::now_v7();
         let line_named_main = |id: Uuid| {
             conn.execute(
-                "INSERT INTO mainline (id, project_id, name, created_at) \
+                "INSERT INTO line (id, project_id, name, created_at) \
                  VALUES (?1, ?2, 'main', 0)",
                 params![id, project],
             )
@@ -9598,7 +9598,7 @@ mod tests {
 
         let entry = Uuid::now_v7();
         conn.execute(
-            "INSERT INTO mainline_entry (id, mainline_id, persona_id, created_at) \
+            "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
              VALUES (?1, ?2, ?3, 0)",
             params![entry, line, persona],
         )
@@ -9621,7 +9621,7 @@ mod tests {
         let merge = Uuid::now_v7();
         let merge_of_close = |id: Uuid| {
             conn.execute(
-                "INSERT INTO mainline_merge (id, pursuit_event_id, persona_id, created_at) \
+                "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
                  VALUES (?1, ?2, ?3, 0)",
                 params![id, close, persona],
             )
@@ -9634,7 +9634,7 @@ mod tests {
 
         let event = |verb: &str, with_asset: bool, with_name: bool| {
             conn.execute(
-                "INSERT INTO mainline_event \
+                "INSERT INTO line_event \
                      (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
                 params![
