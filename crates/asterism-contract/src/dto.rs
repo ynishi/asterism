@@ -1345,6 +1345,45 @@ pub struct SnapshotDto {
     pub created_at_ms: i64,
 }
 
+/// The repo of the forge's git analogy (#63 decisions 1–2): the shared
+/// context pursuits file under, and the owner of the lines they land
+/// on. Carries its lines rather than making the caller ask again —
+/// there is exactly one in v1, and a project without one could not be
+/// merged into.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ProjectDto {
+    /// Project id (UUID hyphenated).
+    pub id: String,
+    /// Owner persona id.
+    pub persona_id: String,
+    /// Human name, non-blank. Unique among this persona's projects by
+    /// a read-first check rather than a constraint, so two simultaneous
+    /// opens of one name can both land.
+    pub name: String,
+    /// One short free-text slot.
+    pub note: Option<String>,
+    /// The project's lines, oldest first. v1 holds exactly one, named
+    /// `main` — "the mainline" is the description of that line rather
+    /// than a type of its own.
+    pub lines: Vec<LineDto>,
+    /// Creation time (unix epoch ms).
+    pub created_at_ms: i64,
+}
+
+/// One named line of a project (#63 decisions 1–2) — the branch of the
+/// forge's git analogy, and what a satisfied close merges into.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct LineDto {
+    /// Line id (UUID hyphenated).
+    pub id: String,
+    /// The project this line belongs to.
+    pub project_id: String,
+    /// Line name, unique within the project. v1 mints only `main`.
+    pub name: String,
+    /// Creation time (unix epoch ms).
+    pub created_at_ms: i64,
+}
+
 /// The minted unit of work (#29): one line of generation and curation
 /// toward an intent. The row is thin and immutable — `standing` is
 /// derived on read from the lifecycle events, never stored.
@@ -1355,6 +1394,10 @@ pub struct PursuitDto {
     pub id: String,
     /// Owner persona id.
     pub persona_id: String,
+    /// Project this work files under (`None` for an unfiled pursuit).
+    /// Set at creation, immutable — what a satisfied close derives its
+    /// merge target from.
+    pub project_id: Option<String>,
     /// Pursuit this one was spawned from (`None` for a root). Set at
     /// creation, immutable.
     pub parent_id: Option<String>,

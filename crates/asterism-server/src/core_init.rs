@@ -417,6 +417,9 @@ pub struct CoreCtx {
     pub snapshot_service: Arc<SnapshotService>,
     /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
     pub pursuit_service: Arc<asterism_core::application::PursuitService>,
+    /// The context those pursuits file under, and the owner of the
+    /// line their satisfied closes land on (#63).
+    pub project_service: Arc<asterism_core::application::ProjectService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
@@ -572,6 +575,7 @@ pub async fn init_core_with(
     let observations = asterism_infra::observe::ObservationStore::new(isle.clone());
     let dispatches = Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone()));
     let pursuits = Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone()));
+    let projects = Arc::new(sqlite::repo::SqliteProjectRepository::new(isle.clone()));
     let query_groups = Arc::new(sqlite::repo::query_group::SqliteQueryGroupRepository::new(
         isle.clone(),
     ));
@@ -1031,10 +1035,18 @@ pub async fn init_core_with(
     // every other freeze gets.
     let pursuit_service = Arc::new(asterism_core::application::PursuitService::new(
         pursuits.clone(),
+        projects.clone(),
         personas.clone(),
         dispatches.clone(),
         assets_arc.clone(),
         snapshot_service.clone(),
+    ));
+    // The context those pursuits file under (#63). No lifecycle of its
+    // own: opened, read, and everything that happens to it happens
+    // through the pursuits filed under it.
+    let project_service = Arc::new(asterism_core::application::ProjectService::new(
+        projects.clone(),
+        personas.clone(),
     ));
 
     // Register the built-in exporters (`comfy` / `file` / `http`, the
@@ -1169,6 +1181,7 @@ pub async fn init_core_with(
         snapshot_service,
         dispatch_service,
         pursuit_service,
+        project_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

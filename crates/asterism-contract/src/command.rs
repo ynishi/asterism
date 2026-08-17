@@ -1948,6 +1948,39 @@ pub struct RedispatchCommand {
     pub pursuit_id: Option<String>,
 }
 
+/// Opens a project (#63 decisions 1–2): the repo of the forge's git
+/// analogy — the shared context pursuits file under, and the owner of
+/// the line they land on.
+///
+/// A deliberate act, like opening a pursuit, and the line comes with
+/// it: one named `main` is minted in the same transaction, because a
+/// project with nothing to land on is not a project anything could
+/// merge into. Opening one is a statement, so the row carries the
+/// attribution triple.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct OpenProjectCommand {
+    /// Owner persona id.
+    pub persona_id: String,
+    /// Human name, required and non-blank — a project exists to be
+    /// named, unlike a pursuit, whose title is optional intent.
+    ///
+    /// Unique among one persona's projects, compared exactly as given
+    /// once trimmed. The uniqueness is checked by reading first rather
+    /// than held by a constraint, so two simultaneous opens of the same
+    /// name can both succeed.
+    pub name: String,
+    /// One short free-text slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Caller-asserted operator slug, like
+    /// [`OpenPursuitCommand::operator_ai`]. Recorded so a project an
+    /// agent opened says so; omitting it records nothing rather than
+    /// the owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
 /// Opens a pursuit explicitly — the "start new pursuit" affordance
 /// (#29). Optional: a dispatch arriving unstamped mints one anyway
 /// (always-mint); pre-creating simply lets the caller name the intent
@@ -1969,8 +2002,16 @@ pub struct OpenPursuitCommand {
     /// is refused as a conflict rather than merged into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pursuit_id: Option<String>,
+    /// Project this work files under — set at creation, immutable,
+    /// same persona. Filing is what puts a pursuit on a line, so what
+    /// this pursuit merges into at a satisfied close derives from it.
+    /// `None` leaves the pursuit unfiled, which closes as it always
+    /// has: freeze the kept set, land nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     /// Pursuit this one is spawned from — set at creation, immutable,
-    /// same persona. `None` for a root pursuit.
+    /// same persona. `None` for a root pursuit. A parent's filing is
+    /// not inherited: a child says where it files, or files nowhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_pursuit_id: Option<String>,
     /// Short human label; provenance of intent, not state.

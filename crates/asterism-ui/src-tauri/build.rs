@@ -6,7 +6,7 @@
 //! types are avoided so the two sides never drift apart.
 //!
 //! The list below is explicit, not exhaustive, and nothing checks it
-//! against `asterism-contract`. Two deliberate omissions today, both of
+//! against `asterism-contract`. Three deliberate omissions today, all of
 //! the same shape — a surface the UI does not reach:
 //!
 //! - the diagnostics *read* types (`ListDiagQuery` / `DiagDto`) derive
@@ -19,7 +19,13 @@
 //!   HTTP / MCP surface for the agent driving an importer, and the UI
 //!   has no screen for it — the eventual UI is about promoting one
 //!   series to a real Group, which is a different shape from editing
-//!   a rule.
+//!   a rule;
+//! - the forge's project types (`OpenProjectCommand`, `ProjectDto`,
+//!   `LineDto`) stay out while the only surface that opens or reads a
+//!   project is MCP. The `project_id` fields they explain do reach the
+//!   bindings, because they ride on `OpenPursuitCommand` / `PursuitDto`
+//!   which the UI already has — a filed pursuit is visible in the UI
+//!   before a project is.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,

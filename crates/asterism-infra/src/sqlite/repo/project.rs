@@ -238,7 +238,11 @@ impl ProjectRepository for SqliteProjectRepository {
         name: &str,
     ) -> Result<Option<Project>, DomainError> {
         let uuid = *persona_id.as_uuid();
-        let name = name.trim().to_string();
+        // Bound as given. The domain trims on the way in, so trimming
+        // again here would be a second normalization agreeing with the
+        // first by luck — and it would quietly contradict the port,
+        // which promises the column's own byte-exact comparison.
+        let name = name.to_string();
         let row = self
             .isle
             .call(move |conn| {

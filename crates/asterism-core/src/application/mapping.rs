@@ -787,6 +787,14 @@ pub fn parse_pursuit_id(value: &str) -> Result<crate::domain::value::PursuitId, 
     )?))
 }
 
+/// Parses the wire representation of a project id.
+pub fn parse_project_id(value: &str) -> Result<crate::domain::value::ProjectId, DomainError> {
+    Ok(crate::domain::value::ProjectId::from_uuid(parse_uuid(
+        value,
+        "project_id",
+    )?))
+}
+
 /// Parses the wire representation of an asset-comment id.
 pub fn parse_asset_comment_id(value: &str) -> Result<AssetCommentId, DomainError> {
     Ok(AssetCommentId::from_uuid(parse_uuid(value, "comment_id")?))

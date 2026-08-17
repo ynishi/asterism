@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, PursuitService, QueryGroupService,
-    SeriesStrategyService, SessionService, SnapshotService, ThreadService, ThumbService,
+    MaterialMarkService, ModalityService, PersonaService, ProjectService, PursuitService,
+    QueryGroupService, SeriesStrategyService, SessionService, SnapshotService, ThreadService,
+    ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
 
@@ -38,6 +39,9 @@ pub struct ServerCtx {
     /// Lifecycle verbs of the pursuit — the unit of work every
     /// dispatch files itself under (#29).
     pub pursuit_service: Arc<PursuitService>,
+    /// The context pursuits file under (#63) — opened deliberately,
+    /// and the owner of the line a satisfied close lands on.
+    pub project_service: Arc<ProjectService>,
     /// Outbound dispatch lifecycle (creates jobs, reifies derived
     /// output, exposes list/detail).
     pub dispatch_service: Arc<DispatchService>,
@@ -110,6 +114,7 @@ impl ServerCtx {
             thumb_service: core.thumb_service.clone(),
             snapshot_service: core.snapshot_service.clone(),
             pursuit_service: core.pursuit_service.clone(),
+            project_service: core.project_service.clone(),
             dispatch_service: core.dispatch_service.clone(),
             query_group_service: core.query_group_service.clone(),
             modality_service: core.modality_service.clone(),
