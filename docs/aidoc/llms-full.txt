@@ -125,7 +125,7 @@ convert them into domain types and surface any validation failures as
 - `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
 - `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
 - `CancelJobCommand` — Requests cancellation of a running or pending job.
-- `ClosePursuitCommand` — Closes a pursuit (#29): records a one-way lifecycle fact, never a
+- `ClosePursuitCommand` — Closes a pursuit (#29, verdicts on #22): records a one-way
 - `ConflictResolution` — How a person answered one raised duplicate question.
 - `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
 - `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
@@ -137,6 +137,7 @@ convert them into domain types and surface any validation failures as
 - `CreateSeriesStrategyCommand` — Registers a series Strategy (`POST /asterism/series-strategies`).
 - `CreateSnapshotCommand` — Freezes a picked asset list as an immutable `Snapshot` — internal
 - `CreateThreadCommand` — Creates a Thread anchored to the given axis.
+- `CullVerdictEntry` — One requested verdict within a `satisfied` close (#22).
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
@@ -191,6 +192,7 @@ convert them into domain types and surface any validation failures as
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
+- `RecordPursuitTxCommand` — Appends one gesture to a pursuit's membership ledger (#22): an
 - `RedispatchCommand` — Re-runs a finished dispatch with the same frozen input, exporter,
 - `RegisterPersonaCommand` — Registers a new persona in Asterism.
 - `RemoveAssetFromGroupCommand` — Removes an asset from a Group. Idempotent — missing link is a
@@ -300,6 +302,7 @@ the domain types.
 - `AssetCardDto` — Lightweight card representation used on the grid (wire form of
 - `AssetCommentDto` — One comment attached to an Asset.
 - `AssetCountEntryDto` — One row of a sidebar count aggregation — `(key, asset_count)`.
+- `AssetCullDto` — One verdict about one asset, joined to the cull it belongs to
 - `AssetDetailDto` — Composite response for the detail view (asset + tags + edges).
 - `AssetDto` — Full asset payload used on the detail view.
 - `AssetIndexEntryDto` — Index-only wire form for 6-figure grids.
@@ -308,6 +311,8 @@ the domain types.
 - `AssetTextDto` — Full source text of one asset, resolved from the original
 - `ChapterMarkDto` — One named section of a material — an entry in a chapter list.
 - `ConstellationItemDto` — One hover-burst item — an edge paired with the card it lands on.
+- `CullDto` — The record of one close's narrowing (#22): who decided what, out
+- `CullMemberDto` — One member's verdict within a cull (#22).
 - `DerivedDto` — One thing an exporter produced, ready for the core to reify
 - `DiagDto` — One persisted diagnostic (`GET /asterism/diag`).
 - `DirDto` — A sidebar organisation folder. Dirs contain dirs and groups —
@@ -347,6 +352,7 @@ the domain types.
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `PursuitDto` — The minted unit of work (#29): one line of generation and curation
 - `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
+- `PursuitTxDto` — One gesture in a pursuit's append-only membership ledger (#22):
 - `PursuitViewDto` — One pursuit, opened up (#29): the thin row plus everything the
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
@@ -611,8 +617,10 @@ the private design notes.
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
+- [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
+- [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -2031,8 +2039,8 @@ cross-module view.
    and the `_trace` claim a returning artefact brings back
    ([`provenance`]) — which say which event a row belongs to and never
    what anyone thought of it. Verdicts the forge records live on its
-   own rows and name core ids (#63 drafts that record); a core row may
-   record who wrote it (doctrine 2) but never why. The corollary that
+   own rows and name core ids (the cull, #22, model on #63); a core
+   row may record who wrote it (doctrine 2) but never why. The corollary that
    has been reached for and is wrong: identity ("these are the same
    thing") is a core
    question the store asks itself, and expressing worth ("this one is
@@ -3198,12 +3206,13 @@ forge does not hold a working copy, and there is no state to
 integrate at the end. What the close integrates is a *decision*.
 
 **Culling** — the narrowing between a return and the next round or
-the close — has no record of its own in this layer yet. It moves
-through the catalogue's working state (rating, labels, trash), and
-what survives it is the next round's input, or the kept set the
-close freezes. The record it should leave — keep or reject, out of
-which candidate set, written just before the close — is drafted on
-#63, and #22 carries its implementation.
+the close — is recorded (#22, model on #63). Mid-work it moves
+through the ledger ([`tx`]): every entry, removal and reversal is
+an append-only gesture, and membership derives on read. At a
+satisfied close the [`cull`] converts the final state into
+verdicts — keep or reject, out of the candidate set the ledger
+accumulated, frozen at that moment — and what survives is the next
+round's input, or the kept set the close freezes.
 
 # The boundary
 
@@ -3213,7 +3222,7 @@ which candidate set, written just before the close — is drafted on
   is the id that lets the two rejoin after a round trip — the
   `_dispatch` stamp on a reified output, the `_trace` claim a
   returning artefact carries. What the forge has to say about an
-  asset — lifecycle events today, the cull record #63 drafts — lives
+  asset — lifecycle events, ledger gestures, cull verdicts — lives
   on forge rows that name core ids. A verdict written onto a core
   row itself would put the forge's vocabulary on the core's rows and
   hand every downstream reader (dedupe, lineage, restore) an
@@ -3252,6 +3261,51 @@ The full domain model this layer is growing toward — mainline,
 targeted IN, cull, merge-on-close — is drafted on #63.
 
 [`Snapshot`]: crate::domain::snapshot::Snapshot
+
+
+<!-- asterism_core/domain__forge__cull.md -->
+# asterism-core::domain::forge::cull
+
+`Cull` — the record of one close's narrowing (#22, model on #63):
+who decided to keep or drop what, out of which frozen candidate
+set, in which line of work.
+
+The cull is a **close-time record**, not a mid-work gate. Mid-work
+tidying moves through the ledger
+([`tx`](super::tx)); the cull converts the final state into
+verdicts at the one moment they become statements — just before
+the close that lands them. One cull per close event; a repeat
+close is a new event and may carry a new cull.
+
+# Verdict rules (resolved by [`resolve_verdicts`])
+
+- A verdict names a **candidate** — an asset the ledger admitted.
+  Judging what never entered is refused.
+- A **newly entered** member (`generated` / `imported`) takes
+  `keep` or `reject`.
+- An **existing** member takes `reject` only: keeping what the
+  library already holds is the untouched default, not a statement.
+  The one exception is salvage — a `keep` on a *removed* existing
+  member cancels the removal's default and is recorded.
+- A member **removed** in the ledger and not spoken for culls as
+  `reject` — the default is materialised as a row, because the
+  cull is the record and a reader must not have to re-derive it
+  from the ledger.
+- An **untouched** member without a verdict gets no row: "this act
+  said nothing about it" is the absence, deliberately (#63 — no
+  forced verdict; the unprocessed remainder just stays).
+
+## Functions
+
+- `resolve_verdicts` — Resolves a caller's verdicts against the ledger into the rows the
+
+## Types
+
+- `Cull` — One act of narrowing, bound to the close event it happened at.
+- `CullMember` — One member's verdict within a cull.
+- `CullVerdict` — The closed set of member verdicts. Two values, no third —
+- `RequestedVerdict` — A caller's requested verdict, before resolution against the
+- `ResolvedVerdict` — A resolved verdict, ready to become a `cull_member` row.
 
 
 <!-- asterism_core/domain__forge__dispatch.md -->
@@ -3347,6 +3401,48 @@ the pursuit is a projection over the stamped events.
 - `PursuitRestamp` — One recorded move of a stamped event between pursuits — the repair
 - `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
 - `RestampSubject` — What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
+
+
+<!-- asterism_core/domain__forge__tx.md -->
+# asterism-core::domain::forge::tx
+
+`PursuitTx` — the pursuit's append-only membership ledger (#22,
+model on #63): every asset that enters the line of work, every
+mid-work removal, and every reversal, one row per gesture.
+
+The ledger is what makes a cull's "out of what" answerable without
+being handed in: the candidate set is **what the pursuit
+accumulated**, derived here and frozen at close — never a
+caller-supplied snapshot. Mid-work tidying feels like free
+manipulation on the surface; underneath, every gesture is a ledger
+entry, which is the difference between a workspace and a record.
+
+# Shape
+
+- [`PursuitTx`] is one gesture: `in` (with its [`TxOrigin`]),
+  `remove`, `unremove` — and `update`, the model's reserved verb
+  for the external-edit round-trip, admitted by the vocabulary but
+  written by nothing yet.
+- **Membership is derived on read** by [`ledger`]: latest tx per
+  asset by `(created_at, id)` wins — `in` / `unremove` mean
+  present, `remove` means removed, `update` changes nothing. No
+  row is ever edited.
+- The asset reference is an id, not a foreign key: the ledger is
+  history and history outlives the asset (the
+  `dispatch_job.output_asset_ids` stance). The candidate *set*
+  survives independently in the snapshot the cull freezes.
+
+## Functions
+
+- `ledger` — Derives the ledger state from a pursuit's gestures: latest tx per
+
+## Types
+
+- `Ledger` — The derived state of a pursuit's ledger: every asset that ever
+- `MemberState` — One asset's derived position in a pursuit's ledger.
+- `PursuitTx` — One recorded membership gesture.
+- `PursuitTxKind` — The closed set of ledger gestures. `In` carries its origin because
+- `TxOrigin` — Where an `in` gesture brought its asset from. A fact about the
 
 
 <!-- asterism_core/domain__group.md -->
@@ -4895,6 +4991,7 @@ Design notes:
 - `ChapterMarkId` — Surrogate id for a `ChapterMark` — one entry in a structure
 - `CoverTemplate` — The template `cover_gen` applies to derive card cover text. A
 - `CoverText` — Text shown on the grid card for an asset (produced by the CoverGen
+- `CullId` — Surrogate id for a `Cull` — the record of one close's
 - `DirId` — Surrogate id for `Dir` (sidebar organisation folder).
 - `DispatchId` — Surrogate id for a `DispatchJob` — one exporter invocation
 - `DuplicateConflictId` — Surrogate id for a `DuplicateConflict` — one raised "are these
@@ -4922,6 +5019,7 @@ Design notes:
 - `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
 - `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
 - `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a
+- `PursuitTxId` — Surrogate id for a `PursuitTx` — one entry in a pursuit's
 - `RegisterNote` — Short annotation about the asset's register / tone; the presentation
 - `SessionId` — Session identifier attached to a dialogue asset — after the
 - `SnapshotId` — Surrogate id for a `Snapshot` — the immutable, content-addressed
@@ -7873,7 +7971,7 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
-- [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29).
+- [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
@@ -9765,13 +9863,18 @@ SQLite adapter for the `PersonaThemeRepository` port.
 <!-- asterism_infra/sqlite__repo__pursuit.md -->
 # asterism-infra::sqlite::repo::pursuit
 
-SQLite adapter for the `PursuitRepository` port (#29).
+SQLite adapter for the `PursuitRepository` port (#29, extended by
+#22).
 
-Three tables, one concern: `pursuit` (thin, immutable, insert-only),
-`pursuit_event` (append-only lifecycle facts), and `pursuit_restamp`
-(the recorded repair verb). The one multi-table write — restamp —
-runs in a single transaction here, because "the move is recorded"
-and "the stamp moved" must not be separable facts.
+Six tables, one concern: `pursuit` (thin, immutable, insert-only),
+`pursuit_event` (append-only lifecycle facts), `pursuit_restamp`
+(the recorded repair verb), `pursuit_tx` (the append-only
+membership ledger), and `cull` / `cull_member` (the record of a
+close's narrowing). The multi-table writes — restamp, and the
+close-with-cull — each run in a single transaction here, because
+"the move is recorded" and "the stamp moved" (respectively "the
+pursuit closed" and "this is what it decided") must not be
+separable facts.
 
 ## Types
 
@@ -10183,6 +10286,7 @@ agent should read, not a broken call.
 ## Types
 
 - `AssetCommentsParams` — `asset_comments` input.
+- `AssetCullsParams` — `asset_culls` input.
 - `AssetLineageParams` — `asset_lineage` input — mirrors the HTTP `LineageParams` query pair
 - `AsterismMcp` — The MCP server handler — a thin tool facade over [`ServerCtx`].
 - `CatalogOverviewParams` — `catalog_overview` input.

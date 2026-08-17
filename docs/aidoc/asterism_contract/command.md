@@ -21,7 +21,7 @@ convert them into domain types and surface any validation failures as
 - `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
 - `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
 - `CancelJobCommand` — Requests cancellation of a running or pending job.
-- `ClosePursuitCommand` — Closes a pursuit (#29): records a one-way lifecycle fact, never a
+- `ClosePursuitCommand` — Closes a pursuit (#29, verdicts on #22): records a one-way
 - `ConflictResolution` — How a person answered one raised duplicate question.
 - `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
 - `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
@@ -33,6 +33,7 @@ convert them into domain types and surface any validation failures as
 - `CreateSeriesStrategyCommand` — Registers a series Strategy (`POST /asterism/series-strategies`).
 - `CreateSnapshotCommand` — Freezes a picked asset list as an immutable `Snapshot` — internal
 - `CreateThreadCommand` — Creates a Thread anchored to the given axis.
+- `CullVerdictEntry` — One requested verdict within a `satisfied` close (#22).
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
@@ -87,6 +88,7 @@ convert them into domain types and surface any validation failures as
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
+- `RecordPursuitTxCommand` — Appends one gesture to a pursuit's membership ledger (#22): an
 - `RedispatchCommand` — Re-runs a finished dispatch with the same frozen input, exporter,
 - `RegisterPersonaCommand` — Registers a new persona in Asterism.
 - `RemoveAssetFromGroupCommand` — Removes an asset from a Group. Idempotent — missing link is a

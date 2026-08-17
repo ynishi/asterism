@@ -70,7 +70,7 @@
     {
       "path": "asterism_contract::command::ClosePursuitCommand",
       "kind": "struct",
-      "docs": "Closes a pursuit (#29): records a one-way lifecycle fact, never a\nstatus write. A repeat close is a new fact — standing re-derives\nfrom the latest event."
+      "docs": "Closes a pursuit (#29, verdicts on #22): records a one-way\nlifecycle fact, never a status write. A repeat close is a new fact\n— standing re-derives from the latest event.\n\nA `satisfied` close is where the cull is recorded: the candidate\nset is derived from the pursuit's own ledger (never supplied\nhere), frozen into a snapshot, and the verdicts below are resolved\nagainst it — a member removed mid-work and not spoken for culls as\n`reject`, an untouched member without a verdict gets no row, and\nthe kept set the event freezes is exactly the `keep` verdicts."
     },
     {
       "path": "asterism_contract::command::ConflictResolution",
@@ -126,6 +126,11 @@
       "path": "asterism_contract::command::CreateThreadCommand",
       "kind": "struct",
       "docs": "Creates a Thread anchored to the given axis.\n\n`anchor_kind`:\n- `\"app_global\"` — the Home-tab Inbox / free-form axis.\n  `anchor_id` must be `None`.\n- `\"snapshot\"` — attaches to a Snapshot. `anchor_id` is required\n  and must reference an existing Snapshot.\n- `\"query_group\"` — attaches to a query Group. `anchor_id` is\n  required.\n- `\"card\"` — attaches to an Asset. `anchor_id` is required.\n\n`title` is trimmed; a blank / whitespace-only value is rejected."
+    },
+    {
+      "path": "asterism_contract::command::CullVerdictEntry",
+      "kind": "struct",
+      "docs": "One requested verdict within a `satisfied` close (#22)."
     },
     {
       "path": "asterism_contract::command::DeclareAssetMetaCommand",
@@ -305,7 +310,7 @@
     {
       "path": "asterism_contract::command::OpenPursuitCommand",
       "kind": "struct",
-      "docs": "Opens a pursuit explicitly — the \"start new pursuit\" affordance\n(#29). Optional: a dispatch or judgment arriving unstamped mints\none anyway (always-mint); pre-creating simply lets the caller name\nthe intent up front. An empty pursuit that never receives work is\nan honest record, closable as abandoned."
+      "docs": "Opens a pursuit explicitly — the \"start new pursuit\" affordance\n(#29). Optional: a dispatch arriving unstamped mints one anyway\n(always-mint); pre-creating simply lets the caller name the intent\nup front. An empty pursuit that never receives work is an honest\nrecord, closable as abandoned."
     },
     {
       "path": "asterism_contract::command::OrganizeByLocationCommand",
@@ -396,6 +401,11 @@
       "path": "asterism_contract::command::RecordEventCommand",
       "kind": "struct",
       "docs": "Appends one telemetry event to the local `event_log` (dogfooding\nmetrics — `app_open` / `persona_switch` / `search` / `burst_open` /\n`asset_open`, kinds are open slugs). `occurred_at` is stamped\nserver-side; the recording path is fire-and-forget on the UI side\nso it never blocks an interaction. Local-only: rows never leave\nthe machine."
+    },
+    {
+      "path": "asterism_contract::command::RecordPursuitTxCommand",
+      "kind": "struct",
+      "docs": "Appends one gesture to a pursuit's membership ledger (#22): an\nasset entering (`in`, with its origin), a mid-work removal, or its\nreversal. Append-only — membership derives on read, latest gesture\nper asset wins. `update` is the model's reserved round-trip verb\nand is refused here until that slice lands."
     },
     {
       "path": "asterism_contract::command::RedispatchCommand",
@@ -598,6 +608,11 @@
       "docs": "One row of a sidebar count aggregation — `(key, asset_count)`.\n\nThe `key` string carries different id shapes depending on the\naxis being counted (persona UUID for\n`list_persona_asset_counts`, modality slug for\n`list_modality_asset_counts`); the UI resolves it against the\naxis's own name map."
     },
     {
+      "path": "asterism_contract::dto::AssetCullDto",
+      "kind": "struct",
+      "docs": "One verdict about one asset, joined to the cull it belongs to\n(#22) — the acceptance read: who decided to keep or drop this\nasset, out of which set, in which line of work."
+    },
+    {
       "path": "asterism_contract::dto::AssetDetailDto",
       "kind": "struct",
       "docs": "Composite response for the detail view (asset + tags + edges)."
@@ -636,6 +651,16 @@
       "path": "asterism_contract::dto::ConstellationItemDto",
       "kind": "struct",
       "docs": "One hover-burst item — an edge paired with the card it lands on."
+    },
+    {
+      "path": "asterism_contract::dto::CullDto",
+      "kind": "struct",
+      "docs": "The record of one close's narrowing (#22): who decided what, out\nof which frozen candidate set. One cull per close event; a repeat\nclose reads as a second record, never an overwrite."
+    },
+    {
+      "path": "asterism_contract::dto::CullMemberDto",
+      "kind": "struct",
+      "docs": "One member's verdict within a cull (#22)."
     },
     {
       "path": "asterism_contract::dto::DERIVED_COVER_MAX_CHARS",
@@ -841,6 +866,11 @@
       "path": "asterism_contract::dto::PursuitEventDto",
       "kind": "struct",
       "docs": "One lifecycle fact about a pursuit (#29): a close or a reopen,\nappend-only. A repeat close is a new fact; standing re-derives."
+    },
+    {
+      "path": "asterism_contract::dto::PursuitTxDto",
+      "kind": "struct",
+      "docs": "One gesture in a pursuit's append-only membership ledger (#22):\nan asset entering (`in`, with its origin), a mid-work removal, or\nits reversal. Membership is derived on read — latest gesture per\nasset wins."
     },
     {
       "path": "asterism_contract::dto::PursuitViewDto",
