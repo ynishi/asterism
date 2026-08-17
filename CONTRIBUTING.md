@@ -40,13 +40,19 @@ path as the same crate even across checkouts
 every crate here satisfies against every other worktree — so two
 worktrees pointed at one directory can report a gate green against the
 other branch's binaries, with no error to notice. Copies collide with
-nothing. On APFS a copy is copy-on-write and costs about three seconds
-and no disk. The recipe asks the volume before copying rather than
-judging by the result: `cp -c` does not fail where clonefile is
+nothing. The copy is made only where it is copy-on-write: APFS on
+macOS, where it costs about three seconds and no disk, and on Linux
+btrfs, bcachefs or XFS made with `reflink=1`, where it is the same
+operation with no timing taken yet. Not ext4, which is what most
+distributions leave on `/`. The recipe asks the filesystem before
+copying rather than judging by the result, because neither `cp` answers
+usefully afterwards: BSD's `-c` does not fail where clonefile is
 unavailable — it falls back to a real byte copy "to ensure the copy
 still succeeds" (`man cp`), which would cost more than the build it is
-meant to save. Off APFS it skips the copy and says so, and the worktree
-starts cold, which is where it would have started regardless.
+meant to save — and GNU's `--reflink=always` does fail, but once per
+file, which over a full `target/` is tens of thousands of lines. Where
+there is no clone to make it skips the copy and says so, and the
+worktree starts cold, which is where it would have started regardless.
 
 Run it from the main checkout — a worktree cannot cut another one, and
 the recipe stops rather than nest one. Remove the worktree once the
