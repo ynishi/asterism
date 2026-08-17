@@ -15,7 +15,8 @@ the pursuit is a projection over the stamped events.
 # Shape
 
 - [`Pursuit`] is a thin, immutable row: identity, persona, optional
-  parent, optional human label. No status column, no members.
+  filing, optional parent, optional human label. No status column,
+  no members.
 - [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
   **standing is derived on read** by [`standing`] — latest event by
   `(created_at, id)` wins, no row means open. A repeat close is a new
@@ -30,6 +31,11 @@ the pursuit is a projection over the stamped events.
   never crosses personas; a parent exists before its child. These are
   cross-aggregate and live in the application service, like the
   persona cascade.
+- `project_id` never crosses personas either, and the foreign key
+  cannot say so: `project` carries its own `persona_id`, and
+  `pursuit.project_id` references only `project(id)`. So filing
+  under someone else's project is refused where both rows are
+  visible — the same place, and for the same reason, as `parent_id`.
 - `snapshot_id` may only accompany `closed_satisfied` (checked here):
   it is the kept set frozen at close. `None` on a `closed_satisfied`
   is a defined state — "concluded with nothing kept" — because an

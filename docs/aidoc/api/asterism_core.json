@@ -1295,12 +1295,12 @@
     {
       "path": "asterism_core::domain::forge::pursuit",
       "kind": "module",
-      "docs": "`Pursuit` — the minted unit of work: one line of generation and\ncuration toward an intent, identified by a minted id that its events\nare stamped with (#29, design on #21).\n\nContent ancestry cannot express this unit: round N+1 built from the\nsame sources with a new prompt shares no derivation edge with round\nN's outputs, rejected rounds have no descendants, and abandonment has\nno ancestry expression at all. So the identity is minted up front —\nthe convergent form of every surviving forge (Gerrit's Change-Id,\nJujutsu's change id, Radicle's COB ids) — and everything else about\nthe pursuit is a projection over the stamped events.\n\n# Shape\n\n- [`Pursuit`] is a thin, immutable row: identity, persona, optional\n  parent, optional human label. No status column, no members.\n- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);\n  **standing is derived on read** by [`standing`] — latest event by\n  `(created_at, id)` wins, no row means open. A repeat close is a new\n  fact, not an error.\n- [`PursuitRestamp`] records a move of a stamped event between\n  pursuits — the repair verb for mis-filed correlation. The stamped\n  column holds the current filing; the restamp row holds the move.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- A stamped event's persona equals its pursuit's persona; `parent_id`\n  never crosses personas; a parent exists before its child. These are\n  cross-aggregate and live in the application service, like the\n  persona cascade.\n- `snapshot_id` may only accompany `closed_satisfied` (checked here):\n  it is the kept set frozen at close. `None` on a `closed_satisfied`\n  is a defined state — \"concluded with nothing kept\" — because an\n  empty snapshot is domain-rejected."
+      "docs": "`Pursuit` — the minted unit of work: one line of generation and\ncuration toward an intent, identified by a minted id that its events\nare stamped with (#29, design on #21).\n\nContent ancestry cannot express this unit: round N+1 built from the\nsame sources with a new prompt shares no derivation edge with round\nN's outputs, rejected rounds have no descendants, and abandonment has\nno ancestry expression at all. So the identity is minted up front —\nthe convergent form of every surviving forge (Gerrit's Change-Id,\nJujutsu's change id, Radicle's COB ids) — and everything else about\nthe pursuit is a projection over the stamped events.\n\n# Shape\n\n- [`Pursuit`] is a thin, immutable row: identity, persona, optional\n  filing, optional parent, optional human label. No status column,\n  no members.\n- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);\n  **standing is derived on read** by [`standing`] — latest event by\n  `(created_at, id)` wins, no row means open. A repeat close is a new\n  fact, not an error.\n- [`PursuitRestamp`] records a move of a stamped event between\n  pursuits — the repair verb for mis-filed correlation. The stamped\n  column holds the current filing; the restamp row holds the move.\n\n# Invariants (service-enforced, entity-checked where local)\n\n- A stamped event's persona equals its pursuit's persona; `parent_id`\n  never crosses personas; a parent exists before its child. These are\n  cross-aggregate and live in the application service, like the\n  persona cascade.\n- `project_id` never crosses personas either, and the foreign key\n  cannot say so: `project` carries its own `persona_id`, and\n  `pursuit.project_id` references only `project(id)`. So filing\n  under someone else's project is refused where both rows are\n  visible — the same place, and for the same reason, as `parent_id`.\n- `snapshot_id` may only accompany `closed_satisfied` (checked here):\n  it is the kept set frozen at close. `None` on a `closed_satisfied`\n  is a defined state — \"concluded with nothing kept\" — because an\n  empty snapshot is domain-rejected."
     },
     {
       "path": "asterism_core::domain::forge::pursuit::Pursuit",
       "kind": "struct",
-      "docs": "The minted unit of work. Thin and immutable: identity plus intent\n(`title` / `note`) plus lineage of work (`parent_id`) — never\ncontent, never status."
+      "docs": "The minted unit of work. Thin and immutable: identity plus intent\n(`title` / `note`) plus lineage of work (`parent_id`) plus filing\n(`project_id`) — never content, never status."
     },
     {
       "path": "asterism_core::domain::forge::pursuit::PursuitEvent",
@@ -1355,12 +1355,17 @@
     {
       "path": "asterism_core::domain::forge::tx::PursuitTxKind",
       "kind": "enum",
-      "docs": "The closed set of ledger gestures. `In` carries its origin because\nan entry without one is not a statement — the schema enforces the\nsame pairing with a two-way CHECK."
+      "docs": "The closed set of ledger gestures. `In` carries its origin because\nan entry without one is not a statement — the schema enforces the\nsame pairing with a two-way CHECK.\n\nThe payloads sit on the variants that own them (the `LineVerb`\nstance), which makes three of V84's four pairing rules\nunrepresentable rather than merely checked: a pin cannot exist\nwithout a target, an out-of-scope claim cannot be made by a\n`remove`, and nothing but an `update` can supersede. The fourth —\nthat only an `existing` origin targets an entry — needs a check,\nbecause origin and aim are separate axes that a rule happens to\ncorrelate; [`PursuitTx::new`] holds it."
     },
     {
       "path": "asterism_core::domain::forge::tx::TxOrigin",
       "kind": "enum",
       "docs": "Where an `in` gesture brought its asset from. A fact about the\nentry, not about the asset: the same asset can enter one pursuit\nas `existing` and have entered an earlier one as `generated`."
+    },
+    {
+      "path": "asterism_core::domain::forge::tx::TxTarget",
+      "kind": "struct",
+      "docs": "What an `in` declares about a line entry it is aimed at (#63\ndecisions 4–5): the entry, and optionally the version of it the\ncaller was looking at when they aimed.\n\nA pin lives *inside* the target rather than beside it, so \"a pin\nwith nothing pinned\" is a state this type cannot hold. What it\ncannot hold on its own is that the pinned event belongs to this\nentry — a cross-row fact no constraint here or in the schema can\nsee, so the service checks it where both rows are visible."
     },
     {
       "path": "asterism_core::domain::forge::tx::ledger",
