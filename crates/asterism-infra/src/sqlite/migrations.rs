@@ -9953,8 +9953,15 @@ mod tests {
 
         tx("in", Some("existing"), Some(entry), None, 0, None)
             .expect("an existing IN may name the entry it aims at");
-        tx("in", Some("existing"), Some(entry), Some(base_event), 0, None)
-            .expect("and may pin the version it saw there");
+        tx(
+            "in",
+            Some("existing"),
+            Some(entry),
+            Some(base_event),
+            0,
+            None,
+        )
+        .expect("and may pin the version it saw there");
         tx("in", Some("generated"), None, None, 0, None).expect("an untargeted IN stays legal");
         tx("in", Some("existing"), Some(entry), None, 1, None)
             .expect("an IN may declare it reached outside its scope");
