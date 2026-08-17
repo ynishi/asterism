@@ -1257,6 +1257,38 @@ pub struct DispatchDto {
     pub action: String,
     /// Exporter-specific parameters (opaque JSON string).
     pub params_json: String,
+    /// The exporter's handle payload (opaque JSON string). `None`
+    /// until the backend has accepted the job — which is most of the
+    /// time a dispatch is `pending`, and permanently for one that
+    /// failed or was cancelled before a handle was ever issued.
+    ///
+    /// This is the other half of `params_json`. What a dispatch asked
+    /// for was already readable here; what came back of it was not, and
+    /// lived only in the `handle_payload` column. The HTTP adapter
+    /// records the submit request as sent beside the response as
+    /// received, under `exchange`, so a reader answering "which model
+    /// ran, with what, and what did it say" reaches it through this
+    /// field rather than through the database.
+    ///
+    /// Opaque on purpose. The shape belongs to whichever exporter
+    /// issued it — `exporter_slug` names the exporter that ran, and a
+    /// row dispatched under a legacy alias names the alias rather than
+    /// the adapter that now answers to it. A typed field here would put
+    /// one adapter's payload into the contract every other adapter also
+    /// speaks.
+    ///
+    /// It rides on list rows as well as on a fetched one, which is the
+    /// same bargain `params_json` already makes: a blob of unbounded
+    /// width per row, in exchange for a record that reads without a
+    /// second call. A backend whose recorded exchange makes that too
+    /// wide is the measurement that would argue for a narrower list.
+    ///
+    /// Serialised as `null` rather than omitted, because the generated
+    /// TypeScript binding declares the key present-and-nullable and a
+    /// reader should not have to know which of the two absences the
+    /// wire chose.
+    #[serde(default)]
+    pub handle_json: Option<String>,
     /// Lifecycle-state slug (`pending` / `running` / `done` /
     /// `failed` / `cancelled`).
     pub state: String,

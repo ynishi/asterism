@@ -6057,10 +6057,15 @@ The response is kept whole because those values are siblings of the
 artefacts array rather than fields of an item.
 
 The recorded copy is scrubbed of the credential the `auth` block
-named, and its headers are redacted. What no scrub can reach is a
-token a profile interpolated out of its own params into a URL or a
-body: the adapter was never told it was a credential. That is the
-same trade the paragraph above describes, one surface further along.
+named, and its headers are redacted. So is the handle itself, on the
+way into the payload: `submit.handle_from` defaults to the whole
+submit response, a backend is free to echo the request it was sent,
+and that payload is handed back out on every read of the dispatch —
+including to a caller that never touches the database. What no scrub
+can reach is a token a profile interpolated out of its own params
+into a URL or a body: the adapter was never told it was a
+credential. That is the same trade the paragraph above describes,
+one surface further along.
 
 ## Modules
 
