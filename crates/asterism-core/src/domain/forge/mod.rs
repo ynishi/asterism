@@ -95,5 +95,7 @@
 
 pub mod cull;
 pub mod dispatch;
+pub mod mainline;
+pub mod project;
 pub mod pursuit;
 pub mod tx;

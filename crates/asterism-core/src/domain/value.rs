@@ -213,6 +213,44 @@ define_uuid_id!(
     /// are per member on `cull_member`.
     CullId
 );
+define_uuid_id!(
+    /// Surrogate id for a `Project` — the repo of the forge's git
+    /// analogy (#63): the shared context pursuits file under and the
+    /// owner of a mainline. Minted, like a pursuit's: a project is a
+    /// deliberate act, not a derived fact.
+    ProjectId
+);
+define_uuid_id!(
+    /// Surrogate id for a `Mainline` — one named line of a project.
+    /// v1 restricts a project to exactly one, named `main`; the id
+    /// exists so "mainline" is a branch rather than a hard-coded
+    /// place (the V82 admit-ahead stance: schema admits, code
+    /// restricts).
+    MainlineId
+);
+define_uuid_id!(
+    /// Surrogate id for a `MainlineEntry` — the name-like forge
+    /// identity above raw asset ids (#63 decision 1): the thing that
+    /// stays "the living one" while replacement and renaming move
+    /// beneath it. Raw asset ids stay one-off; the entry is what a
+    /// targeted IN declares.
+    MainlineEntryId
+);
+define_uuid_id!(
+    /// Surrogate id for a `MainlineEvent` — one merge verb applied to
+    /// an entry (add / replace / delete / rename, #63 decision 2).
+    /// Liveness and naming derive on read by "latest event per entry
+    /// wins" over `(created_at, id)`; the v7 tie-break makes that
+    /// answer total when two verbs share a millisecond.
+    MainlineEventId
+);
+define_uuid_id!(
+    /// Surrogate id for a `Merge` — the record that one satisfied
+    /// close applied its verbs (#63 decision 3: approval *is* the
+    /// merge event). One merge per close event; the verbs group under
+    /// it on `mainline_event`.
+    MergeId
+);
 /// Declares a non-empty text newtype (returns `Validation` if the value is
 /// blank after trimming).
 macro_rules! define_text_vo {
