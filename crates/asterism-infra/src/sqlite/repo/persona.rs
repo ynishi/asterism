@@ -324,8 +324,8 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // single DELETE — the bucket.origin_snapshot_id precedent,
                 // cheaper than ordering the delete children-first.
                 //
-                // The forge's project and its lines (V83, extended by
-                // V84) are RESTRICT on everything as well, and they
+                // The forge's project and its lines (V84, extended by
+                // V85) are RESTRICT on everything as well, and they
                 // wedge the pursuit slots apart. `line_merge` restricts
                 // `pursuit_event`, so it goes before the events it
                 // hangs on; `line_event` restricts `line_merge` and
@@ -609,7 +609,7 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 'keep')",
                 params![cull, asset],
             )?;
-            // The V83/V84 additions: project → persona, line →
+            // The V84/V85 additions: project → persona, line →
             // project, line_entry → line / persona, line_merge →
             // pursuit_event / persona, line_event → line_entry /
             // line_merge / persona, and a targeted IN reaching from

@@ -18,6 +18,11 @@
 //!   updates during the `dispatch → poll` loop. The handle is
 //!   persisted immediately after `Exporter::dispatch` returns so a
 //!   restart mid-poll rehydrates the exact same reference.
+//! - [`save_attempt`](DispatchRunnerService::save_attempt) — the record
+//!   of the call the exporter just made, which is the only thing a
+//!   refused submit leaves behind: it produces no handle, and without
+//!   this the request as sent and the backend's answer go out with the
+//!   error.
 //! - [`reify`](DispatchRunnerService::reify) — turn the
 //!   `Vec<Derived>` the exporter produced into new `Asset` rows whose
 //!   `parent_ids` point at the Snapshot's members via
@@ -175,6 +180,37 @@ impl DispatchRunnerService {
             .ok_or_else(|| DomainError::not_found("dispatch", id))?;
         job.handle_kind = Some(handle_kind);
         job.handle = Some(handle_payload);
+        job.updated_at = Utc::now();
+        self.dispatches.save(&job).await?;
+        Ok(())
+    }
+
+    /// Runner-side attempt persistence — called after an exporter call
+    /// returns, whichever arm it returned on, with whatever the exporter
+    /// recorded about the call it just made.
+    ///
+    /// Separate from [`save_handle`](Self::save_handle) because the case
+    /// it serves is the one with no handle to save: a submit the backend
+    /// refused ends the job with an error, and the request as sent and
+    /// the backend's answer would otherwise leave with it. The runner
+    /// records the attempt *before* it saves the failure, so the row
+    /// carries the evidence by the time it carries the verdict.
+    ///
+    /// The payload is opaque here in the way the handle is: its shape
+    /// belongs to the exporter named by `attempt_kind`.
+    pub async fn save_attempt(
+        &self,
+        id: &DispatchId,
+        attempt_kind: String,
+        attempt_payload: serde_json::Value,
+    ) -> Result<(), DomainError> {
+        let mut job = self
+            .dispatches
+            .find(id)
+            .await?
+            .ok_or_else(|| DomainError::not_found("dispatch", id))?;
+        job.attempt_kind = Some(attempt_kind);
+        job.attempt = Some(attempt_payload);
         job.updated_at = Utc::now();
         self.dispatches.save(&job).await?;
         Ok(())

@@ -1107,6 +1107,12 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
             None | Some(serde_json::Value::Null) => None,
             Some(handle) => Some(handle.to_string()),
         },
+        // Same reading of absence as the handle above, for the same
+        // reason: a record that says nothing is not a record.
+        attempt_json: match &job.attempt {
+            None | Some(serde_json::Value::Null) => None,
+            Some(attempt) => Some(attempt.to_string()),
+        },
         state: job.state.slug().to_string(),
         state_message,
         progress_current,

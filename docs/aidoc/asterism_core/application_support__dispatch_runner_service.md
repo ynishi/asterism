@@ -20,6 +20,11 @@ run / redispatch (start one) and get / list (read one).
   updates during the `dispatch → poll` loop. The handle is
   persisted immediately after `Exporter::dispatch` returns so a
   restart mid-poll rehydrates the exact same reference.
+- [`save_attempt`](DispatchRunnerService::save_attempt) — the record
+  of the call the exporter just made, which is the only thing a
+  refused submit leaves behind: it produces no handle, and without
+  this the request as sent and the backend's answer go out with the
+  error.
 - [`reify`](DispatchRunnerService::reify) — turn the
   `Vec<Derived>` the exporter produced into new `Asset` rows whose
   `parent_ids` point at the Snapshot's members via

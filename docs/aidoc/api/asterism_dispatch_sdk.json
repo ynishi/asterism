@@ -3,6 +3,31 @@
   "version": "0.0.0",
   "items": [
     {
+      "path": "asterism_dispatch_sdk::attempt",
+      "kind": "module",
+      "docs": "`AttemptRecord` — what an exporter has to say about a call it made,\nwhether or not the call produced a [`Handle`](crate::Handle).\n\nA [`Handle`](crate::Handle) is the record of a job the backend\naccepted, and it is the only thing [`Exporter::dispatch`] can hand\nback. That leaves the refused submit — the case a reader has the most\nquestions about — with nowhere to write: which endpoint, with which\nbody, and what the backend actually said all go out with the error,\nand what survives on the row is one message string.\n\nThis is the second channel. The core hands the exporter an\n[`AttemptRecorder`] on [`DispatchContext.attempt`], the exporter\nrecords what it sent and what came back as it makes the call, and the\ncore persists whatever landed there — on the arm that returned a\nhandle and on the arm that returned an error alike.\n\nKept separate from the return type on purpose. Widening\n[`ExporterError`](crate::ExporterError) would make every error site\ndecide what to attach, and returning a `Handle` for a job that does\nnot exist would put a reference to nothing where the poll loop\nexpects a backend job. Both change what the trait's own words mean;\na recorder the exporter writes to leaves `dispatch` saying exactly\nwhat it said before.\n\n[`Exporter::dispatch`]: crate::Exporter::dispatch\n[`DispatchContext.attempt`]: crate::DispatchContext::attempt"
+    },
+    {
+      "path": "asterism_dispatch_sdk::attempt::AttemptRecord",
+      "kind": "struct",
+      "docs": "One call as the exporter wants it remembered.\n\nThe shape of `payload` belongs to the exporter, exactly as\n[`Handle::payload`](crate::Handle::payload) does: the core writes it\ndown and hands it back on reads without looking inside. `kind` names\nwhose shape it is, so a reader that does want to look knows which\ngrammar to read it with.\n\nNothing here is a promise that the call failed. An exporter that\nrecords every submit gives a reader one place to look for what was\nsent, instead of one place for accepted jobs and another for refused\nones."
+    },
+    {
+      "path": "asterism_dispatch_sdk::attempt::AttemptRecorder",
+      "kind": "trait",
+      "docs": "Where an exporter puts an [`AttemptRecord`].\n\nTakes `&self` rather than `&mut self` because the exporter holds it\nthrough a shared borrow on a `Copy` context, and calls it from the\nmiddle of an `async fn` — the implementation owns whatever\nsynchronisation it needs.\n\nA record replaces any earlier one from the same dispatch. One row\ncarries the record of its latest attempt: a re-run after a refusal is\na fresh dispatch row of its own\n(`DispatchService::redispatch`), so accumulating here would collect\nretries of a single tick rather than the history a reader is after."
+    },
+    {
+      "path": "asterism_dispatch_sdk::attempt::DISCARD_ATTEMPTS",
+      "kind": "static",
+      "docs": "Shared [`DiscardAttempts`], so a context built without a row to write\nonto can borrow one instead of keeping a local alive."
+    },
+    {
+      "path": "asterism_dispatch_sdk::attempt::DiscardAttempts",
+      "kind": "struct",
+      "docs": "An [`AttemptRecorder`] that keeps nothing.\n\nWhat a call site with no row to write onto passes: exporter tests, and\nany caller driving an exporter outside the dispatch state machine. The\nexporter still records; the record goes nowhere."
+    },
+    {
       "path": "asterism_dispatch_sdk::derived",
       "kind": "module",
       "docs": "Re-export shim for the shared boundary type\n[`asterism_contract::DerivedDto`], plus the character-count\nconstants exporter authors want to pre-enforce.\n\nRationale: the wire shape lives in `asterism-contract` (the\nleaf DTO crate) so both the SDK and the core can talk about\n`Derived` without either depending on the other — the SDK\nstays a pure adapter surface, the core stays free of any\nadapter dep. Exporter authors keep writing `use\nasterism_dispatch_sdk::Derived;` unchanged."
@@ -10,12 +35,12 @@
     {
       "path": "asterism_dispatch_sdk::exporter",
       "kind": "module",
-      "docs": "`Exporter` — the trait every outbound adapter implements.\n\nAn exporter is stateless from the SDK's point of view: the core\npasses it a [`DispatchContext`] on every method and stores anything\nthe exporter wants to remember about the in-flight job as an opaque\n[`Handle`]. The three methods split the lifecycle so backends with\nvery different rhythms (single-shot HTTP, long-poll, watchdog on a\nfilesystem drop dir) all fit the same shape:\n\n1. [`Exporter::dispatch`] — send the job to the backend. Returns a\n   `Handle` the core persists so subsequent calls survive restart.\n2. [`Exporter::poll`] — check the backend for progress. Called by\n   the apalis `DispatchRun` job on a re-enqueue loop until the\n   state is terminal.\n3. [`Exporter::harvest`] — once `poll` returns `Done`, ask the\n   exporter to collect the produced artefacts and describe them as\n   [`Derived`]s. The core reifies each Derived into a new `Asset`\n   with `parent_ids` = the Selection's inputs, `session_id` =\n   `DispatchJob.id`, and `source_kind` = `format!(\"dispatch:{}\",\n   exporter_slug)`."
+      "docs": "`Exporter` — the trait every outbound adapter implements.\n\nAn exporter is stateless from the SDK's point of view: the core\npasses it a [`DispatchContext`] on every method and stores anything\nthe exporter wants to remember about the in-flight job as an opaque\n[`Handle`]. The three methods split the lifecycle so backends with\nvery different rhythms (single-shot HTTP, long-poll, watchdog on a\nfilesystem drop dir) all fit the same shape:\n\n1. [`Exporter::dispatch`] — send the job to the backend. Returns a\n   `Handle` the core persists so subsequent calls survive restart.\n2. [`Exporter::poll`] — check the backend for progress. Called by\n   the apalis `DispatchRun` job on a re-enqueue loop until the\n   state is terminal.\n3. [`Exporter::harvest`] — once `poll` returns `Done`, ask the\n   exporter to collect the produced artefacts and describe them as\n   [`Derived`]s. The core reifies each Derived into a new `Asset`\n   with `parent_ids` = the Selection's inputs, `session_id` =\n   `DispatchJob.id`, and `source_kind` = `format!(\"dispatch:{}\",\n   exporter_slug)`.\n\nAll three take the same [`DispatchContext`], and it carries one\noutbound channel beside the read-only slices:\n[`attempt`](DispatchContext::attempt), where the exporter records\nwhat a call sent and what came back. That record survives an error\nreturn, which is what makes a refused submit as readable as an\naccepted one."
     },
     {
       "path": "asterism_dispatch_sdk::exporter::DispatchContext",
       "kind": "struct",
-      "docs": "The Selection-plus-context bundle the core hands the exporter on\nevery method call.\n\nCarries **references only** — the core owns the entity storage\nand lets exporters borrow read-only slices for the duration of\nthe call. `inputs` is materialised from `Selection::asset_ids`\n(which is why an exporter never has to talk to the AssetRepo\nitself).\n\n`Copy` because every field is a shared borrow — the runner\nhands the same context to `dispatch` → `poll` → `harvest` on\nseparate ticks without extra allocation.\n\n`inputs` carries [`asterism_contract::dto::AssetCardDto`] —\nthe same wire shape the Tauri UI already receives, so backends\nconsuming the SDK see the exact card the human sees in the\ngrid. No SDK-local projection type is invented; the contract\ncrate is the single source of truth for both the frontend and\nevery outbound adapter."
+      "docs": "The Selection-plus-context bundle the core hands the exporter on\nevery method call.\n\nCarries **references only** — the core owns the entity storage\nand lets exporters borrow it for the duration of the call.\n`inputs` is materialised from `Selection::asset_ids` (which is why\nan exporter never has to talk to the AssetRepo itself).\n\nEvery field but one is a read-only slice.\n[`attempt`](Self::attempt) is the exception, and it goes the other\nway: the exporter writes its record of the call there, and the core\npersists it. It is on the context rather than in a return type\nbecause the case that needs it is the one where the return type is\nan error.\n\n`Copy` because every field is a shared borrow — the runner\nhands the same context to `dispatch` → `poll` → `harvest` on\nseparate ticks without extra allocation.\n\n`inputs` carries [`asterism_contract::dto::AssetCardDto`] —\nthe same wire shape the Tauri UI already receives, so backends\nconsuming the SDK see the exact card the human sees in the\ngrid. No SDK-local projection type is invented; the contract\ncrate is the single source of truth for both the frontend and\nevery outbound adapter."
     },
     {
       "path": "asterism_dispatch_sdk::exporter::Exporter",

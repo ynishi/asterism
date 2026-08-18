@@ -43,6 +43,12 @@ struct DispatchRow {
     progress_total: Option<i64>,
     handle_kind: Option<String>,
     handle_payload: Option<String>,
+    // The exporter's record of its latest call (V83). NULL on a row
+    // whose exporter recorded nothing, and on every row written before
+    // the column — the calls those describe are over, so there is
+    // nothing to backfill from.
+    attempt_kind: Option<String>,
+    attempt_payload: Option<String>,
     output_asset_ids_json: String,
     created_at: i64,
     updated_at: i64,
@@ -69,7 +75,8 @@ impl DispatchRow {
                                    handle_kind, handle_payload,
                                    output_asset_ids, created_at, updated_at, completed_at,
                                    source_group_id, source_query_json, operator_ai,
-                                   author_kind, author_subject, attributed_via, pursuit_id";
+                                   author_kind, author_subject, attributed_via, pursuit_id,
+                                   attempt_kind, attempt_payload";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -96,6 +103,13 @@ impl DispatchRow {
             author_subject: row.get(20)?,
             attributed_via: row.get(21)?,
             pursuit_id: row.get(22)?,
+            // Read from the tail of the select rather than from beside
+            // the handle: the column list is append-only for the same
+            // reason the migrations are, and inserting in the middle
+            // renumbers every index below it for no gain in what the
+            // query returns.
+            attempt_kind: row.get(23)?,
+            attempt_payload: row.get(24)?,
         })
     }
 
@@ -129,6 +143,12 @@ impl DispatchRow {
                     DomainError::Infra(anyhow::anyhow!("corrupt handle_payload: {e}"))
                 })?),
             };
+        let attempt = match self.attempt_payload {
+            None => None,
+            Some(text) => Some(serde_json::from_str(&text).map_err(|e| {
+                DomainError::Infra(anyhow::anyhow!("corrupt attempt_payload: {e}"))
+            })?),
+        };
         let output_ids: Vec<String> = serde_json::from_str(&self.output_asset_ids_json)
             .map_err(|e| DomainError::Infra(anyhow::anyhow!("corrupt output_asset_ids: {e}")))?;
         let output_asset_ids = output_ids
@@ -167,6 +187,8 @@ impl DispatchRow {
         job.state = state;
         job.handle = handle;
         job.handle_kind = self.handle_kind;
+        job.attempt = attempt;
+        job.attempt_kind = self.attempt_kind;
         job.output_asset_ids = output_asset_ids;
         job.source_group_id = self
             .source_group_id
@@ -228,6 +250,8 @@ impl DispatchRepository for SqliteDispatchRepository {
         };
         let handle_kind = job.handle_kind.clone();
         let handle_payload = job.handle.as_ref().map(|v| v.to_string());
+        let attempt_kind = job.attempt_kind.clone();
+        let attempt_payload = job.attempt.as_ref().map(|v| v.to_string());
         let output_ids: Vec<String> = job.output_asset_ids.iter().map(|a| a.to_string()).collect();
         let output_json = serde_json::Value::Array(
             output_ids
@@ -270,10 +294,11 @@ impl DispatchRepository for SqliteDispatchRepository {
                           handle_kind, handle_payload, output_asset_ids,
                           created_at, updated_at, completed_at,
                           source_group_id, source_query_json, operator_ai,
-                          author_kind, author_subject, attributed_via, pursuit_id)
+                          author_kind, author_subject, attributed_via, pursuit_id,
+                          attempt_kind, attempt_payload)
                      VALUES
                          (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                          ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+                          ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
                      -- The attribution columns are absent from the
                      -- update set for the same reason `source_*` is: who
                      -- asked for the run, and how the request arrived,
@@ -294,6 +319,8 @@ impl DispatchRepository for SqliteDispatchRepository {
                          progress_total = excluded.progress_total,
                          handle_kind = excluded.handle_kind,
                          handle_payload = excluded.handle_payload,
+                         attempt_kind = excluded.attempt_kind,
+                         attempt_payload = excluded.attempt_payload,
                          output_asset_ids = excluded.output_asset_ids,
                          updated_at = excluded.updated_at,
                          completed_at = excluded.completed_at",
@@ -321,6 +348,8 @@ impl DispatchRepository for SqliteDispatchRepository {
                         author_subject,
                         attributed_via,
                         pursuit_id,
+                        attempt_kind,
+                        attempt_payload,
                     ],
                 )?;
                 Ok(())

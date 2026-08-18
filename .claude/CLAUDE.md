@@ -10,4 +10,4 @@
 - Never work on `main`; one worktree per issue under `.worktrees/`, cut with `just worktree-new <type> <slug>` from the main checkout — the recipe runs `just branch-check` in the new worktree, so there is no second run to make.
 - The `-changed` gates answer for the commits on the branch and refuse a dirty tree. Commit, then run them; while editing, reach for `just rust-test-pkg <crate>`.
 - Agents do not push, publish, or open PRs. They do run `git fetch origin` then `just pre-push` themselves, write the PR body to a file under `workspace/`, and hand over the two literal commands — the ordering is in [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests) and putting `just pre-push` in the handed-over block is the mistake it exists to stop.
-- Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) on the diff before every commit.
+- Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) before every commit — `pub-checker` on the diff, `reviewer` with the issue number, which is all it needs.

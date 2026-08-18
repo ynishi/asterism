@@ -94,7 +94,7 @@ pub struct TxTarget {
 /// same pairing with a two-way CHECK.
 ///
 /// The payloads sit on the variants that own them (the `LineVerb`
-/// stance), which makes three of V84's four pairing rules
+/// stance), which makes three of V85's four pairing rules
 /// unrepresentable rather than merely checked: a pin cannot exist
 /// without a target, an out-of-scope claim cannot be made by a
 /// `remove`, and nothing but an `update` can supersede. The fourth —
@@ -187,7 +187,7 @@ impl PursuitTxKind {
     /// corrupt rows).
     ///
     /// A payload the reconstructed variant cannot hold is refused, not
-    /// discarded. V84's CHECKs already refuse these rows, so reaching
+    /// discarded. V85's CHECKs already refuse these rows, so reaching
     /// one here means the storage guarantee has broken somewhere — and
     /// the harmful answer to that is a value that reads back as though
     /// the column had been empty all along. Every column is either
@@ -285,7 +285,7 @@ impl PursuitTx {
     /// may do. Keeping what the library already holds is the untouched
     /// default, so a `Generated` or `Imported` asset has no entry to be
     /// working *on* — it is arriving, not revising. The other three of
-    /// V84's rules are unrepresentable rather than refused.
+    /// V85's rules are unrepresentable rather than refused.
     pub fn new(
         pursuit_id: PursuitId,
         persona_id: PersonaId,
@@ -569,7 +569,7 @@ mod tests {
         );
     }
 
-    /// The one pairing rule the type cannot hold. Three of V84's four
+    /// The one pairing rule the type cannot hold. Three of V85's four
     /// are unrepresentable — this is the fourth, and it is refused at
     /// construction rather than left to storage, because a caller that
     /// aims a generated asset at an entry has misunderstood what the

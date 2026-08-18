@@ -50,9 +50,33 @@ usefully afterwards: BSD's `-c` does not fail where clonefile is
 unavailable — it falls back to a real byte copy "to ensure the copy
 still succeeds" (`man cp`), which would cost more than the build it is
 meant to save — and GNU's `--reflink=always` does fail, but once per
-file, which over a full `target/` is tens of thousands of lines. Where
-there is no clone to make it skips the copy and says so, and the
-worktree starts cold, which is where it would have started regardless.
+file, which over a full `target/` is tens of thousands of lines.
+
+Where Linux has no clone the recipe hardlinks instead. Measured on
+ext4 against a 111 GB target directory, that is seconds and about
+10 GB where a byte copy of the same tree is 6.3 minutes and 111 GB —
+and two of those copies do not fit beside a checkout that already
+holds one. A hardlink shares the inode, so only the part of the tree
+that cargo replaces rather than overwrites is shared: the artifacts of
+a megabyte and up under `deps/`, which cargo names by a hash of their
+inputs and swaps by unlinking its own copy first. Everything else is
+copied, because everything else has a writer that opens the file that
+is already there — dep-info, fingerprints, an `OUT_DIR` a re-run
+build script does not get cleared, rustdoc's JSON, the lock file two
+checkouts would otherwise queue on. `incremental/` is dropped because
+cargo regenerates it.
+
+That copy is the slow half, so it runs in the background and the recipe
+returns in about two seconds: the branch is cut and its sources are
+there, and nothing reads `target/` until something compiles. It is
+staged under `workspace/`, which is gitignored, so an unfinished copy
+never makes the tree dirty and never blocks the `-changed` gates, and
+cargo cannot see a half-made tree either way.
+`workspace/target-staging.log` says when it lands, and a build started
+before then gets a cold `target/` of its own, which the staging leaves
+alone. Off Linux and without a clone the recipe skips the copy and says
+so, and the worktree starts cold, which is where it would have started
+regardless.
 
 Run it from the main checkout — a worktree cannot cut another one, and
 the recipe stops rather than nest one. Remove the worktree once the
@@ -188,8 +212,12 @@ Two agents ship with the repo, and we would appreciate a diff passing
 both before a pull request — recommended, not enforced:
 
 - `pub-checker` — applies the disclosure policy to the diff.
-- `reviewer` — checks the diff against the issue's acceptance criteria,
-  redistribution, gates, and the commit message format.
+- `reviewer` — checks the branch against the issue's acceptance
+  criteria, redistribution, gates, and the commit message format. Give
+  it the issue number and it takes the rest: the diff against `main`,
+  and its own rounds from `workspace/review-<issue>.md`. It stops
+  without an issue, and it reviews a branch twice — a branch too large
+  for that is an issue to split.
 
 The same recommendation extends past the PR: releases and publishes
 (crates, packages, the repository's own settings) are best performed
@@ -217,7 +245,11 @@ remote, and that includes the gate:
    gitignored, and say where it is. Not a summary in the chat, not "a
    draft" — a file, so that the command handed over can be
    `--body-file <path>` and the human reads the same bytes that will be
-   posted.
+   posted. The review record — `workspace/review-<issue>.md`, the
+   rounds and what became of each finding — goes into that body. A
+   finding declined there is a decision the pull request is making, so
+   it travels with it rather than staying in a worktree that is about
+   to be deleted.
 3. Hand over the literal commands. These two are the only ones that
    write to anything remote:
 

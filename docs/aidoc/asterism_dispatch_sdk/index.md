@@ -83,6 +83,7 @@ contract every other adapter is written against.
 
 ## Modules
 
+- [`attempt`](attempt.md): `AttemptRecord` — what an exporter has to say about a call it made,
 - [`derived`](derived.md): Re-export shim for the shared boundary type
 - [`exporter`](exporter.md): `Exporter` — the trait every outbound adapter implements.
 - [`handle`](handle.md): `Handle` — the exporter's backend-side reference to an in-flight job.

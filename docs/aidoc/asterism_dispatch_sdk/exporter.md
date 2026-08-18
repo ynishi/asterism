@@ -21,6 +21,13 @@ filesystem drop dir) all fit the same shape:
    `DispatchJob.id`, and `source_kind` = `format!("dispatch:{}",
    exporter_slug)`.
 
+All three take the same [`DispatchContext`], and it carries one
+outbound channel beside the read-only slices:
+[`attempt`](DispatchContext::attempt), where the exporter records
+what a call sent and what came back. That record survives an error
+return, which is what makes a refused submit as readable as an
+accepted one.
+
 ## Types
 
 - `DispatchContext` — The Selection-plus-context bundle the core hands the exporter on

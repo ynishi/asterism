@@ -302,6 +302,7 @@ mod tests {
             persona_id: "persona-1",
             action: "run",
             params,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         }
     }
 

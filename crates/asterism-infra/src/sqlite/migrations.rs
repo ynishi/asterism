@@ -6066,7 +6066,7 @@ CREATE INDEX idx_pursuit_restamp_from
     ON pursuit_restamp(from_pursuit_id);
 "#;
 
-/// V83 — the project and its lines (#63 decisions 1–3): the repo of
+/// V84 — the project and its lines (#63 decisions 1–3): the repo of
 /// the forge's git analogy, the named line it lands on, the entry
 /// identity above raw asset ids, the verb sequence that moves it, and
 /// the merge record that makes approval and landing one act.
@@ -6096,7 +6096,7 @@ CREATE INDEX idx_pursuit_restamp_from
 ///   channel-carrier list).
 /// - **Every line starts empty** — no backfill from historical kept
 ///   snapshots, which would invent approval events nobody performed.
-const V83_FORGE_PROJECT_LINE: &str = r#"
+const V84_FORGE_PROJECT_LINE: &str = r#"
 CREATE TABLE project (
     id             BLOB PRIMARY KEY,
     persona_id     BLOB NOT NULL REFERENCES persona(id) ON DELETE RESTRICT,
@@ -6161,7 +6161,7 @@ CREATE INDEX idx_line_event_asset ON line_event(asset_id);
 CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 "#;
 
-/// V84 — filing, and the columns a targeted IN needs (#63 decisions
+/// V85 — filing, and the columns a targeted IN needs (#63 decisions
 /// 4–5): the pursuit learns which project it files under, and the
 /// ledger learns to say *which entry* an `in` is aimed at, *which
 /// version it saw there*, whether it reached outside its scope, and
@@ -6210,7 +6210,7 @@ CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 ///   only on `update`, but an `update` is not yet required to carry
 ///   one: the verb is still reserved (`tx.rs`), nothing writes it, and
 ///   the other direction is P3's to close once the verb states what it
-///   means. V83 could pair its verbs both ways because all four were
+///   means. V84 could pair its verbs both ways because all four were
 ///   specified; this one is not, and a CHECK that guesses is worse than
 ///   a CHECK that waits. It names an asset and still carries no FK, for
 ///   the reason `pursuit_tx.asset_id` does not: the ledger is history,
@@ -6219,7 +6219,7 @@ CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 ///   statement the caller made at IN time about crossing into another
 ///   project's living set, not a fact that can be re-derived later,
 ///   because the set moves.
-const V84_FILING_AND_TARGETED_IN: &str = r#"
+const V85_FILING_AND_TARGETED_IN: &str = r#"
 ALTER TABLE pursuit ADD COLUMN project_id BLOB REFERENCES project(id) ON DELETE RESTRICT;
 
 CREATE INDEX idx_pursuit_project ON pursuit(project_id);
@@ -6240,6 +6240,32 @@ ALTER TABLE pursuit_tx ADD COLUMN supersedes_asset_id BLOB
 
 CREATE INDEX idx_pursuit_tx_target ON pursuit_tx(target_entry_id);
 CREATE INDEX idx_pursuit_tx_base_event ON pursuit_tx(base_event_id);
+"#;
+
+/// Version 82 → 83: the record of a dispatch's latest attempt — what the
+/// exporter sent and what came back, on the calls that produced no
+/// handle as well as on the ones that did.
+///
+/// `handle_payload` answers this today only where the backend accepted
+/// the job: the exporter builds its record on the way to a handle, and a
+/// refused submit returns an error instead, so the row keeps the one
+/// sentence in `state_message` and nothing about the call. These two
+/// columns are where that record goes, and they sit beside the handle
+/// rather than inside it because the handle means "a job exists over
+/// there" — a refused submit has no such job, and writing one in would
+/// hand the poll loop a reference to nothing.
+///
+/// Same ownership as `handle_payload`: `attempt_payload` is a JSON TEXT
+/// blob the exporter names the shape of, opaque to the DB layer, and
+/// `attempt_kind` says whose shape it is.
+///
+/// Rows written before this column keep it NULL, which reads as "nothing
+/// was recorded". There is no backfill and could not be one: the calls
+/// these rows describe are over, and their requests and responses were
+/// never written down anywhere to recover them from.
+const V83_DISPATCH_ATTEMPT: &str = r#"
+ALTER TABLE dispatch_job ADD COLUMN attempt_kind TEXT;
+ALTER TABLE dispatch_job ADD COLUMN attempt_payload TEXT;
 "#;
 
 /// Migrations in application order. **Append only** — never rewrite an
@@ -6327,8 +6353,9 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V80_TRACE_LOOKUP),
     Step::Sql(V81_DERIVED_TEXT),
     Step::App(v82_cull_record),
-    Step::Sql(V83_FORGE_PROJECT_LINE),
-    Step::Sql(V84_FILING_AND_TARGETED_IN),
+    Step::Sql(V83_DISPATCH_ATTEMPT),
+    Step::Sql(V84_FORGE_PROJECT_LINE),
+    Step::Sql(V85_FILING_AND_TARGETED_IN),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -9603,7 +9630,7 @@ mod tests {
     /// gesture and an act of narrowing are both statements somebody
     /// makes (#22: "who decided"), so they carry the triple;
     /// `cull_member` deliberately does not (a line item of its cull,
-    /// not a statement of its own). Fourth wave: the project (V83) —
+    /// not a statement of its own). Fourth wave: the project (V84) —
     /// opening one is a statement; `line_merge` deliberately does
     /// not carry the triple (who approved is who closed, and the
     /// close event already says so), and the line tables are
@@ -9643,7 +9670,7 @@ mod tests {
         );
     }
 
-    /// V83's rules are pairing rules, and they live in the schema: a
+    /// V84's rules are pairing rules, and they live in the schema: a
     /// verb's payload columns travel with the verb (two two-way
     /// CHECKs), a project holds one line per name, and a close event
     /// carries at most one merge. Asserted at insert level because
@@ -9652,7 +9679,7 @@ mod tests {
     /// write path arrives (the `v78_holds_the_two_rules` precedent:
     /// the schema is where the property actually lives).
     #[test]
-    fn v83_pairs_verb_and_payload_and_keeps_lines_and_merges_unique() {
+    fn v84_pairs_verb_and_payload_and_keeps_lines_and_merges_unique() {
         let mut conn = test_conn();
         migrate(&mut conn).unwrap();
         let persona = seed_persona(&conn);
@@ -9757,7 +9784,7 @@ mod tests {
         );
     }
 
-    /// V84's rules are pairing rules carried by **column-level** CHECKs
+    /// V85's rules are pairing rules carried by **column-level** CHECKs
     /// on ALTER-added columns, which is the arrangement the step doc
     /// says was measured rather than assumed. This is where the
     /// measurement is pinned: each rule is asserted against a real
@@ -9765,15 +9792,15 @@ mod tests {
     /// failure mode that would make the whole choice wrong — cannot
     /// pass unnoticed.
     ///
-    /// The other half is the ledger a pre-V84 database already holds.
+    /// The other half is the ledger a pre-V85 database already holds.
     /// `pursuit_tx` rows are history and a lost one is a gesture nobody
     /// can re-perform, so a row is seeded *before* the step runs and
     /// read back after with every attribution column named — the four
     /// that a careless widening would drop.
     #[test]
-    fn v84_leaves_the_ledger_alone_and_pairs_the_new_columns() {
+    fn v85_leaves_the_ledger_alone_and_pairs_the_new_columns() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 83).unwrap();
+        migrate_to(&mut conn, 84).unwrap();
         let persona = seed_persona(&conn);
 
         let pursuit = Uuid::now_v7();

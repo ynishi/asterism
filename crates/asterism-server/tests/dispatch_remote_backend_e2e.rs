@@ -563,6 +563,7 @@ mod fake_backend {
     use axum::Json;
     use axum::Router;
     use axum::extract::{Path as UrlPath, State};
+    use axum::http::StatusCode;
     use axum::routing::{get, post};
     use serde_json::{Value, json};
 
@@ -576,6 +577,16 @@ mod fake_backend {
         Finished { outputs: Value },
         /// The backend gave up, and said this.
         Failed { message: String },
+        /// The backend refuses the submit itself — a bad credential, a
+        /// body it will not accept. Nothing is queued, so no route past
+        /// the submit is ever reached, and there is no job id to key
+        /// anything by.
+        RefusedSubmit {
+            /// Status the submit is answered with.
+            status: u16,
+            /// What the backend says about the refusal.
+            body: Value,
+        },
     }
 
     /// The scripted backend plus everything it observed.
@@ -783,6 +794,9 @@ mod fake_backend {
             Outcome::Failed { message } => json!({
                 "status": { "status_str": "error", "completed": false, "error": message },
             }),
+            // Unreachable under that script: a refused submit never
+            // yields a prompt id, so nothing asks about one.
+            Outcome::RefusedSubmit { .. } => json!({}),
         };
         let mut history = serde_json::Map::new();
         history.insert(backend.job_id.to_string(), entry);
@@ -790,14 +804,26 @@ mod fake_backend {
     }
 
     /// The schema-driven backend's submit.
+    ///
+    /// Answers with a status as well as a body, because one script
+    /// refuses here: the submit is where a credential is checked, and
+    /// what the exporter does with a refusal is the thing
+    /// `a_refused_submit_records_what_it_sent` is about. The accepting
+    /// scripts answer `200`, which is what they always did.
     async fn http_submit(
         State(backend): State<Arc<FakeBackend>>,
         Json(body): Json<Value>,
-    ) -> Json<Value> {
+    ) -> (StatusCode, Json<Value>) {
         backend.record("POST /generate");
         backend.record_submission(body);
+        if let Outcome::RefusedSubmit { status, body } = &backend.outcome {
+            return (
+                StatusCode::from_u16(*status).expect("the script names a real status"),
+                Json(body.clone()),
+            );
+        }
         backend.write_declared_outputs();
-        Json(json!({ "job_id": backend.job_id }))
+        (StatusCode::OK, Json(json!({ "job_id": backend.job_id })))
     }
 
     /// The schema-driven backend's status route — the one the
@@ -823,6 +849,9 @@ mod fake_backend {
                 "status": "failed",
                 "error": message,
             })),
+            // Unreachable: the submit that would have produced this id
+            // was refused.
+            Outcome::RefusedSubmit { .. } => Json(json!({ "status": "unknown" })),
         }
     }
 
@@ -835,7 +864,7 @@ mod fake_backend {
         backend.record(format!("GET /result/{id}"));
         let items = match &backend.outcome {
             Outcome::Finished { outputs } => outputs.clone(),
-            Outcome::Failed { .. } => json!([]),
+            Outcome::Failed { .. } | Outcome::RefusedSubmit { .. } => json!([]),
         };
         // `seed` is the point of the envelope: a value the backend
         // decided, sitting beside the artefacts rather than inside one.
@@ -1806,4 +1835,243 @@ async fn a_schema_driven_export_reports_the_backends_own_failure_message() {
         .await
         .expect("list assets");
     assert_eq!(page.items.len(), 1, "only the original");
+}
+
+/// A submit the backend refuses lands the same record an accepted one
+/// does — the request as sent and the answer as received — where the
+/// accepted one has a handle and this one has nothing (#76).
+///
+/// The refusal is the case with the questions in it. A job that ran
+/// produced an artefact carrying its own call note, so "which endpoint,
+/// with what body, and what came back" is answerable from the output.
+/// A job that was refused has no output, and before this the whole
+/// record of it was the one sentence `state_message` carries. Both
+/// halves are asserted: the sentence is still the sentence, and the
+/// exchange is now beside it.
+///
+/// Read through `DispatchService::get`, which is the read a successful
+/// dispatch is inspected through too — a record reachable only from the
+/// database would leave the caller exactly where they started.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_submit_records_what_it_sent() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let corpus = tmp.path().join("corpus");
+    std::fs::create_dir_all(&corpus).expect("fixture dir");
+    let plate = corpus.join("plate.png");
+    std::fs::write(&plate, PNG_1X1).expect("write plate");
+
+    let db_path = tmp.path().join("asterism.db");
+    let core = boot(tmp.path()).await;
+    let (backend, port) = fake_backend::spawn(FakeBackend::new(
+        HTTP_JOB_ID,
+        0,
+        Outcome::RefusedSubmit {
+            status: 401,
+            // The echo is deliberate: a backend that quotes the request
+            // it rejected is the shape that would carry a credential
+            // back out if anything on this path copied instead of
+            // scrubbing.
+            body: json!({
+                "error": "invalid api key",
+                "echoed": { "client_id": "(the dispatch id)" },
+            }),
+        },
+        None,
+    ))
+    .await;
+
+    let persona = core
+        .persona_service
+        .register(
+            RegisterPersonaCommand {
+                name: "E2E".into(),
+                pack_id: Some("e2e-http-refused".into()),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("register persona");
+    let original = core
+        .asset_service
+        .add(
+            add_command(
+                &persona.id,
+                plate.to_str().expect("utf-8 fixture path"),
+                1_785_000_000_000,
+                None,
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("add original");
+
+    let export = export_via(
+        &core,
+        &db_path,
+        &persona.id,
+        &original.id,
+        Arc::new(HttpExporter::with_client(
+            tmp.path().join("custody"),
+            backend_client(),
+        )),
+        "render",
+        http_params(port),
+    )
+    .await;
+
+    assert_eq!(
+        backend.log(),
+        vec!["POST /generate".to_string()],
+        "a refused submit never gets as far as a status read"
+    );
+    assert!(export.output_ids.is_empty(), "nothing was made");
+    assert_eq!(
+        export.reenqueued,
+        Vec::<String>::new(),
+        "there is nothing to come back for"
+    );
+
+    let dto = core
+        .dispatch_service
+        .get(&export.dispatch_id)
+        .await
+        .expect("dispatch get");
+    assert_eq!(dto.state, "failed");
+    let message = dto.state_message.clone().expect("a failure says why");
+    assert!(
+        message.contains("HTTP 401") && message.contains("invalid api key"),
+        "the sentence on the row still reads as one: {message}"
+    );
+    assert!(
+        dto.handle_json.is_none(),
+        "no handle: there is no job over there to hold one for"
+    );
+
+    let attempt: serde_json::Value =
+        serde_json::from_str(&dto.attempt_json.expect("the refused submit is recorded"))
+            .expect("the record is JSON");
+    let exchange = &attempt["exchange"];
+    assert_eq!(exchange["request"]["method"], "POST");
+    assert_eq!(
+        exchange["request"]["url"],
+        json!(format!("http://127.0.0.1:{port}/generate")),
+        "which endpoint was asked"
+    );
+    assert_eq!(
+        exchange["request"]["body"]["prompt"],
+        json!("a test plate"),
+        "the body as sent, rendered templates and all"
+    );
+    assert_eq!(
+        exchange["request"]["body"]["client_id"],
+        json!(export.dispatch_id),
+        "the body as sent, rendered templates and all"
+    );
+    assert_eq!(exchange["status"], json!(401), "what the backend answered");
+    assert_eq!(
+        exchange["response"],
+        json!({
+            "error": "invalid api key",
+            "echoed": { "client_id": "(the dispatch id)" },
+        }),
+        "and what it said while answering it"
+    );
+    assert!(
+        exchange.get("error").is_none(),
+        "a backend that answered is not a backend that was never reached"
+    );
+}
+
+/// A backend that is not listening is told apart from one that answered
+/// with a rejection (#76).
+///
+/// Two different questions to whoever reads the row: one is "the
+/// endpoint said no", the other is "there is nothing at that address".
+/// The shape says which — a record with a status and a body against a
+/// record with neither and the transport's own words instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_that_was_never_there_records_that_it_was_not() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let corpus = tmp.path().join("corpus");
+    std::fs::create_dir_all(&corpus).expect("fixture dir");
+    let plate = corpus.join("plate.png");
+    std::fs::write(&plate, PNG_1X1).expect("write plate");
+
+    let db_path = tmp.path().join("asterism.db");
+    let core = boot(tmp.path()).await;
+    // A port bound and released: nothing is listening on it, and it is
+    // a port the OS just told us is free rather than one this test
+    // hoped was.
+    let port = {
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind probe");
+        probe.local_addr().expect("local_addr").port()
+    };
+
+    let persona = core
+        .persona_service
+        .register(
+            RegisterPersonaCommand {
+                name: "E2E".into(),
+                pack_id: Some("e2e-http-absent".into()),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("register persona");
+    let original = core
+        .asset_service
+        .add(
+            add_command(
+                &persona.id,
+                plate.to_str().expect("utf-8 fixture path"),
+                1_785_000_000_000,
+                None,
+            ),
+            &unattributed(),
+        )
+        .await
+        .expect("add original");
+
+    let export = export_via(
+        &core,
+        &db_path,
+        &persona.id,
+        &original.id,
+        Arc::new(HttpExporter::with_client(
+            tmp.path().join("custody"),
+            backend_client(),
+        )),
+        "render",
+        http_params(port),
+    )
+    .await;
+
+    let dto = core
+        .dispatch_service
+        .get(&export.dispatch_id)
+        .await
+        .expect("dispatch get");
+    assert_eq!(dto.state, "failed");
+
+    let attempt: serde_json::Value =
+        serde_json::from_str(&dto.attempt_json.expect("the attempt is recorded"))
+            .expect("the record is JSON");
+    let exchange = &attempt["exchange"];
+    assert_eq!(
+        exchange["request"]["url"],
+        json!(format!("http://127.0.0.1:{port}/generate")),
+        "the address that answered nothing is the useful half"
+    );
+    assert!(
+        exchange.get("status").is_none(),
+        "no status: nothing answered to have one"
+    );
+    assert_eq!(exchange["response"], json!(null));
+    let error = exchange["error"].as_str().expect("the transport said why");
+    assert!(
+        error.contains(&format!("127.0.0.1:{port}")),
+        "and it names the address it could not reach: {error}"
+    );
 }

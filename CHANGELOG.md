@@ -57,6 +57,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where it files or files nowhere. The close still lands nothing: what
   a filed pursuit does at close is P3.
 
+- **A refused submit records what it sent** (#76, carried from #41). The
+  record of a call existed only where the call succeeded: the HTTP
+  adapter builds the exchange — the request as sent beside the response
+  as received — on its way to a handle, and a submit the backend refuses
+  returns an error instead, so everything a reader would ask about it
+  left with that error. What stayed on the row was one sentence. That is
+  backwards from where the questions are: a job that ran produced an
+  artefact carrying its own call note, and a job that was refused is the
+  one with nothing to read.
+
+  Exporters now record a call through `DispatchContext.attempt`, and the
+  runner writes down whatever landed there after every exporter call —
+  on the arm that returned a handle and on the arm that returned an
+  error alike. The record is its own column pair
+  (`dispatch_job.attempt_kind` / `attempt_payload`, schema V83) beside
+  the handle rather than inside it, because a handle means "a job exists
+  over there" and a refused submit has no such job; it reaches a caller
+  as `DispatchDto.attempt_json`, the same read a successful dispatch is
+  inspected through. The HTTP adapter writes the same `exchange` shape
+  either way, now carrying the status it was answered with and, when
+  nothing answered, the transport's own words — so a backend that
+  rejected the request reads differently from one that was never there.
+  The failure message on the row is unchanged, and the credential
+  discipline is the one already in place: the secret an `auth` block
+  named is scrubbed out of everything recorded, on the way in, including
+  a backend's echo of the request it rejected. Unchanged in its limit
+  too — a token a profile interpolates out of its own params into a URL
+  or a body was never named as a credential, and this record is one more
+  surface it can reach.
+
+  Poll and harvest record on the same channel, for the calls that end a
+  job — a routine poll's exchange answers nothing the row does not
+  already say. One record per row, replaced by the latest attempt: a
+  re-run is a fresh dispatch, so the sequence a reader wants is already
+  the sequence of rows. Rows written before the columns read as "nothing
+  recorded"; there is no backfill, because the calls they describe are
+  over and were never written down to recover from.
+
 - **The ledger and the cull — selection is recorded** (#22, model on
   #63). Keeping or discarding a generated asset used to move through
   four unrelated routes — trash, a low rating, the inbox label, a fold
@@ -129,8 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fingerprints meaningful; on Linux it is `cp --reflink=always` on
   btrfs, bcachefs or XFS made with `reflink=1` — the same operation,
   with no timing taken for it yet. ext4 clones nothing and is what most
-  distributions leave on `/`, so a Linux checkout hears "starts cold"
-  more often than a macOS one. The filesystem is asked before the copy
+  distributions leave on `/`, so Linux gets the hardlink path below
+  more often than the clone. The filesystem is asked before the copy
   rather than judged by the outcome, because neither `cp` answers
   usefully afterwards: `cp -c` does not fail where clonefile is
   unavailable — it falls back to a real byte copy, which would cost
@@ -139,6 +177,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `target/` here held 74,802 of them. Asking is one clone of one 8 KiB
   file inside the new worktree, removed again before the recipe
   returns, or named in a NOTE where it could not be.
+
+  Where Linux has no clone it hardlinks, which is the one way left to
+  hand over a target directory without copying it: seconds and about
+  10 GB against the 6.3 minutes and 111 GB the byte copy of the same
+  tree costs at the 301 MiB/s this machine writes — and two of those
+  copies do not fit beside a checkout that already holds one. A
+  hardlink shares the inode, so a write through one path is a write to
+  the other, and only one part of the tree is safe on those terms: the
+  artifacts of a megabyte and up under `deps/` (2,307 files,
+  85.56 GiB), which cargo names by a hash of their inputs and swaps by
+  unlinking its own copy first. The remaining 33,368 files of
+  10.44 GiB are copied, because each has a writer that opens the file
+  already there — rustc truncating dep-info, cargo rewriting its
+  fingerprints and `.rustc_info.json`, a re-run build script writing
+  into an `OUT_DIR` nothing cleared, rustdoc overwriting its JSON, and
+  `.cargo-lock`, which is the inode two checkouts would queue on.
+  `incremental/` is dropped rather than either, since cargo
+  regenerates it and it is 18 GB of the 111. A worktree cut this way
+  builds 4 to 16 crates where a cold one builds the 753-crate graph.
+
+  The copy is the slow half — 45 seconds with the tree in page cache,
+  six minutes reading it cold — so it runs in the background and the
+  recipe returns in about two seconds. Nothing reads `target/` until
+  something compiles, and the staging happens under `workspace/`,
+  where being gitignored keeps an unfinished copy from making the tree
+  dirty and blocking the branch's own `-changed` gates.
+  `workspace/target-staging.log` says when it lands; a build that
+  starts first gets a cold `target/` of its own and keeps it.
 
 - **`just commit-msg-check` — the commit-message rules are checked
   rather than remembered** (#67). CONTRIBUTING asks for a body wrapped
