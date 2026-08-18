@@ -559,7 +559,7 @@ impl SourceKind {
     pub const DISPATCH_PREFIX: &'static str = "dispatch-";
 
     /// Builds the `source_kind` that
-    /// `asterism_core::application::DispatchService::reify` writes on
+    /// `asterism_core::application::forge::DispatchService::reify` writes on
     /// each derived Asset row for a dispatch that was handled by
     /// `exporter_slug`.
     ///

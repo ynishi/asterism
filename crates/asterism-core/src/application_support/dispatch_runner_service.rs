@@ -10,7 +10,7 @@
 //! that could call [`reify`](DispatchRunnerService::reify) could mint
 //! assets from a payload the wire supplied rather than from what the
 //! exporter actually produced. What the transports *do* front lives on
-//! [`DispatchService`](crate::application::DispatchService): create /
+//! [`DispatchService`](crate::application::forge::DispatchService): create /
 //! run / redispatch (start one) and get / list (read one).
 //!
 //! - [`save_state`](DispatchRunnerService::save_state) /

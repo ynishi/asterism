@@ -10,11 +10,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use asterism_core::application::forge::{DispatchService, ProjectService, PursuitService};
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, ProjectService, PursuitService,
-    QueryGroupService, SeriesStrategyService, SessionService, SnapshotService, ThreadService,
-    ThumbService,
+    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
+    SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
 

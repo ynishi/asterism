@@ -14,8 +14,8 @@
 //!   "paths that name a row keep it" half of the fold read rule).
 //! - [`forge`]           — the verbs of a line of work: the pursuit
 //!   lifecycle and the rounds filed under it. Grouped because they are
-//!   the services whose writes carry intent rather than content
-//!   (doctrine 6).
+//!   the services whose writes carry intent rather than content; the
+//!   boundary they keep is in [`domain::forge`](crate::domain::forge).
 //! - `attribution_intake` — the single check on the attribution fields a
 //!   command still carries (a remote caller's assertion arriving through
 //!   the owner's own surface).
@@ -77,9 +77,6 @@ pub mod thumb_service;
 pub use app_setting_service::AppSettingService;
 pub use asset_comment_service::AssetCommentService;
 pub use asset_service::{AssetService, INBOX_LABEL, OriginalFileRef};
-pub use forge::dispatch_service::DispatchService;
-pub use forge::project_service::ProjectService;
-pub use forge::pursuit_service::PursuitService;
 pub use material_layer_service::MaterialLayerService;
 pub use material_mark_service::MaterialMarkService;
 pub use modality_service::ModalityService;

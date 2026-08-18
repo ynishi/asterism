@@ -142,7 +142,7 @@ pub struct DispatchJob {
     ///
     /// One record per row: the latest attempt replaces the one before
     /// it. A re-run after a refusal is a fresh row
-    /// ([`DispatchService::redispatch`](crate::application::DispatchService::redispatch)),
+    /// ([`DispatchService::redispatch`](crate::application::forge::DispatchService::redispatch)),
     /// so the history a reader wants is already a sequence of rows.
     pub attempt: Option<serde_json::Value>,
     /// Kind slug for [`attempt`](Self::attempt) (mirrors

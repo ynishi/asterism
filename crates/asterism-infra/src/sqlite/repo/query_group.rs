@@ -1160,7 +1160,9 @@ mod tests {
         }
     }
 
-    fn build_dispatch_service(isle: &AsyncIsle) -> asterism_core::application::DispatchService {
+    fn build_dispatch_service(
+        isle: &AsyncIsle,
+    ) -> asterism_core::application::forge::DispatchService {
         use crate::sqlite::repo::SqliteDispatchRepository;
         use crate::sqlite::repo::asset::SqliteAssetRepository;
         use crate::sqlite::repo::group::SqliteGroupRepository;
@@ -1173,7 +1175,7 @@ mod tests {
             Arc::new(SqliteAssetRepository::new(isle.clone())),
             Arc::new(SqliteGroupRepository::new(isle.clone())),
         ));
-        asterism_core::application::DispatchService::new(
+        asterism_core::application::forge::DispatchService::new(
             Arc::new(SqliteSnapshotRepository::new(isle.clone())),
             Arc::new(SqliteDispatchRepository::new(isle.clone())),
             Arc::new(NoopQueue),

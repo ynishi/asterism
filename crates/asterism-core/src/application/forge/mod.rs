@@ -1,20 +1,17 @@
 //! Forge use cases — the verbs of a line of work.
 //!
 //! [`pursuit_service`] owns the lifecycle (open / close / reopen /
-//! restamp) and the reads over it; [`project_service`] opens the context
-//! those pursuits file under; [`dispatch_service`] starts a round and
-//! files it under the pursuit it belongs to, minting one when the caller
-//! named none.
+//! restamp) and the reads over it; [`dispatch_service`] starts a round
+//! and files it under the pursuit it belongs to, minting one when the
+//! caller named none. They are together because they are the two halves
+//! of one story — a pursuit with no round records nothing, a round with
+//! no pursuit cannot exist, which is a rule this layer keeps rather
+//! than one the type enforces ([`DispatchJob::pursuit_id`] is an
+//! `Option`) — and apart from the rest because they are the only
+//! services here whose writes carry intent rather than content (the
+//! layer itself is described in [`domain::forge`](crate::domain::forge)).
 //!
-//! The round itself is not a forge thing — [`dispatch`](crate::domain::dispatch)
-//! is a core module, because an exporter invocation is a call that was
-//! made rather than an account of why. What is a forge thing is the
-//! *filing*: choosing which pursuit a round belongs to, and minting one
-//! when the caller named none (doctrine 5). That rule binds here, at the
-//! application layer, on a forge verb — `DispatchJob::new` leaves
-//! `pursuit_id` unset, and the domain type is complete without it. So
-//! this service sits under `forge/` for the half of its job that is
-//! filing, and the boundary it straddles is the one #81 is about.
+//! [`DispatchJob::pursuit_id`]: crate::domain::dispatch::DispatchJob::pursuit_id
 //!
 //! Nothing in the catalogue is edited by either of them. Closing a
 //! pursuit freezes what was kept and touches no asset: no trash, no
@@ -24,3 +21,7 @@
 pub mod dispatch_service;
 pub mod project_service;
 pub mod pursuit_service;
+
+pub use dispatch_service::DispatchService;
+pub use project_service::ProjectService;
+pub use pursuit_service::PursuitService;

@@ -10,10 +10,11 @@
 use std::sync::Arc;
 
 use asterism_core::DomainError;
+use asterism_core::application::forge::{DispatchService, PursuitService};
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, PursuitService, QueryGroupService,
-    SessionService, SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SessionService,
+    SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;

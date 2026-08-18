@@ -15,7 +15,7 @@
 //! ```
 //!
 //! What follows is the part no index can generate: how the modules hang
-//! together, and the doctrines that reading one module at a time gets wrong.
+//! together, and the one dependency that decides where a new one goes.
 //!
 //! ## A tour of the domain
 //!
@@ -46,15 +46,13 @@
 //! behalf, and through which channel that answer arrived.
 //!
 //! **The forge layer.** [`forge`] is where intent lives: a line of work
-//! (`forge::pursuit`) inside the context it files under
-//! (`forge::project`), what entered it and what survived (`forge::tx`,
-//! `forge::cull`), and where a satisfied close lands (`forge::line`).
-//! The rounds it sends out are [`dispatch`], which stays in the core —
-//! an exporter invocation is a thing that happened, and the forge's
-//! claim on it is one stamp naming the pursuit it was filed under.
-//! Every other group above describes what is true of the stored bytes;
-//! this one describes what somebody was trying to do, and its own
-//! module doc states the boundary the two keep.
+//! (`forge::pursuit`), the culls and ledger entries it records, and the
+//! conclusion it freezes. The rounds themselves are [`dispatch`], which
+//! is a catalogue module — an exporter running over a frozen set is
+//! something that happened to the bytes, and it works with no pursuit in
+//! sight. Every other group above describes what is
+//! true of the stored bytes; this one describes what somebody was trying
+//! to do, and its own module doc states the boundary the two keep.
 //!
 //! **The annotation layer.** [`thread`] collects messages from humans and
 //! agents alike; [`asset_comment`] is the short-note thread on one asset;
@@ -80,74 +78,32 @@
 //! module absent here is an omission from a narrative, not from the
 //! record; the generated index and the command above are the inventory.
 //!
-//! ## Doctrines
+//! ## The one dependency
 //!
-//! The recurring decisions that reading code alone misleads on. Each is
-//! stated in full next to the type that carries it; this is the
-//! cross-module view.
+//! ```text
+//!   forge ──uses──▶ catalogue
+//! ```
 //!
-//! 1. **Events, not state.** A recorded act is one row per invocation over
-//!    a frozen set, with one-way lifecycle transitions — re-dispatching a
-//!    snapshot inserts a new `DispatchJob` rather than rolling a status
-//!    row per snapshot-exporter pair — and "current standing" is derived
-//!    on read: `duplicate_conflict` refuses a third resolution value, and
-//!    its repository re-derives "one of them went away" against the
-//!    assets on every read rather than writing it into the queue row.
-//! 2. **Facts and verdicts stay apart.** Edges are facts about content and
-//!    deliberately carry no actor and no timestamp; verdicts — a conflict
-//!    resolution, a fold, a merge ruling — live on their own rows, where
-//!    who and when can be recorded.
-//! 3. **Freeze, then refer.** A snapshot carries no name, no note, no
-//!    origin story. Every statement of *where it came from* lives on the
-//!    referencing event (`dispatch_job.source_group_id` /
-//!    `source_query_json`), never on the snapshot itself (`migrations.rs`,
-//!    `v19_selection_model`). Extends to pursuits: a pursuit carries
-//!    intent (`title`, `note`) and lineage of work (`parent_id`) but never
-//!    content — what happened lives on the stamped events, and the one
-//!    materialised set (the close product) is itself a frozen snapshot
-//!    the event refers to.
-//! 4. **Attribution answers "whose write is this" and stops there.** The
-//!    `(author, operator, via)` triple is about the write; where an
-//!    artefact came from is [`provenance`]'s question. The two vocabularies
-//!    do not mix.
-//! 5. **The unit of work is minted, never derived.** Content identity
-//!    changes whenever work is redone, so correlation by ancestry alone
-//!    cannot express succession, rejection, or abandonment. A
-//!    [`pursuit`](forge::pursuit) is identified by a minted id stamped
-//!    on its events, work cannot
-//!    happen outside one (a dispatch without a pursuit gets one minted in
-//!    the same request; a mint stranded by a failed dispatch write is the
-//!    legal pre-created-empty state, not debris), and everything else
-//!    about it — standing, membership, rollups — is projection.
+//! The forge names catalogue types. The catalogue should name a forge
+//! **id** and nothing else — no forge entity, no forge event, no forge
+//! port — and a change that adds one is the change to refuse.
 //!
-//!    Where this binds is the application layer, on the forge's own
-//!    verbs. [`DispatchJob`](dispatch::DispatchJob) is a core type and
-//!    is complete with `pursuit_id` unset; it is
-//!    `application::forge::dispatch_service` that will not let a round
-//!    be *started* without filing it. Reading the rule onto the domain
-//!    type is what would make the core need the forge, which doctrine 6
-//!    forbids.
-//! 6. **Two layers: the core states facts, the [`forge`] states intent.**
-//!    The core is what is true of the stored bytes — assets, freezes,
-//!    edges, the identity question ([`duplicate_conflict`]), what an
-//!    artefact discloses on its way out ([`disclosure`]), and the
-//!    invocation that sent it there ([`dispatch`]) — and it is
-//!    complete without the forge: importing, deduplicating, rating and
-//!    trashing need no pursuit, and the minting rule above binds the
-//!    forge's own events, not the catalogue. The forge is the operator's
-//!    account of a line of work, and it refers to content through frozen
-//!    sets and ids. **What it writes onto a core row is a correlation id
-//!    and nothing else** — the `_dispatch` stamp a reified output carries
-//!    and the `_trace` claim a returning artefact brings back
-//!    ([`provenance`]) — which say which event a row belongs to and never
-//!    what anyone thought of it. Verdicts the forge records live on its
-//!    own rows and name core ids (the cull, #22, model on #63); a core
-//!    row may record who wrote it (doctrine 2) but never why. The corollary that
-//!    has been reached for and is wrong: identity ("these are the same
-//!    thing") is a core
-//!    question the store asks itself, and expressing worth ("this one is
-//!    better") through a fold makes every reader of `folded_into` inherit
-//!    the ambiguity.
+//! **The arrow does not hold yet, and this is not a claim that it
+//! does.** [`repository`] declares `PursuitRepository` and
+//! `ProjectRepository` alongside the catalogue's own ports and imports
+//! seven forge types to do it; `application::asset_service` holds an
+//! `Arc<dyn PursuitRepository>`; `application::mapping` parses a
+//! pursuit id. Those are the open work on #81, not exceptions the rule
+//! makes room for. Cutting [`forge`] into its own crate is what would
+//! put the refusal in the compiler rather than in a reviewer's head,
+//! and until then this paragraph is the whole enforcement.
+//!
+//! No other cross-module rule is stated here, because the ones that
+//! used to be stated twice drifted. Each lives next to the type that
+//! enforces it — [`attribution`] for who a write is by, [`snapshot`]
+//! for why a freeze carries no origin story, [`edge`] for the two
+//! populations that share one table, and [`forge::pursuit`] for why a
+//! unit of work is minted rather than derived.
 //!
 //! ## Aggregate boundaries
 //!

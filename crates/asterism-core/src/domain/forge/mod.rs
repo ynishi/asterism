@@ -29,15 +29,13 @@
 //!                          (or .closed_abandoned — nothing lands)
 //! ```
 //!
-//! [`pursuit`] is the minted unit of work and its lifecycle facts. A
-//! round is a [`dispatch`](crate::domain::dispatch) — an exporter
-//! invocation against a frozen input set — and it is a *core* module,
-//! because what it records is that a call was made and what came back,
-//! not what anybody was after. The forge's part is the stamp: which
-//! pursuit that round was filed under. A round's outputs and the
-//! artefacts that come back are ordinary catalogue rows too — the forge
-//! does not hold a working copy, and there is no state to integrate at
-//! the end. What the close integrates is a *decision*.
+//! [`pursuit`] is the minted unit of work and its lifecycle facts;
+//! [`dispatch`](crate::domain::dispatch) is one round — an exporter
+//! invocation against a frozen
+//! input set, stamped with the pursuit it files under. A round's outputs
+//! and the artefacts that come back are ordinary catalogue rows: the
+//! forge does not hold a working copy, and there is no state to
+//! integrate at the end. What the close integrates is a *decision*.
 //!
 //! **Culling** — the narrowing between a return and the next round or
 //! the close — is recorded (#22, model on #63). Mid-work it moves
@@ -61,15 +59,28 @@
 //!   row itself would put the forge's vocabulary on the core's rows and
 //!   hand every downstream reader (dedupe, lineage, restore) an
 //!   ambiguity to inherit.
-//! - **Intent lives only here.** `title`, `note`, and the actor triple
-//!   are forge properties. A core row may record who wrote it — that is
-//!   bookkeeping, and doctrine 2 already allows it — but never *why*.
+//! - **Intent lives only here.** `title` and `note` are forge
+//!   properties; a core row may record who wrote it but never *why*.
+//!   The actor triple is **not** a forge property —
+//!   [`Asset`](crate::domain::asset::Asset) carries it too, so
+//!   [`attribution`](crate::domain::attribution) is a core module the
+//!   forge uses rather than one it owns. Moving it here would make
+//!   `Asset::new` depend on the forge, which is the arrow above turned
+//!   around.
 //! - **The core does not need the forge.** Importing, deduplicating,
 //!   rating and trashing all work with no pursuit in sight. The minting
-//!   rule (doctrine 5) binds the forge's own events, not the catalogue.
+//!   rule ([`pursuit`]) binds the forge's
+//!   own events, not the catalogue.
 //!
 //! # What is deliberately not here
 //!
+//! [`dispatch`](crate::domain::dispatch) is a catalogue module, though
+//! it reads as the forge's own: it records that an exporter ran over a
+//! frozen set, which is something that happened to the bytes. Delete
+//! the forge and dispatch still works — `pursuit_id` is an `Option`
+//! both constructors leave `None`. Delete dispatch and there is no way
+//! to send anything out. It keeps the stamp because an id is the one
+//! thing the catalogue may name.
 //! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
 //! the core by, and belongs to the core: it is content-addressed,
 //! deduplicated persona-wide, and carries no story about who froze it.
