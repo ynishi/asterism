@@ -494,7 +494,7 @@ aidoc-guard:
 #
 # Every gate whose cost does not scale with the workspace.
 [group('check')]
-check-shared: rust-fmt-check bindings-check ui-test ui-check ui-build aidoc-guard
+check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard
 
 # Run all Rust and frontend checks. The definition of green, and what
 # `main` gets.
@@ -954,9 +954,79 @@ commit-msg-check *args:
 # both answer questions no build can change, and a branch that fails
 # either fails it just as surely after twenty minutes of compiling.
 #
+# A branch that edits nothing but prose stops after those two. CI
+# already works that way — `paths-ignore` in `.github/workflows/check.yml`
+# starts no run for a push that touches only those files — so a local
+# run of the build gates over such a branch is minutes of a shared
+# machine spent reproducing a verdict nobody asked for and nothing
+# reads. The list is read from the workflow rather than copied here, so
+# the two cannot drift; the workflow's own comment is where the
+# reasoning for each entry lives, including which files are deliberately
+# absent from it.
+#
+# What a prose branch is left with is the two assertions above and a
+# reading of the diff — `pub-checker` for the disclosure policy,
+# `reviewer` for the rest. Neither is a recipe, and neither is
+# something `pre-push` can stand in for.
+#
 # Run every gate over the tree being handed over.
 [group('check')]
-pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD") check-shared rust-clippy-changed rust-test-changed
+pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ project_root }}"
+    changed=$(git diff --name-only origin/main...HEAD)
+    if [ -z "$changed" ]; then
+        echo "no commits on this branch that origin/main does not have." >&2
+        exit 1
+    fi
+    # The workflow's patterns are glob, and `**` there means what `*`
+    # means to bash once the path separator is not special to it.
+    mapfile -t ignored < <(
+        awk '/paths-ignore:/ { f = 1; next }
+             f && /^[[:space:]]*-[[:space:]]/ {
+                 gsub(/^[[:space:]]*-[[:space:]]*/, "")
+                 gsub(/^.|.$/, "")
+                 print
+                 next
+             }
+             f { exit }' .github/workflows/check.yml
+    )
+    if [ "${#ignored[@]}" -eq 0 ]; then
+        echo "could not read paths-ignore from .github/workflows/check.yml;" >&2
+        echo "running every gate rather than guessing." >&2
+        prose_only=false
+    else
+        prose_only=true
+        while IFS= read -r path; do
+            matched=false
+            for pattern in "${ignored[@]}"; do
+                # shellcheck disable=SC2053
+                if [[ "$path" == ${pattern/\*\*/\*} ]]; then
+                    matched=true
+                    break
+                fi
+            done
+            if [ "$matched" = false ]; then
+                prose_only=false
+                break
+            fi
+        done <<< "$changed"
+    fi
+    if [ "$prose_only" = true ]; then
+        # Except the one gate that is about prose. `check-shared` carries
+        # it for every other branch; a branch that edits nothing but
+        # markdown is the last one that should skip it.
+        just md-check
+        echo
+        echo "This branch edits only files the CI workflow's paths-ignore covers:"
+        printf '  %s\n' $changed
+        echo "No build gate starts for them in CI, so none runs here either. Read"
+        echo "the diff instead — pub-checker for the disclosure policy, reviewer"
+        echo "for the rest."
+        exit 0
+    fi
+    just check-shared rust-clippy-changed rust-test-changed
 
 # Fail when any Rust file is not rustfmt-clean.
 #
@@ -1563,6 +1633,52 @@ ui-check:
 [group('allow-agent')]
 ui-build:
     cd "{{ ui_dir }}" && npm run build
+
+# Wrap the repository's markdown at 80 columns.
+#
+# Three widths apply to this repository and only one of them is this: a
+# commit message body wraps at 72, because `git log` indents it four
+# spaces inside an 80-column terminal, and `commit-msg-check` is where
+# that is enforced. A body written to be posted — a pull request, an
+# issue — is not wrapped at all, because GitHub folds paragraphs itself
+# and a hard-wrapped one arrives with breaks nobody put there on
+# purpose; nothing here can check those, since they are never committed.
+# What is left is the markdown in the tree, and 80 is the width the
+# tools converged on (`markdownlint`'s MD013 defaults to it).
+#
+# Prettier rather than a checker of our own because the requirement is
+# to fix, not to complain: `md-fmt` rewraps, `md-check` fails when
+# something is unwrapped, and the two cannot disagree about what
+# "wrapped" means. `.prettierrc.json` carries the width and
+# `.prettierignore` carries what is exempt and why.
+#
+# It comes from the UI package because that is where this repository's
+# node_modules already is; `cd crates/asterism-ui && npm ci` installs
+# it, the same step `ui-test` needs.
+[group('check')]
+md-fmt:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ project_root }}"
+    exec "{{ ui_dir }}/node_modules/.bin/prettier" --write "**/*.md"
+
+# Fail if any markdown in the tree is not wrapped at 80.
+[group('check')]
+md-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ project_root }}"
+    prettier="{{ ui_dir }}/node_modules/.bin/prettier"
+    if [ ! -x "$prettier" ]; then
+        echo "prettier is not installed. It comes with the UI package:" >&2
+        echo "    cd crates/asterism-ui && npm ci" >&2
+        exit 1
+    fi
+    "$prettier" --check "**/*.md" || {
+        echo >&2
+        echo "Run 'just md-fmt' to wrap them." >&2
+        exit 1
+    }
 
 # Run the desktop e2e suite against a WebDriver-enabled debug build.
 #

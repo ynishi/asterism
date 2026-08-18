@@ -24,17 +24,17 @@ not required.
 This is a single-maintainer project, so these are commitments a single person
 can keep rather than a team SLA:
 
-| Stage | Target |
-|---|---|
-| Acknowledge the report | within 7 days |
-| Initial assessment — is it a vulnerability, and how severe | within 30 days |
-| Fix, or an explanation of why it will not be fixed | discussed with you once assessed |
-| Public disclosure | when the fix ships, or 90 days after the report, whichever is first |
+| Stage                                                      | Target                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| Acknowledge the report                                     | within 7 days                                                       |
+| Initial assessment — is it a vulnerability, and how severe | within 30 days                                                      |
+| Fix, or an explanation of why it will not be fixed         | discussed with you once assessed                                    |
+| Public disclosure                                          | when the fix ships, or 90 days after the report, whichever is first |
 
-The 90-day deadline is the industry norm and it runs regardless of whether a
-fix is ready, because an unfixed issue that stays secret indefinitely protects
-nobody but the project. If you need it held longer — a coordinated release
-with another project, for example — say so and it can be agreed.
+The 90-day deadline is the industry norm and it runs regardless of whether a fix
+is ready, because an unfixed issue that stays secret indefinitely protects
+nobody but the project. If you need it held longer — a coordinated release with
+another project, for example — say so and it can be agreed.
 
 Reports are handled through GitHub security advisories, which means you are
 credited on the published advisory unless you ask not to be. There is no bug
@@ -62,14 +62,14 @@ to import or export, and the contents of their own database.
 
 ## Safe harbour
 
-Good-faith research on your own installation is welcome and will not be met
-with legal action. "Good faith" means: your own data, no third party's, no
-attempt to reach anyone else's machine, and no public disclosure before the
-window above closes.
+Good-faith research on your own installation is welcome and will not be met with
+legal action. "Good faith" means: your own data, no third party's, no attempt to
+reach anyone else's machine, and no public disclosure before the window above
+closes.
 
 ## Handling a report that turns out to be a disclosure
 
 If a report shows that protected content is already published — a credential in
 history, personal data in a fixture — it stops being a vulnerability report and
-follows [After a disclosure](PUBLIC_DEVELOPMENT.md#after-a-disclosure), which
-is where the containment and notification steps live.
+follows [After a disclosure](PUBLIC_DEVELOPMENT.md#after-a-disclosure), which is
+where the containment and notification steps live.

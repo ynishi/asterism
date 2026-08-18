@@ -1,0 +1,17 @@
+{
+  "name": "prose-shape",
+  "version": "0.1.0",
+  "description": "Refuses a write that hard-wraps a pull request or issue body. GitHub folds paragraphs itself, and those bodies are never committed, so no gate over the tree can see them — the write is the only moment anything can.",
+  "author": {
+    "name": "Yutaka Nishimura"
+  },
+  "homepage": "https://github.com/ynishi/asterism",
+  "repository": "https://github.com/ynishi/asterism",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "asterism",
+    "hooks",
+    "prose",
+    "formatting"
+  ]
+}
