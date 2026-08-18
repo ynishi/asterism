@@ -247,11 +247,15 @@ pub struct AssetService {
     /// `preview_gen` job writes; the naming contract between the two
     /// is `domain::render::video_preview_path` and siblings.
     previews_dir: std::path::PathBuf,
-    /// Pursuit lookups for the sidecar claim lane (#29): a returning
-    /// artefact's `_asterism.pursuit_id` is a claim, and resolving it
-    /// means one `find` + a persona comparison — the same
+    /// The sidecar claim lane (#29): a returning artefact's
+    /// `_asterism.pursuit_id` is a claim, and resolving it means asking
+    /// whether the stamp names anything live in this persona — the same
     /// parse-then-resolve honesty the dispatch claim gets.
-    pursuits: Arc<dyn crate::domain::repository::PursuitRepository>,
+    ///
+    /// A `bool` port rather than the forge's own, which this held until
+    /// #81: ingest needs the answer, never the `Pursuit`, and the wider
+    /// port put a forge type on the catalogue's central service.
+    correlations: Arc<dyn crate::domain::repository::CorrelationResolver>,
 }
 
 impl AssetService {
@@ -276,7 +280,7 @@ impl AssetService {
         query_group_invalidator: crate::application::query_group_invalidation::QueryGroupInvalidator,
         sessions: Arc<crate::application::SessionService>,
         previews_dir: std::path::PathBuf,
-        pursuits: Arc<dyn crate::domain::repository::PursuitRepository>,
+        correlations: Arc<dyn crate::domain::repository::CorrelationResolver>,
     ) -> Self {
         Self {
             assets,
@@ -297,7 +301,7 @@ impl AssetService {
             query_group_invalidator,
             sessions,
             previews_dir,
-            pursuits,
+            correlations,
         }
     }
 
@@ -391,15 +395,14 @@ impl AssetService {
         persona_id: &crate::domain::value::PersonaId,
     ) -> Option<(String, bool)> {
         let claim = claim?;
-        let resolved = match crate::application::mapping::parse_pursuit_id(claim.trim()) {
+        let resolved = match crate::application::mapping::parse_correlation_id(claim.trim()) {
             Err(_) => false,
-            Ok(id) => match self.pursuits.find(&id).await {
-                Ok(Some(pursuit)) => pursuit.persona_id == *persona_id,
-                Ok(None) => false,
+            Ok(stamp) => match self.correlations.resolves(&stamp, persona_id).await {
+                Ok(answer) => answer,
                 Err(err) => {
                     tracing::warn!(
                         event = "diag.ingest.pursuit_claim_lookup_failed",
-                        pursuit_id = %id,
+                        pursuit_id = %stamp,
                         error = %err,
                         "pursuit claim recorded unresolved because the lookup failed"
                     );

@@ -16,11 +16,13 @@ use asterism_core::domain::forge::cull::{Cull, CullMember, CullVerdict};
 use asterism_core::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject,
 };
+use asterism_core::domain::forge::repository::PursuitRepository;
 use asterism_core::domain::forge::tx::{PursuitTx, PursuitTxKind};
 use asterism_core::domain::forge::value::{
     CullId, LineEntryId, LineEventId, ProjectId, PursuitEventId, PursuitId, PursuitTxId,
 };
-use asterism_core::domain::repository::PursuitRepository;
+use asterism_core::domain::repository::CorrelationResolver;
+use asterism_core::domain::value::CorrelationId;
 use asterism_core::domain::value::{AssetId, PersonaId, SnapshotId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
@@ -971,6 +973,50 @@ impl PursuitRepository for SqlitePursuitRepository {
     }
 }
 
+/// The catalogue's narrow view of the same table.
+///
+/// Ingest asks whether a returning artefact's stamp names anything live
+/// in its persona, and that is all it may ask — the port is a `bool`
+/// and lives in `domain::repository` so the catalogue never holds
+/// [`PursuitRepository`]. This adapter answers it because the answer is
+/// a row lookup, and putting the implementation in the forge would hand
+/// the composition root a forge type to wire into `AssetService` — the
+/// same dependency, arriving by a longer route.
+///
+/// One `EXISTS` rather than `find` plus a persona comparison: the
+/// caller discards the row either way, and the pair `(id, persona_id)`
+/// is what the question is about.
+///
+/// That changes one answer, deliberately. A row that is there but
+/// cannot hydrate — bad attribution columns, an out-of-range
+/// `created_at` — used to reach the caller as an error and be recorded
+/// unresolved. It now answers `true`, because the claim does name a
+/// pursuit of this persona and that is the whole question; whether the
+/// row reads back cleanly is a different one, and the reads that ask it
+/// still fail as before.
+#[async_trait]
+impl CorrelationResolver for SqlitePursuitRepository {
+    async fn resolves(
+        &self,
+        stamp: &CorrelationId,
+        persona_id: &PersonaId,
+    ) -> Result<bool, DomainError> {
+        let uuid = *stamp.as_uuid();
+        let persona = *persona_id.as_uuid();
+        self.isle
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pursuit WHERE id = ?1 AND persona_id = ?2)",
+                    params![uuid, persona],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|found| found != 0)
+            })
+            .await
+            .map_err(infra_err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1595,6 +1641,70 @@ mod tests {
             "one row per evented pursuit, tie broken on id; no-event pursuits absent"
         );
         let _ = untouched;
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// What the port answers, for the four cases ingest turns into
+    /// `pursuit_resolved` (#81). It exercises the port and stops there
+    /// — nothing between here and ingest is covered, so this is the
+    /// whole test of the swap that put a `bool` port under
+    /// `AssetService::resolve_pursuit_claim`.
+    ///
+    /// The persona half is the one worth pinning. A claim naming
+    /// another persona's pursuit is *unresolved*, not
+    /// resolved-elsewhere: the stamp is a real pursuit id, so a query
+    /// keyed on the id alone would answer `true` and file a return
+    /// across a boundary nothing else in the tree crosses. The second
+    /// assertion is what fails against such an implementation.
+    #[tokio::test]
+    async fn a_claim_resolves_only_against_its_own_persona() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona_a = seed_persona(&isle).await;
+        let persona_b = seed_persona(&isle).await;
+        let repo = SqlitePursuitRepository::new(isle.clone());
+        let ctx = AttributionContext::owner_surface();
+        let t0 = Utc.timestamp_millis_opt(1_000).unwrap();
+
+        let mine = Pursuit::new(persona_a, None, None, None, None, t0, &ctx);
+        repo.create(&mine).await.unwrap();
+        let stamp = mine.id.as_correlation();
+
+        assert!(
+            repo.resolves(&stamp, &persona_a).await.unwrap(),
+            "a claim naming a pursuit of the ingesting persona resolves"
+        );
+        assert!(
+            !repo.resolves(&stamp, &persona_b).await.unwrap(),
+            "the same stamp read from another persona is unresolved, not resolved elsewhere"
+        );
+        assert!(
+            !repo
+                .resolves(&PursuitId::new().as_correlation(), &persona_a)
+                .await
+                .unwrap(),
+            "a stamp naming nothing is false rather than an error — an artefact may \
+             carry a claim to a purged pursuit, and that is a fact to record"
+        );
+
+        // Standing is deliberately not consulted: filing a return under
+        // a closed pursuit is a legal act, so a close must not change
+        // any of the answers above.
+        let close = PursuitEvent::new(
+            mine.id,
+            persona_a,
+            PursuitEventKind::ClosedSatisfied,
+            None,
+            None,
+            t0,
+            &ctx,
+        )
+        .unwrap();
+        repo.append_event(&close).await.unwrap();
+        assert!(
+            repo.resolves(&stamp, &persona_a).await.unwrap(),
+            "a closed pursuit still resolves — the claim lane asks existence, not standing"
+        );
 
         driver.shutdown().await.unwrap();
     }

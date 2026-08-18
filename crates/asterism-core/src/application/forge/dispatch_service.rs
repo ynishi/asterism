@@ -39,11 +39,10 @@ use crate::application::mapping::{
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::forge::pursuit::Pursuit;
+use crate::domain::forge::repository::PursuitRepository;
 use crate::domain::forge::value::PursuitId;
 use crate::domain::job::JobKind;
-use crate::domain::repository::{
-    DispatchRepository, JobQueue, PursuitRepository, SnapshotRepository,
-};
+use crate::domain::repository::{DispatchRepository, JobQueue, SnapshotRepository};
 use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 

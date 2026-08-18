@@ -50,9 +50,13 @@ use crate::domain::asset::Asset;
 use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::{ConstellationEdge, EdgeKind};
 use crate::domain::job::JobKind;
+// The one forge port a catalogue-side service still holds: `reify`
+// writes the ledger entry for each output it mints. That write, not the
+// import, is what has to move — see #81.
+use crate::domain::forge::repository::PursuitRepository;
 use crate::domain::repository::{
     AssetRepository, DispatchRepository, EdgeRepository, JobQueue, PersonaRepository,
-    PursuitRepository, SnapshotRepository,
+    SnapshotRepository,
 };
 use crate::domain::value::{
     AssetId, BundleId, CoverText, DispatchId, Label, Modality, PersonaId, RegisterNote, SnapshotId,

@@ -33,10 +33,9 @@ use anyhow::{Context, Result};
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::dispatch::DispatchJob;
 use asterism_core::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind};
+use asterism_core::domain::forge::repository::PursuitRepository;
 use asterism_core::domain::forge::value::PursuitId;
-use asterism_core::domain::repository::{
-    DispatchRepository, PursuitRepository, SnapshotRepository,
-};
+use asterism_core::domain::repository::{DispatchRepository, SnapshotRepository};
 use asterism_core::domain::snapshot::Snapshot;
 use asterism_core::domain::value::AssetId;
 use asterism_infra::sqlite;

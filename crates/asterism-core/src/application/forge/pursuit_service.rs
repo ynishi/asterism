@@ -44,11 +44,10 @@ use crate::domain::forge::cull::{
 use crate::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject, standing,
 };
+use crate::domain::forge::repository::{ProjectRepository, PursuitRepository};
 use crate::domain::forge::tx::{PursuitTx, PursuitTxKind, TxOrigin, ledger};
 use crate::domain::forge::value::PursuitId;
-use crate::domain::repository::{
-    AssetRepository, DispatchRepository, PersonaRepository, ProjectRepository, PursuitRepository,
-};
+use crate::domain::repository::{AssetRepository, DispatchRepository, PersonaRepository};
 use crate::domain::value::{AssetId, PersonaId, SnapshotId};
 use crate::error::DomainError;
 

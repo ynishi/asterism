@@ -89,14 +89,16 @@
 //! port — and a change that adds one is the change to refuse.
 //!
 //! **The arrow does not hold yet, and this is not a claim that it
-//! does.** [`repository`] declares `PursuitRepository` and
-//! `ProjectRepository` alongside the catalogue's own ports and imports
-//! seven forge types to do it; `application::asset_service` holds an
-//! `Arc<dyn PursuitRepository>`; `application::mapping` parses a
-//! pursuit id. Those are the open work on #81, not exceptions the rule
-//! makes room for. Cutting [`forge`] into its own crate is what would
-//! put the refusal in the compiler rather than in a reviewer's head,
-//! and until then this paragraph is the whole enforcement.
+//! does.** Two places still break it, both write paths rather than
+//! oversights: `application_support::dispatch_runner_service` writes a
+//! `PursuitTx` for each output it reifies, and `application::mapping`
+//! parses a pursuit id and a project id for the forge's own callers.
+//! They are the open work on #81, not exceptions the rule makes room
+//! for. Cutting [`forge`] into its own crate is what would put the
+//! refusal in the compiler rather than in a reviewer's head, and until
+//! then this paragraph is the whole enforcement — which is why it is a
+//! list that has to be edited by hand when one of them closes, and why
+//! #81 asks whether a guard should hold it instead.
 //!
 //! No other cross-module rule is stated here, because the ones that
 //! used to be stated twice drifted. Each lives next to the type that

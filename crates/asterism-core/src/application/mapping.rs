@@ -779,6 +779,22 @@ pub fn parse_dispatch_id(value: &str) -> Result<DispatchId, DomainError> {
     Ok(DispatchId::from_uuid(parse_uuid(value, "dispatch_id")?))
 }
 
+/// Parses the wire representation of a correlation stamp — the same
+/// text a pursuit id has, read by a caller that is not allowed to name
+/// one.
+///
+/// Ingest resolves a sidecar's `pursuit_id` claim and only ever asks
+/// whether it resolves, so it parses to the catalogue's own type and
+/// never reaches for the forge's.
+pub fn parse_correlation_id(
+    value: &str,
+) -> Result<crate::domain::value::CorrelationId, DomainError> {
+    Ok(crate::domain::value::CorrelationId::from_uuid(parse_uuid(
+        value,
+        "pursuit_id",
+    )?))
+}
+
 /// Parses the wire representation of a pursuit id.
 ///
 /// One of the two forge parsers still living in the catalogue's mapping

@@ -819,6 +819,10 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
+        // As `CorrelationResolver`, not as the forge port the forge
+        // services get from the same handle: what ingest asks of a
+        // sidecar's stamp is whether it resolves, and the catalogue's
+        // service is typed to that question alone (#81).
         pursuits.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
