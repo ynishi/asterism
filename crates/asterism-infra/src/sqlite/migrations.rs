@@ -6066,6 +6066,32 @@ CREATE INDEX idx_pursuit_restamp_from
     ON pursuit_restamp(from_pursuit_id);
 "#;
 
+/// Version 82 → 83: the record of a dispatch's latest attempt — what the
+/// exporter sent and what came back, on the calls that produced no
+/// handle as well as on the ones that did.
+///
+/// `handle_payload` answers this today only where the backend accepted
+/// the job: the exporter builds its record on the way to a handle, and a
+/// refused submit returns an error instead, so the row keeps the one
+/// sentence in `state_message` and nothing about the call. These two
+/// columns are where that record goes, and they sit beside the handle
+/// rather than inside it because the handle means "a job exists over
+/// there" — a refused submit has no such job, and writing one in would
+/// hand the poll loop a reference to nothing.
+///
+/// Same ownership as `handle_payload`: `attempt_payload` is a JSON TEXT
+/// blob the exporter names the shape of, opaque to the DB layer, and
+/// `attempt_kind` says whose shape it is.
+///
+/// Rows written before this column keep it NULL, which reads as "nothing
+/// was recorded". There is no backfill and could not be one: the calls
+/// these rows describe are over, and their requests and responses were
+/// never written down anywhere to recover them from.
+const V83_DISPATCH_ATTEMPT: &str = r#"
+ALTER TABLE dispatch_job ADD COLUMN attempt_kind TEXT;
+ALTER TABLE dispatch_job ADD COLUMN attempt_payload TEXT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6151,6 +6177,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V80_TRACE_LOOKUP),
     Step::Sql(V81_DERIVED_TEXT),
     Step::App(v82_cull_record),
+    Step::Sql(V83_DISPATCH_ATTEMPT),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

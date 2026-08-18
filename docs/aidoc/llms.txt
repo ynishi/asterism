@@ -114,6 +114,7 @@
 ## asterism-dispatch-sdk 0.0.0
 
 - [asterism-dispatch-sdk overview](asterism_dispatch_sdk/index.md): # asterism-dispatch-sdk
+- [asterism-dispatch-sdk::attempt](asterism_dispatch_sdk/attempt.md): `AttemptRecord` — what an exporter has to say about a call it made,
 - [asterism-dispatch-sdk::derived](asterism_dispatch_sdk/derived.md): Re-export shim for the shared boundary type
 - [asterism-dispatch-sdk::exporter](asterism_dispatch_sdk/exporter.md): `Exporter` — the trait every outbound adapter implements.
 - [asterism-dispatch-sdk::handle](asterism_dispatch_sdk/handle.md): `Handle` — the exporter's backend-side reference to an in-flight job.

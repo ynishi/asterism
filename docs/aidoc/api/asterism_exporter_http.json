@@ -15,7 +15,7 @@
     {
       "path": "asterism_exporter_http::Exchange",
       "kind": "struct",
-      "docs": "The request as sent beside the response as received.\n\nRedaction happens on the way in, not on the way out: the auth header\nis replaced by name, and any other occurrence of the resolved secret\n— a profile is free to put `{{secret}}` in a query string or a body\nfield — is scrubbed from the recorded copy. A redaction applied at\nread time would mean the value had already been written down."
+      "docs": "The request as sent beside the response as received.\n\nRedaction happens on the way in, not on the way out: the auth header\nis replaced by name, and any other occurrence of the resolved secret\n— a profile is free to put `{{secret}}` in a query string or a body\nfield — is scrubbed from the recorded copy. A redaction applied at\nread time would mean the value had already been written down.\n\nThe secret the `auth` block named, that is. A token a profile\ninterpolated out of its own params into a URL or a body is out of\nreach here as it is everywhere else — the adapter was never told it\nwas a credential (the crate doc states the trade). This record is one\nmore surface it can land on, and the poll and harvest requests it\ncarries are surfaces nothing recorded before.\n\nRecorded whichever way the call went. A refused submit is the case a\nreader has the most questions about — which endpoint, with which\nbody, and what the backend actually said — and it is the case that\nproduces no handle to carry the answer, so this shape also travels\nthrough [`DispatchContext::attempt`] onto the row itself."
     },
     {
       "path": "asterism_exporter_http::FetchSchema",

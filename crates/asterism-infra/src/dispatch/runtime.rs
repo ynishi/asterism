@@ -20,7 +20,8 @@ use asterism_core::domain::repository::{
 use asterism_core::domain::value::{DispatchId, Viewer};
 use asterism_core::error::DomainError;
 use asterism_dispatch_sdk::{
-    DispatchContext, DispatchState as SdkState, Exporter, ExporterError, Handle,
+    AttemptRecord, AttemptRecorder, DispatchContext, DispatchState as SdkState, Exporter,
+    ExporterError, Handle,
 };
 
 /// Registry of exporters keyed by their `Exporter::slug()`, plus any
@@ -246,6 +247,11 @@ pub async fn run_dispatch_run(
             dto
         })
         .collect();
+    // Handed to the exporter on every call below, and drained after each
+    // one. It is what makes a refused submit legible: `dispatch` can
+    // only return an error, so anything it wants remembered about the
+    // call has to have been written down before it returned.
+    let recorder = CollectAttempt::default();
     let ctx = DispatchContext {
         inputs: &inputs,
         selection_id: &selection_str,
@@ -254,11 +260,17 @@ pub async fn run_dispatch_run(
         action: &job.action,
         params: &job.params,
         persona_id: &persona_str,
+        attempt: &recorder,
     };
 
     match &job.state {
         DispatchState::Pending => {
-            let handle = match exporter.dispatch(ctx).await {
+            let submitted = exporter.dispatch(ctx).await;
+            // Before the verdict, on both arms: the record of a refused
+            // submit is the whole point, and the record of an accepted
+            // one is what makes the two read alike.
+            record_attempt(env, &dispatch_id, &recorder).await;
+            let handle = match submitted {
                 Ok(h) => h,
                 Err(err) => {
                     let message = describe(&err);
@@ -303,7 +315,9 @@ pub async fn run_dispatch_run(
                     .await?;
                 return Ok(format!("dispatch {} failed: {message}", dispatch_id_str));
             };
-            match exporter.poll(ctx, &handle).await {
+            let polled = exporter.poll(ctx, &handle).await;
+            record_attempt(env, &dispatch_id, &recorder).await;
+            match polled {
                 Ok(SdkState::Running(hint)) => {
                     env.service
                         .save_state(
@@ -318,31 +332,35 @@ pub async fn run_dispatch_run(
                     env.reenqueue.reenqueue(&dispatch_id).await?;
                     Ok(format!("dispatch {} still running", dispatch_id_str))
                 }
-                Ok(SdkState::Done) => match exporter.harvest(ctx, &handle).await {
-                    Ok(derived) => {
-                        let n = derived.len();
-                        env.service.reify(&dispatch_id, derived).await?;
-                        Ok(format!(
-                            "dispatch {} harvested {} derived",
-                            dispatch_id_str, n
-                        ))
+                Ok(SdkState::Done) => {
+                    let harvested = exporter.harvest(ctx, &handle).await;
+                    record_attempt(env, &dispatch_id, &recorder).await;
+                    match harvested {
+                        Ok(derived) => {
+                            let n = derived.len();
+                            env.service.reify(&dispatch_id, derived).await?;
+                            Ok(format!(
+                                "dispatch {} harvested {} derived",
+                                dispatch_id_str, n
+                            ))
+                        }
+                        Err(err) => {
+                            let message = describe(&err);
+                            env.service
+                                .save_state(
+                                    &dispatch_id,
+                                    DispatchState::Failed {
+                                        message: message.clone(),
+                                    },
+                                )
+                                .await?;
+                            Ok(format!(
+                                "dispatch {} harvest failed: {message}",
+                                dispatch_id_str
+                            ))
+                        }
                     }
-                    Err(err) => {
-                        let message = describe(&err);
-                        env.service
-                            .save_state(
-                                &dispatch_id,
-                                DispatchState::Failed {
-                                    message: message.clone(),
-                                },
-                            )
-                            .await?;
-                        Ok(format!(
-                            "dispatch {} harvest failed: {message}",
-                            dispatch_id_str
-                        ))
-                    }
-                },
+                }
                 Ok(SdkState::Failed { message }) => {
                     env.service
                         .save_state(
@@ -393,6 +411,65 @@ pub async fn run_dispatch_run(
                 job.state.slug()
             ))
         }
+    }
+}
+
+/// The runner's [`AttemptRecorder`]: a slot the exporter writes into
+/// during a call and the runner empties once the call has returned.
+///
+/// Keeps the latest record only. Within one tick an exporter makes one
+/// call worth recording, and across ticks the row's own column holds one
+/// record by design — the sequence a reader wants is the sequence of
+/// dispatch rows, not of retries inside a tick.
+#[derive(Default)]
+struct CollectAttempt(std::sync::Mutex<Option<AttemptRecord>>);
+
+impl CollectAttempt {
+    /// Empties the slot, so a call that recorded nothing is
+    /// distinguishable from the previous call's record still sitting
+    /// there.
+    fn take(&self) -> Option<AttemptRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+
+impl AttemptRecorder for CollectAttempt {
+    fn record(&self, record: AttemptRecord) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(record);
+    }
+}
+
+/// Persists whatever the exporter recorded about the call that just
+/// returned. A call that recorded nothing writes nothing.
+///
+/// Logged rather than propagated, for the reason the reify path's
+/// fingerprint enqueue is: the tick's own outcome — a handle to save, a
+/// failure to record — is the thing the row must end up carrying, and an
+/// error here would return `Err` from the handler and hand the job back
+/// to the queue. The retry would find the row still `Pending` and submit
+/// to the backend a second time, which is a duplicate job in exchange
+/// for a note about the first one.
+async fn record_attempt(env: &DispatchRunEnv, id: &DispatchId, recorder: &CollectAttempt) {
+    let Some(record) = recorder.take() else {
+        return;
+    };
+    if let Err(err) = env
+        .service
+        .save_attempt(id, record.kind, record.payload)
+        .await
+    {
+        tracing::warn!(
+            event = "diag.dispatch.attempt_save_failed",
+            dispatch_id = %id,
+            error = %err,
+            "could not record what the exporter's call sent and received"
+        );
     }
 }
 

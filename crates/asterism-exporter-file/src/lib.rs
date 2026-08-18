@@ -909,6 +909,7 @@ mod tests {
             action: ACTION_WRITE,
             params: &params,
             inputs: &inputs,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         };
 
         let exp = FileExporter::new();
@@ -968,6 +969,7 @@ mod tests {
             action: ACTION_WRITE,
             params: &params,
             inputs: &inputs,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         };
 
         let exp = FileExporter::new();
@@ -1006,6 +1008,7 @@ mod tests {
             action: ACTION_WRITE,
             params: &params,
             inputs: &inputs,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         };
 
         let exp = FileExporter::new();
@@ -1064,6 +1067,7 @@ mod tests {
             action: ACTION_WRITE,
             params: &params,
             inputs: &inputs,
+            attempt: &asterism_dispatch_sdk::DISCARD_ATTEMPTS,
         };
 
         let exp = FileExporter::new();
