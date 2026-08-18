@@ -19,6 +19,8 @@ use crate::domain::duplicate_conflict::{ConflictResolution, DuplicateAxis, Dupli
 use crate::domain::edge::{ConstellationEdge, EdgeKind, IncidentEdge};
 use crate::domain::forge::cull::{Cull, CullMember};
 use crate::domain::forge::dispatch::DispatchJob;
+use crate::domain::forge::line::Line;
+use crate::domain::forge::project::Project;
 use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::forge::tx::PursuitTx;
 use crate::domain::group::{Group, GroupLink, GroupSummary};
@@ -40,8 +42,8 @@ use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
-    PackId, Page, PersonaId, Progress, PursuitId, SessionId, SnapshotId, SourceKind, StrategyId,
-    TagId, ThreadId,
+    PackId, Page, PersonaId, Progress, ProjectId, PursuitId, SessionId, SnapshotId, SourceKind,
+    StrategyId, TagId, ThreadId,
 };
 use crate::error::DomainError;
 
@@ -3022,6 +3024,62 @@ pub trait PursuitRepository: Send + Sync {
         asset_id: &AssetId,
         limit: u32,
     ) -> Result<Vec<(Cull, CullMember)>, DomainError>;
+}
+
+/// Persistence port for the forge's project and its lines (#63
+/// decisions 1–2).
+///
+/// Separate from [`PursuitRepository`] rather than folded into it,
+/// because the two answer different questions: a pursuit is one
+/// attempt and its record, a project is the shared context attempts
+/// file under and the canonical set they land on. They meet at exactly
+/// one column (`pursuit.project_id`), which is a filing rather than an
+/// aggregate boundary being crossed.
+#[async_trait]
+pub trait ProjectRepository: Send + Sync {
+    /// Persists a project together with the line it opens with, in one
+    /// transaction. Two rows rather than one call each because "the
+    /// project exists" and "it has a line to land on" must not be
+    /// separable facts — a project whose line is missing has nothing a
+    /// merge could target, and nothing would ever notice.
+    ///
+    /// v1 passes exactly one line, named
+    /// [`MAIN`](crate::domain::forge::line::Line::MAIN); the signature
+    /// takes a slice so a later multi-line model is a caller change
+    /// rather than a port change. An empty slice is refused — it would
+    /// commit the very state the transaction exists to prevent.
+    async fn create(&self, project: &Project, lines: &[Line]) -> Result<(), DomainError>;
+
+    /// Fetches one project by id.
+    async fn find(&self, id: &ProjectId) -> Result<Option<Project>, DomainError>;
+
+    /// Fetches a persona's project by the exact name it was stored
+    /// under. Comparison is the column's, which is byte-exact: case,
+    /// internal spacing and Unicode normal form all distinguish two
+    /// names.
+    ///
+    /// This exists because project-name uniqueness is an application
+    /// rule rather than a schema one, so nothing raises a constraint
+    /// violation to catch — a caller enforcing it reads first. Two of
+    /// those reads can both come back empty and both go on to write,
+    /// which this port does not close: `create` is a separate call, so
+    /// the rule is advisory under concurrency. Whether it stays that
+    /// way is open, and the alternative is a partial UNIQUE (the
+    /// `dir(persona_id, name)` precedent, which survives archival by
+    /// excluding archived rows) rather than a check moved elsewhere.
+    async fn find_named(
+        &self,
+        persona_id: &PersonaId,
+        name: &str,
+    ) -> Result<Option<Project>, DomainError>;
+
+    /// Lists a persona's projects, most-recent first, capped at
+    /// `limit`.
+    async fn list(&self, persona_id: &PersonaId, limit: u32) -> Result<Vec<Project>, DomainError>;
+
+    /// A project's lines, oldest first. v1 returns exactly one; the
+    /// merge target derives pursuit → project → this.
+    async fn lines_of(&self, project_id: &ProjectId) -> Result<Vec<Line>, DomainError>;
 }
 
 /// Persistence port for the Query Group evaluation core.

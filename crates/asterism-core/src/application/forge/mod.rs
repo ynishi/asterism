@@ -16,4 +16,5 @@
 //! the catalogue's own business, and stays on the catalogue's verbs.
 
 pub mod dispatch_service;
+pub mod project_service;
 pub mod pursuit_service;

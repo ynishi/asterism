@@ -10,6 +10,48 @@ and this project adheres to
 
 ### Added
 
+- **The project, its mainline, and the merge record — the forge gets a place to
+  land** (P1 of #63). The forge could say what a pursuit tried and what a close
+  kept, but not what anything landed on. Now the project is the repo of the
+  forge's git analogy — per persona, deliberately opened, one `main` line each
+  (the `line` table admits named siblings before the code does, so "the
+  mainline" is a description, not a type) — and above raw asset ids sits the
+  line entry: the identity that stays "the living one" while replacement and
+  renaming move beneath it. Four merge verbs (`add` / `replace` / `delete` /
+  `rename`) move an entry as an append-only sequence; liveness, current name,
+  and current version all derive on read, latest-wins per axis, so history is
+  the verb sequence itself. The merge row binds a satisfied close to what it
+  landed — approval _is_ the merge event, so an approved entry can never
+  silently hold unapproved bytes. This slice is schema and domain only (V83,
+  `project.rs`, `line.rs`, derives, tests): no write path yet, every line starts
+  empty, and a pursuit that files under no project behaves exactly as before.
+
+- **Filing, and the columns a targeted IN needs** (P2 of #63). A pursuit can now
+  say which project it files under, and the ledger can say which line entry an
+  `in` is aimed at, which version of that entry the caller saw when it aimed,
+  whether the aim reached into another project, and which member an `update`
+  revises (V84). Filing is nullable because filing is what mints a pursuit once
+  exploration moves below the forge — a pursuit with no project is what the
+  always-mint rule left behind, not a mode, and those rows are left as they are
+  rather than given a project they never had. The aim rides on the gesture that
+  carries it rather than in four loose columns, so a pin with nothing pinned, a
+  `remove` claiming it reached out of scope, and anything but an `update`
+  superseding a member are all states the domain cannot express; only "just an
+  existing `in` may aim" needs a check. Purging a persona now sweeps its project
+  and lines with everything else.
+
+- **The filing verb — a project to work under** (P2 of #63). `project_open`
+  opens one and mints the `main` line with it in the same transaction,
+  `project_get` and `project_list` read them back, and `pursuit_open` takes a
+  `project_id` that puts the pursuit's satisfied close on that project's line.
+  Two rules the schema cannot hold live in the service: a project name is unique
+  among one persona's projects, checked by reading first, so two simultaneous
+  opens of one name can both land; and filing never crosses personas, which no
+  foreign key can say because `project` carries its own persona and the column
+  references only the project. A parent's filing is not inherited — a child says
+  where it files or files nowhere. The close still lands nothing: what a filed
+  pursuit does at close is P3.
+
 - **A refused submit records what it sent** (#76, carried from #41). The record
   of a call existed only where the call succeeded: the HTTP adapter builds the
   exchange — the request as sent beside the response as received — on its way to

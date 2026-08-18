@@ -350,14 +350,16 @@ impl DispatchRunnerService {
                 let entry = crate::domain::forge::tx::PursuitTx::new(
                     pursuit_id,
                     job.persona_id,
-                    crate::domain::forge::tx::PursuitTxKind::In(
-                        crate::domain::forge::tx::TxOrigin::Generated,
-                    ),
+                    crate::domain::forge::tx::PursuitTxKind::In {
+                        origin: crate::domain::forge::tx::TxOrigin::Generated,
+                        target: None,
+                        out_of_scope: false,
+                    },
                     *asset_id,
                     None,
                     now,
                     &attribution,
-                );
+                )?;
                 self.pursuits.append_tx(&entry).await?;
             }
         }

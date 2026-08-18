@@ -37,4 +37,5 @@ entry, which is the difference between a workspace and a record.
 - `PursuitTx` — One recorded membership gesture.
 - `PursuitTxKind` — The closed set of ledger gestures. `In` carries its origin because
 - `TxOrigin` — Where an `in` gesture brought its asset from. A fact about the
+- `TxTarget` — What an `in` declares about a line entry it is aimed at (#63
 

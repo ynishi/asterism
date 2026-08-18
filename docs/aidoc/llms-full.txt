@@ -173,6 +173,7 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
+- `OpenProjectCommand` — Opens a project (#63 decisions 1–2): the repo of the forge's git
 - `OpenPursuitCommand` — Opens a pursuit explicitly — the "start new pursuit" affordance
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
@@ -331,6 +332,7 @@ the domain types.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
 - `JobsSnapshotDto` — Snapshot of the background-jobs table used by the UI progress
+- `LineDto` — One named line of a project (#63 decisions 1–2) — the branch of the
 - `LineageEdgeDto` — One `derived_from` link in a lineage walk. Direction is
 - `LineageNodeDto` — One asset in a multi-hop lineage walk.
 - `LineageViewDto` — Multi-hop `derived_from` lineage around one asset.
@@ -349,6 +351,7 @@ the domain types.
 - `PersonaDto` — Persona payload.
 - `PersonaProfileDto` — Per-persona identity signal — the avatar / short bio / role
 - `PersonaThemeDto` — Per-persona visual chrome — currently holds the wallpaper asset
+- `ProjectDto` — The repo of the forge's git analogy (#63 decisions 1–2): the shared
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `PursuitDto` — The minted unit of work (#29): one line of generation and curation
 - `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
@@ -576,6 +579,7 @@ the private design notes.
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::project_service`](application__forge__project_service.md): Project use cases — opening the context work files under, and
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -619,6 +623,8 @@ the private design notes.
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
 - [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
+- [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
+- [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
@@ -996,6 +1002,32 @@ assets from a wire payload.
 - `DispatchService` — Outbound-dispatch use-case service.
 
 
+<!-- asterism_core/application__forge__project_service.md -->
+# asterism-core::application::forge::project_service
+
+Project use cases — opening the context work files under, and
+reading it back (#63 decisions 1–2).
+
+Thin next to [`pursuit_service`](super::pursuit_service), and it
+stays that way while the merge is unwritten: a project has no
+lifecycle of its own. It is opened, it is read, and everything that
+happens *to* it happens through the pursuits filed under it.
+
+Two rules live here rather than in the schema, for opposite
+reasons. **Name uniqueness among one persona's projects** is
+application-side and read-checked, so two callers racing can both
+find the name free and both write it — the rule is advisory under
+concurrency, and closing that is a schema decision (a partial
+UNIQUE) rather than a service one. **The line minted with the
+project** is the other way round: the repository writes both in one
+transaction, and this layer only decides that there is exactly one
+and what it is called.
+
+## Types
+
+- `ProjectService` — Project use-case service.
+
+
 <!-- asterism_core/application__forge__pursuit_service.md -->
 # asterism-core::application::forge::pursuit_service
 
@@ -1074,6 +1106,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `parse_message_ref` — Parses one wire `MessageRefDto` chip into an [`EntityRef`].
 - `parse_ms` — Parses a unix-epoch-milliseconds timestamp from the wire (returns a
 - `parse_persona_id` — Parses the wire representation of a persona id.
+- `parse_project_id` — Parses the wire representation of a project id.
 - `parse_pursuit_id` — Parses the wire representation of a pursuit id.
 - `parse_snapshot_id` — Parses the wire representation of a snapshot id.
 - `parse_tag_id` — Parses the wire representation of a tag id.
@@ -3356,6 +3389,122 @@ Aggregate root for a single outbound job's whole lifecycle
 - `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
 
 
+<!-- asterism_core/domain__forge__line.md -->
+# asterism-core::domain::forge::line
+
+`Line` — a project's canonical set, and the forge identity that
+makes "the living one" a derivable fact (#63 decisions 1–3).
+
+Raw asset ids are one-off: a replacement is a different row, and
+nothing in the core says the new row *is* the old thing, newer. The
+entry is that statement — a minted identity above asset ids — and
+the four merge verbs (add / replace / delete / rename) are the only
+things that ever move it. Liveness, current name, and current
+version all derive on read from the verb sequence, exactly like
+`PursuitStanding`: latest event per entry wins, and history is the
+sequence itself, not a second record of it.
+
+# Shape
+
+- [`Line`] is one named line of a project — the branch of the git
+  analogy. v1 mints exactly one per project, named [`Line::MAIN`]
+  (application-enforced), so "the mainline" is a description — the
+  line named `main` — rather than a type of its own, and the
+  schema admits siblings before the code does (the V82 admit-ahead
+  stance).
+- [`LineEntry`] is the identity; it carries no name column —
+  the current name is the latest naming verb's, so renames are
+  history like everything else.
+- [`LineEvent`] is one verb applied to one entry.
+  [`LineVerb`] carries each verb's payload so a caller cannot
+  file an add without a name or a delete with an asset (the
+  `RestampSubject` stance); storage enforces the same pairing with
+  two-way CHECKs.
+- [`Merge`] is the record that one satisfied close applied its
+  verbs — approval *is* the merge event, so every event names the
+  merge it landed under, and who approved derives through the
+  close event's attribution rather than being copied here.
+
+# The boundary, restated
+
+A line *references* asset ids; it never annotates or mutates
+an asset (the PR #62 rule). A dead entry's asset row stays live and
+restorable — `delete` is a statement about the canonical set, not
+about bytes, the same distance `CullVerdict::Reject` keeps from
+trash.
+
+# Invariants (service-enforced, entity-checked where local)
+
+- Verb payload pairing and non-blank names are checked here.
+- Living-name uniqueness within a line is an application rule
+  checked at merge time — dead names are reusable, so it cannot be
+  a schema constraint.
+- An entry's first event is an `add`; later events land on an
+  existing entry. The write path (P3) enforces this; on read the
+  derive tolerates a dangling tail by answering `None` on the axes
+  the missing `add` would have filled. That tolerance is *weaker*
+  than the ledger's, which drops a dangling gesture's asset from
+  membership outright (`tx.rs`) — deliberately so: an event row
+  names an entry that exists, so deriving its presence states
+  nothing false, where a membership would.
+
+## Functions
+
+- `entry_state` — Derives one entry's state from its events: latest by
+
+## Types
+
+- `EntryState` — One entry's derived position: alive or dead, and what it currently
+- `Line` — One named line of a project. v1 restricts a project to exactly one,
+- `LineEntry` — The forge identity above raw asset ids (#63 decision 1). Deliberately
+- `LineEvent` — One verb applied to one entry, filed under the merge that landed it.
+- `LineVerb` — The closed set of merge verbs, payload included (#63 decision 2).
+- `Merge` — The record that one satisfied close applied its verbs (#63 decision
+
+
+<!-- asterism_core/domain__forge__project.md -->
+# asterism-core::domain::forge::project
+
+`Project` — the repo of the forge's git analogy (#63): the shared
+context pursuits file under, and the owner of a mainline.
+
+The pursuit answers "one line of work"; the project answers "one
+body of work" — the unit a mainline is canonical *for*. Without it
+the mainline would be a persona-wide singleton, and two unrelated
+efforts would fight over one namespace of living names. With it,
+scope has a referent (an `In(Existing)` of another project's living
+asset is cross-project contamination, catchable at IN time) and
+"the canonical set" means canonical for something in particular.
+
+# Shape
+
+- [`Project`] is a thin, immutable row: identity, persona, a
+  required human name, an optional note. No status column, no
+  members — what belongs to a project derives through its pursuits
+  and its mainline, never from a membership table.
+- [`Line`](crate::domain::forge::line::Line) rows are the
+  project's lines. v1 mints exactly one, named
+  [`MAIN`](crate::domain::forge::line::Line::MAIN), in the same
+  transaction as the project (application-enforced); the schema
+  admits more so a later multi-line model is an enum's worth of
+  change, not a migration.
+
+# Invariants (service-enforced, entity-checked where local)
+
+- `name` is non-blank (checked here); uniqueness among one
+  persona's projects is an application rule, checked where both
+  rows are visible — like living-name uniqueness on a line,
+  and unlike a schema UNIQUE, so a later archival verb can free
+  names without a migration.
+- A pursuit filing under a project shares its persona
+  (cross-aggregate, application service — the persona cascade
+  rule every forge pairing states).
+
+## Types
+
+- `Project` — The repo above the pursuits. Thin and immutable: identity plus a
+
+
 <!-- asterism_core/domain__forge__pursuit.md -->
 # asterism-core::domain::forge::pursuit
 
@@ -3374,7 +3523,8 @@ the pursuit is a projection over the stamped events.
 # Shape
 
 - [`Pursuit`] is a thin, immutable row: identity, persona, optional
-  parent, optional human label. No status column, no members.
+  filing, optional parent, optional human label. No status column,
+  no members.
 - [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
   **standing is derived on read** by [`standing`] — latest event by
   `(created_at, id)` wins, no row means open. A repeat close is a new
@@ -3389,6 +3539,11 @@ the pursuit is a projection over the stamped events.
   never crosses personas; a parent exists before its child. These are
   cross-aggregate and live in the application service, like the
   persona cascade.
+- `project_id` never crosses personas either, and the foreign key
+  cannot say so: `project` carries its own `persona_id`, and
+  `pursuit.project_id` references only `project(id)`. So filing
+  under someone else's project is refused where both rows are
+  visible — the same place, and for the same reason, as `parent_id`.
 - `snapshot_id` may only accompany `closed_satisfied` (checked here):
   it is the kept set frozen at close. `None` on a `closed_satisfied`
   is a defined state — "concluded with nothing kept" — because an
@@ -3448,6 +3603,7 @@ entry, which is the difference between a workspace and a record.
 - `PursuitTx` — One recorded membership gesture.
 - `PursuitTxKind` — The closed set of ledger gestures. `In` carries its origin because
 - `TxOrigin` — Where an `in` gesture brought its asset from. A fact about the
+- `TxTarget` — What an `in` declares about a line entry it is aimed at (#63
 
 
 <!-- asterism_core/domain__group.md -->
@@ -4359,6 +4515,7 @@ projection instead of full `Asset` entities.
 - `PersonaRepository` — Persistence port for [`Persona`].
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
+- `ProjectRepository` — Persistence port for the forge's project and its lines (#63
 - `PursuitRepository` — Persistence port for the pursuit family (#29): the minted unit of
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
@@ -5009,9 +5166,13 @@ Design notes:
 - `JobId` — Surrogate id for `Job`.
 - `Keyword` — Raw keyword extracted by the auto-tag pipeline; a `Tag` may be
 - `Label` — Free-form annotation attached to an asset.
+- `LineEntryId` — Surrogate id for a `LineEntry` — the name-like forge identity
+- `LineEventId` — Surrogate id for a `LineEvent` — one merge verb applied to an
+- `LineId` — Surrogate id for a `Line` — one named line of a project, the
 - `MaterialLayerId` — Surrogate id for a `MaterialLayer` — one band of marks over an
 - `MaterialMarkId` — Surrogate id for a `MaterialMark` — one mark in an Asset's
 - `MediaKind` — Media-render variant selected by a [`ContentKind`].
+- `MergeId` — Surrogate id for a `Merge` — the record that one satisfied
 - `MessageId` — Surrogate id for a `Message` — one entry appended to a
 - `MimeType` — What an asset's bytes are, parsed once at the mapping boundary.
 - `Modality` — Primary modality slug for an asset (open slug).
@@ -5021,6 +5182,7 @@ Design notes:
 - `PersonaId` — Surrogate id for `Persona`. The natural key (external pack id) is
 - `PreviewMode` — Preview mode selected by a [`ContentKind`] for the QuickLook overlay.
 - `Progress` — Job progress payload; the `ProgressEmitter` forwards it to the UI.
+- `ProjectId` — Surrogate id for a `Project` — the repo of the forge's git
 - `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
 - `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
 - `PursuitRestampId` — Surrogate id for a `PursuitRestamp` — one recorded move of a
@@ -8033,6 +8195,7 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
+- [`sqlite::repo::project`](sqlite__repo__project.md): SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
 - [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
@@ -9758,14 +9921,23 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`], [`super::dispatch`]
-and [`super::pursuit`] (all three pursuit-family tables), at the
-point where the values about to be bound are visible as the columns
-themselves.
+Called by the row builders in [`super::asset`], [`super::dispatch`],
+[`super::pursuit`] and [`super::project`], at the point where the
+values about to be bound are visible as the columns themselves.
+
+[`attribution_columns`] lives here for the same reason: it is the
+encoding half of the same concern, wanted by every table that
+carries the triple, and a home in any one adapter would make the
+next one reach sideways into a sibling.
 
 ## Functions
 
 - `assert_channel_recorded` — Rejects a row that records somebody without recording how that
+- `attribution_columns` — Encodes an entity's attribution triple into the column values,
+
+## Types
+
+- `AttributionColumns` — The four attribution column values in write order:
 
 
 <!-- asterism_infra/sqlite__repo__chapter_mark.md -->
@@ -9920,6 +10092,23 @@ SQLite adapter for the `PersonaThemeRepository` port.
 ## Types
 
 - `SqlitePersonaThemeRepository` — SQLite adapter for `PersonaThemeRepository` (uses a writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__project.md -->
+# asterism-infra::sqlite::repo::project
+
+SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
+
+Two tables: `project` (thin, immutable, insert-only, like `pursuit`)
+and `line`, which is the same but owned by a project rather than a
+persona. The pair is written in one transaction — a project whose
+line is missing has nothing a merge could land on, and no later
+read would notice the difference between that and a project nobody
+has merged into yet.
+
+## Types
+
+- `SqliteProjectRepository` — SQLite adapter for `ProjectRepository`.
 
 
 <!-- asterism_infra/sqlite__repo__pursuit.md -->
@@ -10356,6 +10545,8 @@ agent should read, not a broken call.
 - `DuplicateConflictsParams` — `duplicate_conflicts` input — the same persona / limit pair the
 - `MaterialLayersParams` — `material_layers` input.
 - `MaterialMarksParams` — `material_marks` input.
+- `ProjectGetParams` — `project_get` input.
+- `ProjectListParams` — `project_list` input.
 - `PursuitViewParams` — `pursuit_view` input.
 
 

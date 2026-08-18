@@ -108,6 +108,16 @@
       "docs": "`material_marks` input."
     },
     {
+      "path": "asterism_server::mcp::ProjectGetParams",
+      "kind": "struct",
+      "docs": "`project_get` input."
+    },
+    {
+      "path": "asterism_server::mcp::ProjectListParams",
+      "kind": "struct",
+      "docs": "`project_list` input."
+    },
+    {
       "path": "asterism_server::mcp::PursuitViewParams",
       "kind": "struct",
       "docs": "`pursuit_view` input."

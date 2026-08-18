@@ -650,12 +650,22 @@
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard",
       "kind": "module",
-      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`], [`super::dispatch`]\nand [`super::pursuit`] (all three pursuit-family tables), at the\npoint where the values about to be bound are visible as the columns\nthemselves."
+      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`], [`super::dispatch`],\n[`super::pursuit`] and [`super::project`], at the point where the\nvalues about to be bound are visible as the columns themselves.\n\n[`attribution_columns`] lives here for the same reason: it is the\nencoding half of the same concern, wanted by every table that\ncarries the triple, and a home in any one adapter would make the\nnext one reach sideways into a sibling."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::attribution_guard::AttributionColumns",
+      "kind": "type_alias",
+      "docs": "The four attribution column values in write order:\n`(author_kind, author_subject, operator_ai, attributed_via)`."
     },
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard::assert_channel_recorded",
       "kind": "function",
       "docs": "Rejects a row that records somebody without recording how that\nanswer arrived.\n\nTakes the encoded column values rather than domain types so it sits\nat the same boundary the `params!` list does — the last place where\nwhat is about to be written is visible as itself.\n\n- author / operator absent → nothing to attribute, no channel\n  expected (an ordinary unrecorded write).\n- author or operator present, channel present → recorded.\n- author or operator present, channel absent → rejected here."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::attribution_guard::attribution_columns",
+      "kind": "function",
+      "docs": "Encodes an entity's attribution triple into the column values,\nrunning [`assert_channel_recorded`] on the result — a row that\nrecords somebody records the channel the answer arrived through."
     },
     {
       "path": "asterism_infra::sqlite::repo::chapter_mark",
@@ -776,6 +786,16 @@
       "path": "asterism_infra::sqlite::repo::persona_theme::SqlitePersonaThemeRepository",
       "kind": "struct",
       "docs": "SQLite adapter for `PersonaThemeRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::project",
+      "kind": "module",
+      "docs": "SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).\n\nTwo tables: `project` (thin, immutable, insert-only, like `pursuit`)\nand `line`, which is the same but owned by a project rather than a\npersona. The pair is written in one transaction — a project whose\nline is missing has nothing a merge could land on, and no later\nread would notice the difference between that and a project nobody\nhas merged into yet."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::project::SqliteProjectRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `ProjectRepository`."
     },
     {
       "path": "asterism_infra::sqlite::repo::pursuit",

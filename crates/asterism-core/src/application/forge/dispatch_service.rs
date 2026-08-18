@@ -121,7 +121,7 @@ impl DispatchService {
                 Ok(id)
             }
             None => {
-                let minted = Pursuit::new(persona_id, None, None, None, now, attribution);
+                let minted = Pursuit::new(persona_id, None, None, None, None, now, attribution);
                 self.pursuits.create(&minted).await?;
                 Ok(minted.id)
             }

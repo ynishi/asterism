@@ -12,12 +12,51 @@
 //! legacy bucket would be indistinguishable from one that predates the
 //! column.
 //!
-//! Called by the row builders in [`super::asset`], [`super::dispatch`]
-//! and [`super::pursuit`] (all three pursuit-family tables), at the
-//! point where the values about to be bound are visible as the columns
-//! themselves.
+//! Called by the row builders in [`super::asset`], [`super::dispatch`],
+//! [`super::pursuit`] and [`super::project`], at the point where the
+//! values about to be bound are visible as the columns themselves.
+//!
+//! [`attribution_columns`] lives here for the same reason: it is the
+//! encoding half of the same concern, wanted by every table that
+//! carries the triple, and a home in any one adapter would make the
+//! next one reach sideways into a sibling.
 
+use asterism_core::domain::attribution::PersistedAttribution;
 use asterism_core::error::DomainError;
+
+/// The four attribution column values in write order:
+/// `(author_kind, author_subject, operator_ai, attributed_via)`.
+pub type AttributionColumns = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Encodes an entity's attribution triple into the column values,
+/// running [`assert_channel_recorded`] on the result — a row that
+/// records somebody records the channel the answer arrived through.
+pub fn attribution_columns(
+    table: &'static str,
+    attribution: &PersistedAttribution,
+) -> Result<AttributionColumns, DomainError> {
+    let (author_kind, author_subject) = match attribution.author() {
+        Some(author) => {
+            let (kind, subject) = author.encode();
+            (Some(kind.to_string()), subject.map(str::to_string))
+        }
+        None => (None, None),
+    };
+    let operator_ai = attribution.operator_ai().map(|o| o.as_str().to_string());
+    let attributed_via = attribution.attributed_via().map(|c| c.slug().to_string());
+    assert_channel_recorded(
+        table,
+        author_kind.as_deref(),
+        operator_ai.as_deref(),
+        attributed_via.as_deref(),
+    )?;
+    Ok((author_kind, author_subject, operator_ai, attributed_via))
+}
 
 /// Rejects a row that records somebody without recording how that
 /// answer arrived.

@@ -78,6 +78,7 @@ pub use app_setting_service::AppSettingService;
 pub use asset_comment_service::AssetCommentService;
 pub use asset_service::{AssetService, INBOX_LABEL, OriginalFileRef};
 pub use forge::dispatch_service::DispatchService;
+pub use forge::project_service::ProjectService;
 pub use forge::pursuit_service::PursuitService;
 pub use material_layer_service::MaterialLayerService;
 pub use material_mark_service::MaterialMarkService;

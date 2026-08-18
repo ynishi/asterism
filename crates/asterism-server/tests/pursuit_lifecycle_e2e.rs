@@ -110,6 +110,7 @@ async fn open(
             OpenPursuitCommand {
                 persona_id: persona_id.to_string(),
                 pursuit_id: None,
+                project_id: None,
                 parent_pursuit_id: parent.map(str::to_string),
                 title: title.map(str::to_string),
                 note: None,
@@ -192,6 +193,7 @@ async fn open_names_intent_and_walls_parenthood() {
             OpenPursuitCommand {
                 persona_id: stranger.id.clone(),
                 pursuit_id: None,
+                project_id: None,
                 parent_pursuit_id: Some(root.id.clone()),
                 title: None,
                 note: None,

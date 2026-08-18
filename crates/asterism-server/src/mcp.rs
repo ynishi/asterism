@@ -30,8 +30,9 @@ use std::sync::Arc;
 
 use asterism_contract::command::{
     AddAssetCommand, ClosePursuitCommand, DeclareAssetMetaCommand, MergeAssetsCommand,
-    OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand, RecordPursuitTxCommand,
-    ReopenPursuitCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
+    OpenProjectCommand, OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand,
+    RecordPursuitTxCommand, ReopenPursuitCommand, ResolveDuplicateConflictCommand,
+    RestampDispatchCommand,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
@@ -142,6 +143,26 @@ pub struct PursuitViewParams {
     /// Pursuit id — returned by `pursuit_open`, stamped on every
     /// dispatch (`pursuit_id`), and carried in exporter sidecars.
     pub pursuit_id: String,
+}
+
+/// `project_get` input.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ProjectGetParams {
+    /// Project id — returned by `project_open` and `project_list`, and
+    /// carried on a filed pursuit as `project_id`.
+    pub project_id: String,
+}
+
+/// `project_list` input.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct ProjectListParams {
+    /// Persona whose projects to list.
+    pub persona_id: String,
+    /// Cap on returned rows, clamped to 1..=500. Omitted means 50, and
+    /// 0 is raised to 1 rather than meaning "none".
+    pub limit: Option<u32>,
 }
 
 /// `asset_culls` input.
@@ -505,7 +526,56 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. Optional: a dispatch that arrives unstamped mints one anyway, so this is for naming the line of work up front and then passing `pursuit_id` on the dispatches you start. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
+        description = "Open a project — the shared context pursuits file under, and the owner of the line their satisfied closes land on. A deliberate act: nothing mints one for you, and a pursuit with no project files nowhere and lands nothing. `name` is required, non-blank, and unique among this persona's projects, compared exactly as given once trimmed — uniqueness is checked by reading first rather than held by a constraint, so two simultaneous opens of one name can both land. The line comes with it — one named `main`, minted in the same transaction, because a project with nothing to land on could not be merged into. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this project, omit it and it records nobody."
+    )]
+    async fn project_open(
+        &self,
+        Parameters(command): Parameters<OpenProjectCommand>,
+    ) -> Result<CallToolResult, McpError> {
+        let attribution =
+            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
+                Ok(attribution) => attribution,
+                Err(err) => return Ok(domain_error(err)),
+            };
+        match self.ctx.project_service.open(command, &attribution).await {
+            Ok(project) => ok_json(&project),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Read one project with its lines. A line is what a satisfied close of a filed pursuit merges into; v1 gives every project exactly one, named `main`. Addressed by id and not scoped to a persona — filing a pursuit under another persona's project is refused, reading one whose id you already hold is not."
+    )]
+    async fn project_get(
+        &self,
+        Parameters(query): Parameters<ProjectGetParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.ctx.project_service.get(&query.project_id).await {
+            Ok(project) => ok_json(&project),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "List a persona's projects, most-recent first, each with its lines. `limit` is clamped to 1..=500; omitting it means 50, and 0 is raised to 1 rather than meaning \"no rows\"."
+    )]
+    async fn project_list(
+        &self,
+        Parameters(query): Parameters<ProjectListParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match self
+            .ctx
+            .project_service
+            .list(&query.persona_id, query.limit.unwrap_or(50))
+            .await
+        {
+            Ok(projects) => ok_json(&projects),
+            Err(err) => Ok(domain_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. Optional: a dispatch that arrives unstamped mints one anyway, so this is for naming the line of work up front and then passing `pursuit_id` on the dispatches you start. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
     )]
     async fn pursuit_open(
         &self,

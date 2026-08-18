@@ -34,8 +34,8 @@ use asterism_contract::dto::{
 use chrono::Utc;
 
 use crate::application::mapping::{
-    dispatch_to_dto, parse_asset_id, parse_dispatch_id, parse_persona_id, parse_pursuit_id,
-    parse_snapshot_id,
+    dispatch_to_dto, parse_asset_id, parse_dispatch_id, parse_persona_id, parse_project_id,
+    parse_pursuit_id, parse_snapshot_id,
 };
 use crate::domain::attribution::AttributionContext;
 use crate::domain::forge::cull::{
@@ -46,7 +46,7 @@ use crate::domain::forge::pursuit::{
 };
 use crate::domain::forge::tx::{PursuitTx, PursuitTxKind, TxOrigin, ledger};
 use crate::domain::repository::{
-    AssetRepository, DispatchRepository, PersonaRepository, PursuitRepository,
+    AssetRepository, DispatchRepository, PersonaRepository, ProjectRepository, PursuitRepository,
 };
 use crate::domain::value::{AssetId, PersonaId, SnapshotId};
 use crate::error::DomainError;
@@ -54,6 +54,10 @@ use crate::error::DomainError;
 /// Pursuit lifecycle use-case service.
 pub struct PursuitService {
     pursuits: Arc<dyn PursuitRepository>,
+    /// Filing is checked against the project it names — existence, and
+    /// that it belongs to the same persona, which no foreign key can
+    /// say.
+    projects: Arc<dyn ProjectRepository>,
     personas: Arc<dyn PersonaRepository>,
     dispatches: Arc<dyn DispatchRepository>,
     /// The ledger's `in` names an asset row; the existence and persona
@@ -69,6 +73,7 @@ impl PursuitService {
     /// Wires the service around its ports.
     pub fn new(
         pursuits: Arc<dyn PursuitRepository>,
+        projects: Arc<dyn ProjectRepository>,
         personas: Arc<dyn PersonaRepository>,
         dispatches: Arc<dyn DispatchRepository>,
         assets: Arc<dyn AssetRepository>,
@@ -76,6 +81,7 @@ impl PursuitService {
     ) -> Self {
         Self {
             pursuits,
+            projects,
             personas,
             dispatches,
             assets,
@@ -116,6 +122,34 @@ impl PursuitService {
                 Some(id)
             }
         };
+        // Filing crosses no personas either, and the foreign key cannot
+        // hold that: `project` carries its own `persona_id` and
+        // `pursuit.project_id` references only `project(id)`, so a
+        // pursuit filed under someone else's project would be an
+        // ordinary-looking row. Checked here, where both are visible,
+        // exactly like `parent_id` above.
+        //
+        // A parent's filing is deliberately not inherited: a child says
+        // where it files or files nowhere. Inheritance would make the
+        // filing of a whole subtree move with a decision taken once at
+        // its root, which is a different verb from the one this is.
+        let project_id = match command.project_id.as_deref() {
+            None => None,
+            Some(wire) => {
+                let id = parse_project_id(wire)?;
+                let project = self
+                    .projects
+                    .find(&id)
+                    .await?
+                    .ok_or_else(|| DomainError::not_found("project", wire))?;
+                if project.persona_id != persona_id {
+                    return Err(DomainError::Validation(
+                        "project belongs to a different persona".into(),
+                    ));
+                }
+                Some(id)
+            }
+        };
         // A caller-chosen id is the repair path (a returning artefact
         // claimed a pursuit that has no row here); absent, the id is
         // minted like every other open. Either way the create is a
@@ -124,6 +158,7 @@ impl PursuitService {
         let pursuit = match command.pursuit_id.as_deref() {
             None => Pursuit::new(
                 persona_id,
+                project_id,
                 parent_id,
                 command.title,
                 command.note,
@@ -133,6 +168,7 @@ impl PursuitService {
             Some(wire) => Pursuit::new_at(
                 parse_pursuit_id(wire)?,
                 persona_id,
+                project_id,
                 parent_id,
                 command.title,
                 command.note,
@@ -334,7 +370,15 @@ impl PursuitService {
             .ok_or_else(|| DomainError::not_found("pursuit", &command.pursuit_id))?;
         let asset_id = parse_asset_id(&command.asset_id)?;
         let kind = match (command.kind.as_str(), command.origin.as_deref()) {
-            ("in", Some(origin)) => PursuitTxKind::In(TxOrigin::parse(origin)?),
+            // Aim and scope stay unset here: this command cannot yet
+            // carry them, and a targeted IN is the filing verb's to
+            // record (#63 decision 4) once a pursuit has a project
+            // whose entries it could be aiming at.
+            ("in", Some(origin)) => PursuitTxKind::In {
+                origin: TxOrigin::parse(origin)?,
+                target: None,
+                out_of_scope: false,
+            },
             ("in", None) => {
                 return Err(DomainError::Validation(
                     "an 'in' names its origin: generated, imported, or existing".into(),
@@ -362,7 +406,7 @@ impl PursuitService {
         let txs = self.pursuits.txs_of(&pursuit.id).await?;
         let state = ledger(&txs);
         match kind {
-            PursuitTxKind::In(_) => {
+            PursuitTxKind::In { .. } => {
                 let asset = self
                     .assets
                     .find(&asset_id)
@@ -413,7 +457,7 @@ impl PursuitService {
                     )));
                 }
             },
-            PursuitTxKind::Update => unreachable!("refused above"),
+            PursuitTxKind::Update { .. } => unreachable!("refused above"),
         }
         let tx = PursuitTx::new(
             pursuit.id,
@@ -423,7 +467,7 @@ impl PursuitService {
             command.note,
             Utc::now(),
             attribution,
-        );
+        )?;
         self.pursuits.append_tx(&tx).await?;
         Ok(tx_to_dto(&tx))
     }
@@ -656,6 +700,7 @@ fn pursuit_to_dto(pursuit: &Pursuit, standing: &str) -> PursuitDto {
     PursuitDto {
         id: pursuit.id.to_string(),
         persona_id: pursuit.persona_id.to_string(),
+        project_id: pursuit.project_id.map(|p| p.to_string()),
         parent_id: pursuit.parent_id.map(|p| p.to_string()),
         title: pursuit.title.clone(),
         note: pursuit.note.clone(),

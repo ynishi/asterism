@@ -97,6 +97,7 @@ async fn open(core: &CoreCtx, persona_id: &str) -> String {
             OpenPursuitCommand {
                 persona_id: persona_id.to_string(),
                 pursuit_id: None,
+                project_id: None,
                 parent_pursuit_id: None,
                 title: None,
                 note: None,
