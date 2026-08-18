@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Refuse a write that gives a file the wrong prose shape.
+"""Refuse a write that hard-wraps a body GitHub is going to render.
 
-Two shapes, decided by where the file goes rather than by what it says:
+Three widths apply to this repository, and two of them are checked by
+something that runs over the tree:
 
-  - Tracked prose is read in an editor and in `git diff`, where
-    re-flowing a paragraph is a whole-paragraph diff. It wraps.
-  - A body GitHub renders is folded by the renderer. Hard wrapping it
-    buys nothing and survives into the rendered page as nothing at all.
+  - A commit message body wraps at 72, because `git log` indents it four
+    spaces inside an 80-column terminal. `just commit-msg-check`.
+  - Markdown in the tree wraps at 80. `just md-check`.
+  - A pull request or issue body is not wrapped at all. GitHub folds
+    paragraphs itself, and a hard-wrapped one arrives carrying breaks
+    nobody chose.
 
-The widths are here and nowhere else on purpose. They used to be in
-CONTRIBUTING, which is read start to finish by every agent that opens
-the repository, and an agent that reads "wrapped at 72" wraps whatever
-it writes next — including the pull request bodies that must not be.
-Naming the exceptions in the same paragraph did not stop it: two
-consecutive pull request bodies came in hand-wrapped, the second after
-the exceptions had been spelled out. A width that is only ever quoted
-back at the moment a file breaks it cannot leak into anything else.
+The third is what this hook is for, and the reason it is a hook rather
+than a gate is that there is no tree to gate: CONTRIBUTING asks for
+those bodies as files under `workspace/`, which is gitignored, so they
+are never committed and no run ever sees them. The only moment anything
+can look at one is the moment it is written.
 
-Columns are characters, not bytes: an em dash is one column, and
-counting it as three calls a 71-column line 73.
+It has happened twice — two consecutive pull request bodies arrived
+wrapped at 72, the second after CONTRIBUTING had spelled out that
+GitHub-rendered prose takes no wrapping. Guidance that has to be
+remembered and scoped by its reader loses to a check that runs.
 """
 
 import json
@@ -26,21 +28,16 @@ import os
 import re
 import sys
 
-WRAP_AT = 72
-
-# Read in an editor and in `git diff`.
-WRAPPED = re.compile(
-    r"^(README|CHANGELOG|CONTRIBUTING|PUBLIC_DEVELOPMENT|SECURITY)\.md$"
-    r"|^docs/.*\.md$"
-)
-# Written to be posted: pull request and issue bodies, which CONTRIBUTING
-# asks for as files under this directory.
+# Written to be posted: the pull request and issue bodies CONTRIBUTING
+# asks for as files here.
 RENDERED = re.compile(r"^workspace/.*\.md$")
 
 FENCE = re.compile(r"^\s*(```|~~~)")
-TABLE = re.compile(r"^\s*\|")
-# A line that is one long link or path has nowhere to break.
-UNBREAKABLE = re.compile(r"^\s*[-*]?\s*\[?[^ ]{60,}")
+# A run this long says the writer was wrapping rather than writing.
+RUN = 3
+# Lines this short are a heading or a fragment; this wide, nothing was
+# wrapping to a margin.
+NARROW, WIDE = 40, 76
 
 
 def body_lines(text):
@@ -54,33 +51,22 @@ def body_lines(text):
             yield number, line
 
 
-def too_wide(text):
-    for number, line in body_lines(text):
-        if len(line) <= WRAP_AT or TABLE.match(line) or UNBREAKABLE.match(line):
-            continue
-        # Only a line that could have been broken is one to complain
-        # about: it has a space left of the limit to break at.
-        if " " in line[:WRAP_AT]:
-            return number, len(line)
-    return None
-
-
 def hand_wrapped(text):
     """Three or more body lines in a row, none reaching the margin.
 
-    That is what a hand-wrapped paragraph looks like and what a
-    paragraph written as one line never does.
+    That is what a hand-wrapped paragraph looks like, and what a
+    paragraph written as one line never does. Lists, quotes, headings
+    and table rows carry their own line breaks and are not counted.
     """
     run = 0
     for number, line in body_lines(text):
         stripped = line.strip()
-        short = 40 <= len(line) <= WRAP_AT + 4
         listish = stripped.startswith(("-", "*", ">", "#", "|")) or re.match(
             r"^\d+\.", stripped
         )
-        if short and not listish:
+        if NARROW <= len(line) <= WIDE and not listish:
             run += 1
-            if run >= 3:
+            if run >= RUN:
                 return number
         else:
             run = 0
@@ -95,7 +81,11 @@ def main():
 
     tool_input = event.get("tool_input") or {}
     path = tool_input.get("file_path") or ""
-    if not path:
+    # `Write` carries the whole file. An `Edit` carries a fragment, and a
+    # fragment of a paragraph is not enough to tell wrapping from a
+    # short paragraph, so only whole files are judged.
+    content = tool_input.get("content")
+    if not path or not content:
         return 0
 
     root = event.get("cwd") or os.getcwd()
@@ -103,43 +93,21 @@ def main():
         relative = os.path.relpath(path, root)
     except ValueError:
         return 0
-    if relative.startswith(".."):
+    if not RENDERED.match(relative):
         return 0
 
-    # Write carries the whole file; Edit carries the replacement.
-    whole_file = "content" in tool_input
-    text = tool_input.get("content") or tool_input.get("new_string") or ""
-    if not text:
+    number = hand_wrapped(content)
+    if number is None:
         return 0
 
-    if WRAPPED.match(relative):
-        wide = too_wide(text)
-        if wide:
-            number, width = wide
-            print(
-                f"{relative} is read in an editor and in `git diff`, so its"
-                f" prose wraps at {WRAP_AT} columns."
-                f" Line {number} of what you are writing is {width}."
-                f" Break it. Tables, fenced blocks and unbreakable links are"
-                f" exempt, and this check skips them.",
-                file=sys.stderr,
-            )
-            return 2
-
-    if RENDERED.match(relative) and whole_file:
-        number = hand_wrapped(text)
-        if number is not None:
-            print(
-                f"{relative} is a body GitHub renders, and the renderer folds"
-                f" paragraphs itself. Line {number} sits in a run of"
-                f" hand-wrapped lines: write each paragraph as one line and"
-                f" let it fold. Lists, tables and fenced blocks keep their own"
-                f" line breaks.",
-                file=sys.stderr,
-            )
-            return 2
-
-    return 0
+    print(
+        f"{relative} is a body GitHub renders, and the renderer folds"
+        f" paragraphs itself. Line {number} sits in a run of hand-wrapped"
+        f" lines: write each paragraph as one line and let it fold. Lists,"
+        f" tables and fenced blocks keep their own line breaks.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -172,11 +172,14 @@ that deny push/PR to agents outright, and a plugin worth installing:
 /plugin install prose-shape@asterism
 ```
 
-`prose-shape` is a hook. It refuses a write that gives a file the wrong prose
-shape — a paragraph hand-wrapped into a body GitHub renders and folds itself, a
-line too wide for prose that is read in an editor and in `git diff` — and names
-the file and the line as the write is attempted. Nothing about it is installed
-by cloning; it is two commands you run once. If you develop here with a coding
+`prose-shape` is a hook, and it covers the one width nothing else can. A commit
+message body is answered for by `commit-msg-check` and the markdown in the tree
+by `just md-check`, both over committed files. A pull request or issue body is
+never committed — this file asks for it as a file under the gitignored
+`workspace/` — so the write is the only moment anything can look at one, and a
+hard-wrapped paragraph is exactly what should not reach a renderer that folds.
+The hook refuses that write and names the line. Nothing about it is installed by
+cloning; it is two commands you run once. If you develop here with a coding
 agent, the loop that works is:
 
 ```text

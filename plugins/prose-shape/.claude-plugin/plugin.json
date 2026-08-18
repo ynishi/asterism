@@ -1,7 +1,7 @@
 {
   "name": "prose-shape",
   "version": "0.1.0",
-  "description": "Refuses a write that gives a file the wrong prose shape: hard wrapping in a body GitHub renders, over-long lines in prose read in an editor and in git diff. The widths live in the check, not in guidance an agent reads and then applies to everything it writes.",
+  "description": "Refuses a write that hard-wraps a pull request or issue body. GitHub folds paragraphs itself, and those bodies are never committed, so no gate over the tree can see them — the write is the only moment anything can.",
   "author": {
     "name": "Yutaka Nishimura"
   },

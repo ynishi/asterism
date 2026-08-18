@@ -30,9 +30,11 @@
 - Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) before every
   commit — `pub-checker` on the diff, `reviewer` with the issue number, which is
   all it needs.
-- Recommended, once per machine: `/plugin marketplace add ynishi/asterism` then
-  `/plugin install prose-shape@asterism`. Its hook refuses a write that gives a
-  file the wrong prose shape and says which line, at the moment of the write.
-  What the shapes are is in the check and deliberately not repeated here — an
-  agent that reads a width applies it to everything it writes next, which is the
-  failure this replaces.
+- Do not carry a wrapping width from one artefact to another; three differ, and
+  each has its own check to say so. `commit-msg-check` answers for commit
+  messages, `just md-fmt` wraps the markdown in the tree and `just md-check`
+  fails when it is not wrapped, and the `prose-shape` plugin refuses a
+  hard-wrapped pull request or issue body, which nothing over the tree can see
+  because those are never committed. Install it once per machine:
+  `/plugin marketplace add ynishi/asterism`, then
+  `/plugin install prose-shape@asterism`.

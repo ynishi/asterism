@@ -8,12 +8,17 @@
     {
       "name": "prose-shape",
       "source": "./plugins/prose-shape",
-      "description": "Refuses a write that gives a file the wrong prose shape: hard wrapping in a body GitHub renders, over-long lines in prose read in an editor and in git diff.",
+      "description": "Refuses a write that hard-wraps a pull request or issue body, which GitHub folds itself and no gate over the tree can see.",
       "version": "0.1.0",
       "license": "MIT OR Apache-2.0",
       "homepage": "https://github.com/ynishi/asterism",
       "repository": "https://github.com/ynishi/asterism",
-      "keywords": ["asterism", "hooks", "prose", "formatting"]
+      "keywords": [
+        "asterism",
+        "hooks",
+        "prose",
+        "formatting"
+      ]
     }
   ]
 }
