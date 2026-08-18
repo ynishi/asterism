@@ -684,6 +684,33 @@ and this project adheres to
   variables overrides locally with `CARGO_PROFILE_DEV_DEBUG=2` without touching
   the tree. (#85)
 
+- **The six doctrines are gone, and `dispatch` is a catalogue module again.**
+  `domain::mod`'s doctrine list was a second copy of reasoning that already
+  lived next to the types, and it had drifted: read against those types, four of
+  the six were contradicted by them, and the boundary the sixth declared was
+  broken in eight files. Five modules cited it by number, which made the drift
+  read as authority. Nothing is lost by deleting it — `attribution.rs`,
+  `snapshot.rs`, `edge.rs` and `forge/pursuit.rs` each state their own rule
+  where it is enforced, and the citations now point there.
+
+  What stands in its place is the one rule a module doc is the right home for:
+  the forge names catalogue types, the catalogue names a forge id and nothing
+  else. It is written as the rule plus the four places that break it today
+  (`repository` declaring the forge's ports, `asset_service` holding
+  `Arc<dyn PursuitRepository>`, `mapping` parsing a pursuit id), because
+  asserting a boundary the dependency graph does not have is the defect #81 was
+  opened about.
+
+  Applying that rule moved two things. `dispatch` is a catalogue module: an
+  exporter running over a frozen set is something that happened to the bytes, it
+  runs with no pursuit in sight, and deleting the forge leaves it working while
+  deleting it takes the ability to send anything out. And the claim that the
+  actor triple is a forge property is withdrawn — `Asset` carries the same
+  triple, so `attribution` is a catalogue module the forge uses, and moving it
+  across during the crate split would have turned the arrow around. The three
+  forge services are no longer re-exported from `application`'s root; callers
+  name `application::forge::` and the grouping shows at the use site.
+
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
   and the flatness cost something specific: the design that introduced it said
