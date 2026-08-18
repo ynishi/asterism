@@ -46,10 +46,15 @@
 //! behalf, and through which channel that answer arrived.
 //!
 //! **The forge layer.** [`forge`] is where intent lives: a line of work
-//! (`forge::pursuit`), the rounds it sends out (`forge::dispatch`), and
-//! the conclusion it freezes. Every other group above describes what is
-//! true of the stored bytes; this one describes what somebody was trying
-//! to do, and its own module doc states the boundary the two keep.
+//! (`forge::pursuit`) inside the context it files under
+//! (`forge::project`), what entered it and what survived (`forge::tx`,
+//! `forge::cull`), and where a satisfied close lands (`forge::line`).
+//! The rounds it sends out are [`dispatch`], which stays in the core —
+//! an exporter invocation is a thing that happened, and the forge's
+//! claim on it is one stamp naming the pursuit it was filed under.
+//! Every other group above describes what is true of the stored bytes;
+//! this one describes what somebody was trying to do, and its own
+//! module doc states the boundary the two keep.
 //!
 //! **The annotation layer.** [`thread`] collects messages from humans and
 //! agents alike; [`asset_comment`] is the short-note thread on one asset;
@@ -114,9 +119,19 @@
 //!    the same request; a mint stranded by a failed dispatch write is the
 //!    legal pre-created-empty state, not debris), and everything else
 //!    about it — standing, membership, rollups — is projection.
+//!
+//!    Where this binds is the application layer, on the forge's own
+//!    verbs. [`DispatchJob`](dispatch::DispatchJob) is a core type and
+//!    is complete with `pursuit_id` unset; it is
+//!    `application::forge::dispatch_service` that will not let a round
+//!    be *started* without filing it. Reading the rule onto the domain
+//!    type is what would make the core need the forge, which doctrine 6
+//!    forbids.
 //! 6. **Two layers: the core states facts, the [`forge`] states intent.**
 //!    The core is what is true of the stored bytes — assets, freezes,
-//!    edges, the identity question and the outbound one — and it is
+//!    edges, the identity question ([`duplicate_conflict`]), what an
+//!    artefact discloses on its way out ([`disclosure`]), and the
+//!    invocation that sent it there ([`dispatch`]) — and it is
 //!    complete without the forge: importing, deduplicating, rating and
 //!    trashing need no pursuit, and the minting rule above binds the
 //!    forge's own events, not the catalogue. The forge is the operator's
@@ -166,6 +181,7 @@ pub mod content_region;
 pub mod derived_text;
 pub mod dir;
 pub mod disclosure;
+pub mod dispatch;
 pub mod duplicate_conflict;
 pub mod edge;
 pub mod embedded_text;

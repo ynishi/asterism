@@ -12,7 +12,7 @@ use std::sync::Arc;
 use asterism_core::application::mapping::card_to_dto;
 use asterism_core::application_support::DispatchRunnerService;
 use asterism_core::domain::asset::AssetCard;
-use asterism_core::domain::forge::dispatch::DispatchState;
+use asterism_core::domain::dispatch::DispatchState;
 use asterism_core::domain::job::JobKind;
 use asterism_core::domain::repository::{
     AssetRepository, DispatchRepository, JobQueue, SnapshotRepository,
@@ -473,7 +473,7 @@ async fn record_attempt(env: &DispatchRunEnv, id: &DispatchId, recorder: &Collec
     }
 }
 
-fn build_handle(job: &asterism_core::domain::forge::dispatch::DispatchJob) -> Option<Handle> {
+fn build_handle(job: &asterism_core::domain::dispatch::DispatchJob) -> Option<Handle> {
     match (&job.handle_kind, &job.handle) {
         (Some(kind), Some(payload)) => Some(Handle {
             kind: kind.clone(),

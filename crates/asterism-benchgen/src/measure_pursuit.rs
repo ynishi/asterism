@@ -31,7 +31,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use asterism_core::domain::attribution::AttributionContext;
-use asterism_core::domain::forge::dispatch::DispatchJob;
+use asterism_core::domain::dispatch::DispatchJob;
 use asterism_core::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind};
 use asterism_core::domain::repository::{
     DispatchRepository, PursuitRepository, SnapshotRepository,
