@@ -31,7 +31,8 @@ use chrono::{DateTime, Utc};
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
 use crate::domain::forge::tx::{Ledger, TxOrigin};
-use crate::domain::value::{AssetId, CullId, PersonaId, PursuitEventId, PursuitId, SnapshotId};
+use crate::domain::forge::value::{CullId, PursuitEventId, PursuitId};
+use crate::domain::value::{AssetId, PersonaId, SnapshotId};
 use crate::error::DomainError;
 
 /// The closed set of member verdicts. Two values, no third —

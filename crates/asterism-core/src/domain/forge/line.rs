@@ -57,9 +57,10 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::domain::value::{
-    AssetId, LineEntryId, LineEventId, LineId, MergeId, PersonaId, ProjectId, PursuitEventId,
+use crate::domain::forge::value::{
+    LineEntryId, LineEventId, LineId, MergeId, ProjectId, PursuitEventId,
 };
+use crate::domain::value::{AssetId, PersonaId};
 use crate::error::DomainError;
 
 /// Rejects a blank name so "named" means something; returns the

@@ -56,6 +56,29 @@ macro_rules! define_uuid_id {
     };
 }
 
+// Shared with `domain::forge::value`, which declares the forge's own ids
+// with the same shape. `macro_rules!` is textually scoped, so the
+// sibling module cannot reach it without this.
+pub(crate) use define_uuid_id;
+
+define_uuid_id!(
+    /// The catalogue's handle on a forge round.
+    ///
+    /// A dispatch is filed under a pursuit, and the row has to carry
+    /// which one — but the catalogue does not know what a pursuit is,
+    /// and a type it cannot name is a type it cannot depend on. So the
+    /// stamp is held opaquely here and the forge puts its own
+    /// [`PursuitId`](crate::domain::forge::value::PursuitId) over it,
+    /// converting at the boundary.
+    ///
+    /// The field, the column, and the sidecar key all stay
+    /// `pursuit_id`: that is what the id refers to, and three names for
+    /// one value would cost more than the one this type buys. What
+    /// changes is the direction of the dependency, which is the part a
+    /// compiler can hold.
+    CorrelationId
+);
+
 define_uuid_id!(
     /// Surrogate id for `Persona`. The natural key (external pack id) is
     /// [`PackId`].
@@ -173,84 +196,11 @@ define_uuid_id!(
     /// happen to derive the same key from being read as one grouping.
     StrategyId
 );
-define_uuid_id!(
-    /// Surrogate id for a `Pursuit` — the minted unit of work that
-    /// dispatches and culls are stamped with (#29). Minted, never
-    /// derived from content: content identity changes whenever work is
-    /// redone, so succession, rejection, and abandonment need an id
-    /// that survives rework. UUID v7 so `(created_at, id)` totally
-    /// orders rows minted in the same instant.
-    PursuitId
-);
-define_uuid_id!(
-    /// Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
-    /// about a pursuit (close / reopen). The v7 timestamp is the
-    /// tie-break that makes "latest event" total when two events share
-    /// a `created_at`.
-    PursuitEventId
-);
-define_uuid_id!(
-    /// Surrogate id for a `PursuitRestamp` — one recorded move of a
-    /// stamped event between pursuits (the repair verb for broken
-    /// correlation, #29). The row is the fact of the move; the stamped
-    /// column holds only the current filing.
-    PursuitRestampId
-);
-define_uuid_id!(
-    /// Surrogate id for a `PursuitTx` — one entry in a pursuit's
-    /// append-only membership ledger (#22, model on #63): an asset
-    /// entering, a mid-work removal, or its reversal. Membership is
-    /// derived by "latest tx per asset wins" over `(created_at, id)`;
-    /// the id tie-break makes that answer total and stable when two
-    /// gestures share a millisecond, though within one it is an
-    /// ordering, not a causal claim.
-    PursuitTxId
-);
-define_uuid_id!(
-    /// Surrogate id for a `Cull` — the record of one close's
-    /// narrowing (#22): which candidate set was decided over, written
-    /// at the close it belongs to. One cull per close event; verdicts
-    /// are per member on `cull_member`.
-    CullId
-);
-define_uuid_id!(
-    /// Surrogate id for a `Project` — the repo of the forge's git
-    /// analogy (#63): the shared context pursuits file under and the
-    /// owner of a mainline. Minted, like a pursuit's: a project is a
-    /// deliberate act, not a derived fact.
-    ProjectId
-);
-define_uuid_id!(
-    /// Surrogate id for a `Line` — one named line of a project, the
-    /// branch of the forge's git analogy. v1 restricts a project to
-    /// exactly one, named `main`, so "the mainline" is a description
-    /// rather than a type (the V82 admit-ahead stance: schema admits
-    /// siblings, code restricts).
-    LineId
-);
-define_uuid_id!(
-    /// Surrogate id for a `LineEntry` — the name-like forge identity
-    /// above raw asset ids (#63 decision 1): the thing that stays
-    /// "the living one" while replacement and renaming move beneath
-    /// it. Raw asset ids stay one-off; the entry is what a targeted
-    /// IN declares.
-    LineEntryId
-);
-define_uuid_id!(
-    /// Surrogate id for a `LineEvent` — one merge verb applied to an
-    /// entry (add / replace / delete / rename, #63 decision 2).
-    /// Liveness and naming derive on read by "latest event per entry
-    /// wins" over `(created_at, id)`; the v7 tie-break makes that
-    /// answer total when two verbs share a millisecond.
-    LineEventId
-);
-define_uuid_id!(
-    /// Surrogate id for a `Merge` — the record that one satisfied
-    /// close applied its verbs (#63 decision 3: approval *is* the
-    /// merge event). One merge per close event; the verbs group under
-    /// it on `line_event`.
-    MergeId
-);
+// The forge's own ids — `PursuitId` and the nine around it — are
+// declared in [`domain::forge::value`](crate::domain::forge::value), so
+// that this module names no forge type. What the catalogue holds of
+// them is `CorrelationId` above.
+
 /// Declares a non-empty text newtype (returns `Validation` if the value is
 /// blank after trimming).
 macro_rules! define_text_vo {

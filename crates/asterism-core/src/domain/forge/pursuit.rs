@@ -43,9 +43,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
-use crate::domain::value::{
-    DispatchId, PersonaId, ProjectId, PursuitEventId, PursuitId, PursuitRestampId, SnapshotId,
-};
+use crate::domain::forge::value::{ProjectId, PursuitEventId, PursuitId, PursuitRestampId};
+use crate::domain::value::{DispatchId, PersonaId, SnapshotId};
 use crate::error::DomainError;
 
 /// Trims an optional human label; whitespace-only collapses to `None`

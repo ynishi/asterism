@@ -348,7 +348,7 @@ impl DispatchRunnerService {
         if let Some(pursuit_id) = job.pursuit_id {
             for asset_id in &job.output_asset_ids {
                 let entry = crate::domain::forge::tx::PursuitTx::new(
-                    pursuit_id,
+                    crate::domain::forge::value::PursuitId::from_correlation(pursuit_id),
                     job.persona_id,
                     crate::domain::forge::tx::PursuitTxKind::In {
                         origin: crate::domain::forge::tx::TxOrigin::Generated,

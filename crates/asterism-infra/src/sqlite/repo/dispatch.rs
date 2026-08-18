@@ -8,7 +8,7 @@
 
 use asterism_core::domain::dispatch::{DispatchJob, DispatchState};
 use asterism_core::domain::repository::DispatchRepository;
-use asterism_core::domain::value::{AssetId, DispatchId, PersonaId, PursuitId, SnapshotId};
+use asterism_core::domain::value::{AssetId, CorrelationId, DispatchId, PersonaId, SnapshotId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -194,7 +194,7 @@ impl DispatchRow {
             .source_group_id
             .map(asterism_core::domain::value::GroupId::from_uuid);
         job.source_query_json = self.source_query_json;
-        job.pursuit_id = self.pursuit_id.map(PursuitId::from_uuid);
+        job.pursuit_id = self.pursuit_id.map(CorrelationId::from_uuid);
         job.completed_at = self.completed_at.map(ms_to_datetime).transpose()?;
         Ok(job)
     }
@@ -358,7 +358,10 @@ impl DispatchRepository for SqliteDispatchRepository {
             .map_err(infra_err)
     }
 
-    async fn list_rounds(&self, pursuit_id: &PursuitId) -> Result<Vec<DispatchJob>, DomainError> {
+    async fn list_rounds(
+        &self,
+        pursuit_id: &CorrelationId,
+    ) -> Result<Vec<DispatchJob>, DomainError> {
         let uuid = *pursuit_id.as_uuid();
         let rows = self
             .isle

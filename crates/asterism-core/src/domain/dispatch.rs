@@ -177,7 +177,16 @@ pub struct DispatchJob {
     /// which is why it is a public field where the attribution triple
     /// is private: restamping rewrites the filing without touching what
     /// happened.
-    pub pursuit_id: Option<crate::domain::value::PursuitId>,
+    ///
+    /// Typed as a
+    /// [`CorrelationId`](crate::domain::value::CorrelationId) rather
+    /// than as the forge's own
+    /// [`PursuitId`](crate::domain::forge::value::PursuitId), because a
+    /// catalogue row may carry a forge id but not name a forge type.
+    /// The forge converts at its boundary; the name stays `pursuit_id`
+    /// here, on the column, and in the sidecar, because that is what
+    /// the value refers to and the name was never the coupling.
+    pub pursuit_id: Option<crate::domain::value::CorrelationId>,
     /// Agent that started this dispatch (`claude-code`, `codex`,
     /// `asterism-ui`, …) — see
     /// [`attribution`](crate::domain::attribution).

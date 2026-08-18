@@ -39,11 +39,12 @@ use crate::application::mapping::{
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::forge::pursuit::Pursuit;
+use crate::domain::forge::value::PursuitId;
 use crate::domain::job::JobKind;
 use crate::domain::repository::{
     DispatchRepository, JobQueue, PursuitRepository, SnapshotRepository,
 };
-use crate::domain::value::{PersonaId, PursuitId};
+use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
 /// Outbound-dispatch use-case service.
@@ -239,7 +240,8 @@ impl DispatchService {
         // price of a *failed write*, not of a typo).
         job.pursuit_id = Some(
             self.resolve_pursuit(command.pursuit_id.as_deref(), persona_id, now, attribution)
-                .await?,
+                .await?
+                .as_correlation(),
         );
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
@@ -286,13 +288,15 @@ impl DispatchService {
         job.pursuit_id = match command.pursuit_id.as_deref() {
             Some(wire) => Some(
                 self.resolve_pursuit(Some(wire), prior.persona_id, now, attribution)
-                    .await?,
+                    .await?
+                    .as_correlation(),
             ),
             None => match prior.pursuit_id {
                 Some(inherited) => Some(inherited),
                 None => Some(
                     self.resolve_pursuit(None, prior.persona_id, now, attribution)
-                        .await?,
+                        .await?
+                        .as_correlation(),
                 ),
             },
         };
@@ -351,7 +355,8 @@ impl DispatchService {
                 now,
                 attribution,
             )
-            .await?,
+            .await?
+            .as_correlation(),
         );
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))

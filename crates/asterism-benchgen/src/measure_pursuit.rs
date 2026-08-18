@@ -33,11 +33,12 @@ use anyhow::{Context, Result};
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::dispatch::DispatchJob;
 use asterism_core::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind};
+use asterism_core::domain::forge::value::PursuitId;
 use asterism_core::domain::repository::{
     DispatchRepository, PursuitRepository, SnapshotRepository,
 };
 use asterism_core::domain::snapshot::Snapshot;
-use asterism_core::domain::value::{AssetId, PursuitId};
+use asterism_core::domain::value::AssetId;
 use asterism_infra::sqlite;
 use asterism_infra::sqlite::repo::{
     SqliteDispatchRepository, SqlitePursuitRepository, SqliteSnapshotRepository,
@@ -183,7 +184,7 @@ pub async fn run(args: MeasurePursuitArgs) -> Result<()> {
                 now,
                 &ctx,
             )?;
-            job.pursuit_id = Some(pursuit.id);
+            job.pursuit_id = Some(pursuit.id.as_correlation());
             dispatches.save(&job).await?;
             round_ids.push(job.id);
         }
@@ -258,7 +259,7 @@ pub async fn run(args: MeasurePursuitArgs) -> Result<()> {
         let t = Instant::now();
         let _row = pursuits.find(id).await?.expect("seeded pursuit");
         let _events = pursuits.events_of(id).await?;
-        let _rounds = dispatches.list_rounds(id).await?;
+        let _rounds = dispatches.list_rounds(&id.as_correlation()).await?;
         let _returns = pursuits.returns_of(id).await?;
         view_samples.push(t.elapsed().as_micros());
     }

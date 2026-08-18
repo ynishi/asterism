@@ -45,6 +45,7 @@ use crate::domain::forge::pursuit::{
     Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp, RestampSubject, standing,
 };
 use crate::domain::forge::tx::{PursuitTx, PursuitTxKind, TxOrigin, ledger};
+use crate::domain::forge::value::PursuitId;
 use crate::domain::repository::{
     AssetRepository, DispatchRepository, PersonaRepository, ProjectRepository, PursuitRepository,
 };
@@ -597,7 +598,7 @@ impl PursuitService {
         let to = parse_pursuit_id(&command.to_pursuit_id)?;
         let restamp = PursuitRestamp::new(
             RestampSubject::Dispatch(dispatch_id),
-            job.pursuit_id,
+            job.pursuit_id.map(PursuitId::from_correlation),
             to,
             Utc::now(),
             attribution,
@@ -679,7 +680,10 @@ impl PursuitService {
             .await?
             .ok_or_else(|| DomainError::not_found("pursuit", id))?;
         let events = self.pursuits.events_of(&pursuit_id).await?;
-        let rounds = self.dispatches.list_rounds(&pursuit_id).await?;
+        let rounds = self
+            .dispatches
+            .list_rounds(&pursuit_id.as_correlation())
+            .await?;
         let returns = self.pursuits.returns_of(&pursuit_id).await?;
         let txs = self.pursuits.txs_of(&pursuit_id).await?;
         let culls = self.pursuits.culls_of(&pursuit_id).await?;

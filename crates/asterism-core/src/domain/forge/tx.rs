@@ -28,7 +28,8 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
-use crate::domain::value::{AssetId, LineEntryId, LineEventId, PersonaId, PursuitId, PursuitTxId};
+use crate::domain::forge::value::{LineEntryId, LineEventId, PursuitId, PursuitTxId};
+use crate::domain::value::{AssetId, PersonaId};
 use crate::error::DomainError;
 
 /// Where an `in` gesture brought its asset from. A fact about the

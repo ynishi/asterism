@@ -36,7 +36,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
-use crate::domain::value::{PersonaId, ProjectId};
+use crate::domain::forge::value::ProjectId;
+use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
 /// Trims an optional human label; whitespace-only collapses to `None`

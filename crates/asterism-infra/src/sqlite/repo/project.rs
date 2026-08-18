@@ -10,8 +10,9 @@
 use asterism_core::domain::attribution::PersistedAttribution;
 use asterism_core::domain::forge::line::Line;
 use asterism_core::domain::forge::project::Project;
+use asterism_core::domain::forge::value::{LineId, ProjectId};
 use asterism_core::domain::repository::ProjectRepository;
-use asterism_core::domain::value::{LineId, PersonaId, ProjectId};
+use asterism_core::domain::value::PersonaId;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;

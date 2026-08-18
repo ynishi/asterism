@@ -23,6 +23,7 @@ use crate::domain::forge::line::Line;
 use crate::domain::forge::project::Project;
 use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
 use crate::domain::forge::tx::PursuitTx;
+use crate::domain::forge::value::{ProjectId, PursuitId};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
@@ -40,10 +41,10 @@ use crate::domain::source_locator::SourceLocator;
 use crate::domain::tag::{Tag, TagCount, TagMergeOutcome};
 use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
-    AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
+    AssetCommentId, AssetId, ChapterMarkId, CorrelationId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
-    PackId, Page, PersonaId, Progress, ProjectId, PursuitId, SessionId, SnapshotId, SourceKind,
-    StrategyId, TagId, ThreadId,
+    PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
+    ThreadId,
 };
 use crate::error::DomainError;
 
@@ -2920,9 +2921,19 @@ pub trait DispatchRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<DispatchJob>, DomainError>;
 
-    /// Lists the dispatch jobs stamped with a pursuit — the pursuit's
-    /// rounds, oldest first (round order is dispatch creation order).
-    async fn list_rounds(&self, pursuit_id: &PursuitId) -> Result<Vec<DispatchJob>, DomainError>;
+    /// Lists the dispatch jobs carrying a stamp — a pursuit's rounds,
+    /// oldest first (round order is dispatch creation order).
+    ///
+    /// Takes the stamp rather than
+    /// [`PursuitId`] so that a
+    /// catalogue port declares no forge type. Only the forge has a
+    /// caller for it, and only the forge can say whether the stamp
+    /// still names a live pursuit; this answers the narrower question
+    /// of which rows carry the value.
+    async fn list_rounds(
+        &self,
+        pursuit_id: &CorrelationId,
+    ) -> Result<Vec<DispatchJob>, DomainError>;
 }
 
 /// Persistence port for the pursuit family (#29): the minted unit of
