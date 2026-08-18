@@ -69,6 +69,7 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
+- `OpenProjectCommand` — Opens a project (#63 decisions 1–2): the repo of the forge's git
 - `OpenPursuitCommand` — Opens a pursuit explicitly — the "start new pursuit" affordance
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.

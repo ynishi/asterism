@@ -59,6 +59,7 @@ the private design notes.
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::project_service`](application__forge__project_service.md): Project use cases — opening the context work files under, and
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's

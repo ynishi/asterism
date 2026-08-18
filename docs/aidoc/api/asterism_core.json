@@ -108,6 +108,16 @@
       "docs": "Outbound-dispatch use-case service."
     },
     {
+      "path": "asterism_core::application::forge::project_service",
+      "kind": "module",
+      "docs": "Project use cases — opening the context work files under, and\nreading it back (#63 decisions 1–2).\n\nThin next to [`pursuit_service`](super::pursuit_service), and it\nstays that way while the merge is unwritten: a project has no\nlifecycle of its own. It is opened, it is read, and everything that\nhappens *to* it happens through the pursuits filed under it.\n\nTwo rules live here rather than in the schema, for opposite\nreasons. **Name uniqueness among one persona's projects** is\napplication-side and read-checked, so two callers racing can both\nfind the name free and both write it — the rule is advisory under\nconcurrency, and closing that is a schema decision (a partial\nUNIQUE) rather than a service one. **The line minted with the\nproject** is the other way round: the repository writes both in one\ntransaction, and this layer only decides that there is exactly one\nand what it is called."
+    },
+    {
+      "path": "asterism_core::application::forge::project_service::ProjectService",
+      "kind": "struct",
+      "docs": "Project use-case service."
+    },
+    {
       "path": "asterism_core::application::forge::pursuit_service",
       "kind": "module",
       "docs": "`PursuitService` — the lifecycle verbs of the minted unit of work\n(#29): open, close, reopen, restamp, and the reads that derive\nstanding.\n\nAlways-mint lives in\n[`DispatchService`](super::dispatch_service::DispatchService) —\na dispatch arriving unstamped mints its own pursuit there. This\nservice is everything else: the explicit pre-create (naming intent\nup front), the one-way lifecycle facts (close / reopen — recorded,\nnever a status write), the close's single deliberate\nmaterialisation (the kept set frozen into a snapshot), and the\nrestamp repair verb. Transport routes land in the next slice of\n#29; until then the service fronts the e2e surface through\n`CoreCtx`, the same way every service is reachable there.\n\n# The close freeze is a forge-side calling convention\n\nThe core treats snapshot member order as part of snapshot identity\n(caller order, nothing sorts). The close path sorts the kept set\nascending *itself* before freezing, so identical kept sets dedupe\nacross closes; a close snapshot consequently does not dedupe with a\npick-ordered input snapshot over the same members — correct, they\nare different statements."
@@ -291,6 +301,11 @@
       "path": "asterism_core::application::mapping::parse_persona_id",
       "kind": "function",
       "docs": "Parses the wire representation of a persona id."
+    },
+    {
+      "path": "asterism_core::application::mapping::parse_project_id",
+      "kind": "function",
+      "docs": "Parses the wire representation of a project id."
     },
     {
       "path": "asterism_core::application::mapping::parse_pursuit_id",
@@ -1355,7 +1370,7 @@
     {
       "path": "asterism_core::domain::forge::tx::PursuitTxKind",
       "kind": "enum",
-      "docs": "The closed set of ledger gestures. `In` carries its origin because\nan entry without one is not a statement — the schema enforces the\nsame pairing with a two-way CHECK.\n\nThe payloads sit on the variants that own them (the `LineVerb`\nstance), which makes three of V84's four pairing rules\nunrepresentable rather than merely checked: a pin cannot exist\nwithout a target, an out-of-scope claim cannot be made by a\n`remove`, and nothing but an `update` can supersede. The fourth —\nthat only an `existing` origin targets an entry — needs a check,\nbecause origin and aim are separate axes that a rule happens to\ncorrelate; [`PursuitTx::new`] holds it."
+      "docs": "The closed set of ledger gestures. `In` carries its origin because\nan entry without one is not a statement — the schema enforces the\nsame pairing with a two-way CHECK.\n\nThe payloads sit on the variants that own them (the `LineVerb`\nstance), which makes three of V85's four pairing rules\nunrepresentable rather than merely checked: a pin cannot exist\nwithout a target, an out-of-scope claim cannot be made by a\n`remove`, and nothing but an `update` can supersede. The fourth —\nthat only an `existing` origin targets an entry — needs a check,\nbecause origin and aim are separate axes that a rule happens to\ncorrelate; [`PursuitTx::new`] holds it."
     },
     {
       "path": "asterism_core::domain::forge::tx::TxOrigin",

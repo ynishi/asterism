@@ -308,6 +308,11 @@
       "docs": "What the caller wants done if the asset being registered turns out\nto hold bytes an existing asset already holds.\n\nThe wire half of `asterism_core::domain::value::OnDuplicate`, which\nis the type the row is written from. Two declarations of the same\nclosed set rather than one, because this crate is a leaf — it has\nno dependency on `asterism-core` (that arrow points the other way),\nand it is the crate the TypeScript bindings and the MCP tool schemas\nare generated from. The `snake_case` tokens are `ask` / `fold` /\n`separate` on both sides, and the single conversion between them\n(`AssetService::add`) is an exhaustive match, so a variant added to\neither set stops compiling until the other is answered for.\n\nSpelled as an enum rather than a free string — unlike `author_kind`,\nthe neighbouring caller-asserted field — because the set really is\nclosed and small: a caller reading the generated schema sees the\nthree answers instead of guessing, and an unknown token is refused\nby deserialisation, above every side effect the ingest could have."
     },
     {
+      "path": "asterism_contract::command::OpenProjectCommand",
+      "kind": "struct",
+      "docs": "Opens a project (#63 decisions 1–2): the repo of the forge's git\nanalogy — the shared context pursuits file under, and the owner of\nthe line they land on.\n\nA deliberate act, like opening a pursuit, and the line comes with\nit: one named `main` is minted in the same transaction, because a\nproject with nothing to land on is not a project anything could\nmerge into. Opening one is a statement, so the row carries the\nattribution triple."
+    },
+    {
       "path": "asterism_contract::command::OpenPursuitCommand",
       "kind": "struct",
       "docs": "Opens a pursuit explicitly — the \"start new pursuit\" affordance\n(#29). Optional: a dispatch arriving unstamped mints one anyway\n(always-mint); pre-creating simply lets the caller name the intent\nup front. An empty pursuit that never receives work is an honest\nrecord, closable as abandoned."
@@ -763,6 +768,11 @@
       "docs": "Snapshot of the background-jobs table used by the UI progress\nbanner (status roll-up + per-kind breakdown)."
     },
     {
+      "path": "asterism_contract::dto::LineDto",
+      "kind": "struct",
+      "docs": "One named line of a project (#63 decisions 1–2) — the branch of the\nforge's git analogy, and what a satisfied close merges into."
+    },
+    {
       "path": "asterism_contract::dto::LineageEdgeDto",
       "kind": "struct",
       "docs": "One `derived_from` link in a lineage walk. Direction is\nchild → parent, matching the stored edge."
@@ -851,6 +861,11 @@
       "path": "asterism_contract::dto::PersonaThemeDto",
       "kind": "struct",
       "docs": "Per-persona visual chrome — currently holds the wallpaper asset\nreference. Returned by `get_persona_theme` and echoed back by\n`set_persona_theme` so the UI can flip its CSS variables without\na follow-up query."
+    },
+    {
+      "path": "asterism_contract::dto::ProjectDto",
+      "kind": "struct",
+      "docs": "The repo of the forge's git analogy (#63 decisions 1–2): the shared\ncontext pursuits file under, and the owner of the lines they land\non. Carries its lines rather than making the caller ask again —\nthere is exactly one in v1, and a project without one could not be\nmerged into."
     },
     {
       "path": "asterism_contract::dto::ProvenanceViewDto",

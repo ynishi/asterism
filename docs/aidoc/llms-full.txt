@@ -173,6 +173,7 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
+- `OpenProjectCommand` — Opens a project (#63 decisions 1–2): the repo of the forge's git
 - `OpenPursuitCommand` — Opens a pursuit explicitly — the "start new pursuit" affordance
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
@@ -331,6 +332,7 @@ the domain types.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
 - `JobsSnapshotDto` — Snapshot of the background-jobs table used by the UI progress
+- `LineDto` — One named line of a project (#63 decisions 1–2) — the branch of the
 - `LineageEdgeDto` — One `derived_from` link in a lineage walk. Direction is
 - `LineageNodeDto` — One asset in a multi-hop lineage walk.
 - `LineageViewDto` — Multi-hop `derived_from` lineage around one asset.
@@ -349,6 +351,7 @@ the domain types.
 - `PersonaDto` — Persona payload.
 - `PersonaProfileDto` — Per-persona identity signal — the avatar / short bio / role
 - `PersonaThemeDto` — Per-persona visual chrome — currently holds the wallpaper asset
+- `ProjectDto` — The repo of the forge's git analogy (#63 decisions 1–2): the shared
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `PursuitDto` — The minted unit of work (#29): one line of generation and curation
 - `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
@@ -576,6 +579,7 @@ the private design notes.
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::project_service`](application__forge__project_service.md): Project use cases — opening the context work files under, and
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -998,6 +1002,32 @@ assets from a wire payload.
 - `DispatchService` — Outbound-dispatch use-case service.
 
 
+<!-- asterism_core/application__forge__project_service.md -->
+# asterism-core::application::forge::project_service
+
+Project use cases — opening the context work files under, and
+reading it back (#63 decisions 1–2).
+
+Thin next to [`pursuit_service`](super::pursuit_service), and it
+stays that way while the merge is unwritten: a project has no
+lifecycle of its own. It is opened, it is read, and everything that
+happens *to* it happens through the pursuits filed under it.
+
+Two rules live here rather than in the schema, for opposite
+reasons. **Name uniqueness among one persona's projects** is
+application-side and read-checked, so two callers racing can both
+find the name free and both write it — the rule is advisory under
+concurrency, and closing that is a schema decision (a partial
+UNIQUE) rather than a service one. **The line minted with the
+project** is the other way round: the repository writes both in one
+transaction, and this layer only decides that there is exactly one
+and what it is called.
+
+## Types
+
+- `ProjectService` — Project use-case service.
+
+
 <!-- asterism_core/application__forge__pursuit_service.md -->
 # asterism-core::application::forge::pursuit_service
 
@@ -1076,6 +1106,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `parse_message_ref` — Parses one wire `MessageRefDto` chip into an [`EntityRef`].
 - `parse_ms` — Parses a unix-epoch-milliseconds timestamp from the wire (returns a
 - `parse_persona_id` — Parses the wire representation of a persona id.
+- `parse_project_id` — Parses the wire representation of a project id.
 - `parse_pursuit_id` — Parses the wire representation of a pursuit id.
 - `parse_snapshot_id` — Parses the wire representation of a snapshot id.
 - `parse_tag_id` — Parses the wire representation of a tag id.
@@ -10514,6 +10545,8 @@ agent should read, not a broken call.
 - `DuplicateConflictsParams` — `duplicate_conflicts` input — the same persona / limit pair the
 - `MaterialLayersParams` — `material_layers` input.
 - `MaterialMarksParams` — `material_marks` input.
+- `ProjectGetParams` — `project_get` input.
+- `ProjectListParams` — `project_list` input.
 - `PursuitViewParams` — `pursuit_view` input.
 
 
