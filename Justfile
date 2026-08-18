@@ -1207,6 +1207,46 @@ rust-test-pkg +packages:
     fi
     exit "$status"
 
+# Run one package's tests, with everything after the package name handed
+# to `cargo test` verbatim.
+#
+# The edit loop's recipe. `rust-test-pkg` is still a whole crate, and a
+# crate is not a small unit here: `asterism-core` builds 413 tests and
+# `asterism-server` links 44 separate integration binaries, so "narrow"
+# at package granularity is still minutes for a one-line change. Nothing
+# above this line could say *which* test, and that is what makes the
+# gates unusable while actually writing code.
+#
+# Everything after the package is cargo's, not this file's, so the whole
+# of `cargo test`'s selection vocabulary is reachable without this
+# recipe learning any of it:
+#
+#   just rust-test-one asterism-core edge          # names matching `edge`
+#   just rust-test-one asterism-core --lib         # unit tests only
+#   just rust-test-one asterism-server --test dispatch_copy_fold_e2e
+#   just rust-test-one asterism-core edge -- --nocapture
+#
+# `--lib` is the one worth knowing: it skips the integration binaries,
+# which is where the link time is.
+#
+# No `--no-fail-fast` here, deliberately. The gates pass it so one
+# crate's failure cannot hide another's; while iterating the first
+# failure is the answer and waiting for the rest is waste.
+#
+# This is not a gate and does not stand in for one. It answers about
+# whatever you named and nothing else — `pre-push` still runs
+# `rust-test-changed`.
+#
+# Run one package's tests, passing the rest to cargo (the edit loop's recipe).
+[group('check')]
+[group('allow-agent')]
+rust-test-one pkg *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "{{ project_root }}"
+    export CARGO_TERM_COLOR=never
+    cargo test -p "{{ pkg }}" {{ args }}
+
 # Print the workspace members this branch touched, one per line.
 #
 # The shared half of `rust-test-changed` and `rust-clippy-changed`, and
@@ -1299,8 +1339,8 @@ changed-packages:
     # a caller as exit 0 is a green report from a suite that never ran —
     # the worse of the two mistakes, by the same reasoning the sentinel
     # below is written around. Commit first, which is the order
-    # `pre-push` imposes anyway, or run `just rust-test-pkg <crate>`
-    # while editing.
+    # `pre-push` imposes anyway, or run
+    # `just rust-test-one <crate> <filter>` while editing.
     #
     # Not refused under `CI`, where the checkout is clean by
     # construction and any dirt is something a step in the same job
@@ -1314,7 +1354,8 @@ changed-packages:
         if [ -z "${CI:-}" ]; then
             echo "the working tree is dirty, so this cannot answer for it —" >&2
             echo "it reports the commits on this branch and nothing else." >&2
-            echo "Commit, or run 'just rust-test-pkg <crate>' while editing:" >&2
+            echo "Commit, or run 'just rust-test-one <crate> <filter>' while" >&2
+            echo "editing:" >&2
             printf '%s\n' "$dirty" | sed 's/^/  /' >&2
             exit 1
         fi
@@ -1458,9 +1499,58 @@ rust-test-changed:
         echo "No workspace member changed; no Rust test to run."
         exit 0
     fi
-    echo "Testing what this branch touched:$(printf ' %s' $packages)"
+    # Members whose test binary would link the world to run nothing.
+    #
+    # `changed-packages` maps paths to members, and a member with no
+    # tests maps just as readily as one with hundreds. `asterism-ui` is
+    # the case that forced this: its Rust side is DI wiring, its actual
+    # tests are the vitest suite `ui-test` runs in `check-shared`, and
+    # `cargo test -p asterism-ui` still links the Tauri stack on top of
+    # `asterism-core` and `asterism-infra` before running none. On the
+    # branch that added this, seven lines of import churn in that crate
+    # cost more wall clock than the other five packages together.
+    #
+    # Named, not inferred — the call `changed-packages` already makes
+    # for `scripts/check-commit-msg.py`, for the same reason. Deciding
+    # this by pattern-matching sources reads "no match" and "could not
+    # look" as one answer, and has to keep up with every spelling of a
+    # test attribute: this tree writes
+    # `#[tokio::test(flavor = "multi_thread")]` 167 times, which the
+    # obvious pattern misses. Both mistakes point the expensive way — a
+    # suite that never ran, reported green.
+    #
+    #   asterism-ui        `#[lib]` + `#[bin]` of Tauri DI wiring. Zero
+    #                      test attributes, zero doc examples. Tested by
+    #                      `ui-test`.
+    #   asterism-importer  One `main.rs` of clap subcommands over the
+    #                      importer adapters, each of which carries its
+    #                      own tests. Zero test attributes.
+    #
+    # A member here that gains a test must come off this list. Nothing
+    # local catches a stale entry — `main`'s workspace run is what does,
+    # which is the same net every other narrowing in this file relies
+    # on.
+    testless="asterism-ui asterism-importer"
+    run=""
+    skipped=""
+    for pkg in $packages; do
+        case " $testless " in
+            *" $pkg "*) skipped="$skipped $pkg" ;;
+            *) run="$run $pkg" ;;
+        esac
+    done
+    # Printed, never silent. A gate that quietly tests less than it says
+    # is the failure this whole family of recipes exists to avoid.
+    if [ -n "$skipped" ]; then
+        echo "Carries no Rust test, so no test binary is built for it:$skipped"
+    fi
+    if [ -z "$run" ]; then
+        echo "That is every member this branch touched; no Rust test to run."
+        exit 0
+    fi
+    echo "Testing what this branch touched:$(printf ' %s' $run)"
     echo "Dependents of these are not run here — main's run covers them."
-    just rust-test-pkg $packages
+    just rust-test-pkg $run
 
 # Lint the packages this branch touched (pre-push's narrow clippy).
 #

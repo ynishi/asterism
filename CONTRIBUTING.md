@@ -102,9 +102,13 @@ The recipes to actually use:
   dirty tree is refused rather than answered: an uncommitted edit belongs to no
   commit, so it maps to no member, and "no member changed" is not a thing to
   hear while a suite goes unrun. Commit, then ask.
-- `just rust-test-pkg <crate>…` — the tests with the crates named by hand, for
-  the loop while work is still moving. This is the one to reach for before the
-  commit lands.
+- `just rust-test-one <crate> <cargo args>…` — one crate, and everything after
+  it handed to `cargo test` verbatim, so a filter, `--lib`, or `--test <name>`
+  all reach it. This is the one to reach for while work is still moving: a whole
+  crate is not a small unit here, and `--lib` in particular skips the
+  integration binaries that hold the link time.
+- `just rust-test-pkg <crate>…` — whole crates, named by hand. Between the two
+  above when the change is wide enough that naming tests stops helping.
 
 These are narrower than the workspace gates, not weaker: they cover what a
 change edited, not what depends on it. `main` closes that gap on every merge.

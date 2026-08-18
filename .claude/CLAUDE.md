@@ -15,13 +15,15 @@
   crate. Use `just rust-test-changed` and `just rust-clippy-changed` (the
   packages this branch touched — the pair `pre-push` runs), or
   `just rust-test-pkg <crate>…`. Never hand-roll `cargo test --workspace` or
-  `cargo clippy --workspace`.
+  `cargo clippy --workspace` — that includes reaching for either as a quick
+  check of your own edit.
 - Never work on `main`; one worktree per issue under `.worktrees/`, cut with
   `just worktree-new <type> <slug>` from the main checkout — the recipe runs
   `just branch-check` in the new worktree, so there is no second run to make.
 - The `-changed` gates answer for the commits on the branch and refuse a dirty
   tree. Commit, then run them; while editing, reach for
-  `just rust-test-pkg <crate>`.
+  `just rust-test-one <crate> <cargo args>…`, which passes a filter, `--lib`, or
+  `--test <name>` straight through. A whole crate is not a small unit here.
 - Agents do not push, publish, or open PRs. They do run `git fetch origin` then
   `just pre-push` themselves, write the PR body to a file under `workspace/`,
   and hand over the two literal commands — the ordering is in
