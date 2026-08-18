@@ -471,10 +471,21 @@ mod tests {
             Some(first.clone()),
             "the persona's own project, not the other's of the same name"
         );
+        // Byte-exact, as the port promises: this adapter normalizes
+        // nothing. Trimming is the domain's, done once on the way in,
+        // and a caller that reaches the port with an untrimmed string
+        // is asking for a name that was never stored. The service goes
+        // through `Project::new` first, which is why opening `"  album
+        // "` still collides there.
         assert_eq!(
             repo.find_named(&mine, "  album  ").await.unwrap(),
-            Some(first.clone()),
-            "looked up on the trimmed name the writer stored"
+            None,
+            "the adapter compares what it is given, padding included"
+        );
+        assert_eq!(
+            repo.find_named(&mine, "Album").await.unwrap(),
+            None,
+            "and case, on the column's own BINARY collation"
         );
         assert_eq!(repo.find_named(&mine, "absent").await.unwrap(), None);
         assert_eq!(
