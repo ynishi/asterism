@@ -553,6 +553,17 @@ and this project adheres to
 
 ### Changed
 
+- **Dev builds keep line tables and drop variable DWARF.** The default dev
+  profile linked every e2e binary at about 0.8 GB, most of it variable and type
+  debuginfo nothing here reads: failures are read from test output and panic
+  backtraces, which need file:line only. `[profile.dev]` now sets
+  `debug = "line-tables-only"`, shrinking both the binaries and the rlibs
+  feeding each link — before this, one `rust-test-changed` over a core-touching
+  branch wrote 45 GB of `target/` on a shared 31 GB machine and saturated its
+  disk. Backtraces still resolve to file:line; a session that does want debugger
+  variables overrides locally with `CARGO_PROFILE_DEV_DEBUG=2` without touching
+  the tree. (#85)
+
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
   and the flatness cost something specific: the design that introduced it said
