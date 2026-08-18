@@ -695,11 +695,11 @@ and this project adheres to
 
   What stands in its place is the one rule a module doc is the right home for:
   the forge names catalogue types, the catalogue names a forge id and nothing
-  else. It is written as the rule plus the four places that break it today
-  (`repository` declaring the forge's ports, `asset_service` holding
-  `Arc<dyn PursuitRepository>`, `mapping` parsing a pursuit id), because
-  asserting a boundary the dependency graph does not have is the defect #81 was
-  opened about.
+  else. It is written as the rule plus the places that break it, named one by
+  one, because asserting a boundary the dependency graph does not have is the
+  defect #81 was opened about. Two are left by the end of this entry:
+  `dispatch_runner_service` writing a `PursuitTx` per reified output, and
+  `mapping` parsing a pursuit id and a project id.
 
   Applying that rule moved two things. `dispatch` is a catalogue module: an
   exporter running over a frozen set is something that happened to the bytes, it
@@ -710,6 +710,24 @@ and this project adheres to
   across during the crate split would have turned the arrow around. The three
   forge services are no longer re-exported from `application`'s root; callers
   name `application::forge::` and the grouping shows at the use site.
+
+  Two moves follow the same rule further. The forge's ids leave `domain::value`:
+  ten of the eleven are named nowhere outside the forge, and the eleventh is the
+  dispatch stamp, which `DispatchJob` now carries as an opaque `CorrelationId`
+  the forge converts at its own boundary. The field, the column and the sidecar
+  key stay `pursuit_id` — three names for one value would buy nothing, and the
+  name was never the coupling. And the forge's two persistence ports leave
+  `domain::repository` for `domain::forge::repository`, which leaves the
+  catalogue's central service holding a `bool`: `CorrelationResolver` answers
+  whether a returning artefact's stamp names anything live in its persona, which
+  is all ingest ever asked of a pursuit.
+
+  None of this is enforceable yet, and the doc says so rather than implying
+  otherwise. Nothing stops an implementation of that `bool` port from being
+  three lines over the forge port it replaced; what a narrow port buys is that
+  doing so is a visible choice at a wiring site instead of the default shape of
+  the service. Cutting `asterism-forge` into its own crate is what would move
+  the refusal into the compiler.
 
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
