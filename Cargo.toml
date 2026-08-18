@@ -292,3 +292,13 @@ memmap2   = "0.9"
 tantivy = "0.25"
 lindera = "4"
 lindera-tantivy = { version = "4", features = ["embed-ipadic"] }
+
+# Debug builds keep file:line and drop variable/type DWARF. Backtraces,
+# `dbg!`, and llvm-cov keep working; what goes away is `p <var>` in an
+# interactive debugger, which no workflow here uses. Full DWARF is most
+# of every test binary — e2e binaries linked at ~0.8 GB each, and one
+# `rust-test-changed` over a core-touching branch wrote 45 GB of target/
+# on a shared 31 GB machine, saturating the disk (2026-08-18). The test
+# profile inherits this.
+[profile.dev]
+debug = "line-tables-only"
