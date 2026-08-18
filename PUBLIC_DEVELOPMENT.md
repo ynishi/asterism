@@ -1,9 +1,9 @@
 # Public development and information boundaries
 
-Asterism develops in public wherever the information is ours to disclose.
-This document defines what may cross from private planning into public issues,
-pull requests, code, and documentation. It is also the policy that coding
-agents use when deciding whether a reference is a disclosure problem.
+Asterism develops in public wherever the information is ours to disclose. This
+document defines what may cross from private planning into public issues, pull
+requests, code, and documentation. It is also the policy that coding agents use
+when deciding whether a reference is a disclosure problem.
 
 This policy is about **information visibility**. Licensing and product access
 are separate decisions: public source may be open source or covered by another
@@ -23,9 +23,9 @@ Product strategy, roadmaps, competitive analysis, design choices, code, and
 implementation plans are public by default when Asterism can decide their
 disclosure without exposing information entrusted to us by someone else.
 
-Private does not mean "commercial" or "important." It means that another
-person or organisation has not agreed to publication, or that disclosure would
-expose credentials or an unresolved security issue.
+Private does not mean "commercial" or "important." It means that another person
+or organisation has not agreed to publication, or that disclosure would expose
+credentials or an unresolved security issue.
 
 Examples include customer identities and conversations, private assets,
 contracts and NDA material, personnel matters, access credentials, and
@@ -64,13 +64,13 @@ The following are allowed to exist. They are worth correcting because a
 self-contained explanation makes the design easier to understand and maintain,
 not because they are disclosures:
 
-- the problem, requirement, acceptance criteria, or design rationale exists
-  only in an internal issue;
+- the problem, requirement, acceptance criteria, or design rationale exists only
+  in an internal issue;
 - an internal link is the sole explanation for a public code change;
 - a copied planning note has not been rewritten as a self-contained public
   explanation;
-- a public issue says that a customer requested something but provides no
-  usable description of the underlying need.
+- a public issue says that a customer requested something but provides no usable
+  description of the underlying need.
 
 A WARN is not a leak, a security incident, or a publication blocker. On a
 best-effort basis, add the public problem, constraints, and decision rationale
@@ -81,15 +81,15 @@ missing context needs separate work.
 
 Do not build an elaborate guard or review process to guarantee that no WARN is
 ever published. Human and AI contributors will both produce incomplete context
-occasionally, and preventing every instance costs more than the defect. Find
-and improve these cases as ordinary documentation work.
+occasionally, and preventing every instance costs more than the defect. Find and
+improve these cases as ordinary documentation work.
 
 ### BLOCK
 
 The following must not be copied into a public artifact:
 
-- the body, comments, attachments, or screenshots of a private issue unless
-  each disclosed part has independently been cleared for publication;
+- the body, comments, attachments, or screenshots of a private issue unless each
+  disclosed part has independently been cleared for publication;
 - link text that itself reveals protected information, even when the plain URL
   would have been allowed;
 - customer or contributor identity, private conversation, private asset, or
@@ -103,36 +103,34 @@ The following must not be copied into a public artifact:
 
 If a BLOCK item is found **before** publication, remove or redact the protected
 content and carry on; nothing else is owed. If it is found **after**, removal is
-no longer the remedy on its own — see
-[After a disclosure](#after-a-disclosure). Do not classify an allowed internal
-identifier or plain URL as an incident.
+no longer the remedy on its own — see [After a disclosure](#after-a-disclosure).
+Do not classify an allowed internal identifier or plain URL as an incident.
 
 ## Third-party material
 
-The boundary above is about information. A file asks a second question that
-the classification does not: whether this repository may redistribute it at
-all.
+The boundary above is about information. A file asks a second question that the
+classification does not: whether this repository may redistribute it at all.
 
-Committing a file redistributes it as part of this repository. The file does
-not have to use the repository's default licence: different crates and files
-may carry different terms. Those terms must permit the distribution being
-made, and every required licence, copyright, attribution, and notice must be
-preserved. Two things make this easy to miss: a file can be freely downloadable
-and still not freely redistributable, and a fixture fetched at test time
-becomes redistribution the moment someone commits it.
+Committing a file redistributes it as part of this repository. The file does not
+have to use the repository's default licence: different crates and files may
+carry different terms. Those terms must permit the distribution being made, and
+every required licence, copyright, attribution, and notice must be preserved.
+Two things make this easy to miss: a file can be freely downloadable and still
+not freely redistributable, and a fixture fetched at test time becomes
+redistribution the moment someone commits it.
 
 Before adding a file that did not originate here, state where it came from,
-under what terms it is distributed, and which notices must accompany it,
-beside the file or in the script that produces it. If these cannot be stated,
-do not commit it: generate an equivalent, or fetch it at build time and leave
-it untracked. Fetching rather than committing avoids redistribution by this
+under what terms it is distributed, and which notices must accompany it, beside
+the file or in the script that produces it. If these cannot be stated, do not
+commit it: generate an equivalent, or fetch it at build time and leave it
+untracked. Fetching rather than committing avoids redistribution by this
 repository; it does not remove any terms governing use of the fetched file.
 
 This has already cost the repository once. Fixtures under
-`crates/*/tests/fixtures/` were downloaded from upstream test corpora —
-AGPL-3.0 and LGPL-3.0 among them — and committed, while the tests' own
-doc comments said they were not committed. They are generated by
-`scripts/gen-test-fixtures.py` now.
+`crates/*/tests/fixtures/` were downloaded from upstream test corpora — AGPL-3.0
+and LGPL-3.0 among them — and committed, while the tests' own doc comments said
+they were not committed. They are generated by `scripts/gen-test-fixtures.py`
+now.
 
 ## After a disclosure
 
@@ -144,42 +142,42 @@ prevent. What follows is an incident, not an edit.
 The first question is whether the exposed thing can be **invalidated**.
 
 **It can** — credentials, tokens, signed URLs, session material. Revoke or
-rotate before touching history. A published secret is compromised the moment
-it is published, and removing it from the code stops nobody who already copied
-it; rotation is the only step that actually contains anything. Once rotated,
-the secret cannot be used, and that may be the entire remedy — rewriting
-history is then a tidiness decision rather than a containment one. Weigh it
-knowing what it cannot reach: it does not touch other people's clones (they
-have to be told), a fork keeps the commit until its owner removes it, and
-someone who pulls an old clone and pushes can restore what was purged. GitHub
-Support removes cached views and pull-request references only where it judges
-that rotation cannot mitigate the risk. If the content reached a package
-registry, treat external copies as potentially permanent. `cargo yank` is not
-deletion — the version stays downloadable and existing lockfiles keep
-resolving to it. crates.io may delete an entire crate when either it was first
-published less than 72 hours ago, or it has a single owner, has fewer than 500
-downloads for each month it has been published, and no other crates on
-crates.io depend on it. Even a successful registry deletion does not retract
-copies already downloaded or mirrored.
+rotate before touching history. A published secret is compromised the moment it
+is published, and removing it from the code stops nobody who already copied it;
+rotation is the only step that actually contains anything. Once rotated, the
+secret cannot be used, and that may be the entire remedy — rewriting history is
+then a tidiness decision rather than a containment one. Weigh it knowing what it
+cannot reach: it does not touch other people's clones (they have to be told), a
+fork keeps the commit until its owner removes it, and someone who pulls an old
+clone and pushes can restore what was purged. GitHub Support removes cached
+views and pull-request references only where it judges that rotation cannot
+mitigate the risk. If the content reached a package registry, treat external
+copies as potentially permanent. `cargo yank` is not deletion — the version
+stays downloadable and existing lockfiles keep resolving to it. crates.io may
+delete an entire crate when either it was first published less than 72 hours
+ago, or it has a single owner, has fewer than 500 downloads for each month it
+has been published, and no other crates on crates.io depend on it. Even a
+successful registry deletion does not retract copies already downloaded or
+mirrored.
 
 **It cannot** — a person's data, a customer's conversation, third-party
 confidential material, an unpatched vulnerability. Nothing can be rotated, so
-the disclosure is irreversible and the work moves from the file to the people
-it affects. Establish what was exposed, over what window, and how far it could
-have travelled; mirrors, forks, archives, and scrapers are part of that answer
-rather than a footnote. Then meet the obligations the *content* carries, which
-are not the repository's to waive:
+the disclosure is irreversible and the work moves from the file to the people it
+affects. Establish what was exposed, over what window, and how far it could have
+travelled; mirrors, forks, archives, and scrapers are part of that answer rather
+than a footnote. Then meet the obligations the _content_ carries, which are not
+the repository's to waive:
 
 - **Personal data** requires determining the applicable law, the relevant
-  jurisdiction, and whether Asterism or another party is acting as controller
-  or processor. Where the GDPR applies to the controller, notification to the
-  supervisory authority is made without undue delay and, where feasible,
-  within 72 hours of becoming aware — aware, not finished investigating, and
-  staged if facts are still arriving — unless the breach is unlikely to risk
-  people's rights and freedoms. The affected individuals are also notified
-  where that risk is high. Deleting the data does not by itself discharge the
-  applicable duty; GDPR-covered controllers document every personal-data
-  breach whether or not it was notifiable.
+  jurisdiction, and whether Asterism or another party is acting as controller or
+  processor. Where the GDPR applies to the controller, notification to the
+  supervisory authority is made without undue delay and, where feasible, within
+  72 hours of becoming aware — aware, not finished investigating, and staged if
+  facts are still arriving — unless the breach is unlikely to risk people's
+  rights and freedoms. The affected individuals are also notified where that
+  risk is high. Deleting the data does not by itself discharge the applicable
+  duty; GDPR-covered controllers document every personal-data breach whether or
+  not it was notifiable.
 - **Third-party confidential material** is owed to its owner under whatever
   agreement covers it.
 - **An unpatched vulnerability** follows [SECURITY.md](SECURITY.md), not this
@@ -192,9 +190,8 @@ record is what the obligations above are answered with.
 
 Where that record is public it is an issue, and it closes once everything it
 describes is done — the takedowns, and the obligations the content carried,
-which outlast them. What it says stays readable and searchable after it
-closes; an issue left open says instead that the disclosure is still being
-dealt with.
+which outlast them. What it says stays readable and searchable after it closes;
+an issue left open says instead that the disclosure is still being dealt with.
 
 ## Internal references
 
@@ -244,15 +241,14 @@ publishing an entire private plan. Its minimum output is:
 5. unresolved questions;
 6. relevant locations in the public repository.
 
-An internal issue may remain linked after this conversion. Coding should use
-the public artifact as its contract, so the implementation context does not
-need the protected source material.
+An internal issue may remain linked after this conversion. Coding should use the
+public artifact as its contract, so the implementation context does not need the
+protected source material.
 
-A note being kept locally rather than published says where it is, not whether
-it is confidential. Once a task has passed the publication gate, keep its
-contents public-safe even if the note itself is never published. This lets
-human and AI contributors use the same context without repeatedly
-reclassifying it.
+A note being kept locally rather than published says where it is, not whether it
+is confidential. Once a task has passed the publication gate, keep its contents
+public-safe even if the note itself is never published. This lets human and AI
+contributors use the same context without repeatedly reclassifying it.
 
 ## Role of each public artifact
 
@@ -281,21 +277,20 @@ do not replace the public explanation.
 
 Before producing a public-facing artifact, an agent checks in this order:
 
-1. **BLOCK:** Does the draft contain protected third-party content,
-   credentials, token-bearing URLs, or non-public security material?
+1. **BLOCK:** Does the draft contain protected third-party content, credentials,
+   token-bearing URLs, or non-public security material?
 2. **WARN:** Can a reader understand the problem, constraints, and decision
    without opening an internal system?
 3. **ALLOW:** Keep internal IDs and plain URLs when they add useful provenance;
    do not report them as leaks merely because they are internal.
-4. **Redistribution:** Does the change commit a file that originated
-   elsewhere? That is a licensing question, not a disclosure one, so none of
-   the three outcomes above answers it — see
+4. **Redistribution:** Does the change commit a file that originated elsewhere?
+   That is a licensing question, not a disclosure one, so none of the three
+   outcomes above answers it — see
    [Third-party material](#third-party-material).
 
 If a BLOCK item turns out to be already published, stop applying this check and
 go to [After a disclosure](#after-a-disclosure). At that point the question is
 no longer what the next artifact may contain.
 
-This check is intentionally narrow. It prevents disclosure of protected
-contents while avoiding an unbounded search for every string that merely looks
-internal.
+This check is intentionally narrow. It prevents disclosure of protected contents
+while avoiding an unbounded search for every string that merely looks internal.
