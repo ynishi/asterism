@@ -1,7 +1,7 @@
 # asterism-core::domain::forge
 
 The forge layer — the intentional history over the catalogue: a line
-of work, the rounds it sent out, and the conclusion it reached.
+of work, what it filed under itself, and the conclusion it reached.
 
 Everything else in [`domain`](crate::domain) answers what is true of
 the stored bytes. This module answers what somebody was *trying to
@@ -31,12 +31,15 @@ verdict — which is the failure mode this split exists to prevent.
                          (or .closed_abandoned — nothing lands)
 ```
 
-[`pursuit`] is the minted unit of work and its lifecycle facts;
-[`dispatch`] is one round — an exporter invocation against a frozen
-input set, stamped with the pursuit it files under. A round's outputs
-and the artefacts that come back are ordinary catalogue rows: the
-forge does not hold a working copy, and there is no state to
-integrate at the end. What the close integrates is a *decision*.
+[`pursuit`] is the minted unit of work and its lifecycle facts. A
+round is a [`dispatch`](crate::domain::dispatch) — an exporter
+invocation against a frozen input set — and it is a *core* module,
+because what it records is that a call was made and what came back,
+not what anybody was after. The forge's part is the stamp: which
+pursuit that round was filed under. A round's outputs and the
+artefacts that come back are ordinary catalogue rows too — the forge
+does not hold a working copy, and there is no state to integrate at
+the end. What the close integrates is a *decision*.
 
 **Culling** — the narrowing between a return and the next round or
 the close — is recorded (#22, model on #63). Mid-work it moves

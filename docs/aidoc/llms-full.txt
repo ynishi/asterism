@@ -617,12 +617,12 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
-- [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
@@ -951,14 +951,20 @@ trash view's hydration depends on that.
 Forge use cases — the verbs of a line of work.
 
 [`pursuit_service`] owns the lifecycle (open / close / reopen /
-restamp) and the reads over it; [`dispatch_service`] starts a round
-and files it under the pursuit it belongs to, minting one when the
-caller named none. They are together because they are the two halves
-of one story — a pursuit with no round records nothing, a round with
-no pursuit cannot exist (doctrine 5) — and apart from the rest
-because they are the only services here whose writes carry intent
-rather than content (doctrine 6; the layer itself is described in
-[`domain::forge`](crate::domain::forge)).
+restamp) and the reads over it; [`project_service`] opens the context
+those pursuits file under; [`dispatch_service`] starts a round and
+files it under the pursuit it belongs to, minting one when the caller
+named none.
+
+The round itself is not a forge thing — [`dispatch`](crate::domain::dispatch)
+is a core module, because an exporter invocation is a call that was
+made rather than an account of why. What is a forge thing is the
+*filing*: choosing which pursuit a round belongs to, and minting one
+when the caller named none (doctrine 5). That rule binds here, at the
+application layer, on a forge verb — `DispatchJob::new` leaves
+`pursuit_id` unset, and the domain type is complete without it. So
+this service sits under `forge/` for the half of its job that is
+filing, and the boundary it straddles is the one #81 is about.
 
 Nothing in the catalogue is edited by either of them. Closing a
 pursuit freezes what was kept and touches no asset: no trash, no
@@ -1997,10 +2003,15 @@ renders; [`attribution`] types who a write is by, what operated on their
 behalf, and through which channel that answer arrived.
 
 **The forge layer.** [`forge`] is where intent lives: a line of work
-(`forge::pursuit`), the rounds it sends out (`forge::dispatch`), and
-the conclusion it freezes. Every other group above describes what is
-true of the stored bytes; this one describes what somebody was trying
-to do, and its own module doc states the boundary the two keep.
+(`forge::pursuit`) inside the context it files under
+(`forge::project`), what entered it and what survived (`forge::tx`,
+`forge::cull`), and where a satisfied close lands (`forge::line`).
+The rounds it sends out are [`dispatch`], which stays in the core —
+an exporter invocation is a thing that happened, and the forge's
+claim on it is one stamp naming the pursuit it was filed under.
+Every other group above describes what is true of the stored bytes;
+this one describes what somebody was trying to do, and its own
+module doc states the boundary the two keep.
 
 **The annotation layer.** [`thread`] collects messages from humans and
 agents alike; [`asset_comment`] is the short-note thread on one asset;
@@ -2065,9 +2076,19 @@ cross-module view.
    the same request; a mint stranded by a failed dispatch write is the
    legal pre-created-empty state, not debris), and everything else
    about it — standing, membership, rollups — is projection.
+
+   Where this binds is the application layer, on the forge's own
+   verbs. [`DispatchJob`](dispatch::DispatchJob) is a core type and
+   is complete with `pursuit_id` unset; it is
+   `application::forge::dispatch_service` that will not let a round
+   be *started* without filing it. Reading the rule onto the domain
+   type is what would make the core need the forge, which doctrine 6
+   forbids.
 6. **Two layers: the core states facts, the [`forge`] states intent.**
    The core is what is true of the stored bytes — assets, freezes,
-   edges, the identity question and the outbound one — and it is
+   edges, the identity question ([`duplicate_conflict`]), what an
+   artefact discloses on its way out ([`disclosure`]), and the
+   invocation that sent it there ([`dispatch`]) — and it is
    complete without the forge: importing, deduplicating, rating and
    trashing need no pursuit, and the minting rule above binds the
    forge's own events, not the catalogue. The forge is the operator's
@@ -3068,6 +3089,49 @@ mark on one is a false statement.
 - `UnknownSourceType` — A value that is not a term of the IPTC digital source type vocabulary.
 
 
+<!-- asterism_core/domain__dispatch.md -->
+# asterism-core::domain::dispatch
+
+`DispatchJob` — one exporter invocation against a Snapshot.
+
+Aggregate root for a single outbound job's whole lifecycle
+(Pending → Running → Done/Failed/Cancelled). Everything the apalis
+`DispatchRun` runner needs to resume after restart is on this row:
+
+- `snapshot_id` — points back at the input Snapshot.
+- `exporter_slug` + `action` + `params_json` — how to reach the
+  backend.
+- `handle_json` — opaque bytes the exporter's `Handle` serialised
+  into; the runner rehydrates this to call `poll` / `harvest`
+  again.
+- `state_slug` — the lifecycle state (mirrors
+  `asterism_dispatch_sdk::DispatchState::slug()`).
+- `output_asset_ids` — populated during `harvest` so callers can
+  go "show me what this dispatch produced" without a follow-up
+  query.
+
+# Invariants
+
+1. `persona_id` is the persona the dispatch belongs to; the
+   Snapshot carries the same persona (application service
+   enforces).
+2. `state` transitions are one-way: Pending → Running →
+   (Done | Failed | Cancelled). Backwards transitions are rejected
+   at the service layer.
+3. `output_asset_ids` is empty until state is `Done`; setting it
+   is atomic with the transition to `Done` (the reify path writes
+   both in one save).
+
+## Types
+
+- `DispatchJob` — One dispatch invocation.
+- `DispatchState` — Lifecycle state persisted with the dispatch job.
+
+## Constants
+
+- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
+
+
 <!-- asterism_core/domain__duplicate_conflict.md -->
 # asterism-core::domain::duplicate_conflict
 
@@ -3206,7 +3270,7 @@ the column.
 # asterism-core::domain::forge
 
 The forge layer — the intentional history over the catalogue: a line
-of work, the rounds it sent out, and the conclusion it reached.
+of work, what it filed under itself, and the conclusion it reached.
 
 Everything else in [`domain`](crate::domain) answers what is true of
 the stored bytes. This module answers what somebody was *trying to
@@ -3236,12 +3300,15 @@ verdict — which is the failure mode this split exists to prevent.
                          (or .closed_abandoned — nothing lands)
 ```
 
-[`pursuit`] is the minted unit of work and its lifecycle facts;
-[`dispatch`] is one round — an exporter invocation against a frozen
-input set, stamped with the pursuit it files under. A round's outputs
-and the artefacts that come back are ordinary catalogue rows: the
-forge does not hold a working copy, and there is no state to
-integrate at the end. What the close integrates is a *decision*.
+[`pursuit`] is the minted unit of work and its lifecycle facts. A
+round is a [`dispatch`](crate::domain::dispatch) — an exporter
+invocation against a frozen input set — and it is a *core* module,
+because what it records is that a call was made and what came back,
+not what anybody was after. The forge's part is the stamp: which
+pursuit that round was filed under. A round's outputs and the
+artefacts that come back are ordinary catalogue rows too — the forge
+does not hold a working copy, and there is no state to integrate at
+the end. What the close integrates is a *decision*.
 
 **Culling** — the narrowing between a return and the next round or
 the close — is recorded (#22, model on #63). Mid-work it moves
@@ -3344,49 +3411,6 @@ close is a new event and may carry a new cull.
 - `CullVerdict` — The closed set of member verdicts. Two values, no third —
 - `RequestedVerdict` — A caller's requested verdict, before resolution against the
 - `ResolvedVerdict` — A resolved verdict, ready to become a `cull_member` row.
-
-
-<!-- asterism_core/domain__forge__dispatch.md -->
-# asterism-core::domain::forge::dispatch
-
-`DispatchJob` — one exporter invocation against a Snapshot.
-
-Aggregate root for a single outbound job's whole lifecycle
-(Pending → Running → Done/Failed/Cancelled). Everything the apalis
-`DispatchRun` runner needs to resume after restart is on this row:
-
-- `snapshot_id` — points back at the input Snapshot.
-- `exporter_slug` + `action` + `params_json` — how to reach the
-  backend.
-- `handle_json` — opaque bytes the exporter's `Handle` serialised
-  into; the runner rehydrates this to call `poll` / `harvest`
-  again.
-- `state_slug` — the lifecycle state (mirrors
-  `asterism_dispatch_sdk::DispatchState::slug()`).
-- `output_asset_ids` — populated during `harvest` so callers can
-  go "show me what this dispatch produced" without a follow-up
-  query.
-
-# Invariants
-
-1. `persona_id` is the persona the dispatch belongs to; the
-   Snapshot carries the same persona (application service
-   enforces).
-2. `state` transitions are one-way: Pending → Running →
-   (Done | Failed | Cancelled). Backwards transitions are rejected
-   at the service layer.
-3. `output_asset_ids` is empty until state is `Done`; setting it
-   is atomic with the transition to `Done` (the reify path writes
-   both in one save).
-
-## Types
-
-- `DispatchJob` — One dispatch invocation.
-- `DispatchState` — Lifecycle state persisted with the dispatch job.
-
-## Constants
-
-- `DISPATCH_TRACE_KEY` — Key under which a reified artefact records the run that made it,
 
 
 <!-- asterism_core/domain__forge__line.md -->
