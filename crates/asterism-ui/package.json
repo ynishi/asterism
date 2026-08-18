@@ -36,6 +36,7 @@
     "@wdio/tauri-plugin": "^1.1.0",
     "@wdio/tauri-service": "^1.1.0",
     "happy-dom": "^20.11.1",
+    "prettier": "^3.9.6",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tslib": "^2.7.0",
