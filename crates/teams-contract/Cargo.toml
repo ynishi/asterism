@@ -14,3 +14,9 @@ publish     = false
 
 [dependencies]
 teams-core = { path = "../teams-core" }
+
+serde = { workspace = true }
+
+# Generates TypeScript bindings from the DTOs defined here — the same
+# flow as asterism-contract, so a later UI consumes one source of truth.
+schema-bridge = { workspace = true }

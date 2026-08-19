@@ -28,6 +28,17 @@ anyhow     = { workspace = true }
 serde_json = { workspace = true }
 uuid       = { workspace = true }
 
+# Auth v0 (#83 §5): argon2id hashing through RustCrypto — never hand-rolled.
+argon2 = { workspace = true }
+# Session tokens are stored hashed: the table keeps the SHA-256 of the
+# opaque token, so the database never contains a usable bearer token.
+sha2 = { workspace = true }
+# 256-bit session tokens and argon2 salts come from the OS CSPRNG
+# (`rand::rngs::OsRng`); already a workspace line for asterism-benchgen.
+rand = { workspace = true }
+# `teams-core::port::auth::CredentialVerifier` is an async trait.
+async-trait = { workspace = true }
+
 # A real dependency, not only dev, the same promotion asterism-infra
 # made for the same mechanism: the profile-marker publish writes its
 # contents to a `NamedTempFile` (created `O_EXCL` and 0600) and hard-

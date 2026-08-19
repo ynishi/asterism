@@ -126,9 +126,49 @@ BEGIN
 END;
 "#;
 
+/// Version 1 → 2: auth v0 (#83 §5, the #91 slice) — instance-local
+/// credentials and DB-backed opaque sessions.
+///
+/// - **`user_account` holds credentials, not identity semantics.** The
+///   domain's `User` stays credential-free behind `port::auth`; this
+///   table is where the v0 password adapter keeps the argon2id PHC
+///   string. `is_operator` marks the env/CLI bootstrap identity
+///   (#83 §1 InstanceOperator) — a flag on the *account*, deliberately
+///   nowhere near `membership`: the operator lives outside the
+///   membership table, and owning a team is an explicit membership row
+///   like anyone else's.
+/// - **`auth_session.token_hash` is the SHA-256 of the opaque token**,
+///   never the token itself, so the database never contains a usable
+///   bearer credential. Expiry is `expires_at` epoch ms; resolve-time
+///   rejection deletes the row and `cleanup_expired` sweeps in bulk —
+///   the index on `expires_at` is what the sweep walks.
+const V2_AUTH_TABLES: &str = r#"
+CREATE TABLE user_account (
+    user_id       BLOB PRIMARY KEY,
+    login         TEXT NOT NULL,
+    display_name  TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_operator   INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX idx_user_account_login ON user_account(login);
+
+CREATE TABLE auth_session (
+    token_hash TEXT NOT NULL,
+    user_id    BLOB NOT NULL REFERENCES user_account(user_id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (token_hash)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_auth_session_user    ON auth_session(user_id);
+CREATE INDEX idx_auth_session_expires ON auth_session(expires_at);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
-const MIGRATIONS: &[&str] = &[V1_INITIAL_SCHEMA];
+const MIGRATIONS: &[&str] = &[V1_INITIAL_SCHEMA, V2_AUTH_TABLES];
 
 /// Latest schema version (`MIGRATIONS.len()`).
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
