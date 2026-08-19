@@ -73,3 +73,24 @@ pub struct RevokeOwnerCommand {
     /// The owner whose role becomes `member`.
     pub user_id: String,
 }
+
+/// Uploads a blob into the team's store
+/// (`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).
+///
+/// The one command whose fields travel in the **query string**: the
+/// request body is the blob's raw bytes, streamed, so there is no JSON
+/// body for them to ride in (the OCI registry `PUT ?digest=` shape,
+/// #83 §3).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct UploadBlobCommand {
+    /// The digest the client **declares** the bytes to have — computed
+    /// by re-reading the file at promote time, in the shared
+    /// `sha256:<64hex>` notation.
+    ///
+    /// Mandatory: omitting it is a `400`, it is typed `Option` only so
+    /// the server can answer that omission in the house error shape
+    /// instead of a framework rejection. A mismatch against what the
+    /// server hashes while writing rejects the whole operation with a
+    /// `409` carrying both sides — no blob, no link, no ledger event.
+    pub digest: Option<String>,
+}

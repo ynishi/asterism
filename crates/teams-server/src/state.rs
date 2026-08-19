@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use teams_core::domain::identity::RegistrationPolicy;
 use teams_infra::auth::password::PasswordAuth;
+use teams_infra::blob::LocalFileStorageAdapter;
 use teams_infra::sqlite::SqliteTeamsRepository;
 
 use crate::rate_limit::RateLimiter;
@@ -32,6 +33,9 @@ pub struct TeamsCtx {
     pub repo: SqliteTeamsRepository,
     /// Credentials and sessions — auth v0 (#83 §5).
     pub auth: PasswordAuth,
+    /// The instance's CAS — bytes only; visibility is the link rows'
+    /// question, answered through [`Self::repo`] (#83 §3, #93).
+    pub blobs: LocalFileStorageAdapter,
     /// Whether any authenticated user may create teams, or only the
     /// operator (#83 §1's closed-registration flag).
     pub registration: RegistrationPolicy,

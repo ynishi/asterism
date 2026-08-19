@@ -87,6 +87,24 @@ pub struct LedgerEventDto {
     pub payload_json: String,
 }
 
+/// The result of `PUT /teams/{team_id}/blobs?digest=…`.
+///
+/// Deliberately identical for a first copy and a deduplicated one: the
+/// CAS holding the digest already is server-side knowledge only, and a
+/// response that said "skipped" would be the Harnik-2010 dedupe side
+/// channel (#83 §3). What the caller learns is what changed *for their
+/// team*: the link now exists, and here is the event that recorded it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct BlobUploadedDto {
+    /// The verified digest — declared and computed, now equal by
+    /// construction — under which the blob is addressable at
+    /// `GET /teams/{team_id}/blobs/{digest}`.
+    pub digest: String,
+    /// The `teams.blob.copy_completed/1` event the upload appended, in
+    /// the same transaction as the link row (#83 §3 ordering).
+    pub event: LedgerEventDto,
+}
+
 /// One typed reference an event makes.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct SubjectRefDto {

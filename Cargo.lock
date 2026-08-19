@@ -8282,10 +8282,13 @@ dependencies = [
  "rusqlite-isle",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "teams-contract",
  "teams-core",
  "teams-infra",
+ "tempfile",
  "tokio",
+ "tokio-util",
  "tower",
  "uuid",
 ]

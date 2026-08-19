@@ -70,6 +70,12 @@ enum Command {
         /// override with `$ASTERISM_TEAMS_HOME`).
         #[arg(long)]
         db: Option<PathBuf>,
+        /// Blob store root (default: `blobs/` in the active teams
+        /// profile home — beside the database, so the #83 §3 ordering
+        /// rule spans one machine's durability). Opening it sweeps
+        /// `staging/` of any interrupted copies.
+        #[arg(long)]
+        blobs: Option<PathBuf>,
         /// Listen port.
         #[arg(long)]
         port: Option<u16>,
@@ -170,12 +176,20 @@ async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Serve {
             db,
+            blobs,
             port,
             bind,
             closed_registration,
         } => {
             let db_path = resolve_db_path(db)?;
             let (isle, _driver) = teams_infra::sqlite::open_and_migrate(&db_path).await?;
+            let blob_root = match blobs {
+                Some(path) => path,
+                None => teams_infra::paths::default_blob_root()?,
+            };
+            // Opening the store runs the startup sweep of staging/
+            // (#83 §3 — the one mechanical cleanup the blob layer owes).
+            let blobs = teams_infra::blob::LocalFileStorageAdapter::open(blob_root).await?;
             let registration = if closed_registration {
                 RegistrationPolicy::Closed
             } else {
@@ -184,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             let ctx = Arc::new(TeamsCtx {
                 repo: SqliteTeamsRepository::new(isle.clone()),
                 auth: PasswordAuth::new(isle),
+                blobs,
                 registration,
                 session_ttl_ms: DEFAULT_SESSION_TTL_MS,
                 auth_limiter: RateLimiter::new(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW),
