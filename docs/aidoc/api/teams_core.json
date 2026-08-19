@@ -1,0 +1,226 @@
+{
+  "crate": "teams-core",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "teams_core::domain",
+      "kind": "module",
+      "docs": "Domain types and invariants of the teams plane — everything here is\nIO-free and unit-testable on a machine with no database and no disk."
+    },
+    {
+      "path": "teams_core::domain::identity",
+      "kind": "module",
+      "docs": "`identity` — who exists, who belongs to a team, and who may do what.\n\nThree separations carry this module, all from #83 §1:\n\n- **Membership is not identity.** A [`User`] exists independently of\n  any team; a [`Membership`] is one `(user, team, role)` row and a\n  team's set of them is what every invariant is evaluated over.\n- **The operator is not a member.** [`InstanceOperator`] is the\n  env/CLI bootstrap identity and lives *outside* the membership\n  set — owning a team is an explicit membership row like anyone\n  else's, and when the operator acts inside a team the ledger stamp\n  says so ([`LedgerActor::Operator`]): an operator action is never\n  disguised as a member's.\n- **Authorization reads state, not history.** The decision functions\n  here take the current membership set ([`TeamRoster`]); the ledger\n  records what was decided and is never consulted to decide.\n\nThe one absolute invariant is the last-owner rule: every team has\n≥1 owner at all times, so the last owner cannot leave, be removed,\nor self-demote (the GitHub/GitLab/Gitea rule). It is enforced as\n`check_*` methods on [`TeamRoster`] so every write path asks the\nsame three lines instead of re-deriving them."
+    },
+    {
+      "path": "teams_core::domain::identity::ActorStamp",
+      "kind": "struct",
+      "docs": "What the ledger records about who acted: `{ user_id, display_name\nat write time }` (#83 §1).\n\nThe name is captured, not referenced — a rename or account deletion\nafter the fact never rewrites past entries, so history keeps saying\nwhat it said when it was written."
+    },
+    {
+      "path": "teams_core::domain::identity::CreationActor",
+      "kind": "enum",
+      "docs": "Who is asking to create a team. Creation happens before any roster\nexists, so the actor here is not a [`TeamAuthority`] — there is no\nrole to have yet."
+    },
+    {
+      "path": "teams_core::domain::identity::InstanceOperator",
+      "kind": "struct",
+      "docs": "The env/CLI bootstrap identity — a distinct actor kind, **not** a\nmembership (#83 §1).\n\nThe operator lives outside the membership table and is never\nimplicitly inside a team: if the operator wants to *own* a team,\nthat is an explicit [`Membership`] row like anyone else's. What\nthis type exists for is the other direction — when the operator\nacts inside a team without being a member (deleting it, say), the\nledger must record an operator stamp, distinguishable from a\nmember's ([`LedgerActor::Operator`]), so the action is never\ndisguised as a member's."
+    },
+    {
+      "path": "teams_core::domain::identity::LedgerActor",
+      "kind": "enum",
+      "docs": "The actor of a ledger event — a member's stamp or the operator's,\nand the two are never the same value.\n\nAn enum rather than a stamp plus a boolean, because the\ndistinguishability is the requirement (#83 §1: an operator action\ninside a team is never disguised as a member's): a boolean field is\na value a writer can forget, a variant is a choice every\nconstructor makes. The serde tag (`actor_kind`) carries the same\ndistinction onto the wire and into storage."
+    },
+    {
+      "path": "teams_core::domain::identity::Membership",
+      "kind": "struct",
+      "docs": "One `(user, team, role)` row — a user's standing inside one team.\n\nPlain data on purpose: the invariants are not properties of one row\nbut of a team's whole set of them, which is [`TeamRoster`]'s job."
+    },
+    {
+      "path": "teams_core::domain::identity::RegistrationPolicy",
+      "kind": "enum",
+      "docs": "Whether the instance accepts team creation from ordinary users, or\nonly from the operator (#83 §1: \"a closed-registration flag flips\nthis to operator\")."
+    },
+    {
+      "path": "teams_core::domain::identity::Role",
+      "kind": "enum",
+      "docs": "A member's role within one team.\n\nStored as TEXT and validated here in app code rather than as a\ndatabase enum (#83 §1): SQLite-friendly, and a later tier is a new\nword plus a new match arm, not a schema migration. Exactly two\nvalues ship in v0, and [`Role::parse`] is the only way TEXT becomes\na `Role` — an unknown word is refused at the boundary instead of\ndefaulting to either side of the authority table."
+    },
+    {
+      "path": "teams_core::domain::identity::TeamAuthority",
+      "kind": "enum",
+      "docs": "Who is asking, reduced to what the authority table cares about:\nthe actor's current role in *this* team, or the fact that the\nactor is the instance operator."
+    },
+    {
+      "path": "teams_core::domain::identity::TeamRoster",
+      "kind": "struct",
+      "docs": "One team's membership set — the value every membership invariant is\nevaluated over.\n\nBuilt from the current state rows (never from the ledger — #83 §1:\nauthorization always reads current membership state) and consulted\nbefore a write. The `check_*` methods answer for the write without\nperforming it: this crate has no storage to perform it on, and\nkeeping the decision pure is what makes the last-owner rule\ntestable here rather than in an integration suite."
+    },
+    {
+      "path": "teams_core::domain::identity::TeamVerb",
+      "kind": "enum",
+      "docs": "The administrative verbs of the #83 §1 authority table — everything\nbut team creation, which needs the registration policy and no\nroster ([`may_create_team`])."
+    },
+    {
+      "path": "teams_core::domain::identity::User",
+      "kind": "struct",
+      "docs": "A person known to the instance — the identity teams are built from.\n\n`user_id` is immutable (private field, read accessor only): it is\nwhat memberships, locators and ledger stamps refer to, and an id\nthat could be reassigned would silently re-attribute all of them.\n`display_name` is the mutable half — renaming is an ordinary edit\n([`User::rename`]) precisely because the ledger records the name\n*at write time* ([`ActorStamp`]), so a rename never rewrites what\npast entries say.\n\nCredentials are deliberately absent: they live behind\n[`port::auth`](crate::port::auth), so the auth provider can be\nswapped without touching this type."
+    },
+    {
+      "path": "teams_core::domain::identity::may_create_team",
+      "kind": "function",
+      "docs": "The team-create row of the #83 §1 authority table."
+    },
+    {
+      "path": "teams_core::domain::identity::verb_allowed",
+      "kind": "function",
+      "docs": "The #83 §1 authority table for in-team verbs, as one decision\nfunction.\n\nOwners may do everything. The operator may **delete** a team\n(ledger-stamped as the operator) and nothing else in this table:\n§1 grants the operator no implicit invite / remove / role-grant /\npurge inside a team it does not own — for those the operator joins\nlike anyone else and acts through a membership row.\n\nThis answers \"does the role permit the verb\" and nothing more; the\nlast-owner rule is a property of the target and the roster, checked\nseparately ([`TeamRoster::check_remove`] and friends), so a verb\ncan be permitted and still refused."
+    },
+    {
+      "path": "teams_core::domain::ledger",
+      "kind": "module",
+      "docs": "`ledger` — the actor-stamped, append-only event envelope (#83 §2).\n\nEach team has one stream. The substrate knows the envelope and\nnothing inside it: `payload` is a versioned body *per kind* and\nstays opaque here, `subjects` is the typed index trace queries walk\ninstead of parsing payloads, and `kind` is a namespaced + versioned\nstring so `forge.*` kinds can register after #63 with the envelope\nunchanged.\n\nTwo things this module deliberately does **not** do:\n\n- **Generate `seq`.** Monotonicity within a team is a storage\n  guarantee (one SQLite tx, single writer by deployment shape), so\n  [`EventSeq`] is a newtype the domain validates and carries but\n  never mints — a domain-side counter would be a second writable\n  truth, the one forbidden shape.\n- **Source state from events.** State tables are authoritative and\n  every state change appends its event in the same tx (audit-log\n  pattern, not event sourcing — #83 §2 SoT note). Nothing here\n  replays."
+    },
+    {
+      "path": "teams_core::domain::ledger::BLOB_COPY_COMPLETED",
+      "kind": "constant",
+      "docs": "A promotion's blob copy completed — declared digest verified,\nbytes in the CAS, link row landing in the same tx (#83 §3)."
+    },
+    {
+      "path": "teams_core::domain::ledger::EventKind",
+      "kind": "struct",
+      "docs": "A namespaced + versioned event kind — `\"teams.membership.added/1\"`.\n\nThe shape is `<segment>.<segment>[.<segment>…]/<version>`: at least\ntwo dot-separated lowercase segments (`[a-z0-9_]`), then `/`, then\na positive integer with no leading zeros. The namespace requirement\nis what lets `forge.*` kinds land beside `teams.*` ones after #63\nwithout collisions; the version is in the *name* because the\npayload contract is per kind-version, and a reader that knows\n`…/1` must not be handed a `…/2` body under the same label.\n\n[`EventKind::parse`] validates the shape and nothing more — whether\na kind is *registered* is [`is_v0_kind`]'s question, kept separate\nso a future kind's events can be carried by an envelope that\npredates it."
+    },
+    {
+      "path": "teams_core::domain::ledger::EventSeq",
+      "kind": "struct",
+      "docs": "Storage-assigned position of an event within its team's stream —\nmonotonic, starting at 1.\n\nA newtype rather than a bare `i64` so \"validated but not generated\"\nis a property of the type: the only constructor checks the value a\nstorage row handed back, and there is no `next()` for domain code\nto invent sequence numbers with."
+    },
+    {
+      "path": "teams_core::domain::ledger::LedgerEvent",
+      "kind": "struct",
+      "docs": "One entry in a team's stream — the envelope, with the payload\nopaque to it.\n\nFields are public: the envelope is a record, and what makes it\ntrustworthy is not encapsulation here but the storage discipline\n(append-only, no update/delete) that `teams-infra` owes. The\nconstructor exists so that every envelope that passes through\ndomain code has been shape-checked once."
+    },
+    {
+      "path": "teams_core::domain::ledger::MEMBERSHIP_ADDED",
+      "kind": "constant",
+      "docs": "A user became a member."
+    },
+    {
+      "path": "teams_core::domain::ledger::MEMBERSHIP_REMOVED",
+      "kind": "constant",
+      "docs": "A member left or was removed."
+    },
+    {
+      "path": "teams_core::domain::ledger::ROLE_CHANGED",
+      "kind": "constant",
+      "docs": "A member's role changed — the payload carries **both** the old and\nthe new value (#83 §1: role changes are first-class events carrying\nold/new), so the entry reads on its own instead of against its\npredecessors."
+    },
+    {
+      "path": "teams_core::domain::ledger::SubjectRef",
+      "kind": "enum",
+      "docs": "A typed reference an event makes — the index trace queries walk, so\n\"which events touched X\" never becomes payload parsing (#83 §2).\n\nThe constructors validate where a shape exists to validate\n([`SubjectRef::digest`] / [`SubjectRef::blob`]); the enum's payloads\nstay public because a tagged serde representation needs them, so\nconstruction through the constructors is the convention the tests\npin, not a wall the type enforces."
+    },
+    {
+      "path": "teams_core::domain::ledger::TEAM_CREATED",
+      "kind": "constant",
+      "docs": "A team came into existence."
+    },
+    {
+      "path": "teams_core::domain::ledger::TEAM_DELETED",
+      "kind": "constant",
+      "docs": "A team was deleted (owner, or the operator — ledger-stamped)."
+    },
+    {
+      "path": "teams_core::domain::ledger::V0_KINDS",
+      "kind": "constant",
+      "docs": "The v0 kind registry: team lifecycle, membership changes, role\nchanges, blob-copy completed. A slice rather than knowledge spread\nover call sites, for the reason `asterism-core` keeps\n`RESERVED_VALUES` as a list — whoever needs \"every kind v0 ships\"\n(a projection, a migration, a doc generator) walks this, and a kind\nadded later reaches them without an edit on their side."
+    },
+    {
+      "path": "teams_core::domain::ledger::is_v0_kind",
+      "kind": "function",
+      "docs": "Whether `kind` is one this build of the plane writes. Shape and\nregistration are separate questions on purpose: a reader must\naccept well-formed kinds it does not know (a stream written by a\nnewer build, `forge.*` after #63), a *writer* asks this before\nappending."
+    },
+    {
+      "path": "teams_core::domain::store",
+      "kind": "module",
+      "docs": "`store` — the team-side view of instance-owned blobs, and the\ndeclared-digest contract (#83 §3).\n\nThe store proper is a global CAS the instance owns; what this\nmodule types is the layer everything consults instead of bytes:\n\n- [`TeamBlobLink`] — the visibility AND dedupe boundary. A digest\n  \"exists\" for a caller iff a link row sits in a team they belong\n  to; purge scope is a team's links, never the CAS directly.\n- [`Locator`] — a *private* link to content the instance does not\n  hold: a uri, and at most a digest **hint** from the last\n  sighting. The instance guarantees nothing about it.\n- The promotion verification rule — [`verify_declared_digest`],\n  whose two outcomes are the whole point of this module.\n\n# Digest notation is `asterism-core`'s, reused as-is\n\nEvery digest here is the `sha256:`-prefixed storage form defined by\n`asterism_core::domain::content_hash` (and the contract crate under\nit). [`parse_digest`] delegates to that parser rather than\nre-spelling the grammar — one notation, one set of shape rules,\nacross the local app and the teams plane (#83 §3: \"core digest\nreused, `sha256:` prefix kept; strip only at the path-mapping\nedge\")."
+    },
+    {
+      "path": "teams_core::domain::store::DeclaredDigest",
+      "kind": "struct",
+      "docs": "The digest a promotion **declares** — mandatory, computed by the\nclient at promote time by re-reading the file (#83 §3).\n\nA newtype rather than a `String` parameter so \"the declaration was\nparsed\" is a fact the verification signature can demand: there is\nno way to hand [`verify_declared_digest`] an unvalidated claim."
+    },
+    {
+      "path": "teams_core::domain::store::Locator",
+      "kind": "struct",
+      "docs": "A private-space link: where a user last saw some content, outside\nthe instance's custody (#83 §3).\n\nThe digest field is named `digest_hint` and typed `Option` because\nboth facts are the contract: there may not be one, and when there\nis, it is an **index hint from the last sighting — never a\nverification source**. Nothing may compare content against it and\ncall the result verified; verification is what promotion's declared\ndigest exists for ([`verify_declared_digest`]), computed by\nre-reading the file at promote time. The instance does not\nguarantee the uri resolves at all."
+    },
+    {
+      "path": "teams_core::domain::store::TeamBlobLink",
+      "kind": "struct",
+      "docs": "One `(team, digest)` row — the boundary that makes a blob visible.\n\nThe CAS holds one physical copy per instance; this row is what\nmakes that copy *exist* for a team's members, and removing a team's\nrows is what purge means (the bytes go when no team links them —\nswept async, registry-GC shape). Kept as a validated pair rather\nthan two loose fields so a link row cannot be minted around the\ndigest grammar."
+    },
+    {
+      "path": "teams_core::domain::store::VerifiedCopy",
+      "kind": "struct",
+      "docs": "Proof that a promotion's bytes hashed to what was declared — the\n**only** way a digest enters the link layer from a promotion.\n\nThe field is private and the sole constructor is\n[`verify_declared_digest`]'s accept arm. That is the \"no\naccept-new-digest path exists in the type\" rule made structural: a\ncaller holding a mismatch cannot build one of these around the\ncomputed value, because nothing public takes a computed value alone."
+    },
+    {
+      "path": "teams_core::domain::store::parse_digest",
+      "kind": "function",
+      "docs": "Validates a whole-file digest in the shared notation and hands back\nits canonical string.\n\nDelegates the shape rules (`sha256:` + 64 lowercase hex) to\n`asterism-core`'s parser, then narrows to the artefact axis: the\nteams store addresses whole-file bytes only, so a content-region\n(`cr1-sha256:`) or metadata (`m1-sha256:`) digest — valid claims in\nthe local app — are refused here rather than silently admitted into\na CAS keyed by file digests."
+    },
+    {
+      "path": "teams_core::domain::store::verify_declared_digest",
+      "kind": "function",
+      "docs": "The declared-digest verification rule (#83 §3), with exactly two\noutcomes: **accept** (declared equals computed) or **reject the\nwhole op** (they differ — no copy, no link row, no ledger event).\n\nA mismatch is promote-time TOCTOU: the file changed between the\nuser choosing it and the bytes arriving. The right response is to\nreject and let the user re-confirm, because a promotion asserts\n\"content X\", not \"whatever the path holds now\" — accepting the new\ndigest would promote bytes nobody looked at under a claim nobody\nmade. That third outcome is not an error case this function\nreturns; it is a function this module refuses to contain, and\n[`VerifiedCopy`]'s private constructor is what keeps a caller from\nwriting it outside.\n\n`computed` goes through [`parse_digest`] too: the hasher side is\nthis workspace's own code, but a malformed computed value meeting a\nwell-formed declaration must read as \"the comparison is broken\",\nnever as an ordinary mismatch a user is told to re-confirm away."
+    },
+    {
+      "path": "teams_core::error",
+      "kind": "module",
+      "docs": "`DomainError` — the innermost error type of the teams plane.\n\nSame convention as `asterism-core`'s enum of the same name: outer\nlayers (`teams-server`'s HTTP / MCP errors, once they exist) convert\nfrom this, infrastructure failures are collapsed into `Infra`, and\nthe domain vocabulary stays clean. The two enums are deliberately\nseparate types — the teams plane and the local app do not share an\nerror surface, only `asterism-core`'s domain vocabulary (#83 §4)."
+    },
+    {
+      "path": "teams_core::error::DomainError",
+      "kind": "enum",
+      "docs": "Errors raised by the teams domain layer.\n\nConvention: `teams-infra` converts adapter failures into\n`anyhow::Error` and passes them through [`Self::Infra`]; the domain\nitself returns the specific variants directly."
+    },
+    {
+      "path": "teams_core::port",
+      "kind": "module",
+      "docs": "Ports — the traits `teams-infra` implements (dependency inversion,\nsame discipline as `asterism-core`'s repository traits). Declared\nhere so the domain can be exercised against fakes with no adapter\ncompiled."
+    },
+    {
+      "path": "teams_core::port::auth",
+      "kind": "module",
+      "docs": "`port::auth` — credential verification behind a provider swap\n(#83 §1).\n\nCredentials live behind this port so the v0 choice (instance-local\nargon2id password adapter, #83 §5) stays an adapter detail and a\nlater OIDC adapter is a new implementation, not a domain change.\nSessions are deliberately **not** here: a session is a short-lived\ninfra artifact that resolves to a `user_id` and the ledger never\nsees one — `teams-infra` owns that table and its expiry."
+    },
+    {
+      "path": "teams_core::port::auth::CredentialVerifier",
+      "kind": "trait",
+      "docs": "Verifies a presented credential and resolves it to a user."
+    },
+    {
+      "path": "teams_core::port::blob",
+      "kind": "module",
+      "docs": "`port::blob` — backing storage for the instance's global CAS.\n\nHand-rolled trait, house style (#83 §3): `object_store` / OpenDAL\nstay adapter details if S3 arrives — they are not the port. The\nfive verbs are the day-1 set because GC, orphan audit and backup\nneed `delete` + `list` from the start, not only `put` / `get`.\n\nThe v0 adapter (`teams-infra`) is a local-filesystem layout with a\nstaging dir and a stream-hash → verify → fsync → rename write path;\nnone of that shows here, deliberately."
+    },
+    {
+      "path": "teams_core::port::blob::BlobStore",
+      "kind": "trait",
+      "docs": "Content-addressed blob storage — one physical copy per instance,\naddressed by whole-file digest only.\n\n`put` takes the **declared** digest and returns a [`VerifiedCopy`]:\nthe adapter hashes while writing and the domain's verification rule\n([`verify_declared_digest`](crate::domain::store::verify_declared_digest))\ndecides accept-or-reject, so a mismatch surfaces as\n[`DomainError::DigestMismatch`] and no bytes land. The owned\n`Vec<u8>` is the v0 signature; when the adapter's streaming write\npath needs to show through the port (multi-GB promotions), a stream\nform is added *beside* this method rather than by changing what\nthis one promises."
+    },
+    {
+      "path": "teams_core::port::share",
+      "kind": "module",
+      "docs": "`port::share` — reserved for the share domain.\n\n#63 owns the share vocabulary: pursuit/cull/merge semantics,\npromotion copy *timing* (at IN vs at merge), and the minimum\nprovenance payload at promotion. This port is filled after #63\nfixes those; it exists now so the crate layering already has the\nseam in the place the design says it goes (#83 §0), and so nothing\ngrows share-shaped methods on the other ports in the meantime."
+    },
+    {
+      "path": "teams_core::port::share::SharePort",
+      "kind": "trait",
+      "docs": "Reserved — filled after #63. Deliberately empty: an invented verb\nhere would be this crate deciding what #63 exists to decide."
+    }
+  ]
+}
