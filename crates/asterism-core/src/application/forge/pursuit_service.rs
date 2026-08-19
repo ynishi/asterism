@@ -756,7 +756,7 @@ impl PursuitService {
             .pursuits
             .find(&pursuit_id)
             .await?
-            .ok_or_else(|| DomainError::not_found("pursuit", &pursuit_id.to_string()))?;
+            .ok_or_else(|| DomainError::not_found("pursuit", pursuit_id.to_string()))?;
         if pursuit.persona_id != job.persona_id {
             return Err(DomainError::Validation(
                 "dispatch and the pursuit it is stamped with belong to different personas".into(),
