@@ -641,6 +641,26 @@ and this project adheres to
 
 ### Changed
 
+- **A round is a core thing again, and the boundary says what the forge claims**
+  (#81). An exporter invocation is a call that was made and a record of what
+  came back — a lifecycle, the columns a runner resumes from, and no opinion
+  about why anyone wanted it. It had been filed under the forge as a passenger
+  of the commit that gave that layer its name, whose subject was the pursuit
+  sitting flat among forty-six modules and which never argued that a dispatch
+  carries intent. `dispatch` is a core module again, byte for byte the same file
+  at a different path. What it buys is that the dispatch port names no forge
+  type, so the asset service turning a `derived_from: dispatch:<id>` claim into
+  the assets that dispatch produced is core work through a core port rather than
+  the core reaching up a layer — and resolving a provenance claim was always
+  core work. Three doc passages disagreed once the module moved, and they were
+  one question: what the forge claims on a round, and where the minting rule
+  binds. Both answers are now written in the same words everywhere they appear —
+  the claim is the stamp naming the pursuit a round was filed under, and the
+  rule binds at the application layer on a forge verb, because the job type is
+  complete with that stamp unset. Doctrine 6 also stops saying "the identity
+  question and the outbound one", which named no module and could be read as
+  either of two; it names all three instead.
+
 - **Dev builds keep line tables and drop variable DWARF.** The default dev
   profile linked every e2e binary at about 0.8 GB, most of it variable and type
   debuginfo nothing here reads: failures are read from test output and panic
@@ -661,17 +681,17 @@ and this project adheres to
   the core's own shape to answer a forge question, and proposed recording "this
   one is better" through the fold that means "these are the same thing" (#22).
 
-  `pursuit` and `dispatch` now live under `domain::forge` with their services
-  under `application::forge`, and that module's doc states the loop (rounds out
-  and in, culling between them, the close that lands the kept set) and the
-  contract: intent lives only in the forge, the core is complete without it —
-  importing, deduplicating and rating need no pursuit — and what the forge
-  writes onto a core row is a correlation id and nothing else. That last clause
-  is stated with its exceptions rather than as an absolute, because the forge
-  does write on core rows: the `_dispatch` stamp a reified output carries and
-  the `_trace` claim a returning artefact brings back are both ids on
-  `asset.extra`, and they are how the two layers rejoin after a round trip. What
-  does not go there is a verdict. Doctrine 6 says the same in a paragraph.
+  `pursuit` now lives under `domain::forge` with its service under
+  `application::forge`, and that module's doc states the loop (rounds out and
+  in, culling between them, the close that lands the kept set) and the contract:
+  intent lives only in the forge, the core is complete without it — importing,
+  deduplicating and rating need no pursuit — and what the forge writes onto a
+  core row is a correlation id and nothing else. That last clause is stated with
+  its exceptions rather than as an absolute, because the forge does write on
+  core rows: the `_dispatch` stamp a reified output carries and the `_trace`
+  claim a returning artefact brings back are both ids on `asset.extra`, and they
+  are how the two layers rejoin after a round trip. What does not go there is a
+  verdict. Doctrine 6 says the same in a paragraph.
 
   Culling is named in the loop and has no record of its own yet; the module doc
   says so rather than leaving the gap for a reader to discover. The record's

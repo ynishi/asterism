@@ -97,12 +97,12 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
-- [`domain::forge::dispatch`](domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and

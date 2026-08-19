@@ -66,12 +66,12 @@
 - [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [asterism-core::domain::disclosure::record](asterism_core/domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [asterism-core::domain::disclosure::source_type](asterism_core/domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [asterism-core::domain::embedded_text](asterism_core/domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
 - [asterism-core::domain::forge](asterism_core/domain__forge.md): The forge layer — the intentional history over the catalogue: a line
 - [asterism-core::domain::forge::cull](asterism_core/domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
-- [asterism-core::domain::forge::dispatch](asterism_core/domain__forge__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::forge::line](asterism_core/domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [asterism-core::domain::forge::project](asterism_core/domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [asterism-core::domain::forge::pursuit](asterism_core/domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
