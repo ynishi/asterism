@@ -1019,6 +1019,24 @@ and this project adheres to
 
 ### Fixed
 
+- **The disclosure writer stops labelling every `ftyp` file MP4, and its JPEG
+  walk steps over standalone markers** (#23). Two carries from the disclosure
+  writer review. The container sniff treated every `ftyp` brand except `qt  ` as
+  MP4, so HEIC, AVIF and M4A — same box, different families — signed under a
+  declared `video/mp4` the file contradicts. Membership is now read the way the
+  box states it: from the major brand when it is an MP4 dialect, from the
+  compatible list behind it when the major brand is a vendor's name (Sony's
+  `XAVC`), and the families this build does not write into are refused before
+  that list is consulted — an M4A routinely declares `isom` compatible, and
+  compatibility with a video dialect does not make audio video. A brand list
+  naming nothing recognised is refused too: an unsupported-container report
+  rather than a signature under a guess. And the JPEG segment walk assumed every
+  marker short of `EOI` carries a length field; `TEM`, the restarts and a stray
+  `SOI` carry none, so on a file other decoders accept the walk resynchronised
+  at whatever offset the two bytes after one implied. It now records the same
+  standalone set the media probe's scanner already steps over, and the packet
+  insertion point treats them as the non-application markers they are.
+
 - **`changed-packages` answers for the branch's commits, and a script nothing in
   the build reads no longer selects every crate** (#67). Two defects in one
   recipe, and both reach the gates built on it — `rust-test-changed`,
