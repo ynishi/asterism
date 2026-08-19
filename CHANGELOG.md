@@ -1141,6 +1141,30 @@ and this project adheres to
 
 ### Removed
 
+- **The base-event pin — the version claim a targeted `in` could make** (#63).
+  `TxTarget::base_event_id`, the `pursuit_tx.base_event_id` column, the CHECK
+  pairing it to a target and the index over it are gone (V90). A pursuit is cut
+  from a line and its `in` already names the entry it works on; a claim about
+  which version of that entry the caller was looking at is a second statement,
+  and nothing was ever built to make it. No command carried one, the single
+  production writer hard-codes the target both columns derive from to `None`,
+  and no reader ever asked what the column held — so the `Option` was saying
+  "nothing fills this yet" rather than stating a model. `TxTarget` survives as a
+  one-field struct, `target_entry_id` and its own CHECK are untouched, and
+  `PursuitTxKind::from_columns` takes one fewer argument.
+
+  **Nothing on the wire changes.** No command, DTO, HTTP route, MCP tool or
+  TypeScript binding ever carried the pin, so a caller cannot tell the
+  difference. **No row loses a value either**: every row this codebase has
+  written holds NULL here, and `git log -S` finds no revision of the writer that
+  did otherwise. A row written by hand against a real profile is the case no
+  migration can answer for, and its value is dropped like any other.
+
+  The name stays in two places, both of which are records of a past shape rather
+  than claims about today: V85's DDL, which still adds the column because a
+  database walking the chain from scratch has to reach the shape V90 alters, and
+  V90's own step and test.
+
 - **The cull — the close's record of what it kept and what it dropped** (#22).
   The concept is gone from every layer at once: `domain::forge::cull` and its
   `Cull`, `CullMember`, `CullVerdict`, `RequestedVerdict` and
