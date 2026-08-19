@@ -6,11 +6,13 @@
 //! `AsyncIsle`, so state, ledger, credentials and sessions live in one
 //! SQLite file behind one writer.
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use teams_core::domain::identity::RegistrationPolicy;
 use teams_infra::auth::password::PasswordAuth;
 use teams_infra::blob::LocalFileStorageAdapter;
+use teams_infra::gc::GcGuard;
 use teams_infra::sqlite::SqliteTeamsRepository;
 
 use crate::rate_limit::RateLimiter;
@@ -19,6 +21,12 @@ use crate::rate_limit::RateLimiter;
 /// short-lived by design (#83 §1); a client that outlives this logs in
 /// again.
 pub const DEFAULT_SESSION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// The purge grace window's safe default: **7 days**, the
+/// delayed-deletion period GitLab ships for the same trash→purge shape
+/// (#83 §1 names it as the precedent). Configurable per instance with
+/// `teams-server serve --purge-grace-seconds`; tests run a tiny one.
+pub const DEFAULT_PURGE_GRACE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Auth rate limit: attempts allowed per key per window (#83 §5 — one
 /// limiter over ALL auth endpoints from v0).
@@ -43,6 +51,14 @@ pub struct TeamsCtx {
     pub session_ttl_ms: i64,
     /// The one limiter every auth endpoint sits behind.
     pub auth_limiter: RateLimiter,
+    /// How long a purge mark must sit before reclaim may remove it
+    /// (#95). [`DEFAULT_PURGE_GRACE_MS`] unless the operator says
+    /// otherwise; tests use a tiny one.
+    pub purge_grace_ms: i64,
+    /// The guard between the upload write path and the zero-link
+    /// sweep: uploads hold it shared across rename → link commit, the
+    /// sweep holds it exclusive (`teams_infra::gc`).
+    pub gc_guard: Arc<GcGuard>,
 }
 
 /// Milliseconds since the Unix epoch, now — the single clock every

@@ -105,6 +105,64 @@ pub struct BlobUploadedDto {
     pub event: LedgerEventDto,
 }
 
+/// The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
+///
+/// Mark and unmark answer with their [`LedgerEventDto`] alone (the
+/// receipt convention); reclaim gets a shape of its own because one
+/// call removes many links and triggers the zero-link sweep behind it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PurgeReclaimedDto {
+    /// The digests whose links this reclaim removed — exactly the
+    /// marked links whose grace window had elapsed; marks still inside
+    /// their window stay marked for a later reclaim.
+    pub removed_digests: Vec<String>,
+    /// How many blobs the post-reclaim zero-link sweep deleted the
+    /// bytes of. A **count, deliberately not a list**: the sweep is
+    /// instance-wide (registry-GC shape, #83 §3 — it may also collect
+    /// orphans, or another team's leftovers from an earlier failed
+    /// sweep), and digest values a caller's team never linked must not
+    /// cross the team boundary on a surface that otherwise treats
+    /// digest existence as protected. Not necessarily equal to
+    /// `removed_digests.len()`: a digest still linked in another team
+    /// keeps its bytes.
+    pub swept: u64,
+    /// The `teams.blob_link.reclaimed/1` event the reclaim appended —
+    /// its payload carries every removed digest and the window they
+    /// waited out.
+    pub event: LedgerEventDto,
+}
+
+/// The team's marked-for-purge set
+/// (`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or
+/// operator, the mark's own authority).
+///
+/// This is the read surface the grace-visibility boundary (#83 §3
+/// [Grace visibility]) *grants*: the mark hides a link from the
+/// normal reads, but inside the team it is sayable state — and whoever
+/// may mark must be able to see what is marked, or unmark is a verb
+/// aimed blind.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MarkedBlobsDto {
+    /// The team whose marked set this is.
+    pub team_id: String,
+    /// The marked links, one row each.
+    pub marked: Vec<MarkedBlobLinkDto>,
+}
+
+/// One marked link — everything unmark (or a decision to let reclaim
+/// run) needs.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MarkedBlobLinkDto {
+    /// The marked digest — what
+    /// `POST …/blobs/{digest}/purge/unmark` takes.
+    pub digest: String,
+    /// When the mark landed, epoch ms.
+    pub marked_at_ms: i64,
+    /// When the grace window elapses and reclaim may remove this link
+    /// (`marked_at_ms` + the instance's grace window), epoch ms.
+    pub reclaimable_at_ms: i64,
+}
+
 /// One typed reference an event makes.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct SubjectRefDto {

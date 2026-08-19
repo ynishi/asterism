@@ -177,13 +177,29 @@ pub const ROLE_CHANGED: &str = "teams.membership.role_changed/1";
 /// A promotion's blob copy completed — declared digest verified,
 /// bytes in the CAS, link row landing in the same tx (#83 §3).
 pub const BLOB_COPY_COMPLETED: &str = "teams.blob.copy_completed/1";
+/// A team's blob link was marked for purge (#83 §3 lifecycle, the #95
+/// slice): the first half of the trash→purge two-step. The link is
+/// hidden from normal reads for the grace window; the payload carries
+/// the digest and when the mark landed.
+pub const BLOB_LINK_PURGE_MARKED: &str = "teams.blob_link.purge_marked/1";
+/// A purge mark was lifted during the grace window — the link is
+/// restored intact. The payload carries the digest and the mark it
+/// undid.
+pub const BLOB_LINK_PURGE_UNMARKED: &str = "teams.blob_link.purge_unmarked/1";
+/// Marked links whose grace window elapsed were reclaimed — the second
+/// half of the two-step, and the only path that removes links for
+/// reclaim's sake. The record survives, the bytes go (the zero-link
+/// sweep collects them); the payload carries the digests removed and
+/// the window they waited out.
+pub const BLOB_LINK_RECLAIMED: &str = "teams.blob_link.reclaimed/1";
 
 /// The v0 kind registry: team lifecycle, membership changes, role
-/// changes, blob-copy completed. A slice rather than knowledge spread
-/// over call sites, for the reason `asterism-core` keeps
-/// `RESERVED_VALUES` as a list — whoever needs "every kind v0 ships"
-/// (a projection, a migration, a doc generator) walks this, and a kind
-/// added later reaches them without an edit on their side.
+/// changes, blob-copy completed, and the purge two-step. A slice
+/// rather than knowledge spread over call sites, for the reason
+/// `asterism-core` keeps `RESERVED_VALUES` as a list — whoever needs
+/// "every kind v0 ships" (a projection, a migration, a doc generator)
+/// walks this, and a kind added later reaches them without an edit on
+/// their side.
 pub const V0_KINDS: &[&str] = &[
     TEAM_CREATED,
     TEAM_DELETED,
@@ -191,6 +207,9 @@ pub const V0_KINDS: &[&str] = &[
     MEMBERSHIP_REMOVED,
     ROLE_CHANGED,
     BLOB_COPY_COMPLETED,
+    BLOB_LINK_PURGE_MARKED,
+    BLOB_LINK_PURGE_UNMARKED,
+    BLOB_LINK_RECLAIMED,
 ];
 
 /// Whether `kind` is one this build of the plane writes. Shape and

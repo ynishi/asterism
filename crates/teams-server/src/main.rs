@@ -3,10 +3,13 @@
 //! ## Role
 //!
 //! Serves the `/teams/*` HTTP API (auth v0 + team/membership routes —
-//! the #91 slice) over the teams-owned SQLite database. Fully separate
+//! the #91 slice; blobs — #93; purge — #95) over the teams-owned
+//! SQLite database, and carries the instance's maintenance verbs:
+//! `gc` (the zero-link sweep on demand) and `backup` (quiesce →
+//! `VACUUM INTO` → one DB-first archive), both #95. Fully separate
 //! from the `asterism-server` binary: the two share `asterism-core`
 //! (lib) only, so the license boundary sits at the bin edge (#83 §4).
-//! The MCP surface and the `backup` command are later slices.
+//! The MCP surface is a later slice.
 //!
 //! ## Identity bootstrap
 //!
@@ -87,6 +90,12 @@ enum Command {
         /// teams.
         #[arg(long)]
         closed_registration: bool,
+        /// Purge grace window in seconds (#95): how long a marked blob
+        /// link stays restorable before reclaim may remove it. Default
+        /// 7 days — GitLab's delayed-deletion period, the precedent
+        /// #83 §1 names for the trash→purge shape.
+        #[arg(long, default_value_t = 7 * 24 * 60 * 60)]
+        purge_grace_seconds: u32,
     },
     /// Creates the database (if missing) and applies every pending
     /// migration. Idempotent — safe to re-run.
@@ -126,6 +135,65 @@ enum Command {
         #[arg(long)]
         display_name: Option<String>,
     },
+    /// Runs the zero-link sweep on demand (#95): deletes blob bytes no
+    /// team links anymore. Links marked for purge still count as links
+    /// — their bytes survive the grace window. Single-process
+    /// assumption (#93): run this against a stopped server; a running
+    /// server sweeps for itself after every reclaim. Never migrates
+    /// the database — a schema behind this build is refused.
+    Gc {
+        /// SQLite database path.
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Blob store root.
+        #[arg(long)]
+        blobs: Option<PathBuf>,
+    },
+    /// Backs the instance up into ONE archive file: quiesce writes →
+    /// SQLite snapshot via `VACUUM INTO` (never a live-file copy) →
+    /// DB snapshot + blob dir into a plain tar at DESTINATION.
+    #[command(long_about = "\
+Backs the instance up into ONE archive file (#83 §4, gitea-dump shape):
+
+  1. quiesce writes — the snapshot runs on the single writer, so no
+     repository write interleaves with it
+  2. SQLite snapshot via VACUUM INTO — never a copy of the live file
+     (that is a documented corruption path); the snapshot lands in a
+     local temp dir first, because live SQLite must never sit on
+     network storage — the (possibly network-mounted) DESTINATION
+     receives only the finished archive
+  3. one plain uncompressed tar: db/teams.db FIRST, blobs/sha256/…
+     after — so the worst inconsistency an archive can hold is an
+     orphan blob (harmless; the restored instance's gc collects it),
+     never a dangling DB reference
+
+DESTINATION must be a fresh path; an existing file is refused rather
+than overwritten. Run it against a stopped or idle server: a reclaim
+landing mid-backup could remove bytes the snapshot still links. The
+command never migrates the database — a schema that does not match
+this build is refused, so a newer binary archives a pre-upgrade
+instance as it stands or not at all.
+
+RESTORE (documentation, not a command):
+
+  1. tar -xf <archive> -C <dir>
+  2. teams-server serve --db <dir>/db/teams.db --blobs <dir>/blobs
+
+That is the whole procedure — the archive holds everything an instance
+is (state, ledger, credentials, blob bytes). Members' clients keep
+their own copies too, so anything promoted after the backup can simply
+be promoted again (#83 §4's second recovery path).")]
+    Backup {
+        /// SQLite database path.
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Blob store root.
+        #[arg(long)]
+        blobs: Option<PathBuf>,
+        /// Where the archive file is written (any mounted/rclone-
+        /// reachable target). Must not already exist.
+        destination: PathBuf,
+    },
 }
 
 fn resolve_db_path(db: Option<PathBuf>) -> anyhow::Result<PathBuf> {
@@ -138,6 +206,26 @@ fn resolve_db_path(db: Option<PathBuf>) -> anyhow::Result<PathBuf> {
         }
         None => Ok(teams_infra::paths::default_db_path()?),
     }
+}
+
+/// Like [`resolve_db_path`], but for commands that operate on an
+/// existing instance (`gc`, `backup`): opening a database path that
+/// holds nothing would silently manufacture an empty instance — and
+/// then "back up" nothing, or sweep every blob as unlinked. Refusing
+/// is the honest answer.
+fn existing_db_path(db: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let path = match db {
+        Some(path) => path,
+        None => teams_infra::paths::default_db_path()?,
+    };
+    if !path.is_file() {
+        anyhow::bail!(
+            "no teams database at {}; this command operates on an existing instance \
+             (create one with `teams-server init`)",
+            path.display()
+        );
+    }
+    Ok(path)
 }
 
 fn password_from_env(var: &str) -> anyhow::Result<String> {
@@ -180,6 +268,7 @@ async fn main() -> anyhow::Result<()> {
             port,
             bind,
             closed_registration,
+            purge_grace_seconds,
         } => {
             let db_path = resolve_db_path(db)?;
             let (isle, _driver) = teams_infra::sqlite::open_and_migrate(&db_path).await?;
@@ -202,6 +291,8 @@ async fn main() -> anyhow::Result<()> {
                 registration,
                 session_ttl_ms: DEFAULT_SESSION_TTL_MS,
                 auth_limiter: RateLimiter::new(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW),
+                purge_grace_ms: i64::from(purge_grace_seconds) * 1000,
+                gc_guard: Arc::new(teams_infra::gc::GcGuard::new()),
             });
             let addr = SocketAddr::from((bind, port.unwrap_or(DEFAULT_PORT)));
             let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -243,5 +334,61 @@ async fn main() -> anyhow::Result<()> {
             login,
             display_name,
         } => create_account(db, &login, display_name, USER_PASSWORD_ENV, false).await,
+        Command::Gc { db, blobs } => {
+            let db_path = existing_db_path(db)?;
+            // No migration on a maintenance verb: the schema must
+            // already be current, or the open refuses (#95).
+            let (isle, driver) = teams_infra::sqlite::open_existing_at_latest(&db_path).await?;
+            let blob_root = match blobs {
+                Some(path) => path,
+                None => teams_infra::paths::default_blob_root()?,
+            };
+            let adapter = teams_infra::blob::LocalFileStorageAdapter::open(blob_root).await?;
+            let repo = SqliteTeamsRepository::new(isle);
+            // A fresh guard: this process is the only one allowed to
+            // be touching the instance (the subcommand's doc says so),
+            // and within it the sweep is the sole CAS actor.
+            let guard = Arc::new(teams_infra::gc::GcGuard::new());
+            let outcome = teams_infra::gc::sweep_zero_link_blobs(&guard, &repo, &adapter).await;
+            driver.shutdown().await.ok();
+            let swept = outcome?;
+            println!(
+                "teams-server: gc swept {} blob(s){}",
+                swept.len(),
+                if swept.is_empty() { "" } else { ":" }
+            );
+            for digest in swept {
+                println!("  {digest}");
+            }
+            Ok(())
+        }
+        Command::Backup {
+            db,
+            blobs,
+            destination,
+        } => {
+            let db_path = existing_db_path(db)?;
+            // No migration on a maintenance verb — the sharp corner is
+            // backup-before-upgrade: a newer binary must archive the
+            // instance as it stands, never migrate it first and
+            // archive the migrated schema (#95).
+            let (isle, driver) = teams_infra::sqlite::open_existing_at_latest(&db_path).await?;
+            let blob_root = match blobs {
+                Some(path) => path,
+                None => teams_infra::paths::default_blob_root()?,
+            };
+            let outcome = teams_infra::backup::create_backup(&isle, &blob_root, &destination).await;
+            driver.shutdown().await.ok();
+            let report = outcome?;
+            println!(
+                "teams-server: backup written to {} (db snapshot {} bytes, {} blob file(s); \
+                 restore: untar, then `teams-server serve --db <dir>/db/teams.db --blobs \
+                 <dir>/blobs`)",
+                report.archive.display(),
+                report.db_snapshot_bytes,
+                report.blob_files,
+            );
+            Ok(())
+        }
     }
 }

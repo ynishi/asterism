@@ -36,6 +36,28 @@ pub enum DomainError {
         team_id: Uuid,
     },
 
+    /// The digest is already linked to the team, but the link is
+    /// **marked for purge** (#95). A variant of its own — not a
+    /// `Validation` string — because the caller has a real remedy the
+    /// transport layer must be able to name: unmark the link to
+    /// restore it, or wait for reclaim and upload afresh. Saying so is
+    /// deliberate under the grace-visibility boundary (#83 §3 [Grace
+    /// visibility]): the mark is team-visible state, hidden from the
+    /// *read* surface's existence answers but sayable to a member of
+    /// the very team that holds the mark — the refusal names nothing
+    /// an outsider could reach, since uploads sit behind the
+    /// membership gate.
+    #[error(
+        "digest {digest} is already linked to team {team_id} but marked for purge; \
+         unmark it to restore the link, or wait for reclaim and upload again"
+    )]
+    MarkedForPurge {
+        /// The team whose link carries the mark.
+        team_id: Uuid,
+        /// The digest whose link is marked.
+        digest: String,
+    },
+
     /// A promotion's declared digest did not match what the bytes
     /// hashed to — promote-time TOCTOU (#83 §3). The whole operation
     /// is rejected: no copy, no ledger event. Both sides are carried

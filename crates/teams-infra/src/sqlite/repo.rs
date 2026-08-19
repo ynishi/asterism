@@ -38,13 +38,14 @@
 //! append recomputes over what actually committed. The domain's
 //! [`EventSeq`] validates what storage hands back and mints nothing.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{OptionalExtension as _, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::DomainError;
 use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamRoster};
 use teams_core::domain::ledger::{
-    BLOB_COPY_COMPLETED, EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED,
-    ROLE_CHANGED, SubjectRef, TEAM_CREATED, TEAM_DELETED, is_v0_kind,
+    BLOB_COPY_COMPLETED, BLOB_LINK_PURGE_MARKED, BLOB_LINK_PURGE_UNMARKED, BLOB_LINK_RECLAIMED,
+    EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED, ROLE_CHANGED,
+    SubjectRef, TEAM_CREATED, TEAM_DELETED, is_v0_kind,
 };
 use teams_core::domain::store::{Locator, TeamBlobLink, parse_digest};
 use uuid::Uuid;
@@ -339,6 +340,16 @@ impl SqliteTeamsRepository {
     /// dedupe is decided server-side before this call, and a second
     /// row for the same `(team, digest)` would append an event for a
     /// copy that changed nothing.
+    ///
+    /// A duplicate whose link is **marked for purge** is its own
+    /// refusal — [`DomainError::MarkedForPurge`], not the plain
+    /// "already linked" — because the caller's remedy differs: unmark
+    /// restores the link, reclaim frees the digest for a fresh upload
+    /// (#95, the grace-visibility boundary). The distinction is made
+    /// *here*, inside the write transaction, rather than by a handler
+    /// pre-check: a mark landing between a handler's read and this
+    /// commit would turn the answer stale, and the write API is the
+    /// one place that sees the row under the write lock.
     pub async fn add_blob_link(
         &self,
         link: TeamBlobLink,
@@ -352,16 +363,20 @@ impl SqliteTeamsRepository {
                     "team {team_id} does not exist"
                 ))));
             }
-            let already: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM team_blob_link WHERE team_id = ?1 AND digest = ?2)",
-                params![team_id, link.digest()],
-                |row| row.get(0),
-            )?;
-            if already {
-                return Ok(Err(DomainError::Validation(format!(
-                    "digest {} is already linked to team {team_id}",
-                    link.digest()
-                ))));
+            match link_mark_in_tx(tx, team_id, link.digest())? {
+                Some(None) => {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "digest {} is already linked to team {team_id}",
+                        link.digest()
+                    ))));
+                }
+                Some(Some(_)) => {
+                    return Ok(Err(DomainError::MarkedForPurge {
+                        team_id,
+                        digest: link.digest().to_string(),
+                    }));
+                }
+                None => {}
             }
             let subject = match SubjectRef::blob(link.digest()) {
                 Ok(subject) => subject,
@@ -380,6 +395,220 @@ impl SqliteTeamsRepository {
                 vec![subject],
                 serde_json::json!({ "digest": link.digest() }),
             )
+        })
+        .await
+    }
+
+    /// Marks a team's blob link for purge, appending
+    /// `teams.blob_link.purge_marked/1` — the first half of the
+    /// trash→purge two-step (#83 §3 lifecycle, #95).
+    ///
+    /// The mark is `purge_marked_at` on the link row (state, never the
+    /// ledger): from this instant the link is hidden from normal reads
+    /// ([`Self::blob_link_exists`] / [`Self::blob_links`]) but the row
+    /// — and the bytes — survive, restorable via
+    /// [`Self::unmark_blob_link`] until
+    /// [`Self::reclaim_marked_links`] removes it after the grace
+    /// window. Marking a link that is not there, or is already marked,
+    /// is refused: either would append an event for a state change
+    /// that did not happen.
+    pub async fn mark_blob_link_for_purge(
+        &self,
+        team_id: Uuid,
+        digest: &str,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+    ) -> Result<LedgerEvent, DomainError> {
+        let digest = parse_digest(digest)?;
+        self.write_tx(move |tx| {
+            match link_mark_in_tx(tx, team_id, &digest)? {
+                None => {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "digest {digest} is not linked to team {team_id}; there is nothing to mark"
+                    ))));
+                }
+                Some(Some(marked_at)) => {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "digest {digest} is already marked for purge (at {marked_at}); \
+                         a second mark would append an event with no state change"
+                    ))));
+                }
+                Some(None) => {}
+            }
+            let subject = match SubjectRef::blob(&digest) {
+                Ok(subject) => subject,
+                Err(refused) => return Ok(Err(refused)),
+            };
+            tx.execute(
+                "UPDATE team_blob_link SET purge_marked_at = ?3
+                 WHERE team_id = ?1 AND digest = ?2",
+                params![team_id, digest, occurred_at_ms],
+            )?;
+            append_event_in_tx(
+                tx,
+                team_id,
+                &actor,
+                occurred_at_ms,
+                BLOB_LINK_PURGE_MARKED,
+                vec![subject],
+                serde_json::json!({
+                    "digest": digest,
+                    "marked_at_ms": occurred_at_ms,
+                }),
+            )
+        })
+        .await
+    }
+
+    /// Lifts a purge mark during the grace window, appending
+    /// `teams.blob_link.purge_unmarked/1` — the link is restored
+    /// intact (only the mark column changes; `created_at` and the row
+    /// itself were never touched).
+    ///
+    /// Unmarking a link that is not marked (or not there) is refused,
+    /// same reasoning as the mark's. There is no window check here on
+    /// purpose: the window bounds *reclaim*, not restoration — a mark
+    /// nobody reclaimed yet is restorable however old it is.
+    pub async fn unmark_blob_link(
+        &self,
+        team_id: Uuid,
+        digest: &str,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+    ) -> Result<LedgerEvent, DomainError> {
+        let digest = parse_digest(digest)?;
+        self.write_tx(move |tx| {
+            let was_marked_at = match link_mark_in_tx(tx, team_id, &digest)? {
+                None => {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "digest {digest} is not linked to team {team_id}; there is nothing to \
+                         unmark"
+                    ))));
+                }
+                Some(None) => {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "digest {digest} is not marked for purge in team {team_id}; \
+                         an unmark would append an event with no state change"
+                    ))));
+                }
+                Some(Some(marked_at)) => marked_at,
+            };
+            let subject = match SubjectRef::blob(&digest) {
+                Ok(subject) => subject,
+                Err(refused) => return Ok(Err(refused)),
+            };
+            tx.execute(
+                "UPDATE team_blob_link SET purge_marked_at = NULL
+                 WHERE team_id = ?1 AND digest = ?2",
+                params![team_id, digest],
+            )?;
+            append_event_in_tx(
+                tx,
+                team_id,
+                &actor,
+                occurred_at_ms,
+                BLOB_LINK_PURGE_UNMARKED,
+                vec![subject],
+                serde_json::json!({
+                    "digest": digest,
+                    "was_marked_at_ms": was_marked_at,
+                }),
+            )
+        })
+        .await
+    }
+
+    /// Removes the team's marked links whose grace window has elapsed,
+    /// appending one `teams.blob_link.reclaimed/1` event that carries
+    /// every digest removed — the second half of the two-step, and the
+    /// only path that removes links for reclaim's sake (#83 §3).
+    ///
+    /// The window is evaluated per link (`purge_marked_at +
+    /// grace_window_ms <= occurred_at_ms`): marks land at different
+    /// times, and one reclaim removes exactly the ripe ones while the
+    /// still-waiting marks stay marked for a later reclaim. Two
+    /// refusals, both before anything is written: nothing is marked at
+    /// all, or marks exist but none has waited out its window — the
+    /// "reclaim before the window is refused" rule, with the earliest
+    /// reclaimable instant named so the caller knows when to return.
+    ///
+    /// The record survives, the bytes go: the link rows are deleted
+    /// (state), the ledger keeps the mark/unmark/reclaim history, and
+    /// the bytes are the zero-link sweep's to collect *after* this
+    /// transaction commits ([`crate::gc`]).
+    pub async fn reclaim_marked_links(
+        &self,
+        team_id: Uuid,
+        grace_window_ms: i64,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+    ) -> Result<(Vec<String>, LedgerEvent), DomainError> {
+        self.write_tx(move |tx| {
+            if !team_exists_in_tx(tx, team_id)? {
+                return Ok(Err(DomainError::Validation(format!(
+                    "team {team_id} does not exist"
+                ))));
+            }
+            let mut stmt = tx.prepare(
+                "SELECT digest, purge_marked_at FROM team_blob_link
+                 WHERE team_id = ?1 AND purge_marked_at IS NOT NULL
+                 ORDER BY digest",
+            )?;
+            let marked: Vec<(String, i64)> = stmt
+                .query_map(params![team_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            drop(stmt);
+            if marked.is_empty() {
+                return Ok(Err(DomainError::Validation(format!(
+                    "team {team_id} has no links marked for purge; reclaim removes marked \
+                     links only"
+                ))));
+            }
+            let ripe: Vec<String> = marked
+                .iter()
+                .filter(|(_, marked_at)| {
+                    marked_at.saturating_add(grace_window_ms) <= occurred_at_ms
+                })
+                .map(|(digest, _)| digest.clone())
+                .collect();
+            if ripe.is_empty() {
+                let earliest = marked
+                    .iter()
+                    .map(|(_, marked_at)| marked_at.saturating_add(grace_window_ms))
+                    .min()
+                    .expect("marked is non-empty");
+                return Ok(Err(DomainError::Validation(format!(
+                    "the grace window has not elapsed for any of team {team_id}'s {} marked \
+                     link(s); the earliest becomes reclaimable at {earliest} (epoch ms)",
+                    marked.len()
+                ))));
+            }
+            let mut subjects = Vec::with_capacity(ripe.len());
+            for digest in &ripe {
+                match SubjectRef::blob(digest) {
+                    Ok(subject) => subjects.push(subject),
+                    Err(refused) => return Ok(Err(refused)),
+                }
+            }
+            for digest in &ripe {
+                tx.execute(
+                    "DELETE FROM team_blob_link WHERE team_id = ?1 AND digest = ?2",
+                    params![team_id, digest],
+                )?;
+            }
+            let event = append_event_in_tx(
+                tx,
+                team_id,
+                &actor,
+                occurred_at_ms,
+                BLOB_LINK_RECLAIMED,
+                subjects,
+                serde_json::json!({
+                    "digests": ripe,
+                    "grace_window_ms": grace_window_ms,
+                }),
+            )?;
+            Ok(event.map(|event| (ripe, event)))
         })
         .await
     }
@@ -456,13 +685,18 @@ impl SqliteTeamsRepository {
     /// for a caller iff a link row sits in a team they belong to).
     /// The digest goes through the domain's parser first, so a
     /// malformed probe is a refusal, never a silent `false`.
+    ///
+    /// A **marked** link answers `false` here: hiding from normal
+    /// reads is what the mark means (#95), and this predicate is what
+    /// the blob route's indistinguishable `404` stands on — a marked
+    /// digest and a never-linked one read identically.
     pub async fn blob_link_exists(&self, team_id: Uuid, digest: &str) -> Result<bool, DomainError> {
         let digest = parse_digest(digest)?;
         self.isle
             .call(move |conn| {
                 conn.query_row(
                     "SELECT EXISTS(SELECT 1 FROM team_blob_link
-                     WHERE team_id = ?1 AND digest = ?2)",
+                     WHERE team_id = ?1 AND digest = ?2 AND purge_marked_at IS NULL)",
                     params![team_id, digest],
                     |row| row.get(0),
                 )
@@ -471,14 +705,17 @@ impl SqliteTeamsRepository {
             .map_err(infra_err)
     }
 
-    /// The team's blob links, each re-validated through
-    /// [`TeamBlobLink::new`] on the way out.
+    /// The team's **visible** blob links — marked links are hidden
+    /// from this roster for their grace window (#95); the marked set
+    /// has its own read, [`Self::marked_blob_links`]. Each digest is
+    /// re-validated through [`TeamBlobLink::new`] on the way out.
     pub async fn blob_links(&self, team_id: Uuid) -> Result<Vec<TeamBlobLink>, DomainError> {
         let digests: Vec<String> = self
             .isle
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT digest FROM team_blob_link WHERE team_id = ?1 ORDER BY digest",
+                    "SELECT digest FROM team_blob_link
+                     WHERE team_id = ?1 AND purge_marked_at IS NULL ORDER BY digest",
                 )?;
                 let rows = stmt.query_map(params![team_id], |row| row.get(0))?;
                 rows.collect()
@@ -489,6 +726,53 @@ impl SqliteTeamsRepository {
             .iter()
             .map(|digest| TeamBlobLink::new(team_id, digest))
             .collect()
+    }
+
+    /// The team's marked links with their mark instants — the purge
+    /// half of the ledgerless state question ("what would a reclaim
+    /// look at"). Deliberately a separate read instead of a flag on
+    /// [`Self::blob_links`], so no normal-read call site can forget to
+    /// filter.
+    pub async fn marked_blob_links(
+        &self,
+        team_id: Uuid,
+    ) -> Result<Vec<(TeamBlobLink, i64)>, DomainError> {
+        let rows: Vec<(String, i64)> = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT digest, purge_marked_at FROM team_blob_link
+                     WHERE team_id = ?1 AND purge_marked_at IS NOT NULL ORDER BY digest",
+                )?;
+                let rows =
+                    stmt.query_map(params![team_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(|(digest, marked_at)| Ok((TeamBlobLink::new(team_id, &digest)?, marked_at)))
+            .collect()
+    }
+
+    /// Whether **any** team links `digest` — marked links included,
+    /// because a marked link is restorable and its bytes must survive
+    /// (#95). This is the zero-link sweep's question ([`crate::gc`]),
+    /// deliberately distinct from [`Self::blob_link_exists`]'s
+    /// visibility question: the sweep protects what *could* come back,
+    /// the read surface shows what *is* there.
+    pub async fn digest_linked_anywhere(&self, digest: &str) -> Result<bool, DomainError> {
+        let digest = parse_digest(digest)?;
+        self.isle
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM team_blob_link WHERE digest = ?1)",
+                    params![digest],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(infra_err)
     }
 
     /// A user's locators, most recently seen first.
@@ -605,6 +889,23 @@ impl SqliteTeamsRepository {
 // ----------------------------------------------------------------------
 // In-transaction helpers.
 // ----------------------------------------------------------------------
+
+/// The link row's mark state as it reads inside this transaction:
+/// `None` = no link row, `Some(None)` = linked and live, `Some(Some(t))`
+/// = linked and marked for purge at `t`. The three-way answer is what
+/// mark and unmark dispatch their refusals on.
+fn link_mark_in_tx(
+    tx: &Transaction<'_>,
+    team_id: Uuid,
+    digest: &str,
+) -> Result<Option<Option<i64>>, rusqlite::Error> {
+    tx.query_row(
+        "SELECT purge_marked_at FROM team_blob_link WHERE team_id = ?1 AND digest = ?2",
+        params![team_id, digest],
+        |row| row.get(0),
+    )
+    .optional()
+}
 
 fn team_exists_in_tx(tx: &Transaction<'_>, team_id: Uuid) -> Result<bool, rusqlite::Error> {
     tx.query_row(
@@ -1339,6 +1640,197 @@ mod tests {
             .await;
         assert!(matches!(again, Err(DomainError::Validation(_))));
         assert_eq!(repo.events(team_id).await.unwrap().len(), 3);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_mark_hides_the_link_and_an_unmark_restores_it_intact() {
+        let (repo, _isle, driver) = repo().await;
+        let (team_id, _, actor) = team_with_owner(&repo).await;
+        let digest = digest_of('a');
+        let link = TeamBlobLink::new(team_id, &digest).unwrap();
+        repo.add_blob_link(link.clone(), actor.clone(), T0)
+            .await
+            .unwrap();
+
+        let marked = repo
+            .mark_blob_link_for_purge(team_id, &digest, actor.clone(), T0 + 1)
+            .await
+            .unwrap();
+        assert_eq!(marked.kind.as_str(), BLOB_LINK_PURGE_MARKED);
+        assert_eq!(marked.payload["digest"], digest);
+        assert_eq!(marked.payload["marked_at_ms"], T0 + 1);
+        assert_eq!(marked.subjects, vec![SubjectRef::blob(&digest).unwrap()]);
+
+        // Hidden from every normal read…
+        assert!(!repo.blob_link_exists(team_id, &digest).await.unwrap());
+        assert!(repo.blob_links(team_id).await.unwrap().is_empty());
+        // …but not gone: the marked read shows it, and any-link (the
+        // sweep's question) still counts it.
+        let marked_links = repo.marked_blob_links(team_id).await.unwrap();
+        assert_eq!(marked_links, vec![(link.clone(), T0 + 1)]);
+        assert!(repo.digest_linked_anywhere(&digest).await.unwrap());
+
+        let unmarked = repo
+            .unmark_blob_link(team_id, &digest, actor.clone(), T0 + 2)
+            .await
+            .unwrap();
+        assert_eq!(unmarked.kind.as_str(), BLOB_LINK_PURGE_UNMARKED);
+        assert_eq!(unmarked.payload["was_marked_at_ms"], T0 + 1);
+
+        // Restored intact: visible again, same row (created_at was
+        // never touched — only the mark column moved).
+        assert!(repo.blob_link_exists(team_id, &digest).await.unwrap());
+        assert_eq!(repo.blob_links(team_id).await.unwrap(), vec![link]);
+        assert!(repo.marked_blob_links(team_id).await.unwrap().is_empty());
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mark_and_unmark_refuse_when_there_is_no_state_change_to_record() {
+        let (repo, _isle, driver) = repo().await;
+        let (team_id, _, actor) = team_with_owner(&repo).await;
+        let linked = digest_of('b');
+        let never = digest_of('c');
+        repo.add_blob_link(
+            TeamBlobLink::new(team_id, &linked).unwrap(),
+            actor.clone(),
+            T0,
+        )
+        .await
+        .unwrap();
+        let events_before = repo.events(team_id).await.unwrap().len();
+
+        // Marking what is not linked, unmarking what is not marked.
+        let refused = repo
+            .mark_blob_link_for_purge(team_id, &never, actor.clone(), T0 + 1)
+            .await;
+        assert!(matches!(refused, Err(DomainError::Validation(_))));
+        let refused = repo
+            .unmark_blob_link(team_id, &linked, actor.clone(), T0 + 1)
+            .await;
+        assert!(matches!(refused, Err(DomainError::Validation(_))));
+
+        // A second mark on a marked link.
+        repo.mark_blob_link_for_purge(team_id, &linked, actor.clone(), T0 + 2)
+            .await
+            .unwrap();
+        let refused = repo
+            .mark_blob_link_for_purge(team_id, &linked, actor.clone(), T0 + 3)
+            .await;
+        assert!(matches!(refused, Err(DomainError::Validation(_))));
+
+        // Re-linking a marked digest is the purge-aware refusal, not
+        // the plain duplicate: the caller's remedy is unmark or
+        // reclaim, and the variant is what lets the transport name it
+        // (#95). The mark itself is untouched.
+        let refused = repo
+            .add_blob_link(
+                TeamBlobLink::new(team_id, &linked).unwrap(),
+                actor.clone(),
+                T0 + 3,
+            )
+            .await;
+        assert!(matches!(
+            refused,
+            Err(DomainError::MarkedForPurge { team_id: t, digest: d })
+                if t == team_id && d == linked
+        ));
+        assert_eq!(repo.marked_blob_links(team_id).await.unwrap().len(), 1);
+
+        // Exactly one event landed — the successful mark; every
+        // refusal wrote nothing.
+        assert_eq!(repo.events(team_id).await.unwrap().len(), events_before + 1);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reclaim_refuses_early_removes_ripe_links_and_the_stream_keeps_the_story() {
+        let (repo, _isle, driver) = repo().await;
+        let (team_id, _, actor) = team_with_owner(&repo).await;
+        const GRACE: i64 = 1_000;
+        let early = digest_of('d');
+        let late = digest_of('e');
+        for digest in [&early, &late] {
+            repo.add_blob_link(
+                TeamBlobLink::new(team_id, digest).unwrap(),
+                actor.clone(),
+                T0,
+            )
+            .await
+            .unwrap();
+        }
+
+        // Nothing marked: reclaim has nothing to do and says so.
+        let refused = repo
+            .reclaim_marked_links(team_id, GRACE, actor.clone(), T0 + 1)
+            .await;
+        assert!(matches!(refused, Err(DomainError::Validation(_))));
+
+        // Two marks, a window apart.
+        repo.mark_blob_link_for_purge(team_id, &early, actor.clone(), T0 + 10)
+            .await
+            .unwrap();
+        repo.mark_blob_link_for_purge(team_id, &late, actor.clone(), T0 + 500)
+            .await
+            .unwrap();
+
+        // Before any window elapses: refused, and the refusal names
+        // when the earliest mark becomes reclaimable.
+        let refused = repo
+            .reclaim_marked_links(team_id, GRACE, actor.clone(), T0 + 600)
+            .await;
+        match refused {
+            Err(DomainError::Validation(message)) => assert!(
+                message.contains(&(T0 + 10 + GRACE).to_string()),
+                "the refusal must name the earliest reclaimable instant: {message}"
+            ),
+            other => panic!("expected a Validation refusal, got {other:?}"),
+        }
+        assert_eq!(repo.marked_blob_links(team_id).await.unwrap().len(), 2);
+
+        // Between the two windows: exactly the ripe link goes, the
+        // still-waiting mark stays marked.
+        let (removed, event) = repo
+            .reclaim_marked_links(team_id, GRACE, actor.clone(), T0 + 10 + GRACE)
+            .await
+            .unwrap();
+        assert_eq!(removed, vec![early.clone()]);
+        assert_eq!(event.kind.as_str(), BLOB_LINK_RECLAIMED);
+        assert_eq!(event.payload["digests"], serde_json::json!([early]));
+        assert_eq!(event.payload["grace_window_ms"], GRACE);
+        assert_eq!(event.subjects, vec![SubjectRef::blob(&early).unwrap()]);
+        let still_marked = repo.marked_blob_links(team_id).await.unwrap();
+        assert_eq!(still_marked.len(), 1);
+        assert_eq!(still_marked[0].0.digest(), late);
+
+        // The record survives the row: the removed link's whole story
+        // reads back off the subjects index.
+        assert!(!repo.digest_linked_anywhere(&early).await.unwrap());
+        let hits = repo
+            .events_for_subject(team_id, &SubjectRef::blob(&early).unwrap())
+            .await
+            .unwrap();
+        let story: Vec<&str> = hits.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(
+            story,
+            vec![
+                BLOB_COPY_COMPLETED,
+                BLOB_LINK_PURGE_MARKED,
+                BLOB_LINK_RECLAIMED
+            ]
+        );
+
+        // The second window elapses; the second reclaim takes the rest.
+        let (removed, _) = repo
+            .reclaim_marked_links(team_id, GRACE, actor, T0 + 500 + GRACE)
+            .await
+            .unwrap();
+        assert_eq!(removed, vec![late]);
+        assert!(repo.marked_blob_links(team_id).await.unwrap().is_empty());
 
         driver.shutdown().await.unwrap();
     }

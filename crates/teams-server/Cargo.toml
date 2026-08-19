@@ -57,3 +57,5 @@ rusqlite-isle = { workspace = true }
 sha2 = { workspace = true }
 # A throwaway blob root per test harness.
 tempfile = "3"
+# The backup restore e2e unpacks the archive the way an operator would.
+tar = { workspace = true }

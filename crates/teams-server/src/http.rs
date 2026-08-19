@@ -17,6 +17,10 @@
 //! | POST | `/teams/{team_id}/owners/revoke` | owner |
 //! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; the operator has no implicit upload) |
 //! | GET | `/teams/{team_id}/blobs/{digest}` | member, or the operator — every failure is the same `404`, see below |
+//! | POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or the operator (operator-stamped — #95, the §1 delete row's reclaim sibling) |
+//! | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
+//! | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
+//! | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
 //!
 //! ## The gate (#83 §5: every route, no exceptions)
 //!
@@ -46,7 +50,8 @@
 //! only, and answers **one indistinguishable `404`** for every miss:
 //! unknown team, caller neither a member nor the operator, digest
 //! never uploaded, digest linked only in a team the caller cannot
-//! read. The gate's
+//! read — and, since #95, a link **marked for purge**, whose grace
+//! window hides it behind the very same answer. The gate's
 //! usual 403/404 split would confirm which part of the probe was
 //! right; on the byte-serving surface that is exactly the existence
 //! oracle the link boundary exists to close (#83 §3 — a digest
@@ -81,8 +86,8 @@ use teams_contract::command::{
     RevokeOwnerCommand, UploadBlobCommand,
 };
 use teams_contract::dto::{
-    BlobUploadedDto, LedgerEventDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
-    TeamCreatedDto,
+    BlobUploadedDto, LedgerEventDto, MarkedBlobLinkDto, MarkedBlobsDto, PurgeReclaimedDto,
+    RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
 };
 use teams_core::DomainError;
 use teams_core::domain::identity::{
@@ -93,6 +98,7 @@ use teams_core::domain::ledger::LedgerEvent;
 use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
 use teams_infra::auth::password::AccountRecord;
+use teams_infra::gc::sweep_zero_link_blobs;
 use teams_infra::sqlite::map::subject_to_ref;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -137,6 +143,13 @@ impl IntoResponse for ApiError {
                     // this variant out for.
                     DomainError::LastOwner { .. } | DomainError::DigestMismatch { .. } => {
                         (StatusCode::CONFLICT, "Conflict")
+                    }
+                    // Its own kind, not the generic conflict: the
+                    // caller's remedy (unmark, or wait for reclaim) is
+                    // the point of the refusal, and a client can only
+                    // branch on what the body distinguishes (#95).
+                    DomainError::MarkedForPurge { .. } => {
+                        (StatusCode::CONFLICT, "marked_for_purge")
                     }
                     DomainError::Infra(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal"),
                 };
@@ -216,6 +229,23 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         .route("/teams/{team_id}/owners/grant", post(grant_owner))
         .route("/teams/{team_id}/owners/revoke", post(revoke_owner))
         .route("/teams/{team_id}/blobs", put(upload_blob))
+        // The purge two-step (#95). `purge` is a static segment, which
+        // axum prefers over the `{digest}` capture — and no digest can
+        // collide with it anyway, the grammar admits `sha256:` forms
+        // only.
+        .route(
+            "/teams/{team_id}/blobs/{digest}/purge/mark",
+            post(purge_mark),
+        )
+        .route(
+            "/teams/{team_id}/blobs/{digest}/purge/unmark",
+            post(purge_unmark),
+        )
+        .route("/teams/{team_id}/blobs/purge/reclaim", post(purge_reclaim))
+        .route(
+            "/teams/{team_id}/blobs/purge/marked",
+            get(purge_marked_list),
+        )
         .layer(middleware::from_fn_with_state(ctx.clone(), team_gate));
 
     let authed = Router::new()
@@ -274,12 +304,21 @@ async fn auth_gate(
 
 /// Account → standing in the `{team_id}` team. The second half of the
 /// gate, on every team-scoped route.
+///
+/// The path lands as a name→value map rather than a typed `Path<Uuid>`
+/// because the gate spans routes with different arities — the purge
+/// routes carry `{digest}` beside `{team_id}` (#95), and a
+/// single-value extractor refuses any route with a second capture.
 async fn team_gate(
     State(ctx): State<Arc<TeamsCtx>>,
-    Path(team_id): Path<Uuid>,
+    Path(params): Path<std::collections::HashMap<String, String>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    let team_id = parse_uuid(
+        params.get("team_id").map(String::as_str).unwrap_or(""),
+        "team_id",
+    )?;
     let account = req
         .extensions()
         .get::<AuthedAccount>()
@@ -711,6 +750,12 @@ async fn upload_blob(
             staged.write_chunk(&data).await?;
         }
     }
+    // The gc guard's link phase spans the rename that makes the bytes
+    // durable and the link row's commit: while any upload sits between
+    // those two, the zero-link sweep must not decide (the racing
+    // same-digest case — `teams_infra::gc`'s module doc). Shared, so
+    // uploads never wait on each other.
+    let _link_phase = ctx.gc_guard.link_phase().await;
     let verified = staged.commit(&declared).await?;
     let link = TeamBlobLink::new(access.team_id, verified.digest())?;
     let event = ctx
@@ -791,6 +836,134 @@ async fn read_blob(
         .headers_mut()
         .insert(header::CONTENT_LENGTH, HeaderValue::from(length));
     Ok(response)
+}
+
+// ----------------------------------------------------------------------
+// Handlers — purge (#95, the #83 §3 lifecycle).
+// ----------------------------------------------------------------------
+
+/// `POST /teams/{team_id}/blobs/{digest}/purge/mark` — owner, or the
+/// operator (operator-stamped).
+///
+/// The first half of the trash→purge two-step: from here the link is
+/// hidden from normal reads — the blob route answers its one `404` for
+/// it — but restorable via unmark until a reclaim takes it after the
+/// grace window. The refusals ("not linked", "already marked") are the
+/// repository's; they answer to an owner or the operator, who could
+/// read the link state anyway.
+async fn purge_mark(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+    Path((_team_id, digest)): Path<(Uuid, String)>,
+) -> Result<Json<LedgerEventDto>, ApiError> {
+    let capacity = decide(&access, TeamVerb::Purge)?;
+    let event = ctx
+        .repo
+        .mark_blob_link_for_purge(
+            access.team_id,
+            &digest,
+            stamp(&account, capacity)?,
+            now_ms(),
+        )
+        .await?;
+    Ok(Json(event_dto(&event)?))
+}
+
+/// `POST /teams/{team_id}/blobs/{digest}/purge/unmark` — owner, or the
+/// operator (operator-stamped). Restores the marked link intact; the
+/// grace window bounds reclaim, not restoration.
+async fn purge_unmark(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+    Path((_team_id, digest)): Path<(Uuid, String)>,
+) -> Result<Json<LedgerEventDto>, ApiError> {
+    let capacity = decide(&access, TeamVerb::Purge)?;
+    let event = ctx
+        .repo
+        .unmark_blob_link(
+            access.team_id,
+            &digest,
+            stamp(&account, capacity)?,
+            now_ms(),
+        )
+        .await?;
+    Ok(Json(event_dto(&event)?))
+}
+
+/// `POST /teams/{team_id}/blobs/purge/reclaim` — owner, or the
+/// operator (operator-stamped). The explicit second verb of the
+/// two-step (#83 §3: reclaim is the only path that removes links for
+/// reclaim's sake).
+///
+/// Removes the team's marked links whose grace window
+/// ([`TeamsCtx::purge_grace_ms`]) has elapsed and appends the one
+/// reclaim event; refused (`400`) while nothing is marked or every
+/// mark is still inside its window. The zero-link sweep runs right
+/// after, inside the same request — single-process — and the response
+/// carries **how many** blobs it deleted, never which: the sweep is
+/// instance-wide, so its digest list can name blobs the caller's team
+/// never linked (orphans, another team's leftovers), and digest values
+/// must not cross the team boundary on a surface that otherwise treats
+/// digest existence as protected (the caller's own removals are named
+/// in `removed_digests`). A sweep failure after the commit surfaces as
+/// `500` — the reclaim itself is durable by then (the events route
+/// shows it), and `teams-server gc` retries the sweep.
+async fn purge_reclaim(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+) -> Result<Json<PurgeReclaimedDto>, ApiError> {
+    let capacity = decide(&access, TeamVerb::Purge)?;
+    let (removed_digests, event) = ctx
+        .repo
+        .reclaim_marked_links(
+            access.team_id,
+            ctx.purge_grace_ms,
+            stamp(&account, capacity)?,
+            now_ms(),
+        )
+        .await?;
+    let swept = sweep_zero_link_blobs(&ctx.gc_guard, &ctx.repo, &ctx.blobs).await?;
+    Ok(Json(PurgeReclaimedDto {
+        removed_digests,
+        swept: swept.len() as u64,
+        event: event_dto(&event)?,
+    }))
+}
+
+/// `GET /teams/{team_id}/blobs/purge/marked` — owner, or the operator
+/// (operator-stamped authority, though a read stamps nothing): the
+/// team's marked-for-purge set, with each mark's instant and when it
+/// becomes reclaimable.
+///
+/// Same authority as the mark itself ([`TeamVerb::Purge`], so a plain
+/// member's ask is the usual `403` — the convention every owner-only
+/// verb follows): whoever may unmark must be able to see what is
+/// marked. This is the surface the grace-visibility boundary (#83 §3)
+/// *grants* — the mark hides a link from the normal reads, but inside
+/// the team it is sayable state, and this route is where it is said.
+async fn purge_marked_list(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(access): Extension<TeamAccess>,
+) -> Result<Json<MarkedBlobsDto>, ApiError> {
+    decide(&access, TeamVerb::Purge)?;
+    let marked = ctx
+        .repo
+        .marked_blob_links(access.team_id)
+        .await?
+        .into_iter()
+        .map(|(link, marked_at_ms)| MarkedBlobLinkDto {
+            digest: link.digest().to_string(),
+            marked_at_ms,
+            reclaimable_at_ms: marked_at_ms.saturating_add(ctx.purge_grace_ms),
+        })
+        .collect();
+    Ok(Json(MarkedBlobsDto {
+        team_id: access.team_id.to_string(),
+        marked,
+    }))
 }
 
 // ----------------------------------------------------------------------
