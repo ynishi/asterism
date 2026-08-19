@@ -1,0 +1,420 @@
+//! `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+//!
+//! Each team has one stream. The substrate knows the envelope and
+//! nothing inside it: `payload` is a versioned body *per kind* and
+//! stays opaque here, `subjects` is the typed index trace queries walk
+//! instead of parsing payloads, and `kind` is a namespaced + versioned
+//! string so `forge.*` kinds can register after #63 with the envelope
+//! unchanged.
+//!
+//! Two things this module deliberately does **not** do:
+//!
+//! - **Generate `seq`.** Monotonicity within a team is a storage
+//!   guarantee (one SQLite tx, single writer by deployment shape), so
+//!   [`EventSeq`] is a newtype the domain validates and carries but
+//!   never mints — a domain-side counter would be a second writable
+//!   truth, the one forbidden shape.
+//! - **Source state from events.** State tables are authoritative and
+//!   every state change appends its event in the same tx (audit-log
+//!   pattern, not event sourcing — #83 §2 SoT note). Nothing here
+//!   replays.
+
+use crate::domain::identity::LedgerActor;
+use crate::domain::store;
+use crate::error::DomainError;
+use uuid::Uuid;
+
+/// Storage-assigned position of an event within its team's stream —
+/// monotonic, starting at 1.
+///
+/// A newtype rather than a bare `i64` so "validated but not generated"
+/// is a property of the type: the only constructor checks the value a
+/// storage row handed back, and there is no `next()` for domain code
+/// to invent sequence numbers with.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(try_from = "i64", into = "i64")]
+pub struct EventSeq(i64);
+
+impl EventSeq {
+    /// Accepts a storage-assigned sequence number. Zero and negatives
+    /// are refused: no storage scheme this plane admits produces them,
+    /// so one arriving means a corrupted read, not a first event.
+    pub fn new(raw: i64) -> Result<Self, DomainError> {
+        if raw < 1 {
+            return Err(DomainError::Validation(format!(
+                "event seq {raw} is not a storage-assigned position (positions start at 1)"
+            )));
+        }
+        Ok(Self(raw))
+    }
+
+    /// The raw position.
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+impl TryFrom<i64> for EventSeq {
+    type Error = DomainError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<EventSeq> for i64 {
+    fn from(value: EventSeq) -> Self {
+        value.get()
+    }
+}
+
+/// A namespaced + versioned event kind — `"teams.membership.added/1"`.
+///
+/// The shape is `<segment>.<segment>[.<segment>…]/<version>`: at least
+/// two dot-separated lowercase segments (`[a-z0-9_]`), then `/`, then
+/// a positive integer with no leading zeros. The namespace requirement
+/// is what lets `forge.*` kinds land beside `teams.*` ones after #63
+/// without collisions; the version is in the *name* because the
+/// payload contract is per kind-version, and a reader that knows
+/// `…/1` must not be handed a `…/2` body under the same label.
+///
+/// [`EventKind::parse`] validates the shape and nothing more — whether
+/// a kind is *registered* is [`is_v0_kind`]'s question, kept separate
+/// so a future kind's events can be carried by an envelope that
+/// predates it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct EventKind(String);
+
+impl EventKind {
+    /// Parses and validates the `namespace.name/version` shape.
+    pub fn parse(raw: &str) -> Result<Self, DomainError> {
+        let (path, version) = raw.split_once('/').ok_or_else(|| {
+            DomainError::Validation(format!(
+                "event kind {raw:?} carries no version (expected \"ns.name/N\")"
+            ))
+        })?;
+
+        let segments: Vec<&str> = path.split('.').collect();
+        if segments.len() < 2 {
+            return Err(DomainError::Validation(format!(
+                "event kind {raw:?} is not namespaced (expected at least \
+                 \"namespace.name\" before the version)"
+            )));
+        }
+        for segment in &segments {
+            let well_formed = !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+            if !well_formed {
+                return Err(DomainError::Validation(format!(
+                    "event kind {raw:?} has a malformed segment {segment:?} \
+                     (lowercase [a-z0-9_], non-empty)"
+                )));
+            }
+        }
+
+        let parsed: u32 = version.parse().map_err(|_| {
+            DomainError::Validation(format!(
+                "event kind {raw:?} has a non-numeric version {version:?}"
+            ))
+        })?;
+        // `parse` accepts "01" and "+1"; the round-trip check refuses
+        // every spelling but the canonical one, so one kind-version has
+        // one string and string equality is kind equality.
+        if parsed < 1 || version != parsed.to_string() {
+            return Err(DomainError::Validation(format!(
+                "event kind {raw:?} has version {version:?}; versions are \
+                 positive integers written canonically (1, 2, …)"
+            )));
+        }
+
+        Ok(Self(raw.to_string()))
+    }
+
+    /// The full storage form, e.g. `"teams.membership.added/1"`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for EventKind {
+    type Error = DomainError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<EventKind> for String {
+    fn from(value: EventKind) -> Self {
+        value.0
+    }
+}
+
+impl std::fmt::Display for EventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A team came into existence.
+pub const TEAM_CREATED: &str = "teams.team.created/1";
+/// A team was deleted (owner, or the operator — ledger-stamped).
+pub const TEAM_DELETED: &str = "teams.team.deleted/1";
+/// A user became a member.
+pub const MEMBERSHIP_ADDED: &str = "teams.membership.added/1";
+/// A member left or was removed.
+pub const MEMBERSHIP_REMOVED: &str = "teams.membership.removed/1";
+/// A member's role changed — the payload carries **both** the old and
+/// the new value (#83 §1: role changes are first-class events carrying
+/// old/new), so the entry reads on its own instead of against its
+/// predecessors.
+pub const ROLE_CHANGED: &str = "teams.membership.role_changed/1";
+/// A promotion's blob copy completed — declared digest verified,
+/// bytes in the CAS, link row landing in the same tx (#83 §3).
+pub const BLOB_COPY_COMPLETED: &str = "teams.blob.copy_completed/1";
+
+/// The v0 kind registry: team lifecycle, membership changes, role
+/// changes, blob-copy completed. A slice rather than knowledge spread
+/// over call sites, for the reason `asterism-core` keeps
+/// `RESERVED_VALUES` as a list — whoever needs "every kind v0 ships"
+/// (a projection, a migration, a doc generator) walks this, and a kind
+/// added later reaches them without an edit on their side.
+pub const V0_KINDS: &[&str] = &[
+    TEAM_CREATED,
+    TEAM_DELETED,
+    MEMBERSHIP_ADDED,
+    MEMBERSHIP_REMOVED,
+    ROLE_CHANGED,
+    BLOB_COPY_COMPLETED,
+];
+
+/// Whether `kind` is one this build of the plane writes. Shape and
+/// registration are separate questions on purpose: a reader must
+/// accept well-formed kinds it does not know (a stream written by a
+/// newer build, `forge.*` after #63), a *writer* asks this before
+/// appending.
+pub fn is_v0_kind(kind: &EventKind) -> bool {
+    V0_KINDS.contains(&kind.as_str())
+}
+
+/// A typed reference an event makes — the index trace queries walk, so
+/// "which events touched X" never becomes payload parsing (#83 §2).
+///
+/// The constructors validate where a shape exists to validate
+/// ([`SubjectRef::digest`] / [`SubjectRef::blob`]); the enum's payloads
+/// stay public because a tagged serde representation needs them, so
+/// construction through the constructors is the convention the tests
+/// pin, not a wall the type enforces.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "ref_type", content = "value", rename_all = "snake_case")]
+pub enum SubjectRef {
+    /// A content digest (`sha256:` form, `asterism-core` notation).
+    Digest(String),
+    /// Reserved for #63 — the forge identity vocabulary is not fixed
+    /// yet, so the payload is an opaque string this build only carries.
+    ForgeIdentity(String),
+    /// A user.
+    User(Uuid),
+    /// A stored blob, addressed the only way blobs are: by digest.
+    Blob(String),
+}
+
+impl SubjectRef {
+    /// A digest subject, validated against the shared notation.
+    pub fn digest(raw: &str) -> Result<Self, DomainError> {
+        Ok(Self::Digest(store::parse_digest(raw)?))
+    }
+
+    /// A blob subject — digest-addressed, same validation.
+    pub fn blob(raw: &str) -> Result<Self, DomainError> {
+        Ok(Self::Blob(store::parse_digest(raw)?))
+    }
+
+    /// A user subject.
+    pub const fn user(user_id: Uuid) -> Self {
+        Self::User(user_id)
+    }
+
+    /// A reserved forge-identity subject (#63).
+    pub fn forge_identity(opaque: impl Into<String>) -> Self {
+        Self::ForgeIdentity(opaque.into())
+    }
+}
+
+/// One entry in a team's stream — the envelope, with the payload
+/// opaque to it.
+///
+/// Fields are public: the envelope is a record, and what makes it
+/// trustworthy is not encapsulation here but the storage discipline
+/// (append-only, no update/delete) that `teams-infra` owes. The
+/// constructor exists so that every envelope that passes through
+/// domain code has been shape-checked once.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LedgerEvent {
+    /// Storage-assigned position within the team's stream.
+    pub seq: EventSeq,
+    /// Globally unique id of this event.
+    pub event_id: Uuid,
+    /// The stream — team boundary only; private-space operations never
+    /// land in any team's ledger (#83 §2).
+    pub team_id: Uuid,
+    /// Who acted, stamped at write time and distinguishable as member
+    /// or operator ([`LedgerActor`]).
+    pub actor: LedgerActor,
+    /// When, as milliseconds since the Unix epoch.
+    pub occurred_at_ms: i64,
+    /// What happened — namespaced + versioned ([`EventKind`]).
+    pub kind: EventKind,
+    /// What it happened *to* — the typed refs an index is built over.
+    pub subjects: Vec<SubjectRef>,
+    /// The kind-versioned body. Opaque to the substrate: this crate
+    /// neither reads nor validates it beyond being JSON.
+    pub payload: serde_json::Value,
+}
+
+impl LedgerEvent {
+    /// Assembles an envelope from parts that already carry their own
+    /// validation (`seq` and `kind` are parsed types) plus the one
+    /// check nothing else owns: `occurred_at_ms` must not predate the
+    /// epoch — a negative timestamp is a serialization accident, not a
+    /// time.
+    #[allow(clippy::too_many_arguments)] // The envelope *is* these eight fields (#83 §2); grouping them would invent a ninth name.
+    pub fn new(
+        seq: EventSeq,
+        event_id: Uuid,
+        team_id: Uuid,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+        kind: EventKind,
+        subjects: Vec<SubjectRef>,
+        payload: serde_json::Value,
+    ) -> Result<Self, DomainError> {
+        if occurred_at_ms < 0 {
+            return Err(DomainError::Validation(format!(
+                "occurred_at_ms {occurred_at_ms} predates the epoch"
+            )));
+        }
+        Ok(Self {
+            seq,
+            event_id,
+            team_id,
+            actor,
+            occurred_at_ms,
+            kind,
+            subjects,
+            payload,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::identity::{ActorStamp, LedgerActor};
+
+    #[test]
+    fn every_v0_kind_parses_and_registers() {
+        for raw in V0_KINDS {
+            let kind = EventKind::parse(raw)
+                .unwrap_or_else(|e| panic!("registered kind {raw} must parse: {e}"));
+            assert!(is_v0_kind(&kind));
+            assert_eq!(kind.as_str(), *raw);
+        }
+    }
+
+    #[test]
+    fn a_kind_needs_a_namespace_and_a_canonical_version() {
+        // A well-formed kind this build does not register still
+        // parses — shape and registration are different questions.
+        let foreign = EventKind::parse("forge.identity.linked/1").unwrap();
+        assert!(!is_v0_kind(&foreign));
+
+        for invalid in [
+            "teams.membership.added",    // no version
+            "added/1",                   // no namespace
+            "teams..added/1",            // empty segment
+            "Teams.membership.added/1",  // uppercase
+            "teams.membership.added/0",  // versions start at 1
+            "teams.membership.added/01", // non-canonical spelling
+            "teams.membership.added/+1", // non-canonical spelling
+            "teams.membership.added/one",
+            "teams.membership added/1", // space
+            "/1",
+            "",
+        ] {
+            assert!(
+                matches!(EventKind::parse(invalid), Err(DomainError::Validation(_))),
+                "{invalid:?} must not parse as an event kind"
+            );
+        }
+    }
+
+    #[test]
+    fn seq_is_validated_never_generated() {
+        assert_eq!(EventSeq::new(1).unwrap().get(), 1);
+        assert!(EventSeq::new(0).is_err());
+        assert!(EventSeq::new(-5).is_err());
+        // There is deliberately no `next()` to assert the absence of;
+        // what this pins is that the boundary value storage would
+        // never assign is refused rather than carried.
+    }
+
+    #[test]
+    fn an_envelope_assembles_from_validated_parts() {
+        let actor = LedgerActor::member(ActorStamp {
+            user_id: Uuid::now_v7(),
+            display_name: "Hoshino".into(),
+        });
+        let kind = EventKind::parse(ROLE_CHANGED).unwrap();
+        let subject = SubjectRef::user(Uuid::now_v7());
+
+        let event = LedgerEvent::new(
+            EventSeq::new(7).unwrap(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            actor.clone(),
+            1_755_000_000_000,
+            kind.clone(),
+            vec![subject],
+            // Old + new both in the payload — the entry reads on its
+            // own. The envelope does not inspect this; the shape is
+            // the kind's contract.
+            serde_json::json!({ "old": "member", "new": "owner" }),
+        )
+        .unwrap();
+        assert_eq!(event.kind, kind);
+
+        assert!(
+            LedgerEvent::new(
+                EventSeq::new(1).unwrap(),
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+                actor,
+                -1,
+                kind,
+                vec![],
+                serde_json::Value::Null,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn digest_subjects_carry_the_shared_notation() {
+        let digest = asterism_core::domain::content_hash::of_bytes(b"star");
+        assert!(SubjectRef::digest(&digest).is_ok());
+        assert!(SubjectRef::blob(&digest).is_ok());
+
+        // A bare hex string is not a digest in this workspace's
+        // notation, on either digest-shaped variant.
+        for wrong in ["a1b2c3", "cr1-sha256:", ""] {
+            assert!(SubjectRef::digest(wrong).is_err());
+            assert!(SubjectRef::blob(wrong).is_err());
+        }
+    }
+}

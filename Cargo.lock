@@ -8200,6 +8200,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "teams-contract"
+version = "0.0.0"
+dependencies = [
+ "teams-core",
+]
+
+[[package]]
+name = "teams-core"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "asterism-core",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "teams-infra"
+version = "0.0.0"
+dependencies = [
+ "teams-core",
+]
+
+[[package]]
+name = "teams-server"
+version = "0.0.0"
+dependencies = [
+ "teams-contract",
+ "teams-core",
+ "teams-infra",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

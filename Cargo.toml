@@ -22,6 +22,14 @@ members = [
     "crates/asterism-importer-audio",
     "crates/asterism-ui/src-tauri",
     "crates/asterism-benchgen",
+    # The teams plane (#83). Same layering discipline as the asterism-*
+    # rows above, one deliberate difference: these four do not inherit
+    # the workspace license — each manifest says why where the field
+    # would be.
+    "crates/teams-core",
+    "crates/teams-infra",
+    "crates/teams-contract",
+    "crates/teams-server",
 ]
 
 [workspace.package]

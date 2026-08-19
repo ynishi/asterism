@@ -1,0 +1,16 @@
+[package]
+name = "teams-contract"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+homepage.workspace   = true
+description = "Wire contract for the Asterism teams plane — schema generation over teams-core (follow-up slices of #83)"
+# license deliberately undeclared until the teams-plane licensing decision (issue #83 §4)
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+teams-core = { path = "../teams-core" }

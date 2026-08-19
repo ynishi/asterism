@@ -1,0 +1,31 @@
+[package]
+name = "teams-core"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+homepage.workspace   = true
+description = "Domain layer of the Asterism teams plane — identity, ledger envelope, store rules, ports (IO-free)"
+# license deliberately undeclared until the teams-plane licensing decision (issue #83 §4)
+# Not published to crates.io.
+publish     = false
+
+[lib]
+
+[dependencies]
+# The one asterism-* crate the teams plane declares (#83 §4): the
+# domain vocabulary — the digest notation and its parsing rules — is
+# reused as-is rather than re-spelled. The rule is about DIRECT edges:
+# never asterism-infra / -contract / -server here — those are the local
+# app's plumbing, and teams-infra owns its own. What asterism-core
+# itself pulls in (today: asterism-contract, where the digest notation
+# lives) rides along transitively; the direction the license boundary
+# guards is the reverse one, asterism-* → teams-*, which stays empty.
+asterism-core = { path = "../asterism-core" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+uuid        = { workspace = true }
