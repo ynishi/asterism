@@ -429,6 +429,15 @@ impl TeamRoster {
         self.team_id
     }
 
+    /// The membership rows this roster was assembled from — the read
+    /// side's view (a roster listing is these rows verbatim). Shared
+    /// rather than owned because the roster's constructor invariants
+    /// (one team, one row per user) must keep holding over what a
+    /// caller sees.
+    pub fn members(&self) -> &[Membership] {
+        &self.members
+    }
+
     /// How many owners the team currently has.
     pub fn owner_count(&self) -> usize {
         self.members

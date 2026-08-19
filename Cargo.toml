@@ -230,6 +230,11 @@ kamadak-exif = "0.6"
 # separate image decode.
 color-thief  = "0.2"
 
+# --- teams-infra: auth v0 (#83 §5) ---
+# argon2id password hashing (OWASP current first choice), the RustCrypto
+# implementation — credentials never go through a hand-rolled hash.
+argon2 = "0.5"
+
 # --- asterism-benchgen: seeded synthetic corpus ---
 # The bench corpus is defined by its seed, not by the files it happens to
 # have produced: `rand_chacha`'s ChaCha20 is reproducible across platforms

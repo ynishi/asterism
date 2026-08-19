@@ -1,11 +1,12 @@
 //! # teams-infra — adapters for the teams plane
 //!
-//! This slice (#89, second slice of #83) is the SQLite layer: the
-//! teams-owned database, its migration series, the state tables over
-//! the `teams-core` domain types, and the per-team append-only ledger.
-//! The local blob adapter (staging → verify → fsync → rename), the
-//! password auth adapter and the backup command are the follow-up
-//! slices.
+//! The SQLite layer (#89, second slice of #83): the teams-owned
+//! database, its migration series, the state tables over the
+//! `teams-core` domain types, and the per-team append-only ledger.
+//! Auth v0 (#91, third slice) adds the instance-local password adapter
+//! and the DB-backed session store. The local blob adapter
+//! (staging → verify → fsync → rename) and the backup command are the
+//! follow-up slices.
 //!
 //! ## Layout
 //!
@@ -16,6 +17,9 @@
 //! - [`sqlite`] — connection lifecycle (WAL, through the workspace's
 //!   `rusqlite-isle` line), the fresh `PRAGMA user_version` migration
 //!   series starting at V1, and the repository.
+//! - [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
+//!   behind `teams-core`'s auth port, opaque sessions with expiry and
+//!   a cleanup path.
 //!
 //! ## The one write rule
 //!
@@ -36,5 +40,6 @@
 
 #![warn(missing_docs)]
 
+pub mod auth;
 pub mod paths;
 pub mod sqlite;
