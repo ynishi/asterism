@@ -10,6 +10,24 @@ and this project adheres to
 
 ### Added
 
+- **The teams plane learns to let go, and to survive** (#95, fifth slice of the
+  #83 design — the last area ahead of the share port). Storage reclaim is an
+  explicit verb with a conscience: an owner (or the operator, operator-stamped)
+  marks a team's blob link for purge, the link vanishes from every read while
+  the grace window runs — restorable by unmark the whole time — and only an
+  explicit reclaim, refused until a mark has aged past the window, removes the
+  ripe links and appends the purge event. The record survives; the bytes go.
+  Mark, unmark, and reclaim are each first-class ledger events, and the ledger
+  tables stay append-only — the mark state lives on the link row. Blobs nothing
+  links anymore are swept by a guarded zero-link sweep (uploads and the sweeper
+  share a lock, so a racing same-digest upload can never lose its bytes), inline
+  after reclaim and on demand via the `gc` subcommand. And the instance can back
+  itself up in one command: quiesce, snapshot the database via `VACUUM INTO` —
+  never a live file copy — then database first, blobs after, into a single tar
+  whose worst inconsistency is an orphan blob, never a dangling reference.
+  Restore is an unpack and a `--db`/`--blobs` flag, proven end-to-end by a test
+  that unpacks an archive and reads a blob back through its link.
+
 - **The teams plane holds bytes** (#93, fourth slice of the #83 design). The
   blob port gets its local adapter: a global content-addressed store under
   `blobs/sha256/<2ch>/<64hex>`, written the careful way — stream into staging
