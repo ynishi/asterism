@@ -15,6 +15,8 @@
 //! | POST | `/teams/{team_id}/members/remove` | owner |
 //! | POST | `/teams/{team_id}/owners/grant` | owner |
 //! | POST | `/teams/{team_id}/owners/revoke` | owner |
+//! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; the operator has no implicit upload) |
+//! | GET | `/teams/{team_id}/blobs/{digest}` | member, or the operator — every failure is the same `404`, see below |
 //!
 //! ## The gate (#83 §5: every route, no exceptions)
 //!
@@ -38,29 +40,49 @@
 //! is reserved for the operator acting *from outside* the membership
 //! set, which is exactly when §1 demands the stamp say so.
 //!
+//! ## The blob read is the one deliberate exception to [`team_gate`]
+//!
+//! `GET /teams/{team_id}/blobs/{digest}` sits behind [`auth_gate`]
+//! only, and answers **one indistinguishable `404`** for every miss:
+//! unknown team, caller neither a member nor the operator, digest
+//! never uploaded, digest linked only in a team the caller cannot
+//! read. The gate's
+//! usual 403/404 split would confirm which part of the probe was
+//! right; on the byte-serving surface that is exactly the existence
+//! oracle the link boundary exists to close (#83 §3 — a digest
+//! "exists" for a caller iff a link row sits in a team they belong
+//! to), the same conflation `asterism-server`'s asset-file route
+//! documents. Uploads stay behind the full gate: mutations answer
+//! 403 to outsiders on every other route, and a 403 on `PUT` reveals
+//! nothing about any digest.
+//!
 //! ## Error mapping
 //!
 //! Same body shape as `asterism-server` (`{"kind", "message"}`).
 //! Domain refusals surface as client errors, never `500`:
 //! `Validation` → 400, [`DomainError::LastOwner`] and
-//! `DigestMismatch` → 409, `Infra` → 500; the gate adds 401/403/404
-//! and the limiter 429.
+//! `DigestMismatch` → 409 (the mismatch body carries declared and
+//! computed, both), `Infra` → 500; the gate adds 401/403/404 and the
+//! limiter 429.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{ConnectInfo, Path, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::body::Body;
+use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Extension, Json, Router};
+use http_body_util::BodyExt as _;
 use teams_contract::command::{
     CreateTeamCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand, RemoveMemberCommand,
-    RevokeOwnerCommand,
+    RevokeOwnerCommand, UploadBlobCommand,
 };
 use teams_contract::dto::{
-    LedgerEventDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
+    BlobUploadedDto, LedgerEventDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
+    TeamCreatedDto,
 };
 use teams_core::DomainError;
 use teams_core::domain::identity::{
@@ -68,9 +90,11 @@ use teams_core::domain::identity::{
     TeamVerb, may_create_team, verb_allowed,
 };
 use teams_core::domain::ledger::LedgerEvent;
+use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
 use teams_infra::auth::password::AccountRecord;
 use teams_infra::sqlite::map::subject_to_ref;
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use crate::state::{TeamsCtx, now_ms};
@@ -87,6 +111,11 @@ enum ApiError {
     Forbidden(String),
     /// The `{team_id}` names no team on this instance.
     TeamNotFound,
+    /// The blob read's one answer for every miss — unknown team,
+    /// non-member, unlinked digest, foreign digest — deliberately a
+    /// single variant so the four cannot drift into distinguishable
+    /// bodies (see the module doc).
+    BlobNotFound,
     /// The auth limiter refused the attempt.
     RateLimited,
 }
@@ -123,6 +152,11 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "NotFound",
                 "no such team on this instance".to_string(),
+            ),
+            Self::BlobNotFound => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "no such blob in this team".to_string(),
             ),
             Self::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -181,10 +215,15 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         .route("/teams/{team_id}/members/remove", post(remove_member))
         .route("/teams/{team_id}/owners/grant", post(grant_owner))
         .route("/teams/{team_id}/owners/revoke", post(revoke_owner))
+        .route("/teams/{team_id}/blobs", put(upload_blob))
         .layer(middleware::from_fn_with_state(ctx.clone(), team_gate));
 
     let authed = Router::new()
         .route("/teams/create", post(create_team))
+        // Deliberately outside `team_gate`: the blob read answers one
+        // `404` for every miss instead of the gate's 403/404 split —
+        // the module doc's "one deliberate exception".
+        .route("/teams/{team_id}/blobs/{digest}", get(read_blob))
         .merge(team_scoped)
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_gate))
         .with_state(ctx);
@@ -607,6 +646,151 @@ async fn events(
         .map(event_dto)
         .collect::<Result<Vec<_>, _>>()
         .map(Json)
+}
+
+// ----------------------------------------------------------------------
+// Handlers — blobs (#93, the #83 §3 mechanics).
+// ----------------------------------------------------------------------
+
+/// `PUT /teams/{team_id}/blobs?digest=sha256:<hex>` — members only.
+///
+/// The declared digest is mandatory (the OCI `PUT ?digest=` contract);
+/// the body is the raw bytes, streamed frame by frame into the
+/// adapter's staging write — never buffered whole. The full body is
+/// **always** consumed and hashed, even when the CAS already holds the
+/// digest: dedupe is server-side only, and a response (or a timing
+/// difference) that skipped work would be the Harnik-2010 side channel
+/// (#83 §3).
+///
+/// Ordering (#83 §3): the bytes are durable in the CAS *before* the
+/// link row + `blob-copy completed` event commit in one transaction
+/// (the #89 write API). A failure between the two leaves an orphan
+/// blob — harmless, swept later — and never a dangling link. A digest
+/// mismatch is a `409` carrying declared and computed, with no blob,
+/// no link and no event behind it. A duplicate link (this team already
+/// holds the digest) is the #89 repository's refusal, surfaced as the
+/// `400` it already is — by then the body has been read in full, so
+/// the refusal reveals only what the member could read anyway.
+async fn upload_blob(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+    Query(cmd): Query<UploadBlobCommand>,
+    body: Body,
+) -> Result<Json<BlobUploadedDto>, ApiError> {
+    let Some(raw_digest) = cmd.digest.as_deref() else {
+        return Err(ApiError::Domain(DomainError::Validation(
+            "the declared digest is mandatory: PUT /teams/{team_id}/blobs?digest=sha256:<hex> \
+             (#83 §3 — promotion asserts \"content X\", so the claim travels with the bytes)"
+                .to_string(),
+        )));
+    };
+    let declared = DeclaredDigest::parse(raw_digest)?;
+    // A membership row, not the operator capacity: §83 §1 gives the
+    // operator delete and closed-registration create, nothing else
+    // implicit — bringing content into a team's store is a member's
+    // act, stamped as one.
+    if access.role.is_none() {
+        return Err(ApiError::Forbidden(
+            "uploading into a team's store requires membership; the operator has no implicit \
+             upload"
+                .to_string(),
+        ));
+    }
+    let mut staged = ctx.blobs.begin_put().await?;
+    let mut body = body;
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|err| {
+            // The client's stream broke mid-body; the staging write is
+            // dropped (and removes its temp) on this return path.
+            ApiError::Domain(DomainError::Validation(format!(
+                "request body ended early: {err}"
+            )))
+        })?;
+        if let Ok(data) = frame.into_data() {
+            staged.write_chunk(&data).await?;
+        }
+    }
+    let verified = staged.commit(&declared).await?;
+    let link = TeamBlobLink::new(access.team_id, verified.digest())?;
+    let event = ctx
+        .repo
+        .add_blob_link(link, stamp(&account, Capacity::Member)?, now_ms())
+        .await?;
+    Ok(Json(BlobUploadedDto {
+        digest: verified.digest().to_string(),
+        event: event_dto(&event)?,
+    }))
+}
+
+/// `GET /teams/{team_id}/blobs/{digest}` — the blob's bytes, streamed.
+///
+/// Visibility is the link boundary (#83 §3): the digest exists for
+/// this caller iff a link row sits in this team and the caller may
+/// read this team — a membership row, or the operator capacity. §1's
+/// read boundary is general: the operator may read what a member may
+/// read (roster, events, and blob bytes alike), because the operator
+/// physically owns the instance's disk and an HTTP-layer read denial
+/// would be theater, not a boundary. Every way of not clearing the
+/// bar — unknown team, no read capacity, unlinked digest, digest
+/// linked elsewhere — is the same `404` (see the module doc's
+/// exception note). A digest that fails to parse at all is the usual
+/// `400`: the refusal is about the request's grammar and confirms
+/// nothing.
+///
+/// Hits stream through the house `ReaderStream` pattern — 64 KiB
+/// chunks, length from the open handle, `application/octet-stream` +
+/// `nosniff` — never a whole-blob allocation.
+async fn read_blob(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path((team_id, raw_digest)): Path<(Uuid, String)>,
+) -> Result<Response, ApiError> {
+    let digest = parse_digest(&raw_digest)?;
+    // The operator capacity, or a membership row (§1's general read
+    // boundary). An unknown team reads as an empty roster, so the
+    // membership probe covers "no such team" and "not a member" in
+    // one motion — and the link table is consulted only for callers
+    // who may read at all.
+    let may_read = account.operator
+        || ctx
+            .repo
+            .roster(team_id)
+            .await?
+            .role_of(account.user_id)
+            .is_some();
+    if !may_read || !ctx.repo.blob_link_exists(team_id, &digest).await? {
+        return Err(ApiError::BlobNotFound);
+    }
+    let (file, length) = ctx.blobs.open_blob(&digest).await?.ok_or_else(|| {
+        // By the #83 §3 ordering this cannot happen — the link row
+        // commits only after the bytes are durable — so a miss here is
+        // an invariant breach, not a 404.
+        ApiError::Domain(DomainError::Infra(anyhow::anyhow!(
+            "link row exists for {digest} but the CAS holds no bytes"
+        )))
+    })?;
+    // 64 KiB chunks, the house choice (asterism-server's asset-file
+    // route): a blob can be huge, and the 4 KiB default is a syscall
+    // per page.
+    let mut response = Response::new(Body::from_stream(ReaderStream::with_capacity(
+        file,
+        64 * 1024,
+    )));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    // The CAS stores bytes, not types; `nosniff` keeps a browser from
+    // promoting untyped bytes into something executable.
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+    Ok(response)
 }
 
 // ----------------------------------------------------------------------

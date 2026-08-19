@@ -52,6 +52,9 @@ const PROFILE_MARKER: &str = ".asterism-teams-profile";
 /// The teams database file name inside the home — the teams plane's
 /// own file, sharing nothing with the app's `asterism.db`.
 const DB_FILE: &str = "teams.db";
+/// The blob store's directory inside the home — the CAS root the
+/// `blob` module lays `sha256/` and `staging/` under (#83 §3).
+const BLOBS_DIR: &str = "blobs";
 
 /// Isolated local dataset selected for the current process — same four
 /// profiles as the local app, because the workloads they separate
@@ -331,6 +334,14 @@ pub fn teams_home() -> Result<PathBuf, DomainError> {
 /// nothing with the app database.
 pub fn default_db_path() -> Result<PathBuf, DomainError> {
     Ok(teams_home()?.join(DB_FILE))
+}
+
+/// Returns the default blob store root (`<teams_home>/blobs`), under
+/// the same profile guard as the database — the two live and move
+/// together, which is what lets #83 §3's ordering rule (bytes durable
+/// before the link commits) mean one machine's durability, not two.
+pub fn default_blob_root() -> Result<PathBuf, DomainError> {
+    Ok(teams_home()?.join(BLOBS_DIR))
 }
 
 #[cfg(test)]

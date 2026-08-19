@@ -33,15 +33,22 @@ struct Harness {
     #[allow(dead_code)] // Held so the isle outlives every request.
     isle: AsyncIsle,
     driver: AsyncIsleDriver,
+    #[allow(dead_code)] // Held so the blob root outlives every request.
+    blob_dir: tempfile::TempDir,
 }
 
 async fn harness(registration: RegistrationPolicy) -> Harness {
     let (isle, driver) = teams_infra::sqlite::open_and_migrate_in_memory()
         .await
         .expect("open in-memory teams db");
+    let blob_dir = tempfile::tempdir().expect("blob tempdir");
+    let blobs = teams_infra::blob::LocalFileStorageAdapter::open(blob_dir.path().join("blobs"))
+        .await
+        .expect("open blob store");
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
         auth: PasswordAuth::new(isle.clone()),
+        blobs,
         registration,
         session_ttl_ms: 60_000,
         auth_limiter: RateLimiter::new(1_000, Duration::from_secs(60)),
@@ -52,6 +59,7 @@ async fn harness(registration: RegistrationPolicy) -> Harness {
         router,
         isle,
         driver,
+        blob_dir,
     }
 }
 

@@ -38,6 +38,10 @@ sha2 = { workspace = true }
 rand = { workspace = true }
 # `teams-core::port::auth::CredentialVerifier` is an async trait.
 async-trait = { workspace = true }
+# The blob adapter's write path (#83 §3): async fs for the staging
+# file, the fsyncs and the rename. Promoted from dev-dependency when
+# the adapter landed (#93) — until then only the tests were async.
+tokio = { workspace = true }
 
 # A real dependency, not only dev, the same promotion asterism-infra
 # made for the same mechanism: the profile-marker publish writes its
@@ -47,6 +51,4 @@ async-trait = { workspace = true }
 tempfile = "3"
 
 [dev-dependencies]
-# `#[tokio::test]` for the async repository surface.
-tokio = { workspace = true }
 tempfile = "3"

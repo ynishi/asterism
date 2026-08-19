@@ -46,7 +46,7 @@ use teams_core::domain::ledger::{
     BLOB_COPY_COMPLETED, EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED,
     ROLE_CHANGED, SubjectRef, TEAM_CREATED, TEAM_DELETED, is_v0_kind,
 };
-use teams_core::domain::store::{Locator, TeamBlobLink};
+use teams_core::domain::store::{Locator, TeamBlobLink, parse_digest};
 use uuid::Uuid;
 
 use crate::sqlite::map::{
@@ -449,6 +449,26 @@ impl SqliteTeamsRepository {
             .await
             .map_err(infra_err)?;
         promote_roster(team_id, rows)
+    }
+
+    /// Whether `digest` is linked to `team_id` — the visibility
+    /// question the blob read surface asks (#83 §3: a digest exists
+    /// for a caller iff a link row sits in a team they belong to).
+    /// The digest goes through the domain's parser first, so a
+    /// malformed probe is a refusal, never a silent `false`.
+    pub async fn blob_link_exists(&self, team_id: Uuid, digest: &str) -> Result<bool, DomainError> {
+        let digest = parse_digest(digest)?;
+        self.isle
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM team_blob_link
+                     WHERE team_id = ?1 AND digest = ?2)",
+                    params![team_id, digest],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(infra_err)
     }
 
     /// The team's blob links, each re-validated through
