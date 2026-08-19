@@ -10,6 +10,22 @@ and this project adheres to
 
 ### Added
 
+- **The teams plane holds bytes** (#93, fourth slice of the #83 design). The
+  blob port gets its local adapter: a global content-addressed store under
+  `blobs/sha256/<2ch>/<64hex>`, written the careful way — stream into staging
+  while hashing, verify against the digest the client declared, fsync, rename
+  into place, fsync the parent — so no partially written blob is ever visible
+  and a crash leaves at most a staging temp the startup sweep clears. Upload
+  rides the OCI contract: the declared digest is mandatory, the server hashes
+  while writing, and a mismatch rejects the whole operation — no blob, no link,
+  no ledger event. Uploads are always accepted in full and deduped server-side
+  only; the response never reveals that the instance had the bytes already.
+  Bytes land in the CAS first, then the link row and the blob-copy-completed
+  event commit in one transaction — an interrupted upload leaves a harmless
+  orphan blob, never a dangling reference. Reads stream, never buffer, and a
+  digest exists for a caller only through a team they belong to: unknown team,
+  non-member, and never-uploaded all return the same 404.
+
 - **The teams plane opens its door** (#91, third slice of the #83 design).
   `teams-server` stops being a stub: instance-local auth v0 — argon2id password
   hashing, opaque session tokens the database stores only as hashes, expiry
