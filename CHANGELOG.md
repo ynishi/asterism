@@ -691,10 +691,10 @@ and this project adheres to
   not happen without a forge object being written. `DispatchService` is a raw
   dispatcher again. It stamps what the caller supplied, leaves the stamp `None`
   where nobody supplied one, and names no forge type at all: the wire field
-  stays `pursuit_id` and parses to the catalogue's own `CorrelationId`.
-  `redispatch` still inherits the prior round's stamp, because naming the prior
-  round is itself explicit, and inherits nothing where the prior carried
-  nothing.
+  stays `pursuit_id` and parses to `CorrelationId`, an id of the raw layer's own
+  — which the stamp's own removal, further down, deletes in turn. `redispatch`
+  still inherits the prior round's stamp, because naming the prior round is
+  itself explicit, and inherits nothing where the prior carried nothing.
 
   The existence check went with it, which is the part worth stating plainly: a
   supplied id is no longer read at all, so nothing here refuses an id that names
@@ -705,14 +705,17 @@ and this project adheres to
   rows are untouched — the V79 backfill stands, and a `pursuit` row with no
   project is still residue of the retired rule rather than a mode.
 
-- **The six doctrines are gone, and `dispatch` is a catalogue module again.**
+- **The six doctrines are gone, and `dispatch` is a raw-layer module again.**
   `domain::mod`'s doctrine list was a second copy of reasoning that already
   lived next to the types, and it had drifted: read against those types, four of
   the six were contradicted by them, and the boundary the sixth declared was
   broken in eight files. Five modules cited it by number, which made the drift
   read as authority. Nothing is lost by deleting it — `attribution.rs`,
   `snapshot.rs`, `edge.rs` and `forge/pursuit.rs` each state their own rule
-  where it is enforced, and the citations now point there.
+  where it is enforced, and the citations now point there. The rewrite of
+  doctrine 6 that a later entry here records — naming its three modules instead
+  of describing two of them — goes the same way: this deletes what that
+  corrected.
 
   What stands in its place is the one rule a module doc is the right home for:
   the forge uses catalogue types, the catalogue uses a forge id and nothing
@@ -739,10 +742,11 @@ and this project adheres to
   the forge converts at its own boundary. The field, the column and the sidecar
   key stay `pursuit_id` — three names for one value would buy nothing, and the
   name was never the coupling. And the forge's two persistence ports leave
-  `domain::repository` for `domain::forge::repository`, which leaves the
-  catalogue's central service holding a `bool`: `CorrelationResolver` answers
+  `domain::repository` for `domain::forge::repository`, which leaves the raw
+  layer's central service holding a `bool`: `CorrelationResolver` answers
   whether a returning artefact's stamp names anything live in its persona, which
-  is all ingest ever asked of a pursuit.
+  is all ingest ever asked of a pursuit. Both that resolver and the stamp it
+  answered for are deleted further down, so neither ships.
 
   The last crossing was a write, and it moved rather than being translated. The
   dispatch runner used to append one ledger row per output it reified, which put
@@ -753,8 +757,9 @@ and this project adheres to
   before the first row. **What the move adds is a window.** A close landing
   before the job runs freezes its candidate set without those outputs, and that
   is permanent; the queue has no retry policy and this kind has no backfill, so
-  a filing lost that way stays lost. Both are recorded on #81, where the
-  backfill predicate that would close them belongs.
+  a filing lost that way stays lost. The window closed a different way: the job
+  kind, its handler and the enqueue are deleted further down, and nothing on
+  this branch files a ledger at all.
 
   None of this is enforceable yet, and the doc says so rather than implying
   otherwise. Nothing stops an implementation of that `bool` port from being
@@ -768,15 +773,14 @@ and this project adheres to
   and the word stayed, naming nothing that was ever defined. The layer it
   pointed at is the raw layer, and that is what the prose says now, or the
   concrete module where a sentence was really about `dispatch` or about an asset
-  row. Forty-one mentions over nineteen files, all doc comments, code comments
-  and test fixtures — no type, column or wire key was ever named after it, and
-  the one string a caller reads (the MCP ingest description's example of an
-  outside identifier) is now an edition number.
+  row. Every mention was a doc comment, a code comment or a test fixture — no
+  type, column or wire key was ever named after it, and the one string a caller
+  reads (the MCP ingest description's example of an outside identifier) is now
+  an edition number.
 
-  Three mentions stay, in migration docs that describe the schema as it stood at
-  their own step: V86 twice and V88 once. Those are a record of a past shape
-  rather than a claim about today. `asterism-importer-sdk` keeps its own
-  `catalogue` module, which is an unrelated type.
+  No mention stays anywhere in the crates. `asterism-importer-sdk` keeps its own
+  `catalogue` module, which is an unrelated type — a list of import targets, not
+  a name for the store.
 
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
@@ -1233,9 +1237,8 @@ and this project adheres to
 - **The `pursuit_restamp` table** (V88). With the verb gone the table is
   unreachable — nothing reads it, nothing writes it, and the persona purge no
   longer sweeps it. **This destroys those rows**, which recorded which pursuit a
-  round was re-filed under. `dispatch_job.pursuit_id` and its index stay: unlike
-  the restamp record they are still live, written on every export and read by
-  the returns join.
+  round was re-filed under. `dispatch_job.pursuit_id` and its index outlive this
+  step, still written on every export; V89 below is what takes them.
 
 - **The pursuit stamp on a dispatch, and the whole lane that resolved it**
   (V89). A dispatch is a raw-layer export — a frozen input, an exporter, an
