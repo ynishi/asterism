@@ -130,15 +130,64 @@ impl Container {
             Some(embed::Container::Jpeg) => return Some(Self::Jpeg),
             None => {}
         }
-        // ISO base media: a `ftyp` box at the head, whose major brand
-        // says which dialect. `qt  ` is QuickTime; everything else that
-        // got this far is treated as MP4, which is what the brand list
-        // (`isom`, `mp42`, `avc1`, `iso2`, …) actually contains.
+        // ISO base media: a `ftyp` box at the head, whose brands say
+        // which dialect. Treating everything that was not `qt  ` as MP4
+        // — which is what this arm used to do — labelled every other
+        // family in the container `video/mp4`: HEIC, AVIF and M4A all
+        // begin with `ftyp`, and a manifest signed under the wrong
+        // declared MIME type is a claim about the file that the file
+        // contradicts. So membership is now read the way the box states
+        // it: from the major brand when it is one of the MP4 dialects,
+        // and otherwise from the compatible list, which is where a file
+        // whose major brand is its vendor's name (Sony's `XAVC`)
+        // declares itself. The families this module does not write into
+        // are refused *before* that list is consulted, because it is not
+        // exclusive — an M4A routinely declares `isom` compatible, and
+        // compatibility with a video dialect does not make audio video.
+        // A brand list naming nothing recognised is refused too, and the
+        // caller reports a container this build does not write into
+        // rather than signing under a guess.
         if head.get(4..8)? == b"ftyp" {
-            return match head.get(8..12)? {
-                b"qt  " => Some(Self::Mov),
-                _ => Some(Self::Mp4),
-            };
+            /// Major brands of the dialects [`Container::Mp4`] means.
+            const MP4: [[u8; 4]; 10] = [
+                *b"isom", *b"iso2", *b"iso3", *b"iso4", *b"iso5", *b"iso6", *b"mp41", *b"mp42",
+                *b"avc1", *b"dash",
+            ];
+            /// ISO base media families that are not MP4: HEIF stills,
+            /// AVIF, and the iTunes audio and video family.
+            const FOREIGN: [[u8; 4]; 13] = [
+                *b"heic", *b"heix", *b"hevc", *b"hevx", *b"mif1", *b"mif2", *b"msf1", *b"avif",
+                *b"avis", *b"M4A ", *b"M4B ", *b"M4P ", *b"M4V ",
+            ];
+            let major: [u8; 4] = head.get(8..12)?.try_into().ok()?;
+            if major == *b"qt  " {
+                return Some(Self::Mov);
+            }
+            if FOREIGN.contains(&major) {
+                return None;
+            }
+            if MP4.contains(&major) {
+                return Some(Self::Mp4);
+            }
+            // The compatible brands run from the minor version to the
+            // end of the box, read no further than the head the caller
+            // took and no further than the box's own declared size.
+            let declared = u32::from_be_bytes(head.get(..4)?.try_into().ok()?) as usize;
+            let end = declared.min(head.len());
+            let mut at = 16;
+            while at + 4 <= end {
+                let brand: [u8; 4] = head[at..at + 4].try_into().ok()?;
+                // The same non-exclusivity cuts both ways: a list that
+                // names a foreign family refuses the file even when an
+                // MP4 dialect sits further along it.
+                if FOREIGN.contains(&brand) {
+                    return None;
+                }
+                if MP4.contains(&brand) {
+                    return Some(Self::Mp4);
+                }
+                at += 4;
+            }
         }
         None
     }
@@ -872,8 +921,12 @@ impl DisclosureWriter {
         };
 
         // Enough bytes to identify any container here: PNG's signature
-        // is 8, JPEG's is 2, and a `ftyp` brand ends at 12.
-        let head = read_head(path, 12).map_err(io)?;
+        // is 8, JPEG's is 2, and a `ftyp` major brand ends at 12 — but
+        // when that brand is a vendor's name the answer sits in the
+        // compatible list behind it, so the window is 64, room for a
+        // dozen compatible brands. `sniff` reads no further than the
+        // `ftyp` box's own declared size.
+        let head = read_head(path, 64).map_err(io)?;
         let container =
             Container::sniff(&head).ok_or_else(|| DisclosureError::UnsupportedContainer {
                 path: path.to_path_buf(),
@@ -1391,6 +1444,49 @@ mod tests {
         mov.extend_from_slice(b"ftypqt  ");
         assert_eq!(Container::sniff(&mov), Some(Container::Mov));
         assert_eq!(Container::sniff(b"GIF89a......"), None);
+    }
+
+    /// A `ftyp` box: size, `ftyp`, the major brand, a zero minor
+    /// version, then the compatible brands.
+    fn ftyp(major: &[u8; 4], compatible: &[&[u8; 4]]) -> Vec<u8> {
+        let size = 16 + 4 * compatible.len();
+        let mut head = (size as u32).to_be_bytes().to_vec();
+        head.extend_from_slice(b"ftyp");
+        head.extend_from_slice(major);
+        head.extend_from_slice(&[0, 0, 0, 0]);
+        for brand in compatible {
+            head.extend_from_slice(*brand);
+        }
+        head
+    }
+
+    #[test]
+    fn ftyp_brands_outside_the_mp4_family_are_refused() {
+        // HEIC and AVIF, with the compatible lists their encoders write.
+        assert_eq!(Container::sniff(&ftyp(b"heic", &[b"mif1", b"heic"])), None);
+        assert_eq!(Container::sniff(&ftyp(b"avif", &[b"avif", b"mif1"])), None);
+        // M4A declares `isom` compatible, which is why the major brand
+        // answers first: compatibility with a video dialect does not
+        // make audio `video/mp4`.
+        assert_eq!(
+            Container::sniff(&ftyp(b"M4A ", &[b"M4A ", b"mp42", b"isom"])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_vendor_major_brand_is_read_from_its_compatible_list() {
+        // Sony's XAVC: the vendor name as the major brand, MP4
+        // membership declared behind it.
+        assert_eq!(
+            Container::sniff(&ftyp(b"XAVC", &[b"XAVC", b"mp42", b"iso2"])),
+            Some(Container::Mp4)
+        );
+        // A brand list naming nothing recognised is refused rather than
+        // guessed at, and so is one naming a foreign family ahead of an
+        // MP4 dialect — non-exclusivity cuts both ways.
+        assert_eq!(Container::sniff(&ftyp(b"ZZZZ", &[b"YYYY"])), None);
+        assert_eq!(Container::sniff(&ftyp(b"ZZZZ", &[b"heic", b"isom"])), None);
     }
 
     #[test]

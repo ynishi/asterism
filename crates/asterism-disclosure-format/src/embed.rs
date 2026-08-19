@@ -454,6 +454,15 @@ mod jpeg {
     const APP15: u8 = 0xEF;
     /// `APP1` — EXIF and XMP both.
     const APP1: u8 = 0xE1;
+    /// Temporary marker — standalone, no length field.
+    const TEM: u8 = 0x01;
+    /// The restart interval, `RST0` through `RST7` — standalone too.
+    const RST0: u8 = 0xD0;
+    const RST7: u8 = 0xD7;
+    /// Start of image. The walk begins past the leading one, so meeting
+    /// this marker again is a stray inside the stream — standalone like
+    /// the restarts it sits directly above in the marker table.
+    const SOI: u8 = 0xD8;
 
     /// One segment's position in the file.
     struct Segment {
@@ -506,6 +515,24 @@ mod jpeg {
                     segments: out,
                     end_of_walk: Some(pos),
                 });
+            }
+            // `TEM`, the restarts and a stray `SOI` carry no length
+            // field — the same standalone set the media probe's scanner
+            // steps over. Reading the two bytes after one as a length
+            // used to resynchronise the walk at whatever offset those
+            // bytes implied, on a file other decoders accept. Recorded
+            // with an empty payload rather than skipped: one of these is
+            // a non-`APPn` marker, so it caps the metadata run that
+            // `embed` inserts into.
+            if matches!(marker, TEM | RST0..=RST7 | SOI) {
+                out.push(Segment {
+                    marker,
+                    start: pos,
+                    end: pos + 2,
+                    payload: pos + 2..pos + 2,
+                });
+                pos += 2;
+                continue;
             }
             let length_at = pos + 2;
             let length = bytes
@@ -821,6 +848,48 @@ mod tests {
         jpeg.extend_from_slice(app0_payload);
         jpeg.extend_from_slice(&[0xFF, 0xD9]);
         jpeg
+    }
+
+    /// A JPEG carrying the standalone markers — `TEM`, both ends of the
+    /// restart range, a stray `SOI` — between its metadata and its scan.
+    /// No ordinary encoder emits them there, but a decoder steps over
+    /// them, and the walk used to read the two bytes after each one as a
+    /// segment length.
+    fn jpeg_with_standalone_markers() -> Vec<u8> {
+        let mut jpeg = vec![0xFF, 0xD8];
+        let app0_payload = b"JFIF\0\x01\x02\0\0\x01\0\x01\0\0";
+        jpeg.extend_from_slice(&[0xFF, 0xE0]);
+        jpeg.extend_from_slice(&((app0_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(app0_payload);
+        // Two bytes each, no length field. The first is followed by
+        // `0xFF 0xD0`, which read as a length is 65_488 — far past the
+        // end of the fixture, so the old walk refused the file.
+        jpeg.extend_from_slice(&[0xFF, 0x01]); // TEM
+        jpeg.extend_from_slice(&[0xFF, 0xD0]); // RST0
+        jpeg.extend_from_slice(&[0xFF, 0xD7]); // RST7
+        jpeg.extend_from_slice(&[0xFF, 0xD8]); // a stray SOI
+        let sos_payload = [0u8; 10];
+        jpeg.extend_from_slice(&[0xFF, 0xDA]);
+        jpeg.extend_from_slice(&((sos_payload.len() + 2) as u16).to_be_bytes());
+        jpeg.extend_from_slice(&sos_payload);
+        jpeg.extend_from_slice(&[0x12, 0xFF, 0x00, 0x34]);
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        jpeg
+    }
+
+    #[test]
+    fn standalone_markers_before_the_scan_are_stepped_over() {
+        let original = jpeg_with_standalone_markers();
+        // Reading is the same walk: a file the walk refuses cannot even
+        // answer "no packet".
+        assert_eq!(read_xmp(&original).unwrap(), None);
+        let stamped = stamp(&original, &record()).unwrap().unwrap();
+        assert!(read_xmp(&stamped).unwrap().is_some());
+        // The packet lands after the JFIF `APP0` — 18 bytes, behind the
+        // 2-byte `SOI` — and before the first standalone marker, and
+        // everything from that marker on is byte-for-byte the original.
+        assert_eq!(&stamped[..20], &original[..20]);
+        assert!(stamped.ends_with(&original[20..]));
     }
 
     /// One PNG chunk, the way an encoder writes it. Shared by the
