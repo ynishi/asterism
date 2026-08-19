@@ -6202,9 +6202,9 @@ CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 ///   holding the version of the entry a caller saw when aiming, with a
 ///   CHECK admitting it only alongside a target and an index of its
 ///   own. No writer ever filled it and no reader ever wanted it, and
-///   [`V90_DROP_THE_BASE_EVENT_PIN`] takes all three. The DDL below
+///   [`V91_DROP_THE_BASE_EVENT_PIN`] takes all three. The DDL below
 ///   still adds them, because a database walking this chain from
-///   scratch has to arrive at the shape V90 expects to alter.
+///   scratch has to arrive at the shape V91 expects to alter.
 /// - **`supersedes_asset_id` is one-way on purpose.** It is admitted
 ///   only on `update`, but an `update` is not yet required to carry
 ///   one: the verb is still reserved (`tx.rs`), nothing writes it, and
@@ -6293,7 +6293,7 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
     CHECK (gesture IN ('trash', 'trash_group', 'restore'));
 "#;
 
-/// Version 85 → 86: the pursuit stamp on a dispatch becomes a value.
+/// Version 86 → 87: the pursuit stamp on a dispatch becomes a value.
 ///
 /// `dispatch_job.pursuit_id` has carried `REFERENCES pursuit(id) ON
 /// DELETE RESTRICT` since V79, and it was the one foreign key anywhere
@@ -6351,7 +6351,7 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
 /// RESTRICT, `persona_id` CASCADE, `source_group_id` SET NULL) are
 /// re-declared on the new table, and a copy that landed a row past one
 /// of them surfaces here rather than at the next write.
-fn v86_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+fn v87_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     tx.execute_batch(V86_DISPATCH_STAMP_UNBOUND)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
@@ -6365,7 +6365,7 @@ fn v86_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::E
     Ok(())
 }
 
-/// DDL half of V86 — see [`v86_dispatch_stamp_is_a_value`] for the
+/// DDL half of V87— see [`v87_dispatch_stamp_is_a_value`] for the
 /// choices. The column list is the physical one, read off the migration
 /// history (V19's rebuild, then V48, V50, V79, V83) rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
@@ -6427,7 +6427,7 @@ CREATE INDEX idx_dispatch_pursuit
     ON dispatch_job(pursuit_id);
 "#;
 
-/// Version 86 → 87: drops the two tables V82 created for the close's
+/// Version 87 → 88: drops the two tables V82 created for the close's
 /// narrowing, and narrows the restamp vocabulary back to the one
 /// subject that exists.
 ///
@@ -6459,14 +6459,14 @@ CREATE INDEX idx_dispatch_pursuit
 /// reasoning), and the three indexes are recreated because `DROP
 /// TABLE` takes every index with it.
 ///
-/// An App step for the reason [`v86_dispatch_stamp_is_a_value`] gives:
+/// An App step for the reason [`v87_dispatch_stamp_is_a_value`] gives:
 /// the canonical rebuild is safe only where [`migrate`] holds
 /// `foreign_keys = OFF`, which it does around `App` steps and not
 /// around `Sql` ones. The closing `PRAGMA foreign_key_check` is the
-/// V79 / V82 / V86 guard — here it answers for the drops as much as
+/// V79 / V82 / V87 guard — here it answers for the drops as much as
 /// the rebuild, since a table going away is exactly what would leave a
 /// dangling edge if anything still pointed at one.
-fn v87_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+fn v88_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     tx.execute_batch(V87_DROP_CLOSE_RECORD)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
@@ -6480,7 +6480,7 @@ fn v87_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error
     Ok(())
 }
 
-/// DDL half of V87 — see [`v87_drop_the_close_record`] for the
+/// DDL half of V88— see [`v88_drop_the_close_record`] for the
 /// choices. The member table goes first: it is the side that holds the
 /// edge.
 const V87_DROP_CLOSE_RECORD: &str = r#"
@@ -6513,12 +6513,12 @@ CREATE INDEX idx_pursuit_restamp_from
     ON pursuit_restamp(from_pursuit_id);
 "#;
 
-/// V88 — drops `pursuit_restamp`, the table behind the restamp repair
+/// V89— drops `pursuit_restamp`, the table behind the restamp repair
 /// verb, now that the verb is gone.
 ///
 /// The forge no longer dispatches, so the only subject a restamp could
 /// ever name no longer reaches it: `RestampSubject` had one variant,
-/// the CHECK V87 narrowed back admitted one value, and the service verb
+/// the CHECK V88 narrowed back admitted one value, and the service verb
 /// that minted these rows is deleted. Nothing reads the table, nothing
 /// writes it, and the persona purge no longer has to sweep it.
 ///
@@ -6535,17 +6535,17 @@ CREATE INDEX idx_pursuit_restamp_from
 /// indexes go with the table. That is the case `DROP TABLE` handles
 /// with foreign keys left on, so there is no rebuild to hold
 /// `foreign_keys = OFF` for.
-const V88_DROP_THE_RESTAMP_RECORD: &str = r#"
+const V89_DROP_THE_RESTAMP_RECORD: &str = r#"
 DROP TABLE pursuit_restamp;
 "#;
 
-/// V89 — takes the pursuit stamp off the dispatch, and the lookup lane
+/// V90— takes the pursuit stamp off the dispatch, and the lookup lane
 /// that read it off the asset.
 ///
 /// A dispatch is a raw-layer export: a frozen input, an exporter, an
 /// action, and what came back. Which line of work somebody was on when
 /// they started it is not a fact about the export, and
-/// `dispatch_job.pursuit_id` was the schema saying otherwise. V86 took
+/// `dispatch_job.pursuit_id` was the schema saying otherwise. V87 took
 /// the foreign key off that column three steps ago, which left the
 /// stamp as a value nothing owns; this takes the value.
 ///
@@ -6571,9 +6571,9 @@ DROP TABLE pursuit_restamp;
 ///
 /// - `dispatch_job` gets the canonical rebuild — `CREATE
 ///   dispatch_job_v89` → `INSERT … SELECT` → drop → rename → recreate
-///   every index — in the V86 shape it rebuilt for the constraint, one
+///   every index — in the V87 shape it rebuilt for the constraint, one
 ///   column shorter. Every column is named on both sides for the
-///   reason V86 gives: a twenty-four-column list should fail loudly
+///   reason V87 gives: a twenty-four-column list should fail loudly
 ///   rather than transpose neighbouring columns of the same type. All
 ///   three surviving indexes are recreated, because `DROP TABLE` takes
 ///   every index with it, and `idx_dispatch_pursuit` is not among them
@@ -6589,11 +6589,11 @@ DROP TABLE pursuit_restamp;
 /// canonical rebuild is safe only where [`migrate`] holds
 /// `foreign_keys = OFF`, which it does around `App` steps and not
 /// around `Sql` ones. The closing `PRAGMA foreign_key_check` is the
-/// V79 / V82 / V86 guard — the edges this step keeps (`snapshot_id`
+/// V79 / V82 / V87 guard — the edges this step keeps (`snapshot_id`
 /// RESTRICT, `persona_id` CASCADE, `source_group_id` SET NULL) are
 /// re-declared on the new table, and a copy that landed a row past one
 /// of them surfaces here rather than at the next write.
-fn v89_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+fn v90_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     tx.execute_batch(V89_DROP_THE_PURSUIT_STAMP)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
@@ -6607,8 +6607,8 @@ fn v89_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Erro
     Ok(())
 }
 
-/// DDL half of V89 — see [`v89_drop_the_pursuit_stamp`] for the
-/// choices. The column list is V86's physical one minus `pursuit_id`,
+/// DDL half of V90— see [`v90_drop_the_pursuit_stamp`] for the
+/// choices. The column list is V87's physical one minus `pursuit_id`,
 /// read off the migration history rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
 /// nothing.
@@ -6669,7 +6669,7 @@ DROP INDEX idx_asset_trace_pursuit;
 ALTER TABLE asset DROP COLUMN trace_pursuit_id;
 "#;
 
-/// V90 — takes the base-event pin off the ledger: the column V85 added
+/// V91— takes the base-event pin off the ledger: the column V85 added
 /// to hold which version of an entry an `in` was looking at, the CHECK
 /// pairing it to a target, and the index over it.
 ///
@@ -6689,9 +6689,9 @@ ALTER TABLE asset DROP COLUMN trace_pursuit_id;
 /// against a real profile, and no migration can: the value is dropped
 /// either way, which is what dropping a column means.
 ///
-/// A plain `Sql` step, and not the canonical rebuild V89 needed. The
+/// A plain `Sql` step, and not the canonical rebuild V90 needed. The
 /// index is dropped first because SQLite refuses `DROP COLUMN` on an
-/// indexed column — the same condition V89 hit on
+/// indexed column — the same condition V90 hit on
 /// `idx_asset_trace_pursuit`. The other documented refusal, a column
 /// "used in a foreign key constraint", was measured rather than assumed
 /// before this shape was chosen: a throwaway table whose dropped column
@@ -6705,7 +6705,7 @@ ALTER TABLE asset DROP COLUMN trace_pursuit_id;
 /// hand-copy an append-only ledger — the argument V85 made for altering
 /// `pursuit_tx` rather than rebuilding it holds just as well in this
 /// direction.
-const V90_DROP_THE_BASE_EVENT_PIN: &str = r#"
+const V91_DROP_THE_BASE_EVENT_PIN: &str = r#"
 DROP INDEX idx_pursuit_tx_base_event;
 ALTER TABLE pursuit_tx DROP COLUMN base_event_id;
 "#;
@@ -6799,11 +6799,11 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V84_FORGE_PROJECT_LINE),
     Step::Sql(V85_FILING_AND_TARGETED_IN),
     Step::Sql(V86_ASSET_COMMENT_GESTURE),
-    Step::App(v86_dispatch_stamp_is_a_value),
-    Step::App(v87_drop_the_close_record),
-    Step::Sql(V88_DROP_THE_RESTAMP_RECORD),
-    Step::App(v89_drop_the_pursuit_stamp),
-    Step::Sql(V90_DROP_THE_BASE_EVENT_PIN),
+    Step::App(v87_dispatch_stamp_is_a_value),
+    Step::App(v88_drop_the_close_record),
+    Step::Sql(V89_DROP_THE_RESTAMP_RECORD),
+    Step::App(v90_drop_the_pursuit_stamp),
+    Step::Sql(V91_DROP_THE_BASE_EVENT_PIN),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -10243,10 +10243,10 @@ mod tests {
     /// that a careless widening would drop.
     ///
     /// It runs to *latest* rather than stopping at 85, so what it
-    /// asserts is the shape a caller meets today: V90 dropped the pin
+    /// asserts is the shape a caller meets today: V91 dropped the pin
     /// column, its CHECK and its index, and the rules asserted below
     /// are the three that outlived it. That makes this the test that
-    /// answers for V90 leaving the surviving column-level CHECKs
+    /// answers for V91 leaving the surviving column-level CHECKs
     /// standing — `DROP COLUMN` rewrites the table's schema text, and a
     /// CHECK lost in that rewrite would fire nowhere and say nothing.
     #[test]
@@ -11918,7 +11918,7 @@ mod tests {
             .unwrap();
         }
 
-        // Stops at 79 rather than running to latest: V89 drops
+        // Stops at 79 rather than running to latest: V90 drops
         // `dispatch_job.pursuit_id`, and the backfill asserted below is
         // V79's own answer, not the schema's current one.
         migrate_to(&mut conn, 79).unwrap();
@@ -12086,20 +12086,20 @@ mod tests {
         }
     }
 
-    /// V86 rebuilds `dispatch_job` to drop one constraint and nothing
+    /// V87 rebuilds `dispatch_job` to drop one constraint and nothing
     /// else: every column keeps its value, every index comes back, and
     /// the pursuit a row names can now be deleted out from under it.
     ///
-    /// Seeded at 85 with every one of the twenty-five columns non-NULL
+    /// Seeded at 86 with every one of the twenty-five columns non-NULL
     /// — the point of the rebuild is that a hand-written column list
     /// could transpose two neighbours of the same type without SQLite
     /// noticing, and a fixture that leaves the optional columns NULL
     /// would not catch it. The values are deliberately distinguishable
     /// from each other for the same reason.
     #[test]
-    fn v86_unbinds_the_dispatch_stamp_and_keeps_the_row() {
+    fn v87_unbinds_the_dispatch_stamp_and_keeps_the_row() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 85).unwrap();
+        migrate_to(&mut conn, 86).unwrap();
         let persona = seed_persona(&conn);
         let asset = seed_asset(&conn, persona);
         let snapshot = Uuid::now_v7();
@@ -12155,10 +12155,10 @@ mod tests {
         )
         .unwrap();
 
-        // Stops at 86 rather than running to latest: V89 drops the
-        // column this rebuild kept, and what is asserted below is V86's
+        // Stops at 87 rather than running to latest: V90 drops the
+        // column this rebuild kept, and what is asserted below is V88's
         // own answer — the constraint gone and the value still there.
-        migrate_to(&mut conn, 86).unwrap();
+        migrate_to(&mut conn, 87).unwrap();
 
         // Every column, by value. `output_asset_ids` is compared
         // against the string that was written rather than re-derived,
@@ -12364,20 +12364,20 @@ mod tests {
         }
     }
 
-    /// V87 drops the two tables the close's narrowing was recorded in
+    /// V88 drops the two tables the close's narrowing was recorded in
     /// and narrows the restamp CHECK back to the one subject that
     /// exists.
     ///
-    /// Seeded at 86 with a populated cull and member — the drop has to
+    /// Seeded at 87 with a populated cull and member — the drop has to
     /// be exercised against rows, not against empty tables, because
     /// what made leaving them costly was the RESTRICT edges those rows
     /// hold into `pursuit`, `persona`, `pursuit_event` and `snapshot`.
     /// The pursuit is deleted afterwards with foreign keys on: at 86
     /// those rows would have refused it.
     #[test]
-    fn v87_drops_the_close_record_and_frees_what_it_pinned() {
+    fn v88_drops_the_close_record_and_frees_what_it_pinned() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 86).unwrap();
+        migrate_to(&mut conn, 87).unwrap();
         let persona = seed_persona(&conn);
         let asset = seed_asset(&conn, persona);
         let snapshot = Uuid::now_v7();
@@ -12414,11 +12414,11 @@ mod tests {
         )
         .unwrap();
 
-        // Stops at 87 rather than running to latest: V88 drops
+        // Stops at 88 rather than running to latest: V89 drops
         // `pursuit_restamp` outright, and the CHECK and indexes
-        // asserted below are V87's own answer, not the schema's
+        // asserted below are V89's own answer, not the schema's
         // current one.
-        migrate_to(&mut conn, 87).unwrap();
+        migrate_to(&mut conn, 88).unwrap();
 
         // Both tables are gone, indexes with them.
         let left: Vec<String> = {
@@ -12503,19 +12503,19 @@ mod tests {
         assert_eq!(live, 0, "the pursuit really is gone");
     }
 
-    /// V88 drops `pursuit_restamp` and takes its three indexes with it,
+    /// V89 drops `pursuit_restamp` and takes its three indexes with it,
     /// leaving what it pointed at alone.
     ///
-    /// Seeded at 87 with a row, for the reason the V87 test seeds one:
+    /// Seeded at 88 with a row, for the reason the V88 test seeds one:
     /// a drop exercised against an empty table would not show that the
     /// two RESTRICT edges into `pursuit` go with it. The stamp on
     /// `dispatch_job` is checked afterwards because it is the thing
     /// most easily mistaken for part of this change — the restamp
     /// record goes, the filing it recorded moves to stays.
     #[test]
-    fn v88_drops_the_restamp_record_and_leaves_the_filing() {
+    fn v89_drops_the_restamp_record_and_leaves_the_filing() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 87).unwrap();
+        migrate_to(&mut conn, 88).unwrap();
         let persona = seed_persona(&conn);
         let asset = seed_asset(&conn, persona);
         let snapshot = Uuid::now_v7();
@@ -12554,10 +12554,10 @@ mod tests {
         )
         .unwrap();
 
-        // Stops at 88 rather than running to latest: V89 drops
+        // Stops at 89 rather than running to latest: V90 drops
         // `dispatch_job.pursuit_id`, and the filing this step leaves
         // alone is what is asserted below.
-        migrate_to(&mut conn, 88).unwrap();
+        migrate_to(&mut conn, 89).unwrap();
 
         // The table and its three indexes are gone together.
         let left: Vec<String> = {
@@ -12603,22 +12603,22 @@ mod tests {
         assert_eq!(live, 0, "the pursuit really is gone");
     }
 
-    /// V89 takes the stamp off the dispatch and the lookup column off
+    /// V90 takes the stamp off the dispatch and the lookup column off
     /// the asset, and a rebuild is the one kind of migration where
     /// "it ran" and "it kept the data" are different claims.
     ///
-    /// Seeded at 88 with a stamped row whose every other column is
+    /// Seeded at 89 with a stamped row whose every other column is
     /// distinguishable, because the risk a hand-written `INSERT …
     /// SELECT` over twenty-four columns carries is not failing — it is
     /// landing `author_kind` in `author_subject` and saying nothing.
     /// The three surviving indexes are asserted by name for the same
-    /// reason V86's are: `DROP TABLE` takes every index with it, and a
+    /// reason V87's are: `DROP TABLE` takes every index with it, and a
     /// recreate that was forgotten costs a seek per read with nothing
     /// to notice it.
     #[test]
-    fn v89_drops_the_stamp_and_carries_every_other_column_across() {
+    fn v90_drops_the_stamp_and_carries_every_other_column_across() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 88).unwrap();
+        migrate_to(&mut conn, 89).unwrap();
         let persona = seed_persona(&conn);
         let asset = seed_asset(&conn, persona);
         let snapshot = Uuid::now_v7();
@@ -12829,10 +12829,10 @@ mod tests {
         );
     }
 
-    /// V90 drops the base-event pin, its index and its CHECK, and
+    /// V91 drops the base-event pin, its index and its CHECK, and
     /// leaves the rest of the ledger row where it was.
     ///
-    /// Seeded at 89 with a row that *does* hold a pin, which no shipped
+    /// Seeded at 90 with a row that *does* hold a pin, which no shipped
     /// writer has ever produced. That is the point: the shipped writer
     /// is not the only thing that can have written this table, and a
     /// `DROP COLUMN` that only ever met NULLs would prove nothing about
@@ -12846,9 +12846,9 @@ mod tests {
     /// ordinal, and a column removed from the middle of the SELECT list
     /// shifts every read after it onto a neighbour of the same type.
     #[test]
-    fn v90_drops_the_pin_and_leaves_the_rest_of_the_gesture() {
+    fn v91_drops_the_pin_and_leaves_the_rest_of_the_gesture() {
         let mut conn = test_conn();
-        migrate_to(&mut conn, 89).unwrap();
+        migrate_to(&mut conn, 90).unwrap();
         let persona = seed_persona(&conn);
 
         let pursuit = Uuid::now_v7();
@@ -12914,7 +12914,7 @@ mod tests {
         )
         .unwrap();
 
-        migrate_to(&mut conn, 90).unwrap();
+        migrate_to(&mut conn, 91).unwrap();
 
         // The column is gone, and so is the index over it.
         let columns: Vec<String> = {
@@ -13039,7 +13039,7 @@ mod tests {
         )
         .unwrap();
 
-        // Stops at 80 rather than running to latest: V89 drops
+        // Stops at 80 rather than running to latest: V90 drops
         // `trace_pursuit_id`, and both generated columns are what this
         // test reads back.
         migrate_to(&mut conn, 80).unwrap();
@@ -13060,7 +13060,7 @@ mod tests {
     #[test]
     fn v80_surfaces_resolved_trace_claims_and_probes_by_index() {
         let mut conn = test_conn();
-        // Stops at 80 rather than running to latest: V89 drops
+        // Stops at 80 rather than running to latest: V90 drops
         // `trace_pursuit_id` and its index, and both lookup columns are
         // what this test probes.
         migrate_to(&mut conn, 80).unwrap();
