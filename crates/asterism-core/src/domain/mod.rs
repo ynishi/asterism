@@ -88,17 +88,22 @@
 //! **id** and nothing else — no forge entity, no forge event, no forge
 //! port — and a change that adds one is the change to refuse.
 //!
-//! **The arrow does not hold yet, and this is not a claim that it
-//! does.** Two places still break it, both write paths rather than
-//! oversights: `application_support::dispatch_runner_service` writes a
-//! `PursuitTx` for each output it reifies, and `application::mapping`
-//! parses a pursuit id and a project id for the forge's own callers.
-//! They are the open work on #81, not exceptions the rule makes room
-//! for. Cutting [`forge`] into its own crate is what would put the
-//! refusal in the compiler rather than in a reviewer's head, and until
-//! then this paragraph is the whole enforcement — which is why it is a
-//! list that has to be edited by hand when one of them closes, and why
-//! #81 asks whether a guard should hold it instead.
+//! **The arrow holds — and nothing enforces it.** *Uses* is the verb,
+//! and a `use` is what counts: doc links across the boundary are prose
+//! about it, not crossings of it. By that reading no file outside
+//! [`forge`] uses a forge type today, which is a fact about the tree
+//! rather than a rule it obeys — the next `use` would restore the
+//! dependency and no gate would say so. Cutting [`forge`] into its own
+//! crate is what turns the fact into a rule the compiler holds, and it
+//! is the remaining work on #81. Until then this paragraph is the whole
+//! enforcement, which is a reviewer's attention and nothing else.
+//!
+//! Two of the arrow's crossings are worth knowing, because both look
+//! like violations and are not. `dispatch` is a catalogue module though
+//! it reads as the forge's — see [`forge`]'s own doc. And the runner
+//! asks the forge to file a finished dispatch's outputs rather than
+//! writing the ledger itself: the `PursuitLedgerFile` job carries a
+//! dispatch id, and the write happens on the side that owns the row.
 //!
 //! No other cross-module rule is stated here, because the ones that
 //! used to be stated twice drifted. Each lives next to the type that

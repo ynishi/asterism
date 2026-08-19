@@ -33,9 +33,9 @@ use asterism_contract::dto::{
 };
 use chrono::Utc;
 
+use crate::application::forge::mapping::{parse_project_id, parse_pursuit_id};
 use crate::application::mapping::{
-    dispatch_to_dto, parse_asset_id, parse_dispatch_id, parse_persona_id, parse_project_id,
-    parse_pursuit_id, parse_snapshot_id,
+    dispatch_to_dto, parse_asset_id, parse_dispatch_id, parse_persona_id, parse_snapshot_id,
 };
 use crate::domain::attribution::AttributionContext;
 use crate::domain::forge::cull::{
@@ -694,6 +694,84 @@ impl PursuitService {
             txs: txs.iter().map(tx_to_dto).collect(),
             culls: culls.iter().map(cull_to_dto).collect(),
         })
+    }
+    /// Files a finished dispatch's outputs into the pursuit it was
+    /// stamped with — one `in` / `generated` gesture per output (#22).
+    ///
+    /// Driven by the `PursuitLedgerFile` job, which the runner enqueues
+    /// once `reify` has landed. The runner used to write these rows
+    /// itself, which put the catalogue's own service on this port; the
+    /// job carries a dispatch id and nothing else, because every value
+    /// the gesture needs is a column of the row by then — including the
+    /// attribution, which is read back rather than asserted, for the
+    /// same reason `reify` reads it back: the caller is a job runtime
+    /// that has nothing of its own to assert.
+    ///
+    /// **Idempotent**, which matters more than the queue makes it look.
+    /// Nothing here re-runs on failure — the engine has no retry policy
+    /// — so this guards a *deliberate* second run: a backfill, a
+    /// re-enqueue by hand, the recovery #81 leaves open. `pursuit_tx`
+    /// carries no uniqueness, and a second `in` is not cosmetic:
+    /// membership is latest-gesture-per-asset, so a fresh `in` would
+    /// beat an earlier `remove` and quietly restore a member somebody
+    /// took out. Filtering the raw `in` rows rather than the derived
+    /// membership is what prevents that.
+    ///
+    /// It is a read-then-write with nothing serialising it. What holds
+    /// today is that one reify enqueues one job and the engine never
+    /// re-runs one; a recovery pass that could overlap with this would
+    /// need the uniqueness the table does not have.
+    ///
+    /// An unstamped dispatch files nothing. Pre-V79 rows are the only
+    /// ones that reach here that way, and there is no pursuit for them
+    /// to enter.
+    pub async fn file_dispatch_outputs(&self, dispatch_id: &str) -> Result<(), DomainError> {
+        let id = parse_dispatch_id(dispatch_id)?;
+        let job = self
+            .dispatches
+            .find(&id)
+            .await?
+            .ok_or_else(|| DomainError::not_found("dispatch", dispatch_id))?;
+        let Some(stamp) = job.pursuit_id else {
+            return Ok(());
+        };
+        let pursuit_id = PursuitId::from_correlation(stamp);
+
+        // One read for the whole batch — a probe per output is the same
+        // answer at N times the cost. Raw `in` rows, not derived
+        // membership: an asset the owner removed has no membership and
+        // must still not be re-filed.
+        let already: std::collections::HashSet<AssetId> = self
+            .pursuits
+            .txs_of(&pursuit_id)
+            .await?
+            .into_iter()
+            .filter(|tx| matches!(tx.kind, PursuitTxKind::In { .. }))
+            .map(|tx| tx.asset_id)
+            .collect();
+
+        let attribution = AttributionContext::from_persisted(job.persisted_attribution());
+        let now = Utc::now();
+        for asset_id in &job.output_asset_ids {
+            if already.contains(asset_id) {
+                continue;
+            }
+            let entry = PursuitTx::new(
+                pursuit_id,
+                job.persona_id,
+                PursuitTxKind::In {
+                    origin: TxOrigin::Generated,
+                    target: None,
+                    out_of_scope: false,
+                },
+                *asset_id,
+                None,
+                now,
+                &attribution,
+            )?;
+            self.pursuits.append_tx(&entry).await?;
+        }
+        Ok(())
     }
 }
 

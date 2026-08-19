@@ -795,27 +795,6 @@ pub fn parse_correlation_id(
     )?))
 }
 
-/// Parses the wire representation of a pursuit id.
-///
-/// One of the two forge parsers still living in the catalogue's mapping
-/// module; they belong beside the forge's own wire types (#81).
-pub fn parse_pursuit_id(
-    value: &str,
-) -> Result<crate::domain::forge::value::PursuitId, DomainError> {
-    Ok(crate::domain::forge::value::PursuitId::from_uuid(
-        parse_uuid(value, "pursuit_id")?,
-    ))
-}
-
-/// Parses the wire representation of a project id.
-pub fn parse_project_id(
-    value: &str,
-) -> Result<crate::domain::forge::value::ProjectId, DomainError> {
-    Ok(crate::domain::forge::value::ProjectId::from_uuid(
-        parse_uuid(value, "project_id")?,
-    ))
-}
-
 /// Parses the wire representation of an asset-comment id.
 pub fn parse_asset_comment_id(value: &str) -> Result<AssetCommentId, DomainError> {
     Ok(AssetCommentId::from_uuid(parse_uuid(value, "comment_id")?))

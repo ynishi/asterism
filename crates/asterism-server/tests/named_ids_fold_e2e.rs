@@ -351,7 +351,6 @@ async fn an_export_of_a_folded_freeze_receives_one_input() {
                 Arc::new(sqlite::repo::SqlitePersonaRepository::new(isle.clone())),
                 fx.core.asset_service.clone(),
                 Arc::new(SilentQueue),
-                Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone())),
             ),
         ),
         snapshots: Arc::new(sqlite::repo::SqliteSnapshotRepository::new(isle.clone())),

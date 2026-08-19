@@ -4,10 +4,14 @@
 //!
 //! **The catalogue's ports, and only those.** The forge's are in
 //! [`domain::forge::repository`](crate::domain::forge::repository), so
-//! that adding one here does not mean opening the file that declares
-//! the forge's, and so that nothing here declares a forge type. What
-//! the catalogue needs of a pursuit is [`CorrelationResolver`] below,
-//! which answers with a `bool`.
+//! that adding one here does not mean opening the file that holds the
+//! forge's. What the catalogue needs of a pursuit is
+//! [`CorrelationResolver`] below, which answers with a `bool`.
+//!
+//! The rule the whole tree is measured against is one verb — *uses* —
+//! and it is stated once, in [`domain`](crate::domain). Doc links
+//! pointing at forge paths are prose about the boundary rather than a
+//! crossing of it; a `use` is the thing that counts.
 //!
 //! Every trait is `Send + Sync` because Tauri v2 uses a multi-threaded
 //! tokio runtime. Hot-path list / search methods return the `AssetCard`
@@ -2980,9 +2984,7 @@ pub trait CorrelationResolver: Send + Sync {
 // `PursuitRepository` and `ProjectRepository` were declared here, among
 // the catalogue's own. They are the forge's storage contract and moved
 // to `domain::forge::repository` unchanged; the header says what that
-// leaves this file. Two doc links above still point at forge paths,
-// which is naming one in prose rather than declaring one — the header
-// says "declares", and that is the difference it means.
+// leaves this file.
 
 /// Persistence port for the Query Group evaluation core.
 /// A Query Group stores a *rule*

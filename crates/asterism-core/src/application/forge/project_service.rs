@@ -20,7 +20,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
-use crate::application::mapping::{parse_persona_id, parse_project_id};
+use crate::application::forge::mapping::parse_project_id;
+use crate::application::mapping::parse_persona_id;
 use crate::domain::attribution::AttributionContext;
 use crate::domain::forge::line::Line;
 use crate::domain::forge::project::Project;

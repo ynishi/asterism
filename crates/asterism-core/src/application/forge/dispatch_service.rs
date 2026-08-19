@@ -33,9 +33,8 @@ use asterism_contract::dto::DispatchDto;
 use chrono::Utc;
 
 use crate::application::attribution_intake::refuse_assertion_from_owner_surface;
-use crate::application::mapping::{
-    dispatch_to_dto, parse_dispatch_id, parse_pursuit_id, parse_snapshot_id,
-};
+use crate::application::forge::mapping::parse_pursuit_id;
+use crate::application::mapping::{dispatch_to_dto, parse_dispatch_id, parse_snapshot_id};
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::forge::pursuit::Pursuit;

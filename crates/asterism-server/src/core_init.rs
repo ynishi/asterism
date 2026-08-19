@@ -715,6 +715,11 @@ pub async fn init_core_with(
     // one is how a test / preview harness says "no sweep".
     let retention_cell: Arc<OnceLock<Arc<RetentionService>>> = Arc::new(OnceLock::new());
     let _ = retention_cell.set(retention_service.clone());
+    // Bound below, once the forge's service exists — it is built from
+    // the snapshot service, which is built after the queue this cell is
+    // handed to. The `pursuit_ledger_file` job is what reads it.
+    let pursuit_cell: Arc<OnceLock<Arc<asterism_core::application::forge::PursuitService>>> =
+        Arc::new(OnceLock::new());
     let job_queue = match mode {
         CoreMode::Full => {
             // Worker parallelism comes from the `jobs.concurrency`
@@ -768,6 +773,7 @@ pub async fn init_core_with(
                     query_group_refresh: query_group_refresh.clone(),
                     query_group_invalidator: invalidator_cell.clone(),
                     retention_service: retention_cell.clone(),
+                    pursuit_service: pursuit_cell.clone(),
                     series: series.clone(),
                     observations: observations.clone(),
                     // The same two adapters the layer service holds, so
@@ -833,7 +839,6 @@ pub async fn init_core_with(
         personas.clone(),
         asset_service.clone(),
         job_queue_arc.clone(),
-        pursuits.clone(),
     ));
     // Kick one retention sweep per `Full` startup. The sweep is
     // self-chaining while pages come back full, so this single enqueue
@@ -1047,6 +1052,11 @@ pub async fn init_core_with(
         assets_arc.clone(),
         snapshot_service.clone(),
     ));
+    // The job engine's one handle on the forge (#81). Bound here rather
+    // than at the cell's declaration because this is the first moment
+    // the service exists; until then `pursuit_ledger_file` reports a
+    // skip, which is what a harness without a forge should see.
+    let _ = pursuit_cell.set(pursuit_service.clone());
     // The context those pursuits file under (#63). No lifecycle of its
     // own: opened, read, and everything that happens to it happens
     // through the pursuits filed under it.

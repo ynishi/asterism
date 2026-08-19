@@ -50,10 +50,6 @@ use crate::domain::asset::Asset;
 use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::{ConstellationEdge, EdgeKind};
 use crate::domain::job::JobKind;
-// The one forge port a catalogue-side service still holds: `reify`
-// writes the ledger entry for each output it mints. That write, not the
-// import, is what has to move — see #81.
-use crate::domain::forge::repository::PursuitRepository;
 use crate::domain::repository::{
     AssetRepository, DispatchRepository, EdgeRepository, JobQueue, PersonaRepository,
     SnapshotRepository,
@@ -107,13 +103,6 @@ pub struct DispatchRunnerService {
     /// until a restart's backfill walk reaches them, which is precisely
     /// the gap this injection closes.
     jobs: Arc<dyn JobQueue>,
-    /// The ledger port — a reified output *entered its pursuit*, and
-    /// the entry is recorded where every other membership gesture is
-    /// (#22): one `in`/`generated` row per output, written by the same
-    /// pass that minted the asset, for the injection reason `jobs`
-    /// documents above — reify is where generated membership comes
-    /// into existence, so reify owes the ledger the row.
-    pursuits: Arc<dyn PursuitRepository>,
 }
 
 impl DispatchRunnerService {
@@ -127,7 +116,6 @@ impl DispatchRunnerService {
         personas: Arc<dyn PersonaRepository>,
         asset_service: Arc<crate::application::AssetService>,
         jobs: Arc<dyn JobQueue>,
-        pursuits: Arc<dyn PursuitRepository>,
     ) -> Self {
         Self {
             dispatches,
@@ -137,7 +125,6 @@ impl DispatchRunnerService {
             personas,
             asset_service,
             jobs,
-            pursuits,
         }
     }
 
@@ -344,28 +331,44 @@ impl DispatchRunnerService {
         job.completed_at = Some(now);
         self.dispatches.save(&job).await?;
 
-        // Each output entered its pursuit — one ledger row per asset
-        // (#22), under the same attribution the job carries. Guarded
-        // on the stamp being present: every dispatch minted since V79
-        // has one (always-mint), and a legacy NULL means there is no
-        // pursuit to enter.
-        if let Some(pursuit_id) = job.pursuit_id {
-            for asset_id in &job.output_asset_ids {
-                let entry = crate::domain::forge::tx::PursuitTx::new(
-                    crate::domain::forge::value::PursuitId::from_correlation(pursuit_id),
-                    job.persona_id,
-                    crate::domain::forge::tx::PursuitTxKind::In {
-                        origin: crate::domain::forge::tx::TxOrigin::Generated,
-                        target: None,
-                        out_of_scope: false,
-                    },
-                    *asset_id,
-                    None,
-                    now,
-                    &attribution,
-                )?;
-                self.pursuits.append_tx(&entry).await?;
-            }
+        // Each output entered its pursuit, and the ledger row that says
+        // so is the forge's write (#22). This service is the
+        // catalogue's, so it asks for the filing rather than doing it:
+        // the row above is saved, and everything the filing needs —
+        // the stamp, the persona, the output ids, the attribution — is
+        // a column of it, so the payload is the dispatch id.
+        //
+        // The write was never atomic with the reify — the state was
+        // saved as `Done` above, before the first ledger row — so a
+        // failure already left the assets minted and the job finished.
+        // What moving it adds is a window: a close landing before the
+        // job runs freezes its candidate set without these outputs, and
+        // that is permanent. Both the loss and the window are open on
+        // #81, which is where the backfill that would close them goes.
+        //
+        // Logged rather than swallowed, for the reason
+        // `enqueue_fingerprint` gives below: a filing that never
+        // happened must not read the same as one that was never wired.
+        // Not fatal for the same reason either — the bytes are written
+        // and the assets are saved, and failing the reify over a queue
+        // push would discard a run's output to avoid deferring a row.
+        //
+        // Unstamped rows enqueue nothing; there is no pursuit to enter.
+        if job.pursuit_id.is_some()
+            && let Err(err) = self
+                .jobs
+                .enqueue(
+                    JobKind::PursuitLedgerFile,
+                    serde_json::json!({ "dispatch_id": job.id.to_string() }),
+                )
+                .await
+        {
+            tracing::warn!(
+                event = "diag.dispatch.ledger_filing_not_enqueued",
+                dispatch_id = %job.id,
+                error = %err,
+                "outputs minted but the ledger filing was not queued"
+            );
         }
 
         // New outputs are exactly what a pending provenance claim has

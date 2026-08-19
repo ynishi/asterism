@@ -694,12 +694,13 @@ and this project adheres to
   where it is enforced, and the citations now point there.
 
   What stands in its place is the one rule a module doc is the right home for:
-  the forge names catalogue types, the catalogue names a forge id and nothing
-  else. It is written as the rule plus the places that break it, named one by
-  one, because asserting a boundary the dependency graph does not have is the
-  defect #81 was opened about. Two are left by the end of this entry:
-  `dispatch_runner_service` writing a `PursuitTx` per reified output, and
-  `mapping` parsing a pursuit id and a project id.
+  the forge uses catalogue types, the catalogue uses a forge id and nothing
+  else. It is written with the state of the tree beside it rather than as an
+  assertion, because asserting a boundary the dependency graph does not have is
+  the defect #81 was opened about. By the end of this entry no file outside the
+  forge uses a forge type — and nothing enforces that, which the doc says in as
+  many words: the next `use` restores the dependency and no gate notices. The
+  crate split is what would make it a rule rather than a fact.
 
   Applying that rule moved two things. `dispatch` is a catalogue module: an
   exporter running over a frozen set is something that happened to the bytes, it
@@ -721,6 +722,18 @@ and this project adheres to
   catalogue's central service holding a `bool`: `CorrelationResolver` answers
   whether a returning artefact's stamp names anything live in its persona, which
   is all ingest ever asked of a pursuit.
+
+  The last crossing was a write, and it moved rather than being translated. The
+  dispatch runner used to append one ledger row per output it reified, which put
+  a catalogue service on the forge's write port; it now enqueues
+  `pursuit_ledger_file` with the dispatch id, and the forge does the writing.
+  Everything the filing needs is a column of the row by then, and the write was
+  never atomic with the reify anyway — the dispatch was already saved as `Done`
+  before the first row. **What the move adds is a window.** A close landing
+  before the job runs freezes its candidate set without those outputs, and that
+  is permanent; the queue has no retry policy and this kind has no backfill, so
+  a filing lost that way stays lost. Both are recorded on #81, where the
+  backfill predicate that would close them belongs.
 
   None of this is enforceable yet, and the doc says so rather than implying
   otherwise. Nothing stops an implementation of that `bool` port from being

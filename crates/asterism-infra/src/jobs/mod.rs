@@ -155,6 +155,22 @@ pub struct JobDeps {
     /// that originally forced the late binding is gone.
     pub retention_service:
         Arc<std::sync::OnceLock<Arc<asterism_core::application_support::RetentionService>>>,
+    /// Forge filing cell — `pursuit_ledger_file` drives
+    /// `PursuitService::file_dispatch_outputs` through it.
+    ///
+    /// This is the one dependency the job engine has on the forge, and
+    /// it is deliberately the whole of it: the catalogue's dispatch
+    /// runner used to write the ledger rows itself, which put a
+    /// catalogue service on a forge port (#81). It asks for the filing
+    /// now, and this cell is where the asking lands.
+    ///
+    /// A cell rather than a value because `PursuitService` is built
+    /// from the snapshot service, which is built after this struct; the
+    /// same chicken-and-egg the two cells above answer. Unbound
+    /// degrades to "nothing filed", which a test harness wants and a
+    /// running library never sees.
+    pub pursuit_service:
+        Arc<std::sync::OnceLock<Arc<asterism_core::application::forge::PursuitService>>>,
     /// Series axis — the registered rules and the keys derived under
     /// them. `series_derive` reads both halves through this and writes
     /// one; nothing else in the job engine touches it.
@@ -472,6 +488,19 @@ async fn handle_asterism_job(
             // than as a run that did its work.
             None => (
                 Ok("disclosure_stamp skipped: no writer configured".to_string()),
+                true,
+            ),
+        },
+        Ok(JobKind::PursuitLedgerFile) => match env.deps.pursuit_service.get() {
+            Some(_) => (
+                handlers::pursuit_ledger_file(&env, &job.payload).await,
+                false,
+            ),
+            // Same shape as `DisclosureStamp` above: an unbound cell
+            // means nothing was filed, which is a skip rather than a
+            // run that did its work.
+            None => (
+                Ok("pursuit_ledger_file skipped: no forge service configured".to_string()),
                 true,
             ),
         },
@@ -1092,6 +1121,50 @@ mod tests {
         assert_eq!(outcome, "no writer configured, skipped");
     }
 
+    /// The filing handler's two answers that need no forge behind them
+    /// (#81), which is the whole of what a harness without one reaches.
+    ///
+    /// A bad payload is an error either way — read before the cell, so
+    /// an unwired harness cannot report a skip for a job that could
+    /// never have run — and a good payload with no service bound is the
+    /// skip the dispatcher's arm turns into `skipped`.
+    #[tokio::test]
+    async fn filing_reads_its_payload_before_it_looks_for_a_forge() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let env = JobEnv {
+            deps: test_deps(&isle, Arc::new(std::sync::OnceLock::new())).await,
+            queue: open_queue(pool).await.unwrap(),
+        };
+        let err = handlers::pursuit_ledger_file(&env, &serde_json::json!({}))
+            .await
+            .expect_err("a payload with no dispatch_id is refused");
+        assert!(
+            err.to_string().contains("dispatch_id"),
+            "the refusal names the field it wanted: {err}"
+        );
+        let outcome = handlers::pursuit_ledger_file(
+            &env,
+            &serde_json::json!({ "dispatch_id": uuid::Uuid::now_v7().to_string() }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, "no forge service configured, skipped");
+    }
+
+    /// The slug the dispatcher matches on round-trips, which is what
+    /// puts `pursuit_ledger_file` on the arm at all — a kind whose slug
+    /// does not parse is reported as an unknown kind and skipped.
+    #[test]
+    fn the_filing_kind_round_trips_through_its_slug() {
+        let kind = asterism_core::domain::job::JobKind::PursuitLedgerFile;
+        assert_eq!(kind.as_str(), "pursuit_ledger_file");
+        assert_eq!(
+            asterism_core::domain::job::JobKind::parse("pursuit_ledger_file").unwrap(),
+            kind
+        );
+    }
+
     /// The dependency bundle these two fixtures need, with everything
     /// they do not touch left inert.
     async fn test_deps(
@@ -1145,6 +1218,7 @@ mod tests {
             ),
             query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
             retention_service: Arc::new(std::sync::OnceLock::new()),
+            pursuit_service: Arc::new(std::sync::OnceLock::new()),
             series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
             observations: crate::observe::ObservationStore::new(isle.clone()),
             material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(isle.clone()),
@@ -1213,6 +1287,7 @@ mod tests {
                 // Left empty: these tests never exercise the retention
                 // sweep, and an unbound cell degrades to "no sweep".
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -1546,6 +1621,7 @@ mod tests {
                 // Left empty: this test never exercises the retention
                 // sweep, and an unbound cell degrades to "no sweep".
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -1681,6 +1757,7 @@ mod tests {
                 ),
                 query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -1865,6 +1942,7 @@ mod tests {
                 ),
                 query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -2048,6 +2126,7 @@ mod tests {
                 ),
                 query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -2246,6 +2325,7 @@ mod tests {
                 ),
                 query_group_invalidator: cell,
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -2458,6 +2538,7 @@ mod tests {
                 ),
                 query_group_invalidator: cell,
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -2550,6 +2631,7 @@ mod tests {
                 ),
                 query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
@@ -2638,6 +2720,7 @@ mod tests {
                 ),
                 query_group_invalidator: Arc::new(std::sync::OnceLock::new()),
                 retention_service: Arc::new(std::sync::OnceLock::new()),
+                pursuit_service: Arc::new(std::sync::OnceLock::new()),
                 series: crate::sqlite::repo::SqliteSeriesRepository::new(isle.clone()),
                 observations: crate::observe::ObservationStore::new(isle.clone()),
                 material_layers: crate::sqlite::repo::SqliteMaterialLayerRepository::new(
