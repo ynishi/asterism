@@ -2318,11 +2318,19 @@ Design notes:
 - **`edited_at`** is `None` for the original post and stamped on
   every `edit` — the UI reveals a "(edited)" marker when it's set
   without exposing the raw diff.
+- **A comment may be pinned to a selection gesture** (#65). A
+  trash / restore verb can carry a one-line remark, and the row
+  keeps *which* verb occasioned it ([`SelectionGesture`]), so the
+  thread shows when in the asset's life each sentence was said.
+  This is a footnote, not a verdict: the typed statement over a
+  candidate set is the cull record's job (#22), and a gesture
+  comment never upgrades into one.
 
 ## Types
 
 - `AssetComment` — A single comment on an Asset.
 - `CommentAuthor` — Who wrote a comment.
+- `SelectionGesture` — The selection-shaped verb a comment was said alongside.
 
 
 <!-- asterism_core/domain__attribution.md -->

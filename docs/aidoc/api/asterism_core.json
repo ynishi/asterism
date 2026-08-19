@@ -780,7 +780,7 @@
     {
       "path": "asterism_core::domain::asset_comment",
       "kind": "module",
-      "docs": "`AssetComment` — a thread of short notes attached to an Asset.\n\nComments are Asset-first: an Asset is the aggregate root, comments\nare child entries the User or a Persona can post. The intent is\ndeliberately smaller than a full chat surface — one Asset, a\nchronological list of short bodies, each carrying an author kind\nand (for Persona authors) a persona reference.\n\nDesign notes:\n\n- **Two author kinds**: `User` (the human running Asterism) and\n  `Persona` (an AI persona registered in the vault). We do not\n  model a full identity table for the User side — the vault is\n  single-user by design; every `User` post is \"me\". A Persona\n  comment carries the persona id so downstream UI can render the\n  author avatar and colour without a follow-up lookup.\n- **Body is free-form text** (no markdown-only guard). The UI\n  renders it as plain text with newlines preserved; a future\n  markdown pass can layer on top without a schema change.\n- **`edited_at`** is `None` for the original post and stamped on\n  every `edit` — the UI reveals a \"(edited)\" marker when it's set\n  without exposing the raw diff."
+      "docs": "`AssetComment` — a thread of short notes attached to an Asset.\n\nComments are Asset-first: an Asset is the aggregate root, comments\nare child entries the User or a Persona can post. The intent is\ndeliberately smaller than a full chat surface — one Asset, a\nchronological list of short bodies, each carrying an author kind\nand (for Persona authors) a persona reference.\n\nDesign notes:\n\n- **Two author kinds**: `User` (the human running Asterism) and\n  `Persona` (an AI persona registered in the vault). We do not\n  model a full identity table for the User side — the vault is\n  single-user by design; every `User` post is \"me\". A Persona\n  comment carries the persona id so downstream UI can render the\n  author avatar and colour without a follow-up lookup.\n- **Body is free-form text** (no markdown-only guard). The UI\n  renders it as plain text with newlines preserved; a future\n  markdown pass can layer on top without a schema change.\n- **`edited_at`** is `None` for the original post and stamped on\n  every `edit` — the UI reveals a \"(edited)\" marker when it's set\n  without exposing the raw diff.\n- **A comment may be pinned to a selection gesture** (#65). A\n  trash / restore verb can carry a one-line remark, and the row\n  keeps *which* verb occasioned it ([`SelectionGesture`]), so the\n  thread shows when in the asset's life each sentence was said.\n  This is a footnote, not a verdict: the typed statement over a\n  candidate set is the cull record's job (#22), and a gesture\n  comment never upgrades into one."
     },
     {
       "path": "asterism_core::domain::asset_comment::AssetComment",
@@ -791,6 +791,11 @@
       "path": "asterism_core::domain::asset_comment::CommentAuthor",
       "kind": "enum",
       "docs": "Who wrote a comment."
+    },
+    {
+      "path": "asterism_core::domain::asset_comment::SelectionGesture",
+      "kind": "enum",
+      "docs": "The selection-shaped verb a comment was said alongside.\n\nEach variant names one mutating gesture that throws an asset out\nor pulls it back. The set is deliberately short: `empty_trash` and\n`purge` are disposal — executing a decision already made — and a\ndisposal is not a moment anybody states a reason at, so they have\nno variant here."
     },
     {
       "path": "asterism_core::domain::attribution",
