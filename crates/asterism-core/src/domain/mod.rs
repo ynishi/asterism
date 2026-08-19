@@ -47,7 +47,7 @@
 //!
 //! **The forge layer.** [`forge`] is where intent lives: a line of work
 //! (`forge::pursuit`), the ledger entries it records, and the
-//! conclusion it reaches. The rounds themselves are [`dispatch`], which
+//! conclusion it reaches. Sending anything out is [`dispatch`], which
 //! is a raw-layer module — an exporter running over a frozen set is
 //! something that happened to the bytes, and it works with no pursuit in
 //! sight. Every other group above describes what is
@@ -97,10 +97,10 @@
 //!
 //! **Outside this crate the arrow says nothing, and is not meant to.**
 //! `asterism-infra` implements the forge's ports, `asterism-server`
-//! wires them, and `asterism-benchgen` measures them — 28 lines across
-//! eight files name a forge type, and every one of them is a crate that
-//! is supposed to see both halves. The rule is about which way
-//! `asterism-core` depends, not about who may name what.
+//! wires them, and `asterism-benchgen` measures them — every file that
+//! names a forge type from outside is in a crate that is supposed to
+//! see both halves. The rule is about which way `asterism-core`
+//! depends, not about who may name what.
 //!
 //! Cutting [`forge`] into its own crate is what turns the inside half
 //! from a fact into a rule the compiler holds, and it is the remaining

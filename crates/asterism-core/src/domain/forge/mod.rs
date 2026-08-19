@@ -65,9 +65,9 @@
 //!
 //! **Sending work out.** The forge stages what the owner already holds
 //! and records what became of it; it does not export, does not start a
-//! round, and does not wait for anything to come back. Export lives in
-//! the raw layer, where what it records is a thing that happened to the
-//! bytes.
+//! dispatch, and does not wait for anything to come back. Export lives
+//! in the raw layer, where what it records is a thing that happened to
+//! the bytes.
 //! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
 //! the core by, and belongs to the core: it is content-addressed,
 //! deduplicated persona-wide, and carries no story about who froze it.
@@ -77,7 +77,7 @@
 //! to — the shape rhymes with a gate, and the resemblance has misled
 //! before: worth is not identity, and a fold is not a selection.
 //! [`provenance`](crate::domain::provenance) is how a returning artefact
-//! reattaches to the round that produced it: what it declares about
+//! reattaches to the dispatch that produced it: what it declares about
 //! where it came from, and whether that resolved. It is a claim the
 //! artefact
 //! carries rather than a statement the operator makes: the exporter

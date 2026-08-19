@@ -36,7 +36,7 @@ use crate::error::DomainError;
 /// as `existing` and have entered an earlier one as `generated`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxOrigin {
-    /// Produced by one of this pursuit's own rounds.
+    /// Produced by this pursuit's own work.
     Generated,
     /// Brought in from outside the library (an import).
     Imported,
