@@ -19,29 +19,6 @@
 //! is needed (stamping the reified outputs) is minutes or hours after
 //! the request that supplied it.
 //!
-//! The `pursuit_id` a start verb carries is the other thing kept on the
-//! row, and this service treats it as a stamp it does not read: it
-//! parses to the catalogue's own
-//! [`CorrelationId`](crate::domain::value::CorrelationId), is written
-//! where the caller supplied one, and is left `None` where nobody did.
-//! Nothing here checks that the id names a live pursuit, or that the
-//! pursuit belongs to the calling persona. Those questions are about a
-//! forge object, and answering them from a catalogue verb would mean an
-//! export could not be started without a forge in sight; the
-//! forge-side export path where they belong does not exist yet, and
-//! [`restamp_dispatch`] is what corrects a filing until it does.
-//!
-//! What that leaves is worth being exact about, because the two walls
-//! do not fall together. Existence still holds, one layer down and
-//! with a different error: `dispatch_job.pursuit_id` carries a foreign
-//! key to `pursuit(id)` (V79), so a stamp naming no row is refused by
-//! the store rather than by a check here — an infra error, not a
-//! validation one. The persona wall is simply gone: an id naming
-//! *another* persona's pursuit is a row SQLite is happy to write, and
-//! nothing in this path looks.
-//!
-//! [`restamp_dispatch`]: super::pursuit_service::PursuitService::restamp_dispatch
-//!
 //! What the runner does to a dispatch in flight — `save_state` /
 //! `save_handle` / `reify` — is not here. Those live on
 //! [`DispatchRunnerService`](crate::application_support::DispatchRunnerService),
@@ -56,9 +33,7 @@ use asterism_contract::dto::DispatchDto;
 use chrono::Utc;
 
 use crate::application::attribution_intake::refuse_assertion_from_owner_surface;
-use crate::application::mapping::{
-    dispatch_to_dto, parse_correlation_id, parse_dispatch_id, parse_snapshot_id,
-};
+use crate::application::mapping::{dispatch_to_dto, parse_dispatch_id, parse_snapshot_id};
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
 use crate::domain::job::JobKind;
@@ -193,7 +168,7 @@ impl DispatchService {
         let now = Utc::now();
         let snapshot = crate::domain::snapshot::Snapshot::new(persona_id, member_ids, now)?;
         let stored = self.snapshots.create_or_reuse(&snapshot).await?;
-        let mut job = DispatchJob::new(
+        let job = DispatchJob::new(
             stored.id,
             persona_id,
             command.exporter_slug,
@@ -203,11 +178,6 @@ impl DispatchService {
             attribution,
         )?
         .with_source(source_group_id, source_query_json);
-        job.pursuit_id = command
-            .pursuit_id
-            .as_deref()
-            .map(parse_correlation_id)
-            .transpose()?;
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }
@@ -227,7 +197,7 @@ impl DispatchService {
             .await?
             .ok_or_else(|| DomainError::not_found("dispatch", &command.dispatch_id))?;
         let now = Utc::now();
-        let mut job = DispatchJob::new(
+        let job = DispatchJob::new(
             prior.snapshot_id,
             prior.persona_id,
             prior.exporter_slug.clone(),
@@ -243,17 +213,6 @@ impl DispatchService {
             attribution,
         )?
         .with_source(prior.source_group_id, prior.source_query_json.clone());
-        // The stamp *is* inherited where the attribution above is not:
-        // the caller named the prior round literally, and a re-run is a
-        // new round of the same line of work (a new patchset on the
-        // same change) — an explicit reference, not the
-        // membership-overlap inference the model forbids. An unstamped
-        // prior re-runs unstamped; there is nothing to carry, and
-        // inventing a stamp here would be correlating by fiat.
-        job.pursuit_id = match command.pursuit_id.as_deref() {
-            Some(wire) => Some(parse_correlation_id(wire)?),
-            None => prior.pursuit_id,
-        };
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }
@@ -292,7 +251,7 @@ impl DispatchService {
         };
 
         let now = Utc::now();
-        let mut job = DispatchJob::new(
+        let job = DispatchJob::new(
             snapshot.id,
             snapshot.persona_id,
             command.exporter_slug,
@@ -301,11 +260,6 @@ impl DispatchService {
             now,
             attribution,
         )?;
-        job.pursuit_id = command
-            .pursuit_id
-            .as_deref()
-            .map(parse_correlation_id)
-            .transpose()?;
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }

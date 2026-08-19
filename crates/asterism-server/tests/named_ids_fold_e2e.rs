@@ -327,7 +327,6 @@ async fn an_export_of_a_folded_freeze_receives_one_input() {
                 action: "write".into(),
                 params_json: serde_json::json!({}).to_string(),
                 operator_ai: None,
-                pursuit_id: None,
             },
             &unattributed(),
         )

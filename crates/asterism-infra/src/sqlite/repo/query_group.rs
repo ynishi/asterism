@@ -1160,9 +1160,7 @@ mod tests {
         }
     }
 
-    fn build_dispatch_service(
-        isle: &AsyncIsle,
-    ) -> asterism_core::application::forge::DispatchService {
+    fn build_dispatch_service(isle: &AsyncIsle) -> asterism_core::application::DispatchService {
         use crate::sqlite::repo::SqliteDispatchRepository;
         use crate::sqlite::repo::asset::SqliteAssetRepository;
         use crate::sqlite::repo::group::SqliteGroupRepository;
@@ -1175,7 +1173,7 @@ mod tests {
             Arc::new(SqliteAssetRepository::new(isle.clone())),
             Arc::new(SqliteGroupRepository::new(isle.clone())),
         ));
-        asterism_core::application::forge::DispatchService::new(
+        asterism_core::application::DispatchService::new(
             Arc::new(SqliteSnapshotRepository::new(isle.clone())),
             Arc::new(SqliteDispatchRepository::new(isle.clone())),
             Arc::new(NoopQueue),
@@ -1183,69 +1181,6 @@ mod tests {
             query_groups,
             qgs,
         )
-    }
-
-    /// The stamp, observed through the service: a supplied id is filed
-    /// as-is, and a request that supplies none leaves the row
-    /// unstamped. Nothing is invented — an export is a catalogue verb,
-    /// and correlating two rounds that only share their members would
-    /// be exactly the inference the model forbids.
-    ///
-    /// The supplied id names a pursuit that was opened first, because
-    /// `dispatch_job.pursuit_id` references `pursuit(id)` (V79): the
-    /// service reads the id no further than parsing it, but the column
-    /// still refuses one that answers to no row.
-    #[tokio::test]
-    async fn dispatch_run_stamps_only_what_the_caller_supplied() {
-        use asterism_contract::command::DispatchRunCommand;
-        use asterism_core::domain::forge::pursuit::Pursuit;
-        use asterism_core::domain::forge::repository::PursuitRepository;
-        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
-        let persona = seed_persona(&isle).await;
-        let a = seed_asset(&isle, &persona, 100, "[]").await;
-        let svc = build_dispatch_service(&isle);
-        let volatile_run = |pursuit_id: Option<String>| DispatchRunCommand {
-            persona_id: persona.to_string(),
-            group_id: None,
-            asset_ids: vec![a.to_string()],
-            exporter_slug: "file".into(),
-            action: "export".into(),
-            params_json: String::new(),
-            operator_ai: None,
-            pursuit_id,
-        };
-
-        let unstamped = svc.run(volatile_run(None), &nobody()).await.unwrap();
-        assert_eq!(
-            unstamped.pursuit_id, None,
-            "a request that named no pursuit files under none"
-        );
-
-        let opened = Pursuit::new(
-            persona,
-            None,
-            None,
-            Some("the line of work".into()),
-            None,
-            chrono::Utc::now(),
-            &nobody(),
-        );
-        crate::sqlite::repo::SqlitePursuitRepository::new(isle.clone())
-            .create(&opened)
-            .await
-            .unwrap();
-        let supplied = opened.id.to_string();
-        let stamped = svc
-            .run(volatile_run(Some(supplied.clone())), &nobody())
-            .await
-            .unwrap();
-        assert_eq!(
-            stamped.pursuit_id.as_deref(),
-            Some(supplied.as_str()),
-            "a supplied id files the round as-is"
-        );
-
-        driver.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1270,7 +1205,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1297,7 +1231,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1353,7 +1286,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1396,7 +1328,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1409,7 +1340,6 @@ mod tests {
             .redispatch(
                 RedispatchCommand {
                     dispatch_id: dto.id.clone(),
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1445,7 +1375,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1462,7 +1391,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )

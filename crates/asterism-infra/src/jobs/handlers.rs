@@ -3326,38 +3326,6 @@ pub async fn query_group_refresh(
     ))
 }
 
-/// `pursuit_ledger_file` — files a finished dispatch's outputs into the
-/// pursuit it was stamped with. Payload: `{ "dispatch_id": "<uuid>" }`.
-///
-/// Wiring only. The verb is the forge's
-/// (`PursuitService::file_dispatch_outputs`), which is the point: the
-/// catalogue's dispatch runner used to write those rows directly, and
-/// this job is what replaced that call so the write belongs to the side
-/// that owns the ledger (#81).
-///
-/// Idempotent through the service, which skips outputs already filed.
-/// Nothing re-runs this on failure — the engine has no retry policy —
-/// so that guard is for a deliberate second run rather than for the
-/// queue.
-pub async fn pursuit_ledger_file(
-    env: &JobEnv,
-    payload: &serde_json::Value,
-) -> Result<String, DomainError> {
-    // Payload first, cell second. A malformed payload is malformed
-    // whether or not a forge is wired, and reading it in the other
-    // order would let a harness without one report a skip for a job
-    // that could never have run.
-    let dispatch_id = payload
-        .get("dispatch_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| DomainError::Validation("pursuit_ledger_file needs dispatch_id".into()))?;
-    let Some(service) = env.deps.pursuit_service.get() else {
-        return Ok("no forge service configured, skipped".into());
-    };
-    service.file_dispatch_outputs(dispatch_id).await?;
-    Ok(format!("pursuit_ledger_file · dispatch {dispatch_id}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

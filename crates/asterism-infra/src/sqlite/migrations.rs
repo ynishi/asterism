@@ -6294,6 +6294,383 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
     CHECK (gesture IN ('trash', 'trash_group', 'restore'));
 "#;
 
+/// Version 85 → 86: the pursuit stamp on a dispatch becomes a value.
+///
+/// `dispatch_job.pursuit_id` has carried `REFERENCES pursuit(id) ON
+/// DELETE RESTRICT` since V79, and it was the one foreign key anywhere
+/// in the schema pointing out of a catalogue table into a forge one —
+/// every other reference to `pursuit`, `project`, `line` and `cull` is
+/// forge-internal. That single constraint is what made the two
+/// inseparable at the database level: drop the forge's tables and the
+/// catalogue's own schema stops standing up.
+///
+/// They are different domains with different lifecycles, and from the
+/// forge's side the stamp on a dispatch row is a value, not a reference
+/// the forge owns. So the column survives and the constraint does not:
+/// same name, same type, same rows, same `idx_dispatch_pursuit` for
+/// a caller to read a pursuit's rounds through. What the column
+/// records — which pursuit this round was filed under — is a fact about
+/// the round, and facts about a round are what `dispatch_job` is for.
+/// What the constraint added on top was an ownership claim the forge
+/// does not have.
+///
+/// Said in the terms that change here: **deleting a pursuit that
+/// dispatches still name now succeeds**, and those dispatch rows are
+/// left alone — each keeps its stamp, as a value that resolves to
+/// nothing. Nothing rewrites them to NULL, because "filed under a
+/// pursuit that has since been deleted" and "never filed" are different
+/// histories and only one of them is true of these rows. `ON DELETE
+/// RESTRICT` semantics survive nowhere: the delete is not refused, not
+/// cascaded, and not nulled. A caller that needs to know whether a
+/// stamp still names something live has to look — the schema no longer
+/// answers that question on the way out, and no longer refuses a stamp
+/// naming no row on the way in either.
+///
+/// SQLite cannot drop a constraint, so this is the canonical rebuild —
+/// `CREATE dispatch_job_v86` → `INSERT … SELECT` → drop → rename →
+/// recreate every index — in the V31 / V38 shape, and specifically the
+/// V82 `pursuit_restamp` shape for a rebuild whose whole purpose is a
+/// constraint. Two things that rebuild did not have to handle:
+///
+/// - **Every column is named on both sides**, rather than copied with
+///   `INSERT … SELECT *`. `dispatch_job` reached twenty-five columns
+///   through V19's rebuild plus four rounds of `ALTER TABLE … ADD
+///   COLUMN` (V48, V50, V79, V83), and over a list that long a
+///   column-order surprise should fail loudly here rather than
+///   transpose data into neighbouring columns of the same type.
+/// - **All four indexes are recreated**, not the two this change is
+///   about: `DROP TABLE` takes every index on the table with it, so
+///   `idx_dispatch_snapshot_created` and `idx_dispatch_state` have to
+///   be written out again alongside `idx_dispatch_persona_created` and
+///   `idx_dispatch_pursuit`.
+///
+/// An `App` step for the reason [`v40_asset_color`] writes down: the
+/// canonical rebuild is safe only where [`migrate`] holds
+/// `foreign_keys = OFF`, which it does around `App` steps and not
+/// around `Sql` ones. The batch ends with `PRAGMA foreign_key_check`,
+/// the V79 / V82 guard — the edges this step keeps (`snapshot_id`
+/// RESTRICT, `persona_id` CASCADE, `source_group_id` SET NULL) are
+/// re-declared on the new table, and a copy that landed a row past one
+/// of them surfaces here rather than at the next write.
+fn v86_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V86_DISPATCH_STAMP_UNBOUND)?;
+
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v86: foreign_key_check reported violations after the rebuild".into()),
+        ));
+    }
+    Ok(())
+}
+
+/// DDL half of V86 — see [`v86_dispatch_stamp_is_a_value`] for the
+/// choices. The column list is the physical one, read off the migration
+/// history (V19's rebuild, then V48, V50, V79, V83) rather than off
+/// `DispatchRow::COLUMNS`, which is a read order and owes this table
+/// nothing.
+const V86_DISPATCH_STAMP_UNBOUND: &str = r#"
+CREATE TABLE dispatch_job_v86 (
+    id                BLOB PRIMARY KEY,
+    snapshot_id       BLOB NOT NULL REFERENCES snapshot(id) ON DELETE RESTRICT,
+    persona_id        BLOB NOT NULL REFERENCES persona(id) ON DELETE CASCADE,
+    exporter_slug     TEXT NOT NULL,
+    action            TEXT NOT NULL,
+    params_json       TEXT NOT NULL DEFAULT '{}',
+    state_slug        TEXT NOT NULL,
+    state_message     TEXT,
+    progress_current  INTEGER,
+    progress_total    INTEGER,
+    handle_kind       TEXT,
+    handle_payload    TEXT,
+    output_asset_ids  TEXT NOT NULL DEFAULT '[]',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    completed_at      INTEGER,
+    source_group_id   BLOB REFERENCES bucket(id) ON DELETE SET NULL,
+    source_query_json TEXT,
+    operator_ai       TEXT,
+    author_kind       TEXT,
+    author_subject    TEXT,
+    attributed_via    TEXT,
+    pursuit_id        BLOB,
+    attempt_kind      TEXT,
+    attempt_payload   TEXT
+) STRICT;
+
+INSERT INTO dispatch_job_v86
+       (id, snapshot_id, persona_id, exporter_slug, action, params_json,
+        state_slug, state_message, progress_current, progress_total,
+        handle_kind, handle_payload, output_asset_ids, created_at,
+        updated_at, completed_at, source_group_id, source_query_json,
+        operator_ai, author_kind, author_subject, attributed_via,
+        pursuit_id, attempt_kind, attempt_payload)
+SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json,
+       state_slug, state_message, progress_current, progress_total,
+       handle_kind, handle_payload, output_asset_ids, created_at,
+       updated_at, completed_at, source_group_id, source_query_json,
+       operator_ai, author_kind, author_subject, attributed_via,
+       pursuit_id, attempt_kind, attempt_payload
+  FROM dispatch_job;
+
+DROP TABLE dispatch_job;
+ALTER TABLE dispatch_job_v86 RENAME TO dispatch_job;
+
+CREATE INDEX idx_dispatch_persona_created
+    ON dispatch_job(persona_id, created_at DESC);
+CREATE INDEX idx_dispatch_snapshot_created
+    ON dispatch_job(snapshot_id, created_at DESC);
+CREATE INDEX idx_dispatch_state
+    ON dispatch_job(state_slug, created_at DESC);
+CREATE INDEX idx_dispatch_pursuit
+    ON dispatch_job(pursuit_id);
+"#;
+
+/// Version 86 → 87: drops the two tables V82 created for the close's
+/// narrowing, and narrows the restamp vocabulary back to the one
+/// subject that exists.
+///
+/// The concept those tables recorded is gone from the code — no verb
+/// writes them, no read reaches them, and no type names them. What is
+/// left is storage that only that concept ever filled, and leaving it
+/// would not be neutral: both tables hold RESTRICT edges into
+/// `pursuit`, `persona`, `pursuit_event` and `snapshot`, so rows
+/// written before this change would go on refusing a persona purge
+/// through a table nothing can any longer explain. Dropping them is
+/// therefore the honest half of the deletion rather than an extra: the
+/// alternative is a purge path that keeps naming the concept to
+/// clear it.
+///
+/// **This destroys those rows.** They are the concept's own records —
+/// which member of a close was kept or dropped, out of which frozen
+/// candidate set — and nothing else refers to them; the candidate
+/// snapshots they pointed at stay, unreferenced and content-addressed,
+/// as any other unreferenced freeze does. The `pursuit_event` rows the
+/// closes wrote are untouched, including the `snapshot_id` of any
+/// close that froze a kept set: that column is the event's own, and a
+/// row already written keeps what it recorded.
+///
+/// `pursuit_restamp` is rebuilt for its CHECK. V82 widened it to admit
+/// a second subject kind that no verb ever minted — the domain has
+/// only ever parsed `'dispatch'` — so the copy translates nothing and
+/// can find nothing to reject. Narrowing a CHECK on a STRICT table
+/// costs a rebuild the same way widening one does (the V79 / V82
+/// reasoning), and the three indexes are recreated because `DROP
+/// TABLE` takes every index with it.
+///
+/// An App step for the reason [`v86_dispatch_stamp_is_a_value`] gives:
+/// the canonical rebuild is safe only where [`migrate`] holds
+/// `foreign_keys = OFF`, which it does around `App` steps and not
+/// around `Sql` ones. The closing `PRAGMA foreign_key_check` is the
+/// V79 / V82 / V86 guard — here it answers for the drops as much as
+/// the rebuild, since a table going away is exactly what would leave a
+/// dangling edge if anything still pointed at one.
+fn v87_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V87_DROP_CLOSE_RECORD)?;
+
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v87: foreign_key_check reported violations after the drop".into()),
+        ));
+    }
+    Ok(())
+}
+
+/// DDL half of V87 — see [`v87_drop_the_close_record`] for the
+/// choices. The member table goes first: it is the side that holds the
+/// edge.
+const V87_DROP_CLOSE_RECORD: &str = r#"
+DROP TABLE cull_member;
+DROP TABLE cull;
+
+CREATE TABLE pursuit_restamp_v87 (
+    id              BLOB PRIMARY KEY,
+    subject_kind    TEXT NOT NULL
+        CHECK (subject_kind IN ('dispatch')),
+    subject_id      BLOB NOT NULL,
+    from_pursuit_id BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    to_pursuit_id   BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    author_kind     TEXT,
+    author_subject  TEXT,
+    operator_ai     TEXT,
+    attributed_via  TEXT,
+    created_at      INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO pursuit_restamp_v87 SELECT * FROM pursuit_restamp;
+DROP TABLE pursuit_restamp;
+ALTER TABLE pursuit_restamp_v87 RENAME TO pursuit_restamp;
+
+CREATE INDEX idx_pursuit_restamp_subject
+    ON pursuit_restamp(subject_kind, subject_id);
+CREATE INDEX idx_pursuit_restamp_to
+    ON pursuit_restamp(to_pursuit_id);
+CREATE INDEX idx_pursuit_restamp_from
+    ON pursuit_restamp(from_pursuit_id);
+"#;
+
+/// V88 — drops `pursuit_restamp`, the table behind the restamp repair
+/// verb, now that the verb is gone.
+///
+/// The forge no longer dispatches, so the only subject a restamp could
+/// ever name no longer reaches it: `RestampSubject` had one variant,
+/// the CHECK V87 narrowed back admitted one value, and the service verb
+/// that minted these rows is deleted. Nothing reads the table, nothing
+/// writes it, and the persona purge no longer has to sweep it.
+///
+/// **This destroys those rows.** They recorded which pursuit a round
+/// was re-filed under, which is a statement about a relationship the
+/// forge no longer has. What they pointed at is untouched on both
+/// sides: `dispatch_job.pursuit_id` keeps whatever filing it currently
+/// holds — the stamp is still written by the catalogue's export verb
+/// and still read by the returns join — and the `pursuit` rows the
+/// two FK columns referenced are only referenced less.
+///
+/// A plain `Sql` step, unlike the rebuilds around it. Nothing
+/// references `pursuit_restamp`; its two foreign keys point outward, so
+/// dropping it removes edges rather than stranding any, and the three
+/// indexes go with the table. That is the case `DROP TABLE` handles
+/// with foreign keys left on, so there is no rebuild to hold
+/// `foreign_keys = OFF` for.
+const V88_DROP_THE_RESTAMP_RECORD: &str = r#"
+DROP TABLE pursuit_restamp;
+"#;
+
+/// V89 — takes the pursuit stamp off the dispatch, and the lookup lane
+/// that read it off the asset.
+///
+/// A dispatch is a raw-layer export: a frozen input, an exporter, an
+/// action, and what came back. Which line of work somebody was on when
+/// they started it is not a fact about the export, and
+/// `dispatch_job.pursuit_id` was the schema saying otherwise. V86 took
+/// the foreign key off that column three steps ago, which left the
+/// stamp as a value nothing owns; this takes the value.
+///
+/// Two tables, for one reason. `asset.trace_pursuit_id` (V80) exists
+/// to make a pursuit's returns an index seek instead of a scan, and
+/// the read it was cut for — the returns join — went with the column
+/// it joined through: it resolved rounds by `SELECT id FROM
+/// dispatch_job WHERE pursuit_id = ?`, which no longer parses. A
+/// generated column and a partial index that no query names are not
+/// neutral leftovers — they are re-derived on every write to `asset`,
+/// which is the library's hottest table.
+///
+/// **This destroys the filing.** Every dispatch row loses which
+/// pursuit it was started under, and nothing anywhere else records it:
+/// `pursuit_restamp` (the other copy) went at V88, and the `_trace`
+/// note in `asset.extra` keeps its `pursuit_id` text because that bag
+/// is what an ingest recorded rather than what this schema asserts —
+/// the generated column reading it goes, the JSON does not. Nothing
+/// re-derives the stamp afterwards. It is deleted because the design
+/// says a dispatch does not carry one, not because it was empty.
+///
+/// The two halves need different tools:
+///
+/// - `dispatch_job` gets the canonical rebuild — `CREATE
+///   dispatch_job_v89` → `INSERT … SELECT` → drop → rename → recreate
+///   every index — in the V86 shape it rebuilt for the constraint, one
+///   column shorter. Every column is named on both sides for the
+///   reason V86 gives: a twenty-four-column list should fail loudly
+///   rather than transpose neighbouring columns of the same type. All
+///   three surviving indexes are recreated, because `DROP TABLE` takes
+///   every index with it, and `idx_dispatch_pursuit` is not among them
+///   — it indexed the column being dropped.
+/// - `asset` gets `DROP COLUMN`, not a rebuild. The column is VIRTUAL
+///   generated, so no row holds a byte of it, and rebuilding the
+///   library's largest table to remove an expression would cost the
+///   whole table to change a schema line. `idx_asset_trace_pursuit`
+///   is dropped first: SQLite refuses `DROP COLUMN` on an indexed
+///   column, and this one is named in the index's `WHERE` clause too.
+///
+/// An `App` step for the reason [`v40_asset_color`] writes down: the
+/// canonical rebuild is safe only where [`migrate`] holds
+/// `foreign_keys = OFF`, which it does around `App` steps and not
+/// around `Sql` ones. The closing `PRAGMA foreign_key_check` is the
+/// V79 / V82 / V86 guard — the edges this step keeps (`snapshot_id`
+/// RESTRICT, `persona_id` CASCADE, `source_group_id` SET NULL) are
+/// re-declared on the new table, and a copy that landed a row past one
+/// of them surfaces here rather than at the next write.
+fn v89_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V89_DROP_THE_PURSUIT_STAMP)?;
+
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v89: foreign_key_check reported violations after the rebuild".into()),
+        ));
+    }
+    Ok(())
+}
+
+/// DDL half of V89 — see [`v89_drop_the_pursuit_stamp`] for the
+/// choices. The column list is V86's physical one minus `pursuit_id`,
+/// read off the migration history rather than off
+/// `DispatchRow::COLUMNS`, which is a read order and owes this table
+/// nothing.
+const V89_DROP_THE_PURSUIT_STAMP: &str = r#"
+CREATE TABLE dispatch_job_v89 (
+    id                BLOB PRIMARY KEY,
+    snapshot_id       BLOB NOT NULL REFERENCES snapshot(id) ON DELETE RESTRICT,
+    persona_id        BLOB NOT NULL REFERENCES persona(id) ON DELETE CASCADE,
+    exporter_slug     TEXT NOT NULL,
+    action            TEXT NOT NULL,
+    params_json       TEXT NOT NULL DEFAULT '{}',
+    state_slug        TEXT NOT NULL,
+    state_message     TEXT,
+    progress_current  INTEGER,
+    progress_total    INTEGER,
+    handle_kind       TEXT,
+    handle_payload    TEXT,
+    output_asset_ids  TEXT NOT NULL DEFAULT '[]',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    completed_at      INTEGER,
+    source_group_id   BLOB REFERENCES bucket(id) ON DELETE SET NULL,
+    source_query_json TEXT,
+    operator_ai       TEXT,
+    author_kind       TEXT,
+    author_subject    TEXT,
+    attributed_via    TEXT,
+    attempt_kind      TEXT,
+    attempt_payload   TEXT
+) STRICT;
+
+INSERT INTO dispatch_job_v89
+       (id, snapshot_id, persona_id, exporter_slug, action, params_json,
+        state_slug, state_message, progress_current, progress_total,
+        handle_kind, handle_payload, output_asset_ids, created_at,
+        updated_at, completed_at, source_group_id, source_query_json,
+        operator_ai, author_kind, author_subject, attributed_via,
+        attempt_kind, attempt_payload)
+SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json,
+       state_slug, state_message, progress_current, progress_total,
+       handle_kind, handle_payload, output_asset_ids, created_at,
+       updated_at, completed_at, source_group_id, source_query_json,
+       operator_ai, author_kind, author_subject, attributed_via,
+       attempt_kind, attempt_payload
+  FROM dispatch_job;
+
+DROP TABLE dispatch_job;
+ALTER TABLE dispatch_job_v89 RENAME TO dispatch_job;
+
+CREATE INDEX idx_dispatch_persona_created
+    ON dispatch_job(persona_id, created_at DESC);
+CREATE INDEX idx_dispatch_snapshot_created
+    ON dispatch_job(snapshot_id, created_at DESC);
+CREATE INDEX idx_dispatch_state
+    ON dispatch_job(state_slug, created_at DESC);
+
+DROP INDEX idx_asset_trace_pursuit;
+ALTER TABLE asset DROP COLUMN trace_pursuit_id;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6383,6 +6760,10 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V84_FORGE_PROJECT_LINE),
     Step::Sql(V85_FILING_AND_TARGETED_IN),
     Step::Sql(V86_ASSET_COMMENT_GESTURE),
+    Step::App(v86_dispatch_stamp_is_a_value),
+    Step::App(v87_drop_the_close_record),
+    Step::Sql(V88_DROP_THE_RESTAMP_RECORD),
+    Step::App(v89_drop_the_pursuit_stamp),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -9653,11 +10034,9 @@ mod tests {
     /// `attributed_via` would otherwise arrive silently, and every one of
     /// them is a place the attribution rule has to answer for — which channel
     /// wrote it, what a NULL means there, and how auth resolves it
-    /// later. Third wave: the ledger and the cull (V82) — a membership
-    /// gesture and an act of narrowing are both statements somebody
-    /// makes (#22: "who decided"), so they carry the triple;
-    /// `cull_member` deliberately does not (a line item of its cull,
-    /// not a statement of its own). Fourth wave: the project (V84) —
+    /// later. Third wave: the ledger (V82) — a membership gesture is a
+    /// statement somebody makes (#22: "who decided"), so it carries
+    /// the triple. Fourth wave: the project (V84) —
     /// opening one is a statement; `line_merge` deliberately does
     /// not carry the triple (who approved is who closed, and the
     /// close event already says so), and the line tables are
@@ -9684,12 +10063,10 @@ mod tests {
             carriers,
             vec![
                 "asset".to_string(),
-                "cull".to_string(),
                 "dispatch_job".to_string(),
                 "project".to_string(),
                 "pursuit".to_string(),
                 "pursuit_event".to_string(),
-                "pursuit_restamp".to_string(),
                 "pursuit_tx".to_string(),
             ],
             "a table gained an attribution channel; that is a design decision, not a migration \
@@ -11548,7 +11925,10 @@ mod tests {
             .unwrap();
         }
 
-        migrate(&mut conn).unwrap();
+        // Stops at 79 rather than running to latest: V89 drops
+        // `dispatch_job.pursuit_id`, and the backfill asserted below is
+        // V79's own answer, not the schema's current one.
+        migrate_to(&mut conn, 79).unwrap();
 
         let stamped: Vec<(Uuid, Option<Uuid>, i64)> = {
             let mut stmt = conn
@@ -11620,9 +12000,9 @@ mod tests {
     /// V82 transcribes recorded outputs into the ledger — one
     /// `'in'/'generated'` row per (pursuit, asset), first dispatch
     /// wins when the same asset appears in two rounds' outputs, NULL
-    /// attribution, the dispatch's clock — and rebuilds
-    /// `pursuit_restamp` so its CHECK says `'cull'` where it reserved
-    /// `'judgment'`.
+    /// attribution, the dispatch's clock. The restamp CHECK is checked
+    /// at the end of the chain rather than at V82, which is the only
+    /// thing this test can honestly say about it.
     #[test]
     fn v82_transcribes_outputs_into_the_ledger_once_per_membership() {
         let mut conn = test_conn();
@@ -11711,24 +12091,748 @@ mod tests {
                 "nobody recorded these entries; the migration did"
             );
         }
+    }
 
-        // The rebuilt restamp CHECK speaks the model's vocabulary.
-        let cull_row = conn.execute(
+    /// V86 rebuilds `dispatch_job` to drop one constraint and nothing
+    /// else: every column keeps its value, every index comes back, and
+    /// the pursuit a row names can now be deleted out from under it.
+    ///
+    /// Seeded at 85 with every one of the twenty-five columns non-NULL
+    /// — the point of the rebuild is that a hand-written column list
+    /// could transpose two neighbours of the same type without SQLite
+    /// noticing, and a fixture that leaves the optional columns NULL
+    /// would not catch it. The values are deliberately distinguishable
+    /// from each other for the same reason.
+    #[test]
+    fn v86_unbinds_the_dispatch_stamp_and_keeps_the_row() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 85).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'facade', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
+             VALUES (?1, ?2, 0)",
+            params![snapshot, asset],
+        )
+        .unwrap();
+        let bucket = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO bucket (id, persona_id, name, created_at, updated_at) \
+             VALUES (?1, ?2, 'g', 0, 0)",
+            params![bucket, persona],
+        )
+        .unwrap();
+        let pursuit = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, title, created_at) \
+             VALUES (?1, ?2, 'the round', 0)",
+            params![pursuit, persona],
+        )
+        .unwrap();
+        let dispatch = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO dispatch_job \
+                 (id, snapshot_id, persona_id, exporter_slug, action, params_json, \
+                  state_slug, state_message, progress_current, progress_total, \
+                  handle_kind, handle_payload, output_asset_ids, created_at, \
+                  updated_at, completed_at, source_group_id, source_query_json, \
+                  operator_ai, author_kind, author_subject, attributed_via, \
+                  pursuit_id, attempt_kind, attempt_payload) \
+             VALUES (?1, ?2, ?3, 'file', 'copy', '{\"dir\":\"/out\"}', \
+                     'done', 'wrote 1', 7, 9, \
+                     'remote', '{\"job\":\"h-1\"}', ?4, 1000, \
+                     2000, 3000, ?5, '{\"q\":\"tagged\"}', \
+                     'agent-slug', 'owner', 'alice', 'mcp', \
+                     ?6, 'http', '{\"status\":200}')",
+            params![
+                dispatch,
+                snapshot,
+                persona,
+                format!("[\"{asset}\"]"),
+                bucket,
+                pursuit
+            ],
+        )
+        .unwrap();
+
+        // Stops at 86 rather than running to latest: V89 drops the
+        // column this rebuild kept, and what is asserted below is V86's
+        // own answer — the constraint gone and the value still there.
+        migrate_to(&mut conn, 86).unwrap();
+
+        // Every column, by value. `output_asset_ids` is compared
+        // against the string that was written rather than re-derived,
+        // so a rebuild that dropped it would fail here too.
+        // Three groups because a Rust tuple stops being comparable and
+        // printable past twelve elements, and the table has
+        // twenty-five columns.
+        type Head = (
+            Uuid,
+            Uuid,
+            Uuid,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+        );
+        type Middle = (
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+            i64,
+            Option<i64>,
+            Option<Uuid>,
+        );
+        type Tail = (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<Uuid>,
+            Option<String>,
+            Option<String>,
+        );
+        let (head, middle, tail): (Head, Middle, Tail) = conn
+            .query_row(
+                "SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json, \
+                        state_slug, state_message, progress_current, progress_total, \
+                        handle_kind, handle_payload, output_asset_ids, created_at, \
+                        updated_at, completed_at, source_group_id, source_query_json, \
+                        operator_ai, author_kind, author_subject, attributed_via, \
+                        pursuit_id, attempt_kind, attempt_payload \
+                   FROM dispatch_job WHERE id = ?1",
+                params![dispatch],
+                |r| {
+                    Ok((
+                        (
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                            r.get(7)?,
+                            r.get(8)?,
+                        ),
+                        (
+                            r.get(9)?,
+                            r.get(10)?,
+                            r.get(11)?,
+                            r.get(12)?,
+                            r.get(13)?,
+                            r.get(14)?,
+                            r.get(15)?,
+                            r.get(16)?,
+                        ),
+                        (
+                            r.get(17)?,
+                            r.get(18)?,
+                            r.get(19)?,
+                            r.get(20)?,
+                            r.get(21)?,
+                            r.get(22)?,
+                            r.get(23)?,
+                            r.get(24)?,
+                        ),
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            head,
+            (
+                dispatch,
+                snapshot,
+                persona,
+                "file".to_string(),
+                "copy".to_string(),
+                r#"{"dir":"/out"}"#.to_string(),
+                "done".to_string(),
+                Some("wrote 1".to_string()),
+                Some(7),
+            ),
+            "the rebuild copied the row, it did not reshape it"
+        );
+        assert_eq!(
+            middle,
+            (
+                Some(9),
+                Some("remote".to_string()),
+                Some(r#"{"job":"h-1"}"#.to_string()),
+                format!("[\"{asset}\"]"),
+                1000,
+                2000,
+                Some(3000),
+                Some(bucket),
+            ),
+            "including the two integers and the two JSON blobs that sit \
+             next to each other"
+        );
+        assert_eq!(
+            tail,
+            (
+                Some(r#"{"q":"tagged"}"#.to_string()),
+                Some("agent-slug".to_string()),
+                Some("owner".to_string()),
+                Some("alice".to_string()),
+                Some("mcp".to_string()),
+                Some(pursuit),
+                Some("http".to_string()),
+                Some(r#"{"status":200}"#.to_string()),
+            ),
+            "the columns the ALTERs appended survive in their own order"
+        );
+
+        // The constraint, gone: the stamp names no foreign key now.
+        let stamp_edges: Vec<String> = {
+            let mut stmt = conn
+                .prepare("PRAGMA foreign_key_list('dispatch_job')")
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(2))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            !stamp_edges.iter().any(|t| t == "pursuit"),
+            "no edge from the catalogue's dispatch table into the forge: {stamp_edges:?}"
+        );
+        assert!(
+            stamp_edges.iter().any(|t| t == "snapshot")
+                && stamp_edges.iter().any(|t| t == "persona")
+                && stamp_edges.iter().any(|t| t == "bucket"),
+            "and the edges that were never in question stay: {stamp_edges:?}"
+        );
+
+        // Deleting the pursuit succeeds, and the stamp stays behind as
+        // a value that resolves to nothing.
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+        conn.execute("DELETE FROM pursuit WHERE id = ?1", params![pursuit])
+            .unwrap();
+        let survivor: Option<Uuid> = conn
+            .query_row(
+                "SELECT pursuit_id FROM dispatch_job WHERE id = ?1",
+                params![dispatch],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            survivor,
+            Some(pursuit),
+            "the round was filed under that pursuit, and still was"
+        );
+        let live: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pursuit WHERE id = ?1",
+                params![pursuit],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(live, 0, "and the pursuit really is gone");
+
+        // Every index the table carried, by name — the two this change
+        // is about and the two `DROP TABLE` would have taken silently.
+        let indexes: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE type = 'index' AND tbl_name = 'dispatch_job' \
+                      ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        for wanted in [
+            "idx_dispatch_persona_created",
+            "idx_dispatch_pursuit",
+            "idx_dispatch_snapshot_created",
+            "idx_dispatch_state",
+        ] {
+            assert!(
+                indexes.iter().any(|n| n == wanted),
+                "{wanted} did not come back: {indexes:?}"
+            );
+        }
+    }
+
+    /// V87 drops the two tables the close's narrowing was recorded in
+    /// and narrows the restamp CHECK back to the one subject that
+    /// exists.
+    ///
+    /// Seeded at 86 with a populated cull and member — the drop has to
+    /// be exercised against rows, not against empty tables, because
+    /// what made leaving them costly was the RESTRICT edges those rows
+    /// hold into `pursuit`, `persona`, `pursuit_event` and `snapshot`.
+    /// The pursuit is deleted afterwards with foreign keys on: at 86
+    /// those rows would have refused it.
+    #[test]
+    fn v87_drops_the_close_record_and_frees_what_it_pinned() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 86).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'narrowed', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+        let pursuit = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
+            params![pursuit, persona],
+        )
+        .unwrap();
+        let event = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
+             VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
+            params![event, pursuit, persona],
+        )
+        .unwrap();
+        let cull = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO cull (id, pursuit_id, persona_id, pursuit_event_id, \
+                               candidate_snapshot_id, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            params![cull, pursuit, persona, event, snapshot],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cull_member (cull_id, asset_id, verdict) VALUES (?1, ?2, 'keep')",
+            params![cull, asset],
+        )
+        .unwrap();
+
+        // Stops at 87 rather than running to latest: V88 drops
+        // `pursuit_restamp` outright, and the CHECK and indexes
+        // asserted below are V87's own answer, not the schema's
+        // current one.
+        migrate_to(&mut conn, 87).unwrap();
+
+        // Both tables are gone, indexes with them.
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE name LIKE 'cull%' OR tbl_name LIKE 'cull%' \
+                      ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(left.is_empty(), "nothing of the record is left: {left:?}");
+
+        // The close event it hung on is untouched — the drop takes the
+        // record, not the history it was written beside.
+        let events: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pursuit_event WHERE id = ?1",
+                params![event],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 1, "the close event stays");
+
+        // The restamp CHECK admits the one subject and refuses what
+        // V82 had reserved.
+        let dispatch_row = conn.execute(
+            "INSERT INTO pursuit_restamp \
+                 (id, subject_kind, subject_id, to_pursuit_id, created_at) \
+             VALUES (?1, 'dispatch', ?2, ?3, 0)",
+            params![Uuid::now_v7(), Uuid::now_v7(), pursuit],
+        );
+        assert!(
+            dispatch_row.is_ok(),
+            "'dispatch' is admitted: {dispatch_row:?}"
+        );
+        let narrowed = conn.execute(
             "INSERT INTO pursuit_restamp \
                  (id, subject_kind, subject_id, to_pursuit_id, created_at) \
              VALUES (?1, 'cull', ?2, ?3, 0)",
             params![Uuid::now_v7(), Uuid::now_v7(), pursuit],
         );
-        assert!(cull_row.is_ok(), "'cull' is admitted: {cull_row:?}");
-        let judgment_row = conn.execute(
+        assert!(
+            narrowed.is_err(),
+            "the vocabulary went with the concept: {narrowed:?}"
+        );
+        for wanted in [
+            "idx_pursuit_restamp_subject",
+            "idx_pursuit_restamp_to",
+            "idx_pursuit_restamp_from",
+        ] {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                      WHERE type = 'index' AND name = ?1",
+                    params![wanted],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{wanted} did not come back");
+        }
+
+        // What the rows pinned is free: at 86 the cull's RESTRICT edges
+        // would have refused this delete.
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+        conn.execute("DELETE FROM pursuit_restamp", []).unwrap();
+        conn.execute("DELETE FROM pursuit_event WHERE id = ?1", params![event])
+            .unwrap();
+        conn.execute("DELETE FROM pursuit WHERE id = ?1", params![pursuit])
+            .unwrap();
+        let live: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pursuit WHERE id = ?1",
+                params![pursuit],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(live, 0, "the pursuit really is gone");
+    }
+
+    /// V88 drops `pursuit_restamp` and takes its three indexes with it,
+    /// leaving what it pointed at alone.
+    ///
+    /// Seeded at 87 with a row, for the reason the V87 test seeds one:
+    /// a drop exercised against an empty table would not show that the
+    /// two RESTRICT edges into `pursuit` go with it. The stamp on
+    /// `dispatch_job` is checked afterwards because it is the thing
+    /// most easily mistaken for part of this change — the restamp
+    /// record goes, the filing it recorded moves to stays.
+    #[test]
+    fn v88_drops_the_restamp_record_and_leaves_the_filing() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 87).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'unstamped', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
+             VALUES (?1, ?2, 0)",
+            params![snapshot, asset],
+        )
+        .unwrap();
+        let pursuit = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
+            params![pursuit, persona],
+        )
+        .unwrap();
+        let dispatch = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO dispatch_job \
+                 (id, snapshot_id, persona_id, exporter_slug, action, state_slug, \
+                  pursuit_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, 'file', 'copy', 'pending', ?4, 0, 0)",
+            params![dispatch, snapshot, persona, pursuit],
+        )
+        .unwrap();
+        conn.execute(
             "INSERT INTO pursuit_restamp \
                  (id, subject_kind, subject_id, to_pursuit_id, created_at) \
-             VALUES (?1, 'judgment', ?2, ?3, 0)",
-            params![Uuid::now_v7(), Uuid::now_v7(), pursuit],
+             VALUES (?1, 'dispatch', ?2, ?3, 0)",
+            params![Uuid::now_v7(), dispatch, pursuit],
+        )
+        .unwrap();
+
+        // Stops at 88 rather than running to latest: V89 drops
+        // `dispatch_job.pursuit_id`, and the filing this step leaves
+        // alone is what is asserted below.
+        migrate_to(&mut conn, 88).unwrap();
+
+        // The table and its three indexes are gone together.
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE name LIKE '%pursuit_restamp%' \
+                         OR tbl_name LIKE '%pursuit_restamp%' \
+                      ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(left.is_empty(), "nothing of the record is left: {left:?}");
+
+        // The filing the dropped rows recorded moves to is the
+        // catalogue's own column, and it still holds its value.
+        let stamp: Option<Uuid> = conn
+            .query_row(
+                "SELECT pursuit_id FROM dispatch_job WHERE id = ?1",
+                params![dispatch],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stamp, Some(pursuit), "the stamp is untouched");
+
+        // And the pursuit the two dropped FK columns pinned is free.
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+        conn.execute("DELETE FROM dispatch_job WHERE id = ?1", params![dispatch])
+            .unwrap();
+        conn.execute("DELETE FROM pursuit WHERE id = ?1", params![pursuit])
+            .unwrap();
+        let live: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pursuit WHERE id = ?1",
+                params![pursuit],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(live, 0, "the pursuit really is gone");
+    }
+
+    /// V89 takes the stamp off the dispatch and the lookup column off
+    /// the asset, and a rebuild is the one kind of migration where
+    /// "it ran" and "it kept the data" are different claims.
+    ///
+    /// Seeded at 88 with a stamped row whose every other column is
+    /// distinguishable, because the risk a hand-written `INSERT …
+    /// SELECT` over twenty-four columns carries is not failing — it is
+    /// landing `author_kind` in `author_subject` and saying nothing.
+    /// The three surviving indexes are asserted by name for the same
+    /// reason V86's are: `DROP TABLE` takes every index with it, and a
+    /// recreate that was forgotten costs a seek per read with nothing
+    /// to notice it.
+    #[test]
+    fn v89_drops_the_stamp_and_carries_every_other_column_across() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 88).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'deface', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
+             VALUES (?1, ?2, 0)",
+            params![snapshot, asset],
+        )
+        .unwrap();
+        let bucket = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO bucket (id, persona_id, name, created_at, updated_at) \
+             VALUES (?1, ?2, 'g', 0, 0)",
+            params![bucket, persona],
+        )
+        .unwrap();
+        let pursuit = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, title, created_at) \
+             VALUES (?1, ?2, 'the line', 0)",
+            params![pursuit, persona],
+        )
+        .unwrap();
+        let dispatch = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO dispatch_job \
+                 (id, snapshot_id, persona_id, exporter_slug, action, params_json, \
+                  state_slug, state_message, progress_current, progress_total, \
+                  handle_kind, handle_payload, output_asset_ids, created_at, \
+                  updated_at, completed_at, source_group_id, source_query_json, \
+                  operator_ai, author_kind, author_subject, attributed_via, \
+                  pursuit_id, attempt_kind, attempt_payload) \
+             VALUES (?1, ?2, ?3, 'file', 'copy', '{\"dir\":\"/out\"}', \
+                     'done', 'wrote 1', 7, 9, \
+                     'remote', '{\"job\":\"h-1\"}', ?4, 1000, \
+                     2000, 3000, ?5, '{\"q\":\"tagged\"}', \
+                     'agent-slug', 'owner', 'alice', 'mcp', \
+                     ?6, 'http', '{\"status\":200}')",
+            params![
+                dispatch,
+                snapshot,
+                persona,
+                format!("[\"{asset}\"]"),
+                bucket,
+                pursuit
+            ],
+        )
+        .unwrap();
+        // An asset whose `_trace` note resolved both halves, so the
+        // generated column being dropped has a value to lose and the
+        // one being kept has a value to hold on to.
+        let returned = seed_asset(&conn, persona);
+        conn.execute(
+            "UPDATE asset SET extra = ?1 WHERE id = ?2",
+            params![
+                r#"{"_trace":{"resolved":true,"dispatch_id":"d-1","pursuit_resolved":true,"pursuit_id":"p-1"}}"#,
+                returned
+            ],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        // The stamp is gone from the table, and only the stamp.
+        let columns: Vec<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info('dispatch_job')").unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            !columns.iter().any(|c| c == "pursuit_id"),
+            "the stamp is off the table: {columns:?}"
+        );
+        assert_eq!(columns.len(), 24, "one column left, not two: {columns:?}");
+
+        // Every other column landed where it started — the failure a
+        // long hand-written column list makes possible is a silent
+        // transposition, not an error. Read back as rendered values
+        // rather than a typed tuple: twenty-four of those is past what
+        // `Debug` and `PartialEq` are implemented for, and what is
+        // being asserted is which value sits in which column.
+        let row: Vec<String> = conn
+            .query_row(
+                "SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json, \
+                        state_slug, state_message, progress_current, progress_total, \
+                        handle_kind, handle_payload, output_asset_ids, created_at, \
+                        updated_at, completed_at, source_group_id, source_query_json, \
+                        operator_ai, author_kind, author_subject, attributed_via, \
+                        attempt_kind, attempt_payload \
+                   FROM dispatch_job WHERE id = ?1",
+                params![dispatch],
+                |r| {
+                    (0..24)
+                        .map(|i| Ok(format!("{:?}", r.get::<_, rusqlite::types::Value>(i)?)))
+                        .collect::<Result<Vec<_>, _>>()
+                },
+            )
+            .unwrap();
+        let expected: Vec<String> = [
+            format!("Blob({:?})", dispatch.as_bytes().to_vec()),
+            format!("Blob({:?})", snapshot.as_bytes().to_vec()),
+            format!("Blob({:?})", persona.as_bytes().to_vec()),
+            "Text(\"file\")".to_string(),
+            "Text(\"copy\")".to_string(),
+            "Text(\"{\\\"dir\\\":\\\"/out\\\"}\")".to_string(),
+            "Text(\"done\")".to_string(),
+            "Text(\"wrote 1\")".to_string(),
+            "Integer(7)".to_string(),
+            "Integer(9)".to_string(),
+            "Text(\"remote\")".to_string(),
+            "Text(\"{\\\"job\\\":\\\"h-1\\\"}\")".to_string(),
+            format!("Text({:?})", format!("[\"{asset}\"]")),
+            "Integer(1000)".to_string(),
+            "Integer(2000)".to_string(),
+            "Integer(3000)".to_string(),
+            format!("Blob({:?})", bucket.as_bytes().to_vec()),
+            "Text(\"{\\\"q\\\":\\\"tagged\\\"}\")".to_string(),
+            "Text(\"agent-slug\")".to_string(),
+            "Text(\"owner\")".to_string(),
+            "Text(\"alice\")".to_string(),
+            "Text(\"mcp\")".to_string(),
+            "Text(\"http\")".to_string(),
+            "Text(\"{\\\"status\\\":200}\")".to_string(),
+        ]
+        .to_vec();
+        assert_eq!(
+            row, expected,
+            "the rebuild copied the row minus one column, it did not reshape it"
+        );
+
+        // The three surviving indexes came back, and the stamp's did
+        // not — `DROP TABLE` took all four.
+        let indexes: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE type = 'index' AND tbl_name = 'dispatch_job' \
+                        AND name NOT LIKE 'sqlite_%' ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            indexes,
+            vec![
+                "idx_dispatch_persona_created",
+                "idx_dispatch_snapshot_created",
+                "idx_dispatch_state",
+            ],
+            "every index the table still needs was written out again"
+        );
+
+        // The asset side: the lookup column and its partial index are
+        // gone, its sibling stays, and the `_trace` bag is untouched —
+        // what an ingest recorded is not what this schema asserts.
+        let asset_columns: Vec<String> = {
+            // `table_xinfo`, not `table_info`: a VIRTUAL generated
+            // column is hidden from the latter, so the assertion below
+            // would pass against a column that is still there.
+            let mut stmt = conn.prepare("PRAGMA table_xinfo('asset')").unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            !asset_columns.iter().any(|c| c == "trace_pursuit_id"),
+            "the pursuit lookup column is gone: {asset_columns:?}"
         );
         assert!(
-            judgment_row.is_err(),
-            "'judgment' left with the withdrawn spec"
+            asset_columns.iter().any(|c| c == "trace_dispatch_id"),
+            "its sibling stays: {asset_columns:?}"
+        );
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE type = 'index' AND name = 'idx_asset_trace_pursuit'",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(left.is_empty(), "the partial index went with it: {left:?}");
+        let bag: String = conn
+            .query_row(
+                "SELECT extra FROM asset WHERE id = ?1",
+                params![returned],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            bag.contains(r#""pursuit_id":"p-1""#),
+            "the note keeps what the ingest recorded: {bag}"
         );
     }
 
@@ -11747,7 +12851,10 @@ mod tests {
         )
         .unwrap();
 
-        migrate(&mut conn).unwrap();
+        // Stops at 80 rather than running to latest: V89 drops
+        // `trace_pursuit_id`, and both generated columns are what this
+        // test reads back.
+        migrate_to(&mut conn, 80).unwrap();
 
         let surfaced: (Option<String>, Option<String>) = conn
             .query_row(
@@ -11765,7 +12872,10 @@ mod tests {
     #[test]
     fn v80_surfaces_resolved_trace_claims_and_probes_by_index() {
         let mut conn = test_conn();
-        migrate(&mut conn).unwrap();
+        // Stops at 80 rather than running to latest: V89 drops
+        // `trace_pursuit_id` and its index, and both lookup columns are
+        // what this test probes.
+        migrate_to(&mut conn, 80).unwrap();
         let persona = seed_persona(&conn);
 
         let resolved = seed_asset(&conn, persona);

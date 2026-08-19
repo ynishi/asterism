@@ -235,7 +235,6 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "asset_add",
             "asset_comment_add",
             "asset_comments",
-            "asset_culls",
             "asset_declare_meta",
             "asset_get",
             "asset_lineage",
@@ -255,7 +254,6 @@ async fn the_mcp_endpoint_lists_the_curated_tools() {
             "pursuit_close",
             "pursuit_open",
             "pursuit_reopen",
-            "pursuit_restamp_dispatch",
             "pursuit_tx",
             "pursuit_view",
         ],
@@ -518,12 +516,8 @@ async fn mcp_tools_read_and_write_the_same_ledger_as_http() {
 }
 
 /// The agent-facing half of the pursuit surface: name the line of work,
-/// file a round under it, and read back what is in it.
-///
-/// The dispatch itself is started over HTTP because there is no tool for
-/// it — which is the point of the read: an agent that named the pursuit
-/// can see the round somebody else filed under it, because both surfaces
-/// write the same rows.
+/// put an asset in it, conclude it, and read back what is in it — all
+/// over the transport an agent actually has.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -574,36 +568,6 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     assert_eq!(opened["standing"], "open");
     let pursuit_id = opened["id"].as_str().expect("pursuit id").to_owned();
 
-    // A round filed under the pursuit the agent just named, through the
-    // surface that has the verb.
-    let snapshot = core
-        .snapshot_service
-        .create(
-            asterism_contract::command::CreateSnapshotCommand {
-                persona_id: persona.id.clone(),
-                asset_ids: vec![source.id.clone()],
-            },
-            &unattributed,
-        )
-        .await
-        .expect("freeze");
-    let round = core
-        .dispatch_service
-        .create(
-            asterism_contract::command::CreateDispatchCommand {
-                snapshot_id: snapshot.id.clone(),
-                exporter_slug: "file".into(),
-                action: "write".into(),
-                params_json: String::new(),
-                operator_ai: Some("claude-code".into()),
-                pursuit_id: Some(pursuit_id.clone()),
-            },
-            &unattributed,
-        )
-        .await
-        .expect("dispatch under the named pursuit");
-    assert_eq!(round.pursuit_id.as_deref(), Some(pursuit_id.as_str()));
-
     let view = tool_json(
         &tool_call(
             &router,
@@ -615,13 +579,15 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
         .await,
     );
     assert_eq!(view["pursuit"]["standing"], "open");
-    let rounds = view["rounds"].as_array().expect("rounds array");
-    assert_eq!(rounds.len(), 1, "the round reads back: {view}");
-    assert_eq!(rounds[0]["id"], serde_json::json!(round.id));
+    assert!(
+        view.get("rounds").is_none() && view.get("returns").is_none(),
+        "the view carries neither rounds nor returns — a dispatch is a \
+         raw-layer export and files itself under nothing: {view}"
+    );
 
-    // The source enters the ledger over the same transport — a
-    // verdict names a candidate, and the candidate set is derived,
-    // never supplied.
+    // The source enters the ledger over the same transport — what a
+    // line of work is on is derived from its own gestures, never
+    // supplied.
     let entered = tool_json(
         &tool_call(
             &router,
@@ -640,11 +606,10 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     );
     assert_eq!(entered["kind"], "in", "the gesture reads back: {entered}");
 
-    // Concluding it is a recorded act with a frozen kept set, and the
-    // standing the next read gives back. The source entered as
-    // `existing`, so the statement it takes is `reject` — and the
-    // close still freezes nothing, which is the point being asserted:
-    // kept is the keep verdicts, not the survivors.
+    // Concluding it is a recorded act and the standing the next read
+    // gives back. The close freezes nothing — it says the line of
+    // work ended, and the ledger it leaves alone still says what
+    // entered.
     let closed = tool_json(
         &tool_call(
             &router,
@@ -654,7 +619,6 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "verdicts": [{ "asset_id": source.id, "verdict": "reject" }],
                 "operator_ai": "claude-code",
             }),
         )
@@ -663,22 +627,8 @@ async fn an_agent_opens_a_pursuit_and_reads_what_is_filed_under_it() {
     assert_eq!(closed["kind"], "closed_satisfied");
     assert!(
         closed["snapshot_id"].is_null(),
-        "no keep verdicts, nothing frozen: {closed}"
+        "the close freezes nothing: {closed}"
     );
-    let history = tool_json(
-        &tool_call(
-            &router,
-            &session,
-            25,
-            "asset_culls",
-            serde_json::json!({ "asset_id": source.id }),
-        )
-        .await,
-    );
-    let verdicts = history.as_array().expect("verdict rows");
-    assert_eq!(verdicts.len(), 1, "one act judged this asset: {history}");
-    assert_eq!(verdicts[0]["verdict"], "reject");
-    assert_eq!(verdicts[0]["pursuit_id"], serde_json::json!(pursuit_id));
     let after = tool_json(
         &tool_call(
             &router,

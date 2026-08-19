@@ -302,24 +302,19 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // abort. Remove the restricting references explicitly, in
                 // order, inside one transaction before the persona row (and
                 // its remaining cascades) go:
-                //   dispatch_job → pursuit_restamp → cull_member → cull →
-                //   pursuit_tx → line_event → line_merge →
+                //   dispatch_job → pursuit_tx →
+                //   line_event → line_merge →
                 //   pursuit_event → line_entry → pursuit → line →
                 //   project → bucket.origin clear → snapshot → persona.
                 //
+                // `dispatch_job` leads for its `snapshot_id` alone.
+                //
                 // The pursuit tables (V79, extended by V82) are RESTRICT
                 // on *everything* — persona, snapshot, and each other —
-                // so their slots in the order are pinned on both sides:
-                // after `dispatch_job` (whose `pursuit_id` restricts
-                // `pursuit`), before `snapshot` (which
-                // `pursuit_event.snapshot_id` and
-                // `cull.candidate_snapshot_id` restrict). `cull` restricts
-                // `pursuit_event` (`pursuit_event_id`), so it goes first
-                // of the two; `cull_member` restricts `cull` and carries
-                // no persona column, so it is swept through its cull.
-                // `pursuit_restamp` carries no persona column either; it
-                // is swept through the pursuits it points at (`from`/`to`
-                // never cross personas, service-enforced). `parent_id` is
+                // so their slots in the order are pinned before
+                // `snapshot` (which `pursuit_event.snapshot_id`
+                // restricts).
+                // `parent_id` is
                 // a self-FK RESTRICT, so parents are unhooked before the
                 // single DELETE — the bucket.origin_snapshot_id precedent,
                 // cheaper than ordering the delete children-first.
@@ -336,9 +331,9 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // `pursuit.project_id` restricts it too, so `project`
                 // waits for the pursuits and the lines alike. Only
                 // `line` carries no persona column — it is swept
-                // through its project, the `cull_member` treatment.
+                // through its project.
                 //
-                // Like the restamp sweep above, this order holds only
+                // This order holds only
                 // while a forge row's persona agrees with the persona
                 // owning its structural parent — an entry filed under
                 // another persona's line, or an aim reaching into one,
@@ -370,24 +365,6 @@ impl PersonaRepository for SqlitePersonaRepository {
                     "DELETE FROM dispatch_job WHERE persona_id = ?1",
                     params![uuid],
                 )?;
-                // Both FK columns, not just `to`: the adapter refuses a
-                // cross-persona restamp, so `from` and `to` should
-                // always land in one persona — but this DELETE is what
-                // a violated invariant would break (a RESTRICT edge no
-                // order satisfies), so it does not lean on it.
-                tx.execute(
-                    "DELETE FROM pursuit_restamp WHERE to_pursuit_id IN \
-                     (SELECT id FROM pursuit WHERE persona_id = ?1) \
-                     OR from_pursuit_id IN \
-                     (SELECT id FROM pursuit WHERE persona_id = ?1)",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "DELETE FROM cull_member WHERE cull_id IN \
-                     (SELECT id FROM cull WHERE persona_id = ?1)",
-                    params![uuid],
-                )?;
-                tx.execute("DELETE FROM cull WHERE persona_id = ?1", params![uuid])?;
                 tx.execute(
                     "DELETE FROM pursuit_tx WHERE persona_id = ?1",
                     params![uuid],
@@ -509,7 +486,6 @@ mod delete_order_tests {
         let bucket = Uuid::now_v7();
         let parent_pursuit = Uuid::now_v7();
         let child_pursuit = Uuid::now_v7();
-        let restamp = Uuid::now_v7();
         let bystander = Uuid::now_v7();
         let bystander_project = Uuid::now_v7();
         let bystander_line = Uuid::now_v7();
@@ -536,9 +512,9 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 0)",
                 params![snapshot, asset],
             )?;
-            // The pursuit family (V79): RESTRICT on persona, snapshot,
-            // dispatch stamp, self-parent, and the restamp's two FKs —
-            // every edge the ordered cleanup has to unhook.
+            // The pursuit family (V79): RESTRICT on persona, snapshot
+            // and self-parent — every edge the ordered cleanup has to
+            // unhook.
             conn.execute(
                 "INSERT INTO pursuit (id, persona_id, created_at)
                  VALUES (?1, ?2, 0)",
@@ -556,21 +532,13 @@ mod delete_order_tests {
                  VALUES (?1, ?2, ?3, 'closed_satisfied', ?4, 0)",
                 params![Uuid::now_v7(), child_pursuit, persona, snapshot],
             )?;
-            conn.execute(
-                "INSERT INTO pursuit_restamp
-                     (id, subject_kind, subject_id, from_pursuit_id, to_pursuit_id,
-                      created_at)
-                 VALUES (?1, 'dispatch', ?2, ?3, ?4, 0)",
-                params![restamp, dispatch, parent_pursuit, child_pursuit],
-            )?;
-            // dispatch_job.snapshot_id → snapshot (ON DELETE RESTRICT),
-            // and its pursuit stamp → pursuit (ON DELETE RESTRICT).
+            // dispatch_job.snapshot_id → snapshot (ON DELETE RESTRICT).
             conn.execute(
                 "INSERT INTO dispatch_job
                      (id, snapshot_id, persona_id, exporter_slug, action, state_slug,
-                      created_at, updated_at, pursuit_id)
-                 VALUES (?1, ?2, ?3, 'file', 'copy', 'pending', 0, 0, ?4)",
-                params![dispatch, snapshot, persona, child_pursuit],
+                      created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'file', 'copy', 'pending', 0, 0)",
+                params![dispatch, snapshot, persona],
             )?;
             // bucket.origin_snapshot_id → snapshot (ON DELETE RESTRICT).
             conn.execute(
@@ -579,10 +547,9 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 'g', 0, 0, ?3)",
                 params![bucket, persona, snapshot],
             )?;
-            // The V82 additions: pursuit_tx → pursuit / persona, cull →
-            // pursuit / persona / pursuit_event / snapshot, cull_member
-            // → cull — all RESTRICT, all edges the extended order has
-            // to unhook.
+            // The V82 addition that survived V87: pursuit_tx → pursuit
+            // / persona, both RESTRICT, both edges the extended order
+            // has to unhook.
             conn.execute(
                 "INSERT INTO pursuit_tx
                      (id, pursuit_id, persona_id, kind, asset_id, origin, created_at)
@@ -595,19 +562,6 @@ mod delete_order_tests {
                      (id, pursuit_id, persona_id, kind, created_at)
                  VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
                 params![event, child_pursuit, persona],
-            )?;
-            let cull = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO cull
-                     (id, pursuit_id, persona_id, pursuit_event_id,
-                      candidate_snapshot_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-                params![cull, child_pursuit, persona, event, snapshot],
-            )?;
-            conn.execute(
-                "INSERT INTO cull_member (cull_id, asset_id, verdict)
-                 VALUES (?1, ?2, 'keep')",
-                params![cull, asset],
             )?;
             // The V84/V85 additions: project → persona, line →
             // project, line_entry → line / persona, line_merge →
@@ -707,7 +661,7 @@ mod delete_order_tests {
             .await
             .expect("ordered cleanup must delete the persona without an FK error");
 
-        let counts: (i64, i64, i64, i64, i64, i64, i64, i64) = isle
+        let counts: (i64, i64, i64, i64, i64, i64, i64) = isle
             .call(|conn| {
                 let personas: i64 =
                     conn.query_row("SELECT COUNT(*) FROM persona", [], |r| r.get(0))?;
@@ -723,35 +677,22 @@ mod delete_order_tests {
                     conn.query_row("SELECT COUNT(*) FROM pursuit", [], |r| r.get(0))?;
                 let events: i64 =
                     conn.query_row("SELECT COUNT(*) FROM pursuit_event", [], |r| r.get(0))?;
-                let restamps: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM pursuit_restamp", [], |r| r.get(0))?;
                 Ok((
-                    personas, snapshots, members, dispatches, buckets, pursuits, events, restamps,
+                    personas, snapshots, members, dispatches, buckets, pursuits, events,
                 ))
             })
             .await
             .unwrap();
         assert_eq!(
             counts,
-            (1, 0, 0, 0, 0, 0, 0, 0),
+            (1, 0, 0, 0, 0, 0, 0),
             "everything of the purged persona swept; the bystander persona left alone"
         );
-        let ledger_counts: (i64, i64, i64) = isle
-            .call(|conn| {
-                let txs: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM pursuit_tx", [], |r| r.get(0))?;
-                let culls: i64 = conn.query_row("SELECT COUNT(*) FROM cull", [], |r| r.get(0))?;
-                let cull_members: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM cull_member", [], |r| r.get(0))?;
-                Ok((txs, culls, cull_members))
-            })
+        let ledger_count: i64 = isle
+            .call(|conn| conn.query_row("SELECT COUNT(*) FROM pursuit_tx", [], |r| r.get(0)))
             .await
             .unwrap();
-        assert_eq!(
-            ledger_counts,
-            (0, 0, 0),
-            "the ledger and the cull swept with them"
-        );
+        assert_eq!(ledger_count, 0, "the ledger swept with them");
         let forge_counts: (i64, i64, i64, i64, i64) = isle
             .call(|conn| {
                 let projects: i64 =

@@ -272,9 +272,9 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         )
         .await
         .expect("freeze snapshot");
-    // The ledger assertions below read the pursuit this round is filed
-    // under, so the round names one. An export that names none files
-    // nowhere and there is no ledger to read.
+    // The ledger assertion below reads a pursuit the export never
+    // names — that is the point of it: an export is a catalogue verb
+    // and puts nothing into a line of work.
     let pursuit = core
         .pursuit_service
         .open(
@@ -290,7 +290,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
             &unattributed(),
         )
         .await
-        .expect("open the pursuit the round files under");
+        .expect("open a pursuit for the ledger read");
     let dispatch = core
         .dispatch_service
         .create(
@@ -305,7 +305,6 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
                 })
                 .to_string(),
                 operator_ai: None,
-                pursuit_id: Some(pursuit.id.clone()),
             },
             &unattributed(),
         )
@@ -352,55 +351,23 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         vec![serde_json::json!({ "asset_id": copy_id_str })],
         "reify enqueued exactly one fingerprint, for the row it minted"
     );
-    // The ledger filing is asked for, not done (#81). `reify` used to
-    // write one `in` / `generated` row per output itself, which put
-    // this catalogue-side service on the forge's write port; the job is
-    // what replaced that call. Asserted here because this is the only
-    // harness that drives a real reify with a recording queue.
-    assert_eq!(
-        queue.of_kind(JobKind::PursuitLedgerFile),
-        vec![serde_json::json!({ "dispatch_id": dispatch.id })],
-        "reify asked the forge to file its outputs, once, naming the dispatch"
-    );
-
-    // And the verb that job drives does the filing — twice over, with
-    // the same result. Nothing re-runs the job on failure (the engine
-    // has no retry policy), so this pins the deliberate second run: a
-    // backfill, or a re-enqueue by hand. `pursuit_tx` carries no
-    // uniqueness and membership derives latest-gesture-per-asset, so a
-    // second `in` would beat an earlier `remove` and restore a member
-    // somebody had taken out.
-    core.pursuit_service
-        .file_dispatch_outputs(&dispatch.id)
-        .await
-        .expect("file the outputs");
-    core.pursuit_service
-        .file_dispatch_outputs(&dispatch.id)
-        .await
-        .expect("file them again");
-    let stamped = dispatch
-        .pursuit_id
-        .as_deref()
-        .expect("the round carries the stamp it was given");
+    // The fingerprint is the whole of what reify enqueues. An export
+    // files nothing into a pursuit's ledger and asks for nothing on its
+    // behalf — a dispatch is a raw-layer export and names no line of
+    // work at all. Asserted here because this is the only harness that
+    // drives a real reify with a recording queue.
     let filed = core
         .pursuit_service
-        .view(stamped)
+        .view(&pursuit.id)
         .await
-        .expect("view the pursuit the round files under");
-    let generated: Vec<&str> = filed
-        .txs
-        .iter()
-        .filter(|tx| tx.kind == "in" && tx.origin.as_deref() == Some("generated"))
-        .map(|tx| tx.asset_id.as_str())
-        .collect();
-    assert_eq!(
-        generated,
-        vec![copy_id_str.as_str()],
-        "one generated entry for the one output, and the second run added none"
+        .expect("view the pursuit the export never named");
+    assert!(
+        filed.txs.is_empty(),
+        "an export writes no ledger gesture: {:?}",
+        filed.txs
     );
-    // And it asked after writing the lineage, not before: a worker that
-    // picked the job up the instant it was pushed has to be able to see
-    // where the copy came from, or the rule below has nothing to read.
+    // And it wrote the lineage: a reader has to be able to see where
+    // the copy came from, or the rule below has nothing to read.
     let lineage = ports
         .edges
         .edges_incident(&copy_id, Some(EdgeKind::DerivedFrom), 10)

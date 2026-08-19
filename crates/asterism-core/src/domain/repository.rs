@@ -5,8 +5,7 @@
 //! **The catalogue's ports, and only those.** The forge's are in
 //! [`domain::forge::repository`](crate::domain::forge::repository), so
 //! that adding one here does not mean opening the file that holds the
-//! forge's. What the catalogue needs of a pursuit is
-//! [`CorrelationResolver`] below, which answers with a `bool`.
+//! forge's. The catalogue needs nothing of a pursuit.
 //!
 //! The rule the whole tree is measured against is one verb — *uses* —
 //! and it is stated once, in [`domain`](crate::domain). Doc links
@@ -46,7 +45,7 @@ use crate::domain::source_locator::SourceLocator;
 use crate::domain::tag::{Tag, TagCount, TagMergeOutcome};
 use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
-    AssetCommentId, AssetId, ChapterMarkId, CorrelationId, DirId, DispatchId, DuplicateConflictId,
+    AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
     ExternalSessionKey, GroupId, MaterialLayerId, MaterialMarkId, MessageId, MimeType, Modality,
     PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
     ThreadId,
@@ -2925,60 +2924,6 @@ pub trait DispatchRepository: Send + Sync {
         state_slug: Option<&str>,
         limit: u32,
     ) -> Result<Vec<DispatchJob>, DomainError>;
-
-    /// Lists the dispatch jobs carrying a stamp — a pursuit's rounds,
-    /// oldest first (round order is dispatch creation order).
-    ///
-    /// Takes the stamp rather than
-    /// [`PursuitId`](crate::domain::forge::value::PursuitId) so that a
-    /// catalogue port declares no forge type. Only the forge has a
-    /// caller for it, and only the forge can say whether the stamp
-    /// still names a live pursuit; this answers the narrower question
-    /// of which rows carry the value.
-    async fn list_rounds(
-        &self,
-        pursuit_id: &CorrelationId,
-    ) -> Result<Vec<DispatchJob>, DomainError>;
-}
-
-/// Whether a correlation stamp has something live behind it in a
-/// persona.
-///
-/// The one thing the catalogue needs to know about a pursuit, and
-/// deliberately the only thing this port can answer. Ingest resolves a
-/// returning artefact's `pursuit_id` claim, which means asking whether
-/// the claim names anything — not what it names. A `bool` is the whole
-/// answer, so the catalogue asks it without holding
-/// [`PursuitRepository`](crate::domain::forge::repository::PursuitRepository)
-/// and without naming `Pursuit`.
-///
-/// Implemented by the adapter that owns the table, and nothing here can
-/// require that. `PursuitId::from_correlation` is total, so three lines
-/// over [`PursuitRepository`](crate::domain::forge::repository::PursuitRepository)
-/// satisfy this port and put the dependency back through the
-/// composition root — the same code this replaced, one file across.
-/// What a narrow port buys is that doing so is a visible choice at a
-/// wiring site rather than the default shape of the service; it is not
-/// a check, and #81's open question about a guard is where a check
-/// would go.
-///
-/// "Live" is scoped to the persona because a claim naming another
-/// persona's pursuit is unresolved rather than resolved-elsewhere —
-/// matching crosses no persona anywhere else either.
-#[async_trait]
-pub trait CorrelationResolver: Send + Sync {
-    /// `true` when the stamp names a pursuit of this persona.
-    ///
-    /// A stamp that names nothing is `false`, not an error: an artefact
-    /// may carry a claim to a pursuit that has since been purged, and
-    /// that is a fact to record rather than a failure to ingest. An
-    /// `Err` is the lookup itself failing, which the caller logs and
-    /// then treats as unresolved.
-    async fn resolves(
-        &self,
-        stamp: &CorrelationId,
-        persona_id: &PersonaId,
-    ) -> Result<bool, DomainError>;
 }
 
 // `PursuitRepository` and `ProjectRepository` were declared here, among

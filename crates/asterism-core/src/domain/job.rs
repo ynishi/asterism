@@ -376,51 +376,6 @@ pub enum JobKind {
     /// row is one artefact that stays unmarked until something
     /// re-fingerprints it.
     DisclosureStamp,
-    /// Files a finished dispatch's outputs into the pursuit it was
-    /// stamped with. Payload: `{ "dispatch_id": "<uuid>" }`.
-    ///
-    /// # Why the runner does not write this itself
-    ///
-    /// It used to. `reify` minted the assets, saved the job as `Done`,
-    /// and then wrote one ledger row per output — which put a
-    /// catalogue-side service on the forge's write port, the
-    /// dependency #81 is about.
-    ///
-    /// The payload is the dispatch id and nothing else, because the
-    /// stamp, the persona, the output ids and the attribution are all
-    /// columns of the row by the time this runs.
-    ///
-    /// # What the move costs
-    ///
-    /// A filing lost here is lost. The queue has no retry policy
-    /// (`asterism_infra::jobs`), a handler failure surfaces as a
-    /// progress message and settles the row complete, and there is no
-    /// backfill for this kind the way `MaterialHash` has one.
-    ///
-    /// The *loss* is not new — the write was never atomic with the
-    /// reify, which saved the dispatch as `Done` before the first
-    /// ledger row, so a failure already left the assets minted, the job
-    /// finished, and nothing to re-run. What is new is a **window**: a
-    /// close landing between the reify and this job freezes its
-    /// candidate set out of the ledger, so those outputs are missing
-    /// from the conclusion permanently, and this job then appends to a
-    /// closed pursuit.
-    ///
-    /// Both are open on #81. The recoverable shape is a backfill
-    /// predicate — a `Done`, stamped dispatch with an output carrying
-    /// no `in` row — which is the same shape every other walk in this
-    /// enum recovers by.
-    ///
-    /// # Why not part of `MaterialHash`'s chain
-    ///
-    /// That chain waits on bytes. This waits on nothing: the row is
-    /// complete the moment `reify` returns, and a ledger entry is not
-    /// worth holding behind a fingerprint.
-    ///
-    /// A dispatch with no stamp writes nothing — a round its caller
-    /// filed nowhere has no pursuit to enter, and the reify that would
-    /// have queued this does not queue it at all.
-    PursuitLedgerFile,
 }
 
 impl JobKind {
@@ -448,7 +403,6 @@ impl JobKind {
             Self::PreviewGen => "preview_gen",
             Self::ChapterScan => "chapter_scan",
             Self::DisclosureStamp => "disclosure_stamp",
-            Self::PursuitLedgerFile => "pursuit_ledger_file",
         }
     }
 
@@ -476,7 +430,6 @@ impl JobKind {
             "preview_gen" => Ok(Self::PreviewGen),
             "chapter_scan" => Ok(Self::ChapterScan),
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
-            "pursuit_ledger_file" => Ok(Self::PursuitLedgerFile),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

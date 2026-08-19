@@ -1903,15 +1903,6 @@ pub struct CreateDispatchCommand {
     /// codebase does not have yet, and the exporter cannot answer it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
-    /// Pursuit to file this round under. `None` files it nowhere:
-    /// exporting a selection is a catalogue verb, and nothing is
-    /// opened on the caller's behalf. Continuation is explicit — the
-    /// server never infers it from snapshot overlap — so a surface
-    /// that wants rounds to correlate opens a pursuit and threads its
-    /// id. The id is recorded as given and read by nobody here: this
-    /// command does not check that it names a live pursuit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pursuit_id: Option<String>,
 }
 
 /// Runs a dispatch from a live source: the input is **either** a Group
@@ -1943,10 +1934,6 @@ pub struct DispatchRunCommand {
     /// downstream stamping as [`CreateDispatchCommand::operator_ai`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
-    /// Pursuit to file this round under — same contract as
-    /// [`CreateDispatchCommand::pursuit_id`] (`None` files nowhere).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pursuit_id: Option<String>,
 }
 
 /// Re-runs a finished dispatch with the same frozen input, exporter,
@@ -1957,14 +1944,6 @@ pub struct DispatchRunCommand {
 pub struct RedispatchCommand {
     /// The dispatch to re-run.
     pub dispatch_id: String,
-    /// Pursuit to file the re-run under. `None` continues the prior
-    /// dispatch's pursuit — not an inference: the caller named the
-    /// prior round literally, and a re-run is a new round of the same
-    /// line of work (the new-patchset-on-the-same-change shape). A
-    /// prior filed nowhere re-runs filed nowhere; there is nothing to
-    /// carry. Supply an id to file it elsewhere instead.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pursuit_id: Option<String>,
 }
 
 /// Opens a project (#63 decisions 1–2): the repo of the forge's git
@@ -2001,24 +1980,19 @@ pub struct OpenProjectCommand {
 }
 
 /// Opens a pursuit — the "start new pursuit" affordance (#29), and
-/// the only way one comes into being. A caller that wants rounds
-/// correlated opens it here, names the intent, and passes the id on
-/// each dispatch it starts. An empty pursuit that never receives work
-/// is an honest record, closable as abandoned.
+/// the only way one comes into being. A caller names the intent here,
+/// then records what goes in through the ledger. An empty pursuit that
+/// never receives work is an honest record, closable as abandoned.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct OpenPursuitCommand {
     /// Owner persona id.
     pub persona_id: String,
-    /// Id to create the pursuit at, instead of a minted one. The
-    /// repair case the server cannot solve alone: an artefact came
-    /// back naming a pursuit that does not exist here (a sidecar
-    /// written on another machine, a restore that outran its
-    /// pursuit), the claim was recorded unresolved, and creating the
-    /// pursuit under that exact id is what lets the re-resolve sweep
-    /// join the two. `None` mints one, which is the ordinary path.
-    /// Taken as given, never checked for meaning: an id already in use
-    /// is refused as a conflict rather than merged into.
+    /// Id to create the pursuit at, instead of a minted one — the
+    /// restore case, where a pursuit has to come back under the id it
+    /// was known by elsewhere. `None` mints one, which is the ordinary
+    /// path. Taken as given, never checked for meaning: an id already
+    /// in use is refused as a conflict rather than merged into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pursuit_id: Option<String>,
     /// Project this work files under — set at creation, immutable,
@@ -2047,16 +2021,14 @@ pub struct OpenPursuitCommand {
     pub operator_ai: Option<String>,
 }
 
-/// Closes a pursuit (#29, verdicts on #22): records a one-way
-/// lifecycle fact, never a status write. A repeat close is a new fact
-/// — standing re-derives from the latest event.
+/// Closes a pursuit (#29): records a one-way lifecycle fact, never a
+/// status write. A repeat close is a new fact — standing re-derives
+/// from the latest event.
 ///
-/// A `satisfied` close is where the cull is recorded: the candidate
-/// set is derived from the pursuit's own ledger (never supplied
-/// here), frozen into a snapshot, and the verdicts below are resolved
-/// against it — a member removed mid-work and not spoken for culls as
-/// `reject`, an untouched member without a verdict gets no row, and
-/// the kept set the event freezes is exactly the `keep` verdicts.
+/// Both outcomes record the ending and apply nothing else. Neither
+/// selects among the pursuit's members, and neither writes a snapshot
+/// onto the event: the close says the line of work ended, and the
+/// ledger says what entered it.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ClosePursuitCommand {
@@ -2064,40 +2036,14 @@ pub struct ClosePursuitCommand {
     pub pursuit_id: String,
     /// `satisfied` or `abandoned`.
     pub outcome: String,
-    /// `satisfied` only: verdicts over the ledger's candidates. Empty
-    /// is a defined state — a close that recorded no decisions (and,
-    /// with no mid-work removals, freezes nothing). Must be empty for
-    /// `abandoned`, which applies nothing.
-    #[serde(default)]
-    pub verdicts: Vec<CullVerdictEntry>,
     /// One short free-text slot on the event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// One short free-text slot on the cull record itself.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cull_note: Option<String>,
     /// Caller-asserted operator slug, recorded on the event — who
     /// concluded the line of work, in the same sense as
     /// [`OpenPursuitCommand::operator_ai`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
-}
-
-/// One requested verdict within a `satisfied` close (#22).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
-pub struct CullVerdictEntry {
-    /// The asset spoken for — must be a candidate of the pursuit's
-    /// ledger.
-    pub asset_id: String,
-    /// `keep` or `reject`. An `existing`-origin member takes `reject`
-    /// only (keeping what the library already holds is the untouched
-    /// default), except as salvage: a `keep` on a removed member
-    /// cancels the removal's default reject.
-    pub verdict: String,
-    /// The grounds, when stated.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
 }
 
 /// Appends one gesture to a pursuit's membership ledger (#22): an
@@ -2143,30 +2089,6 @@ pub struct ReopenPursuitCommand {
     pub note: Option<String>,
     /// Caller-asserted operator slug, recorded on the event — see
     /// [`OpenPursuitCommand::operator_ai`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operator_ai: Option<String>,
-}
-
-/// Moves a dispatch's pursuit filing — the restamp repair verb (#29),
-/// for when the carrying failed (a context-losing surface minted
-/// fragments, a pre-created pursuit was stranded). The move is
-/// recorded with the prior filing it replaced — read on the server
-/// inside the same transaction that moves the stamp, so the record is
-/// never stale — and it never touches what happened, never crosses
-/// personas. The command carries no caller-observed `from`: a caller
-/// acting on an old view moves whatever filing is current
-/// (compare-and-swap against the caller's own read is a possible
-/// later addition, not a promise this verb makes).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
-pub struct RestampDispatchCommand {
-    /// The dispatch round to re-file.
-    pub dispatch_id: String,
-    /// The pursuit to file it under.
-    pub to_pursuit_id: String,
-    /// Caller-asserted operator slug, recorded on the restamp row —
-    /// who filed the correction, which is a different question from
-    /// who ran the round being moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }

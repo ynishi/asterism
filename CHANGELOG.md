@@ -1096,6 +1096,143 @@ and this project adheres to
   both fail by name if the sort is removed, which is the point — the function
   reads like a no-op and will invite deletion.
 
+- **The dispatch stamp stops being a foreign key** (#81).
+  `dispatch_job.pursuit_id` has referenced `pursuit(id)` with
+  `ON DELETE RESTRICT` since V79, and it was the one foreign key anywhere in the
+  schema pointing from a catalogue table into a forge one — every other
+  reference to `pursuit`, `project`, `line` and `cull` is forge-internal. So a
+  boundary the rest of this section describes as a fact about the tree was
+  contradicted by the database: drop the forge's tables and the catalogue's own
+  schema stops standing up.
+
+  V86 rebuilds `dispatch_job` without it. The column survives with its name, its
+  type, its rows and its index, because what it records — which pursuit this
+  round was filed under — is a fact about the round, and facts about a round are
+  what the table is for; what the constraint added on top was an ownership claim
+  the forge does not have. Deleting a pursuit that dispatches still name now
+  succeeds, and those rows are left alone, each keeping its stamp as a value
+  that resolves to nothing. Nothing rewrites them to NULL: "filed under a
+  pursuit that has since been deleted" and "never filed" are different
+  histories. Nothing refuses a stamp naming no row on the way in either — the
+  existence wall the previous entry left one layer down is gone too, which the
+  `DispatchService` module doc now says rather than claiming otherwise.
+
+  SQLite cannot drop a constraint, so this is a table rebuild, and the
+  twenty-five columns are named on both sides rather than copied with `SELECT *`
+  — a column-order surprise over a list that long should fail loudly instead of
+  transposing data. All four indexes are recreated, not the two the change is
+  about. The persona purge is unchanged: `dispatch_job` still leads, now for its
+  snapshot edge alone.
+
+### Removed
+
+- **The cull — the close's record of what it kept and what it dropped** (#22).
+  The concept is gone from every layer at once: `domain::forge::cull` and its
+  `Cull`, `CullMember`, `CullVerdict`, `RequestedVerdict` and
+  `resolve_verdicts`; `CullId`; the `culls_of` and `culls_for_asset` ports, and
+  the cull argument of `append_close`, which is now
+  `append_close(&self, event: &PursuitEvent)`; `CullDto`, `CullMemberDto`,
+  `AssetCullDto`, `CullVerdictEntry`, and the `verdicts` and `cull_note` fields
+  of `ClosePursuitCommand`; the `GET /asterism/assets/{id}/culls` route and the
+  `asset_culls` MCP tool; and the sentences the `pursuit_close`, `pursuit_view`
+  and `pursuit_tx` tool descriptions spent on verdicts. `PursuitViewDto` no
+  longer carries `culls`.
+
+  **What a satisfied close now does, and what it no longer says.** A close
+  records that a line of work ended, and nothing else. Its `snapshot_id` is
+  always `None`, because the kept set it used to freeze was defined as the
+  `keep` verdicts and there are no verdicts to define it — no substitute
+  selection was invented to fill the gap, and the ledger was not quietly
+  promoted into one. So `satisfied` and `abandoned` now differ in what they say
+  about how the work ended rather than in what they write. Read a `None`
+  `snapshot_id` as "this close froze nothing", not as "this close concluded with
+  nothing kept": the second was a decision the old close could record and the
+  new one cannot make. Rows written before this change keep the snapshot they
+  recorded, and `PursuitEvent::snapshot_id` is still read on the way out for
+  their sake — nothing writes it now. What a pursuit was working on stays where
+  it always was, in the ledger the close leaves untouched and `pursuit_view`
+  still returns. `PursuitService` correspondingly no longer takes a
+  `SnapshotService`.
+
+- **The `cull` and `cull_member` tables, and the restamp subject that named
+  them** (V87). V82 created both and is released, so it stands as written; V87
+  drops them. Leaving them would not have been neutral — both hold `RESTRICT`
+  edges into `pursuit`, `persona`, `pursuit_event` and `snapshot`, so rows
+  written before this change would go on refusing a persona purge through tables
+  nothing in the code can any longer explain, and the purge path would have had
+  to keep naming the concept in order to clear it. **This destroys those rows**;
+  the candidate snapshots they pointed at remain, unreferenced, as any other
+  unreferenced freeze does. `pursuit_restamp` is rebuilt in the same step to
+  narrow its `subject_kind` CHECK back to `('dispatch')`: V82 widened it to
+  admit a second subject kind that no verb ever minted, so the copy translates
+  nothing.
+
+- **Dispatch, out of the forge** (#29). The forge selects an asset the person
+  already manages and stages it into a pursuit. That is the whole of it: no
+  export, no round, no returning artefact of its own. What went with the round:
+  `PursuitService::restamp_dispatch` and `file_dispatch_outputs`, the service's
+  `DispatchRepository` port, the `rounds` a `pursuit_view` used to compose;
+  `RestampSubject`, `PursuitRestamp` and the `restamp` port — the subject enum
+  had one variant, so the verb and its record left with it;
+  `RestampDispatchCommand` and `PursuitViewDto.rounds`; the
+  `POST /asterism/pursuits/restamp-dispatch` route, the
+  `pursuit_restamp_dispatch` MCP tool and Tauri command; and
+  `JobKind::PursuitLedgerFile` with the `pursuit_ledger_file` handler, its
+  dispatcher arm, the `pursuit_service` cell on `JobDeps`, and the enqueue the
+  dispatch runner made after `reify`.
+
+  **`DispatchService` is not deleted.** It was a raw-layer capability filed
+  under the forge, and it moves out intact to
+  `asterism_core::application::dispatch_service` — same verbs, same behaviour,
+  changed import path. Exporting still works and still stamps the pursuit its
+  caller names; what no longer happens is the forge asking for anything back.
+  The stamp is now written by the catalogue and read by whoever asks what it
+  resolves to, and nothing files an export's outputs into a pursuit's ledger. An
+  asset enters a pursuit because somebody recorded that it did, through
+  `pursuit_tx`.
+
+- **The `pursuit_restamp` table** (V88). With the verb gone the table is
+  unreachable — nothing reads it, nothing writes it, and the persona purge no
+  longer sweeps it. **This destroys those rows**, which recorded which pursuit a
+  round was re-filed under. `dispatch_job.pursuit_id` and its index stay: unlike
+  the restamp record they are still live, written on every export and read by
+  the returns join.
+
+- **The pursuit stamp on a dispatch, and the whole lane that resolved it**
+  (V89). A dispatch is a raw-layer export — a frozen input, an exporter, an
+  action, and what came back — and which line of work somebody was on when they
+  started it is not a fact about the export. So `dispatch_job.pursuit_id` and
+  `idx_dispatch_pursuit` are gone, with `DispatchJob.pursuit_id`,
+  `DispatchDto.pursuit_id`, and the `pursuit_id` field of
+  `CreateDispatchCommand`, `DispatchRunCommand` and `RedispatchCommand`. The
+  exporter context no longer carries one, so a sidecar's identity block is
+  `dispatch_id` and the source id alone: `SIDECAR_PURSUIT_ID_FIELD` is gone from
+  the contract.
+
+  The reads built on the stamp go with it. `DispatchRepository::list_rounds` had
+  no production caller left; `PursuitRepository::returns_of` did — the pursuit
+  view — and its adapter joined through the column it can no longer name, so
+  `PursuitViewDto.returns` is gone and a pursuit view is now the row, its
+  events, and its ledger. On the ingest side the sidecar's `pursuit_id` claim
+  and everything that answered it are deleted in full: the `CorrelationResolver`
+  port and its adapter, `parse_correlation_id`,
+  `AssetService::resolve_pursuit_claim`, the `_trace.pursuit_id` and
+  `_trace.pursuit_resolved` note fields, and the `trace_pursuit_id` generated
+  column with its partial index. The re-resolve sweep is back to the one
+  question it started with — did this derivation become answerable.
+
+  **This destroys the filing.** Every dispatch row loses which pursuit it was
+  started under, and nothing else records it: the restamp table went one step
+  earlier, and the `_trace` bag keeps its `pursuit_id` text only because that
+  bag is what an ingest recorded rather than what the schema asserts. Nothing
+  re-derives the stamp afterwards. Two rebuilds land here rather than one — V86
+  took the foreign key off the column three steps ago and this takes the column
+  — because folding them would mean renumbering steps that already exist, and
+  V86 answers a question of its own that its test still asks. `dispatch_job` is
+  rebuilt with every column named on both sides; `asset` gets a plain
+  `DROP COLUMN`, since the column is VIRTUAL generated and rebuilding the
+  library's largest table to remove an expression would cost the whole table.
+
 ### Fixed
 
 - **The disclosure writer stops labelling every `ftyp` file MP4, and its JPEG

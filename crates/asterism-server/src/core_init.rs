@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use asterism_core::DomainError;
+use asterism_core::application::DispatchService;
 use asterism_core::application::disclosure_service::DisclosureService;
-use asterism_core::application::forge::DispatchService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
@@ -715,11 +715,6 @@ pub async fn init_core_with(
     // one is how a test / preview harness says "no sweep".
     let retention_cell: Arc<OnceLock<Arc<RetentionService>>> = Arc::new(OnceLock::new());
     let _ = retention_cell.set(retention_service.clone());
-    // Bound below, once the forge's service exists — it is built from
-    // the snapshot service, which is built after the queue this cell is
-    // handed to. The `pursuit_ledger_file` job is what reads it.
-    let pursuit_cell: Arc<OnceLock<Arc<asterism_core::application::forge::PursuitService>>> =
-        Arc::new(OnceLock::new());
     let job_queue = match mode {
         CoreMode::Full => {
             // Worker parallelism comes from the `jobs.concurrency`
@@ -773,7 +768,6 @@ pub async fn init_core_with(
                     query_group_refresh: query_group_refresh.clone(),
                     query_group_invalidator: invalidator_cell.clone(),
                     retention_service: retention_cell.clone(),
-                    pursuit_service: pursuit_cell.clone(),
                     series: series.clone(),
                     observations: observations.clone(),
                     // The same two adapters the layer service holds, so
@@ -825,11 +819,6 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
-        // As `CorrelationResolver`, not as the forge port the forge
-        // services get from the same handle: what ingest asks of a
-        // sidecar's stamp is whether it resolves, and the catalogue's
-        // service is typed to that question alone (#81).
-        pursuits.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
@@ -1040,22 +1029,14 @@ pub async fn init_core_with(
         query_groups.clone(),
         query_group_service.clone(),
     ));
-    // Lifecycle verbs of the unit of work (#29); the close freeze goes
-    // through the snapshot service so kept ids get the same hydration
-    // every other freeze gets.
+    // Lifecycle verbs of the unit of work (#29). No snapshot service
+    // here: the close records a fact and freezes nothing.
     let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
         pursuits.clone(),
         projects.clone(),
         personas.clone(),
-        dispatches.clone(),
         assets_arc.clone(),
-        snapshot_service.clone(),
     ));
-    // The job engine's one handle on the forge (#81). Bound here rather
-    // than at the cell's declaration because this is the first moment
-    // the service exists; until then `pursuit_ledger_file` reports a
-    // skip, which is what a harness without a forge should see.
-    let _ = pursuit_cell.set(pursuit_service.clone());
     // The context those pursuits file under (#63). No lifecycle of its
     // own: opened, read, and everything that happens to it happens
     // through the pursuits filed under it.

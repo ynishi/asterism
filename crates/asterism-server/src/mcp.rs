@@ -32,7 +32,6 @@ use asterism_contract::command::{
     AddAssetCommand, ClosePursuitCommand, DeclareAssetMetaCommand, MergeAssetsCommand,
     OpenProjectCommand, OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand,
     RecordPursuitTxCommand, ReopenPursuitCommand, ResolveDuplicateConflictCommand,
-    RestampDispatchCommand,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
@@ -140,9 +139,7 @@ pub struct DispatchGetParams {
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PursuitViewParams {
-    /// Pursuit id — returned by `pursuit_open`, stamped on the
-    /// dispatches that name it (`pursuit_id`), and carried in
-    /// exporter sidecars.
+    /// Pursuit id — returned by `pursuit_open`.
     pub pursuit_id: String,
 }
 
@@ -164,16 +161,6 @@ pub struct ProjectListParams {
     /// Cap on returned rows, clamped to 1..=500. Omitted means 50, and
     /// 0 is raised to 1 rather than meaning "none".
     pub limit: Option<u32>,
-}
-
-/// `asset_culls` input.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct AssetCullsParams {
-    /// Asset id whose verdict history to read.
-    pub asset_id: String,
-    /// Maximum rows (0 or absent = the default 50).
-    pub limit: u32,
 }
 
 /// `duplicate_conflicts` input — the same persona / limit pair the
@@ -576,7 +563,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. This is the only way a pursuit comes into being: open one, then pass its `pursuit_id` on the dispatches you want filed under it. A dispatch that names none is filed nowhere, and nothing is opened on your behalf. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
+        description = "Open a pursuit — the unit of work assets are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. This is the only way a pursuit comes into being, and nothing is opened on your behalf. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one, for the case where a pursuit has to come back under the id it was known by elsewhere. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
     )]
     async fn pursuit_open(
         &self,
@@ -594,7 +581,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` records the cull: each entry in `verdicts` says `keep` or `reject` about a member of the pursuit's ledger (what entered via dispatch outputs and `pursuit_tx`), the candidate set is derived from that ledger and frozen — never supplied here — and the kept set the event freezes is exactly the `keep` verdicts. Defaults: a member removed mid-work and not spoken for culls as `reject`; an untouched member without a verdict gets no row (the act said nothing about it); an `existing`-origin member takes `reject` only, except a `keep` on a removed one (salvage). `outcome: \"abandoned\"` records the ending and applies nothing — verdicts must be empty. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; a later round can still file under this pursuit."
+        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` and `outcome: \"abandoned\"` both record the ending and apply nothing else; they differ in what they say about how the line of work finished, not in what they write. Neither selects among the pursuit's members — what entered the line of work stays readable from its ledger (`pursuit_view`), which the close leaves untouched. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; the ledger still accepts a gesture afterwards."
     )]
     async fn pursuit_close(
         &self,
@@ -630,30 +617,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Re-file a dispatch round under a different pursuit: the repair verb for work that landed in the wrong line, including a round you filed under a pursuit you had opened by mistake. The move is recorded with the filing it replaced, the round's returns follow through the dispatch join, and nothing about what happened in the round changes. A target in another persona is refused. Correcting a mis-filing is itself on the record — which is the point; do not use it to re-file rounds whose filing you did not put there without being asked to."
-    )]
-    async fn pursuit_restamp_dispatch(
-        &self,
-        Parameters(command): Parameters<RestampDispatchCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self
-            .ctx
-            .pursuit_service
-            .restamp_dispatch(command, &attribution)
-            .await
-        {
-            Ok(dispatch) => ok_json(&dispatch),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), every dispatch round filed under it, the returning assets that resolved to it, the lifecycle events oldest-first, the membership ledger (`txs`), and the culls recorded at its closes. This is how to check what is already in a line of work before starting another round in it, and what a close would be deciding over."
+        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), the lifecycle events oldest-first, and the membership ledger (`txs`). This is how to check what is already in a line of work before adding to it."
     )]
     async fn pursuit_view(
         &self,
@@ -666,7 +630,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Append one membership gesture to a pursuit's ledger. `kind: \"in\"` records an asset entering the line of work and requires `origin` — `generated` (a round produced it; ordinarily written by the dispatch itself), `imported` (came from outside), or `existing` (brought in from the library). `kind: \"remove\"` is the mid-work removal — reversible with `kind: \"unremove\"` until close, at which point an unreversed removal culls as `reject` unless salvaged. Append-only: membership derives on read, and illegal gestures (an `in` of a present member, a `remove` of a non-member) are refused rather than recorded."
+        description = "Append one membership gesture to a pursuit's ledger. `kind: \"in\"` records an asset entering the line of work and requires `origin` — `generated` (a tool produced it), `imported` (came from outside), or `existing` (brought in from the library). `kind: \"remove\"` is the mid-work removal — reversible with `kind: \"unremove\"`; the row stays either way and membership derives without it. Append-only: membership derives on read, and illegal gestures (an `in` of a present member, a `remove` of a non-member) are refused rather than recorded."
     )]
     async fn pursuit_tx(
         &self,
@@ -684,25 +648,6 @@ impl AsterismMcp {
             .await
         {
             Ok(tx) => ok_json(&tx),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Read every verdict ever recorded about one asset, most-recent first: who decided to keep or drop it, out of which frozen candidate set, in which line of work. The answer to \"why is this asset still here\" when the asset's own state (rating, labels, trash) says nothing."
-    )]
-    async fn asset_culls(
-        &self,
-        Parameters(params): Parameters<AssetCullsParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let limit = if params.limit == 0 { 50 } else { params.limit };
-        match self
-            .ctx
-            .pursuit_service
-            .asset_culls(&params.asset_id, limit)
-            .await
-        {
-            Ok(rows) => ok_json(&rows),
             Err(err) => Ok(domain_error(err)),
         }
     }
@@ -774,17 +719,14 @@ loopback HTTP on the same port.
    about once: whichever answer is given, it is not raised again.
 10. `dispatch_get` — one outbound dispatch's persisted state.
 11. `pursuit_open` / `pursuit_view` / `pursuit_close` / `pursuit_reopen`
-    — the line of work rounds and returns are filed under. A round
-    belongs to one only where you say so: start a dispatch without a
-    `pursuit_id` and it is filed nowhere, and nothing opens a pursuit
-    on your behalf. So the order is to open one first, name what it is
-    for, and pass its id on the rounds you start; `pursuit_view` then answers
-    "what is already in here" (standing, rounds, returns, events) before
-    you add another. Closing is a recorded fact, not a lock — `satisfied`
-    freezes the kept set into a snapshot you can dispatch from, closing
-    twice leaves two facts, and a later round can still file under a
-    closed pursuit. `pursuit_restamp_dispatch` moves a round that landed
-    in the wrong line; the move is recorded with the filing it replaced.
+    — the line of work an asset is staged into. Membership is yours to
+    state: nothing opens a pursuit on your behalf, and nothing enters
+    one unless you say so. So the order is to open one first, name what
+    it is for, and record what goes in through `pursuit_tx`;
+    `pursuit_view` then answers "what is already in here" (standing,
+    events, ledger) before you add more. Closing is a recorded
+    fact, not a lock — closing twice leaves two facts, and a closed
+    pursuit still accepts gestures.
 
 ## Beyond the tool set
 

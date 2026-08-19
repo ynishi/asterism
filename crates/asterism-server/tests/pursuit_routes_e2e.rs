@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::dto::PersonaDto;
-use asterism_contract::sidecar::{SIDECAR_IDENTITY_KEY, SIDECAR_SCHEMA, SIDECAR_SUFFIX};
 use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
@@ -203,8 +202,8 @@ async fn the_lifecycle_round_trips_over_http() {
     assert_eq!(rows.len(), 1, "one pursuit, one row: {listed}");
     assert_eq!(str_at(&rows[0], "id"), pursuit_id);
 
-    // The kept asset enters the ledger first — a verdict names a
-    // candidate, and the candidate set is derived, never supplied.
+    // The asset enters the ledger first — what a line of work is on
+    // is derived from its own gestures, never supplied.
     let (status, entered) = call(
         &router,
         post(
@@ -228,7 +227,6 @@ async fn the_lifecycle_round_trips_over_http() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "verdicts": [{ "asset_id": kept, "verdict": "keep" }],
                 "note": "this one",
             }),
         ),
@@ -239,7 +237,11 @@ async fn the_lifecycle_round_trips_over_http() {
         closed.get("kind").and_then(|v| v.as_str()),
         Some("closed_satisfied")
     );
-    let frozen = str_at(&closed, "snapshot_id").to_string();
+    assert_eq!(
+        closed.get("snapshot_id"),
+        Some(&serde_json::Value::Null),
+        "the close freezes nothing: {closed}"
+    );
 
     let (_, after_close) = call(&router, get(&format!("/asterism/pursuits/{pursuit_id}"))).await;
     assert_eq!(
@@ -248,8 +250,7 @@ async fn the_lifecycle_round_trips_over_http() {
         "standing re-derives from the event just written"
     );
 
-    // Closing again is a second fact, not an overwrite — the ledger
-    // still holds the candidate, so the same verdict stands again.
+    // Closing again is a second fact, not an overwrite.
     let (status, _) = call(
         &router,
         post(
@@ -257,7 +258,6 @@ async fn the_lifecycle_round_trips_over_http() {
             serde_json::json!({
                 "pursuit_id": pursuit_id,
                 "outcome": "satisfied",
-                "verdicts": [{ "asset_id": kept, "verdict": "keep" }],
             }),
         ),
     )
@@ -325,15 +325,18 @@ async fn the_lifecycle_round_trips_over_http() {
         view.get("events").and_then(|e| e.as_array()).map(Vec::len),
         Some(4)
     );
-    assert_eq!(
-        view.get("rounds").and_then(|r| r.as_array()).map(Vec::len),
-        Some(0),
-        "nothing was dispatched under this line of work"
+    assert!(
+        view.get("rounds").is_none(),
+        "the view stopped carrying rounds when the forge stopped \
+         dispatching: {view}"
     );
 
-    // The freeze the close produced is a real snapshot, readable by id.
-    let (status, snapshot) = call(&router, get(&format!("/asterism/snapshots/{frozen}"))).await;
-    assert_eq!(status, StatusCode::OK, "frozen set: {snapshot}");
+    // The ledger the closes left alone still answers for what entered.
+    assert_eq!(
+        view.get("txs").and_then(|t| t.as_array()).map(Vec::len),
+        Some(1),
+        "the entry survives two closes: {view}"
+    );
 
     // An unknown pursuit is a 404 rather than an empty answer.
     let (status, missing) = call(
@@ -344,12 +347,12 @@ async fn the_lifecycle_round_trips_over_http() {
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown pursuit: {missing}");
 }
 
-/// The close's materialisation, seen from the route: the kept set is
-/// canonicalised before freezing, so two closes stating the same
-/// members in different order share one snapshot — and a close that
-/// kept nothing records no snapshot at all.
+/// The close seen from the route: whichever outcome it states, it
+/// writes an event and materialises nothing — no snapshot on the
+/// event, and a ledger it leaves exactly where it was. An outcome the
+/// domain does not know is refused.
 #[tokio::test(flavor = "multi_thread")]
-async fn close_freezes_canonically_and_records_nothing_kept() {
+async fn close_records_a_fact_over_http_and_materialises_nothing() {
     let (tmp, core, router, persona) = harness("materialise").await;
     let a = seed_asset(&core, tmp.path(), &persona.id, "a.md").await;
     let b = seed_asset(&core, tmp.path(), &persona.id, "b.md").await;
@@ -361,335 +364,82 @@ async fn close_freezes_canonically_and_records_nothing_kept() {
         )
     };
     let (_, first) = call(&router, open("first")).await;
-    let (_, second) = call(&router, open("second")).await;
     let (_, empty_handed) = call(&router, open("empty-handed")).await;
 
-    for pursuit in [&first, &second] {
-        for asset in [&a, &b] {
-            let (status, entered) = call(
-                &router,
-                post(
-                    "/asterism/pursuits/tx",
-                    serde_json::json!({
-                        "pursuit_id": str_at(pursuit, "id"),
-                        "kind": "in",
-                        "asset_id": asset,
-                        "origin": "imported",
-                    }),
-                ),
-            )
-            .await;
-            assert_eq!(status, StatusCode::OK, "tx in: {entered}");
-        }
+    for asset in [&a, &b] {
+        let (status, entered) = call(
+            &router,
+            post(
+                "/asterism/pursuits/tx",
+                serde_json::json!({
+                    "pursuit_id": str_at(&first, "id"),
+                    "kind": "in",
+                    "asset_id": asset,
+                    "origin": "imported",
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "tx in: {entered}");
     }
 
-    let close = |pursuit: &str, kept: Vec<&str>| {
-        let verdicts: Vec<serde_json::Value> = kept
-            .iter()
-            .map(|a| serde_json::json!({ "asset_id": a, "verdict": "keep" }))
-            .collect();
+    let close = |pursuit: &str, outcome: &str| {
         post(
             "/asterism/pursuits/close",
-            serde_json::json!({
-                "pursuit_id": pursuit,
-                "outcome": "satisfied",
-                "verdicts": verdicts,
-            }),
+            serde_json::json!({ "pursuit_id": pursuit, "outcome": outcome }),
         )
     };
-    let (_, one) = call(&router, close(str_at(&first, "id"), vec![&a, &b])).await;
-    let (_, other) = call(&router, close(str_at(&second, "id"), vec![&b, &a])).await;
-    assert_eq!(
-        str_at(&one, "snapshot_id"),
-        str_at(&other, "snapshot_id"),
-        "the same kept set stated in either order is one frozen conclusion"
-    );
 
-    let (status, nothing) = call(
+    // A pursuit with two members, and a pursuit with none, conclude
+    // the same way: an event carrying no frozen set.
+    for (pursuit, outcome) in [
+        (&first, "satisfied"),
+        (&empty_handed, "satisfied"),
+        (&empty_handed, "abandoned"),
+    ] {
+        let (status, closed) = call(&router, close(str_at(pursuit, "id"), outcome)).await;
+        assert_eq!(status, StatusCode::OK, "close {outcome}: {closed}");
+        assert_eq!(
+            closed.get("snapshot_id"),
+            Some(&serde_json::Value::Null),
+            "the close freezes nothing: {closed}"
+        );
+    }
+
+    // The members are still the pursuit's own, read back after it
+    // closed — the close never reached for them.
+    let (status, view) = call(
         &router,
-        post(
-            "/asterism/pursuits/close",
-            serde_json::json!({
-                "pursuit_id": str_at(&empty_handed, "id"),
-                "outcome": "satisfied",
-                "verdicts": [],
-            }),
-        ),
+        get(&format!("/asterism/pursuits/{}/view", str_at(&first, "id"))),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "empty close: {nothing}");
+    assert_eq!(status, StatusCode::OK, "view: {view}");
     assert_eq!(
-        nothing.get("snapshot_id"),
-        Some(&serde_json::Value::Null),
-        "concluding with nothing kept is a state, not an empty snapshot"
+        view.get("txs").and_then(|t| t.as_array()).map(Vec::len),
+        Some(2),
+        "both entries outlive the close: {view}"
     );
 
-    // An abandoned close that carries verdicts is refused before
-    // anything is frozen.
-    let (status, refused) = call(
-        &router,
-        post(
-            "/asterism/pursuits/close",
-            serde_json::json!({
-                "pursuit_id": str_at(&first, "id"),
-                "outcome": "abandoned",
-                "verdicts": [{ "asset_id": a, "verdict": "keep" }],
-            }),
-        ),
-    )
-    .await;
+    // An outcome the domain does not know is refused.
+    let (status, refused) = call(&router, close(str_at(&first, "id"), "merged")).await;
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,
-        "an abandoned close decides nothing: {refused}"
+        "an unknown outcome is refused: {refused}"
     );
 }
 
-/// Restamp over HTTP: a round moves, and the two walls hold.
-#[tokio::test(flavor = "multi_thread")]
-async fn restamp_moves_a_round_and_refuses_what_it_must() {
-    let (tmp, core, router, persona) = harness("restamp").await;
-    let source = seed_asset(&core, tmp.path(), &persona.id, "source.md").await;
-
-    let (status, snapshot) = call(
-        &router,
-        post(
-            "/asterism/snapshots/create",
-            serde_json::json!({ "persona_id": persona.id, "asset_ids": [source] }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "freeze: {snapshot}");
-
-    // The round goes out filed under the line of work it names — the
-    // filing restamp exists to move. A dispatch naming none carries no
-    // stamp, and there is nothing to move.
-    let (_, first_guess) = call(
-        &router,
-        post(
-            "/asterism/pursuits/open",
-            serde_json::json!({ "persona_id": persona.id, "title": "the first guess" }),
-        ),
-    )
-    .await;
-    let first_guess_id = str_at(&first_guess, "id").to_string();
-
-    let (status, round) = call(
-        &router,
-        post(
-            "/asterism/dispatch/create",
-            serde_json::json!({
-                "snapshot_id": str_at(&snapshot, "id"),
-                "exporter_slug": "file",
-                "action": "write",
-                "params_json": "",
-                "pursuit_id": first_guess_id,
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "dispatch: {round}");
-    assert_eq!(
-        str_at(&round, "pursuit_id"),
-        first_guess_id,
-        "the supplied stamp is the filing"
-    );
-
-    let (_, target) = call(
-        &router,
-        post(
-            "/asterism/pursuits/open",
-            serde_json::json!({ "persona_id": persona.id, "title": "the real line" }),
-        ),
-    )
-    .await;
-    let target_id = str_at(&target, "id").to_string();
-    assert_ne!(first_guess_id, target_id, "two distinct lines of work");
-
-    let (status, moved) = call(
-        &router,
-        post(
-            "/asterism/pursuits/restamp-dispatch",
-            serde_json::json!({
-                "dispatch_id": str_at(&round, "id"),
-                "to_pursuit_id": target_id,
-                "operator_ai": "claude-code",
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "restamp: {moved}");
-    assert_eq!(
-        str_at(&moved, "pursuit_id"),
-        target_id,
-        "the answer is the row as it now stands"
-    );
-
-    // The round shows up in the target's view and has left the mint's.
-    let (_, target_view) = call(
-        &router,
-        get(&format!("/asterism/pursuits/{target_id}/view")),
-    )
-    .await;
-    assert_eq!(
-        target_view
-            .get("rounds")
-            .and_then(|r| r.as_array())
-            .map(Vec::len),
-        Some(1)
-    );
-    let (_, vacated_view) = call(
-        &router,
-        get(&format!("/asterism/pursuits/{first_guess_id}/view")),
-    )
-    .await;
-    assert_eq!(
-        vacated_view
-            .get("rounds")
-            .and_then(|r| r.as_array())
-            .map(Vec::len),
-        Some(0),
-        "a round is filed in one place at a time"
-    );
-
-    // Wall one: the filing never leaves its persona.
-    let stranger = register(&core, "restamp-stranger").await;
-    let (_, foreign) = call(
-        &router,
-        post(
-            "/asterism/pursuits/open",
-            serde_json::json!({ "persona_id": stranger.id }),
-        ),
-    )
-    .await;
-    let (status, crossing) = call(
-        &router,
-        post(
-            "/asterism/pursuits/restamp-dispatch",
-            serde_json::json!({
-                "dispatch_id": str_at(&round, "id"),
-                "to_pursuit_id": str_at(&foreign, "id"),
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::BAD_REQUEST,
-        "a cross-persona target is refused: {crossing}"
-    );
-
-    // Wall two: a target that does not exist is refused rather than
-    // written as a dangling filing.
-    let (status, nowhere) = call(
-        &router,
-        post(
-            "/asterism/pursuits/restamp-dispatch",
-            serde_json::json!({
-                "dispatch_id": str_at(&round, "id"),
-                "to_pursuit_id": "0198c1c2-dead-7000-8000-00000000dead",
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "an unknown target is refused: {nowhere}"
-    );
-}
-
-/// The repair the id-choosing create exists for: a return arrived
-/// naming a pursuit this library had no row for, the claim was recorded
-/// unresolved, and creating the pursuit *at that id* is what lets the
-/// sweep join them.
+/// Opening a pursuit at an id the caller names, and what happens when
+/// that id is already taken.
 ///
-/// This is the pursuit-only branch of `reresolve_unresolved` — the
-/// dispatch half of the same claim resolved at ingest and must stay
-/// untouched, so a sweep that only repaired rows whose derivation was
-/// broken would never reach this asset.
+/// The route has to carry `pursuit_id` through to the service and turn
+/// the service's refusal into a `409` rather than a `500` — neither of
+/// which a service-level test can see.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_pursuit_created_at_a_claimed_id_repairs_the_return() {
-    let (tmp, core, router, persona) = harness("claimed-id").await;
-    let source = seed_asset(&core, tmp.path(), &persona.id, "plate.md").await;
+async fn a_pursuit_opens_at_a_chosen_id_and_a_taken_one_is_a_conflict() {
+    let (_tmp, _core, router, persona) = harness("claimed-id").await;
 
-    let (_, snapshot) = call(
-        &router,
-        post(
-            "/asterism/snapshots/create",
-            serde_json::json!({ "persona_id": persona.id, "asset_ids": [source] }),
-        ),
-    )
-    .await;
-    let (_, round) = call(
-        &router,
-        post(
-            "/asterism/dispatch/create",
-            serde_json::json!({
-                "snapshot_id": str_at(&snapshot, "id"),
-                "exporter_slug": "file",
-                "action": "write",
-                "params_json": "",
-            }),
-        ),
-    )
-    .await;
-
-    // The artefact comes back with a sidecar naming a pursuit that has
-    // no row here — the shape of a file written on another machine, or
-    // restored ahead of the pursuit it belongs to.
     let claimed = "0198c1c2-beef-7000-8000-00000000beef";
-    let returned = tmp.path().join("returned.md");
-    std::fs::write(&returned, "# returned\n").expect("write returned");
-    let sidecar = serde_json::json!({
-        "id": source,
-        SIDECAR_IDENTITY_KEY: {
-            "schema": SIDECAR_SCHEMA,
-            "dispatch_id": str_at(&round, "id"),
-            "pursuit_id": claimed,
-            "exporter_slug": "file",
-            "source_asset_id": source,
-        }
-    });
-    std::fs::write(
-        format!("{}{}", returned.display(), SIDECAR_SUFFIX),
-        serde_json::to_vec_pretty(&sidecar).unwrap(),
-    )
-    .expect("write sidecar");
-
-    let child = core
-        .asset_service
-        .add(
-            add_command(
-                &persona.id,
-                returned.to_str().unwrap(),
-                Some("sidecar".into()),
-            ),
-            &unattributed(),
-        )
-        .await
-        .expect("an unresolvable pursuit claim never refuses the file");
-    let trace = |dto: &asterism_contract::dto::AssetDto, key: &str| -> Option<bool> {
-        serde_json::from_str::<serde_json::Value>(dto.extra_json.as_deref()?)
-            .ok()?
-            .get("_trace")?
-            .get(key)?
-            .as_bool()
-    };
-    assert_eq!(
-        trace(&child, "pursuit_resolved"),
-        Some(false),
-        "nothing answers to the claimed id yet"
-    );
-    assert_eq!(
-        trace(&child, "resolved"),
-        Some(false),
-        "the round it names is still pending, so the derivation half is \
-         unresolved too — and stays that way through the sweep below, \
-         which is what makes this the pursuit-only repair"
-    );
-
-    // The repair: create the pursuit under the id that was claimed.
     let (status, adopted) = call(
         &router,
         post(
@@ -697,7 +447,7 @@ async fn a_pursuit_created_at_a_claimed_id_repairs_the_return() {
             serde_json::json!({
                 "persona_id": persona.id,
                 "pursuit_id": claimed,
-                "title": "the line the return came from",
+                "title": "the line opened at a chosen id",
             }),
         ),
     )
@@ -716,46 +466,4 @@ async fn a_pursuit_created_at_a_claimed_id_repairs_the_return() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "id already in use: {taken}");
-
-    let repaired = core
-        .asset_service
-        .reresolve_unresolved()
-        .await
-        .expect("sweep");
-    assert_eq!(repaired, 1, "one note had an answer it did not have before");
-
-    let after = core
-        .asset_service
-        .detail(asterism_contract::query::GetAssetDetailQuery {
-            asset_id: child.id.clone(),
-            viewer_subject: None,
-        })
-        .await
-        .expect("read the return back");
-    assert_eq!(
-        trace(&after.asset, "pursuit_resolved"),
-        Some(true),
-        "the claim resolves once the pursuit exists under that id"
-    );
-    assert_eq!(
-        trace(&after.asset, "resolved"),
-        Some(false),
-        "the two halves repair independently: the derivation still has \
-         no finished round to point at, and the repair did not pretend \
-         otherwise"
-    );
-
-    // And the return is now readable as part of that line of work.
-    let (_, view) = call(&router, get(&format!("/asterism/pursuits/{claimed}/view"))).await;
-    let returns: Vec<&str> = view
-        .get("returns")
-        .and_then(|r| r.as_array())
-        .expect("returns array")
-        .iter()
-        .map(|v| v.as_str().expect("asset id"))
-        .collect();
-    assert!(
-        returns.contains(&child.id.as_str()),
-        "the repaired return files under the pursuit it named: {view}"
-    );
 }

@@ -386,20 +386,7 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     ),
     (
         "pursuit_service::view",
-        "read — one pursuit with its rounds, returns and events",
-    ),
-    (
-        "pursuit_service::asset_culls",
-        "read — one asset's verdict history across culls",
-    ),
-    (
-        "pursuit_service::file_dispatch_outputs",
-        "restore — the ledger row for an output the dispatch already \
-         minted. The caller is the job runtime, which has nothing of its \
-         own to assert; the honest answer was recorded on the dispatch \
-         row when the request arrived, and this reads it back the way \
-         `reify` reads it back for the assets it mints. Taking a context \
-         here would let a background worker state one",
+        "read — one pursuit with its events and ledger",
     ),
     // ---- provenance_service
     (
@@ -808,7 +795,7 @@ fn the_application_layer_keeps_no_synchronous_public_verbs() {
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 83;
+const TAURI_MUTATION_COMMANDS: usize = 82;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

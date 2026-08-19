@@ -1,8 +1,7 @@
 //! The pursuit lifecycle (#29), end to end through `CoreCtx`: open
-//! with parenthood and its persona wall, close-satisfied freezing the
-//! kept set canonically, close-abandoned and the empty conclusion,
-//! the append-only event log with derived standing, and the restamp
-//! repair verb.
+//! with parenthood and its persona wall, the close that records a
+//! fact and leaves the ledger alone, either outcome and the latest
+//! one winning, and the append-only event log with derived standing.
 //!
 //! One test per scenario, each over its own core (an `init_core` per
 //! test, as the sibling e2e files do) — a failure names its scenario
@@ -12,9 +11,8 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    AddAssetCommand, ClosePursuitCommand, CreateDispatchCommand, CreateSnapshotCommand,
-    CullVerdictEntry, OpenPursuitCommand, RecordPursuitTxCommand, RegisterPersonaCommand,
-    ReopenPursuitCommand, RestampDispatchCommand,
+    AddAssetCommand, ClosePursuitCommand, OpenPursuitCommand, RecordPursuitTxCommand,
+    RegisterPersonaCommand, ReopenPursuitCommand,
 };
 use asterism_contract::dto::PersonaDto;
 use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
@@ -141,29 +139,17 @@ async fn tx_in(core: &CoreCtx, pursuit_id: &str, asset_id: &str) {
         .expect("record in");
 }
 
-/// A `keep` verdict entry.
-fn keep(asset_id: &str) -> CullVerdictEntry {
-    CullVerdictEntry {
-        asset_id: asset_id.to_string(),
-        verdict: "keep".into(),
-        note: None,
-    }
-}
-
 async fn close(
     core: &CoreCtx,
     pursuit_id: &str,
     outcome: &str,
-    verdicts: Vec<CullVerdictEntry>,
 ) -> Result<asterism_contract::dto::PursuitEventDto, asterism_core::DomainError> {
     core.pursuit_service
         .close(
             ClosePursuitCommand {
                 pursuit_id: pursuit_id.to_string(),
                 outcome: outcome.into(),
-                verdicts,
                 note: None,
-                cull_note: None,
                 operator_ai: None,
             },
             &unattributed(),
@@ -209,95 +195,57 @@ async fn open_names_intent_and_walls_parenthood() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn close_satisfied_freezes_the_kept_set_canonically() {
-    let (tmp, core, persona) = boot("freeze").await;
+async fn close_records_the_fact_and_leaves_the_ledger_where_it_is() {
+    let (tmp, core, persona) = boot("close").await;
     let a = seed_asset(&core, &tmp, &persona.id, "a.md").await;
     let b = seed_asset(&core, &tmp, &persona.id, "b.md").await;
 
-    // Two pursuits, same kept members, opposite verdict orders: the
-    // close path derives the kept set from the `keep` verdicts and
-    // freezes ascending, so both conclusions are one snapshot row —
-    // the dedupe the convention buys.
-    let first = open(&core, &persona.id, None, None).await;
-    let second = open(&core, &persona.id, None, None).await;
-    for pursuit in [&first, &second] {
-        tx_in(&core, &pursuit.id, &a).await;
-        tx_in(&core, &pursuit.id, &b).await;
-    }
-    let forward = close(&core, &first.id, "satisfied", vec![keep(&a), keep(&b)])
+    let pursuit = open(&core, &persona.id, None, None).await;
+    tx_in(&core, &pursuit.id, &a).await;
+    tx_in(&core, &pursuit.id, &b).await;
+
+    let closed = close(&core, &pursuit.id, "satisfied")
         .await
-        .expect("close forward");
-    let backward = close(&core, &second.id, "satisfied", vec![keep(&b), keep(&a)])
-        .await
-        .expect("close backward");
-    let frozen = forward.snapshot_id.expect("a kept set freezes");
+        .expect("close satisfied");
     assert_eq!(
-        backward.snapshot_id.as_deref(),
-        Some(frozen.as_str()),
-        "identical kept sets dedupe to one snapshot regardless of input order"
+        closed.snapshot_id, None,
+        "the close freezes nothing: {closed:?}"
     );
     assert_eq!(
-        core.pursuit_service.get(&first.id).await.unwrap().standing,
+        core.pursuit_service
+            .get(&pursuit.id)
+            .await
+            .unwrap()
+            .standing,
         "closed_satisfied"
     );
 
-    // A dispatch input frozen from the same members in pick order is a
-    // different statement — and when the pick differs from ascending,
-    // a different snapshot row.
-    let picked = core
-        .snapshot_service
-        .create(
-            CreateSnapshotCommand {
-                persona_id: persona.id.clone(),
-                asset_ids: vec![b, a],
-            },
-            &unattributed(),
-        )
+    // What the line of work was on is still readable afterwards,
+    // because the close never touched it.
+    let view = core
+        .pursuit_service
+        .view(&pursuit.id)
         .await
-        .expect("freeze pick-ordered input");
-    assert_ne!(
-        picked.id, frozen,
-        "core keeps caller order as identity; the ascending close is the forge's own convention"
-    );
-
-    // A verdict names a candidate: an asset the ledger never admitted
-    // is refused, whether or not the library holds it.
-    let ghost = close(
-        &core,
-        &first.id,
-        "satisfied",
-        vec![keep("0198c1c2-beef-7000-8000-00000000beef")],
-    )
-    .await;
-    assert!(
-        ghost.is_err(),
-        "judging what never entered is refused: {ghost:?}"
+        .expect("view the closed pursuit");
+    assert_eq!(
+        view.txs.len(),
+        2,
+        "both entries survive the close: {:?}",
+        view.txs
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn abandonment_keeps_nothing_and_the_empty_conclusion_is_defined() {
+async fn either_outcome_records_a_fact_and_the_latest_one_wins() {
     let (_tmp, core, persona) = boot("abandon").await;
     let pursuit = open(&core, &persona.id, None, None).await;
 
-    let kept_on_abandon = close(
-        &core,
-        &pursuit.id,
-        "abandoned",
-        vec![keep("0198c1c2-beef-7000-8000-00000000beef")],
-    )
-    .await;
-    assert!(
-        kept_on_abandon.is_err(),
-        "an abandoned close decides nothing: {kept_on_abandon:?}"
-    );
-
-    let nothing_kept = close(&core, &pursuit.id, "satisfied", Vec::new())
+    let satisfied = close(&core, &pursuit.id, "satisfied")
         .await
-        .expect("an empty conclusion is a defined state");
-    assert_eq!(nothing_kept.snapshot_id, None);
+        .expect("a close over an empty ledger is a defined state");
+    assert_eq!(satisfied.snapshot_id, None);
 
-    let abandoned = close(&core, &pursuit.id, "abandoned", Vec::new())
+    let abandoned = close(&core, &pursuit.id, "abandoned")
         .await
         .expect("a repeat close is a new fact, not an error");
     assert_eq!(abandoned.snapshot_id, None);
@@ -318,7 +266,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
     let pursuit = open(&core, &persona.id, None, None).await;
     let other = open(&core, &persona.id, None, None).await;
 
-    close(&core, &pursuit.id, "satisfied", Vec::new())
+    close(&core, &pursuit.id, "satisfied")
         .await
         .expect("first close");
     core.pursuit_service
@@ -341,7 +289,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
         "open",
         "reopen re-derives to open"
     );
-    close(&core, &pursuit.id, "abandoned", Vec::new())
+    close(&core, &pursuit.id, "abandoned")
         .await
         .expect("second close");
 
@@ -371,188 +319,31 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
     assert_eq!(listed[1].standing, "closed_abandoned");
 }
 
+/// A closed pursuit is a standing, not a lock — the ledger still
+/// accepts a gesture afterwards, and the view still reads it back.
+///
+/// Nothing consults standing on the write path, so closing changes what
+/// the pursuit reads as and refuses nothing. Asserted so a future reader
+/// treats the missing guard as the design, not as a gap to fix.
 #[tokio::test(flavor = "multi_thread")]
-async fn restamp_refiles_a_round_and_the_walls_hold() {
-    let (tmp, core, persona) = boot("restamp").await;
+async fn a_closed_pursuit_is_a_standing_and_not_a_lock() {
+    let (tmp, core, persona) = boot("closed-standing").await;
     let asset = seed_asset(&core, &tmp, &persona.id, "a.md").await;
-    let input = core
-        .snapshot_service
-        .create(
-            CreateSnapshotCommand {
-                persona_id: persona.id.clone(),
-                asset_ids: vec![asset],
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("freeze input");
-
-    // The round starts filed under the line of work it named. A
-    // dispatch that names none carries no stamp, and an unstamped round
-    // is not what restamp is for — restamp moves a filing, so there has
-    // to be one.
-    let first_guess = open(&core, &persona.id, None, Some("the first guess")).await;
-    let round = core
-        .dispatch_service
-        .create(
-            CreateDispatchCommand {
-                snapshot_id: input.id.clone(),
-                exporter_slug: "file".into(),
-                action: "write".into(),
-                params_json: String::new(),
-                operator_ai: None,
-                pursuit_id: Some(first_guess.id.clone()),
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("create dispatch under the pursuit it named");
-    assert_eq!(
-        round.pursuit_id.as_deref(),
-        Some(first_guess.id.as_str()),
-        "the supplied stamp is the filing"
-    );
 
     let target = open(&core, &persona.id, None, Some("the real line")).await;
-    assert_ne!(first_guess.id, target.id, "two distinct lines of work");
-    let moved = core
-        .pursuit_service
-        .restamp_dispatch(
-            RestampDispatchCommand {
-                dispatch_id: round.id.clone(),
-                to_pursuit_id: target.id.clone(),
-                operator_ai: None,
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("re-file the round under the named line of work");
-    assert_eq!(moved.pursuit_id.as_deref(), Some(target.id.as_str()));
-
-    let stranger = register(&core, "restamp-stranger").await;
-    let foreign = open(&core, &stranger.id, None, None).await;
-    let crossing = core
-        .pursuit_service
-        .restamp_dispatch(
-            RestampDispatchCommand {
-                dispatch_id: round.id.clone(),
-                to_pursuit_id: foreign.id.clone(),
-                operator_ai: None,
-            },
-            &unattributed(),
-        )
-        .await;
-    assert!(
-        crossing.is_err(),
-        "a filing never leaves its persona: {crossing:?}"
-    );
-
-    // Closed is standing, not a lock: a new round files under a
-    // closed pursuit and changes live standing rather than being
-    // refused. Asserted so a future reader treats the missing guard
-    // as the design, not as a gap to fix.
-    close(&core, &target.id, "satisfied", Vec::new())
+    close(&core, &target.id, "satisfied")
         .await
         .expect("close the target");
-    let late = core
-        .dispatch_service
-        .create(
-            CreateDispatchCommand {
-                snapshot_id: input.id,
-                exporter_slug: "file".into(),
-                action: "write".into(),
-                params_json: String::new(),
-                operator_ai: None,
-                pursuit_id: Some(target.id.clone()),
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("a closed pursuit still accepts new rounds");
-    assert_eq!(late.pursuit_id.as_deref(), Some(target.id.as_str()));
+    tx_in(&core, &target.id, &asset).await;
 
-    // The view composes what the record correlates: both rounds (the
-    // restamped one and the late one), the close fact, and — with no
-    // ingest in this scenario — an empty returns population, present
-    // as a set rather than absent as a field.
+    // The view composes what the record holds: the close fact, and the
+    // gesture the close did not refuse.
     let opened = core
         .pursuit_service
         .view(&target.id)
         .await
         .expect("view the pursuit");
     assert_eq!(opened.pursuit.standing, "closed_satisfied");
-    let round_ids: Vec<&str> = opened.rounds.iter().map(|r| r.id.as_str()).collect();
-    assert_eq!(round_ids, vec![round.id.as_str(), late.id.as_str()]);
-    assert!(opened.returns.is_empty());
     assert_eq!(opened.events.len(), 1);
-}
-
-/// Filing refuses a cross-persona stamp, which is where that wall lives
-/// now (#81).
-///
-/// `DispatchService` stamps what it is handed and interprets nothing,
-/// so the id on a dispatch can name another persona's pursuit — the
-/// schema's foreign key says the row exists and nothing about whose it
-/// is. Without a check on this side, one persona's outputs would land
-/// in another's ledger, which `restamp` refuses outright and nothing
-/// else in the tree does at all.
-#[tokio::test]
-async fn filing_refuses_a_round_stamped_with_another_personas_pursuit() {
-    let (tmp, core, persona) = boot("filing-wall").await;
-    let stranger = register(&core, "filing-wall-stranger").await;
-    let asset = seed_asset(&core, &tmp, &persona.id, "a.md").await;
-    let input = core
-        .snapshot_service
-        .create(
-            CreateSnapshotCommand {
-                persona_id: persona.id.clone(),
-                asset_ids: vec![asset],
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("freeze input");
-
-    // The stamp names a pursuit that exists — so the foreign key is
-    // satisfied — and belongs to somebody else.
-    let theirs = open(&core, &stranger.id, None, Some("not yours")).await;
-    let round = core
-        .dispatch_service
-        .create(
-            CreateDispatchCommand {
-                snapshot_id: input.id.clone(),
-                exporter_slug: "file".into(),
-                action: "write".into(),
-                params_json: String::new(),
-                operator_ai: None,
-                pursuit_id: Some(theirs.id.clone()),
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("the dispatcher stamps what it is given");
-    assert_eq!(
-        round.pursuit_id.as_deref(),
-        Some(theirs.id.as_str()),
-        "the raw dispatcher interprets nothing, so the crossing reaches the row"
-    );
-
-    let refused = core
-        .pursuit_service
-        .file_dispatch_outputs(&round.id)
-        .await
-        .expect_err("filing refuses the crossing");
-    assert!(
-        refused.to_string().contains("different personas"),
-        "the refusal says what it refused: {refused}"
-    );
-    let theirs_after = core
-        .pursuit_service
-        .view(&theirs.id)
-        .await
-        .expect("view the stranger's pursuit");
-    assert!(
-        theirs_after.txs.is_empty(),
-        "and nothing was written into it"
-    );
+    assert_eq!(opened.txs.len(), 1, "a close refuses no later gesture");
 }

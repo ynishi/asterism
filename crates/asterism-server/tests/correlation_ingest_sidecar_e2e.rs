@@ -17,8 +17,7 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, OpenPursuitCommand,
-    RegisterPersonaCommand,
+    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
 };
 use asterism_contract::dto::DerivedDto;
 use asterism_contract::sidecar::{SIDECAR_IDENTITY_KEY, SIDECAR_SCHEMA, SIDECAR_SUFFIX};
@@ -122,25 +121,6 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
         )
         .await
         .expect("freeze snapshot");
-    // The sidecar below carries the round's stamp, so the round has
-    // one: an export that names no pursuit writes no `pursuit_id`
-    // into the identity block, which is a different scenario.
-    let pursuit = core
-        .pursuit_service
-        .open(
-            OpenPursuitCommand {
-                persona_id: persona.id.clone(),
-                pursuit_id: None,
-                project_id: None,
-                parent_pursuit_id: None,
-                title: Some("the export".into()),
-                note: None,
-                operator_ai: None,
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("open the pursuit the round files under");
     let dispatch = core
         .dispatch_service
         .create(
@@ -150,7 +130,6 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: Some(pursuit.id.clone()),
             },
             &unattributed(),
         )
@@ -199,10 +178,6 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
         SIDECAR_IDENTITY_KEY: {
             "schema": SIDECAR_SCHEMA,
             "dispatch_id": dispatch.id,
-            "pursuit_id": dispatch
-                .pursuit_id
-                .as_deref()
-                .expect("the round carries the stamp it was given"),
             "exporter_slug": "file",
             "source_asset_id": source.id,
         }
@@ -258,85 +233,5 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
             .and_then(|v| v.as_str()),
         Some("embedded"),
         "a detected sidecar claim is recorded as embedded"
-    );
-    // The pursuit claim rode the same sidecar and resolved in-persona
-    // (#29): the return names its line of work, not just its hop.
-    assert_eq!(
-        extra
-            .get("_trace")
-            .and_then(|t| t.get("pursuit_id"))
-            .and_then(|v| v.as_str()),
-        dispatch.pursuit_id.as_deref(),
-    );
-    assert_eq!(
-        extra
-            .get("_trace")
-            .and_then(|t| t.get("pursuit_resolved"))
-            .and_then(|v| v.as_bool()),
-        Some(true),
-        "a claim naming a pursuit of the ingesting persona resolves"
-    );
-
-    // The unresolvable side of the same lane: a sidecar whose pursuit
-    // claim names a pursuit this library does not know. The claim is
-    // recorded, marked unresolved, and refuses nothing — the dispatch
-    // half of the block still resolves on its own.
-    let stray = corpus.join("stray.md");
-    std::fs::write(&stray, "# stray\n").expect("write stray");
-    let foreign_pursuit = "0198c1c2-dead-7000-8000-00000000dead";
-    let stray_sidecar = serde_json::json!({
-        "id": source.id,
-        SIDECAR_IDENTITY_KEY: {
-            "schema": SIDECAR_SCHEMA,
-            "dispatch_id": dispatch.id,
-            "pursuit_id": foreign_pursuit,
-            "exporter_slug": "file",
-            "source_asset_id": source.id,
-        }
-    });
-    std::fs::write(
-        format!("{}{}", stray.display(), SIDECAR_SUFFIX),
-        serde_json::to_vec_pretty(&stray_sidecar).unwrap(),
-    )
-    .expect("write stray sidecar");
-    let stray_child = core
-        .asset_service
-        .add(
-            add_command(
-                &persona.id,
-                stray.to_str().unwrap(),
-                1_785_000_200_000,
-                Some("sidecar".into()),
-            ),
-            &unattributed(),
-        )
-        .await
-        .expect("an unresolvable pursuit claim is never a reason to refuse the file");
-    let stray_extra: serde_json::Value =
-        serde_json::from_str(stray_child.extra_json.as_deref().expect("extra bag"))
-            .expect("extra JSON");
-    assert_eq!(
-        stray_extra
-            .get("_trace")
-            .and_then(|t| t.get("resolved"))
-            .and_then(|v| v.as_bool()),
-        Some(true),
-        "the dispatch half of the block resolves independently"
-    );
-    assert_eq!(
-        stray_extra
-            .get("_trace")
-            .and_then(|t| t.get("pursuit_id"))
-            .and_then(|v| v.as_str()),
-        Some(foreign_pursuit),
-        "what was claimed is recorded even when it resolves to nothing"
-    );
-    assert_eq!(
-        stray_extra
-            .get("_trace")
-            .and_then(|t| t.get("pursuit_resolved"))
-            .and_then(|v| v.as_bool()),
-        Some(false),
-        "a pursuit this library does not know stays an unresolved claim"
     );
 }

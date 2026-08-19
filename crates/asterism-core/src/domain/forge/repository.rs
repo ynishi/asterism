@@ -5,32 +5,27 @@
 //! forge's storage contract part of the file a new catalogue port is
 //! added to. Nothing about the traits changed in the move.
 //!
-//! The catalogue does not name these. What it needs of a pursuit — has
-//! this stamp got something live behind it — is
-//! [`CorrelationResolver`](crate::domain::repository::CorrelationResolver),
-//! which the catalogue owns and answers with a `bool`.
+//! The catalogue does not name these, and needs nothing of a pursuit.
 
 use async_trait::async_trait;
 
-use crate::domain::forge::cull::{Cull, CullMember};
 use crate::domain::forge::line::Line;
 use crate::domain::forge::project::Project;
-use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind, PursuitRestamp};
+use crate::domain::forge::pursuit::{Pursuit, PursuitEvent, PursuitEventKind};
 use crate::domain::forge::tx::PursuitTx;
 use crate::domain::forge::value::{ProjectId, PursuitId};
-use crate::domain::value::{AssetId, PersonaId};
+use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
 /// Persistence port for the pursuit family (#29): the minted unit of
-/// work, its lifecycle facts, and the restamp record.
+/// work, its lifecycle facts, and its ledger.
 ///
-/// One port for the three tables rather than three: they are one
-/// cohesive concern (the correlation layer over the record), share
-/// every caller, and the two write verbs that must be atomic across
-/// tables (`restamp`) could not live on a single-table port. The
-/// pursuit row itself has no update and no delete — it is immutable,
-/// standing is derived from the events, and the only deletion path is
-/// the persona purge, which is hand-rolled in the adapter.
+/// One port for the family rather than one per table: they are one
+/// cohesive concern (the correlation layer over the record) and share
+/// every caller. The pursuit row itself has no update and no delete —
+/// it is immutable, standing is derived from the events, and the only
+/// deletion path is the persona purge, which is hand-rolled in the
+/// adapter.
 #[async_trait]
 pub trait PursuitRepository: Send + Sync {
     /// Persists a fresh pursuit — opening one is the only way a row
@@ -56,34 +51,6 @@ pub trait PursuitRepository: Send + Sync {
     /// [`standing`](crate::domain::forge::pursuit::standing) lets win.
     async fn events_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitEvent>, DomainError>;
 
-    /// Records a restamp and moves the stamp, atomically: the
-    /// `pursuit_restamp` row and the `UPDATE` of the subject's
-    /// `pursuit_id` column land in one transaction, and the write is
-    /// refused with a `Conflict` when the subject's current stamp does
-    /// not equal the restamp's recorded `from` — a stale `from` means
-    /// the caller is moving a filing it has not looked at.
-    async fn restamp(&self, restamp: &PursuitRestamp) -> Result<(), DomainError>;
-
-    /// A pursuit's **returns**: assets whose resolved `_trace` names
-    /// one of its rounds (the dispatch join, which is why a restamped
-    /// round's returns follow it automatically), plus assets whose
-    /// resolved direct pursuit claim names it while no dispatch hop
-    /// resolved — the claim-lane authority order, evaluated over the
-    /// V80 lookup columns so each probe is an index seek, never a
-    /// scan (the documented scale is 100k+ assets). Fold headstones
-    /// are dropped (this is an enumeration path); trashed rows stay
-    /// (a return in the trash is still a return, and restorable).
-    /// Ordered by ingest time, then id.
-    ///
-    /// **A round's own outputs are not returns.** What `reify` mints
-    /// in-library rides on the round itself
-    /// (`DispatchJob::output_asset_ids`, stamped `_dispatch`, not
-    /// `_trace`) and reaches a view through its rounds; *returns* are
-    /// what came back from outside — files an external tool produced,
-    /// re-ingested with a claim. The two populations answer different
-    /// questions and deliberately do not mix here.
-    async fn returns_of(&self, pursuit_id: &PursuitId) -> Result<Vec<AssetId>, DomainError>;
-
     /// The latest lifecycle event kind per pursuit of a persona — the
     /// standing read for listings, one window query instead of one
     /// `events_of` per row. A pursuit with no events is absent from
@@ -101,33 +68,12 @@ pub trait PursuitRepository: Send + Sync {
     /// [`ledger`](crate::domain::forge::tx::ledger) derives over.
     async fn txs_of(&self, pursuit_id: &PursuitId) -> Result<Vec<PursuitTx>, DomainError>;
 
-    /// Appends a close event together with its cull, atomically: "the
-    /// pursuit closed" and "this is what that close decided, out of
-    /// what" must not be separable facts. `None` is a close with
-    /// nothing to record — an abandoned close, or a satisfied close of
-    /// a pursuit whose ledger is empty.
-    async fn append_close(
-        &self,
-        event: &PursuitEvent,
-        cull: Option<(&Cull, &[CullMember])>,
-    ) -> Result<(), DomainError>;
-
-    /// A pursuit's culls with their member verdicts, oldest first —
-    /// one cull per close event, so a repeat close reads as a second
-    /// record, not an overwrite.
-    async fn culls_of(
-        &self,
-        pursuit_id: &PursuitId,
-    ) -> Result<Vec<(Cull, Vec<CullMember>)>, DomainError>;
-
-    /// Every verdict ever recorded about one asset, most-recent first,
-    /// capped at `limit` — the acceptance read of #22: who decided to
-    /// keep or drop this, out of which set, in which line of work.
-    async fn culls_for_asset(
-        &self,
-        asset_id: &AssetId,
-        limit: u32,
-    ) -> Result<Vec<(Cull, CullMember)>, DomainError>;
+    /// Appends a close event. Separate from [`append_event`] only in
+    /// name — a close is one row, and there is nothing it has to land
+    /// beside.
+    ///
+    /// [`append_event`]: Self::append_event
+    async fn append_close(&self, event: &PursuitEvent) -> Result<(), DomainError>;
 }
 
 /// Persistence port for the forge's project and its lines (#63

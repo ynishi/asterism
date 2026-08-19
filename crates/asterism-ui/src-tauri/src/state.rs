@@ -10,7 +10,8 @@
 use std::sync::Arc;
 
 use asterism_core::DomainError;
-use asterism_core::application::forge::{DispatchService, PursuitService};
+use asterism_core::application::DispatchService;
+use asterism_core::application::forge::PursuitService;
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SessionService,

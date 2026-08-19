@@ -10,7 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use asterism_core::application::forge::{DispatchService, ProjectService, PursuitService};
+use asterism_core::application::DispatchService;
+use asterism_core::application::forge::{ProjectService, PursuitService};
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
@@ -37,8 +38,8 @@ pub struct ServerCtx {
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
     /// Lifecycle verbs of the pursuit — the unit of work a caller
-    /// files its rounds under (#29), opened through these verbs and
-    /// no others.
+    /// files what it is working on under (#29), opened through these
+    /// verbs and no others.
     pub pursuit_service: Arc<PursuitService>,
     /// The context pursuits file under (#63) — opened deliberately,
     /// and the owner of the line a satisfied close lands on.

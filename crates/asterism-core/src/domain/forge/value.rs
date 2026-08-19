@@ -1,11 +1,11 @@
 //! The forge's surrogate ids.
 //!
 //! Split from [`domain::value`](crate::domain::value) so that the
-//! catalogue's id vocabulary contains no forge type. Ten of the eleven
-//! declared here are named nowhere outside `domain::forge` and
-//! `application::forge`; the eleventh, [`PursuitId`], is the one the
-//! catalogue has a reason to hold — a dispatch filed under a pursuit
-//! carries which one on its row.
+//! catalogue's id vocabulary contains no forge type. All but one of
+//! those declared here are named nowhere outside `domain::forge` and
+//! `application::forge`; the exception, [`PursuitId`], is the one the
+//! catalogue has a reason to hold — a row filed under a pursuit
+//! carries which one.
 //!
 //! That one is handled by conversion rather than by sharing the type.
 //! The catalogue stamps a
@@ -22,7 +22,7 @@ use crate::domain::value::{CorrelationId, define_uuid_id};
 
 define_uuid_id!(
     /// Surrogate id for a `Pursuit` — the minted unit of work that
-    /// dispatches and culls are stamped with (#29). Minted, never
+    /// filed rows are stamped with (#29). Minted, never
     /// derived from content: content identity changes whenever work is
     /// redone, so succession, rejection, and abandonment need an id
     /// that survives rework. UUID v7 so `(created_at, id)` totally
@@ -67,13 +67,6 @@ define_uuid_id!(
     PursuitEventId
 );
 define_uuid_id!(
-    /// Surrogate id for a `PursuitRestamp` — one recorded move of a
-    /// stamped event between pursuits (the repair verb for broken
-    /// correlation, #29). The row is the fact of the move; the stamped
-    /// column holds only the current filing.
-    PursuitRestampId
-);
-define_uuid_id!(
     /// Surrogate id for a `PursuitTx` — one entry in a pursuit's
     /// append-only membership ledger (#22, model on #63): an asset
     /// entering, a mid-work removal, or its reversal. Membership is
@@ -82,13 +75,6 @@ define_uuid_id!(
     /// gestures share a millisecond, though within one it is an
     /// ordering, not a causal claim.
     PursuitTxId
-);
-define_uuid_id!(
-    /// Surrogate id for a `Cull` — the record of one close's
-    /// narrowing (#22): which candidate set was decided over, written
-    /// at the close it belongs to. One cull per close event; verdicts
-    /// are per member on `cull_member`.
-    CullId
 );
 define_uuid_id!(
     /// Surrogate id for a `Project` — the repo of the forge's git

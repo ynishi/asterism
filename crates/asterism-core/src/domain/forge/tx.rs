@@ -2,12 +2,12 @@
 //! model on #63): every asset that enters the line of work, every
 //! mid-work removal, and every reversal, one row per gesture.
 //!
-//! The ledger is what makes a cull's "out of what" answerable without
-//! being handed in: the candidate set is **what the pursuit
-//! accumulated**, derived here and frozen at close — never a
-//! caller-supplied snapshot. Mid-work tidying feels like free
-//! manipulation on the surface; underneath, every gesture is a ledger
-//! entry, which is the difference between a workspace and a record.
+//! The ledger is what makes "what is this line of work on" answerable
+//! without being handed in: membership is **what the pursuit
+//! accumulated**, derived here — never a caller-supplied snapshot.
+//! Mid-work tidying feels like free manipulation on the surface;
+//! underneath, every gesture is a ledger entry, which is the
+//! difference between a workspace and a record.
 //!
 //! # Shape
 //!
@@ -20,9 +20,8 @@
 //!   present, `remove` means removed, `update` changes nothing. No
 //!   row is ever edited.
 //! - The asset reference is an id, not a foreign key: the ledger is
-//!   history and history outlives the asset (the
-//!   `dispatch_job.output_asset_ids` stance). The candidate *set*
-//!   survives independently in the snapshot the cull freezes.
+//!   history and history outlives the asset (the same stance every
+//!   catalogue row taking an id list holds).
 
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
@@ -41,9 +40,8 @@ pub enum TxOrigin {
     Generated,
     /// Brought in from outside the library (an import).
     Imported,
-    /// Brought in from the existing library — the entry whose cull
-    /// verdict is restricted to `reject` (keeping what already exists
-    /// is the untouched default, not a statement).
+    /// Brought in from the existing library — already held, entering
+    /// this line of work rather than the catalogue.
     Existing,
 }
 
@@ -126,9 +124,8 @@ pub enum PursuitTxKind {
         /// P3 decides whether an unbound update means anything.
         supersedes_asset_id: Option<AssetId>,
     },
-    /// Mid-work removal. Reversible ([`Self::Unremove`]) until close;
-    /// at close an unreversed removal culls as `reject` unless
-    /// salvaged.
+    /// Mid-work removal. Reversible ([`Self::Unremove`]) — the row
+    /// stays, and membership derives without it.
     Remove,
     /// Reversal of a removal.
     Unremove,

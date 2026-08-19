@@ -490,7 +490,6 @@ async fn a_dispatch_carries_its_whole_attribution_through_to_what_it_reifies() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: Some("asterism-ui".into()),
-                pursuit_id: None,
             },
             &AttributionContext::asserted(
                 None,
@@ -509,7 +508,6 @@ async fn a_dispatch_carries_its_whole_attribution_through_to_what_it_reifies() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
             },
             &AttributionContext::owner_surface(),
         )

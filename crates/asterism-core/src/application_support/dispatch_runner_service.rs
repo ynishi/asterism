@@ -10,7 +10,7 @@
 //! that could call [`reify`](DispatchRunnerService::reify) could mint
 //! assets from a payload the wire supplied rather than from what the
 //! exporter actually produced. What the transports *do* front lives on
-//! [`DispatchService`](crate::application::forge::DispatchService): create /
+//! [`DispatchService`](crate::application::DispatchService): create /
 //! run / redispatch (start one) and get / list (read one).
 //!
 //! - [`save_state`](DispatchRunnerService::save_state) /
@@ -330,48 +330,6 @@ impl DispatchRunnerService {
         job.updated_at = now;
         job.completed_at = Some(now);
         self.dispatches.save(&job).await?;
-
-        // Where the round was filed under a pursuit, each output
-        // entered it, and the ledger row that says so is the forge's
-        // write (#22) — the unstamped case falls out below. This
-        // service is the
-        // catalogue's, so it asks for the filing rather than doing it:
-        // the row above is saved, and everything the filing needs —
-        // the stamp, the persona, the output ids, the attribution — is
-        // a column of it, so the payload is the dispatch id.
-        //
-        // The write was never atomic with the reify — the state was
-        // saved as `Done` above, before the first ledger row — so a
-        // failure already left the assets minted and the job finished.
-        // What moving it adds is a window: a close landing before the
-        // job runs freezes its candidate set without these outputs, and
-        // that is permanent. Both the loss and the window are open on
-        // #81, which is where the backfill that would close them goes.
-        //
-        // Logged rather than swallowed, for the reason
-        // `enqueue_fingerprint` gives below: a filing that never
-        // happened must not read the same as one that was never wired.
-        // Not fatal for the same reason either — the bytes are written
-        // and the assets are saved, and failing the reify over a queue
-        // push would discard a run's output to avoid deferring a row.
-        //
-        // Unstamped rows enqueue nothing; there is no pursuit to enter.
-        if job.pursuit_id.is_some()
-            && let Err(err) = self
-                .jobs
-                .enqueue(
-                    JobKind::PursuitLedgerFile,
-                    serde_json::json!({ "dispatch_id": job.id.to_string() }),
-                )
-                .await
-        {
-            tracing::warn!(
-                event = "diag.dispatch.ledger_filing_not_enqueued",
-                dispatch_id = %job.id,
-                error = %err,
-                "outputs minted but the ledger filing was not queued"
-            );
-        }
 
         // New outputs are exactly what a pending provenance claim has
         // been waiting for — an artefact ingested with

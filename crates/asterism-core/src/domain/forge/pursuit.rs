@@ -19,9 +19,6 @@
 //!   **standing is derived on read** by [`standing`] — latest event by
 //!   `(created_at, id)` wins, no row means open. A repeat close is a new
 //!   fact, not an error.
-//! - [`PursuitRestamp`] records a move of a stamped event between
-//!   pursuits — the repair verb for mis-filed correlation. The stamped
-//!   column holds the current filing; the restamp row holds the move.
 //!
 //! # Invariants (service-enforced, entity-checked where local)
 //!
@@ -40,11 +37,10 @@
 //!   empty snapshot is domain-rejected.
 
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
-use crate::domain::forge::value::{ProjectId, PursuitEventId, PursuitId, PursuitRestampId};
-use crate::domain::value::{DispatchId, PersonaId, SnapshotId};
+use crate::domain::forge::value::{ProjectId, PursuitEventId, PursuitId};
+use crate::domain::value::{PersonaId, SnapshotId};
 use crate::error::DomainError;
 
 /// Trims an optional human label; whitespace-only collapses to `None`
@@ -63,7 +59,7 @@ pub struct Pursuit {
     /// Surrogate id (UUID v7) — minted, never derived from content.
     pub id: PursuitId,
     /// Persona bucket; every stamped event shares it (service-enforced,
-    /// the same rule `dispatch_job` states for its snapshot).
+    /// the same rule the catalogue's own rows state for their snapshot).
     pub persona_id: PersonaId,
     /// Pursuit this one was spawned from, set at creation and never
     /// rewritten. A closed parent with open children is legal; rollups
@@ -79,10 +75,9 @@ pub struct Pursuit {
     /// rewritten — residue rather than a mode, left as it is instead
     /// of being given a project it never had.
     ///
-    /// Set at creation and never rewritten, like `parent_id`. Restamp
-    /// does not reach it — that verb moves a *dispatch* between
-    /// pursuits — so work filed under the wrong project is re-opened
-    /// under the right one with its rounds restamped across.
+    /// Set at creation and never rewritten, like `parent_id`: work
+    /// filed under the wrong project is re-opened under the right one
+    /// rather than moved.
     pub project_id: Option<ProjectId>,
     /// Short human label — provenance of intent, not state. `None` for
     /// a pursuit opened without one; display names for those are
@@ -92,8 +87,8 @@ pub struct Pursuit {
     pub note: Option<String>,
     /// Creation time.
     pub created_at: DateTime<Utc>,
-    /// Who opened the pursuit. Private as a triple, like
-    /// [`DispatchJob`](crate::domain::dispatch::DispatchJob)'s: set
+    /// Who opened the pursuit. Private as a triple, like every other
+    /// actor-carrying row's: set
     /// whole from the context at construction, restored whole by
     /// [`from_persisted`](Self::from_persisted). All `None` on
     /// migration-backfilled rows — nobody opened those, the migration
@@ -132,13 +127,10 @@ impl Pursuit {
     /// minted one — [`new`](Self::new) with the mint taken out.
     ///
     /// This exists for one shape: an id that is already recorded
-    /// somewhere else and has no row here. A returning artefact's
-    /// sidecar claims a `pursuit_id` written on another machine, the
-    /// ingest records the claim unresolved because nothing answers to
-    /// that id, and creating the pursuit *under that id* is the only
-    /// thing that lets the re-resolve sweep join them; minting a new
-    /// one and telling the operator to re-file would leave the claim
-    /// broken forever.
+    /// somewhere else and has no row here — a restore, or a profile
+    /// carrying a line of work another machine knew by that id.
+    /// Minting a new one instead would leave every reference to the
+    /// old id naming nothing.
     ///
     /// It is not an upsert and it is not a merge: a chosen id already
     /// in use collides at the repository, which is the honest answer —
@@ -213,8 +205,8 @@ impl Pursuit {
         self.attributed_via
     }
 
-    /// Hands the triple back out whole, for the same reason
-    /// `DispatchJob` does: the only assemblable form is a recorded
+    /// Hands the triple back out whole, for the same reason every
+    /// actor-carrying row does: the only assemblable form is a recorded
     /// fact, not a mintable one.
     pub fn persisted_attribution(&self) -> PersistedAttribution {
         PersistedAttribution::recorded(
@@ -272,7 +264,7 @@ pub struct PursuitEvent {
     /// Pursuit the fact is about.
     pub pursuit_id: PursuitId,
     /// Redundant persona copy for cheap persona-scoped queries and the
-    /// purge path (the `dispatch_job.persona_id` precedent).
+    /// purge path (the catalogue's own `persona_id` precedent).
     pub persona_id: PersonaId,
     /// Which fact.
     pub kind: PursuitEventKind,
@@ -425,139 +417,6 @@ where
     )
 }
 
-/// What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
-/// caller cannot file a move under a kind the id does not have; the
-/// `judgment` variant arrives with the worth gate and its table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RestampSubject {
-    /// A dispatch round — its returns follow it automatically, because
-    /// return membership derives through the dispatch join.
-    Dispatch(DispatchId),
-}
-
-impl RestampSubject {
-    /// Storage slug for the subject kind.
-    pub fn kind_slug(&self) -> &'static str {
-        match self {
-            Self::Dispatch(_) => "dispatch",
-        }
-    }
-
-    /// The subject's raw id, for the untyped `subject_id` column.
-    pub fn subject_uuid(&self) -> Uuid {
-        match self {
-            Self::Dispatch(id) => *id.as_uuid(),
-        }
-    }
-
-    /// Parses the stored `(kind, id)` pair (closed set).
-    pub fn from_columns(kind: &str, id: Uuid) -> Result<Self, DomainError> {
-        match kind {
-            "dispatch" => Ok(Self::Dispatch(DispatchId::from_uuid(id))),
-            other => Err(DomainError::Validation(format!(
-                "unknown restamp subject kind: {other:?}"
-            ))),
-        }
-    }
-}
-
-/// One recorded move of a stamped event between pursuits — the repair
-/// verb every surveyed correlation system ships for when the carrying
-/// fails. The stamp is correlation metadata, not event content:
-/// restamping never touches what happened, only which pursuit it files
-/// under.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PursuitRestamp {
-    /// Surrogate id (UUID v7).
-    pub id: PursuitRestampId,
-    /// What moved.
-    pub subject: RestampSubject,
-    /// Filing before the move — `None` repairs a legacy NULL stamp.
-    pub from_pursuit_id: Option<PursuitId>,
-    /// Filing after the move. Same persona as the subject and as
-    /// `from` (service-enforced; a restamp never crosses personas).
-    pub to_pursuit_id: PursuitId,
-    /// When the move happened.
-    pub created_at: DateTime<Utc>,
-    operator_ai: Option<crate::domain::attribution::OperatorRef>,
-    author: Option<crate::domain::attribution::Author>,
-    attributed_via: Option<crate::domain::attribution::AttributionChannel>,
-}
-
-impl PursuitRestamp {
-    /// Records a move. Rejects a no-op (`from == Some(to)`) — a move
-    /// that moves nothing is a row that can only mislead.
-    pub fn new(
-        subject: RestampSubject,
-        from_pursuit_id: Option<PursuitId>,
-        to_pursuit_id: PursuitId,
-        now: DateTime<Utc>,
-        attribution: &AttributionContext,
-    ) -> Result<Self, DomainError> {
-        if from_pursuit_id == Some(to_pursuit_id) {
-            return Err(DomainError::Validation(
-                "restamp target equals the current stamp".into(),
-            ));
-        }
-        Ok(Self {
-            id: PursuitRestampId::new(),
-            subject,
-            from_pursuit_id,
-            to_pursuit_id,
-            created_at: now,
-            operator_ai: attribution.operator_ai().cloned(),
-            author: attribution.author().cloned(),
-            attributed_via: attribution.attributed_via(),
-        })
-    }
-
-    /// Read-path twin of [`new`](Self::new).
-    pub fn from_persisted(
-        id: PursuitRestampId,
-        subject: RestampSubject,
-        from_pursuit_id: Option<PursuitId>,
-        to_pursuit_id: PursuitId,
-        created_at: DateTime<Utc>,
-        attribution: PersistedAttribution,
-    ) -> Self {
-        Self {
-            id,
-            subject,
-            from_pursuit_id,
-            to_pursuit_id,
-            created_at,
-            operator_ai: attribution.operator_ai().cloned(),
-            author: attribution.author().cloned(),
-            attributed_via: attribution.attributed_via(),
-        }
-    }
-
-    /// Subject that ordered this move (`None` = unrecorded).
-    pub fn author(&self) -> Option<&crate::domain::attribution::Author> {
-        self.author.as_ref()
-    }
-
-    /// Agent that performed this move (`None` = unrecorded).
-    pub fn operator_ai(&self) -> Option<&crate::domain::attribution::OperatorRef> {
-        self.operator_ai.as_ref()
-    }
-
-    /// Channel the pair above arrived through (`None` = unrecorded).
-    pub fn attributed_via(&self) -> Option<crate::domain::attribution::AttributionChannel> {
-        self.attributed_via
-    }
-
-    /// Hands the triple back out whole (see
-    /// [`Pursuit::persisted_attribution`]).
-    pub fn persisted_attribution(&self) -> PersistedAttribution {
-        PersistedAttribution::recorded(
-            self.author.clone(),
-            self.operator_ai.clone(),
-            self.attributed_via,
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,23 +561,5 @@ mod tests {
 
         let unfiled = Pursuit::new(PersonaId::new(), None, None, None, None, Utc::now(), &ctx());
         assert_eq!(unfiled.project_id, None);
-    }
-
-    #[test]
-    fn restamp_rejects_a_no_op_move() {
-        let target = PursuitId::new();
-        let subject = RestampSubject::Dispatch(DispatchId::new());
-        assert!(PursuitRestamp::new(subject, Some(target), target, Utc::now(), &ctx()).is_err());
-        assert!(PursuitRestamp::new(subject, None, target, Utc::now(), &ctx()).is_ok());
-    }
-
-    #[test]
-    fn restamp_subject_round_trips_through_columns() {
-        let dispatch = DispatchId::new();
-        let subject = RestampSubject::Dispatch(dispatch);
-        let back =
-            RestampSubject::from_columns(subject.kind_slug(), subject.subject_uuid()).unwrap();
-        assert_eq!(back, subject);
-        assert!(RestampSubject::from_columns("judgment", Uuid::now_v7()).is_err());
     }
 }

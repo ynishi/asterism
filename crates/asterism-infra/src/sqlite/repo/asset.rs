@@ -3060,14 +3060,9 @@ impl AssetRepository for SqliteAssetRepository {
         let rows = self
             .isle
             .call(move |conn| {
-                // Unresolved pursuit claims (#29) ride the same
-                // worklist: a return can arrive before the library
-                // knows its pursuit (a restore, an out-of-order sync),
-                // and the sweep is the moment such an answer changes.
                 let mut stmt = conn.prepare(
                     "SELECT id FROM asset \
-                     WHERE (json_extract(extra, '$._trace.resolved') = 0 \
-                            OR json_extract(extra, '$._trace.pursuit_resolved') = 0) \
+                     WHERE json_extract(extra, '$._trace.resolved') = 0 \
                        AND folded_into IS NULL \
                      ORDER BY created_at ASC LIMIT ?1",
                 )?;
