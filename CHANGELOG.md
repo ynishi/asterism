@@ -763,6 +763,21 @@ and this project adheres to
   the service. Cutting `asterism-forge` into its own crate is what would move
   the refusal into the compiler.
 
+- **The word `catalogue` is gone from the crates.** It came from the six deleted
+  design claims, where it named the half that is not the forge; the claims went
+  and the word stayed, naming nothing that was ever defined. The layer it
+  pointed at is the raw layer, and that is what the prose says now, or the
+  concrete module where a sentence was really about `dispatch` or about an asset
+  row. Forty-one mentions over nineteen files, all doc comments, code comments
+  and test fixtures — no type, column or wire key was ever named after it, and
+  the one string a caller reads (the MCP ingest description's example of an
+  outside identifier) is now an edition number.
+
+  Three mentions stay, in migration docs that describe the schema as it stood at
+  their own step: V86 twice and V88 once. Those are a record of a past shape
+  rather than a claim about today. `asterism-importer-sdk` keeps its own
+  `catalogue` module, which is an unrelated type.
+
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
   and the flatness cost something specific: the design that introduced it said
