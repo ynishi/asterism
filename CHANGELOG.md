@@ -1124,7 +1124,7 @@ and this project adheres to
   contradicted by the database: drop the forge's tables and the catalogue's own
   schema stops standing up.
 
-  V86 rebuilds `dispatch_job` without it. The column survives with its name, its
+  V87 rebuilds `dispatch_job` without it. The column survives with its name, its
   type, its rows and its index, because what it records — which pursuit this
   round was filed under — is a fact about the round, and facts about a round are
   what the table is for; what the constraint added on top was an ownership claim
@@ -1147,7 +1147,7 @@ and this project adheres to
 
 - **The base-event pin — the version claim a targeted `in` could make** (#63).
   `TxTarget::base_event_id`, the `pursuit_tx.base_event_id` column, the CHECK
-  pairing it to a target and the index over it are gone (V90). A pursuit is cut
+  pairing it to a target and the index over it are gone (V91). A pursuit is cut
   from a line and its `in` already names the entry it works on; a claim about
   which version of that entry the caller was looking at is a second statement,
   and nothing was ever built to make it. No command carried one, the single
@@ -1166,8 +1166,8 @@ and this project adheres to
 
   The name stays in two places, both of which are records of a past shape rather
   than claims about today: V85's DDL, which still adds the column because a
-  database walking the chain from scratch has to reach the shape V90 alters, and
-  V90's own step and test.
+  database walking the chain from scratch has to reach the shape V91 alters, and
+  V91's own step and test.
 
 - **The cull — the close's record of what it kept and what it dropped** (#22).
   The concept is gone from every layer at once: `domain::forge::cull` and its
@@ -1198,7 +1198,7 @@ and this project adheres to
   `SnapshotService`.
 
 - **The `cull` and `cull_member` tables, and the restamp subject that named
-  them** (V87). V82 created both and is released, so it stands as written; V87
+  them** (V88). V82 created both and is released, so it stands as written; V88
   drops them. Leaving them would not have been neutral — both hold `RESTRICT`
   edges into `pursuit`, `persona`, `pursuit_event` and `snapshot`, so rows
   written before this change would go on refusing a persona purge through tables
@@ -1234,14 +1234,14 @@ and this project adheres to
   asset enters a pursuit because somebody recorded that it did, through
   `pursuit_tx`.
 
-- **The `pursuit_restamp` table** (V88). With the verb gone the table is
+- **The `pursuit_restamp` table** (V89). With the verb gone the table is
   unreachable — nothing reads it, nothing writes it, and the persona purge no
   longer sweeps it. **This destroys those rows**, which recorded which pursuit a
   round was re-filed under. `dispatch_job.pursuit_id` and its index outlive this
-  step, still written on every export; V89 below is what takes them.
+  step, still written on every export; V90 below is what takes them.
 
 - **The pursuit stamp on a dispatch, and the whole lane that resolved it**
-  (V89). A dispatch is a raw-layer export — a frozen input, an exporter, an
+  (V90). A dispatch is a raw-layer export — a frozen input, an exporter, an
   action, and what came back — and which line of work somebody was on when they
   started it is not a fact about the export. So `dispatch_job.pursuit_id` and
   `idx_dispatch_pursuit` are gone, with `DispatchJob.pursuit_id`,
@@ -1267,10 +1267,10 @@ and this project adheres to
   started under, and nothing else records it: the restamp table went one step
   earlier, and the `_trace` bag keeps its `pursuit_id` text only because that
   bag is what an ingest recorded rather than what the schema asserts. Nothing
-  re-derives the stamp afterwards. Two rebuilds land here rather than one — V86
+  re-derives the stamp afterwards. Two rebuilds land here rather than one — V87
   took the foreign key off the column three steps ago and this takes the column
   — because folding them would mean renumbering steps that already exist, and
-  V86 answers a question of its own that its test still asks. `dispatch_job` is
+  V87 answers a question of its own that its test still asks. `dispatch_job` is
   rebuilt with every column named on both sides; `asset` gets a plain
   `DROP COLUMN`, since the column is VIRTUAL generated and rebuilding the
   library's largest table to remove an expression would cost the whole table.
