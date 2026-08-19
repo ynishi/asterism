@@ -6268,6 +6268,32 @@ ALTER TABLE dispatch_job ADD COLUMN attempt_kind TEXT;
 ALTER TABLE dispatch_job ADD COLUMN attempt_payload TEXT;
 "#;
 
+/// Version 85 → 86: a comment may be pinned to the selection gesture
+/// that occasioned it (#65).
+///
+/// One nullable `TEXT` slug on `asset_comment` — `'trash'`,
+/// `'trash_group'` or `'restore'`, the mutating verbs a solo user
+/// states a reason at. Every existing row keeps `NULL`, which reads as
+/// "an ordinary thread post": before this column no comment was ever
+/// posted *by* a gesture, so `NULL` is the truth about all of them and
+/// there is nothing to backfill.
+///
+/// `ALTER TABLE ADD COLUMN` carries the column-level `CHECK` fine
+/// (V85's `pursuit_tx` columns set the precedent), and `NULL` passes a
+/// `CHECK` by evaluating to unknown, so the guard costs existing rows
+/// nothing. Disposal verbs (`empty_trash`, `purge`) are deliberately
+/// not in the set — executing a decision already made is not a moment
+/// anybody states a reason at — and the `CHECK` is what keeps a later
+/// caller from quietly widening that vocabulary in data.
+///
+/// Not indexed: the reader is the asset's thread
+/// (`idx_asset_comment_asset` already serves it), and no query filters
+/// by gesture alone yet.
+const V86_ASSET_COMMENT_GESTURE: &str = r#"
+ALTER TABLE asset_comment ADD COLUMN gesture TEXT
+    CHECK (gesture IN ('trash', 'trash_group', 'restore'));
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6356,6 +6382,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V83_DISPATCH_ATTEMPT),
     Step::Sql(V84_FORGE_PROJECT_LINE),
     Step::Sql(V85_FILING_AND_TARGETED_IN),
+    Step::Sql(V86_ASSET_COMMENT_GESTURE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

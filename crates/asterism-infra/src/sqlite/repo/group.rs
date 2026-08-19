@@ -643,6 +643,26 @@ impl GroupRepository for SqliteGroupRepository {
         rows.into_iter().map(GroupRow::into_domain).collect()
     }
 
+    async fn member_asset_ids(&self, group_id: &GroupId) -> Result<Vec<AssetId>, DomainError> {
+        let uuid = *group_id.as_uuid();
+        let rows = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT asset_id FROM asset_bucket \
+                     WHERE bucket_id = ?1 \
+                     ORDER BY position, asset_id",
+                )?;
+                let rows = stmt
+                    .query_map(params![uuid], |row| row.get::<_, Uuid>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(rows.into_iter().map(AssetId::from_uuid).collect())
+    }
+
     async fn rename(
         &self,
         id: &GroupId,
@@ -976,6 +996,44 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    /// `member_asset_ids` answers with the filing, not the live view:
+    /// a trashed member keeps its `asset_bucket` row by design, and
+    /// the caller (the #65 remark fan-out) wants the batch a sentence
+    /// was said over — which includes the member that happens to be
+    /// in the trash — in hand-arranged order.
+    #[tokio::test]
+    async fn member_asset_ids_returns_the_filing_in_order_trashed_included() {
+        let (isle, _driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteGroupRepository::new(isle.clone());
+        let persona = Uuid::now_v7();
+        seed_persona(&isle, persona).await;
+        let (a, b) = (Uuid::now_v7(), Uuid::now_v7());
+        seed_asset(&isle, persona, a).await;
+        seed_asset(&isle, persona, b).await;
+
+        let group = repo
+            .create(PersonaId::from_uuid(persona), "g".into(), None, Utc::now())
+            .await
+            .unwrap();
+        for id in [a, b] {
+            repo.add(&AssetId::from_uuid(id), &group.id, Utc::now())
+                .await
+                .unwrap();
+        }
+        isle.call(move |conn| {
+            conn.execute("UPDATE asset SET trashed_at = 1 WHERE id = ?1", params![a])
+        })
+        .await
+        .unwrap();
+
+        let listed = repo.member_asset_ids(&group.id).await.unwrap();
+        assert_eq!(
+            listed,
+            vec![AssetId::from_uuid(a), AssetId::from_uuid(b)],
+            "filing order, trashed member included"
+        );
     }
 
     /// The sidebar count is what a Group *is* to the person reading it,

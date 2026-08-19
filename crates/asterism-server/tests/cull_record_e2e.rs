@@ -328,6 +328,7 @@ async fn a_purged_member_can_be_rejected_but_never_kept() {
         .trash(
             TrashAssetCommand {
                 asset_id: gone.clone(),
+                comment: None,
             },
             &unattributed(),
         )

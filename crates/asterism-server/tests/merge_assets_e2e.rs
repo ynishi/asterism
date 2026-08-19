@@ -480,6 +480,7 @@ async fn refusals_ride_on_a_two_hundred_ok_body() {
         .trash(
             TrashAssetCommand {
                 asset_id: fx.keeper.clone(),
+                comment: None,
             },
             &unattributed(),
         )

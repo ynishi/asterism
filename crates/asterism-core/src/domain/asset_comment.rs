@@ -20,6 +20,13 @@
 //! - **`edited_at`** is `None` for the original post and stamped on
 //!   every `edit` — the UI reveals a "(edited)" marker when it's set
 //!   without exposing the raw diff.
+//! - **A comment may be pinned to a selection gesture** (#65). A
+//!   trash / restore verb can carry a one-line remark, and the row
+//!   keeps *which* verb occasioned it ([`SelectionGesture`]), so the
+//!   thread shows when in the asset's life each sentence was said.
+//!   This is a footnote, not a verdict: the typed statement over a
+//!   candidate set is the cull record's job (#22), and a gesture
+//!   comment never upgrades into one.
 
 use chrono::{DateTime, Utc};
 
@@ -78,6 +85,55 @@ impl CommentAuthor {
     }
 }
 
+/// The selection-shaped verb a comment was said alongside.
+///
+/// Each variant names one mutating gesture that throws an asset out
+/// or pulls it back. The set is deliberately short: `empty_trash` and
+/// `purge` are disposal — executing a decision already made — and a
+/// disposal is not a moment anybody states a reason at, so they have
+/// no variant here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionGesture {
+    /// One asset thrown
+    /// ([`TrashAssetCommand`](asterism_contract::command::TrashAssetCommand)).
+    Trash,
+    /// A whole Group filing thrown; the remark fans out to every
+    /// member asset, because a comment is per-asset and the sentence
+    /// said over a batch ("this round's angle was wrong") is exactly
+    /// what a member's siblings want to surface later.
+    TrashGroup,
+    /// A trashed asset pulled back — the salvage. Whether a restore
+    /// is a decision worth a sentence is the caller's call: the
+    /// comment is optional, so providing one *is* treating it as one.
+    Restore,
+}
+
+impl SelectionGesture {
+    /// Slug used on the wire and in the column
+    /// (`"trash"` / `"trash_group"` / `"restore"`).
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::Trash => "trash",
+            Self::TrashGroup => "trash_group",
+            Self::Restore => "restore",
+        }
+    }
+
+    /// Parses a stored slug back. Anything else is a corrupt value —
+    /// rejected rather than degraded, the same stance
+    /// `author_kind` mapping takes.
+    pub fn parse(slug: &str) -> Result<Self, DomainError> {
+        match slug {
+            "trash" => Ok(Self::Trash),
+            "trash_group" => Ok(Self::TrashGroup),
+            "restore" => Ok(Self::Restore),
+            other => Err(DomainError::Validation(format!(
+                "unknown selection gesture: {other:?}"
+            ))),
+        }
+    }
+}
+
 /// A single comment on an Asset.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssetComment {
@@ -96,6 +152,12 @@ pub struct AssetComment {
     /// When the comment was last edited. `None` for original posts
     /// that have never been touched.
     pub edited_at: Option<DateTime<Utc>>,
+    /// The selection gesture this comment was said alongside. `None`
+    /// for an ordinary thread post; `Some` pins the remark to the
+    /// verb, and `created_at` is then also the gesture's moment —
+    /// one clock read stamps both, so "what was said when this was
+    /// thrown" is a row, not a join.
+    pub gesture: Option<SelectionGesture>,
 }
 
 impl AssetComment {
@@ -119,7 +181,24 @@ impl AssetComment {
             body,
             created_at: now,
             edited_at: None,
+            gesture: None,
         })
+    }
+
+    /// Builds a comment pinned to a selection gesture — the footnote
+    /// a trash / restore verb carries. Same body validation as
+    /// [`new`](Self::new); `now` should be the gesture's own clock
+    /// read so the remark and the verb share a moment.
+    pub fn for_gesture(
+        asset_id: AssetId,
+        author: CommentAuthor,
+        body: impl Into<String>,
+        gesture: SelectionGesture,
+        now: DateTime<Utc>,
+    ) -> Result<Self, DomainError> {
+        let mut comment = Self::new(asset_id, author, body, now)?;
+        comment.gesture = Some(gesture);
+        Ok(comment)
     }
 }
 
@@ -134,6 +213,47 @@ mod tests {
         assert!(AssetComment::new(asset, CommentAuthor::User, "", now).is_err());
         assert!(AssetComment::new(asset, CommentAuthor::User, "   ", now).is_err());
         assert!(AssetComment::new(asset, CommentAuthor::User, "hi", now).is_ok());
+    }
+
+    #[test]
+    fn gesture_slug_round_trips_and_rejects_the_unknown() {
+        for gesture in [
+            SelectionGesture::Trash,
+            SelectionGesture::TrashGroup,
+            SelectionGesture::Restore,
+        ] {
+            assert_eq!(SelectionGesture::parse(gesture.slug()).unwrap(), gesture);
+        }
+        assert!(SelectionGesture::parse("empty_trash").is_err());
+        assert!(SelectionGesture::parse("").is_err());
+    }
+
+    #[test]
+    fn for_gesture_pins_the_verb_and_keeps_the_body_guard() {
+        let asset = AssetId::new();
+        let now = Utc::now();
+        let pinned = AssetComment::for_gesture(
+            asset,
+            CommentAuthor::User,
+            "wrong hands again",
+            SelectionGesture::Trash,
+            now,
+        )
+        .unwrap();
+        assert_eq!(pinned.gesture, Some(SelectionGesture::Trash));
+        assert_eq!(pinned.created_at, now);
+        assert!(
+            AssetComment::for_gesture(
+                asset,
+                CommentAuthor::User,
+                "   ",
+                SelectionGesture::Restore,
+                now
+            )
+            .is_err()
+        );
+        let plain = AssetComment::new(asset, CommentAuthor::User, "hi", now).unwrap();
+        assert_eq!(plain.gesture, None);
     }
 
     #[test]

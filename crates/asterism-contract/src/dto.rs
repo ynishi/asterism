@@ -1660,6 +1660,11 @@ pub struct AssetCommentDto {
     /// Last edit timestamp (unix epoch ms); `None` for pristine
     /// posts.
     pub edited_at_ms: Option<i64>,
+    /// Selection gesture this comment was said alongside
+    /// (`"trash"` / `"trash_group"` / `"restore"`); `None` for an
+    /// ordinary thread post. When set, `created_at_ms` is also the
+    /// gesture's moment.
+    pub gesture: Option<String>,
 }
 
 /// One mark placed into an Asset's material — the coordinate space its

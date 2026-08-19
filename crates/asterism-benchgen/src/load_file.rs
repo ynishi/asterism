@@ -513,6 +513,7 @@ pub async fn run(args: LoadFileArgs) -> Result<LoadReport> {
                 "/asterism/assets/trash",
                 &TrashAssetCommand {
                     asset_id: id.clone(),
+                    comment: None,
                 },
             )
             .await?;

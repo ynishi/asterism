@@ -576,6 +576,7 @@ async fn the_backbone_outlives_its_export_copies() {
         .trash(
             TrashAssetCommand {
                 asset_id: exports[0].clone(),
+                comment: None,
             },
             &unattributed(),
         )

@@ -470,6 +470,7 @@ async fn refusals_come_back_on_the_preview_and_stop_the_run() {
         .trash(
             TrashAssetCommand {
                 asset_id: fx.keeper.clone(),
+                comment: None,
             },
             &unattributed(),
         )

@@ -41,6 +41,7 @@ use crate::application::mapping::{
     to_asset_query,
 };
 use crate::domain::asset::Asset;
+use crate::domain::asset_comment::{AssetComment, CommentAuthor, SelectionGesture};
 use crate::domain::attribution::{AttributionContext, OperatorRef};
 use crate::domain::content_hash;
 use crate::domain::edge::{ConstellationEdge, EdgeKind};
@@ -48,8 +49,9 @@ use crate::domain::job::JobKind;
 use crate::domain::material::Material;
 use crate::domain::provenance::{self, ProvenanceRef, SIDECAR_SUFFIX};
 use crate::domain::repository::{
-    AssetRepository, DimsScope, DirRepository, EdgeRepository, GroupRepository, JobQueue,
-    PersonaRepository, SourceLookupScope, SourceTextReader, TagRepository, TextLocator,
+    AssetCommentRepository, AssetRepository, DimsScope, DirRepository, EdgeRepository,
+    GroupRepository, JobQueue, PersonaRepository, SourceLookupScope, SourceTextReader,
+    TagRepository, TextLocator,
 };
 use crate::domain::source_locator::{LocalPath, SourceLocator};
 use crate::domain::value::{
@@ -183,6 +185,12 @@ pub struct AssetService {
     personas: Arc<dyn PersonaRepository>,
     tags: Arc<dyn TagRepository>,
     groups: Arc<dyn GroupRepository>,
+    /// Comment port — held for one write path: the optional remark a
+    /// selection gesture carries (#65) lands as an [`AssetComment`]
+    /// pinned to the verb. Thread lifecycle (post / edit / delete)
+    /// stays with `AssetCommentService`; this service only ever
+    /// appends the gesture's footnote.
+    comments: Arc<dyn AssetCommentRepository>,
     dirs: Arc<dyn DirRepository>,
     edges: Arc<dyn EdgeRepository>,
     /// Snapshot port — read-only use here to synthesise the
@@ -254,6 +262,7 @@ impl AssetService {
         personas: Arc<dyn PersonaRepository>,
         tags: Arc<dyn TagRepository>,
         groups: Arc<dyn GroupRepository>,
+        comments: Arc<dyn AssetCommentRepository>,
         dirs: Arc<dyn DirRepository>,
         edges: Arc<dyn EdgeRepository>,
         snapshots: Arc<dyn crate::domain::repository::SnapshotRepository>,
@@ -274,6 +283,7 @@ impl AssetService {
             personas,
             tags,
             groups,
+            comments,
             dirs,
             edges,
             snapshots,
@@ -1808,6 +1818,47 @@ impl AssetService {
         })
     }
 
+    /// Normalises the optional remark a selection gesture carries
+    /// (#65): trimmed, and whitespace-only reads as absent — the same
+    /// silent discard the comment UI applies to an empty submit, so a
+    /// caller wiring a text field straight through never turns a blank
+    /// into an error.
+    fn gesture_remark(comment: Option<&str>) -> Option<&str> {
+        comment.map(str::trim).filter(|c| !c.is_empty())
+    }
+
+    /// Appends the footnote a selection gesture carried (#65): one
+    /// [`AssetComment`] pinned to the verb. `at` is the verb's own
+    /// clock read — the instant `trash` stamped `trashed_at` with, or
+    /// the one read `restore` / `trash_group` took for the gesture —
+    /// so the remark and the gesture genuinely share a moment instead
+    /// of each reading the clock and landing milliseconds apart.
+    ///
+    /// The author is [`CommentAuthor::User`] — the comment-side alias
+    /// of the attribution `Owner`. The gesture commands carry no
+    /// author fields, and a comment records who is *speaking*, not who
+    /// is accountable (`AssetCommentService`'s stance); in a
+    /// single-user vault the voice stating a culling reason is "me".
+    /// The attribution handed to the verb stays unpersisted here, the
+    /// same as on every comment write — closing that gap is #65's
+    /// second open question, not this write.
+    ///
+    /// Called after the gesture has landed, so a failed gesture never
+    /// leaves a footnote claiming it happened; a failure *here*
+    /// surfaces to the caller with the gesture already in place, which
+    /// is the recoverable side of that trade (the verbs are idempotent
+    /// or reversible, prose handed in and dropped is neither).
+    async fn post_gesture_comment(
+        &self,
+        asset_id: AssetId,
+        body: &str,
+        gesture: SelectionGesture,
+        at: chrono::DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        let comment = AssetComment::for_gesture(asset_id, CommentAuthor::User, body, gesture, at)?;
+        self.comments.save(&comment).await
+    }
+
     /// Moves an asset to the trash. Reversible via
     /// [`restore`](Self::restore) — every dependent row (tags, group
     /// filing and its order, comments, body, thumbnails, snapshot
@@ -1816,6 +1867,11 @@ impl AssetService {
     /// The search document *is* dropped, because a trashed asset must
     /// not come back as a search hit; [`restore`](Self::restore)
     /// re-indexes it.
+    ///
+    /// An optional remark (#65) lands as a gesture-pinned comment
+    /// after the trash succeeds. No re-index follows it: the document
+    /// is being dropped anyway, and the restore-side rebuild
+    /// re-composes from the thread, remark included.
     pub async fn trash(
         &self,
         command: TrashAssetCommand,
@@ -1828,7 +1884,12 @@ impl AssetService {
             .await?
             .ok_or(DomainError::AssetNotFound(id))?;
         let persona_id = asset.persona_id;
-        self.assets.trash(&id, Utc::now()).await?;
+        let now = Utc::now();
+        self.assets.trash(&id, now).await?;
+        if let Some(body) = Self::gesture_remark(command.comment.as_deref()) {
+            self.post_gesture_comment(id, body, SelectionGesture::Trash, now)
+                .await?;
+        }
         self.unindex_removed_asset(&id).await;
         self.notify_persona_touched(persona_id);
         Ok(())
@@ -1875,6 +1936,15 @@ impl AssetService {
             )));
         }
         self.assets.restore(&id).await?;
+        // The salvage remark (#65) goes in before the re-index is
+        // queued, so the rebuild composes a document that already
+        // contains it — one job answers for both. `restore` stamps no
+        // timestamp of its own (it clears one), so the clock read here
+        // *is* the gesture's moment.
+        if let Some(body) = Self::gesture_remark(command.comment.as_deref()) {
+            self.post_gesture_comment(id, body, SelectionGesture::Restore, Utc::now())
+                .await?;
+        }
         if let Err(err) = self
             .jobs
             .enqueue(
@@ -3383,6 +3453,15 @@ impl AssetService {
     /// membership and its drag-arranged order survive
     /// [`restore_group`](Self::restore_group). Member assets are never
     /// touched — a Group is a filing, not a container.
+    ///
+    /// The optional remark (#65) is the one exception to "never
+    /// touched", and it touches threads, not assets: a comment is
+    /// per-asset and a Group has no thread of its own, so the sentence
+    /// said over the batch fans out to every member as a
+    /// gesture-pinned [`AssetComment`]. Members stay live and
+    /// searchable, so each fan-out write queues the same re-index a
+    /// thread post does; the rebuild handler skips any member that is
+    /// itself trashed or folded.
     pub async fn trash_group(
         &self,
         command: asterism_contract::command::TrashGroupCommand,
@@ -3392,7 +3471,58 @@ impl AssetService {
             &command.group_id,
             "group_id",
         )?);
-        self.groups.trash(&id, Utc::now()).await
+        let now = Utc::now();
+        self.groups.trash(&id, now).await?;
+        if let Some(body) = Self::gesture_remark(command.comment.as_deref()) {
+            // One clock read for the whole fan-out: every member's
+            // footnote carries the moment the *group* was thrown,
+            // which is the one gesture that occasioned them all. A
+            // failure part-way through surfaces to the caller with the
+            // group already trashed and the earlier members' footnotes
+            // in place — the recoverable side of the gesture-first
+            // ordering `post_gesture_comment` documents.
+            for asset_id in self.groups.member_asset_ids(&id).await? {
+                self.post_gesture_comment(asset_id, body, SelectionGesture::TrashGroup, now)
+                    .await?;
+                self.reindex_after_thread_write(&asset_id).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Re-composes a live asset's search document after this service
+    /// appended a gesture comment to its thread — the fan-out half of
+    /// [`trash_group`](Self::trash_group). Same contract as
+    /// `AssetCommentService`'s thread-write re-index: an enqueue
+    /// failure does not fail the write (the comment is saved, and the
+    /// caller asked to trash a filing, not to index prose), but it is
+    /// reported, and the composition stamp comes off so the backfill
+    /// walk finds the row.
+    async fn reindex_after_thread_write(&self, asset_id: &AssetId) {
+        let Err(err) = self
+            .jobs
+            .enqueue(
+                JobKind::IndexRebuild,
+                serde_json::json!({ "asset_id": asset_id.to_string() }),
+            )
+            .await
+        else {
+            return;
+        };
+        tracing::warn!(
+            event = "diag.index.enqueue_failed",
+            asset_id = %asset_id,
+            error = %err,
+            "could not queue a re-index after a gesture comment write"
+        );
+        if let Err(err) = self.asset_bodies.unstamp(asset_id).await {
+            tracing::warn!(
+                event = "diag.index.unstamp_failed",
+                asset_id = %asset_id,
+                error = %err,
+                "the asset keeps a document composed from a thread that has changed"
+            );
+        }
     }
 
     /// Returns a trashed Group to the sidebar, membership and order
