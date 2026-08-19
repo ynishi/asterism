@@ -1,7 +1,7 @@
 //! `Group` — a user-curated set of assets, persona-scoped.
 //!
-//! Groups are the first primitive we add to the relationship
-//! catalogue beyond `Tag` (auto-labelled channel) and
+//! Groups are the first relationship primitive we add beyond `Tag`
+//! (auto-labelled channel) and
 //! `ConstellationEdge` (auto-derived similarity). They exist because
 //! Tag alone cannot express **"assets I hand-picked into a bucket"**
 //! — a Tag is an organic label that any auto_tag or importer can

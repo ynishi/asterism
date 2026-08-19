@@ -59,7 +59,7 @@ pub struct Pursuit {
     /// Surrogate id (UUID v7) — minted, never derived from content.
     pub id: PursuitId,
     /// Persona bucket; every stamped event shares it (service-enforced,
-    /// the same rule the catalogue's own rows state for their snapshot).
+    /// the same rule the raw layer's own rows state for their snapshot).
     pub persona_id: PersonaId,
     /// Pursuit this one was spawned from, set at creation and never
     /// rewritten. A closed parent with open children is legal; rollups
@@ -264,7 +264,7 @@ pub struct PursuitEvent {
     /// Pursuit the fact is about.
     pub pursuit_id: PursuitId,
     /// Redundant persona copy for cheap persona-scoped queries and the
-    /// purge path (the catalogue's own `persona_id` precedent).
+    /// purge path (the raw layer's own `persona_id` precedent).
     pub persona_id: PersonaId,
     /// Which fact.
     pub kind: PursuitEventKind,

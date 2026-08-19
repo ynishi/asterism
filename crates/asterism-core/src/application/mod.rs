@@ -17,8 +17,8 @@
 //!   the services whose writes carry intent rather than content; the
 //!   boundary they keep is in [`domain::forge`](crate::domain::forge).
 //! - [`dispatch_service`] — starts an export against a frozen input
-//!   set. A catalogue verb through and through: it names no forge type,
-//!   and a raw-layer export files itself under no line of work.
+//!   set. It names no forge type, and a raw-layer export files itself
+//!   under no line of work.
 //! - `attribution_intake` — the single check on the attribution fields a
 //!   command still carries (a remote caller's assertion arriving through
 //!   the owner's own surface).

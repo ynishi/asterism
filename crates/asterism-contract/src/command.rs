@@ -392,7 +392,7 @@ pub struct AddAssetCommand {
     ///
     /// This is the field an importer that read a value **out of the
     /// source** uses — a generator's own reference, a workflow id, a
-    /// catalogue number. Recording it here keeps it findable without
+    /// edition number. Recording it here keeps it findable without
     /// letting it decide which rows are the same row.
     ///
     /// Keys and values are checked on the same terms as the declaration

@@ -2,8 +2,8 @@
 //!
 //! Two functions, and they are here rather than in
 //! [`application::mapping`](crate::application::mapping) for one
-//! reason: that module is the catalogue's, and a forge id parsed there
-//! made the catalogue name a forge type (#81). Nothing but the forge's
+//! reason: that module is the raw layer's, and a forge id parsed there
+//! made the raw layer name a forge type (#81). Nothing but the forge's
 //! services ever called them.
 //!
 //! The uuid reading itself stays shared — [`parse_uuid`] is about

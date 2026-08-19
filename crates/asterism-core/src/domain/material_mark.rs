@@ -1,8 +1,8 @@
 //! `MaterialMark` — a mark placed into an Asset's **material**: the
 //! coordinate space the asset's content carries, rather than the asset
-//! as a catalogue entry.
+//! as a row.
 //!
-//! An asset names one work in the catalogue. Its material is what that
+//! An asset names one work. Its material is what that
 //! work is made of, and a material has somewhere to point *inside*:
 //! a time axis `[0, duration_ms)` for video and audio, a plane for
 //! images and frames. [`MaterialAnchor`] is that "where", and the mark

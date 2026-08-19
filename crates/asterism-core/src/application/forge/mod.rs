@@ -7,11 +7,11 @@
 //! layer itself is described in
 //! [`domain::forge`](crate::domain::forge)).
 //!
-//! Nothing in the catalogue is edited by either of them. Closing a
+//! Nothing in the raw layer is edited by either of them. Closing a
 //! pursuit records that a line of work ended and touches no asset: no
 //! trash, no label, no rating. Integrating the conclusion back into the
-//! library is the catalogue's own business, and stays on the
-//! catalogue's verbs.
+//! library is the raw layer's own business, and stays on the raw
+//! layer's verbs.
 
 pub mod mapping;
 pub mod project_service;

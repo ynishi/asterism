@@ -65,7 +65,7 @@ pub struct ServerCtx {
     /// commands write.
     pub asset_comment_service: Arc<AssetCommentService>,
     /// Marks placed into an Asset's material — a position inside the
-    /// content rather than a note on the catalogue entry. Same rows the
+    /// content rather than a note on the asset row. Same rows the
     /// UI's four Tauri commands write.
     pub material_mark_service: Arc<MaterialMarkService>,
     /// The bands of marks over an Asset's material — which reading of

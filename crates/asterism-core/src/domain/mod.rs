@@ -19,8 +19,8 @@
 //!
 //! ## A tour of the domain
 //!
-//! **The catalogue.** [`persona`] is the primary aggregate root; [`asset`]
-//! is one catalogued footprint, with [`material`] as its physical-original
+//! **The raw layer.** [`persona`] is the primary aggregate root; [`asset`]
+//! is one recorded footprint, with [`material`] as its physical-original
 //! layer and [`value`] holding the shared newtypes. [`modality`], [`tag`],
 //! [`dir`] and [`group`] are the organisation axes over it; [`instance`]
 //! names the single owner that `Author::Owner` refers to.
@@ -48,7 +48,7 @@
 //! **The forge layer.** [`forge`] is where intent lives: a line of work
 //! (`forge::pursuit`), the ledger entries it records, and the
 //! conclusion it reaches. The rounds themselves are [`dispatch`], which
-//! is a catalogue module — an exporter running over a frozen set is
+//! is a raw-layer module — an exporter running over a frozen set is
 //! something that happened to the bytes, and it works with no pursuit in
 //! sight. Every other group above describes what is
 //! true of the stored bytes; this one describes what somebody was trying
@@ -81,10 +81,10 @@
 //! ## The one dependency
 //!
 //! ```text
-//!   forge ──uses──▶ catalogue
+//!   forge ──uses──▶ raw
 //! ```
 //!
-//! The forge names catalogue types. The catalogue should name a forge
+//! The forge names raw types. The raw layer should name a forge
 //! **id** and nothing else — no forge entity, no forge event, no forge
 //! port — and a change that adds one is the change to refuse.
 //!
@@ -108,7 +108,7 @@
 //! which is a reviewer's attention and nothing else.
 //!
 //! One of the arrow's crossings is worth knowing, because it looks
-//! like a violation and is not. `dispatch` is a catalogue module though
+//! like a violation and is not. `dispatch` is a raw-layer module though
 //! it reads as the forge's — see [`forge`]'s own doc. It names no forge
 //! type at all: a dispatch is a raw-layer export, and what line of work
 //! its caller was on is not a fact about the export.

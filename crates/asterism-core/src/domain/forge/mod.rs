@@ -1,4 +1,4 @@
-//! The forge layer — the intentional history over the catalogue: a line
+//! The forge layer — the intentional history over the raw layer: a line
 //! of work, what it took up, and the conclusion it reached.
 //!
 //! Everything else in [`domain`](crate::domain) answers what is true of
@@ -29,7 +29,7 @@
 //!
 //! [`pursuit`] is the minted unit of work and its lifecycle facts. What
 //! it takes up is an asset the owner already manages — an ordinary
-//! catalogue row, staged into the pursuit by a ledger gesture. The
+//! raw-layer row, staged into the pursuit by a ledger gesture. The
 //! forge does not hold a working copy, and there is no state to
 //! integrate at the end. What the close integrates is a *decision*.
 //!
@@ -58,7 +58,7 @@
 //!   around.
 //! - **The core does not need the forge.** Importing, deduplicating,
 //!   rating and trashing all work with no pursuit in sight. Sending
-//!   anything out is the catalogue's own business, and the forge has
+//!   anything out is the raw layer's own business, and the forge has
 //!   no part in it.
 //!
 //! # What is deliberately not here
@@ -66,7 +66,7 @@
 //! **Sending work out.** The forge stages what the owner already holds
 //! and records what became of it; it does not export, does not start a
 //! round, and does not wait for anything to come back. Export lives in
-//! the catalogue, where what it records is a thing that happened to the
+//! the raw layer, where what it records is a thing that happened to the
 //! bytes.
 //! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
 //! the core by, and belongs to the core: it is content-addressed,

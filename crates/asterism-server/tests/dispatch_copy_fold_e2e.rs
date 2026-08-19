@@ -273,7 +273,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         .await
         .expect("freeze snapshot");
     // The ledger assertion below reads a pursuit the export never
-    // names — that is the point of it: an export is a catalogue verb
+    // names — that is the point of it: an export is a raw-layer verb
     // and puts nothing into a line of work.
     let pursuit = core
         .pursuit_service

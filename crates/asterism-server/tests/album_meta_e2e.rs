@@ -418,7 +418,7 @@ async fn a_statement_made_at_registration_lands_with_the_row() {
 async fn a_registration_statement_survives_everything_written_beside_it() {
     let fx = fixture().await;
     let mut command = fx.ingest("crowded.md");
-    command.album_meta = meta(&[("plate", "offwhite"), ("catalogue", "c-12")]);
+    command.album_meta = meta(&[("plate", "offwhite"), ("edition", "c-12")]);
     command.derived_from = Some(format!("asset:{}", fx.other));
     command.declared_content_hash = Some(format!("sha256:{}", "a".repeat(64)));
     command.extra_json = Some(r#"{"camera":"X100"}"#.into());
@@ -448,7 +448,7 @@ async fn a_registration_statement_survives_everything_written_beside_it() {
         serde_json::json!("offwhite")
     );
     assert_eq!(
-        extra["_trace"]["meta"]["catalogue"]["value"],
+        extra["_trace"]["meta"]["edition"]["value"],
         serde_json::json!("c-12")
     );
 }

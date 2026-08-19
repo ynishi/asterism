@@ -6298,11 +6298,11 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
 ///
 /// `dispatch_job.pursuit_id` has carried `REFERENCES pursuit(id) ON
 /// DELETE RESTRICT` since V79, and it was the one foreign key anywhere
-/// in the schema pointing out of a catalogue table into a forge one —
+/// in the schema pointing out of a raw-layer table into a forge one —
 /// every other reference to `pursuit`, `project`, `line` and `cull` is
 /// forge-internal. That single constraint is what made the two
 /// inseparable at the database level: drop the forge's tables and the
-/// catalogue's own schema stops standing up.
+/// raw layer's own schema stops standing up.
 ///
 /// They are different domains with different lifecycles, and from the
 /// forge's side the stamp on a dispatch row is a value, not a reference
@@ -6525,11 +6525,10 @@ CREATE INDEX idx_pursuit_restamp_from
 ///
 /// **This destroys those rows.** They recorded which pursuit a round
 /// was re-filed under, which is a statement about a relationship the
-/// forge no longer has. What they pointed at is untouched on both
-/// sides: `dispatch_job.pursuit_id` keeps whatever filing it currently
-/// holds — the stamp is still written by the catalogue's export verb
-/// and still read by the returns join — and the `pursuit` rows the
-/// two FK columns referenced are only referenced less.
+/// forge no longer has. The `pursuit` rows the two FK columns
+/// referenced are untouched and only referenced less;
+/// `dispatch_job.pursuit_id` still exists at this step and is dropped
+/// by the next one.
 ///
 /// A plain `Sql` step, unlike the rebuilds around it. Nothing
 /// references `pursuit_restamp`; its two foreign keys point outward, so
@@ -9879,13 +9878,13 @@ mod tests {
                 born_stating,
                 persona,
                 format!("b-{born_stating}.md"),
-                r#"{"_trace":{"meta":{"catalogue":{"value":"c-12"}}}}"#,
+                r#"{"_trace":{"meta":{"edition":{"value":"c-12"}}}}"#,
             ],
         )
         .unwrap();
         assert_eq!(
             statements_of(&conn, born_stating),
-            vec![("catalogue".to_string(), "c-12".to_string())]
+            vec![("edition".to_string(), "c-12".to_string())]
         );
 
         // The projection follows its asset out of the database.
@@ -12308,7 +12307,7 @@ mod tests {
         };
         assert!(
             !stamp_edges.iter().any(|t| t == "pursuit"),
-            "no edge from the catalogue's dispatch table into the forge: {stamp_edges:?}"
+            "no edge from the dispatch table into the forge: {stamp_edges:?}"
         );
         assert!(
             stamp_edges.iter().any(|t| t == "snapshot")
@@ -12583,8 +12582,8 @@ mod tests {
         };
         assert!(left.is_empty(), "nothing of the record is left: {left:?}");
 
-        // The filing the dropped rows recorded moves to is the
-        // catalogue's own column, and it still holds its value.
+        // The filing the dropped rows recorded moves to is
+        // `dispatch_job`'s own column, and it still holds its value.
         let stamp: Option<Uuid> = conn
             .query_row(
                 "SELECT pursuit_id FROM dispatch_job WHERE id = ?1",

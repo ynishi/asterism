@@ -1,11 +1,11 @@
 //! The forge's persistence ports.
 //!
 //! Split from [`domain::repository`](crate::domain::repository), which
-//! held these two beside the catalogue's twenty-eight and so made the
-//! forge's storage contract part of the file a new catalogue port is
+//! held these two beside the raw layer's twenty-eight and so made the
+//! forge's storage contract part of the file a new raw-layer port is
 //! added to. Nothing about the traits changed in the move.
 //!
-//! The catalogue does not name these, and needs nothing of a pursuit.
+//! The raw layer does not name these, and needs nothing of a pursuit.
 
 use async_trait::async_trait;
 

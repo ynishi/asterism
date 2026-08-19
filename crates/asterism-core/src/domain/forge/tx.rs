@@ -21,7 +21,7 @@
 //!   row is ever edited.
 //! - The asset reference is an id, not a foreign key: the ledger is
 //!   history and history outlives the asset (the same stance every
-//!   catalogue row taking an id list holds).
+//!   raw-layer row taking an id list holds).
 
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
@@ -41,7 +41,7 @@ pub enum TxOrigin {
     /// Brought in from outside the library (an import).
     Imported,
     /// Brought in from the existing library — already held, entering
-    /// this line of work rather than the catalogue.
+    /// this line of work rather than the library.
     Existing,
 }
 

@@ -263,7 +263,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/asterism/comments/delete", post(delete_asset_comment))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
-        // on the catalogue entry.
+        // on the asset row.
         .route(
             "/asterism/assets/{id}/material-marks",
             get(list_material_marks).post(post_material_mark),

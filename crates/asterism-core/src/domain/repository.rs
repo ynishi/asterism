@@ -2,10 +2,10 @@
 //! in `asterism-infra` (dependency inversion: trait declarations belong to
 //! the consuming crate).
 //!
-//! **The catalogue's ports, and only those.** The forge's are in
+//! **The raw layer's ports, and only those.** The forge's are in
 //! [`domain::forge::repository`](crate::domain::forge::repository), so
 //! that adding one here does not mean opening the file that holds the
-//! forge's. The catalogue needs nothing of a pursuit.
+//! forge's. The raw layer needs nothing of a pursuit.
 //!
 //! The rule the whole tree is measured against is one verb — *uses* —
 //! and it is stated once, in [`domain`](crate::domain). Doc links
@@ -2927,7 +2927,7 @@ pub trait DispatchRepository: Send + Sync {
 }
 
 // `PursuitRepository` and `ProjectRepository` were declared here, among
-// the catalogue's own. They are the forge's storage contract and moved
+// the raw layer's own. They are the forge's storage contract and moved
 // to `domain::forge::repository` unchanged; the header says what that
 // leaves this file.
 

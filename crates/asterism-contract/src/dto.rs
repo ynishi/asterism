@@ -1578,7 +1578,7 @@ pub struct AssetCommentDto {
 }
 
 /// One mark placed into an Asset's material — the coordinate space its
-/// content carries, rather than the asset as a catalogue entry.
+/// content carries, rather than the asset as a row.
 ///
 /// The anchor arrives flattened: a `anchor_kind` slug plus the columns
 /// that kind populates. The alternative — a tagged sub-object — would
