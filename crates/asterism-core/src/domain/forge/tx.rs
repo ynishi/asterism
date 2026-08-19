@@ -27,7 +27,7 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 use crate::domain::attribution::{AttributionContext, PersistedAttribution};
-use crate::domain::forge::value::{LineEntryId, LineEventId, PursuitId, PursuitTxId};
+use crate::domain::forge::value::{LineEntryId, PursuitId, PursuitTxId};
 use crate::domain::value::{AssetId, PersonaId};
 use crate::error::DomainError;
 
@@ -70,22 +70,19 @@ impl TxOrigin {
 }
 
 /// What an `in` declares about a line entry it is aimed at (#63
-/// decisions 4–5): the entry, and optionally the version of it the
-/// caller was looking at when they aimed.
+/// decision 4): the entry, and nothing else.
 ///
-/// A pin lives *inside* the target rather than beside it, so "a pin
-/// with nothing pinned" is a state this type cannot hold. What it
-/// cannot hold on its own is that the pinned event belongs to this
-/// entry — a cross-row fact no constraint here or in the schema can
-/// see, so the service checks it where both rows are visible.
+/// It held a second field until V90 — the entry's living event at the
+/// moment of aiming, a version claim a later merge could have read to
+/// notice the entry had moved underneath. Nothing was built to fill
+/// it: no caller could name one, every writer left it `None`, and
+/// every row ever written held NULL. A pursuit is cut from a line and
+/// its `in` already names the entry it works on, so the field stated
+/// no model and went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TxTarget {
     /// The entry this `in` declares it is working on.
     pub entry_id: LineEntryId,
-    /// The entry's living event at the moment of aiming — what makes a
-    /// later merge able to notice that the entry moved underneath.
-    /// `None` aims at the entry without claiming a version.
-    pub base_event_id: Option<LineEventId>,
 }
 
 /// The closed set of ledger gestures. `In` carries its origin because
@@ -93,13 +90,13 @@ pub struct TxTarget {
 /// same pairing with a two-way CHECK.
 ///
 /// The payloads sit on the variants that own them (the `LineVerb`
-/// stance), which makes three of V85's four pairing rules
-/// unrepresentable rather than merely checked: a pin cannot exist
-/// without a target, an out-of-scope claim cannot be made by a
-/// `remove`, and nothing but an `update` can supersede. The fourth —
-/// that only an `existing` origin targets an entry — needs a check,
-/// because origin and aim are separate axes that a rule happens to
-/// correlate; [`PursuitTx::new`] holds it.
+/// stance), which makes two of the three pairing rules V85 left
+/// standing unrepresentable rather than merely checked: an
+/// out-of-scope claim cannot be made by a `remove`, and nothing but an
+/// `update` can supersede. The third — that only an `existing` origin
+/// targets an entry — needs a check, because origin and aim are
+/// separate axes that a rule happens to correlate; [`PursuitTx::new`]
+/// holds it. V85's fourth rule was the pin's, and V90 took both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PursuitTxKind {
     /// An asset entered the pursuit.
@@ -194,25 +191,13 @@ impl PursuitTxKind {
         kind: &str,
         origin: Option<&str>,
         target_entry_id: Option<LineEntryId>,
-        base_event_id: Option<LineEventId>,
         out_of_scope: bool,
         supersedes_asset_id: Option<AssetId>,
     ) -> Result<Self, DomainError> {
         let stray = |column: &str| {
             DomainError::Validation(format!("pursuit tx kind {kind:?} carries no {column}"))
         };
-        let target = match (target_entry_id, base_event_id) {
-            (Some(entry_id), base_event_id) => Some(TxTarget {
-                entry_id,
-                base_event_id,
-            }),
-            (None, None) => None,
-            (None, Some(_)) => {
-                return Err(DomainError::Validation(
-                    "pursuit tx pins a base event without naming a target entry".into(),
-                ));
-            }
-        };
+        let target = target_entry_id.map(|entry_id| TxTarget { entry_id });
         if kind != "in" {
             if target.is_some() {
                 return Err(stray("target entry"));
@@ -481,7 +466,6 @@ mod tests {
     #[test]
     fn kind_round_trips_through_columns() {
         let entry = LineEntryId::new();
-        let base = LineEventId::new();
         let superseded = AssetId::new();
         for kind in [
             plain_in(TxOrigin::Generated),
@@ -489,18 +473,12 @@ mod tests {
             plain_in(TxOrigin::Existing),
             PursuitTxKind::In {
                 origin: TxOrigin::Existing,
-                target: Some(TxTarget {
-                    entry_id: entry,
-                    base_event_id: None,
-                }),
+                target: Some(TxTarget { entry_id: entry }),
                 out_of_scope: true,
             },
             PursuitTxKind::In {
                 origin: TxOrigin::Existing,
-                target: Some(TxTarget {
-                    entry_id: entry,
-                    base_event_id: Some(base),
-                }),
+                target: Some(TxTarget { entry_id: entry }),
                 out_of_scope: false,
             },
             PursuitTxKind::Update {
@@ -517,61 +495,46 @@ mod tests {
                 kind.kind_slug(),
                 kind.origin_slug(),
                 target.map(|t| t.entry_id),
-                target.and_then(|t| t.base_event_id),
                 kind.out_of_scope(),
                 kind.supersedes_asset_id(),
             )
             .unwrap();
             assert_eq!(back, kind);
         }
-        assert!(PursuitTxKind::from_columns("in", None, None, None, false, None).is_err());
+        assert!(PursuitTxKind::from_columns("in", None, None, false, None).is_err());
         assert!(
-            PursuitTxKind::from_columns("remove", Some("generated"), None, None, false, None)
-                .is_err()
+            PursuitTxKind::from_columns("remove", Some("generated"), None, false, None).is_err()
         );
-        assert!(PursuitTxKind::from_columns("merge", None, None, None, false, None).is_err());
-        assert!(
-            PursuitTxKind::from_columns("in", Some("existing"), None, Some(base), false, None)
-                .is_err(),
-            "a pin the read path cannot aim is refused rather than dropped"
-        );
+        assert!(PursuitTxKind::from_columns("merge", None, None, false, None).is_err());
 
         // Every column the reconstructed variant cannot hold is
         // reported rather than dropped — a row that read back as
         // though the column had been empty would be the harmful
         // answer to a broken storage guarantee.
         assert!(
-            PursuitTxKind::from_columns("remove", None, Some(entry), None, false, None).is_err(),
+            PursuitTxKind::from_columns("remove", None, Some(entry), false, None).is_err(),
             "a remove aiming at an entry"
         );
         assert!(
-            PursuitTxKind::from_columns("update", None, Some(entry), Some(base), false, None)
-                .is_err(),
+            PursuitTxKind::from_columns("update", None, Some(entry), false, None).is_err(),
             "an update aiming at an entry"
         );
         assert!(
-            PursuitTxKind::from_columns("unremove", None, None, None, true, None).is_err(),
+            PursuitTxKind::from_columns("unremove", None, None, true, None).is_err(),
             "an unremove claiming it reached outside a scope"
         );
         assert!(
-            PursuitTxKind::from_columns(
-                "in",
-                Some("generated"),
-                None,
-                None,
-                false,
-                Some(superseded)
-            )
-            .is_err(),
+            PursuitTxKind::from_columns("in", Some("generated"), None, false, Some(superseded))
+                .is_err(),
             "an in superseding something"
         );
     }
 
-    /// The one pairing rule the type cannot hold. Three of V85's four
-    /// are unrepresentable — this is the fourth, and it is refused at
-    /// construction rather than left to storage, because a caller that
-    /// aims a generated asset at an entry has misunderstood what the
-    /// aim means, not merely written a bad row.
+    /// The one pairing rule the type cannot hold. Two of the three
+    /// V85 left standing are unrepresentable — this is the third, and
+    /// it is refused at construction rather than left to storage,
+    /// because a caller that aims a generated asset at an entry has
+    /// misunderstood what the aim means, not merely written a bad row.
     #[test]
     fn only_an_existing_in_may_aim_at_an_entry() {
         let aim = |origin| {
@@ -582,7 +545,6 @@ mod tests {
                     origin,
                     target: Some(TxTarget {
                         entry_id: LineEntryId::new(),
-                        base_event_id: None,
                     }),
                     out_of_scope: false,
                 },

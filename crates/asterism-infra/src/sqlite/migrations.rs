@@ -6192,20 +6192,19 @@ CREATE INDEX idx_line_event_persona ON line_event(persona_id);
 ///   COLUMN genuinely cannot do.
 /// - **Targeting is a property of an `in` that names something already
 ///   on a line**, so `target_entry_id` is admitted only on
-///   `(kind, origin) = ('in', 'existing')`, and `base_event_id` — the
-///   version the caller saw when aiming — only alongside a target. A
-///   pin with nothing pinned is the row this refuses. The target CHECK
-///   carries only half of that on its own: for `kind = 'in'` with a
-///   NULL origin it evaluates to NULL, and SQLite fails a CHECK only on
-///   false, so what closes it is V82's `(kind = 'in') = (origin IS NOT
-///   NULL)` making that combination unreachable in the first place. The
-///   two are load-bearing together.
-/// - **What the schema cannot say here, the write path owes**: that
-///   `base_event_id` names an event *on* `target_entry_id`. SQLite
-///   cannot express a cross-row constraint, so a pin aimed at another
-///   entry's event is admitted by this table and refused in P2's
-///   service (the `line_event.asset_id` division of labour: the schema
-///   holds what it can hold).
+///   `(kind, origin) = ('in', 'existing')`. The target CHECK carries
+///   only half of that on its own: for `kind = 'in'` with a NULL origin
+///   it evaluates to NULL, and SQLite fails a CHECK only on false, so
+///   what closes it is V82's `(kind = 'in') = (origin IS NOT NULL)`
+///   making that combination unreachable in the first place. The two
+///   are load-bearing together.
+/// - **The second targeting column is gone.** This step also added one
+///   holding the version of the entry a caller saw when aiming, with a
+///   CHECK admitting it only alongside a target and an index of its
+///   own. No writer ever filled it and no reader ever wanted it, and
+///   [`V90_DROP_THE_BASE_EVENT_PIN`] takes all three. The DDL below
+///   still adds them, because a database walking this chain from
+///   scratch has to arrive at the shape V90 expects to alter.
 /// - **`supersedes_asset_id` is one-way on purpose.** It is admitted
 ///   only on `update`, but an `update` is not yet required to carry
 ///   one: the verb is still reserved (`tx.rs`), nothing writes it, and
@@ -6670,6 +6669,47 @@ DROP INDEX idx_asset_trace_pursuit;
 ALTER TABLE asset DROP COLUMN trace_pursuit_id;
 "#;
 
+/// V90 — takes the base-event pin off the ledger: the column V85 added
+/// to hold which version of an entry an `in` was looking at, the CHECK
+/// pairing it to a target, and the index over it.
+///
+/// A pursuit is cut from a line and its `in` already names the entry it
+/// works on. A version claim on top of that entry is a different
+/// statement, and nothing was ever built to make it: no command carries
+/// one, the one production writer hard-codes the target it derives both
+/// columns from to `None`, and no reader has ever asked what the column
+/// held. The `Option` was saying "nothing fills this yet" rather than
+/// stating a model, so it goes rather than waiting for a merge that may
+/// never want it. `target_entry_id` stays, and so does its own CHECK.
+///
+/// **This destroys nothing.** Every row this codebase has written holds
+/// NULL here — the writer has hard-coded no target since the column
+/// landed, and `git log -S` finds no earlier revision that did
+/// otherwise. What it cannot answer for is a row written by hand
+/// against a real profile, and no migration can: the value is dropped
+/// either way, which is what dropping a column means.
+///
+/// A plain `Sql` step, and not the canonical rebuild V89 needed. The
+/// index is dropped first because SQLite refuses `DROP COLUMN` on an
+/// indexed column — the same condition V89 hit on
+/// `idx_asset_trace_pursuit`. The other documented refusal, a column
+/// "used in a foreign key constraint", was measured rather than assumed
+/// before this shape was chosen: a throwaway table whose dropped column
+/// carried `REFERENCES parent(id) ON DELETE RESTRICT` dropped cleanly
+/// under `PRAGMA foreign_keys = ON`, so that condition covers a column
+/// another table's constraint depends on, not an outbound reference
+/// from the one going. The CHECK goes with the column because it is a
+/// *column* constraint on it, which is the arrangement V85 chose and
+/// measured; nothing else in the table names it. With no rebuild there
+/// is no copy to hold `foreign_keys = OFF` for, and no reason to
+/// hand-copy an append-only ledger — the argument V85 made for altering
+/// `pursuit_tx` rather than rebuilding it holds just as well in this
+/// direction.
+const V90_DROP_THE_BASE_EVENT_PIN: &str = r#"
+DROP INDEX idx_pursuit_tx_base_event;
+ALTER TABLE pursuit_tx DROP COLUMN base_event_id;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6763,6 +6803,7 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v87_drop_the_close_record),
     Step::Sql(V88_DROP_THE_RESTAMP_RECORD),
     Step::App(v89_drop_the_pursuit_stamp),
+    Step::Sql(V90_DROP_THE_BASE_EVENT_PIN),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -10200,6 +10241,14 @@ mod tests {
     /// can re-perform, so a row is seeded *before* the step runs and
     /// read back after with every attribution column named — the four
     /// that a careless widening would drop.
+    ///
+    /// It runs to *latest* rather than stopping at 85, so what it
+    /// asserts is the shape a caller meets today: V90 dropped the pin
+    /// column, its CHECK and its index, and the rules asserted below
+    /// are the three that outlived it. That makes this the test that
+    /// answers for V90 leaving the surviving column-level CHECKs
+    /// standing — `DROP COLUMN` rewrites the table's schema text, and a
+    /// CHECK lost in that rewrite would fire nowhere and say nothing.
     #[test]
     fn v85_leaves_the_ledger_alone_and_pairs_the_new_columns() {
         let mut conn = test_conn();
@@ -10275,19 +10324,18 @@ mod tests {
         );
         assert_eq!(
             conn.query_row(
-                "SELECT out_of_scope, target_entry_id IS NULL, base_event_id IS NULL, \
+                "SELECT out_of_scope, target_entry_id IS NULL, \
                         supersedes_asset_id IS NULL \
                  FROM pursuit_tx WHERE id = ?1",
                 params![legacy_tx],
                 |r| Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?
+                    r.get::<_, i64>(2)?
                 ))
             )
             .unwrap(),
-            (0, 1, 1, 1),
+            (0, 1, 1),
             "a gesture that predates the columns aimed at nothing and reached outside nothing"
         );
         assert_eq!(
@@ -10321,33 +10369,6 @@ mod tests {
         )
         .unwrap();
 
-        // A real event to pin to. Built out in full rather than faked
-        // with a loose uuid: `base_event_id` carries an FK, so an
-        // invented id would fail on the reference and the CHECK below
-        // would never be the thing under test.
-        let close = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
-             VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
-            params![close, pursuit, persona],
-        )
-        .unwrap();
-        let merge = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
-             VALUES (?1, ?2, ?3, 0)",
-            params![merge, close, persona],
-        )
-        .unwrap();
-        let base_event = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_event \
-                 (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
-             VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
-            params![base_event, entry, persona, Uuid::now_v7(), merge],
-        )
-        .unwrap();
-
         conn.execute(
             "UPDATE pursuit SET project_id = ?1 WHERE id = ?2",
             params![project, pursuit],
@@ -10357,15 +10378,14 @@ mod tests {
         let tx = |kind: &str,
                   origin: Option<&str>,
                   target: Option<Uuid>,
-                  base: Option<Uuid>,
                   out_of_scope: i64,
                   supersedes: Option<Uuid>| {
             conn.execute(
                 "INSERT INTO pursuit_tx \
                      (id, pursuit_id, persona_id, kind, asset_id, origin, \
-                      target_entry_id, base_event_id, out_of_scope, \
+                      target_entry_id, out_of_scope, \
                       supersedes_asset_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
                 params![
                     Uuid::now_v7(),
                     pursuit,
@@ -10374,72 +10394,46 @@ mod tests {
                     Uuid::now_v7(),
                     origin,
                     target,
-                    base,
                     out_of_scope,
                     supersedes,
                 ],
             )
         };
 
-        tx("in", Some("existing"), Some(entry), None, 0, None)
+        tx("in", Some("existing"), Some(entry), 0, None)
             .expect("an existing IN may name the entry it aims at");
-        tx(
-            "in",
-            Some("existing"),
-            Some(entry),
-            Some(base_event),
-            0,
-            None,
-        )
-        .expect("and may pin the version it saw there");
-        tx("in", Some("generated"), None, None, 0, None).expect("an untargeted IN stays legal");
-        tx("in", Some("existing"), Some(entry), None, 1, None)
+        tx("in", Some("generated"), None, 0, None).expect("an untargeted IN stays legal");
+        tx("in", Some("existing"), Some(entry), 1, None)
             .expect("an IN may declare it reached outside its scope");
-        tx("update", None, None, None, 0, Some(legacy_asset))
+        tx("update", None, None, 0, Some(legacy_asset))
             .expect("an update may name the member it revises");
-        tx("update", None, None, None, 0, None)
+        tx("update", None, None, 0, None)
             .expect("an update without one is still admitted — P3 closes that direction");
 
         assert!(
-            tx("in", Some("generated"), Some(entry), None, 0, None).is_err(),
+            tx("in", Some("generated"), Some(entry), 0, None).is_err(),
             "only an existing-origin IN targets an entry"
         );
         assert!(
-            tx("remove", None, Some(entry), None, 0, None).is_err(),
+            tx("remove", None, Some(entry), 0, None).is_err(),
             "a remove targets nothing"
         );
         assert!(
-            tx("in", Some("existing"), None, Some(base_event), 0, None).is_err(),
-            "a pin with nothing pinned"
-        );
-        assert!(
-            tx("remove", None, None, None, 1, None).is_err(),
+            tx("remove", None, None, 1, None).is_err(),
             "only an IN can reach outside a scope"
         );
         assert!(
-            tx("in", Some("generated"), None, None, 0, Some(legacy_asset)).is_err(),
+            tx("in", Some("generated"), None, 0, Some(legacy_asset)).is_err(),
             "only an update supersedes"
         );
 
-        // Both new columns reference rather than merely record, and a
-        // reference nobody checks is a column of loose uuids. Asserted
-        // with ids that resolve to nothing, which is the one thing the
-        // CHECKs above cannot catch.
+        // The target column references rather than merely records, and
+        // a reference nobody checks is a column of loose uuids.
+        // Asserted with an id that resolves to nothing, which is the
+        // one thing the CHECKs above cannot catch.
         assert!(
-            tx("in", Some("existing"), Some(Uuid::now_v7()), None, 0, None).is_err(),
+            tx("in", Some("existing"), Some(Uuid::now_v7()), 0, None).is_err(),
             "a target that names no entry"
-        );
-        assert!(
-            tx(
-                "in",
-                Some("existing"),
-                Some(entry),
-                Some(Uuid::now_v7()),
-                0,
-                None
-            )
-            .is_err(),
-            "a pin that names no event"
         );
     }
 
@@ -12832,6 +12826,201 @@ mod tests {
         assert!(
             bag.contains(r#""pursuit_id":"p-1""#),
             "the note keeps what the ingest recorded: {bag}"
+        );
+    }
+
+    /// V90 drops the base-event pin, its index and its CHECK, and
+    /// leaves the rest of the ledger row where it was.
+    ///
+    /// Seeded at 89 with a row that *does* hold a pin, which no shipped
+    /// writer has ever produced. That is the point: the shipped writer
+    /// is not the only thing that can have written this table, and a
+    /// `DROP COLUMN` that only ever met NULLs would prove nothing about
+    /// the one case where the FK edge is real. The pinned event is
+    /// deleted afterwards to show the RESTRICT edge went with the
+    /// column rather than merely stopping being read.
+    ///
+    /// The three columns around the dropped one are read back by name
+    /// and compared as a tuple, because the failure this step can cause
+    /// is not an error — `TxRow::from_row` reads `pursuit_tx` by
+    /// ordinal, and a column removed from the middle of the SELECT list
+    /// shifts every read after it onto a neighbour of the same type.
+    #[test]
+    fn v90_drops_the_pin_and_leaves_the_rest_of_the_gesture() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 89).unwrap();
+        let persona = seed_persona(&conn);
+
+        let pursuit = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
+            params![pursuit, persona],
+        )
+        .unwrap();
+        let project = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO project (id, persona_id, name, created_at) VALUES (?1, ?2, 'album', 0)",
+            params![project, persona],
+        )
+        .unwrap();
+        let line = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line (id, project_id, name, created_at) VALUES (?1, ?2, 'main', 0)",
+            params![line, project],
+        )
+        .unwrap();
+        let entry = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_entry (id, line_id, persona_id, created_at) VALUES (?1, ?2, ?3, 0)",
+            params![entry, line, persona],
+        )
+        .unwrap();
+
+        // A real event to pin: the column carries an FK, so a loose
+        // uuid would be refused before the pin was ever written.
+        let close = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
+             VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
+            params![close, pursuit, persona],
+        )
+        .unwrap();
+        let merge = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![merge, close, persona],
+        )
+        .unwrap();
+        let pinned = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_event \
+                 (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
+             VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
+            params![pinned, entry, persona, Uuid::now_v7(), merge],
+        )
+        .unwrap();
+
+        let aimed = Uuid::now_v7();
+        let asset = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_tx \
+                 (id, pursuit_id, persona_id, kind, asset_id, origin, \
+                  target_entry_id, base_event_id, out_of_scope, note, \
+                  author_kind, author_subject, operator_ai, attributed_via, created_at) \
+             VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, ?6, 1, 'aimed', \
+                     'subject', 'alice', 'claude-code', 'mcp', 11)",
+            params![aimed, pursuit, persona, asset, entry, pinned],
+        )
+        .unwrap();
+
+        migrate_to(&mut conn, 90).unwrap();
+
+        // The column is gone, and so is the index over it.
+        let columns: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT name FROM pragma_table_info('pursuit_tx')")
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            !columns.iter().any(|c| c == "base_event_id"),
+            "the pin column is gone: {columns:?}"
+        );
+        assert!(
+            columns.iter().any(|c| c == "target_entry_id"),
+            "the entry it was aimed beside stays: {columns:?}"
+        );
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE type = 'index' AND name = 'idx_pursuit_tx_base_event'",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(left.is_empty(), "the index went with it: {left:?}");
+
+        // The gesture that carried the pin is still a gesture, and
+        // every column beside the dropped one still holds its own
+        // value rather than a neighbour's.
+        type AimedRow = (
+            Uuid,
+            String,
+            Option<String>,
+            Option<Uuid>,
+            i64,
+            Option<Uuid>,
+            Option<String>,
+            Option<String>,
+            i64,
+        );
+        let row: AimedRow = conn
+            .query_row(
+                "SELECT asset_id, kind, origin, target_entry_id, out_of_scope, \
+                        supersedes_asset_id, note, author_subject, created_at \
+                 FROM pursuit_tx WHERE id = ?1",
+                params![aimed],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                        r.get(8)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                asset,
+                "in".to_string(),
+                Some("existing".to_string()),
+                Some(entry),
+                1,
+                None,
+                Some("aimed".to_string()),
+                Some("alice".to_string()),
+                11
+            ),
+            "the aim, the out-of-scope claim and the attribution are untouched"
+        );
+
+        // The RESTRICT edge went with the column: the event the row
+        // pinned is free, and the entry it still names is not.
+        conn.execute("DELETE FROM line_event WHERE id = ?1", params![pinned])
+            .expect("nothing pins the event any more");
+        assert!(
+            conn.execute("DELETE FROM line_entry WHERE id = ?1", params![entry])
+                .is_err(),
+            "the aim it still carries holds the entry"
+        );
+
+        // And the pairing rules the step left standing survived the
+        // schema rewrite `DROP COLUMN` performs.
+        assert!(
+            conn.execute(
+                "INSERT INTO pursuit_tx \
+                     (id, pursuit_id, persona_id, kind, asset_id, origin, \
+                      target_entry_id, created_at) \
+                 VALUES (?1, ?2, ?3, 'in', ?4, 'generated', ?5, 0)",
+                params![Uuid::now_v7(), pursuit, persona, Uuid::now_v7(), entry],
+            )
+            .is_err(),
+            "only an existing-origin IN targets an entry, still"
         );
     }
 

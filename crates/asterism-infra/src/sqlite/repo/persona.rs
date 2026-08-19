@@ -325,9 +325,11 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // `pursuit_event`, so it goes before the events it
                 // hangs on; `line_event` restricts `line_merge` and
                 // `line_entry`, so it goes before both of those.
-                // `pursuit_tx` restricts `line_entry` and `line_event`
-                // through the aim columns, so it moves ahead of the
-                // pair. `line` restricts `project`, and
+                // `pursuit_tx` restricts `line_entry` through its aim
+                // column, so it moves ahead of that; it restricted
+                // `line_event` through a second aim column until V90
+                // dropped that one, which relaxes the order by an edge
+                // without changing it. `line` restricts `project`, and
                 // `pursuit.project_id` restricts it too, so `project`
                 // waits for the pursuits and the lines alike. Only
                 // `line` carries no persona column — it is swept
@@ -567,12 +569,11 @@ mod delete_order_tests {
             // project, line_entry → line / persona, line_merge →
             // pursuit_event / persona, line_event → line_entry /
             // line_merge / persona, and a targeted IN reaching from
-            // pursuit_tx into line_entry and line_event. Every one is
-            // RESTRICT. `line_merge → pursuit_event` is what wedges the
-            // merge ahead of the events; the last two wedge
-            // `line_event` ahead of `line_merge` and `pursuit_tx`
-            // ahead of both — seeded so the order is exercised rather
-            // than assumed.
+            // pursuit_tx into line_entry. Every one is RESTRICT.
+            // `line_merge → pursuit_event` is what wedges the merge
+            // ahead of the events, and `line_event → line_merge` wedges
+            // the event ahead of the merge — seeded so the order is
+            // exercised rather than assumed.
             let project = Uuid::now_v7();
             conn.execute(
                 "INSERT INTO project (id, persona_id, name, created_at)
@@ -611,16 +612,9 @@ mod delete_order_tests {
             conn.execute(
                 "INSERT INTO pursuit_tx
                      (id, pursuit_id, persona_id, kind, asset_id, origin,
-                      target_entry_id, base_event_id, created_at)
-                 VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, ?6, 0)",
-                params![
-                    Uuid::now_v7(),
-                    child_pursuit,
-                    persona,
-                    asset,
-                    entry,
-                    line_event
-                ],
+                      target_entry_id, created_at)
+                 VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, 0)",
+                params![Uuid::now_v7(), child_pursuit, persona, asset, entry],
             )?;
             // A bystander with a project and line of its own. `line`
             // is the one forge table swept through a subquery rather
