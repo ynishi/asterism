@@ -10,6 +10,21 @@ and this project adheres to
 
 ### Added
 
+- **The teams plane opens its door** (#91, third slice of the #83 design).
+  `teams-server` stops being a stub: instance-local auth v0 — argon2id password
+  hashing, opaque session tokens the database stores only as hashes, expiry
+  enforced on touch plus a bulk sweep, one rate limiter over every auth endpoint
+  from the start — and the `/teams/*` HTTP API, every team-scoped route behind
+  the session → user → membership gate. Team create / delete, invite / remove,
+  owner grant / revoke follow the authority table; domain refusals (the
+  last-owner rule above all) come back as client errors with state and ledger
+  untouched, and role changes are readable back through the events route with
+  old and new values in the payload. The instance operator is bootstrapped from
+  env/CLI with no fixed defaults and refuses to run twice — v0 has exactly one
+  operator, an instance capacity outside every roster, operator-stamped in the
+  ledger whenever it acts inside a team. `teams-contract` carries the
+  request/response types through the schema-bridge flow.
+
 - **The teams plane gets its storage floor** (#89, second slice of the #83
   design). `teams-infra` lands the SQLite layer: a teams-owned database with its
   own fresh migration series, WAL and the sibling's pragma discipline, opened
