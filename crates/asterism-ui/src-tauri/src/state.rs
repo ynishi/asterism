@@ -40,8 +40,8 @@ pub struct AppState {
     /// Immutable content-addressed snapshot lifecycle (seeds outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Pursuit lifecycle — the line of work a dispatch files itself
-    /// under, named here by the owner rather than minted for them.
+    /// Pursuit lifecycle — the line of work a dispatch is filed under
+    /// when the owner names one, opened here and nowhere else.
     pub pursuit_service: Arc<PursuitService>,
     /// Outbound dispatch lifecycle (create → apalis → reify → new Asset
     /// via each registered `Exporter`).

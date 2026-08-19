@@ -140,8 +140,9 @@ pub struct DispatchGetParams {
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PursuitViewParams {
-    /// Pursuit id — returned by `pursuit_open`, stamped on every
-    /// dispatch (`pursuit_id`), and carried in exporter sidecars.
+    /// Pursuit id — returned by `pursuit_open`, stamped on the
+    /// dispatches that name it (`pursuit_id`), and carried in
+    /// exporter sidecars.
     pub pursuit_id: String,
 }
 
@@ -575,7 +576,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. Optional: a dispatch that arrives unstamped mints one anyway, so this is for naming the line of work up front and then passing `pursuit_id` on the dispatches you start. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
+        description = "Open a pursuit — the unit of work rounds and returns are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. This is the only way a pursuit comes into being: open one, then pass its `pursuit_id` on the dispatches you want filed under it. A dispatch that names none is filed nowhere, and nothing is opened on your behalf. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one — for the case where an artefact came back claiming a pursuit that has no row here; the claim then resolves on the next sweep. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
     )]
     async fn pursuit_open(
         &self,
@@ -629,7 +630,7 @@ impl AsterismMcp {
     }
 
     #[tool(
-        description = "Re-file a dispatch round under a different pursuit: the repair verb for work that landed in the wrong line, including a round you filed yourself under a pursuit you had just minted by accident. The move is recorded with the filing it replaced, the round's returns follow through the dispatch join, and nothing about what happened in the round changes. A target in another persona is refused. Correcting a mis-filing is itself on the record — which is the point; do not use it to re-file rounds whose filing you did not put there without being asked to."
+        description = "Re-file a dispatch round under a different pursuit: the repair verb for work that landed in the wrong line, including a round you filed under a pursuit you had opened by mistake. The move is recorded with the filing it replaced, the round's returns follow through the dispatch join, and nothing about what happened in the round changes. A target in another persona is refused. Correcting a mis-filing is itself on the record — which is the point; do not use it to re-file rounds whose filing you did not put there without being asked to."
     )]
     async fn pursuit_restamp_dispatch(
         &self,
@@ -773,11 +774,11 @@ loopback HTTP on the same port.
    about once: whichever answer is given, it is not raised again.
 10. `dispatch_get` — one outbound dispatch's persisted state.
 11. `pursuit_open` / `pursuit_view` / `pursuit_close` / `pursuit_reopen`
-    — the line of work rounds and returns are filed under. Every
-    dispatch belongs to one whether or not anybody named it: start a
-    dispatch without a `pursuit_id` and the server mints a pursuit for
-    it. So the useful order is to open one first, name what it is for,
-    and pass its id on the rounds you start; `pursuit_view` then answers
+    — the line of work rounds and returns are filed under. A round
+    belongs to one only where you say so: start a dispatch without a
+    `pursuit_id` and it is filed nowhere, and nothing opens a pursuit
+    on your behalf. So the order is to open one first, name what it is
+    for, and pass its id on the rounds you start; `pursuit_view` then answers
     "what is already in here" (standing, rounds, returns, events) before
     you add another. Closing is a recorded fact, not a lock — `satisfied`
     freezes the kept set into a snapshot you can dispatch from, closing

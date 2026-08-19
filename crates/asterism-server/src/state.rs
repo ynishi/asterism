@@ -36,8 +36,9 @@ pub struct ServerCtx {
     /// Immutable content-addressed snapshots (seeds for outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Lifecycle verbs of the pursuit — the unit of work every
-    /// dispatch files itself under (#29).
+    /// Lifecycle verbs of the pursuit — the unit of work a caller
+    /// files its rounds under (#29), opened through these verbs and
+    /// no others.
     pub pursuit_service: Arc<PursuitService>,
     /// The context pursuits file under (#63) — opened deliberately,
     /// and the owner of the line a satisfied close lands on.

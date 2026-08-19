@@ -1039,7 +1039,6 @@ pub async fn init_core_with(
         groups_arc.clone(),
         query_groups.clone(),
         query_group_service.clone(),
-        pursuits.clone(),
     ));
     // Lifecycle verbs of the unit of work (#29); the close freeze goes
     // through the snapshot service so kept ids get the same hydration

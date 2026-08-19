@@ -1903,11 +1903,13 @@ pub struct CreateDispatchCommand {
     /// codebase does not have yet, and the exporter cannot answer it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
-    /// Pursuit to file this round under. `None` mints a fresh pursuit
-    /// server-side (always-mint: work cannot happen outside a pursuit,
-    /// there is no detached state). Continuation is explicit — the
+    /// Pursuit to file this round under. `None` files it nowhere:
+    /// exporting a selection is a catalogue verb, and nothing is
+    /// opened on the caller's behalf. Continuation is explicit — the
     /// server never infers it from snapshot overlap — so a surface
-    /// that wants rounds to correlate has to thread this id.
+    /// that wants rounds to correlate opens a pursuit and threads its
+    /// id. The id is recorded as given and read by nobody here: this
+    /// command does not check that it names a live pursuit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pursuit_id: Option<String>,
 }
@@ -1942,7 +1944,7 @@ pub struct DispatchRunCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
     /// Pursuit to file this round under — same contract as
-    /// [`CreateDispatchCommand::pursuit_id`] (`None` mints).
+    /// [`CreateDispatchCommand::pursuit_id`] (`None` files nowhere).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pursuit_id: Option<String>,
 }
@@ -1958,8 +1960,9 @@ pub struct RedispatchCommand {
     /// Pursuit to file the re-run under. `None` continues the prior
     /// dispatch's pursuit — not an inference: the caller named the
     /// prior round literally, and a re-run is a new round of the same
-    /// line of work (the new-patchset-on-the-same-change shape).
-    /// Supply an id to file it elsewhere instead.
+    /// line of work (the new-patchset-on-the-same-change shape). A
+    /// prior filed nowhere re-runs filed nowhere; there is nothing to
+    /// carry. Supply an id to file it elsewhere instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pursuit_id: Option<String>,
 }
@@ -1997,11 +2000,11 @@ pub struct OpenProjectCommand {
     pub operator_ai: Option<String>,
 }
 
-/// Opens a pursuit explicitly — the "start new pursuit" affordance
-/// (#29). Optional: a dispatch arriving unstamped mints one anyway
-/// (always-mint); pre-creating simply lets the caller name the intent
-/// up front. An empty pursuit that never receives work is an honest
-/// record, closable as abandoned.
+/// Opens a pursuit — the "start new pursuit" affordance (#29), and
+/// the only way one comes into being. A caller that wants rounds
+/// correlated opens it here, names the intent, and passes the id on
+/// each dispatch it starts. An empty pursuit that never receives work
+/// is an honest record, closable as abandoned.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct OpenPursuitCommand {

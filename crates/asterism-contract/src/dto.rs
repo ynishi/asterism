@@ -1246,9 +1246,10 @@ pub struct DispatchDto {
     pub snapshot_id: String,
     /// Persona bucket.
     pub persona_id: String,
-    /// Pursuit this round is filed under (#29). `None` only on rows
-    /// that predate the stamp's backfill invariant; moved only by the
-    /// restamp verb, never by a state save.
+    /// Pursuit this round is filed under (#29). `None` on a round
+    /// nobody filed — starting an export does not require a line of
+    /// work to file it under; moved only by the restamp verb, never by
+    /// a state save.
     pub pursuit_id: Option<String>,
     /// Exporter slug (`comfy` / `gemini` / `vdsl` / `alc-sd-bake`).
     pub exporter_slug: String,
@@ -1424,8 +1425,8 @@ pub struct PursuitDto {
     /// Pursuit this one was spawned from (`None` for a root). Set at
     /// creation, immutable.
     pub parent_id: Option<String>,
-    /// Short human label (`None` for an anonymous, implicitly minted
-    /// pursuit — display names for those are synthesized, not stored).
+    /// Short human label (`None` for a pursuit opened without one —
+    /// display names for those are synthesized, not stored).
     pub title: Option<String>,
     /// One short free-text slot.
     pub note: Option<String>,

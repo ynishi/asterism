@@ -40,7 +40,7 @@
 //! The two wire verbs take an [`AttributionContext`] they do not
 //! persist (no group column carries attribution); the evaluator itself
 //! takes none at all — see its own doc comment for why that asymmetry
-//! is the doctrine rather than an omission.
+//! is the design rather than an omission.
 //!
 //! # A Query Group is defined by predicates only
 //!

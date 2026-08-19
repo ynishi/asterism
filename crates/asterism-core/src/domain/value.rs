@@ -64,8 +64,8 @@ pub(crate) use define_uuid_id;
 define_uuid_id!(
     /// The catalogue's handle on a forge round.
     ///
-    /// A dispatch is filed under a pursuit, and the row has to carry
-    /// which one — but the catalogue does not know what a pursuit is,
+    /// A dispatch filed under a pursuit has to carry which one — but
+    /// the catalogue does not know what a pursuit is,
     /// and a type it cannot name is a type it cannot depend on. So the
     /// stamp is held opaquely here and the forge puts its own
     /// [`PursuitId`](crate::domain::forge::value::PursuitId) over it,

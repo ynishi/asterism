@@ -237,7 +237,7 @@ fn main() {
         ThreadAnchorDto,
         MessageDto,
         MessageRefDto,
-        // Pursuit — the unit of work rounds file themselves under.
+        // Pursuit — the unit of work a caller files its rounds under.
         OpenPursuitCommand,
         ClosePursuitCommand,
         CullVerdictEntry,

@@ -5655,7 +5655,7 @@ fn v78_material_layers(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
 ///
 /// Three tables and one column. `pursuit` is thin and immutable (no
 /// status column — standing derives from `pursuit_event` on read, the
-/// `duplicate_conflict` doctrine); `pursuit_event` holds the one-way
+/// `duplicate_conflict` reading); `pursuit_event` holds the one-way
 /// lifecycle facts; `pursuit_restamp` records moves of a stamped event
 /// between pursuits — the repair verb for mis-filed correlation.
 /// `dispatch_job.pursuit_id` is the stamp itself.
@@ -9651,7 +9651,7 @@ mod tests {
     ///
     /// Read off the schema rather than a hand-kept list: a new
     /// `attributed_via` would otherwise arrive silently, and every one of
-    /// them is a place the doctrine has to answer for — which channel
+    /// them is a place the attribution rule has to answer for — which channel
     /// wrote it, what a NULL means there, and how auth resolves it
     /// later. Third wave: the ledger and the cull (V82) — a membership
     /// gesture and an act of narrowing are both statements somebody
@@ -11460,7 +11460,7 @@ mod tests {
     ///
     /// Read off this file's own source — names rather than meanings, and
     /// no build dependency (the same trade
-    /// `asterism-core/tests/attribution_doctrine_guards.rs` makes).
+    /// `asterism-core/tests/attribution_guards.rs` makes).
     #[test]
     fn every_step_is_named_for_the_version_it_produces() {
         let list = include_str!("migrations.rs")

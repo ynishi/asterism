@@ -33,9 +33,9 @@ use crate::error::DomainError;
 /// the persona purge, which is hand-rolled in the adapter.
 #[async_trait]
 pub trait PursuitRepository: Send + Sync {
-    /// Persists a fresh pursuit — the explicit pre-create, and the
-    /// mint half of always-mint. Insert-only: a pursuit is never
-    /// re-saved.
+    /// Persists a fresh pursuit — opening one is the only way a row
+    /// gets here, and it is always somebody's explicit act.
+    /// Insert-only: a pursuit is never re-saved.
     async fn create(&self, pursuit: &Pursuit) -> Result<(), DomainError>;
 
     /// Fetches one pursuit by id.

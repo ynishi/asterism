@@ -331,8 +331,10 @@ impl DispatchRunnerService {
         job.completed_at = Some(now);
         self.dispatches.save(&job).await?;
 
-        // Each output entered its pursuit, and the ledger row that says
-        // so is the forge's write (#22). This service is the
+        // Where the round was filed under a pursuit, each output
+        // entered it, and the ledger row that says so is the forge's
+        // write (#22) — the unstamped case falls out below. This
+        // service is the
         // catalogue's, so it asks for the filing rather than doing it:
         // the row above is saved, and everything the filing needs —
         // the stamp, the persona, the output ids, the attribution — is

@@ -1182,20 +1182,24 @@ mod tests {
             Arc::new(SqliteGroupRepository::new(isle.clone())),
             query_groups,
             qgs,
-            Arc::new(crate::sqlite::repo::SqlitePursuitRepository::new(
-                isle.clone(),
-            )),
         )
     }
 
-    /// Always-mint, observed through the service: no supplied id ⇒ the
-    /// row comes back stamped with a fresh pursuit; a supplied id is
-    /// used as-is; a second unstamped request mints separately (the
-    /// mint scope is the request, and correlation is explicit, never
-    /// inferred from the shared members).
+    /// The stamp, observed through the service: a supplied id is filed
+    /// as-is, and a request that supplies none leaves the row
+    /// unstamped. Nothing is invented — an export is a catalogue verb,
+    /// and correlating two rounds that only share their members would
+    /// be exactly the inference the model forbids.
+    ///
+    /// The supplied id names a pursuit that was opened first, because
+    /// `dispatch_job.pursuit_id` references `pursuit(id)` (V79): the
+    /// service reads the id no further than parsing it, but the column
+    /// still refuses one that answers to no row.
     #[tokio::test]
-    async fn dispatch_run_always_stamps_a_pursuit() {
+    async fn dispatch_run_stamps_only_what_the_caller_supplied() {
         use asterism_contract::command::DispatchRunCommand;
+        use asterism_core::domain::forge::pursuit::Pursuit;
+        use asterism_core::domain::forge::repository::PursuitRepository;
         let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
         let persona = seed_persona(&isle).await;
         let a = seed_asset(&isle, &persona, 100, "[]").await;
@@ -1211,26 +1215,34 @@ mod tests {
             pursuit_id,
         };
 
-        let first = svc.run(volatile_run(None), &nobody()).await.unwrap();
-        let minted = first
-            .pursuit_id
-            .expect("an unstamped request is minted a pursuit");
+        let unstamped = svc.run(volatile_run(None), &nobody()).await.unwrap();
+        assert_eq!(
+            unstamped.pursuit_id, None,
+            "a request that named no pursuit files under none"
+        );
 
-        let second = svc
-            .run(volatile_run(Some(minted.clone())), &nobody())
+        let opened = Pursuit::new(
+            persona,
+            None,
+            None,
+            Some("the line of work".into()),
+            None,
+            chrono::Utc::now(),
+            &nobody(),
+        );
+        crate::sqlite::repo::SqlitePursuitRepository::new(isle.clone())
+            .create(&opened)
+            .await
+            .unwrap();
+        let supplied = opened.id.to_string();
+        let stamped = svc
+            .run(volatile_run(Some(supplied.clone())), &nobody())
             .await
             .unwrap();
         assert_eq!(
-            second.pursuit_id.as_deref(),
-            Some(minted.as_str()),
+            stamped.pursuit_id.as_deref(),
+            Some(supplied.as_str()),
             "a supplied id files the round as-is"
-        );
-
-        let third = svc.run(volatile_run(None), &nobody()).await.unwrap();
-        let reminted = third.pursuit_id.expect("stamped");
-        assert_ne!(
-            reminted, minted,
-            "separate unstamped requests mint separately — same members is not correlation"
         );
 
         driver.shutdown().await.unwrap();

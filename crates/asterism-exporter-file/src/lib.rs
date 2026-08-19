@@ -707,8 +707,8 @@ fn stamp_sidecar_identity(
     // The pursuit stamp travels beside the dispatch id (#29): the
     // dispatch names the hop, the pursuit names the line of work, and
     // a returning artefact can keep the second even when truncation
-    // costs it the first. Absent rather than null when the job
-    // predates the stamp — a sidecar states what it knows.
+    // costs it the first. Absent rather than null where the round was
+    // filed under no pursuit — a sidecar states what it knows.
     if let Some(pursuit) = ctx.pursuit_id {
         identity[asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD] = serde_json::json!(pursuit);
     }

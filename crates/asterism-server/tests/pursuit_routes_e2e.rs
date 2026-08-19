@@ -461,8 +461,19 @@ async fn restamp_moves_a_round_and_refuses_what_it_must() {
     .await;
     assert_eq!(status, StatusCode::OK, "freeze: {snapshot}");
 
-    // No `pursuit_id` on the way in: always-mint files the round under
-    // a pursuit nobody named, which is the case restamp exists for.
+    // The round goes out filed under the line of work it names — the
+    // filing restamp exists to move. A dispatch naming none carries no
+    // stamp, and there is nothing to move.
+    let (_, first_guess) = call(
+        &router,
+        post(
+            "/asterism/pursuits/open",
+            serde_json::json!({ "persona_id": persona.id, "title": "the first guess" }),
+        ),
+    )
+    .await;
+    let first_guess_id = str_at(&first_guess, "id").to_string();
+
     let (status, round) = call(
         &router,
         post(
@@ -472,12 +483,17 @@ async fn restamp_moves_a_round_and_refuses_what_it_must() {
                 "exporter_slug": "file",
                 "action": "write",
                 "params_json": "",
+                "pursuit_id": first_guess_id,
             }),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "dispatch: {round}");
-    let minted = str_at(&round, "pursuit_id").to_string();
+    assert_eq!(
+        str_at(&round, "pursuit_id"),
+        first_guess_id,
+        "the supplied stamp is the filing"
+    );
 
     let (_, target) = call(
         &router,
@@ -488,7 +504,7 @@ async fn restamp_moves_a_round_and_refuses_what_it_must() {
     )
     .await;
     let target_id = str_at(&target, "id").to_string();
-    assert_ne!(minted, target_id, "the mint was not the named line");
+    assert_ne!(first_guess_id, target_id, "two distinct lines of work");
 
     let (status, moved) = call(
         &router,
@@ -522,9 +538,13 @@ async fn restamp_moves_a_round_and_refuses_what_it_must() {
             .map(Vec::len),
         Some(1)
     );
-    let (_, minted_view) = call(&router, get(&format!("/asterism/pursuits/{minted}/view"))).await;
+    let (_, vacated_view) = call(
+        &router,
+        get(&format!("/asterism/pursuits/{first_guess_id}/view")),
+    )
+    .await;
     assert_eq!(
-        minted_view
+        vacated_view
             .get("rounds")
             .and_then(|r| r.as_array())
             .map(Vec::len),

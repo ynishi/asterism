@@ -684,6 +684,27 @@ and this project adheres to
   variables overrides locally with `CARGO_PROFILE_DEV_DEBUG=2` without touching
   the tree. (#85)
 
+- **A dispatch carries the pursuit its caller named, and nothing when it named
+  none.** Always-mint made every start verb open a `Pursuit` row: supply no
+  `pursuit_id` and the server minted one for you, so exporting a selection — a
+  catalogue capability, and the one thing the forge is not required for — could
+  not happen without a forge object being written. `DispatchService` is a raw
+  dispatcher again. It stamps what the caller supplied, leaves the stamp `None`
+  where nobody supplied one, and names no forge type at all: the wire field
+  stays `pursuit_id` and parses to the catalogue's own `CorrelationId`.
+  `redispatch` still inherits the prior round's stamp, because naming the prior
+  round is itself explicit, and inherits nothing where the prior carried
+  nothing.
+
+  The existence check went with it, which is the part worth stating plainly: a
+  supplied id is no longer read at all, so nothing here refuses an id that names
+  no live pursuit or one belonging to another persona. That check is about a
+  forge object, and answering it from a catalogue verb is what coupled the two
+  in the first place; the forge-side export path where it belongs does not exist
+  yet, and `restamp` is what corrects a filing until it does. Existing stamped
+  rows are untouched — the V79 backfill stands, and a `pursuit` row with no
+  project is still residue of the retired rule rather than a mode.
+
 - **The six doctrines are gone, and `dispatch` is a catalogue module again.**
   `domain::mod`'s doctrine list was a second copy of reasoning that already
   lived next to the types, and it had drifted: read against those types, four of

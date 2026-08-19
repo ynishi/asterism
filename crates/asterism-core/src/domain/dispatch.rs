@@ -170,10 +170,10 @@ pub struct DispatchJob {
     /// and volatile selections.
     pub source_query_json: Option<String>,
     /// The pursuit this round is filed under (#29). A stamp, not event
-    /// content: set by the service at creation (always-mint — a
-    /// dispatch arriving without one gets a pursuit minted), moved only
-    /// by the recorded restamp verb, and `None` only on rows that
-    /// predate the column's backfill invariant. Correlation metadata —
+    /// content: set at creation from what the caller supplied, moved
+    /// only by the recorded restamp verb, and `None` on a round nobody
+    /// filed — an export is a catalogue verb, and starting one does not
+    /// require a line of work to file it under. Correlation metadata —
     /// which is why it is a public field where the attribution triple
     /// is private: restamping rewrites the filing without touching what
     /// happened.

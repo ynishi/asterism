@@ -19,6 +19,29 @@
 //! is needed (stamping the reified outputs) is minutes or hours after
 //! the request that supplied it.
 //!
+//! The `pursuit_id` a start verb carries is the other thing kept on the
+//! row, and this service treats it as a stamp it does not read: it
+//! parses to the catalogue's own
+//! [`CorrelationId`](crate::domain::value::CorrelationId), is written
+//! where the caller supplied one, and is left `None` where nobody did.
+//! Nothing here checks that the id names a live pursuit, or that the
+//! pursuit belongs to the calling persona. Those questions are about a
+//! forge object, and answering them from a catalogue verb would mean an
+//! export could not be started without a forge in sight; the
+//! forge-side export path where they belong does not exist yet, and
+//! [`restamp_dispatch`] is what corrects a filing until it does.
+//!
+//! What that leaves is worth being exact about, because the two walls
+//! do not fall together. Existence still holds, one layer down and
+//! with a different error: `dispatch_job.pursuit_id` carries a foreign
+//! key to `pursuit(id)` (V79), so a stamp naming no row is refused by
+//! the store rather than by a check here — an infra error, not a
+//! validation one. The persona wall is simply gone: an id naming
+//! *another* persona's pursuit is a row SQLite is happy to write, and
+//! nothing in this path looks.
+//!
+//! [`restamp_dispatch`]: super::pursuit_service::PursuitService::restamp_dispatch
+//!
 //! What the runner does to a dispatch in flight — `save_state` /
 //! `save_handle` / `reify` — is not here. Those live on
 //! [`DispatchRunnerService`](crate::application_support::DispatchRunnerService),
@@ -33,16 +56,13 @@ use asterism_contract::dto::DispatchDto;
 use chrono::Utc;
 
 use crate::application::attribution_intake::refuse_assertion_from_owner_surface;
-use crate::application::forge::mapping::parse_pursuit_id;
-use crate::application::mapping::{dispatch_to_dto, parse_dispatch_id, parse_snapshot_id};
+use crate::application::mapping::{
+    dispatch_to_dto, parse_correlation_id, parse_dispatch_id, parse_snapshot_id,
+};
 use crate::domain::attribution::AttributionContext;
 use crate::domain::dispatch::DispatchJob;
-use crate::domain::forge::pursuit::Pursuit;
-use crate::domain::forge::repository::PursuitRepository;
-use crate::domain::forge::value::PursuitId;
 use crate::domain::job::JobKind;
 use crate::domain::repository::{DispatchRepository, JobQueue, SnapshotRepository};
-use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
 /// Outbound-dispatch use-case service.
@@ -56,14 +76,10 @@ pub struct DispatchService {
     groups: Arc<dyn crate::domain::repository::GroupRepository>,
     query_groups: Arc<dyn crate::domain::repository::QueryGroupRepository>,
     query_group_service: Arc<crate::application::query_group_service::QueryGroupService>,
-    /// The mint half of always-mint (#29): every start verb stamps a
-    /// pursuit, minting one when the caller supplied none.
-    pursuits: Arc<dyn PursuitRepository>,
 }
 
 impl DispatchService {
     /// Wires the service around its ports.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         snapshots: Arc<dyn SnapshotRepository>,
         dispatches: Arc<dyn DispatchRepository>,
@@ -71,7 +87,6 @@ impl DispatchService {
         groups: Arc<dyn crate::domain::repository::GroupRepository>,
         query_groups: Arc<dyn crate::domain::repository::QueryGroupRepository>,
         query_group_service: Arc<crate::application::query_group_service::QueryGroupService>,
-        pursuits: Arc<dyn PursuitRepository>,
     ) -> Self {
         Self {
             snapshots,
@@ -80,50 +95,6 @@ impl DispatchService {
             groups,
             query_groups,
             query_group_service,
-            pursuits,
-        }
-    }
-
-    /// Resolves the pursuit a new round files under: the supplied id
-    /// (validated to exist in the caller's persona — continuation is
-    /// explicit, never inferred, and never crosses personas), or a
-    /// fresh anonymous pursuit minted here (always-mint: work cannot
-    /// happen outside a pursuit, there is no detached state).
-    ///
-    /// The mint and the dispatch write are two repository calls, not
-    /// one transaction — deliberately. If the dispatch write fails
-    /// after the mint, what remains is an empty anonymous pursuit,
-    /// which is exactly the pre-created / stranded state the model
-    /// already defines as an honest record (repairable by restamp,
-    /// closable as abandoned). A cross-aggregate transaction would buy
-    /// nothing but coupling.
-    async fn resolve_pursuit(
-        &self,
-        supplied: Option<&str>,
-        persona_id: PersonaId,
-        now: chrono::DateTime<chrono::Utc>,
-        attribution: &AttributionContext,
-    ) -> Result<PursuitId, DomainError> {
-        match supplied {
-            Some(wire) => {
-                let id = parse_pursuit_id(wire)?;
-                let pursuit = self
-                    .pursuits
-                    .find(&id)
-                    .await?
-                    .ok_or_else(|| DomainError::not_found("pursuit", wire))?;
-                if pursuit.persona_id != persona_id {
-                    return Err(DomainError::Validation(
-                        "pursuit belongs to a different persona".into(),
-                    ));
-                }
-                Ok(id)
-            }
-            None => {
-                let minted = Pursuit::new(persona_id, None, None, None, None, now, attribution);
-                self.pursuits.create(&minted).await?;
-                Ok(minted.id)
-            }
         }
     }
 
@@ -232,15 +203,11 @@ impl DispatchService {
             attribution,
         )?
         .with_source(source_group_id, source_query_json);
-        // Minted only after the job passed its own validation: a bad
-        // slug is a refused request, and a refused request should not
-        // strand an empty pursuit (a strand is legal, but it is the
-        // price of a *failed write*, not of a typo).
-        job.pursuit_id = Some(
-            self.resolve_pursuit(command.pursuit_id.as_deref(), persona_id, now, attribution)
-                .await?
-                .as_correlation(),
-        );
+        job.pursuit_id = command
+            .pursuit_id
+            .as_deref()
+            .map(parse_correlation_id)
+            .transpose()?;
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }
@@ -276,27 +243,16 @@ impl DispatchService {
             attribution,
         )?
         .with_source(prior.source_group_id, prior.source_query_json.clone());
-        // The pursuit *is* inherited where the attribution above is
-        // not: the caller named the prior round literally, and a re-run
-        // is a new round of the same line of work (a new patchset on
-        // the same change) — an explicit reference, not the
-        // membership-overlap inference the model forbids. A prior from
-        // before the stamp invariant can still be NULL; then the
-        // re-run mints, as any unstamped work does.
+        // The stamp *is* inherited where the attribution above is not:
+        // the caller named the prior round literally, and a re-run is a
+        // new round of the same line of work (a new patchset on the
+        // same change) — an explicit reference, not the
+        // membership-overlap inference the model forbids. An unstamped
+        // prior re-runs unstamped; there is nothing to carry, and
+        // inventing a stamp here would be correlating by fiat.
         job.pursuit_id = match command.pursuit_id.as_deref() {
-            Some(wire) => Some(
-                self.resolve_pursuit(Some(wire), prior.persona_id, now, attribution)
-                    .await?
-                    .as_correlation(),
-            ),
-            None => match prior.pursuit_id {
-                Some(inherited) => Some(inherited),
-                None => Some(
-                    self.resolve_pursuit(None, prior.persona_id, now, attribution)
-                        .await?
-                        .as_correlation(),
-                ),
-            },
+            Some(wire) => Some(parse_correlation_id(wire)?),
+            None => prior.pursuit_id,
         };
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
@@ -345,17 +301,11 @@ impl DispatchService {
             now,
             attribution,
         )?;
-        // Post-validation mint, as in `run`: a typo does not strand.
-        job.pursuit_id = Some(
-            self.resolve_pursuit(
-                command.pursuit_id.as_deref(),
-                snapshot.persona_id,
-                now,
-                attribution,
-            )
-            .await?
-            .as_correlation(),
-        );
+        job.pursuit_id = command
+            .pursuit_id
+            .as_deref()
+            .map(parse_correlation_id)
+            .transpose()?;
         self.save_and_enqueue(&job).await?;
         Ok(dispatch_to_dto(&job))
     }

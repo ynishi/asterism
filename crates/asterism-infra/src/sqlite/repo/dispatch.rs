@@ -63,8 +63,9 @@ struct DispatchRow {
     author_kind: Option<String>,
     author_subject: Option<String>,
     attributed_via: Option<String>,
-    // The pursuit stamp (V79). NULL only where the service invariant
-    // has not run — the backfill stamps every pre-V79 row.
+    // The pursuit stamp (V79). NULL wherever the caller named no
+    // pursuit, which is most rounds; the V79 backfill is why no
+    // pre-V79 row reads that way by accident of age.
     pursuit_id: Option<Uuid>,
 }
 

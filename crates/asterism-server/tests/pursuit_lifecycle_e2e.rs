@@ -387,6 +387,11 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
         .await
         .expect("freeze input");
 
+    // The round starts filed under the line of work it named. A
+    // dispatch that names none carries no stamp, and an unstamped round
+    // is not what restamp is for — restamp moves a filing, so there has
+    // to be one.
+    let first_guess = open(&core, &persona.id, None, Some("the first guess")).await;
     let round = core
         .dispatch_service
         .create(
@@ -396,16 +401,20 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
+                pursuit_id: Some(first_guess.id.clone()),
             },
             &unattributed(),
         )
         .await
-        .expect("create dispatch (mints its own pursuit)");
-    let minted = round.pursuit_id.clone().expect("always-mint stamped it");
+        .expect("create dispatch under the pursuit it named");
+    assert_eq!(
+        round.pursuit_id.as_deref(),
+        Some(first_guess.id.as_str()),
+        "the supplied stamp is the filing"
+    );
 
     let target = open(&core, &persona.id, None, Some("the real line")).await;
-    assert_ne!(minted, target.id, "an unstamped request minted fresh");
+    assert_ne!(first_guess.id, target.id, "two distinct lines of work");
     let moved = core
         .pursuit_service
         .restamp_dispatch(
@@ -476,4 +485,74 @@ async fn restamp_refiles_a_round_and_the_walls_hold() {
     assert_eq!(round_ids, vec![round.id.as_str(), late.id.as_str()]);
     assert!(opened.returns.is_empty());
     assert_eq!(opened.events.len(), 1);
+}
+
+/// Filing refuses a cross-persona stamp, which is where that wall lives
+/// now (#81).
+///
+/// `DispatchService` stamps what it is handed and interprets nothing,
+/// so the id on a dispatch can name another persona's pursuit — the
+/// schema's foreign key says the row exists and nothing about whose it
+/// is. Without a check on this side, one persona's outputs would land
+/// in another's ledger, which `restamp` refuses outright and nothing
+/// else in the tree does at all.
+#[tokio::test]
+async fn filing_refuses_a_round_stamped_with_another_personas_pursuit() {
+    let (tmp, core, persona) = boot("filing-wall").await;
+    let stranger = register(&core, "filing-wall-stranger").await;
+    let asset = seed_asset(&core, &tmp, &persona.id, "a.md").await;
+    let input = core
+        .snapshot_service
+        .create(
+            CreateSnapshotCommand {
+                persona_id: persona.id.clone(),
+                asset_ids: vec![asset],
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("freeze input");
+
+    // The stamp names a pursuit that exists — so the foreign key is
+    // satisfied — and belongs to somebody else.
+    let theirs = open(&core, &stranger.id, None, Some("not yours")).await;
+    let round = core
+        .dispatch_service
+        .create(
+            CreateDispatchCommand {
+                snapshot_id: input.id.clone(),
+                exporter_slug: "file".into(),
+                action: "write".into(),
+                params_json: String::new(),
+                operator_ai: None,
+                pursuit_id: Some(theirs.id.clone()),
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("the dispatcher stamps what it is given");
+    assert_eq!(
+        round.pursuit_id.as_deref(),
+        Some(theirs.id.as_str()),
+        "the raw dispatcher interprets nothing, so the crossing reaches the row"
+    );
+
+    let refused = core
+        .pursuit_service
+        .file_dispatch_outputs(&round.id)
+        .await
+        .expect_err("filing refuses the crossing");
+    assert!(
+        refused.to_string().contains("different personas"),
+        "the refusal says what it refused: {refused}"
+    );
+    let theirs_after = core
+        .pursuit_service
+        .view(&theirs.id)
+        .await
+        .expect("view the stranger's pursuit");
+    assert!(
+        theirs_after.txs.is_empty(),
+        "and nothing was written into it"
+    );
 }

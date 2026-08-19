@@ -417,9 +417,9 @@ pub enum JobKind {
     /// complete the moment `reify` returns, and a ledger entry is not
     /// worth holding behind a fingerprint.
     ///
-    /// A dispatch with no stamp writes nothing — pre-V79 rows are the
-    /// only ones that reach the handler that way, and there is no
-    /// pursuit for them to enter.
+    /// A dispatch with no stamp writes nothing — a round its caller
+    /// filed nowhere has no pursuit to enter, and the reify that would
+    /// have queued this does not queue it at all.
     PursuitLedgerFile,
 }
 

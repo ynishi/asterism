@@ -34,7 +34,8 @@
 use std::sync::{Arc, Mutex};
 
 use asterism_contract::command::{
-    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
+    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, OpenPursuitCommand,
+    RegisterPersonaCommand,
 };
 use asterism_core::application_support::DispatchRunnerService;
 use asterism_core::application_support::duplicate_detection::{
@@ -271,6 +272,25 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         )
         .await
         .expect("freeze snapshot");
+    // The ledger assertions below read the pursuit this round is filed
+    // under, so the round names one. An export that names none files
+    // nowhere and there is no ledger to read.
+    let pursuit = core
+        .pursuit_service
+        .open(
+            OpenPursuitCommand {
+                persona_id: persona.id.clone(),
+                pursuit_id: None,
+                project_id: None,
+                parent_pursuit_id: None,
+                title: Some("the export".into()),
+                note: None,
+                operator_ai: None,
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("open the pursuit the round files under");
     let dispatch = core
         .dispatch_service
         .create(
@@ -285,7 +305,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
                 })
                 .to_string(),
                 operator_ai: None,
-                pursuit_id: None,
+                pursuit_id: Some(pursuit.id.clone()),
             },
             &unattributed(),
         )
@@ -361,12 +381,12 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
     let stamped = dispatch
         .pursuit_id
         .as_deref()
-        .expect("always-mint stamped the round");
+        .expect("the round carries the stamp it was given");
     let filed = core
         .pursuit_service
         .view(stamped)
         .await
-        .expect("view the minted pursuit");
+        .expect("view the pursuit the round files under");
     let generated: Vec<&str> = filed
         .txs
         .iter()

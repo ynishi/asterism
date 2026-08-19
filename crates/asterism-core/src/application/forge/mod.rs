@@ -2,14 +2,14 @@
 //!
 //! [`pursuit_service`] owns the lifecycle (open / close / reopen /
 //! restamp) and the reads over it; [`dispatch_service`] starts a round
-//! and files it under the pursuit it belongs to, minting one when the
-//! caller named none. They are together because they are the two halves
-//! of one story — a pursuit with no round records nothing, a round with
-//! no pursuit cannot exist, which is a rule this layer keeps rather
-//! than one the type enforces ([`DispatchJob::pursuit_id`] is an
-//! `Option`) — and apart from the rest because they are the only
-//! services here whose writes carry intent rather than content (the
-//! layer itself is described in [`domain::forge`](crate::domain::forge)).
+//! and files it under the pursuit the caller named, or under none when
+//! the caller named none ([`DispatchJob::pursuit_id`] is an `Option`,
+//! and an export that files nowhere is an ordinary export). They are
+//! together because they are the two halves of one story — a pursuit
+//! with no round records nothing — and apart from the rest because
+//! they are the only services here whose writes carry intent rather
+//! than content (the layer itself is described in
+//! [`domain::forge`](crate::domain::forge)).
 //!
 //! [`DispatchJob::pursuit_id`]: crate::domain::dispatch::DispatchJob::pursuit_id
 //!

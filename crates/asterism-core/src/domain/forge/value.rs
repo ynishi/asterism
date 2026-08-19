@@ -4,8 +4,8 @@
 //! catalogue's id vocabulary contains no forge type. Ten of the eleven
 //! declared here are named nowhere outside `domain::forge` and
 //! `application::forge`; the eleventh, [`PursuitId`], is the one the
-//! catalogue has a reason to hold — a dispatch is filed under a pursuit
-//! and the row carries which one.
+//! catalogue has a reason to hold — a dispatch filed under a pursuit
+//! carries which one on its row.
 //!
 //! That one is handled by conversion rather than by sharing the type.
 //! The catalogue stamps a

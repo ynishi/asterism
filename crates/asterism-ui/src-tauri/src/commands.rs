@@ -1632,9 +1632,9 @@ pub async fn redispatch(
 /// Opens a pursuit and names what it is for, ahead of the first round.
 ///
 /// Not required to have one: a dispatch started without a `pursuit_id`
-/// mints its own. This is the "start a new line of work" affordance, and
-/// the path that creates a pursuit at an id a returning artefact already
-/// claims.
+/// is filed nowhere, and that is an ordinary export. This is the "start
+/// a new line of work" affordance, and the path that creates a pursuit
+/// at an id a returning artefact already claims.
 #[tauri::command]
 pub async fn open_pursuit(
     state: State<'_, AppState>,

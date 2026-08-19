@@ -17,7 +17,8 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
+    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, OpenPursuitCommand,
+    RegisterPersonaCommand,
 };
 use asterism_contract::dto::DerivedDto;
 use asterism_contract::sidecar::{SIDECAR_IDENTITY_KEY, SIDECAR_SCHEMA, SIDECAR_SUFFIX};
@@ -121,6 +122,25 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
         )
         .await
         .expect("freeze snapshot");
+    // The sidecar below carries the round's stamp, so the round has
+    // one: an export that names no pursuit writes no `pursuit_id`
+    // into the identity block, which is a different scenario.
+    let pursuit = core
+        .pursuit_service
+        .open(
+            OpenPursuitCommand {
+                persona_id: persona.id.clone(),
+                pursuit_id: None,
+                project_id: None,
+                parent_pursuit_id: None,
+                title: Some("the export".into()),
+                note: None,
+                operator_ai: None,
+            },
+            &unattributed(),
+        )
+        .await
+        .expect("open the pursuit the round files under");
     let dispatch = core
         .dispatch_service
         .create(
@@ -130,7 +150,7 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
+                pursuit_id: Some(pursuit.id.clone()),
             },
             &unattributed(),
         )
@@ -179,7 +199,10 @@ async fn a_sidecar_links_the_return_through_the_export_it_names() {
         SIDECAR_IDENTITY_KEY: {
             "schema": SIDECAR_SCHEMA,
             "dispatch_id": dispatch.id,
-            "pursuit_id": dispatch.pursuit_id.as_deref().expect("always-mint stamped the run"),
+            "pursuit_id": dispatch
+                .pursuit_id
+                .as_deref()
+                .expect("the round carries the stamp it was given"),
             "exporter_slug": "file",
             "source_asset_id": source.id,
         }

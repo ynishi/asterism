@@ -72,13 +72,12 @@ pub struct Pursuit {
     /// The project this work files under — what makes it forge work,
     /// and what a merge derives its target line from.
     ///
-    /// `None` on every row today: nothing sets this yet, and
-    /// always-mint still opens a pursuit for each dispatch that
-    /// arrives without one. The column is nullable for what comes
-    /// after that rule is retired (#63) rather than for today — filing
-    /// becomes what mints a pursuit, so an unfiled row is residue
-    /// rather than a mode, and residue is left as it is instead of
-    /// being given a project it never had.
+    /// `None` where nobody filed the work: an open that names no
+    /// project files nowhere, and the rows left behind by the retired
+    /// always-mint rule (#63) were never filed by anyone at all. The
+    /// column is nullable because those rows exist and are not
+    /// rewritten — residue rather than a mode, left as it is instead
+    /// of being given a project it never had.
     ///
     /// Set at creation and never rewritten, like `parent_id`. Restamp
     /// does not reach it — that verb moves a *dispatch* between
@@ -86,8 +85,8 @@ pub struct Pursuit {
     /// under the right one with its rounds restamped across.
     pub project_id: Option<ProjectId>,
     /// Short human label — provenance of intent, not state. `None` for
-    /// an anonymous (implicitly minted) pursuit; display names for
-    /// those are synthesized by the read side, not stored.
+    /// a pursuit opened without one; display names for those are
+    /// synthesized by the read side, not stored.
     pub title: Option<String>,
     /// One short free-text slot.
     pub note: Option<String>,

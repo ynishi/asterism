@@ -2,11 +2,11 @@
 //! (#29): open, close, reopen, restamp, and the reads that derive
 //! standing.
 //!
-//! Always-mint lives in
-//! [`DispatchService`](super::dispatch_service::DispatchService) —
-//! a dispatch arriving unstamped mints its own pursuit there. This
-//! service is everything else: the explicit pre-create (naming intent
-//! up front), the one-way lifecycle facts (close / reopen — recorded,
+//! Starting a round lives in
+//! [`DispatchService`](super::dispatch_service::DispatchService),
+//! which stamps the pursuit the caller named and interprets nothing.
+//! This service is everything else: the open that creates one (naming
+//! intent up front), the one-way lifecycle facts (close / reopen — recorded,
 //! never a status write), the close's single deliberate
 //! materialisation (the kept set frozen into a snapshot), and the
 //! restamp repair verb. Transport routes land in the next slice of
@@ -89,10 +89,10 @@ impl PursuitService {
         }
     }
 
-    /// Opens a pursuit explicitly. The always-mint rule makes this
-    /// optional; pre-creating lets a caller name intent before the
-    /// first round, and a pre-created pursuit that never receives work
-    /// is an honest record.
+    /// Opens a pursuit — the only way one comes into being. A caller
+    /// that wants rounds filed under it opens it first and passes the
+    /// id on each dispatch; a pursuit that never receives work is an
+    /// honest record.
     pub async fn open(
         &self,
         command: OpenPursuitCommand,
@@ -722,9 +722,9 @@ impl PursuitService {
     /// re-runs one; a recovery pass that could overlap with this would
     /// need the uniqueness the table does not have.
     ///
-    /// An unstamped dispatch files nothing. Pre-V79 rows are the only
-    /// ones that reach here that way, and there is no pursuit for them
-    /// to enter.
+    /// An unstamped dispatch files nothing — an export that named no
+    /// pursuit has none to enter, which is an ordinary export and not
+    /// a fault to report.
     pub async fn file_dispatch_outputs(&self, dispatch_id: &str) -> Result<(), DomainError> {
         let id = parse_dispatch_id(dispatch_id)?;
         let job = self
@@ -736,6 +736,32 @@ impl PursuitService {
             return Ok(());
         };
         let pursuit_id = PursuitId::from_correlation(stamp);
+
+        // The persona wall, on the side that owns it.
+        //
+        // `DispatchService` stamps whatever it is handed and interprets
+        // nothing, so a caller can put another persona's pursuit id on
+        // a dispatch — the schema's foreign key says the pursuit
+        // exists, and says nothing about whose it is. Filing is where
+        // that becomes a crossing: without this the outputs of one
+        // persona's run land in another persona's ledger, which the
+        // restamp verb refuses outright and nothing else in the tree
+        // does at all.
+        //
+        // Refused rather than skipped. A skip would leave a run whose
+        // outputs are silently unfiled and read as an ordinary empty
+        // pursuit; the error names the pair, and no retry hides it
+        // because nothing retries.
+        let pursuit = self
+            .pursuits
+            .find(&pursuit_id)
+            .await?
+            .ok_or_else(|| DomainError::not_found("pursuit", &pursuit_id.to_string()))?;
+        if pursuit.persona_id != job.persona_id {
+            return Err(DomainError::Validation(
+                "dispatch and the pursuit it is stamped with belong to different personas".into(),
+            ));
+        }
 
         // One read for the whole batch — a probe per output is the same
         // answer at N times the cost. Raw `in` rows, not derived

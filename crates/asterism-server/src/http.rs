@@ -388,11 +388,10 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             post(promote_snapshot_to_group),
         )
         .route("/asterism/dispatch/{id}", get(get_dispatch))
-        // Pursuit — the unit of work every dispatch files itself
-        // under. Always-mint means these rows exist whether or not a
-        // caller ever names one, so the lifecycle verbs are what make
-        // them nameable, closable and repairable from outside the
-        // process. Plural, for the reason the module doc gives.
+        // Pursuit — the unit of work a caller files its rounds under.
+        // These verbs are the only way one exists at all: open it,
+        // then pass its id on the dispatches that belong to it.
+        // Plural, for the reason the module doc gives.
         .route("/asterism/pursuits", get(list_pursuits))
         .route("/asterism/pursuits/open", post(open_pursuit))
         .route("/asterism/pursuits/close", post(close_pursuit))

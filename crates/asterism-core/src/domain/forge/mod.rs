@@ -68,9 +68,9 @@
 //!   `Asset::new` depend on the forge, which is the arrow above turned
 //!   around.
 //! - **The core does not need the forge.** Importing, deduplicating,
-//!   rating and trashing all work with no pursuit in sight. The minting
-//!   rule ([`pursuit`]) binds the forge's
-//!   own events, not the catalogue.
+//!   rating and trashing all work with no pursuit in sight, and so
+//!   does exporting: a round is filed under a pursuit where its caller
+//!   named one, and under none where nobody did.
 //!
 //! # What is deliberately not here
 //!

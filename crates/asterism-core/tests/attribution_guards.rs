@@ -1,4 +1,4 @@
-//! Scans that hold the parts of the attribution doctrine no type can.
+//! Scans that hold the parts of the attribution rule no type can.
 //!
 //! Two shapes are already closed by the compiler:
 //! a service mutation cannot be written without receiving an
@@ -349,7 +349,7 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 }
 
 /// `module::fn` pairs in `application/` that take no `AttributionContext`,
-/// each with the reason it is not a write the doctrine attributes.
+/// each with the reason it is not a write that gets attributed.
 ///
 /// Three kinds of thing live here and nothing else should: reads,
 /// writes of something *derived* from a
@@ -665,7 +665,7 @@ fn every_application_mutation_receives_an_attribution_context() {
         assert!(
             !reason.trim().is_empty(),
             "{key} is exempt without saying why it is not a write the \
-             doctrine attributes"
+             rule attributes"
         );
     }
     let exempt: BTreeSet<&str> = CONTEXT_EXEMPT.iter().map(|(key, _)| *key).collect();

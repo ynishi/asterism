@@ -112,7 +112,8 @@ pub struct DispatchContext<'a> {
     /// the stamp — exporters that write a sidecar copy it out beside
     /// `dispatch_id`, so a returning artefact can name its line of
     /// work even where the dispatch row join is unavailable. `None`
-    /// on rows that predate the stamp's backfill invariant.
+    /// where the round was filed under no pursuit, which a sidecar
+    /// writes out as an absent field rather than an empty one.
     pub pursuit_id: Option<&'a str>,
     /// Exporter action (`"img2img"`, `"txt2img"`, `"lora_bake"`,
     /// `"multimodal_chat"`, …). Open slug space — new actions are
