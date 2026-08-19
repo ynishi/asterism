@@ -10,6 +10,24 @@ and this project adheres to
 
 ### Added
 
+- **The teams plane gets its storage floor** (#89, second slice of the #83
+  design). `teams-infra` lands the SQLite layer: a teams-owned database with its
+  own fresh migration series, WAL and the sibling's pragma discipline, opened
+  through the workspace's one `rusqlite-isle` line. The state tables — team,
+  membership, blob links, locators — are the source of truth, and the ledger is
+  the record: every public write is one transaction that applies the state
+  change and appends its ledger event together or not at all; there is no method
+  that writes state without appending and none that appends without state. The
+  one documented exception is the locator — private-space operations never land
+  in the ledger, by design. The ledger stream is append-only in the API and in
+  the schema (no updated_at, no soft delete, abort triggers on UPDATE/DELETE),
+  seq is storage-assigned, monotonic and gapless per team, and subjects land in
+  an index table so trace queries never parse payload JSON. Domain invariants
+  ride inside the transaction: the last-owner rule refuses the write in the same
+  tx that would have recorded it. Profile markers publish the same way the
+  sibling's do — temp file, sync, hard link — so a crash mid-publish cannot
+  wedge a home behind an empty marker.
+
 - **The teams plane gets its crates and its domain floor** (#87, first slice of
   the #83 design). Four crates join the workspace — `teams-core` / `teams-infra`
   / `teams-contract` / `teams-server`, the same layering as their asterism-*

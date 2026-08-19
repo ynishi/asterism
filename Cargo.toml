@@ -42,6 +42,16 @@ description   = "Persona/Char/Memory grid UI — local-first Asterism for person
 version       = "0.0.0"
 edition       = "2024"
 
+# The teams plane is excluded from docs/aidoc while it is pre-v0 and
+# publish = false: llms-full.txt has a 512 KiB soft cap that `--strict`
+# promotes to an error, the file sits at ~98% of it on the app crates
+# alone, and each teams slice would breach it again (#89's CI run did,
+# by 1,795 bytes). One list here beats trimming doc comments crate by
+# crate. Remove entries as the plane stabilizes — deliberately, cap in
+# view — or lift the cap in cargo-aidoc first.
+[workspace.metadata.aidoc]
+exclude = ["teams-core", "teams-infra", "teams-contract", "teams-server"]
+
 [workspace.dependencies]
 # --- External integrations (kept commented out until reintroduced) ---
 # The following crates were part of an earlier skeleton and were removed
