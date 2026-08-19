@@ -78,7 +78,11 @@ use super::source_type::DigitalSourceType;
 /// Built through [`for_asset`](Self::for_asset) and the `with_*` chain
 /// so that adding a field cannot silently produce a record where a
 /// caller's positional argument moved.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// Deliberately no `Default`: it would construct the one state the
+/// field docs forbid — a record with an empty `asset_id` — and that
+/// record reaches a signed assertion nobody can correct afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisclosureRecord {
     /// How the file came to exist. `None` means nothing established it
     /// — no property is written, which is a different statement from
@@ -123,8 +127,14 @@ impl DisclosureRecord {
     /// rests on.
     pub fn for_asset(asset_id: impl Into<String>) -> Self {
         Self {
+            source_type: None,
+            ai_system: None,
+            ai_system_version: None,
+            prompt: None,
             asset_id: asset_id.into(),
-            ..Self::default()
+            dispatch_id: None,
+            parents: Vec::new(),
+            title: None,
         }
     }
 
@@ -209,11 +219,43 @@ impl DisclosureRecord {
     /// The caller is expected to record that it fell back — a file whose
     /// prompt was dropped and a file that never had one are otherwise
     /// indistinguishable afterwards.
+    ///
+    /// When even this does not fit, [`obligation`](Self::obligation) is
+    /// the tier below.
     pub fn essential(&self) -> Self {
         Self {
             source_type: self.source_type,
             ai_system: self.ai_system.clone(),
             ai_system_version: self.ai_system_version.clone(),
+            prompt: None,
+            asset_id: self.asset_id.clone(),
+            dispatch_id: self.dispatch_id.clone(),
+            parents: self.parents.clone(),
+            title: self.title.clone(),
+        }
+    }
+
+    /// The record cut down to the machine-readable mark alone.
+    ///
+    /// [`essential`](Self::essential) keeps the generating system, and
+    /// the system name is read out of someone else's file — unbounded,
+    /// so a large enough one overflows the JPEG segment a second time
+    /// and takes the whole packet with it. This is the tier below:
+    /// nothing in the packet but the digital source type, whose values
+    /// are a fixed vocabulary of URIs and always fit. The manifest half
+    /// is untouched for the same reason it is untouched in `essential` —
+    /// the limit being escaped is JPEG's APP1 segment, which the
+    /// manifest does not travel in.
+    ///
+    /// A record with no source type reduces to one that discloses
+    /// nothing, and the fallback ladder ends there: with the mark absent
+    /// there is nothing bounded left to write, and the caller keeps the
+    /// failure rather than reporting an empty write as a success.
+    pub fn obligation(&self) -> Self {
+        Self {
+            source_type: self.source_type,
+            ai_system: None,
+            ai_system_version: None,
             prompt: None,
             asset_id: self.asset_id.clone(),
             dispatch_id: self.dispatch_id.clone(),
@@ -276,5 +318,44 @@ mod tests {
             .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
             .with_prompt("p");
         assert_eq!(record.essential(), record.essential().essential());
+    }
+
+    #[test]
+    fn obligation_keeps_the_mark_and_nothing_else_in_the_packet() {
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
+            .with_ai_system("ComfyUI", Some("0.3.0".into()))
+            .with_prompt("a prompt")
+            .with_parents(vec!["parent-1".into()])
+            .with_dispatch("dispatch-1")
+            .with_title("a title");
+
+        let mark = record.obligation();
+        assert_eq!(
+            mark.source_type,
+            Some(DigitalSourceType::TrainedAlgorithmicMedia)
+        );
+        assert_eq!(mark.ai_system, None, "the unbounded string is gone");
+        assert_eq!(mark.ai_system_version, None);
+        assert_eq!(mark.prompt, None);
+        // The manifest half does not travel in the segment being escaped.
+        assert_eq!(mark.asset_id, "asset-1");
+        assert_eq!(mark.parents, vec!["parent-1".to_string()]);
+        assert_eq!(mark.dispatch_id.as_deref(), Some("dispatch-1"));
+        assert_eq!(mark.title.as_deref(), Some("a title"));
+    }
+
+    #[test]
+    fn obligation_is_the_bottom_of_the_fallback_ladder() {
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
+            .with_ai_system("ComfyUI", None)
+            .with_prompt("p");
+        // Each tier only removes, and the bottom tier is a fixed point.
+        assert_eq!(record.obligation(), record.essential().obligation());
+        assert_eq!(record.obligation(), record.obligation().obligation());
+        // A record with no mark reduces to one that discloses nothing.
+        let unmarked = DisclosureRecord::for_asset("asset-1").with_ai_system("ComfyUI", None);
+        assert!(!unmarked.obligation().discloses_anything());
     }
 }
