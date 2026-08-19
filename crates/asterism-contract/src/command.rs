@@ -661,6 +661,11 @@ pub struct UpdateAssetMetaBatchResult {
 pub struct TrashAssetCommand {
     /// Target asset id.
     pub asset_id: String,
+    /// Optional one-line remark said at trash time (#65) — "wrong
+    /// hands again". Lands as an `AssetComment` pinned to the gesture,
+    /// so the reason survives the throw. Whitespace-only is treated as
+    /// absent.
+    pub comment: Option<String>,
 }
 
 /// Returns a trashed asset to the live set. Idempotent.
@@ -668,6 +673,10 @@ pub struct TrashAssetCommand {
 pub struct RestoreAssetCommand {
     /// Target asset id.
     pub asset_id: String,
+    /// Optional one-line remark said at salvage time (#65) — "keep
+    /// for the pose, not the face". Lands as an `AssetComment` pinned
+    /// to the gesture. Whitespace-only is treated as absent.
+    pub comment: Option<String>,
 }
 
 /// Permanently deletes an **already-trashed** asset. Irreversible:
@@ -857,6 +866,13 @@ pub struct CreateGroupCommand {
 pub struct TrashGroupCommand {
     /// Target group id.
     pub group_id: String,
+    /// Optional one-line remark said at trash time (#65). A comment
+    /// is per-asset and a Group has no thread of its own, so the
+    /// remark fans out: every member asset gets an `AssetComment`
+    /// pinned to the gesture — the sentence said over the batch is
+    /// what each member's siblings want to surface later.
+    /// Whitespace-only is treated as absent.
+    pub comment: Option<String>,
 }
 
 /// Returns a trashed Group to the sidebar, membership and drag order

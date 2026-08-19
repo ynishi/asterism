@@ -662,6 +662,7 @@ async fn a_question_whose_side_is_in_the_trash_waits_for_it() {
         .trash(
             TrashAssetCommand {
                 asset_id: fx.newcomer.clone(),
+                comment: None,
             },
             &unattributed(),
         )
@@ -688,6 +689,7 @@ async fn a_question_whose_side_is_in_the_trash_waits_for_it() {
         .restore(
             RestoreAssetCommand {
                 asset_id: fx.newcomer.clone(),
+                comment: None,
             },
             &unattributed(),
         )

@@ -1,6 +1,6 @@
 //! SQLite adapter for the `AssetCommentRepository` port.
 
-use asterism_core::domain::asset_comment::{AssetComment, CommentAuthor};
+use asterism_core::domain::asset_comment::{AssetComment, CommentAuthor, SelectionGesture};
 use asterism_core::domain::repository::AssetCommentRepository;
 use asterism_core::domain::value::{AssetCommentId, AssetId, PersonaId};
 use asterism_core::error::DomainError;
@@ -32,11 +32,12 @@ struct CommentRow {
     body: String,
     created_at: i64,
     edited_at: Option<i64>,
+    gesture: Option<String>,
 }
 
 impl CommentRow {
     const COLUMNS: &'static str =
-        "id, asset_id, author_kind, author_persona_id, body, created_at, edited_at";
+        "id, asset_id, author_kind, author_persona_id, body, created_at, edited_at, gesture";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -47,6 +48,7 @@ impl CommentRow {
             body: row.get(4)?,
             created_at: row.get(5)?,
             edited_at: row.get(6)?,
+            gesture: row.get(7)?,
         })
     }
 
@@ -71,6 +73,19 @@ impl CommentRow {
                 )));
             }
         };
+        // The V86 CHECK keeps the column inside the vocabulary, so a
+        // slug `parse` refuses is a corrupt row, not caller input —
+        // reported as the infrastructure failure it is, like an
+        // unknown `author_kind` above.
+        let gesture = self
+            .gesture
+            .as_deref()
+            .map(|slug| {
+                SelectionGesture::parse(slug).map_err(|_| {
+                    DomainError::Infra(anyhow::anyhow!("unknown gesture slug: {slug:?}"))
+                })
+            })
+            .transpose()?;
         Ok(AssetComment {
             id: AssetCommentId::from_uuid(self.id),
             asset_id: AssetId::from_uuid(self.asset_id),
@@ -78,6 +93,7 @@ impl CommentRow {
             body: self.body,
             created_at: ms_to_datetime(self.created_at)?,
             edited_at: self.edited_at.map(ms_to_datetime).transpose()?,
+            gesture,
         })
     }
 }
@@ -92,13 +108,17 @@ impl AssetCommentRepository for SqliteAssetCommentRepository {
         let body = comment.body.clone();
         let created = datetime_to_ms(&comment.created_at);
         let edited = comment.edited_at.as_ref().map(datetime_to_ms);
+        let gesture = comment.gesture.map(|g| g.slug());
         self.isle
             .call(move |conn| {
+                // `gesture` is not in the conflict update set: which
+                // verb occasioned a comment is a fact about its
+                // posting, and `edit` rewrites the body, not history.
                 conn.execute(
                     "INSERT INTO asset_comment
                          (id, asset_id, author_kind, author_persona_id, body,
-                          created_at, edited_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                          created_at, edited_at, gesture)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(id) DO UPDATE SET
                          body = excluded.body,
                          edited_at = excluded.edited_at",
@@ -109,7 +129,8 @@ impl AssetCommentRepository for SqliteAssetCommentRepository {
                         author_persona_id,
                         body,
                         created,
-                        edited
+                        edited,
+                        gesture
                     ],
                 )?;
                 Ok(())
@@ -278,6 +299,68 @@ mod tests {
         );
         assert_eq!(listed[0].author.kind_slug(), "persona");
         assert_eq!(listed[0].author.persona_id(), None);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A gesture-pinned comment survives the round trip, and an
+    /// ordinary post keeps reading back as one — the V86 column is
+    /// `NULL` for every row nothing pinned, which is also what every
+    /// pre-V86 row reads as.
+    #[tokio::test]
+    async fn a_gesture_pin_round_trips_and_a_plain_post_stays_plain() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetCommentRepository::new(isle.clone());
+        let owner = seed_persona(&isle).await;
+        let asset = seed_asset(&isle, owner).await;
+
+        let at = DateTime::from_timestamp_millis(1_700_000_000_000).unwrap();
+        let pinned = AssetComment::for_gesture(
+            asset,
+            CommentAuthor::User,
+            "wrong hands again",
+            SelectionGesture::Trash,
+            at,
+        )
+        .unwrap();
+        repo.save(&pinned).await.unwrap();
+        let plain = comment(asset, CommentAuthor::User, "just a note");
+        repo.save(&plain).await.unwrap();
+
+        let listed = repo.list_by_asset(&asset).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        let read_pinned = listed.iter().find(|c| c.id == pinned.id).unwrap();
+        assert_eq!(read_pinned.gesture, Some(SelectionGesture::Trash));
+        assert_eq!(read_pinned.body, "wrong hands again");
+        let read_plain = listed.iter().find(|c| c.id == plain.id).unwrap();
+        assert_eq!(read_plain.gesture, None);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The V86 CHECK is the vocabulary's floor: a slug outside
+    /// `trash` / `trash_group` / `restore` cannot even be written, so
+    /// `into_domain`'s corrupt-row arm stays a belt over braces.
+    #[tokio::test]
+    async fn the_gesture_column_refuses_a_slug_outside_the_vocabulary() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let owner = seed_persona(&isle).await;
+        let asset = seed_asset(&isle, owner).await;
+
+        let aid = *asset.as_uuid();
+        let refused = isle
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO asset_comment \
+                         (id, asset_id, author_kind, author_persona_id, body, \
+                          created_at, edited_at, gesture) \
+                     VALUES (?1, ?2, 'user', NULL, 'x', 0, NULL, 'empty_trash')",
+                    params![Uuid::now_v7(), aid],
+                )?;
+                Ok(())
+            })
+            .await;
+        assert!(refused.is_err(), "disposal is not a gesture with a voice");
 
         driver.shutdown().await.unwrap();
     }

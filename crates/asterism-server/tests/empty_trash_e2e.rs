@@ -128,6 +128,7 @@ async fn emptying_the_trash_takes_every_trashed_asset_and_no_live_one() {
             .trash(
                 TrashAssetCommand {
                     asset_id: id.clone(),
+                    comment: None,
                 },
                 &unattributed(),
             )

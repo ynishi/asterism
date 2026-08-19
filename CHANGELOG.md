@@ -10,6 +10,18 @@ and this project adheres to
 
 ### Added
 
+- **A selection gesture can carry a sentence** (#65). `trash`, `restore`, and
+  `trash_group` accept an optional one-line comment, and the remark lands as an
+  `AssetComment` pinned to the gesture — actor, time, and verb on the row — so
+  "why this one was thrown" survives the throw and "keep for the pose, not the
+  face" survives the salvage. A group's remark fans out to every member asset: a
+  comment is per-asset, and the sentence said over a batch is exactly what each
+  member's siblings want to surface later. Strictly a footnote mechanism — free
+  text, optional, silent when absent — and deliberately not a verdict record,
+  which stays #22's territory. Disposal verbs (`empty_trash`, `purge`) take no
+  comment: executing a decision already made is not a moment anybody states a
+  reason at.
+
 - **The teams plane learns to let go, and to survive** (#95, fifth slice of the
   #83 design — the last area ahead of the share port). Storage reclaim is an
   explicit verb with a conscience: an owner (or the operator, operator-stamped)

@@ -802,6 +802,7 @@ pub async fn init_core_with(
         personas.clone(),
         tags_arc.clone(),
         groups_arc.clone(),
+        asset_comments.clone(),
         dirs_arc.clone(),
         edges_arc.clone(),
         snapshots.clone(),

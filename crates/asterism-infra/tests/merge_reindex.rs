@@ -163,6 +163,7 @@ async fn fixture() -> Fixture {
         Arc::new(repo::SqlitePersonaRepository::new(isle.clone())),
         Arc::new(repo::SqliteTagRepository::new(isle.clone())),
         Arc::new(repo::group::SqliteGroupRepository::new(isle.clone())),
+        Arc::new(repo::SqliteAssetCommentRepository::new(isle.clone())),
         Arc::new(repo::SqliteDirRepository::new(isle.clone())),
         Arc::new(repo::SqliteEdgeRepository::new(isle.clone())),
         Arc::new(repo::SqliteSnapshotRepository::new(isle.clone())),

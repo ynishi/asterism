@@ -976,6 +976,7 @@ pub fn asset_comment_to_dto(comment: &AssetComment) -> AssetCommentDto {
         body: comment.body.clone(),
         created_at_ms: comment.created_at.timestamp_millis(),
         edited_at_ms: comment.edited_at.as_ref().map(|t| t.timestamp_millis()),
+        gesture: comment.gesture.map(|g| g.slug().to_string()),
     }
 }
 

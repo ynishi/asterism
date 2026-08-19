@@ -22,9 +22,9 @@ export type UpdateAssetMetaBatchCommand = { items: { asset_id: string; labels: s
 
 export type UpdateAssetMetaBatchResult = { succeeded: { id: string; persona_id: string; source_kind: string; locator: string; file_size_bytes: number | null; platform: string | null; mime: string | null; media: string; content_hash: string | null; modality: string | null; labels: string[]; occurred_at_ms: number; container_id: string | null; title: string | null; bundle_id: string | null; role: string; cover: string | null; keywords: string[]; register_note: string | null; visibility_restricted: boolean; visibility_sharing: string[]; duration_ms: number | null; width_px: number | null; height_px: number | null; rating: number | null; palette: string[] | null; extra_json: string | null; created_at_ms: number; updated_at_ms: number; author_kind: string | null; author_subject: string | null; operator_ai: string | null; attributed_via: string | null; on_duplicate: string | null; folded_into: string | null; fold_policy: string; } | null[]; failed: string[]; success_count: number; failure_count: number; };
 
-export type TrashAssetCommand = { asset_id: string; };
+export type TrashAssetCommand = { asset_id: string; comment: string | null; };
 
-export type RestoreAssetCommand = { asset_id: string; };
+export type RestoreAssetCommand = { asset_id: string; comment: string | null; };
 
 export type PurgeAssetCommand = { asset_id: string; };
 
@@ -40,7 +40,7 @@ export type CancelJobCommand = { job_id: string; };
 
 export type CreateGroupCommand = { persona_id: string; name: string; description: string | null; };
 
-export type TrashGroupCommand = { group_id: string; };
+export type TrashGroupCommand = { group_id: string; comment: string | null; };
 
 export type RestoreGroupCommand = { group_id: string; };
 
@@ -272,7 +272,7 @@ export type SettingLayerDto = { source: string; value_json: string; origin: stri
 
 export type SettingDto = { key: string; kind: string; value_json: string; source: string; layers: { source: string; value_json: string; origin: string | null; rejected: string | null; }[]; env_var: string | null; min: number | null; max: number | null; summary: string; };
 
-export type AssetCommentDto = { id: string; asset_id: string; author_kind: string; author_persona_id: string | null; body: string; created_at_ms: number; edited_at_ms: number | null; };
+export type AssetCommentDto = { id: string; asset_id: string; author_kind: string; author_persona_id: string | null; body: string; created_at_ms: number; edited_at_ms: number | null; gesture: string | null; };
 
 export type MaterialMarkDto = { id: string; asset_id: string; anchor_kind: string; start_ms: number | null; end_ms: number | null; author_kind: string; author_persona_id: string | null; body: string; created_at_ms: number; edited_at_ms: number | null; };
 

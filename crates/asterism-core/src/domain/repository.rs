@@ -2256,6 +2256,14 @@ pub trait GroupRepository: Send + Sync {
     /// toggle against.
     async fn groups_of(&self, asset_id: &AssetId) -> Result<Vec<Group>, DomainError>;
 
+    /// Returns every asset filed in the group, in hand-arranged order.
+    /// The filing rows, not the live view: a trashed or folded member
+    /// keeps its `asset_bucket` row by design, and the one caller —
+    /// fanning a trash-time remark out to the members (#65) — wants
+    /// the batch the sentence was said over, not the subset that
+    /// happens to be visible.
+    async fn member_asset_ids(&self, group_id: &GroupId) -> Result<Vec<AssetId>, DomainError>;
+
     /// Overwrites the ordering of a group's members. `ordered` is the
     /// full sequence of asset ids in the new front-to-back order; any
     /// asset id not currently in the group is silently ignored (the UI

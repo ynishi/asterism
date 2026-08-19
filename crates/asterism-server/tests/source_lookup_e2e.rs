@@ -180,6 +180,7 @@ impl Fixture {
             .trash(
                 asterism_contract::command::TrashAssetCommand {
                     asset_id: asset.to_string(),
+                    comment: None,
                 },
                 &unattributed(),
             )
