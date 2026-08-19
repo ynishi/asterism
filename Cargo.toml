@@ -158,6 +158,15 @@ serde       = { version = "1", features = ["derive"] }
 # specify the canonical form and version the tag.
 serde_json  = { version = "1", features = ["preserve_order"] }
 tokio       = { version = "1", features = ["full"] }
+# The teams-plane backup archive (#95): one plain uncompressed tar holds
+# the `VACUUM INTO` snapshot first and the blob files after, so the
+# DB-first order rule (#83 §4) is readable in the entry order itself.
+# Deliberately no compression layer: blobs are content-addressed media
+# that mostly do not compress, backup destinations (rclone/S3 mounts)
+# compress or dedupe at transport when they care, and a plain tar keeps
+# restore to "untar and point the server at it". First archive dep in
+# the workspace — nothing on the asterism-* side archives anything.
+tar         = "0.4"
 anyhow      = "1"
 thiserror   = "2"
 async-trait = "0.1"

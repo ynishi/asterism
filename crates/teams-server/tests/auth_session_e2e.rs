@@ -52,6 +52,8 @@ async fn harness(limiter: RateLimiter) -> Harness {
         registration: RegistrationPolicy::Open,
         session_ttl_ms: 60_000,
         auth_limiter: limiter,
+        purge_grace_ms: 0,
+        gc_guard: Arc::new(teams_infra::gc::GcGuard::new()),
     });
     let router = teams_server::http::router(ctx.clone());
     Harness {

@@ -300,8 +300,11 @@ pub enum TeamVerb {
     GrantOwner,
     /// Revoke the owner role.
     RevokeOwner,
-    /// Mark the team's stored blobs for purge (grace window, then
-    /// reclaim — the same trash→purge discipline as core).
+    /// The purge two-step over the team's blob links — mark, unmark
+    /// during the grace window, reclaim after it (the same trash→purge
+    /// discipline as core). One verb for all three arms: they share an
+    /// authority row (#95), and splitting them would invite the rows
+    /// to drift apart.
     Purge,
 }
 
@@ -319,11 +322,13 @@ pub enum TeamAuthority {
 /// The #83 §1 authority table for in-team verbs, as one decision
 /// function.
 ///
-/// Owners may do everything. The operator may **delete** a team
-/// (ledger-stamped as the operator) and nothing else in this table:
-/// §1 grants the operator no implicit invite / remove / role-grant /
-/// purge inside a team it does not own — for those the operator joins
-/// like anyone else and acts through a membership row.
+/// Owners may do everything. The operator may **delete** a team and
+/// **purge** its storage (mark / unmark / reclaim — #95 extends the §1
+/// delete row to its reclaim sibling), ledger-stamped as the operator
+/// in both cases, and nothing else in this table: §1 grants the
+/// operator no implicit invite / remove / role-grant inside a team it
+/// does not own — for those the operator joins like anyone else and
+/// acts through a membership row.
 ///
 /// This answers "does the role permit the verb" and nothing more; the
 /// last-owner rule is a property of the target and the roster, checked
@@ -331,15 +336,13 @@ pub enum TeamAuthority {
 /// can be permitted and still refused.
 pub const fn verb_allowed(authority: TeamAuthority, verb: TeamVerb) -> bool {
     match verb {
-        TeamVerb::Delete => matches!(
+        TeamVerb::Delete | TeamVerb::Purge => matches!(
             authority,
             TeamAuthority::Operator | TeamAuthority::Member(Role::Owner)
         ),
-        TeamVerb::Invite
-        | TeamVerb::Remove
-        | TeamVerb::GrantOwner
-        | TeamVerb::RevokeOwner
-        | TeamVerb::Purge => matches!(authority, TeamAuthority::Member(Role::Owner)),
+        TeamVerb::Invite | TeamVerb::Remove | TeamVerb::GrantOwner | TeamVerb::RevokeOwner => {
+            matches!(authority, TeamAuthority::Member(Role::Owner))
+        }
     }
 }
 
@@ -666,9 +669,14 @@ mod tests {
             // table.
             assert!(verb_allowed(owner, verb));
             assert!(!verb_allowed(plain, verb));
-            // The operator's one grant is delete — ledger-stamped as
-            // the operator, never disguised (§1).
-            assert_eq!(verb_allowed(Operator, verb), verb == TeamVerb::Delete);
+            // The operator's grants are the destructive pair — delete,
+            // and purge's mark/unmark/reclaim (#95, the §1 delete row
+            // extended) — ledger-stamped as the operator, never
+            // disguised (§1).
+            assert_eq!(
+                verb_allowed(Operator, verb),
+                matches!(verb, TeamVerb::Delete | TeamVerb::Purge)
+            );
         }
     }
 

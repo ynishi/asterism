@@ -47,8 +47,14 @@ tokio = { workspace = true }
 # made for the same mechanism: the profile-marker publish writes its
 # contents to a `NamedTempFile` (created `O_EXCL` and 0600) and hard-
 # links it into place, so no observable state ever holds an empty or
-# half-written marker.
+# half-written marker. The backup module (#95) leans on it a second
+# time: the `VACUUM INTO` snapshot lands in a local tempdir, never at
+# the (possibly network-mounted) destination.
 tempfile = "3"
+
+# The backup archive (#95): DB-first tar, plain and uncompressed — the
+# workspace manifest's `tar` line carries the reasoning.
+tar = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

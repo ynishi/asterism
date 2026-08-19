@@ -11,6 +11,9 @@
 //! - [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
 //!   points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
 //!   pragmas set and the schema migrated.
+//! - [`open_existing_at_latest`] — the maintenance verbs' entry point
+//!   (#95): pragmas only, **no migration**, refused unless the schema
+//!   is already current.
 //!
 //! ## Pragma choices
 //!
@@ -70,6 +73,49 @@ pub async fn open_and_migrate_in_memory() -> Result<(AsyncIsle, AsyncIsleDriver)
     AsyncIsle::open_in_memory(init_connection).await
 }
 
+/// Opens the teams database **without migrating**, refusing unless its
+/// schema is exactly [`LATEST_VERSION`] — the entry point for the
+/// maintenance verbs (`teams-server gc` / `backup`, #95).
+///
+/// A maintenance verb must never change the instance it maintains as a
+/// side effect of looking at it: a newer binary asked to *back up* a
+/// pre-upgrade database would otherwise migrate it first and archive
+/// the migrated schema — the wrong artefact, produced by the command
+/// whose whole job was to preserve the instance as it stands. Only the
+/// per-connection pragmas are applied here (a persistent-state write
+/// like the WAL switch happened at the instance's creation and is a
+/// no-op on every database this plane produced); on a version mismatch
+/// — older *or* newer — the connection is shut down and the error
+/// names the fix.
+pub async fn open_existing_at_latest(
+    path: impl AsRef<Path>,
+) -> Result<(AsyncIsle, AsyncIsleDriver), teams_core::DomainError> {
+    let path = path.as_ref();
+    let (isle, driver) = AsyncIsle::spawn(path, pragma_only).await.map_err(|e| {
+        teams_core::DomainError::Infra(anyhow::anyhow!("cannot open teams db: {e}"))
+    })?;
+    let version = match schema_version(&isle).await {
+        Ok(version) => version,
+        Err(e) => {
+            driver.shutdown().await.ok();
+            return Err(teams_core::DomainError::Infra(anyhow::anyhow!(
+                "cannot read schema version: {e}"
+            )));
+        }
+    };
+    if version != LATEST_VERSION {
+        driver.shutdown().await.ok();
+        return Err(teams_core::DomainError::Validation(format!(
+            "teams database at {} is at schema v{version}, and this build expects \
+             v{LATEST_VERSION}; maintenance commands never migrate as a side effect — \
+             run `teams-server serve` or `teams-server init` (of the matching build) to \
+             migrate first",
+            path.display()
+        )));
+    }
+    Ok((isle, driver))
+}
+
 fn pragma_only(conn: &mut Connection) -> Result<(), rusqlite::Error> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -103,6 +149,56 @@ mod tests {
         // changes (this is the restart path).
         isle.call(migrate).await.unwrap();
         driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_maintenance_open_refuses_a_version_mismatch_and_mutates_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("teams.db");
+        let (_isle, driver) = open_and_migrate(&path).await.unwrap();
+        driver.shutdown().await.unwrap();
+
+        // The current version opens fine.
+        let (isle, driver) = open_existing_at_latest(&path).await.unwrap();
+        assert_eq!(schema_version(&isle).await.unwrap(), LATEST_VERSION);
+        driver.shutdown().await.unwrap();
+
+        // An instance a version behind — as an older build left it.
+        let stale = LATEST_VERSION - 1;
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", stale).unwrap();
+        let object_count: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
+            .unwrap();
+        drop(conn);
+
+        // Refused, the error naming both versions and the fix…
+        let refused = open_existing_at_latest(&path).await;
+        let message = match refused {
+            Err(e) => e.to_string(),
+            Ok((_, driver)) => {
+                driver.shutdown().await.ok();
+                panic!("a stale schema must be refused");
+            }
+        };
+        for expected in [
+            &format!("v{stale}"),
+            &format!("v{LATEST_VERSION}"),
+            &"teams-server init".to_string(),
+        ] {
+            assert!(message.contains(expected.as_str()), "{expected}: {message}");
+        }
+
+        // …and nothing moved: version and schema exactly as found.
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, stale, "the refusal must not migrate");
+        let after: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, object_count, "the refusal must not touch the schema");
     }
 
     #[tokio::test]

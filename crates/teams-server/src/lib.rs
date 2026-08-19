@@ -12,8 +12,9 @@
 //! - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
 //!   read: repository, credential store, registration policy.
 //!
-//! The MCP surface, blob routes, purge and backup are later slices —
-//! the module docs say which issue owns each.
+//! The blob routes are #93's, the purge routes and the `gc` / `backup`
+//! CLI verbs #95's; the MCP surface is a later slice — the module docs
+//! say which issue owns each.
 
 #![warn(missing_docs)]
 

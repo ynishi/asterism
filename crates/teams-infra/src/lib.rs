@@ -6,8 +6,10 @@
 //! Auth v0 (#91, third slice) adds the instance-local password adapter
 //! and the DB-backed session store. The local blob adapter (#93,
 //! fourth slice) is the CAS backing behind `teams-core`'s blob port —
-//! staging → verify → fsync → rename. The backup command is a
-//! follow-up slice.
+//! staging → verify → fsync → rename. The #95 slice adds the purge
+//! two-step's mark state ([`sqlite`] V3 + the repository's
+//! mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
+//! ([`backup`]).
 //!
 //! ## Layout
 //!
@@ -24,6 +26,11 @@
 //! - [`blob`] — the local CAS adapter behind `teams-core`'s blob port:
 //!   `blobs/sha256/<2ch>/<64hex>` plus a staging dir, the
 //!   declared-digest write path, and the startup sweep (#83 §3).
+//! - [`gc`] — the zero-link sweep (#83 §3 registry-GC shape): bytes no
+//!   team links are deleted, under the guard that keeps the sweep and
+//!   a racing upload from interleaving.
+//! - [`backup`] — quiesce → `VACUUM INTO` → DB-first/blobs-after
+//!   archive (#83 §4).
 //!
 //! ## The one write rule
 //!
@@ -45,6 +52,8 @@
 #![warn(missing_docs)]
 
 pub mod auth;
+pub mod backup;
 pub mod blob;
+pub mod gc;
 pub mod paths;
 pub mod sqlite;

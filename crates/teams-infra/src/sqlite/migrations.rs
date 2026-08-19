@@ -166,9 +166,33 @@ CREATE INDEX idx_auth_session_user    ON auth_session(user_id);
 CREATE INDEX idx_auth_session_expires ON auth_session(expires_at);
 "#;
 
+/// Version 2 → 3: the purge mark (#83 §3 lifecycle, the #95 slice).
+///
+/// `purge_marked_at` lands on **`team_blob_link`** — a state table, the
+/// SoT — and nowhere near the ledger: `NULL` is a live link, a
+/// timestamp is a link marked for purge at that instant, hidden from
+/// normal reads and restorable (unmark) until reclaim removes the row
+/// outright once the grace window elapses. This is deliberately *not*
+/// a soft delete on any ledger table (those stay append-only, trigger-
+/// guarded, exactly as V1 built them); the mark/unmark/reclaim history
+/// lives in the ledger as first-class events, and this column only
+/// answers the state question "is this link visible right now".
+///
+/// The partial index serves the two hot lookups the mark adds: a
+/// team's marked set (reclaim, and the marked-links read) and "is
+/// anything marked" — both filter on `purge_marked_at IS NOT NULL`,
+/// which is expected to be a tiny minority of rows.
+const V3_PURGE_MARK: &str = r#"
+ALTER TABLE team_blob_link ADD COLUMN purge_marked_at INTEGER;
+
+CREATE INDEX idx_team_blob_link_marked
+    ON team_blob_link(team_id, purge_marked_at)
+    WHERE purge_marked_at IS NOT NULL;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
-const MIGRATIONS: &[&str] = &[V1_INITIAL_SCHEMA, V2_AUTH_TABLES];
+const MIGRATIONS: &[&str] = &[V1_INITIAL_SCHEMA, V2_AUTH_TABLES, V3_PURGE_MARK];
 
 /// Latest schema version (`MIGRATIONS.len()`).
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -218,6 +242,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(app_tables, 0);
+    }
+
+    #[test]
+    fn v3_adds_the_purge_mark_to_the_link_table_only() {
+        let conn = migrated();
+
+        // The mark column exists on the state table…
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'team_blob_link'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            ddl.contains("purge_marked_at"),
+            "team_blob_link must carry the purge mark: {ddl}"
+        );
+
+        // …and on nothing else: the mark is state, and in particular
+        // it never reaches the ledger (no soft delete there — #95).
+        let elsewhere: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master
+                 WHERE sql LIKE '%purge_marked_at%'
+                   AND name NOT LIKE '%team_blob_link%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(elsewhere, 0, "the mark belongs to team_blob_link alone");
     }
 
     #[test]
