@@ -62,24 +62,6 @@ macro_rules! define_uuid_id {
 pub(crate) use define_uuid_id;
 
 define_uuid_id!(
-    /// The catalogue's handle on a forge round.
-    ///
-    /// A dispatch filed under a pursuit has to carry which one — but
-    /// the catalogue does not know what a pursuit is,
-    /// and a type it cannot name is a type it cannot depend on. So the
-    /// stamp is held opaquely here and the forge puts its own
-    /// [`PursuitId`](crate::domain::forge::value::PursuitId) over it,
-    /// converting at the boundary.
-    ///
-    /// The field, the column, and the sidecar key all stay
-    /// `pursuit_id`: that is what the id refers to, and three names for
-    /// one value would cost more than the one this type buys. What
-    /// changes is the direction of the dependency, which is the part a
-    /// compiler can hold.
-    CorrelationId
-);
-
-define_uuid_id!(
     /// Surrogate id for `Persona`. The natural key (external pack id) is
     /// [`PackId`].
     PersonaId
@@ -196,10 +178,10 @@ define_uuid_id!(
     /// happen to derive the same key from being read as one grouping.
     StrategyId
 );
-// The forge's own ids — `PursuitId` and the nine around it — are
-// declared in [`domain::forge::value`](crate::domain::forge::value), so
-// that this module names no forge type. What the catalogue holds of
-// them is `CorrelationId` above.
+// The forge's own ids are declared in
+// [`domain::forge::value`](crate::domain::forge::value), so that this
+// module names no forge type. Nothing here holds one: a raw export
+// carries no filing.
 
 /// Declares a non-empty text newtype (returns `Validation` if the value is
 /// blank after trimming).

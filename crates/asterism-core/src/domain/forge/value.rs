@@ -1,24 +1,14 @@
 //! The forge's surrogate ids.
 //!
-//! Split from [`domain::value`](crate::domain::value) so that the
-//! catalogue's id vocabulary contains no forge type. All but one of
-//! those declared here are named nowhere outside `domain::forge` and
-//! `application::forge`; the exception, [`PursuitId`], is the one the
-//! catalogue has a reason to hold — a row filed under a pursuit
-//! carries which one.
-//!
-//! That one is handled by conversion rather than by sharing the type.
-//! The catalogue stamps a
-//! [`CorrelationId`], an opaque
-//! UUID it can carry without knowing what a pursuit is, and the forge
-//! converts at its own boundary. The field, the column, and the sidecar
-//! key stay `pursuit_id` on both sides: renaming them would leave one
-//! value with three names, and the name was never the coupling. The
-//! type was.
+//! Split from [`domain::value`](crate::domain::value) so that the raw
+//! layer's id vocabulary contains no forge type. Every id declared here
+//! is named nowhere outside `domain::forge` and `application::forge` —
+//! nothing on the raw side holds one, because a raw export carries no
+//! filing.
 
 use uuid::Uuid;
 
-use crate::domain::value::{CorrelationId, define_uuid_id};
+use crate::domain::value::define_uuid_id;
 
 define_uuid_id!(
     /// Surrogate id for a `Pursuit` — the minted unit of work that
@@ -29,35 +19,6 @@ define_uuid_id!(
     /// orders rows minted in the same instant.
     PursuitId
 );
-
-impl PursuitId {
-    /// The stamp form the catalogue carries.
-    pub fn as_correlation(&self) -> CorrelationId {
-        CorrelationId::from_uuid(*self.as_uuid())
-    }
-
-    /// Reads a stamp back as the pursuit it names.
-    ///
-    /// Total, and deliberately so: the catalogue cannot check that a
-    /// stamp still names a live pursuit, and a fallible conversion here
-    /// would only move that check somewhere it still could not be made.
-    /// Resolution is the forge's own lookup.
-    pub fn from_correlation(value: CorrelationId) -> Self {
-        Self::from_uuid(*value.as_uuid())
-    }
-}
-
-impl From<PursuitId> for CorrelationId {
-    fn from(value: PursuitId) -> Self {
-        value.as_correlation()
-    }
-}
-
-impl From<CorrelationId> for PursuitId {
-    fn from(value: CorrelationId) -> Self {
-        Self::from_correlation(value)
-    }
-}
 
 define_uuid_id!(
     /// Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
