@@ -10,6 +10,27 @@ and this project adheres to
 
 ### Added
 
+- **The teams plane gets its crates and its domain floor** (#87, first slice of
+  the #83 design). Four crates join the workspace — `teams-core` / `teams-infra`
+  / `teams-contract` / `teams-server`, the same layering as their asterism-*
+  siblings, `publish = false`, license deliberately undeclared until the plane's
+  licensing decision. `teams-core` carries the whole IO-free domain layer:
+  identity (User, Membership with owner/member roles as validated TEXT, the
+  instance operator as an actor that is never a membership, actor stamps that
+  record the display name at write time and never rewrite), the last-owner
+  invariant (a team keeps at least one owner; leave, remove, and self-demote are
+  refused at the brink), the ledger event envelope (namespaced+versioned kinds,
+  typed subject refs, opaque payload) with the v0 kind registry, and the store
+  rules — team blob links, locators whose digest is a hint and never a
+  verification source, and declared-digest verification whose only outcomes are
+  accept-equal or reject-the-whole-op: accept-new-digest is a state the types
+  cannot express. The blob / auth / share ports are declared, the share port an
+  empty reservation until #63 settles its verbs. `teams-infra` and
+  `teams-contract` compile as shells; `teams-server` owns its own binary, fully
+  separate from `asterism-server` — the license boundary sits at the bin edge.
+  Only direct dependency edges are claimed: `teams-* → asterism-core` and
+  nothing else, with no `asterism-* → teams-*` edge anywhere.
+
 - **The project, its mainline, and the merge record — the forge gets a place to
   land** (P1 of #63). The forge could say what a pursuit tried and what a close
   kept, but not what anything landed on. Now the project is the repo of the
