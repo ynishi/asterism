@@ -13,4 +13,29 @@ publish     = false
 [lib]
 
 [dependencies]
+# The one asterism-* edge this crate is allowed is none at all: the
+# teams plane depends on `teams-core` and owns its own plumbing (#83
+# §4 — never asterism-infra / -contract / -server here).
 teams-core = { path = "../teams-core" }
+
+# SQLite access, same line as the rest of the workspace: `rusqlite-isle`
+# provides the thread-isolated actor, `rusqlite` is depended on directly
+# for its types (params!, Connection in init closures, uuid bridge).
+rusqlite-isle = { workspace = true }
+rusqlite      = { workspace = true }
+
+anyhow     = { workspace = true }
+serde_json = { workspace = true }
+uuid       = { workspace = true }
+
+# A real dependency, not only dev, the same promotion asterism-infra
+# made for the same mechanism: the profile-marker publish writes its
+# contents to a `NamedTempFile` (created `O_EXCL` and 0600) and hard-
+# links it into place, so no observable state ever holds an empty or
+# half-written marker.
+tempfile = "3"
+
+[dev-dependencies]
+# `#[tokio::test]` for the async repository surface.
+tokio = { workspace = true }
+tempfile = "3"

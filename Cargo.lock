@@ -8223,7 +8223,14 @@ dependencies = [
 name = "teams-infra"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "rusqlite",
+ "rusqlite-isle",
+ "serde_json",
  "teams-core",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
