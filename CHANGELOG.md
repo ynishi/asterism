@@ -1277,6 +1277,23 @@ and this project adheres to
 
 ### Fixed
 
+- **The disclosure rewrite is durable, not merely atomic** (#23). The staged
+  rewrite — temporary in the target's directory, then a rename — was atomic in
+  the namespace and nothing more: no `fsync` before the rename, so on power loss
+  between the write and the writeback the name could point at bytes that never
+  reached the disk, leaving a short file where the user's original was. That is
+  the opposite of what the module advertises, and it was carried on #23 as a
+  trade-off because the cost is real on large videos. Decided now: the data is
+  fsynced before the rename and the directory after it — the order the teams
+  blob store already writes in — both stamp paths funnel through the one
+  `commit`, and an fsync that fails is a failure like any other. The two sit on
+  different sides of the rename: a data fsync that fails stops the caller with
+  the original untouched, while a directory fsync that fails has already
+  replaced it — "written, not yet crash-durable" rather than "not written", and
+  a re-apply on that error is a repeat, not a loss, since the disclosure is
+  derived from rows. No size threshold and no setting, because "whether power
+  loss eats your original" is not a property that should depend on either.
+
 - **The stamp says what it withheld, and a stamp racing the fingerprint is
   refused instead of writing an unmarked file** (#23). The last two correctness
   carries from the disclosure writer review. The writer's fallback ladder made
