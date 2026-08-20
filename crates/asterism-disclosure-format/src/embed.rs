@@ -697,12 +697,34 @@ pub fn stamp(
         // write the reduced record. The caller learns this happened by
         // comparing what it asked for against what came back, which is
         // why the reduced record is not silently substituted upstream.
-        Err(EmbedError::PacketTooLarge { .. }) => {
+        Err(EmbedError::PacketTooLarge { bytes: over, limit }) => {
             let reduced = record.essential();
             let Some(packet) = xmp::render(&reduced) else {
-                return Ok(None);
+                // A prompt-only record whose prompt overflowed: the
+                // step-down rendered empty. The failure stands, for the
+                // same reason it stands at the bottom tier — `Ok(None)`
+                // here would be indistinguishable from "nothing to say"
+                // when the truth is "something was withheld".
+                return Err(EmbedError::PacketTooLarge { bytes: over, limit });
             };
-            embed_xmp(bytes, &packet).map(Some)
+            match embed_xmp(bytes, &packet) {
+                Ok(stamped) => Ok(Some(stamped)),
+                // `essential` keeps the system name, which came out of
+                // someone else's file and can overflow the segment on
+                // its own. One tier further: the bare mark, whose
+                // vocabulary is fixed-size and always fits. A record
+                // with no mark has nothing bounded left to write, and
+                // the failure stands — reporting an empty write as a
+                // success would erase the one signal that something was
+                // withheld.
+                Err(EmbedError::PacketTooLarge { bytes: over, limit }) => {
+                    let Some(packet) = xmp::render(&record.obligation()) else {
+                        return Err(EmbedError::PacketTooLarge { bytes: over, limit });
+                    };
+                    embed_xmp(bytes, &packet).map(Some)
+                }
+                Err(other) => Err(other),
+            }
         }
         Err(other) => Err(other),
     }
@@ -1139,6 +1161,50 @@ mod tests {
             !packet.contains("AIPromptInformation"),
             "the prompt was dropped rather than split across segments"
         );
+    }
+
+    #[test]
+    fn an_oversized_system_name_falls_back_to_the_bare_mark() {
+        // `essential()` keeps the system name, and the name is read out
+        // of someone else's file — large enough, it overflows the
+        // segment a second time. The tier below writes the mark alone.
+        let record = record().with_ai_system("x".repeat(JPEG_MAX_PACKET + 1), None);
+        let stamped = stamp(&jpeg_fixture(), &record).unwrap().unwrap();
+        let packet = read_xmp(&stamped).unwrap().unwrap();
+        assert!(
+            packet.contains("trainedAlgorithmicMedia"),
+            "the mark landed"
+        );
+        assert!(
+            !packet.contains("AISystemUsed"),
+            "the unbounded string was dropped with the prompt"
+        );
+    }
+
+    #[test]
+    fn an_oversized_prompt_with_nothing_else_stays_a_failure() {
+        // `essential()` on a prompt-only record discloses nothing, and
+        // rendering nothing is not a successful write of nothing: the
+        // caller asked for a disclosure and did not get one.
+        let record =
+            DisclosureRecord::for_asset("asset-1").with_prompt("x".repeat(JPEG_MAX_PACKET + 1));
+        assert!(matches!(
+            stamp(&jpeg_fixture(), &record),
+            Err(EmbedError::PacketTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn an_oversized_system_name_with_no_mark_stays_a_failure() {
+        // With no source type there is nothing bounded left to write,
+        // and pretending otherwise would report an empty write as a
+        // success — erasing the one signal that something was withheld.
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_ai_system("x".repeat(JPEG_MAX_PACKET + 1), None);
+        assert!(matches!(
+            stamp(&jpeg_fixture(), &record),
+            Err(EmbedError::PacketTooLarge { .. })
+        ));
     }
 
     #[test]

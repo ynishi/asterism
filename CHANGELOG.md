@@ -1277,6 +1277,24 @@ and this project adheres to
 
 ### Fixed
 
+- **`DisclosureRecord` loses its `Default`, and the packet fallback gains a
+  bottom that always fits** (#23). Two more carries from the disclosure writer
+  review. The derive constructed the one state the type's own documentation
+  forbids — a record with an empty `asset_id`, which reaches a signed assertion
+  nobody can correct afterwards; `for_asset` now spells its fields out and the
+  derive is gone. And `essential()` was not a bounded fallback: it drops the
+  prompt but keeps `ai_system`, an unbounded string read out of someone else's
+  file, so a large enough one overflowed the JPEG segment a second time and the
+  packet half failed outright. The fallback ladder gets its bottom tier,
+  `obligation()` — nothing in the packet but the digital source type, whose
+  vocabulary is fixed-size URIs and always fits — and `stamp` steps down to it
+  when `essential()` still does not fit. A record with no mark keeps the failure
+  instead: with the source type absent there is nothing bounded left to write,
+  and reporting an empty write as a success would erase the one signal that
+  something was withheld. The same fail-direction now holds one tier up — a
+  prompt-only record whose prompt overflows used to come back as "nothing to
+  disclose", indistinguishable from a record that had nothing to say.
+
 - **The disclosure writer stops labelling every `ftyp` file MP4, and its JPEG
   walk steps over standalone markers** (#23). Two carries from the disclosure
   writer review. The container sniff treated every `ftyp` brand except `qt  ` as

@@ -2352,12 +2352,12 @@ mod tests {
     }
 
     #[test]
-    fn a_packet_that_will_not_fit_does_not_cancel_the_manifest() {
-        // The mirror of the case above. `essential()` drops the prompt
-        // and the writer retries, but it keeps the AI system — so a
-        // long enough one overflows a JPEG segment twice and the packet
-        // cannot be written at all. That used to fail the whole call,
-        // taking a manifest that had nothing to do with it.
+    fn a_system_name_that_will_not_fit_falls_back_to_the_bare_mark() {
+        // `essential()` drops the prompt but keeps the AI system, which
+        // is read out of someone else's file — so a long enough one
+        // overflowed a JPEG segment twice and cost the whole packet.
+        // The fallback ladder now has a bottom, the mark alone, and it
+        // always fits.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("shot.jpg");
         let mut jpeg = vec![0xFF, 0xD8];
@@ -2372,6 +2372,39 @@ mod tests {
                 &DisclosureRecord::for_asset("asset-1")
                     .with_source_type(DigitalSourceType::TrainedAlgorithmicMedia)
                     .with_ai_system(oversized, None),
+            )
+            .expect("a system name that does not fit is not the call failing");
+
+        assert_eq!(outcome.xmp, Half::Written, "the mark landed");
+        assert!(outcome.discloses());
+        let packet = embed::read_xmp(&std::fs::read(&path).unwrap())
+            .unwrap()
+            .expect("the packet reached the file");
+        assert!(packet.contains("trainedAlgorithmicMedia"));
+        assert!(
+            !packet.contains("AISystemUsed"),
+            "the unbounded string was dropped, not split or truncated"
+        );
+    }
+
+    #[test]
+    fn a_packet_that_cannot_be_written_at_all_does_not_fail_the_call() {
+        // With no source type there is no bounded tier to step down to,
+        // so the packet half genuinely cannot be written. That used to
+        // fail the whole call; now the half reports its own failure and
+        // the file is left alone.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot.jpg");
+        let mut jpeg = vec![0xFF, 0xD8];
+        jpeg.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02]);
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        std::fs::write(&path, &jpeg).unwrap();
+
+        let oversized = "x".repeat(embed::JPEG_MAX_PACKET + 1);
+        let outcome = DisclosureWriter::unsigned()
+            .apply(
+                &path,
+                &DisclosureRecord::for_asset("asset-1").with_ai_system(oversized, None),
             )
             .expect("a packet that does not fit is not the call failing");
 
