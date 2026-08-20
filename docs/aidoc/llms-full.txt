@@ -5369,6 +5369,8 @@ are [`EmbedError::PacketTooLarge`].
 
 - `Container` — A still-image container this module can write into.
 - `EmbedError` — What went wrong writing a packet.
+- `Reduction` — How far [`stamp`] had to reduce the record to fit the container.
+- `Stamp` — What [`stamp`] wrote: the stamped file, and what was withheld from
 
 ## Constants
 

@@ -23,6 +23,16 @@
       "docs": "Largest XMP packet a JPEG can carry in one segment.\n\nExposed so a caller can decide to write a reduced record *before*\npaying for a render it is about to be told does not fit."
     },
     {
+      "path": "asterism_disclosure_format::embed::Reduction",
+      "kind": "enum",
+      "docs": "How far [`stamp`] had to reduce the record to fit the container.\n\nReported by the code that made the decision. The caller used to\nre-derive it by substring-searching the rendered XML for one\nproperty name — better than re-running the rule, worse than being\ntold, and blind to the tier below the prompt once there was one."
+    },
+    {
+      "path": "asterism_disclosure_format::embed::Stamp",
+      "kind": "struct",
+      "docs": "What [`stamp`] wrote: the stamped file, and what was withheld from\nthe packet to write it."
+    },
+    {
       "path": "asterism_disclosure_format::embed::embed_xmp",
       "kind": "function",
       "docs": "Writes `packet` into `bytes`, replacing any packet already there.\n\nReturns the whole file. Nothing is written in place: the caller\ndecides whether the result replaces the original, and an export that\nfails halfway must not leave a half-stamped file behind."
