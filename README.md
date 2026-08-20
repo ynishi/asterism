@@ -64,6 +64,7 @@ A deployment supplies its own certificate through the environment:
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `ASTERISM_DISCLOSURE_CERT_CHAIN`     | Path to the PEM certificate chain, end-entity first                                                                 |
 | `ASTERISM_DISCLOSURE_PRIVATE_KEY`    | Path to the PEM private key                                                                                         |
+| `ASTERISM_DISCLOSURE_KEYCHAIN_KEY`   | macOS: the label of a private key in the Keychain, instead of a key file                                            |
 | `ASTERISM_DISCLOSURE_SIGNING_ALG`    | COSE algorithm name; defaults to `es256`                                                                            |
 | `ASTERISM_DISCLOSURE_TSA_URL`        | Timestamp authority (`http://` or `https://`); without one, a manifest stops verifying when the certificate expires |
 | `ASTERISM_DISCLOSURE_SIGNING_STRICT` | `true` also refuses a certificate a trust list would not carry, and requires the issuer's chain                     |
@@ -75,12 +76,18 @@ of every layer it has — which would publish the location of the private key an
 let that route choose which file this process opens. Keep the key readable by
 its owner alone (`0600`); Asterism warns at startup when it is not.
 
-Both path variables are needed together. A certificate that cannot be loaded
-does not stop the application — one issued under the C2PA conformance profile is
-valid for at most 366 days, so every signing deployment eventually meets an
-expired one — but it does not pass quietly either: the reason is logged at
-startup and recorded against every export as a failed manifest half, which is a
-different statement from the skip that means no certificate is configured.
+The certificate variable is needed with exactly one of the two key variables. On
+macOS the Keychain form is the stronger custody: the key — including one held in
+the Secure Enclave, which the same label search finds — never enters the
+process, signing goes through the Security framework, and there is no key file
+whose permissions anyone has to audit. It signs ECDSA (`es256`, `es384`,
+`es512`); an RSA or Ed25519 arrangement uses the file form. A certificate that
+cannot be loaded does not stop the application — one issued under the C2PA
+conformance profile is valid for at most 366 days, so every signing deployment
+eventually meets an expired one — but it does not pass quietly either: the
+reason is logged at startup and recorded against every export as a failed
+manifest half, which is a different statement from the skip that means no
+certificate is configured.
 
 Nothing here makes a manifest _trusted_. That needs a certificate authority on
 the C2PA trust list, and a self-issued one validates as
