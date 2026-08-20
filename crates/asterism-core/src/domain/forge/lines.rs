@@ -6,17 +6,17 @@
 //! vocabulary to isolate. Whatever implements it is somebody else's
 //! problem, and the forge never names them.
 //!
-//! # Landing names the head
+//! # Recording a change names the head
 //!
-//! [`Lines::land`] takes the node the caller believes is the head,
+//! [`Lines::record`] takes the node the caller believes is the head,
 //! beside the change point it wants to append. It could take only the
 //! change point — the parent is on it — and that would be the shape
 //! that breaks.
 //!
-//! The model refuses a landing that does not sit on the head
-//! ([`History::land`]), but it judges the line it was *given*, which
+//! The model refuses a change that does not sit on the head
+//! ([`History::record`]), but it judges the line it was *given*, which
 //! is the line as it was when it was read. Between the read and the
-//! write, another landing can arrive. Naming the head makes the write
+//! write, another change can arrive. Naming the head makes the write
 //! itself conditional, so whoever keeps the line can refuse the second
 //! one — and the rule the model states survives the gap rather than
 //! holding only for as long as nobody else is working.
@@ -26,7 +26,7 @@
 //!
 //! # There is nothing that removes
 //!
-//! No delete, no truncate, no rewrite of a landed node — the same
+//! No delete, no truncate, no rewrite of a recorded node — the same
 //! absence the model has, for the same reason: everything that ever
 //! happened stays reachable, and a path that exists gets called.
 //! Renaming a line and changing its strategy are here because they
@@ -35,7 +35,7 @@
 //!
 //! # One trait rather than a read half and a write half
 //!
-//! [`Lines::get`] and [`Lines::land`] are one concern: `land` is
+//! [`Lines::get`] and [`Lines::record`] are one concern: `record` is
 //! conditional on what `get` returned, and splitting them puts the two
 //! halves of that condition in two places for whoever implements them
 //! to reconcile. It splits when there is a reason, and "reads and
@@ -51,7 +51,7 @@
 //!
 //! [`Line`]: crate::domain::forge::model::line::Line
 //! [`ChangePoint`]: crate::domain::forge::model::history::ChangePoint
-//! [`History::land`]: crate::domain::forge::model::history::History::land
+//! [`History::record`]: crate::domain::forge::model::history::History::record
 //! [`Name`]: crate::domain::forge::model::value::Name
 //! [`Act`]: crate::domain::forge::model::act::Act
 
@@ -73,7 +73,7 @@ pub trait Lines: Send + Sync {
     /// Reads a line back whole, history included.
     ///
     /// Whole, because the rules the model holds are about the chain:
-    /// landing checks the head, and the name check folds it. Handing
+    /// recording checks the head, and the name check folds it. Handing
     /// back less would move those rules to whoever answers this call,
     /// and there would be as many copies of them as there are
     /// implementations.
@@ -83,9 +83,9 @@ pub trait Lines: Send + Sync {
     /// head.
     ///
     /// Returns [`Conflict`](DomainError::Conflict) when it is not:
-    /// somebody else landed first, and this caller is holding a line
-    /// that has moved.
-    async fn land(
+    /// somebody else recorded a change first, and this caller is
+    /// holding a line that has moved.
+    async fn record(
         &self,
         id: &LineId,
         on: ChangePointId,

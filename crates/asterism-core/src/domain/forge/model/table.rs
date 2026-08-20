@@ -11,7 +11,7 @@
 //! # Three axes rather than a verb
 //!
 //! A person writes verbs — add this, rename that — but by the time a
-//! table is landing, the question is per axis, and a verb set cannot
+//! table reaches a line, the question is per axis, and a verb set cannot
 //! spell "says nothing about the name" except as another verb. So a
 //! row states only the axes it moves, and [`Row::added`],
 //! [`Row::replaced`], [`Row::renamed`] and [`Row::removed`] are the
@@ -38,7 +38,7 @@
 //! looks like once the axes already matching the head fall away.
 //! Which rows make sense *against a particular head* is a different
 //! question, and it belongs to the step that judges a table before it
-//! lands rather than to the row.
+//! is recorded rather than to the row.
 //!
 //! An empty [`Table`] is refused for the same kind of reason: a change
 //! point carrying nothing is a line advancing to say nothing, and

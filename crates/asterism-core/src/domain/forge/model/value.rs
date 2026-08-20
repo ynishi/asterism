@@ -22,7 +22,7 @@
 //! answer, and the owner is outside the forge.
 //!
 //! The ids are surrogate and minted, never derived from content.
-//! [`EntryId`] in particular is minted by work that has not landed
+//! [`EntryId`] in particular is minted by work that has changed nothing
 //! yet, which is what lets a later round point at what an earlier one
 //! proposed.
 

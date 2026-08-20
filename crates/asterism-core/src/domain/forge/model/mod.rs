@@ -56,13 +56,13 @@
 //! instead would be a second answer to a question the chain already
 //! answers, and the two disagree the first time a clock steps
 //! backwards — so no fold here looks at a time, and
-//! [`History::land`] refuses anything that does not name the head.
+//! [`History::record`] refuses anything that does not name the head.
 //!
 //! **A line's own description is a separate record.** Renaming a line
 //! or changing how it settles collisions is not a change point: the
 //! history says what happened to what the line carries, and that did
-//! not. [`Meta`] holds those two stamps, and landing does not touch
-//! them.
+//! not. [`Meta`] holds those two stamps, and recording a change does
+//! not touch them.
 //!
 //! # Nothing is removed
 //!
@@ -84,9 +84,9 @@
 //! - **A line always has a head.** [`History::begin`] mints the
 //!   genesis, so [`History::head`] returns an id rather than an
 //!   `Option`, and an untouched line is not a special case.
-//! - **A history does not fork.** [`History::land`] refuses a change
+//! - **A history does not fork.** [`History::record`] refuses a change
 //!   point whose parent is not the head.
-//! - **A node is a genesis or a landing, never half of each.**
+//! - **A node is a genesis or a change, never half of each.**
 //!   [`Genesis`] and [`ChangePoint`] are separate types, so there is
 //!   no pair of `Option` fields that must be empty together or filled
 //!   together.
@@ -96,7 +96,7 @@
 //!   states no axis, and one that takes an entry off the line while
 //!   also naming or filling it.
 //! - **A name is a name.** [`Name::new`] trims and refuses blank.
-//! - **Two entries do not answer to one name.** [`History::land`]
+//! - **Two entries do not answer to one name.** [`History::record`]
 //!   applies the whole table and asks of the result, so handing a name
 //!   from one entry to another in one change point is legal and two
 //!   live claims on it are not.
@@ -158,7 +158,7 @@
 //! [`History`]: history::History
 //! [`History::begin`]: history::History::begin
 //! [`History::head`]: history::History::head
-//! [`History::land`]: history::History::land
+//! [`History::record`]: history::History::record
 //! [`Genesis`]: history::Genesis
 //! [`ChangePoint`]: history::ChangePoint
 //! [`Table`]: table::Table
@@ -166,6 +166,7 @@
 //! [`Row`]: table::Row
 //! [`Row::new`]: table::Row::new
 //! [`states`]: table::states
+//! [`Content`]: value::Content
 //! [`Name`]: value::Name
 //! [`Name::new`]: value::Name::new
 //! [`Act`]: act::Act
@@ -173,6 +174,7 @@
 //! [`ForgeError`]: error::ForgeError
 
 pub mod act;
+pub mod change;
 pub mod error;
 pub mod history;
 pub mod line;

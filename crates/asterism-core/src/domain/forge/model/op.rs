@@ -12,11 +12,11 @@
 //!
 //! # An add mints its own entry
 //!
-//! [`Op::add`] mints the [`EntryId`] on the spot, before anything has
-//! landed. Work refers to what it proposed by that id, so a later
-//! round can rename or replace something no history has heard of —
-//! and when it does land, it lands as the thing that was being talked
-//! about all along rather than as a new arrival.
+//! [`Op::add`] mints the [`EntryId`] on the spot, before any change
+//! has been recorded. Work refers to what it proposed by that id, so a
+//! later round can rename or replace something no history has heard of
+//! — and when it does reach the line, it reaches it as the thing that
+//! was being talked about all along rather than as a new arrival.
 //!
 //! Nothing has to agree to a mint. An id is a surrogate, so there is
 //! no shared counter to contend for, and proposing costs nothing that
@@ -28,7 +28,7 @@
 //! line.** Given the head it would produce a different answer at
 //! different moments, and "what this work says" would stop being a
 //! property of the work — the same operations would mean one thing
-//! before somebody else landed and another thing after.
+//! before somebody else changed the line and another thing after.
 //!
 //! Comparing that answer against a line is a later step, and a
 //! separate one. Here the rule is only: per axis, the last operation

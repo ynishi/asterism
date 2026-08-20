@@ -55,12 +55,12 @@ pub enum ForgeError {
     /// A change point named something other than the head as its
     /// parent, which would fork the history.
     #[error(
-        "a change point lands on the head — this one names another node as its parent, and a \
+        "a change point sits on the head — this one names another node as its parent, and a \
          history does not fork"
     )]
     NotOnHead,
 
-    /// Landing would leave two entries on the line answering to the
+    /// The change would leave two entries on the line answering to the
     /// same name.
     #[error("two entries would be on the line under the name {0:?}")]
     NameTaken(Name),
@@ -72,6 +72,10 @@ pub enum ForgeError {
     /// Work that has ended was written to.
     #[error("this work has ended — pick it up as new work rather than adding to a record")]
     AlreadyClosed,
+
+    /// Work was judged against a line it was not cut from.
+    #[error("this work was cut from a node this line does not have")]
+    UnknownBase,
 }
 
 impl From<ForgeError> for DomainError {
@@ -91,7 +95,8 @@ impl From<ForgeError> for DomainError {
             | ForgeError::EmptyRow
             | ForgeError::RemovalMovesAnotherAxis
             | ForgeError::EmptyTable
-            | ForgeError::EmptyRound => DomainError::Validation(message),
+            | ForgeError::EmptyRound
+            | ForgeError::UnknownBase => DomainError::Validation(message),
         }
     }
 }

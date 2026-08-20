@@ -35,10 +35,10 @@
 //!
 //! # Two records, and neither moves the other
 //!
-//! [`Line::land`] moves the history. [`Line::rename`] and
+//! [`Line::record`] moves the history. [`Line::rename`] and
 //! [`Line::set_strategy`] move the description. A rename is not a
 //! change point — the history says what happened to what the line
-//! carries, and a rename did not — and landing does not touch
+//! carries, and a rename did not — and recording one does not touch
 //! [`Meta`], because "the line moved" and "the line is described
 //! differently" would otherwise collapse into one value that answers
 //! neither question.
@@ -49,7 +49,7 @@ use crate::domain::forge::model::history::{ChangePoint, History};
 use crate::domain::forge::model::table::EntryStates;
 use crate::domain::forge::model::value::{ChangePointId, LineId, Name};
 
-/// What a line does when a landing collides with one that came before
+/// What a line does when a change collides with one that came before
 /// it.
 ///
 /// What diverges is the **entry**, never the chain: the collision is
@@ -120,7 +120,7 @@ impl Line {
         &self.meta
     }
 
-    /// The head of the history — the node a landing has to name as its
+    /// The head of the history — the node a change has to name as its
     /// parent.
     pub fn head(&self) -> ChangePointId {
         self.history.head()
@@ -134,9 +134,9 @@ impl Line {
         self.history.states()
     }
 
-    /// Lands a change point. The only way the line moves.
-    pub fn land(&mut self, point: ChangePoint) -> Result<(), ForgeError> {
-        self.history.land(point)
+    /// Records a change. The only way the line moves.
+    pub fn record(&mut self, point: ChangePoint) -> Result<(), ForgeError> {
+        self.history.record(point)
     }
 
     /// Renames the line. Its own description moving is not something
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn landing_puts_an_entry_on_the_line() {
+    fn recording_a_change_puts_an_entry_on_the_line() {
         let mut line = root();
         let entry = EntryId::new();
         let content = Content::from_uuid(Uuid::now_v7());
@@ -197,7 +197,7 @@ mod tests {
             act(1),
         );
 
-        line.land(point).unwrap();
+        line.record(point).unwrap();
 
         let states = line.states();
         assert!(states.get(&entry).unwrap().alive);
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn landing_does_not_touch_the_description() {
+    fn recording_a_change_does_not_touch_the_description() {
         let mut line = root();
         let point = ChangePoint::new(
             line.head(),
@@ -235,7 +235,7 @@ mod tests {
             act(3),
         );
 
-        line.land(point).unwrap();
+        line.record(point).unwrap();
 
         assert_eq!(line.meta().updated().at(), at(0));
     }
@@ -255,7 +255,7 @@ mod tests {
             ),
             act(1),
         );
-        line.land(first).unwrap();
+        line.record(first).unwrap();
 
         let twin = ChangePoint::new(
             line.head(),
@@ -266,10 +266,10 @@ mod tests {
             ),
             act(2),
         );
-        let refused = line.land(twin);
+        let refused = line.record(twin);
 
         assert_eq!(refused, Err(ForgeError::NameTaken(taken)));
-        assert_eq!(line.history().landed().len(), 1);
+        assert_eq!(line.history().changes().len(), 1);
     }
 
     #[test]

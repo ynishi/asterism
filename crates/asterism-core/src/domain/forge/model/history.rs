@@ -14,7 +14,7 @@
 //! # One chain, never a fork
 //!
 //! A line exists so that there is one answer to what it carries, and
-//! two chains would be two answers. [`History::land`] therefore
+//! two chains would be two answers. [`History::record`] therefore
 //! refuses any change point that does not name the current head as its
 //! parent. That refusal is the whole of the rule — not a check
 //! somewhere else that callers are asked to remember, and not a
@@ -45,8 +45,8 @@
 //! agreement gets filled halfway.
 //!
 //! Its purpose is that a line has a head from the moment it exists.
-//! Without it, "the head of a line nothing has landed on" would be an
-//! absence every reader carries, and the first landing would be a
+//! Without it, "the head of a line nothing has changed yet" would be
+//! an absence every reader carries, and the first change would be a
 //! shape of its own.
 //!
 //! # It only grows
@@ -99,8 +99,8 @@ impl Genesis {
 /// One move of a line's history.
 ///
 /// Always has a parent and always came out of some work: a change
-/// point exists because a pursuit was satisfied, and it lands on
-/// whatever the head was at that moment.
+/// point exists because a pursuit was satisfied, and it takes as its
+/// parent whatever the head was at that moment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangePoint {
     id: ChangePointId,
@@ -111,7 +111,8 @@ pub struct ChangePoint {
 }
 
 impl ChangePoint {
-    /// Mints a change point landing `table` on top of `parent`.
+    /// Mints a change point that puts `table` on the line, on top of
+    /// `parent`.
     pub fn new(parent: ChangePointId, from: PursuitId, table: Table, act: Act) -> Self {
         Self {
             id: ChangePointId::new(),
@@ -127,7 +128,7 @@ impl ChangePoint {
         self.id
     }
 
-    /// The node this landed on.
+    /// The node this was recorded on top of.
     pub fn parent(&self) -> ChangePointId {
         self.parent
     }
@@ -142,7 +143,7 @@ impl ChangePoint {
         &self.table
     }
 
-    /// When it landed, and who landed it.
+    /// When it was recorded, and who recorded it.
     pub fn act(&self) -> &Act {
         &self.act
     }
@@ -152,7 +153,7 @@ impl ChangePoint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct History {
     genesis: Genesis,
-    landed: Vec<ChangePoint>,
+    changes: Vec<ChangePoint>,
 }
 
 impl History {
@@ -161,7 +162,7 @@ impl History {
     pub fn begin(act: Act) -> Self {
         Self {
             genesis: Genesis::new(act),
-            landed: Vec::new(),
+            changes: Vec::new(),
         }
     }
 
@@ -170,16 +171,16 @@ impl History {
         &self.genesis
     }
 
-    /// Everything that has landed, in the chain's order.
-    pub fn landed(&self) -> &[ChangePoint] {
-        &self.landed
+    /// Every change recorded on this line, in the chain's order.
+    pub fn changes(&self) -> &[ChangePoint] {
+        &self.changes
     }
 
     /// The last node of the chain. Never absent — a history begins
     /// with its genesis, so an untouched line has a head like any
     /// other.
     pub fn head(&self) -> ChangePointId {
-        self.landed
+        self.changes
             .last()
             .map(ChangePoint::id)
             .unwrap_or_else(|| self.genesis.id())
@@ -190,11 +191,11 @@ impl History {
     /// Two things are refused, and this is the only way a history
     /// changes — there is no counterpart that removes a node.
     ///
-    /// **A node that does not land on the head.** It would start a
+    /// **A node that does not sit on the head.** It would start a
     /// second chain, and a line with two chains cannot answer what it
     /// carries.
     ///
-    /// **A landing that would leave two live entries under one name.**
+    /// **A change that would leave two live entries under one name.**
     /// A name is how a person reaches for what is on the line, so two
     /// of them is a line that cannot be addressed by the only handle
     /// anybody has. The whole table is applied first and the question
@@ -207,12 +208,12 @@ impl History {
     /// The check folds the chain, so it costs what a read costs. That
     /// is the honest price of keeping no second copy of what is on the
     /// line, and it is measured before it is optimised.
-    pub fn land(&mut self, point: ChangePoint) -> Result<(), ForgeError> {
+    pub fn record(&mut self, point: ChangePoint) -> Result<(), ForgeError> {
         if point.parent() != self.head() {
             return Err(ForgeError::NotOnHead);
         }
         let applied = states(
-            self.landed
+            self.changes
                 .iter()
                 .map(ChangePoint::table)
                 .chain(std::iter::once(point.table())),
@@ -220,14 +221,14 @@ impl History {
         if let Some(name) = live_name_twice(&applied) {
             return Err(ForgeError::NameTaken(name));
         }
-        self.landed.push(point);
+        self.changes.push(point);
         Ok(())
     }
 
     /// What the line carries: the tables of the chain, folded in
     /// order.
     pub fn states(&self) -> EntryStates {
-        states(self.landed.iter().map(ChangePoint::table))
+        states(self.changes.iter().map(ChangePoint::table))
     }
 }
 
@@ -239,7 +240,7 @@ impl History {
 /// name is not a duplicate of anything — whether such a row should
 /// exist at all is a question about which rows are legal against a
 /// head, and that belongs to the step that judges a table before it
-/// lands.
+/// is recorded.
 fn live_name_twice(states: &EntryStates) -> Option<Name> {
     let mut seen: BTreeSet<&Name> = BTreeSet::new();
     for state in states.values() {
@@ -289,7 +290,7 @@ mod tests {
         let history = History::begin(act(0));
 
         assert_eq!(history.head(), history.genesis().id());
-        assert!(history.landed().is_empty());
+        assert!(history.changes().is_empty());
         assert!(history.states().is_empty());
     }
 
@@ -308,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn landing_moves_the_head() {
+    fn recording_a_change_moves_the_head() {
         let mut history = History::begin(act(0));
         let entry = EntryId::new();
         let point = ChangePoint::new(
@@ -317,11 +318,11 @@ mod tests {
             added(entry, "key visual"),
             act(1),
         );
-        let landed = point.id();
+        let recorded = point.id();
 
-        history.land(point).unwrap();
+        history.record(point).unwrap();
 
-        assert_eq!(history.head(), landed);
+        assert_eq!(history.head(), recorded);
         assert!(history.states().get(&entry).unwrap().alive);
     }
 
@@ -335,7 +336,7 @@ mod tests {
             act(1),
         );
         let stale_head = history.head();
-        history.land(first).unwrap();
+        history.record(first).unwrap();
 
         let second = ChangePoint::new(
             stale_head,
@@ -343,10 +344,10 @@ mod tests {
             added(EntryId::new(), "alternate"),
             act(2),
         );
-        let refused = history.land(second);
+        let refused = history.record(second);
 
         assert_eq!(refused, Err(ForgeError::NotOnHead));
-        assert_eq!(history.landed().len(), 1);
+        assert_eq!(history.changes().len(), 1);
     }
 
     #[test]
@@ -358,7 +359,7 @@ mod tests {
             added(EntryId::new(), "key visual"),
             act(1),
         );
-        history.land(first).unwrap();
+        history.record(first).unwrap();
 
         let twin = ChangePoint::new(
             history.head(),
@@ -366,13 +367,13 @@ mod tests {
             added(EntryId::new(), "key visual"),
             act(2),
         );
-        let refused = history.land(twin);
+        let refused = history.record(twin);
 
         assert_eq!(
             refused,
             Err(ForgeError::NameTaken(Name::new("key visual").unwrap()))
         );
-        assert_eq!(history.landed().len(), 1);
+        assert_eq!(history.changes().len(), 1);
     }
 
     /// The whole table is applied before the question is asked, so
@@ -383,7 +384,7 @@ mod tests {
         let mut history = History::begin(act(0));
         let leaving = EntryId::new();
         history
-            .land(ChangePoint::new(
+            .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
                 added(leaving, "key visual"),
@@ -405,7 +406,7 @@ mod tests {
         .unwrap();
 
         history
-            .land(ChangePoint::new(
+            .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
                 swap,
@@ -425,7 +426,7 @@ mod tests {
         let mut history = History::begin(act(0));
         let first = EntryId::new();
         history
-            .land(ChangePoint::new(
+            .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
                 added(first, "key visual"),
@@ -433,7 +434,7 @@ mod tests {
             ))
             .unwrap();
         history
-            .land(ChangePoint::new(
+            .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
                 Table::one(first, Row::removed()),
@@ -448,12 +449,12 @@ mod tests {
             act(3),
         );
 
-        assert!(history.land(second).is_ok());
+        assert!(history.record(second).is_ok());
     }
 
     /// The chain orders the history, not the clock. A node minted a
-    /// minute *earlier* than the one it lands on still lands after it,
-    /// and the fold answers by the chain.
+    /// minute *earlier* than its own parent still comes after it, and
+    /// the fold answers by the chain.
     #[test]
     fn the_chain_orders_the_history_and_not_the_clock() {
         let mut history = History::begin(act(10));
@@ -464,14 +465,14 @@ mod tests {
             added(entry, "key visual"),
             act(9),
         );
-        history.land(arrival).unwrap();
+        history.record(arrival).unwrap();
         let departure = ChangePoint::new(
             history.head(),
             PursuitId::new(),
             Table::one(entry, Row::removed()),
             act(8),
         );
-        history.land(departure).unwrap();
+        history.record(departure).unwrap();
 
         assert!(!history.states().get(&entry).unwrap().alive);
     }

@@ -12,8 +12,8 @@
 //! The shape mirrors a line's history deliberately: a root that is not
 //! like the others, a chain that only grows, and everything the thing
 //! currently says derived by folding it. What differs is what the
-//! nodes carry — a line's node carries a table that has landed, a
-//! work log's carries operations that have not.
+//! nodes carry — a line's node carries a table that has changed it, a
+//! work log's carries operations that have not changed anything yet.
 //!
 //! # A pass is the unit, not the pursuit
 //!
@@ -22,7 +22,7 @@
 //! could hold instead.
 //!
 //! A round with no operations is ordinary — it is a round that took a
-//! change point in, which is how work says "I have seen what landed".
+//! change point in, which is how work says "I have seen what changed".
 //! What is refused is a round that says neither: a node that carries
 //! no operations and takes nothing in records that nothing happened,
 //! and nothing happening is not an event.
@@ -36,7 +36,7 @@
 //! The distinction is what makes a collision visible. The base says
 //! where this work started from; a round's `taken_in` says what it has
 //! since seen. If taking something in moved the base, then work could
-//! walk past a landing it never looked at, and the step that compares
+//! walk past a change it never looked at, and the step that compares
 //! this work against the line would find nothing to compare.
 //!
 //! # Closing is terminal
@@ -59,7 +59,7 @@
 //! can only point at something already open cannot form one.
 //!
 //! Nothing else about the relationship is stored. Which pursuits are
-//! under a parent, and what they landed, is a question answered by
+//! under a parent, and what they changed, is a question answered by
 //! looking — and a stored answer would be a second copy of it.
 
 use crate::domain::forge::model::act::{Act, Meta};
@@ -327,7 +327,7 @@ impl WorkLog {
     /// What this work says, folded across every pass.
     ///
     /// The line is not an input — see
-    /// [`fold`](crate::domain::forge::model::op::fold).
+    /// [`fold`].
     pub fn says(&self) -> Rows {
         let ops: Vec<Op> = self
             .rounds
