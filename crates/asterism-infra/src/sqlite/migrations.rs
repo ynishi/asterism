@@ -6365,7 +6365,7 @@ fn v87_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::E
     Ok(())
 }
 
-/// DDL half of V87— see [`v87_dispatch_stamp_is_a_value`] for the
+/// DDL half of V87 — see [`v87_dispatch_stamp_is_a_value`] for the
 /// choices. The column list is the physical one, read off the migration
 /// history (V19's rebuild, then V48, V50, V79, V83) rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
@@ -6480,7 +6480,7 @@ fn v88_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error
     Ok(())
 }
 
-/// DDL half of V88— see [`v88_drop_the_close_record`] for the
+/// DDL half of V88 — see [`v88_drop_the_close_record`] for the
 /// choices. The member table goes first: it is the side that holds the
 /// edge.
 const V87_DROP_CLOSE_RECORD: &str = r#"
@@ -6513,7 +6513,7 @@ CREATE INDEX idx_pursuit_restamp_from
     ON pursuit_restamp(from_pursuit_id);
 "#;
 
-/// V89— drops `pursuit_restamp`, the table behind the restamp repair
+/// V89 — drops `pursuit_restamp`, the table behind the restamp repair
 /// verb, now that the verb is gone.
 ///
 /// The forge no longer dispatches, so the only subject a restamp could
@@ -6539,7 +6539,7 @@ const V89_DROP_THE_RESTAMP_RECORD: &str = r#"
 DROP TABLE pursuit_restamp;
 "#;
 
-/// V90— takes the pursuit stamp off the dispatch, and the lookup lane
+/// V90 — takes the pursuit stamp off the dispatch, and the lookup lane
 /// that read it off the asset.
 ///
 /// A dispatch is a raw-layer export: a frozen input, an exporter, an
@@ -6607,7 +6607,7 @@ fn v90_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Erro
     Ok(())
 }
 
-/// DDL half of V90— see [`v90_drop_the_pursuit_stamp`] for the
+/// DDL half of V90 — see [`v90_drop_the_pursuit_stamp`] for the
 /// choices. The column list is V87's physical one minus `pursuit_id`,
 /// read off the migration history rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
@@ -6669,7 +6669,7 @@ DROP INDEX idx_asset_trace_pursuit;
 ALTER TABLE asset DROP COLUMN trace_pursuit_id;
 "#;
 
-/// V91— takes the base-event pin off the ledger: the column V85 added
+/// V91 — takes the base-event pin off the ledger: the column V85 added
 /// to hold which version of an entry an `in` was looking at, the CHECK
 /// pairing it to a target, and the index over it.
 ///
