@@ -64,6 +64,14 @@ pub enum ForgeError {
     /// same name.
     #[error("two entries would be on the line under the name {0:?}")]
     NameTaken(Name),
+
+    /// A pass wrote nothing and looked at nothing.
+    #[error("a pass writes something or takes something in — otherwise nothing happened")]
+    EmptyRound,
+
+    /// Work that has ended was written to.
+    #[error("this work has ended — pick it up as new work rather than adding to a record")]
+    AlreadyClosed,
 }
 
 impl From<ForgeError> for DomainError {
@@ -76,11 +84,14 @@ impl From<ForgeError> for DomainError {
     fn from(error: ForgeError) -> Self {
         let message = error.to_string();
         match error {
-            ForgeError::NotOnHead | ForgeError::NameTaken(_) => DomainError::Conflict(message),
+            ForgeError::NotOnHead | ForgeError::NameTaken(_) | ForgeError::AlreadyClosed => {
+                DomainError::Conflict(message)
+            }
             ForgeError::BlankName
             | ForgeError::EmptyRow
             | ForgeError::RemovalMovesAnotherAxis
-            | ForgeError::EmptyTable => DomainError::Validation(message),
+            | ForgeError::EmptyTable
+            | ForgeError::EmptyRound => DomainError::Validation(message),
         }
     }
 }

@@ -66,6 +66,15 @@ define_uuid_id!(
 );
 
 define_uuid_id!(
+    /// Surrogate id for a node of a work log — where it opened, one
+    /// pass at it, or where it ended.
+    ///
+    /// As with a history, the chain is what orders them, so the id
+    /// answers "which node" and never "which came first".
+    NodeId
+);
+
+define_uuid_id!(
     /// Surrogate id for a `Pursuit` — one line of work.
     ///
     /// Declared here because a change point names the work it came out

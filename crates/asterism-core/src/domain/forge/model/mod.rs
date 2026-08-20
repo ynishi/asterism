@@ -176,5 +176,7 @@ pub mod act;
 pub mod error;
 pub mod history;
 pub mod line;
+pub mod op;
+pub mod pursuit;
 pub mod table;
 pub mod value;
