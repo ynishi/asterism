@@ -939,6 +939,7 @@ impl DisclosureWriter {
         // would be a file on disk in a state neither half asked for.
         let mut staged: Option<Vec<u8>> = None;
         let mut prompt_dropped = false;
+        let mut system_dropped = false;
         let mut xmp = if !container.takes_xmp() {
             Half::Skipped(Skipped::ContainerCannotCarryIt)
         } else if !record.discloses_anything() {
@@ -950,7 +951,7 @@ impl DisclosureWriter {
             // it.
             let original = std::fs::read(path).map_err(io)?;
             match embed::stamp(&original, record) {
-                // A packet that will not fit even after the reduction,
+                // A packet that will not fit even after the reductions,
                 // or a container the writer chokes on. The manifest can
                 // still be signed over the original bytes.
                 Err(source) => Half::Failed(
@@ -961,28 +962,37 @@ impl DisclosureWriter {
                     .to_string(),
                 ),
                 Ok(None) => Half::Skipped(Skipped::NothingToDisclose),
-                Ok(Some(bytes)) => {
-                    // `embed::stamp` falls back to the reduced record
-                    // when a JPEG segment cannot hold the packet.
-                    // Reading the result back is how this side learns
-                    // that happened — the alternative is re-deriving
-                    // the decision here, which would be a second place
-                    // it could differ.
-                    //
-                    // The read has three outcomes and only one of them
-                    // is that. A packet that fails to parse, or that
-                    // the reader cannot find at all, says the write
-                    // produced something this crate does not recognise
-                    // — a defect, not a fact about the record. Those
-                    // two discard the bytes rather than putting them on
-                    // disk: a file carrying an unreadable packet is
-                    // worse than one carrying none, because the
-                    // manifest's binding would then be taken over it.
-                    match embed::read_xmp(&bytes) {
-                        Ok(Some(written)) => {
-                            prompt_dropped =
-                                record.prompt.is_some() && !written.contains("AIPromptInformation");
-                            staged = Some(bytes);
+                Ok(Some(stamp)) => {
+                    // The read-back stays, with one job left: a packet
+                    // that fails to parse, or that the reader cannot
+                    // find at all, says the write produced something
+                    // this crate does not recognise — a defect, not a
+                    // fact about the record. Those two discard the
+                    // bytes rather than putting them on disk: a file
+                    // carrying an unreadable packet is worse than one
+                    // carrying none, because the manifest's binding
+                    // would then be taken over it.
+                    match embed::read_xmp(&stamp.bytes) {
+                        Ok(Some(_)) => {
+                            // `embed::stamp` says how far it reduced
+                            // the record to fit — it used to say
+                            // nothing, and this side re-derived the
+                            // prompt's fate by substring-search over
+                            // the rendered XML, which was blind to the
+                            // tier below the prompt once there was
+                            // one. A reduction is only a withholding
+                            // of what the record actually asked for: a
+                            // record with no prompt loses nothing at
+                            // the prompt tier. Set here rather than
+                            // where the reduction is first seen, so a
+                            // packet the read-back refuses cannot
+                            // leave a note about a packet that never
+                            // reached the file.
+                            prompt_dropped = record.prompt.is_some()
+                                && stamp.reduction != embed::Reduction::Nothing;
+                            system_dropped = record.ai_system.is_some()
+                                && stamp.reduction == embed::Reduction::Obligation;
+                            staged = Some(stamp.bytes);
                             Half::Written
                         }
                         Ok(None) => Half::Failed(
@@ -1035,14 +1045,16 @@ impl DisclosureWriter {
             // The packet was produced and could not be put on disk.
             // Nothing else wrote the file, so the original stands and
             // the half that was about to claim it landed has to
-            // retract — including the prompt note, which is a fact
-            // about a packet that is not there.
+            // retract — including the withholding notes, which are
+            // facts about a packet that is not there.
             xmp = Half::Failed(io(failure).to_string());
             prompt_dropped = false;
+            system_dropped = false;
         }
 
         let mut outcome = Stamped::new(xmp, manifest);
         outcome.prompt_dropped = prompt_dropped;
+        outcome.system_dropped = system_dropped;
         Ok(outcome)
     }
 
@@ -2208,7 +2220,7 @@ mod tests {
         // what writing XMP after signing amounts to.
         let corrected = DisclosureRecord::for_asset("asset-1")
             .with_source_type(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia);
-        let tampered = embed::stamp(&signed, &corrected).unwrap().unwrap();
+        let tampered = embed::stamp(&signed, &corrected).unwrap().unwrap().bytes;
         match read_manifest("image/png", tampered) {
             Err(_) => {}
             Ok(reader) => assert!(
@@ -2377,6 +2389,16 @@ mod tests {
 
         assert_eq!(outcome.xmp, Half::Written, "the mark landed");
         assert!(outcome.discloses());
+        assert!(
+            outcome.system_dropped,
+            "a packet reduced to the bare mark and a container that never \
+             named its generator read identically afterwards, so the \
+             difference leaves through the outcome"
+        );
+        assert!(
+            !outcome.prompt_dropped,
+            "this record asked for no prompt, so none was withheld"
+        );
         let packet = embed::read_xmp(&std::fs::read(&path).unwrap())
             .unwrap()
             .expect("the packet reached the file");
@@ -2439,6 +2461,10 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.xmp, Half::Written);
         assert!(outcome.prompt_dropped);
+        assert!(
+            !outcome.system_dropped,
+            "the prompt tier keeps the system name, and the note says only what went"
+        );
 
         let packet = embed::read_xmp(&std::fs::read(&path).unwrap())
             .unwrap()

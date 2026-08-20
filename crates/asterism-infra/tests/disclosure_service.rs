@@ -27,6 +27,7 @@ use asterism_core::domain::repository::{
     AssetRepository, EdgeRepository, MaterialFingerprint, PersonaRepository,
 };
 use asterism_core::domain::value::{AssetId, Modality, PersonaId, SourceKind, SourceRef};
+use asterism_core::error::DomainError;
 use asterism_disclosure_format::embed;
 use asterism_infra::disclosure::DisclosureWriter;
 use asterism_infra::sqlite::open_and_migrate_in_memory;
@@ -150,6 +151,51 @@ impl Fixture {
         asset.id
     }
 
+    /// One image asset whose material is attached and not yet
+    /// fingerprinted — the state a stamp racing the hash job sees.
+    async fn seed_unfingerprinted_asset(&self, persona: PersonaId) -> AssetId {
+        let locator = format!("m-{}.png", uuid::Uuid::now_v7());
+        let source = SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), locator).unwrap();
+        let mut asset = Asset::new(
+            persona,
+            source.clone(),
+            Some(Modality::new("image").unwrap()),
+            Utc::now(),
+            &unattributed(),
+        );
+        asset
+            .attach_material(Material::primary(
+                asset.source.locator.clone(),
+                None,
+                Utc::now(),
+            ))
+            .expect("an item may carry a material");
+        self.assets.save(&asset).await.unwrap();
+        asset.id
+    }
+
+    /// One asset whose fingerprint ran and left the meta axis a marker
+    /// — the answer the hash job stores for a format no probe reads.
+    async fn seed_unprobeable_asset(&self, persona: PersonaId) -> AssetId {
+        let asset = self.seed_unfingerprinted_asset(persona).await;
+        self.assets
+            .set_material_fingerprint(
+                &asset,
+                0,
+                &MaterialFingerprint {
+                    file: "unhashable:no-bytes".into(),
+                    content: "unhashable:no-bytes".into(),
+                    meta: "unsupported:video/mp4".into(),
+                    meta_kv: None,
+                    meta_raw: None,
+                    meta_text: None,
+                },
+            )
+            .await
+            .unwrap();
+        asset
+    }
+
     /// `child` was derived from `parent`, in the direction the write
     /// path uses (`from` = the newer asset).
     async fn seed_derived_from(&self, child: AssetId, parent: AssetId) {
@@ -222,6 +268,45 @@ async fn the_record_comes_out_of_what_the_library_stored() {
         record.dispatch_id.as_deref(),
         Some("dispatch-1"),
         "the dispatch is the caller's context, not the library's"
+    );
+    fx.close().await;
+}
+
+/// Before the fingerprint job has run, "what does this asset disclose"
+/// is a question nobody has asked yet, not an answer — and the service
+/// refuses rather than stamping an unmarked file nothing can tell
+/// afterwards from one with nothing to say. `meta_kv` alone cannot make
+/// the distinction; `meta_hash` being `NULL` is what does.
+#[tokio::test]
+async fn an_asset_racing_its_fingerprint_is_refused_not_silently_unmarked() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let asset = fx.seed_unfingerprinted_asset(persona).await;
+
+    let err = fx.service.record_for(&asset, None).await.unwrap_err();
+    assert!(
+        matches!(err, DomainError::Conflict(_)),
+        "not-yet-measured is a state conflict, not a missing row: {err:?}"
+    );
+    fx.close().await;
+}
+
+/// A format no probe reads is an answer, not a pending question: the
+/// fingerprint ran and left the meta axis a marker, and the record
+/// proceeds with nothing established.
+#[tokio::test]
+async fn a_format_no_probe_reads_discloses_nothing_rather_than_waiting() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let asset = fx.seed_unprobeable_asset(persona).await;
+
+    let record = fx.service.record_for(&asset, None).await.unwrap();
+    assert_eq!(record.source_type, None);
+    assert!(!record.discloses_anything());
+    assert_eq!(
+        record.asset_id,
+        asset.to_string(),
+        "the identifier is still worth carrying"
     );
     fx.close().await;
 }

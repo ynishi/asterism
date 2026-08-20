@@ -175,15 +175,27 @@ pub struct Stamped {
     /// [`Half::Written`] — nothing else writes a packet to drop it
     /// from.
     pub prompt_dropped: bool,
+    /// The system name was dropped too: the packet carries the mark
+    /// alone.
+    ///
+    /// The tier below the one above, and reported for the same reason —
+    /// a packet reduced to the bare mark and a file whose container
+    /// never named its generator read identically afterwards. Implies
+    /// nothing about [`Self::prompt_dropped`]: each says its field was
+    /// asked for and withheld, and a record with no prompt loses
+    /// nothing when the prompt tier goes. Only meaningful when
+    /// [`Self::xmp`] is [`Half::Written`].
+    pub system_dropped: bool,
 }
 
 impl Stamped {
-    /// An outcome with both halves accounted for and no prompt dropped.
+    /// An outcome with both halves accounted for and nothing dropped.
     pub fn new(xmp: Half, manifest: Half) -> Self {
         Self {
             xmp,
             manifest,
             prompt_dropped: false,
+            system_dropped: false,
         }
     }
 
@@ -226,6 +238,7 @@ impl Stamped {
             "xmp": self.xmp.to_note(),
             "manifest": self.manifest.to_note(),
             "prompt_dropped": self.prompt_dropped,
+            "system_dropped": self.system_dropped,
             "discloses": self.discloses(),
         })
     }
@@ -290,6 +303,20 @@ mod tests {
         // Both disclosed the file: the XMP half landed either way.
         assert_eq!(unconfigured.to_note()["discloses"], serde_json::json!(true));
         assert_eq!(broken.to_note()["discloses"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn the_note_says_which_field_was_withheld_not_just_that_one_was() {
+        // The two withholdings are different findings: a dropped prompt
+        // still names the generator, a bare mark does not. A note that
+        // merged them would leave "which packet is in this file" to be
+        // answered by opening the file, which is what the note exists
+        // to avoid.
+        let mut outcome = Stamped::new(Half::Written, Half::Skipped(Skipped::NoSigningIdentity));
+        outcome.system_dropped = true;
+        let note = outcome.to_note();
+        assert_eq!(note["system_dropped"], serde_json::json!(true));
+        assert_eq!(note["prompt_dropped"], serde_json::json!(false));
     }
 
     #[test]
