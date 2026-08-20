@@ -10,6 +10,21 @@ and this project adheres to
 
 ### Added
 
+- **The signing key can live in the macOS Keychain** (#23).
+  `ASTERISM_DISCLOSURE_KEYCHAIN_KEY` names a private key by its Keychain label,
+  in place of the key-file path — one of the two, never both. The key —
+  including one held in the Secure Enclave, which the same search finds — never
+  enters the process: signing goes through `SecKeyCreateSignature`, so there is
+  no heap copy to zeroize and no key file whose mode anyone has to audit, which
+  is the custody the C2PA guidance asks of a production signer. The certificate
+  chain still travels as a file; it is public material and goes into every
+  manifest anyway, and it passes the same acceptance checks as the file-based
+  identity. ECDSA only (`es256`, `es384`, `es512`): the Security framework does
+  not sign Ed25519, and an RSA arrangement keeps the file form. A label that
+  names nothing refuses at startup rather than on the first export, and setting
+  the variable on a non-macOS build reports the identity as unavailable instead
+  of quietly signing nothing.
+
 - **A selection gesture can carry a sentence** (#65). `trash`, `restore`, and
   `trash_group` accept an optional one-line comment, and the remark lands as an
   `AssetComment` pinned to the gesture — actor, time, and verb on the row — so

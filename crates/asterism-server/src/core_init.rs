@@ -172,6 +172,7 @@ fn parse_trash_retention(raw: Option<&str>) -> Result<chrono::Duration, DomainEr
 /// reads the startup log, or the disclosure recorded beside an export.
 const SIGNING_CERT_CHAIN_ENV: &str = "ASTERISM_DISCLOSURE_CERT_CHAIN";
 const SIGNING_PRIVATE_KEY_ENV: &str = "ASTERISM_DISCLOSURE_PRIVATE_KEY";
+const SIGNING_KEYCHAIN_KEY_ENV: &str = "ASTERISM_DISCLOSURE_KEYCHAIN_KEY";
 const SIGNING_ALG_ENV: &str = "ASTERISM_DISCLOSURE_SIGNING_ALG";
 const SIGNING_TSA_URL_ENV: &str = "ASTERISM_DISCLOSURE_TSA_URL";
 const SIGNING_STRICT_ENV: &str = "ASTERISM_DISCLOSURE_SIGNING_STRICT";
@@ -184,10 +185,25 @@ const SIGNING_ALG_DEFAULT: &str = "es256";
 #[derive(Debug, PartialEq, Eq)]
 struct SigningRequest {
     cert_chain: PathBuf,
-    private_key: PathBuf,
+    key: SigningKey,
     alg: String,
     tsa_url: Option<String>,
     strictness: Strictness,
+}
+
+/// Which custody the key variables named.
+///
+/// One of two, never both: a file the process reads, or a label the
+/// macOS Keychain resolves — where the key's bytes never enter this
+/// process at all. The refusal of both at once lives in
+/// [`signing_request`], because two keys is not a configuration, it is
+/// a question about which one the operator meant.
+#[derive(Debug, PartialEq, Eq)]
+enum SigningKey {
+    /// `ASTERISM_DISCLOSURE_PRIVATE_KEY` — a PEM file on disk.
+    File(PathBuf),
+    /// `ASTERISM_DISCLOSURE_KEYCHAIN_KEY` — a Keychain item label.
+    Keychain(String),
 }
 
 /// Pure half of [`disclosure_writer`], split out so the rules can be
@@ -206,6 +222,7 @@ struct SigningRequest {
 fn signing_request(
     cert_chain: Option<&str>,
     private_key: Option<&str>,
+    keychain_key: Option<&str>,
     alg: Option<&str>,
     tsa_url: Option<&str>,
     strict: Option<&str>,
@@ -213,7 +230,8 @@ fn signing_request(
     fn set(raw: Option<&str>) -> Option<&str> {
         raw.map(str::trim).filter(|v| !v.is_empty())
     }
-    let (cert_chain, private_key) = (set(cert_chain), set(private_key));
+    let (cert_chain, private_key, keychain_key) =
+        (set(cert_chain), set(private_key), set(keychain_key));
 
     // Before the "nothing configured" exit below, so that a value this
     // switch would refuse is refused wherever it is set. Read after it,
@@ -232,23 +250,45 @@ fn signing_request(
         },
     };
 
+    // Two keys is not a configuration. Refused before the pairing
+    // below so that an install that set both hears about the conflict,
+    // not about whichever half the pairing happened to inspect first.
+    let key = match (private_key, keychain_key) {
+        (Some(_), Some(_)) => {
+            return Err(format!(
+                "{SIGNING_PRIVATE_KEY_ENV} and {SIGNING_KEYCHAIN_KEY_ENV} are both set; \
+                 name one key, not two"
+            ));
+        }
+        (Some(file), None) => Some(SigningKey::File(PathBuf::from(file))),
+        (None, Some(label)) => Some(SigningKey::Keychain(label.to_string())),
+        (None, None) => None,
+    };
+
     // Half a configuration is refused rather than ignored. Signing needs
     // both halves, so an install that names one has asked for something
     // it is not going to get, and the quiet reading — no certificate
     // configured — is the one answer that never prompts anybody to go
     // and look at the variable they misspelled.
-    let (cert_chain, private_key) = match (cert_chain, private_key) {
+    let (cert_chain, key) = match (cert_chain, key) {
         (None, None) => return Ok(None),
-        (Some(cert_chain), Some(private_key)) => (cert_chain, private_key),
+        (Some(cert_chain), Some(key)) => (cert_chain, key),
         (Some(_), None) => {
             return Err(format!(
-                "{SIGNING_CERT_CHAIN_ENV} names a certificate but {SIGNING_PRIVATE_KEY_ENV} \
-                 is not set; signing needs both"
+                "{SIGNING_CERT_CHAIN_ENV} names a certificate but neither \
+                 {SIGNING_PRIVATE_KEY_ENV} nor {SIGNING_KEYCHAIN_KEY_ENV} is set; signing \
+                 needs a key"
             ));
         }
-        (None, Some(_)) => {
+        (None, Some(SigningKey::File(_))) => {
             return Err(format!(
                 "{SIGNING_PRIVATE_KEY_ENV} names a key but {SIGNING_CERT_CHAIN_ENV} is not \
+                 set; signing needs both"
+            ));
+        }
+        (None, Some(SigningKey::Keychain(_))) => {
+            return Err(format!(
+                "{SIGNING_KEYCHAIN_KEY_ENV} names a key but {SIGNING_CERT_CHAIN_ENV} is not \
                  set; signing needs both"
             ));
         }
@@ -279,7 +319,7 @@ fn signing_request(
 
     Ok(Some(SigningRequest {
         cert_chain: PathBuf::from(cert_chain),
-        private_key: PathBuf::from(private_key),
+        key,
         alg: set(alg).unwrap_or(SIGNING_ALG_DEFAULT).to_string(),
         tsa_url,
         strictness,
@@ -307,6 +347,7 @@ fn disclosure_writer() -> InfraDisclosureWriter {
     let request = signing_request(
         read(SIGNING_CERT_CHAIN_ENV).as_deref(),
         read(SIGNING_PRIVATE_KEY_ENV).as_deref(),
+        read(SIGNING_KEYCHAIN_KEY_ENV).as_deref(),
         read(SIGNING_ALG_ENV).as_deref(),
         read(SIGNING_TSA_URL_ENV).as_deref(),
         read(SIGNING_STRICT_ENV).as_deref(),
@@ -328,14 +369,43 @@ fn disclosure_writer() -> InfraDisclosureWriter {
         }
     };
 
-    warn_if_key_is_readable_by_others(&request.private_key);
-    match SigningIdentity::from_files(
-        &request.cert_chain,
-        &request.private_key,
-        &request.alg,
-        request.tsa_url.clone(),
-        request.strictness,
-    ) {
+    let identity = match &request.key {
+        SigningKey::File(private_key) => {
+            warn_if_key_is_readable_by_others(private_key);
+            SigningIdentity::from_files(
+                &request.cert_chain,
+                private_key,
+                &request.alg,
+                request.tsa_url.clone(),
+                request.strictness,
+            )
+        }
+        // The permission warning has no keychain counterpart on
+        // purpose: there is no file whose mode could widen who reads
+        // the key, which is the point of the arrangement.
+        #[cfg(target_os = "macos")]
+        SigningKey::Keychain(label) => SigningIdentity::from_keychain(
+            &request.cert_chain,
+            label,
+            &request.alg,
+            request.tsa_url.clone(),
+            request.strictness,
+        ),
+        #[cfg(not(target_os = "macos"))]
+        SigningKey::Keychain(_) => {
+            tracing::error!(
+                event = "diag.disclosure.identity",
+                "{SIGNING_KEYCHAIN_KEY_ENV} is set, but keychain signing is macOS-only \
+                 and this is not a macOS build"
+            );
+            return InfraDisclosureWriter::unavailable(
+                "the configured signing identity names a macOS Keychain key on a build \
+                 without one; exports carry the IPTC/XMP disclosure and no manifest until \
+                 the configuration matches the platform",
+            );
+        }
+    };
+    match identity {
         Ok(identity) => {
             tracing::info!(
                 event = "diag.disclosure.identity",
@@ -1273,9 +1343,12 @@ mod signing_tests {
 
     #[test]
     fn no_signing_variables_is_not_an_error() {
-        assert_eq!(signing_request(None, None, None, None, None).unwrap(), None);
         assert_eq!(
-            signing_request(Some(""), Some("  "), None, None, None).unwrap(),
+            signing_request(None, None, None, None, None, None).unwrap(),
+            None
+        );
+        assert_eq!(
+            signing_request(Some(""), Some("  "), Some(" "), None, None, None).unwrap(),
             None,
             "an exported-but-empty variable is how a value gets cleared"
         );
@@ -1287,19 +1360,48 @@ mod signing_tests {
     /// carry no manifest.
     #[test]
     fn naming_one_half_of_the_identity_is_refused() {
-        let err = signing_request(Some(CERT), None, None, None, None).unwrap_err();
+        let err = signing_request(Some(CERT), None, None, None, None, None).unwrap_err();
         assert!(err.contains(SIGNING_PRIVATE_KEY_ENV), "{err}");
-        let err = signing_request(None, Some(KEY), None, None, None).unwrap_err();
+        let err = signing_request(None, Some(KEY), None, None, None, None).unwrap_err();
         assert!(err.contains(SIGNING_CERT_CHAIN_ENV), "{err}");
+        let err =
+            signing_request(None, None, Some("Asterism Signing"), None, None, None).unwrap_err();
+        assert!(err.contains(SIGNING_CERT_CHAIN_ENV), "{err}");
+    }
+
+    /// Two keys is a question, not a configuration: whichever one this
+    /// quietly preferred, some installation meant the other.
+    #[test]
+    fn naming_two_keys_is_refused() {
+        let err = signing_request(
+            Some(CERT),
+            Some(KEY),
+            Some("Asterism Signing"),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains(SIGNING_PRIVATE_KEY_ENV), "{err}");
+        assert!(err.contains(SIGNING_KEYCHAIN_KEY_ENV), "{err}");
+    }
+
+    #[test]
+    fn a_keychain_label_and_a_certificate_are_a_signing_request() {
+        let request = signing_request(Some(CERT), None, Some("Asterism Signing"), None, None, None)
+            .unwrap()
+            .expect("a certificate and a keychain label is a signing request");
+        assert_eq!(request.key, SigningKey::Keychain("Asterism Signing".into()));
+        assert_eq!(request.cert_chain, PathBuf::from(CERT));
     }
 
     #[test]
     fn both_paths_produce_a_request_with_the_defaults_filled_in() {
-        let request = signing_request(Some(CERT), Some(KEY), None, None, None)
+        let request = signing_request(Some(CERT), Some(KEY), None, None, None, None)
             .unwrap()
             .expect("a certificate and a key is a signing request");
         assert_eq!(request.cert_chain, PathBuf::from(CERT));
-        assert_eq!(request.private_key, PathBuf::from(KEY));
+        assert_eq!(request.key, SigningKey::File(PathBuf::from(KEY)));
         assert_eq!(request.alg, SIGNING_ALG_DEFAULT);
         assert_eq!(request.tsa_url, None);
         assert_eq!(
@@ -1315,6 +1417,7 @@ mod signing_tests {
         let request = signing_request(
             Some(CERT),
             Some(KEY),
+            None,
             Some("ps256"),
             Some("http://timestamp.example/tsa"),
             None,
@@ -1331,13 +1434,13 @@ mod signing_tests {
     #[test]
     fn strictness_takes_a_boolean_and_nothing_else() {
         for on in ["true", "TRUE", "1", "  true  "] {
-            let request = signing_request(Some(CERT), Some(KEY), None, None, Some(on))
+            let request = signing_request(Some(CERT), Some(KEY), None, None, None, Some(on))
                 .unwrap()
                 .unwrap();
             assert_eq!(request.strictness, Strictness::Strict, "{on:?}");
         }
         for off in ["false", "False", "0"] {
-            let request = signing_request(Some(CERT), Some(KEY), None, None, Some(off))
+            let request = signing_request(Some(CERT), Some(KEY), None, None, None, Some(off))
                 .unwrap()
                 .unwrap();
             assert_eq!(request.strictness, Strictness::Permissive, "{off:?}");
@@ -1348,7 +1451,7 @@ mod signing_tests {
         // publishing strictly while it is not.
         for bad in ["yes", "on", "strict", "2", "-1"] {
             assert!(
-                signing_request(Some(CERT), Some(KEY), None, None, Some(bad)).is_err(),
+                signing_request(Some(CERT), Some(KEY), None, None, None, Some(bad)).is_err(),
                 "{bad:?} must be refused"
             );
         }
@@ -1359,9 +1462,9 @@ mod signing_tests {
     /// told nothing about the only variable it typed correctly.
     #[test]
     fn a_bad_strictness_is_refused_even_with_no_certificate_configured() {
-        assert!(signing_request(None, None, None, None, Some("yes")).is_err());
+        assert!(signing_request(None, None, None, None, None, Some("yes")).is_err());
         assert_eq!(
-            signing_request(None, None, None, None, Some("true")).unwrap(),
+            signing_request(None, None, None, None, None, Some("true")).unwrap(),
             None,
             "asking for strict signing is not itself a configured certificate"
         );
@@ -1374,7 +1477,7 @@ mod signing_tests {
     #[test]
     fn a_timestamp_authority_is_checked_for_shape() {
         for good in ["http://timestamp.example/tsa", "https://ts.example"] {
-            let request = signing_request(Some(CERT), Some(KEY), None, Some(good), None)
+            let request = signing_request(Some(CERT), Some(KEY), None, None, Some(good), None)
                 .unwrap()
                 .unwrap();
             assert_eq!(request.tsa_url.as_deref(), Some(good), "{good:?}");
@@ -1385,7 +1488,8 @@ mod signing_tests {
             "http://",
             "ftp://timestamp.example",
         ] {
-            let err = signing_request(Some(CERT), Some(KEY), None, Some(bad), None).unwrap_err();
+            let err =
+                signing_request(Some(CERT), Some(KEY), None, None, Some(bad), None).unwrap_err();
             assert!(err.contains(SIGNING_TSA_URL_ENV), "{bad:?}: {err}");
         }
     }

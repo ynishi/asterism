@@ -145,3 +145,10 @@ objc2-av-foundation = { version = "0.3", features = [
     "AVAsset",
     "AVAssetImageGenerator",
 ] }
+# Keychain-held signing keys for the C2PA manifest writer. The key is
+# looked up by label and used through `SecKeyCreateSignature`, so its
+# bytes never enter this process — the custody the platform keystore
+# exists to provide, and what the C2PA guidance asks of a production
+# signer over a key file. Already in the tree transitively; naming it
+# here pins the API this crate calls.
+security-framework = "3.7"

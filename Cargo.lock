@@ -591,6 +591,7 @@ dependencies = [
  "rkyv 0.7.46",
  "rusqlite",
  "rusqlite-isle",
+ "security-framework",
  "serde",
  "serde_json",
  "tantivy",

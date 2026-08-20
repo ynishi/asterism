@@ -281,24 +281,42 @@ pub enum DisclosureError {
 /// the manifest is.
 pub struct SigningIdentity {
     cert_chain: Vec<u8>,
-    private_key: Vec<u8>,
+    key: KeyMaterial,
     alg: c2pa::crypto::raw_signature::SigningAlg,
     tsa_url: Option<String>,
+}
+
+/// Where the private key lives, which decides what this process holds.
+///
+/// [`Bytes`](Self::Bytes) is the key itself, read out of the configured
+/// file and resident for the process lifetime. [`Keychain`](Self::Keychain)
+/// is a handle: the key stays in the macOS Keychain — or in the Secure
+/// Enclave, which surfaces through the same search — and signing goes
+/// through `SecKeyCreateSignature`, so the bytes never enter this
+/// process at all. That difference is the reason the variant exists;
+/// everything else about the identity (certificate checks, algorithm,
+/// timestamping) is the same on both sides.
+enum KeyMaterial {
+    /// PEM bytes from `ASTERISM_DISCLOSURE_PRIVATE_KEY`'s file.
+    Bytes(Vec<u8>),
+    /// A key resident in the Keychain, found by its label.
+    #[cfg(target_os = "macos")]
+    Keychain(keychain::KeychainKey),
 }
 
 impl std::fmt::Debug for SigningIdentity {
     /// Names the algorithm and nothing else.
     ///
-    /// The private key is in this struct, and a derived `Debug` would
-    /// put it into any log line, panic message or error report that
-    /// formatted the value — including ones written years from now by
-    /// somebody who never read this file.
+    /// The private key may be in this struct, and a derived `Debug`
+    /// would put it into any log line, panic message or error report
+    /// that formatted the value — including ones written years from now
+    /// by somebody who never read this file.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SigningIdentity")
             .field("alg", &self.alg)
             .field("tsa_url", &self.tsa_url)
             .field("cert_chain", &"<redacted>")
-            .field("private_key", &"<redacted>")
+            .field("key", &"<redacted>")
             .finish()
     }
 }
@@ -474,7 +492,76 @@ impl SigningIdentity {
         tsa_url: Option<String>,
         strictness: Strictness,
     ) -> Result<Self, DisclosureError> {
-        if names_a_test_certificate(&cert_chain) {
+        let alg = Self::accept(&cert_chain, alg, strictness)?;
+        Ok(Self {
+            cert_chain,
+            key: KeyMaterial::Bytes(private_key),
+            alg,
+            tsa_url,
+        })
+    }
+
+    /// Loads an identity whose key lives in the macOS Keychain.
+    ///
+    /// The certificate chain is still a file — certificates are public
+    /// material and travel into every manifest anyway — and goes
+    /// through the same acceptance as the file-based identity. What
+    /// changes is custody of the key: it is found by `label`, held by
+    /// the Keychain (or the Secure Enclave, which answers the same
+    /// search), and used through `SecKeyCreateSignature`, so its bytes
+    /// never enter this process. ECDSA only (`es256`, `es384`,
+    /// `es512`): the Security framework does not sign Ed25519, and an
+    /// RSA arrangement already has the file path. The algorithm is
+    /// refused before the Keychain is asked so that a misconfigured
+    /// installation hears about the algorithm, not about a key lookup
+    /// it was never going to reach.
+    #[cfg(target_os = "macos")]
+    pub fn from_keychain(
+        cert_chain: &Path,
+        label: &str,
+        alg: &str,
+        tsa_url: Option<String>,
+        strictness: Strictness,
+    ) -> Result<Self, DisclosureError> {
+        let cert_chain = std::fs::read(cert_chain).map_err(|e| {
+            DisclosureError::Identity(format!("reading {}: {e}", cert_chain.display()))
+        })?;
+        let alg = Self::accept(&cert_chain, alg, strictness)?;
+        keychain::signing_algorithm(alg)?;
+        // The signer will need the certificates as DER, and a bundle
+        // that parses to none would otherwise surface as a failed
+        // manifest inside the COSE writer at the first export. This
+        // path refuses degenerate material at load — that is its whole
+        // posture — so the empty parse is refused here too.
+        if keychain::der_certificates(&cert_chain).is_empty() {
+            return Err(DisclosureError::Identity(
+                "no certificate could be parsed out of the bundle; check that the file \
+                 is PEM and holds the certificate you meant"
+                    .into(),
+            ));
+        }
+        let key = keychain::find_signing_key(label)?;
+        Ok(Self {
+            cert_chain,
+            key: KeyMaterial::Keychain(key),
+            alg,
+            tsa_url,
+        })
+    }
+
+    /// What every identity checks about its certificate, wherever the
+    /// key lives.
+    ///
+    /// Split from [`from_bytes`](Self::from_bytes) when the Keychain
+    /// identity arrived: the checks are statements about the
+    /// certificate and the algorithm name, and duplicating them per key
+    /// source is how the two paths would drift.
+    fn accept(
+        cert_chain: &[u8],
+        alg: &str,
+        strictness: Strictness,
+    ) -> Result<c2pa::crypto::raw_signature::SigningAlg, DisclosureError> {
+        if names_a_test_certificate(cert_chain) {
             return Err(DisclosureError::Identity(
                 "this is a C2PA test certificate: a manifest signed with it validates as \
                  untrusted, which claims a provenance a reader will reject. Configure a real \
@@ -492,7 +579,7 @@ impl SigningIdentity {
         // this reads the extensions instead. Last of the three, so a
         // bundle that fails an earlier one is refused for the earlier
         // reason rather than warned about first.
-        let verdict = inspect_certificate(&cert_chain);
+        let verdict = inspect_certificate(cert_chain);
         if !verdict.refusals.is_empty() {
             return Err(DisclosureError::Identity(format!(
                 "this certificate cannot sign a C2PA claim: {}. Nothing is written rather \
@@ -507,7 +594,7 @@ impl SigningIdentity {
         // sign, and an installation that does not publish can use it by
         // leaving strict mode off.
         if strictness == Strictness::Strict {
-            let count = certificate_count(&cert_chain);
+            let count = certificate_count(cert_chain);
 
             // Bytes that parse as nothing are their own answer and not a
             // strictness one. `inspect_certificate` passes what it
@@ -569,22 +656,242 @@ impl SigningIdentity {
             );
         }
 
-        Ok(Self {
-            cert_chain,
-            private_key,
-            alg,
-            tsa_url,
-        })
+        Ok(alg)
     }
 
     /// Builds the `c2pa` signer for one signing operation.
     fn signer(&self) -> Result<c2pa::BoxedSigner, c2pa::Error> {
-        c2pa::create_signer::from_keys(
-            &self.cert_chain,
-            &self.private_key,
-            self.alg,
-            self.tsa_url.clone(),
-        )
+        match &self.key {
+            KeyMaterial::Bytes(private_key) => c2pa::create_signer::from_keys(
+                &self.cert_chain,
+                private_key,
+                self.alg,
+                self.tsa_url.clone(),
+            ),
+            #[cfg(target_os = "macos")]
+            KeyMaterial::Keychain(key) => Ok(Box::new(keychain::KeychainSigner::new(
+                key.clone(),
+                &self.cert_chain,
+                self.alg,
+                self.tsa_url.clone(),
+            ))),
+        }
+    }
+}
+
+/// The Keychain half of [`SigningIdentity`] — macOS only.
+///
+/// What this buys is custody: the private key stays in the Keychain (or
+/// the Secure Enclave, which answers the same search), signing goes
+/// through `SecKeyCreateSignature`, and the key's bytes never enter
+/// this process — no heap residue to zeroize, no key file whose mode
+/// anyone has to audit. The certificates still travel as bytes, because
+/// they are public material and go into every manifest anyway.
+#[cfg(target_os = "macos")]
+mod keychain {
+    use c2pa::crypto::raw_signature::SigningAlg;
+    use security_framework::item::{ItemSearchOptions, KeyClass, Reference, SearchResult};
+    use security_framework::key::{Algorithm, SecKey};
+
+    use super::DisclosureError;
+
+    /// A private key resident in the Keychain, with the label that
+    /// found it — kept because an error that cannot name the label
+    /// names nothing the operator configured.
+    #[derive(Clone)]
+    pub(super) struct KeychainKey {
+        key: SecKey,
+        label: String,
+    }
+
+    /// Finds the private key `label` names — exactly one.
+    ///
+    /// Looked up once, at identity load, so a label that names nothing
+    /// is a startup refusal rather than a failed manifest on the first
+    /// export. Two keys under the label are refused on the same terms
+    /// as two key variables in the environment: whichever one a search
+    /// order quietly preferred, the manifests might be signed by the
+    /// other. The handle is what this holds from then on; whether the
+    /// key may actually sign is the Keychain's access-control decision,
+    /// made at each signature.
+    pub(super) fn find_signing_key(label: &str) -> Result<KeychainKey, DisclosureError> {
+        let results = ItemSearchOptions::new()
+            .key_class(KeyClass::private())
+            .label(label)
+            .load_refs(true)
+            // Two is enough to tell "one" from "more than one", and
+            // this never wants a third.
+            .limit(2i64)
+            .search()
+            .map_err(|e| {
+                DisclosureError::Identity(format!(
+                    "no private key labelled {label:?} in the Keychain: {e}"
+                ))
+            })?;
+        let mut keys = results.into_iter().filter_map(|result| match result {
+            SearchResult::Ref(Reference::Key(key)) => Some(key),
+            _ => None,
+        });
+        match (keys.next(), keys.next()) {
+            (Some(key), None) => Ok(KeychainKey {
+                key,
+                label: label.to_string(),
+            }),
+            (Some(_), Some(_)) => Err(DisclosureError::Identity(format!(
+                "more than one private key is labelled {label:?} in the Keychain; give \
+                 the signing key a label of its own"
+            ))),
+            (None, _) => Err(DisclosureError::Identity(format!(
+                "the Keychain search for {label:?} returned no key reference"
+            ))),
+        }
+    }
+
+    /// The DER certificates a PEM bundle parses to, in bundle order.
+    ///
+    /// A block that does not parse is skipped rather than an error —
+    /// the same terms as the inspector — which is why the identity
+    /// loader refuses an empty result before this shape ever reaches a
+    /// signer.
+    pub(super) fn der_certificates(cert_chain_pem: &[u8]) -> Vec<Vec<u8>> {
+        x509_parser::pem::Pem::iter_from_buffer(cert_chain_pem)
+            .filter_map(|pem| pem.ok())
+            .map(|pem| pem.contents)
+            .collect()
+    }
+
+    /// The `SecKey` algorithm a COSE name maps to.
+    ///
+    /// ECDSA only. The Security framework does not sign Ed25519, and an
+    /// RSA arrangement already has the file-based path — supporting it
+    /// here would double the surface for a configuration nobody has.
+    /// The `Message` variants hash internally, which is what the COSE
+    /// signer hands over: the bytes to be signed, not a digest.
+    pub(super) fn signing_algorithm(alg: SigningAlg) -> Result<Algorithm, DisclosureError> {
+        match alg {
+            SigningAlg::Es256 => Ok(Algorithm::ECDSASignatureMessageX962SHA256),
+            SigningAlg::Es384 => Ok(Algorithm::ECDSASignatureMessageX962SHA384),
+            SigningAlg::Es512 => Ok(Algorithm::ECDSASignatureMessageX962SHA512),
+            other => Err(DisclosureError::Identity(format!(
+                "keychain signing supports es256, es384 and es512; {other} needs the \
+                 file-based key configuration"
+            ))),
+        }
+    }
+
+    /// A `c2pa` signer whose private half never leaves the Keychain.
+    pub(super) struct KeychainSigner {
+        key: KeychainKey,
+        /// DER, one certificate per entry — the shape [`certs`]
+        /// returns, parsed once here rather than per signature.
+        ///
+        /// [`certs`]: c2pa::Signer::certs
+        certs: Vec<Vec<u8>>,
+        alg: SigningAlg,
+        tsa_url: Option<String>,
+        reserve_size: usize,
+    }
+
+    impl KeychainSigner {
+        pub(super) fn new(
+            key: KeychainKey,
+            cert_chain_pem: &[u8],
+            alg: SigningAlg,
+            tsa_url: Option<String>,
+        ) -> Self {
+            let certs = der_certificates(cert_chain_pem);
+            // The margin `c2pa`'s own callback signer reserves over the
+            // certificates, and the same reason: the signature's size
+            // is not knowable before it exists.
+            let reserve_size = 10_000 + certs.iter().map(Vec::len).sum::<usize>();
+            Self {
+                key,
+                certs,
+                alg,
+                tsa_url,
+                reserve_size,
+            }
+        }
+    }
+
+    impl c2pa::Signer for KeychainSigner {
+        fn sign(&self, data: &[u8]) -> c2pa::Result<Vec<u8>> {
+            // The signature comes back DER-encoded. That is fine as a
+            // return value: the COSE writer recognises a DER ECDSA
+            // signature and converts it to P1363 itself.
+            let algorithm = signing_algorithm(self.alg)
+                .map_err(|e| c2pa::Error::OtherError(e.to_string().into()))?;
+            self.key.key.create_signature(algorithm, data).map_err(|e| {
+                c2pa::Error::OtherError(
+                    format!("the Keychain key {:?} did not sign: {e}", self.key.label).into(),
+                )
+            })
+        }
+
+        fn alg(&self) -> SigningAlg {
+            self.alg
+        }
+
+        fn certs(&self) -> c2pa::Result<Vec<Vec<u8>>> {
+            Ok(self.certs.clone())
+        }
+
+        fn reserve_size(&self) -> usize {
+            self.reserve_size
+        }
+
+        fn time_authority_url(&self) -> Option<String> {
+            self.tsa_url.clone()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use security_framework::key::{GenerateKeyOptions, KeyType};
+
+        use super::*;
+
+        /// The signing plumbing, without a keychain: an ephemeral pair
+        /// (no location, so nothing lands in any keychain), a signature
+        /// through the same call the real path uses, and a verification
+        /// against the public half. What this pins is the algorithm
+        /// mapping and the DER handoff; what it cannot pin is the item
+        /// search, which needs a provisioned keychain and stays a
+        /// deployment-time check.
+        #[test]
+        fn a_signature_verifies_against_the_public_half() {
+            let mut options = GenerateKeyOptions::default();
+            options.set_key_type(KeyType::ec());
+            options.set_size_in_bits(256);
+            let key = SecKey::new(&options).expect("ephemeral P-256 pair");
+            let signer = KeychainSigner::new(
+                KeychainKey {
+                    key: key.clone(),
+                    label: "ephemeral test key".into(),
+                },
+                b"",
+                SigningAlg::Es256,
+                None,
+            );
+            let data = b"the bytes the claim would hand over";
+            let signature = c2pa::Signer::sign(&signer, data).expect("signing");
+            let public = key.public_key().expect("public half");
+            assert!(
+                public
+                    .verify_signature(Algorithm::ECDSASignatureMessageX962SHA256, data, &signature,)
+                    .expect("verification ran"),
+                "the DER signature must verify against the public half"
+            );
+        }
+
+        #[test]
+        fn only_ecdsa_names_a_keychain_algorithm() {
+            assert!(signing_algorithm(SigningAlg::Es256).is_ok());
+            assert!(signing_algorithm(SigningAlg::Es384).is_ok());
+            assert!(signing_algorithm(SigningAlg::Es512).is_ok());
+            assert!(signing_algorithm(SigningAlg::Ed25519).is_err());
+            assert!(signing_algorithm(SigningAlg::Ps256).is_err());
+        }
     }
 }
 
