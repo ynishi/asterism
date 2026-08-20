@@ -31,8 +31,8 @@ use asterism_contract::command::{
     CreateDirCommand, CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand,
     CreateModalityCommand, CreateQueryGroupCommand, CreateSeriesStrategyCommand,
     CreateSnapshotCommand, CreateThreadCommand, DeclareAssetMetaCommand, DeclareProvenanceCommand,
-    DeleteAssetCommentCommand, DeleteChapterMarkCommand, DeleteDirCommand,
-    DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
+    DeclareSourceTypeCommand, DeleteAssetCommentCommand, DeleteChapterMarkCommand,
+    DeleteDirCommand, DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
     DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
     DeleteSeriesStrategyCommand, DeleteSessionCommand, DeleteTagCommand, DeleteTagResult,
     DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
@@ -245,6 +245,10 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route(
             "/asterism/assets/{id}/album-meta",
             post(declare_asset_album_meta),
+        )
+        .route(
+            "/asterism/assets/{id}/source-type",
+            post(declare_asset_source_type),
         )
         .route("/asterism/assets/{id}/lineage", get(asset_lineage))
         .route("/asterism/assets/{id}/groups", get(groups_of_asset))
@@ -1169,6 +1173,27 @@ async fn declare_asset_album_meta(
     Ok(Json(
         ctx.asset_service
             .declare_asset_meta(command, &asserted(None, None, None)?)
+            .await?,
+    ))
+}
+
+/// `POST /asterism/assets/{id}/source-type` — asserts, or retracts, the
+/// asset's digital source type by hand.
+///
+/// The URL names the asset and wins over the body, the arbitration its
+/// two sibling declare routes use. Removal is an absent `source_type`
+/// in the body, the spelling `album-meta` gives its own removal. The
+/// term is refused at the door when it is not one the IPTC vocabulary
+/// defines — everything downstream signs this verbatim.
+async fn declare_asset_source_type(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(mut command): Json<DeclareSourceTypeCommand>,
+) -> ApiResult<AssetDto> {
+    command.asset_id = id;
+    Ok(Json(
+        ctx.asset_service
+            .declare_source_type(command, &asserted(None, None, None)?)
             .await?,
     ))
 }

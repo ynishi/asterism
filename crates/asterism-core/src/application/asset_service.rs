@@ -775,6 +775,64 @@ impl AssetService {
         Ok(crate::application::mapping::asset_to_dto(&asset))
     }
 
+    /// Declares — or retracts — the asset's digital source type by hand.
+    ///
+    /// The third sibling of
+    /// [`declare_provenance`](Self::declare_provenance) and
+    /// [`declare_asset_meta`](Self::declare_asset_meta), and the one
+    /// the disclosure module acts on: the recorded term outranks the
+    /// container's evidence when the next disclosure is derived
+    /// ([`record_for`](crate::domain::disclosure::record_for)), and a
+    /// parent carrying one reads as declared rather than unknown. The
+    /// term is validated at the door — an unknown value is refused, not
+    /// recorded — because everything downstream signs this verbatim.
+    ///
+    /// Single-slot: a second declaration replaces the first, and `None`
+    /// removes it, returning the asset to what its container evidence
+    /// says on its own. No reindex: the term is not part of the derived
+    /// search document.
+    ///
+    /// Takes an `AttributionContext` and does not use it, for the
+    /// reason its siblings do not: the operator recorded here is part
+    /// of the statement, not an attribution column.
+    pub async fn declare_source_type(
+        &self,
+        command: asterism_contract::command::DeclareSourceTypeCommand,
+        _attribution: &AttributionContext,
+    ) -> Result<AssetDto, DomainError> {
+        use crate::domain::disclosure;
+
+        let id = parse_asset_id(&command.asset_id)?;
+        // Checked before the read, the rule the siblings follow: an
+        // unknown term is a rejected assertion, and a blank operator a
+        // rejected statement, before either costs a round trip.
+        let source_type = command
+            .source_type
+            .as_deref()
+            .map(disclosure::DigitalSourceType::parse)
+            .transpose()
+            .map_err(|e| DomainError::Validation(e.to_string()))?;
+        let operator = command.operator_ai.map(OperatorRef::new).transpose()?;
+
+        let mut asset = self
+            .assets
+            .find(&id)
+            .await?
+            .ok_or(DomainError::AssetNotFound(id))?;
+        let now = Utc::now();
+        let entry = source_type.map(|ty| {
+            album_meta_entry_for_source_type(
+                ty,
+                operator.as_ref().map(OperatorRef::as_str),
+                now.timestamp_millis(),
+            )
+        });
+        merge_source_type_assertion(&mut asset.extra, entry);
+        asset.updated_at = now;
+        self.assets.save(&asset).await?;
+        Ok(crate::application::mapping::asset_to_dto(&asset))
+    }
+
     /// Re-composes one asset's search document after a write to a field
     /// the document is derived from.
     ///
@@ -5481,6 +5539,46 @@ fn merge_meta_entry(extra: &mut serde_json::Value, key: &str, entry: Option<serd
     merge_extra_key(extra, provenance::TRACE_KEY, trace);
 }
 
+/// The statement [`AssetService::declare_source_type`] files under
+/// `_trace.source_type`.
+///
+/// The same shape as an AlbumMeta entry — value, channel, operator,
+/// moment — because it is the same kind of thing: a statement somebody
+/// made, with enough beside it to answer "who said this, and when". The
+/// value is the term's URI, the spelling every emitter writes.
+fn album_meta_entry_for_source_type(
+    ty: crate::domain::disclosure::DigitalSourceType,
+    operator: Option<&str>,
+    at_ms: i64,
+) -> serde_json::Value {
+    crate::domain::album_meta::entry(ty.uri(), provenance::source::MANUAL, operator, at_ms)
+}
+
+/// Writes — or removes — the source-type assertion under `_trace`.
+///
+/// The single-field sibling of [`merge_meta_entry`], with the same
+/// care: everything else in `_trace` is left exactly as it was.
+fn merge_source_type_assertion(extra: &mut serde_json::Value, entry: Option<serde_json::Value>) {
+    use crate::domain::disclosure::SOURCE_TYPE_KEY;
+
+    let mut trace = extra
+        .get(provenance::TRACE_KEY)
+        .filter(|existing| existing.is_object())
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(map) = trace.as_object_mut() {
+        match entry {
+            Some(note) => {
+                map.insert(SOURCE_TYPE_KEY.to_string(), note);
+            }
+            None => {
+                map.remove(SOURCE_TYPE_KEY);
+            }
+        }
+    }
+    merge_extra_key(extra, provenance::TRACE_KEY, trace);
+}
+
 fn merge_trace_field(extra: &mut serde_json::Value, field: &str, value: serde_json::Value) {
     let mut trace = extra
         .get(provenance::TRACE_KEY)
@@ -5676,6 +5774,39 @@ fn synth_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The assertion writes into `_trace` beside what is already there,
+    /// and its removal takes only its own key — the care every `_trace`
+    /// writer here owes the others.
+    #[test]
+    fn a_source_type_assertion_leaves_the_rest_of_the_trace_alone() {
+        use crate::domain::disclosure;
+
+        let mut extra = serde_json::json!({
+            "_trace": { "source": "manual" },
+            "unrelated": true,
+        });
+        let entry = album_meta_entry_for_source_type(
+            disclosure::DigitalSourceType::DigitalCapture,
+            Some("asterism-ui"),
+            1_000,
+        );
+        merge_source_type_assertion(&mut extra, Some(entry));
+        assert_eq!(
+            disclosure::asserted_source_type(&extra),
+            Some(disclosure::DigitalSourceType::DigitalCapture),
+            "the entry must read back through the disclosure module's own reader"
+        );
+        assert_eq!(extra["_trace"]["source"], "manual");
+        assert_eq!(extra["unrelated"], true);
+
+        merge_source_type_assertion(&mut extra, None);
+        assert_eq!(disclosure::asserted_source_type(&extra), None);
+        assert_eq!(
+            extra["_trace"]["source"], "manual",
+            "retracting the assertion is not license to touch the claim"
+        );
+    }
 
     #[test]
     fn classify_none_when_both_axes_absent() {

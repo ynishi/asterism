@@ -130,6 +130,11 @@ impl DisclosureService {
     /// the record it would produce is indistinguishable from one for a
     /// file with nothing to say.
     ///
+    /// The refusal holds for an asserted asset too: an assertion
+    /// answers what the file *is*, not whether its container has been
+    /// read, and the gate is about the second. The fingerprint runs
+    /// either way; the assertion outranks whatever it finds.
+    ///
     /// `dispatch_id` is context the caller has and the library does not:
     /// an asset's `session_id` carries a dispatch id only when the asset
     /// was reified by one, and reading it as a dispatch for every asset
@@ -199,14 +204,24 @@ impl DisclosureService {
             // caller can write. A parent racing its own fingerprint
             // reads the same way — unknown until its rows land, and a
             // re-apply after they do re-derives with what they say.
-            let parent_meta = self
-                .assets
-                .find(&parent_id)
-                .await?
-                .and_then(|parent| parent.materials.first().and_then(|m| m.meta_kv.clone()));
+            //
+            // A person's assertion on the parent is read first: an
+            // asserted term is a declaration on the same footing as the
+            // container's own, and it is what the hand-assertion route
+            // exists to supply for a parent whose container says
+            // nothing.
+            let origin = match self.assets.find(&parent_id).await? {
+                None => disclosure::ParentOrigin::Unknown,
+                Some(parent) => match disclosure::asserted_source_type(&parent.extra) {
+                    Some(ty) => disclosure::ParentOrigin::declared(ty),
+                    None => disclosure::declared_origin(
+                        parent.materials.first().and_then(|m| m.meta_kv.as_deref()),
+                    ),
+                },
+            };
             parents.push(ParentEvidence {
                 asset_id: parent_id.to_string(),
-                origin: disclosure::declared_origin(parent_meta.as_deref()),
+                origin,
             });
         }
 
@@ -216,6 +231,7 @@ impl DisclosureService {
             dispatch_id,
             meta_kv.as_deref(),
             &parents,
+            disclosure::asserted_source_type(&asset.extra),
             self.prompts,
         ))
     }

@@ -837,6 +837,36 @@ pub struct DeclareAssetMetaCommand {
     pub operator_ai: Option<String>,
 }
 
+/// Declares — or retracts — the asset's digital source type by hand.
+///
+/// The hand-assertion half of the disclosure: for an artefact whose
+/// container declares nothing, the signer states what it is, and the
+/// statement is signed into the exported disclosure verbatim — their
+/// claim, under their certificate. It also outranks the container when
+/// both speak: correcting a container that is wrong about one's own
+/// work is the signer's to do and theirs to answer for.
+///
+/// Single-slot like [`DeclareAssetMetaCommand`]: a second declaration
+/// is a correction, not a second fact.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct DeclareSourceTypeCommand {
+    /// Target asset id.
+    pub asset_id: String,
+    /// The IPTC digital source type being asserted, as the term's URI
+    /// or its short name (`trainedAlgorithmicMedia`, `digitalCapture`,
+    /// `humanEdits`, …). Unknown terms are refused rather than
+    /// recorded. `None` **removes** the assertion, returning the asset
+    /// to what its container evidence says on its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    /// Agent this statement came through, recorded on the entry as
+    /// `operator` — the same terms as
+    /// [`DeclareAssetMetaCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
 /// Requests cancellation of a running or pending job.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct CancelJobCommand {

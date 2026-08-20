@@ -138,6 +138,11 @@
       "docs": "Declares (or repairs) the origin of an asset that is already in\nthe library — the after-the-fact twin of\n[`AddAssetCommand::derived_from`].\n\nExists because a claim can outlive its first chance to resolve:\nthe artefact landed before its dispatch finished, the sidecar\narrived later, or nobody knew the parent at ingest time. Same\nvocabulary (`asset:<uuid>`, `dispatch:<uuid>`, `sidecar`), same\nbehaviour on failure — the claim is recorded on `extra._trace`\nrather than rejected, so it stays repairable.\n\nClaims through this verb are bookkept as `_trace.source:\n\"manual\"` — this *is* the after-the-fact declaration channel, as\nopposed to `embedded` / `pushed` which only ingest-time claims\n([`AddAssetCommand::derived_from`]) can carry."
     },
     {
+      "path": "asterism_contract::command::DeclareSourceTypeCommand",
+      "kind": "struct",
+      "docs": "Declares — or retracts — the asset's digital source type by hand.\n\nThe hand-assertion half of the disclosure: for an artefact whose\ncontainer declares nothing, the signer states what it is, and the\nstatement is signed into the exported disclosure verbatim — their\nclaim, under their certificate. It also outranks the container when\nboth speak: correcting a container that is wrong about one's own\nwork is the signer's to do and theirs to answer for.\n\nSingle-slot like [`DeclareAssetMetaCommand`]: a second declaration\nis a correction, not a second fact."
+    },
+    {
       "path": "asterism_contract::command::DeleteAssetCommentCommand",
       "kind": "struct",
       "docs": "Deletes an `AssetComment` by id. Idempotent."
