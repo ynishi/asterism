@@ -87,4 +87,4 @@ pub mod embed;
 pub mod manifest;
 pub mod xmp;
 
-pub use embed::{Container, EmbedError};
+pub use embed::{Container, EmbedError, Reduction, Stamp};

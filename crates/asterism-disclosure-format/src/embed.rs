@@ -677,6 +677,37 @@ mod jpeg {
 /// paying for a render it is about to be told does not fit.
 pub const JPEG_MAX_PACKET: usize = jpeg::MAX_PACKET;
 
+/// How far [`stamp`] had to reduce the record to fit the container.
+///
+/// Reported by the code that made the decision. The caller used to
+/// re-derive it by substring-searching the rendered XML for one
+/// property name — better than re-running the rule, worse than being
+/// told, and blind to the tier below the prompt once there was one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reduction {
+    /// The record was written as given.
+    Nothing,
+    /// [`essential`] was written: the prompt did not fit.
+    ///
+    /// [`essential`]: asterism_core::domain::disclosure::DisclosureRecord::essential
+    Essential,
+    /// [`obligation`] was written: the system name did not fit either,
+    /// and the packet carries the mark alone.
+    ///
+    /// [`obligation`]: asterism_core::domain::disclosure::DisclosureRecord::obligation
+    Obligation,
+}
+
+/// What [`stamp`] wrote: the stamped file, and what was withheld from
+/// the packet to write it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stamp {
+    /// The file with the packet embedded.
+    pub bytes: Vec<u8>,
+    /// How far the record was reduced to fit the container's slot.
+    pub reduction: Reduction,
+}
+
 /// Convenience: renders the record and writes it, doing nothing when
 /// there is nothing to disclose.
 ///
@@ -686,17 +717,20 @@ pub const JPEG_MAX_PACKET: usize = jpeg::MAX_PACKET;
 pub fn stamp(
     bytes: &[u8],
     record: &asterism_core::domain::disclosure::DisclosureRecord,
-) -> Result<Option<Vec<u8>>, EmbedError> {
+) -> Result<Option<Stamp>, EmbedError> {
     let Some(packet) = xmp::render(record) else {
         return Ok(None);
     };
     match embed_xmp(bytes, &packet) {
-        Ok(stamped) => Ok(Some(stamped)),
+        Ok(stamped) => Ok(Some(Stamp {
+            bytes: stamped,
+            reduction: Reduction::Nothing,
+        })),
         // The obligation outranks the context: rather than fail the
         // export over a prompt that will not fit the container's slot,
-        // write the reduced record. The caller learns this happened by
-        // comparing what it asked for against what came back, which is
-        // why the reduced record is not silently substituted upstream.
+        // write the reduced record — and say so, because a file whose
+        // prompt was dropped and a file that never had one are
+        // indistinguishable once written.
         Err(EmbedError::PacketTooLarge { bytes: over, limit }) => {
             let reduced = record.essential();
             let Some(packet) = xmp::render(&reduced) else {
@@ -708,7 +742,10 @@ pub fn stamp(
                 return Err(EmbedError::PacketTooLarge { bytes: over, limit });
             };
             match embed_xmp(bytes, &packet) {
-                Ok(stamped) => Ok(Some(stamped)),
+                Ok(stamped) => Ok(Some(Stamp {
+                    bytes: stamped,
+                    reduction: Reduction::Essential,
+                })),
                 // `essential` keeps the system name, which came out of
                 // someone else's file and can overflow the segment on
                 // its own. One tier further: the bare mark, whose
@@ -721,7 +758,12 @@ pub fn stamp(
                     let Some(packet) = xmp::render(&record.obligation()) else {
                         return Err(EmbedError::PacketTooLarge { bytes: over, limit });
                     };
-                    embed_xmp(bytes, &packet).map(Some)
+                    embed_xmp(bytes, &packet).map(|stamped| {
+                        Some(Stamp {
+                            bytes: stamped,
+                            reduction: Reduction::Obligation,
+                        })
+                    })
                 }
                 Err(other) => Err(other),
             }
@@ -905,7 +947,7 @@ mod tests {
         // Reading is the same walk: a file the walk refuses cannot even
         // answer "no packet".
         assert_eq!(read_xmp(&original).unwrap(), None);
-        let stamped = stamp(&original, &record()).unwrap().unwrap();
+        let stamped = stamp(&original, &record()).unwrap().unwrap().bytes;
         assert!(read_xmp(&stamped).unwrap().is_some());
         // The packet lands after the JFIF `APP0` — 18 bytes, behind the
         // 2-byte `SOI` — and before the first standalone marker, and
@@ -944,7 +986,7 @@ mod tests {
 
     #[test]
     fn a_png_round_trips_its_packet() {
-        let stamped = stamp(&png_fixture(), &record()).unwrap().unwrap();
+        let stamped = stamp(&png_fixture(), &record()).unwrap().unwrap().bytes;
         let packet = read_xmp(&stamped).unwrap().expect("a packet came back");
         assert!(packet.contains("trainedAlgorithmicMedia"));
         assert!(packet.contains("ComfyUI"));
@@ -952,7 +994,7 @@ mod tests {
 
     #[test]
     fn a_jpeg_round_trips_its_packet() {
-        let stamped = stamp(&jpeg_fixture(), &record()).unwrap().unwrap();
+        let stamped = stamp(&jpeg_fixture(), &record()).unwrap().unwrap().bytes;
         let packet = read_xmp(&stamped).unwrap().expect("a packet came back");
         assert!(packet.contains("trainedAlgorithmicMedia"));
     }
@@ -961,7 +1003,7 @@ mod tests {
     fn the_png_chunk_lands_before_the_first_idat() {
         // Position is not cosmetic: a reader that decides what a file is
         // before decoding it only sees what precedes the pixel data.
-        let stamped = stamp(&png_fixture(), &record()).unwrap().unwrap();
+        let stamped = stamp(&png_fixture(), &record()).unwrap().unwrap().bytes;
         let itxt = find(&stamped, b"iTXt").expect("the chunk is there");
         let idat = find(&stamped, b"IDAT").expect("the fixture has pixels");
         assert!(itxt < idat, "iTXt at {itxt} must precede IDAT at {idat}");
@@ -969,7 +1011,7 @@ mod tests {
 
     #[test]
     fn the_jpeg_segment_lands_after_jfif_and_before_the_first_non_app_marker() {
-        let stamped = stamp(&jpeg_fixture(), &record()).unwrap().unwrap();
+        let stamped = stamp(&jpeg_fixture(), &record()).unwrap().unwrap().bytes;
         let jfif = find(&stamped, b"JFIF").expect("the fixture has a JFIF APP0");
         let xmp = find(&stamped, b"http://ns.adobe.com/xap/1.0/").expect("the segment is there");
         assert!(jfif < xmp, "XMP must not displace the JFIF header");
@@ -986,10 +1028,10 @@ mod tests {
         // which reader opens the file — a stale source type shadowing a
         // corrected one, with nothing in either file saying which wins.
         for original in [png_fixture(), jpeg_fixture()] {
-            let once = stamp(&original, &record()).unwrap().unwrap();
+            let once = stamp(&original, &record()).unwrap().unwrap().bytes;
             let corrected = DisclosureRecord::for_asset("asset-1")
                 .with_source_type(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia);
-            let twice = stamp(&once, &corrected).unwrap().unwrap();
+            let twice = stamp(&once, &corrected).unwrap().unwrap().bytes;
 
             let packet = read_xmp(&twice).unwrap().unwrap();
             assert!(packet.contains("compositeWithTrainedAlgorithmicMedia"));
@@ -1061,7 +1103,7 @@ mod tests {
                 "the fixture has to start with the shape under test"
             );
 
-            let stamped = stamp(&original, &record()).unwrap().unwrap();
+            let stamped = stamp(&original, &record()).unwrap().unwrap().bytes;
 
             assert_eq!(
                 count(&stamped, b"</x:xmpmeta>"),
@@ -1102,7 +1144,7 @@ mod tests {
     #[test]
     fn a_jpeg_that_never_reaches_a_scan_still_gets_a_readable_packet() {
         let original = jpeg_with_no_scan();
-        let stamped = stamp(&original, &record()).unwrap().unwrap();
+        let stamped = stamp(&original, &record()).unwrap().unwrap().bytes;
 
         let packet = read_xmp(&stamped)
             .unwrap()
@@ -1123,7 +1165,7 @@ mod tests {
         // An export hands back the pixels it was given. Nothing here
         // decodes them, and this is what says so.
         let original = png_fixture();
-        let stamped = stamp(&original, &record()).unwrap().unwrap();
+        let stamped = stamp(&original, &record()).unwrap().unwrap().bytes;
         let idat = find(&original, b"IDAT").unwrap();
         assert_eq!(
             &original[idat..],
@@ -1152,7 +1194,12 @@ mod tests {
         let huge = "x".repeat(JPEG_MAX_PACKET + 1);
         let record = record().with_prompt(huge);
         let stamped = stamp(&jpeg_fixture(), &record).unwrap().unwrap();
-        let packet = read_xmp(&stamped).unwrap().unwrap();
+        assert_eq!(
+            stamped.reduction,
+            Reduction::Essential,
+            "the writer says what it withheld rather than leaving the caller to grep"
+        );
+        let packet = read_xmp(&stamped.bytes).unwrap().unwrap();
         assert!(
             packet.contains("trainedAlgorithmicMedia"),
             "the mark landed"
@@ -1170,7 +1217,8 @@ mod tests {
         // segment a second time. The tier below writes the mark alone.
         let record = record().with_ai_system("x".repeat(JPEG_MAX_PACKET + 1), None);
         let stamped = stamp(&jpeg_fixture(), &record).unwrap().unwrap();
-        let packet = read_xmp(&stamped).unwrap().unwrap();
+        assert_eq!(stamped.reduction, Reduction::Obligation);
+        let packet = read_xmp(&stamped.bytes).unwrap().unwrap();
         assert!(
             packet.contains("trainedAlgorithmicMedia"),
             "the mark landed"
@@ -1221,7 +1269,8 @@ mod tests {
         let long = "y".repeat(JPEG_MAX_PACKET + 1);
         let record = record().with_prompt(long);
         let stamped = stamp(&png_fixture(), &record).unwrap().unwrap();
-        let packet = read_xmp(&stamped).unwrap().unwrap();
+        assert_eq!(stamped.reduction, Reduction::Nothing);
+        let packet = read_xmp(&stamped.bytes).unwrap().unwrap();
         assert!(packet.contains("AIPromptInformation"));
     }
 

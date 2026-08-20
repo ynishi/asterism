@@ -1277,6 +1277,26 @@ and this project adheres to
 
 ### Fixed
 
+- **The stamp says what it withheld, and a stamp racing the fingerprint is
+  refused instead of writing an unmarked file** (#23). The last two correctness
+  carries from the disclosure writer review. The writer's fallback ladder made
+  its decisions and said nothing: the adapter re-derived the prompt's fate by
+  substring-searching the rendered XML for a property name, and once the ladder
+  grew a bare-mark tier, a withheld system name was invisible outright — a
+  packet reduced to the mark alone and a container that never named its
+  generator read identically afterwards. `embed::stamp` now returns what it
+  wrote and how far it reduced the record to write it, the adapter records it,
+  and the disclosure note carries `system_dropped` beside `prompt_dropped` —
+  each true only when its field was asked for and withheld. The read-back keeps
+  its one remaining job, refusing a packet the reader cannot parse. And the
+  service's `record_for` read `meta_kv` alone, whose `None` merged three states
+  the storage keeps apart: fingerprint not yet run, probed and this is what it
+  holds, and a format no probe reads. The first is a question nobody has asked
+  yet, not an answer — a stamp built on it wrote an unmarked file nothing can
+  tell afterwards from one with nothing to say. The service now refuses it as a
+  state conflict, keyed on `meta_hash` being `NULL`; a marker there stays an
+  answer and proceeds with nothing established.
+
 - **`DisclosureRecord` loses its `Default`, and the packet fallback gains a
   bottom that always fits** (#23). Two more carries from the disclosure writer
   review. The derive constructed the one state the type's own documentation

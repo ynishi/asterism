@@ -121,6 +121,15 @@ impl DisclosureService {
 
     /// Assembles what one asset discloses.
     ///
+    /// # Errors
+    ///
+    /// Beside the repository errors that propagate, this refuses
+    /// ([`DomainError::Conflict`]) an asset whose primary material has
+    /// not been fingerprinted: until the hash job runs there is no
+    /// answer to build from, only a question nobody has asked yet, and
+    /// the record it would produce is indistinguishable from one for a
+    /// file with nothing to say.
+    ///
     /// `dispatch_id` is context the caller has and the library does not:
     /// an asset's `session_id` carries a dispatch id only when the asset
     /// was reified by one, and reading it as a dispatch for every asset
@@ -143,10 +152,29 @@ impl DisclosureService {
         // the primary one. A collection has no materials at all and
         // yields no container evidence, which is the correct answer for
         // something that has no bytes.
-        let meta_kv = asset
-            .materials
-            .first()
-            .and_then(|material| material.meta_kv.clone());
+        //
+        // `meta_kv` alone is not enough to read, because its `None`
+        // used to merge three states the storage keeps apart: the
+        // fingerprint job has not run (`meta_hash` is `NULL`), a probe
+        // read the container and this is what it holds (`meta_hash` is
+        // a digest), and no probe reads this format (`meta_hash` is a
+        // marker). The first is not an answer — it is the question not
+        // yet asked — and a record built on it stamps an unmarked file
+        // that cannot be told afterwards from one with nothing to say.
+        // The refusal is the fix: the automatic path already orders the
+        // stamp after the hash, so what this catches is a caller
+        // racing the fingerprint or re-applying before it ran.
+        let meta_kv = match asset.materials.first() {
+            None => None,
+            Some(material) if material.meta_hash.is_none() => {
+                return Err(DomainError::Conflict(format!(
+                    "asset {asset_id} has not had its metadata fingerprinted yet: \
+                     a disclosure built now would read \"nothing established\" \
+                     out of a question that has not been asked"
+                )));
+            }
+            Some(material) => material.meta_kv.clone(),
+        };
 
         let edges = self
             .edges
