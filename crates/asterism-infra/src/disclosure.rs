@@ -1289,6 +1289,18 @@ fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
 /// "written, not yet safe" rather than "not written". A caller that
 /// re-applies on it rewrites a file already carrying the disclosure,
 /// which the derived-from-rows design makes a repeat, not a loss.
+///
+/// On Apple platforms both syncs mean more than they say. macOS's
+/// plain `fsync` hands the bytes to the drive and lets its volatile
+/// cache keep them — durable in name only, per its own man page — and
+/// the standard library answers that by issuing `fcntl(F_FULLFSYNC)`
+/// for `sync_all` there. That full-cache flush is the durability this
+/// function is buying, at tens of milliseconds per call on Apple
+/// hardware, and it has no fallback: on a volume that does not
+/// support `F_FULLFSYNC` — an SMB share, some external enclosures —
+/// the call errors and the stamp stops. That is the same stance as
+/// every other fsync failure here: a file whose durability cannot be
+/// promised is not quietly rewritten with less.
 fn commit(temporary: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
     // The data first: a rename made durable ahead of its content would
     // pin the name to bytes the disk does not hold yet.
