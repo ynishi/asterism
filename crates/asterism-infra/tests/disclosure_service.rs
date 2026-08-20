@@ -381,19 +381,40 @@ async fn a_generated_child_of_a_generated_parent_is_not_a_composite() {
     fx.close().await;
 }
 
-/// The service treats a parent it cannot read as not synthetic, and
-/// storage is why that branch is not reachable from here.
+/// A parent that declared nothing does not turn the child into a
+/// composite: composite asserts that material from outside a model is
+/// in the file, and an unknown parent is not evidence of that.
+#[tokio::test]
+async fn a_generated_child_of_an_unknown_parent_is_not_a_composite() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let unknown = fx.seed_asset(persona, None, None).await;
+    let child = fx.seed_asset(persona, None, Some(&comfy())).await;
+    fx.seed_derived_from(child, unknown).await;
+
+    let record = fx.service.record_for(&child, None).await.unwrap();
+    assert_eq!(
+        record.source_type,
+        Some(DigitalSourceType::TrainedAlgorithmicMedia),
+        "the term stays at what the child's own container states"
+    );
+    assert_eq!(record.parents, vec![unknown.to_string()]);
+    fx.close().await;
+}
+
+/// The service treats a parent it cannot read as unknown, and storage
+/// is why that branch is not reachable from here.
 #[tokio::test]
 async fn an_edge_cannot_point_at_an_asset_that_is_not_there() {
     // Worth pinning rather than assuming. The service reads each parent
-    // to establish whether it is itself synthetic, and a parent it
-    // cannot find falls back to "not synthetic" — the weaker of the two
-    // claims, which is the direction a guess is allowed to fail in. That
-    // fallback exists for a row that vanishes between the two reads;
-    // it is not a state an edge can be *written* into, because the
-    // foreign key refuses one. If this ever stops failing, the fallback
-    // has become reachable through ordinary writes and wants a test of
-    // its own rather than a comment.
+    // to establish what it declares about itself, and a parent it
+    // cannot find reads as unknown — which asserts nothing, so it
+    // cannot move the child's term in either direction. That fallback
+    // exists for a row that vanishes between the two reads; it is not a
+    // state an edge can be *written* into, because the foreign key
+    // refuses one. If this ever stops failing, the fallback has become
+    // reachable through ordinary writes and wants a test of its own
+    // rather than a comment.
     let fx = Fixture::open().await;
     let persona = fx.seed_persona().await;
     let child = fx.seed_asset(persona, None, Some(&comfy())).await;

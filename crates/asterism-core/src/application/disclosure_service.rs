@@ -185,16 +185,20 @@ impl DisclosureService {
             // `from` is the newer asset by the write path's convention,
             // so the parent is on the far side.
             let parent_id = edge.to;
-            // Whether the parent is itself synthetic is what separates
-            // "a model made this" from "a model altered a photograph".
-            // A parent this cannot read reads as not synthetic — the
-            // weaker of the two claims, which is the right direction to
-            // fail in: it can only widen `trainedAlgorithmicMedia` into
-            // `compositeWithTrainedAlgorithmicMedia`, never the reverse.
+            // What the parent declares is what separates "a model made
+            // this" from "a model altered a photograph" — and only a
+            // declaration separates them. A parent this cannot read is
+            // unknown, and unknown asserts nothing: it neither widens
+            // the term into `compositeWithTrainedAlgorithmicMedia` nor
+            // narrows it, because putting either movement on a parent
+            // nobody read would write a claim no evidence made.
             // Storage will not let an edge dangle (a foreign key refuses
             // it, pinned by `an_edge_cannot_point_at_an_asset_that_is_
-            // not_there`), so this covers a row disappearing between
-            // these two reads rather than a shape a caller can write.
+            // not_there`), so the missing-row case covers a row
+            // disappearing between these two reads rather than a shape a
+            // caller can write. A parent racing its own fingerprint
+            // reads the same way — unknown until its rows land, and a
+            // re-apply after they do re-derives with what they say.
             let parent_meta = self
                 .assets
                 .find(&parent_id)
@@ -202,7 +206,7 @@ impl DisclosureService {
                 .and_then(|parent| parent.materials.first().and_then(|m| m.meta_kv.clone()));
             parents.push(ParentEvidence {
                 asset_id: parent_id.to_string(),
-                synthetic: disclosure::is_synthetic(parent_meta.as_deref()),
+                origin: disclosure::declared_origin(parent_meta.as_deref()),
             });
         }
 
