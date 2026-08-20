@@ -1111,7 +1111,7 @@ impl AssetService {
             .transpose()?;
         // A locator with no bytes of its own — a record inside a
         // container file, a URL, a caller-minted name — is never
-        // hashed: the job records `unhashable:no-bytes` and moves on.
+        // hashed: the job records the `no-bytes` status and moves on.
         // A declaration about it would therefore sit forever in the
         // "not checked yet" state, which is the one state a reader must
         // be able to trust. Refused on the same grounds as the content
@@ -2788,19 +2788,24 @@ impl AssetService {
     /// [`DuplicateAxis::parse`](crate::domain::duplicate_conflict::DuplicateAxis::parse)
     /// records why a closed vocabulary does not get a fallback.
     ///
-    /// Two counts ride with the groups, and an empty list cannot be
-    /// read without both:
+    /// Three counts ride with the groups, and an empty list cannot be
+    /// read without them:
     ///
-    /// - `unhashed_count` — nothing has been fingerprinted yet on
-    ///   either axis. Converges to zero as the walk runs.
+    /// - `unhashed_count` — open fingerprint work. Converges to zero
+    ///   as the walk runs, which it can do now that the unreadable rows
+    ///   are counted apart (issue #17).
+    /// - `unreadable_count` — originals the fingerprint pass could not
+    ///   read: moved, deleted, on a disk that was not plugged in. The
+    ///   walk keeps retrying them, but the number does not move on its
+    ///   own — the files have to come back.
     /// - `unwalked_count` — the content axis has no reading of these
     ///   rows. The column's migration marks every pre-existing row and
     ///   its next step reads the files, both before the app serves
     ///   anything, so what is left is the originals that could not be
-    ///   opened. **Nothing here moves it** and neither does time: those
-    ///   files have to come back.
+    ///   opened then. Same posture as `unreadable_count`: not a
+    ///   progress bar.
     ///
-    /// Both are reported on every axis: a caller standing on the
+    /// All are reported on every axis: a caller standing on the
     /// artefact axis is entitled to know that switching would ask a
     /// question about a fraction of the library before it switches.
     ///
@@ -2825,6 +2830,7 @@ impl AssetService {
             .list_duplicate_groups(parsed.as_ref(), axis, limit)
             .await?;
         let unhashed_count = self.assets.unhashed_material_count().await?;
+        let unreadable_count = self.assets.unreadable_material_count().await?;
         let unwalked_count = self.assets.unwalked_material_count().await?;
         Ok(asterism_contract::dto::DuplicateReportDto {
             groups: groups
@@ -2840,6 +2846,7 @@ impl AssetService {
                 })
                 .collect(),
             unhashed_count,
+            unreadable_count,
             unwalked_count,
         })
     }

@@ -412,13 +412,17 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
 
     // The fingerprints the `material_hash` job would have written —
     // every axis, as one write, the way the job writes them. The two
-    // walking axes take a marker: this fixture is about the artefact
-    // axis, and a marker is not a duplicate key, so neither of the
+    // walking axes take an answered status: this fixture is about the
+    // artefact axis, and a status carries no digest, so neither of the
     // others can answer for it.
     let fingerprint = asterism_core::domain::repository::MaterialFingerprint {
-        file: digest.clone(),
-        content: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
-        meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
+        file: asterism_core::domain::axis_status::AxisRecord::computed(digest.clone()),
+        content: asterism_core::domain::axis_status::AxisRecord::bare(
+            asterism_core::domain::axis_status::AxisStatus::EmptySpan,
+        ),
+        meta: asterism_core::domain::axis_status::AxisRecord::bare(
+            asterism_core::domain::axis_status::AxisStatus::EmptySpan,
+        ),
         meta_kv: None,
         meta_text: None,
         meta_raw: None,

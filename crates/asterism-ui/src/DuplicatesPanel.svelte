@@ -521,6 +521,16 @@
           not fingerprinted yet — this answer is incomplete.
         </span>
       {/if}
+      {#if duplicatesCatalog.unreadable > 0}
+        <!-- Deliberately not folded into the count above: that one
+             converges to zero on its own, this one moves only when the
+             files come back, and merging them is what used to keep the
+             "still fingerprinting" notice open forever. -->
+        <span class="dup-pending">
+          {duplicatesCatalog.unreadable} original{duplicatesCatalog.unreadable === 1 ? "" : "s"}
+          could not be read — moved, deleted, or on a disconnected disk.
+        </span>
+      {/if}
     </p>
   {/if}
 

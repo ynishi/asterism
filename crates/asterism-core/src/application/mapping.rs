@@ -520,11 +520,16 @@ pub fn asset_to_dto(asset: &Asset) -> AssetDto {
         .media
         .as_str()
         .to_string(),
-        // Primary material's fingerprint, stored value and all: a
-        // marker (`unhashable:no-bytes`) is a different answer from the
-        // absence the same field shows for "not hashed yet" / "not
-        // hydrated", so neither is translated into the other here.
+        // Primary material's fingerprint — a digest or nothing, with
+        // the status beside it carrying what the marker strings used
+        // to: "no bytes to read" is a different answer from the absence
+        // the digest field shows for "not hashed yet" / "not hydrated",
+        // and the pair is what keeps them apart on the wire.
         content_hash: asset.materials.first().and_then(|m| m.content_hash.clone()),
+        content_hash_status: asset
+            .materials
+            .first()
+            .map(|m| m.content_hash_status.as_str().to_string()),
         modality: asset.modality.as_ref().map(|m| m.as_str().to_string()),
         labels: asset
             .labels
@@ -1115,14 +1120,15 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
 mod tests {
     use super::*;
     use crate::domain::attribution::AttributionContext;
-    use crate::domain::content_hash::{UNHASHABLE, of_bytes};
+    use crate::domain::axis_status::AxisStatus;
+    use crate::domain::content_hash::of_bytes;
     use crate::domain::material::Material;
     use crate::domain::value::{SourceKind, SourceRef};
     use asterism_contract::query::ListAssetsQuery;
 
-    /// An item asset holding one primary material whose hash column is
-    /// in the given state.
-    fn asset_with_stored_hash(stored: Option<&str>) -> Asset {
+    /// An item asset holding one primary material whose file axis is in
+    /// the given state.
+    fn asset_with_file_axis(digest: Option<&str>, status: AxisStatus) -> Asset {
         let source =
             SourceRef::new(SourceKind::new("fs").expect("kind"), "/pics/a.png").expect("source");
         let locator = source.locator.clone();
@@ -1134,36 +1140,49 @@ mod tests {
             &AttributionContext::unrecorded(),
         );
         let mut material = Material::primary(locator, None, Utc::now());
-        material.content_hash = stored.map(str::to_string);
+        material.content_hash = digest.map(str::to_string);
+        material.content_hash_status = status;
         asset.attach_material(material).expect("an item takes one");
         asset
     }
 
-    /// The detail payload carries the primary material's fingerprint,
-    /// and carries each of the column's three states as its own answer.
+    /// The detail payload carries the primary material's fingerprint
+    /// and its status, and each state stays its own answer.
     ///
-    /// The marker row is the one with teeth. `unhashable:no-bytes` says
-    /// "there are no bytes to read" — a permanent fact about a record
-    /// inside a container or a locator off this disk. Translating it to
-    /// absence on the way out would tell every consumer "nobody has
-    /// looked yet" instead, and leave them waiting on a hash that is
-    /// never coming.
+    /// The `no-bytes` row is the one with teeth. It says "there are no
+    /// bytes to read" — a permanent fact about a record inside a
+    /// container or a locator off this disk. Folding it into absence on
+    /// the way out would tell every consumer "nobody has looked yet"
+    /// instead, and leave them waiting on a hash that is never coming.
+    /// The marker string that used to carry the distinction inside the
+    /// digest field now crosses the wire as the status beside it.
     #[test]
     fn detail_payload_carries_each_hash_state_as_its_own_answer() {
         let digest = of_bytes(b"the same photograph, byte for byte\n");
-        for stored in [Some(digest.as_str()), Some(UNHASHABLE), None] {
-            let dto = asset_to_dto(&asset_with_stored_hash(stored));
+        for (stored, status) in [
+            (Some(digest.as_str()), AxisStatus::Computed),
+            (None, AxisStatus::NoBytes),
+            (None, AxisStatus::Failed),
+            (None, AxisStatus::Pending),
+        ] {
+            let dto = asset_to_dto(&asset_with_file_axis(stored, status));
             assert_eq!(
                 dto.content_hash.as_deref(),
                 stored,
                 "stored {stored:?} must reach the wire as itself"
             );
+            assert_eq!(
+                dto.content_hash_status.as_deref(),
+                Some(status.as_str()),
+                "the status crosses the wire beside the digest"
+            );
         }
 
-        // The fourth shape is not a material state at all: a payload
+        // The remaining shape is not a material state at all: a payload
         // built from an entity that carries no material (a collection,
-        // or an un-hydrated row) has nothing to report, which is the
-        // second meaning of the absent case.
+        // or an un-hydrated row) has nothing to report — and no status
+        // either, which is how a consumer tells "not loaded" from "not
+        // computed".
         let source = SourceRef::new(SourceKind::new("fs").expect("kind"), "/pics/a.png").unwrap();
         let bare = Asset::new(
             PersonaId::new(),
@@ -1173,6 +1192,7 @@ mod tests {
             &AttributionContext::unrecorded(),
         );
         assert_eq!(asset_to_dto(&bare).content_hash, None);
+        assert_eq!(asset_to_dto(&bare).content_hash_status, None);
     }
 
     /// The default wire query must land on the live side. This is the

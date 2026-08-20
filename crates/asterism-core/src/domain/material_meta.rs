@@ -107,8 +107,9 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
+use crate::domain::axis_status::{AxisRecord, AxisStatus};
 use crate::domain::content_hash::META_DIGEST_PREFIX;
-use crate::domain::content_region::{EMPTY_SPAN, UNKNOWN_FORMAT, UNSUPPORTED_PREFIX};
+use crate::domain::content_region::UNKNOWN_FORMAT;
 use crate::domain::value::MimeType;
 
 /// What a reading of an artefact's metadata concluded.
@@ -151,12 +152,15 @@ pub enum MaterialMeta {
 }
 
 impl MaterialMeta {
-    /// The literal to store in the material's meta-digest column.
-    pub fn stored_value(&self) -> String {
+    /// What to store for this outcome — the status column's word, the
+    /// digest column's value, the reason column's payload
+    /// ([`AxisRecord`]), same shape as
+    /// [`ContentRegion::record`](crate::domain::content_region::ContentRegion::record).
+    pub fn record(&self) -> AxisRecord {
         match self {
-            Self::Digest { digest, .. } => digest.clone(),
-            Self::Unsupported(format) => format!("{UNSUPPORTED_PREFIX}{format}"),
-            Self::EmptySpan => EMPTY_SPAN.to_string(),
+            Self::Digest { digest, .. } => AxisRecord::computed(digest.clone()),
+            Self::Unsupported(format) => AxisRecord::unsupported(format.clone()),
+            Self::EmptySpan => AxisRecord::bare(AxisStatus::EmptySpan),
         }
     }
 
@@ -300,25 +304,34 @@ mod tests {
         );
     }
 
-    /// The three outcomes render to three different columns' worth of
-    /// value, and only the digest carries a body.
+    /// The three outcomes render to three different stored triples, and
+    /// only the digest carries a body.
     #[test]
-    fn each_outcome_stores_its_own_literal_and_only_one_carries_an_object() {
+    fn each_outcome_stores_its_own_record_and_only_one_carries_an_object() {
         let canonical = render(&fields(&[("prompt", "a cat")]));
         let measured = MaterialMeta::Digest {
             digest: digest_of(&canonical),
             canonical: canonical.clone(),
         };
-        assert_eq!(measured.stored_value(), digest_of(&canonical));
+        assert_eq!(
+            measured.record(),
+            AxisRecord::computed(digest_of(&canonical))
+        );
         assert_eq!(measured.canonical(), Some(canonical.as_str()));
         assert_eq!(measured.digest(), Some(digest_of(&canonical).as_str()));
 
         let unsupported = MaterialMeta::Unsupported("video/mp4".to_string());
-        assert_eq!(unsupported.stored_value(), "unsupported:video/mp4");
+        assert_eq!(
+            unsupported.record(),
+            AxisRecord::unsupported("video/mp4".to_string())
+        );
         assert!(unsupported.canonical().is_none());
         assert!(unsupported.digest().is_none());
 
-        assert_eq!(MaterialMeta::EmptySpan.stored_value(), EMPTY_SPAN);
+        assert_eq!(
+            MaterialMeta::EmptySpan.record(),
+            AxisRecord::bare(AxisStatus::EmptySpan)
+        );
         assert!(MaterialMeta::EmptySpan.canonical().is_none());
         assert!(MaterialMeta::EmptySpan.digest().is_none());
     }
@@ -328,19 +341,18 @@ mod tests {
     /// The digest of the empty rendering is a perfectly real value, so a
     /// reading that produced one for every metadata-less file would put
     /// them all in a single duplicate group. It is reserved rather than
-    /// produced, and this asserts the two strings are not the same one.
+    /// produced, and this asserts the outcome carries no digest at all.
     #[test]
-    fn the_empty_span_marker_is_not_the_digest_of_an_empty_object() {
+    fn the_empty_span_outcome_is_not_the_digest_of_an_empty_object() {
         assert_eq!(
             digest_of("{}"),
             content_hash::META_EMPTY,
             "the reserved value is the digest of the empty rendering"
         );
-        assert_ne!(MaterialMeta::EmptySpan.stored_value(), digest_of("{}"));
-        assert!(
-            !MaterialMeta::EmptySpan
-                .stored_value()
-                .starts_with(META_DIGEST_PREFIX)
+        assert_eq!(MaterialMeta::EmptySpan.record().digest, None);
+        assert_eq!(
+            MaterialMeta::EmptySpan.record().status,
+            AxisStatus::EmptySpan
         );
     }
 
@@ -374,14 +386,13 @@ mod tests {
             let parsed = raw.map(MimeType::parse);
             let declared = parsed.as_ref();
             assert_eq!(
-                unsupported_format(declared).stored_value(),
-                content_region::unsupported_format(declared).stored_value(),
+                unsupported_format(declared).record(),
+                content_region::unsupported_format(declared).record(),
                 "{raw:?}: one artefact reads the same way in both columns"
             );
-            assert!(
-                unsupported_format(declared)
-                    .stored_value()
-                    .starts_with(UNSUPPORTED_PREFIX)
+            assert_eq!(
+                unsupported_format(declared).record().status,
+                AxisStatus::Unsupported
             );
         }
     }

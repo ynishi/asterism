@@ -389,8 +389,8 @@ impl ArtefactProbe for PngProbe {
     ///
     /// - **A file with none of the five.** There is nothing to keep, and
     ///   a marker would say something about this build where the column
-    ///   holds a container's bytes. `meta_hash` already carries
-    ///   `unsupported:empty-span` beside it.
+    ///   holds a container's bytes. The meta axis already says
+    ///   `empty-span` beside it.
     /// - **A walk that never reached `IEND`.** What was collected is
     ///   part of a file rather than a file, on the terms
     ///   `asterism_media_probe::png` sets: a caller must not read a
@@ -448,7 +448,6 @@ impl ArtefactProbe for PngProbe {
 mod tests {
     use super::*;
     use asterism_core::domain::content_hash::{self, CONTENT_DIGEST_PREFIX};
-    use asterism_core::domain::content_region::{EMPTY_SPAN, UNSUPPORTED_PREFIX};
     use asterism_core::domain::material_meta_raw::RAW_PREFIX;
     // The gates and the two public readings: what a caller reaches, and
     // what every assertion below goes through, so that a refusal this
@@ -564,9 +563,9 @@ mod tests {
     /// bytes' signature, so a claim on any format that is not a PNG is a
     /// claim this probe refuses for every artefact carrying it: the gate
     /// opens, the file is read whole up to the walk ceiling, the
-    /// signature declines it, and the row stores `unsupported:unknown`
-    /// where it used to store the mime it was declared as. A whole
-    /// format's stored column, rewritten by one line above.
+    /// signature declines it, and the row stores `unsupported` with the
+    /// reason `unknown` where it used to name the mime it was declared
+    /// as. A whole format's stored axis, rewritten by one line above.
     ///
     /// The axes are asserted with the mime rather than after it, because
     /// dropping one is the quiet half of the same edit: the column stops
@@ -1091,19 +1090,22 @@ mod tests {
 
         let walked = region(&bytes, Some(&png_mime()));
         assert_eq!(walked, ContentRegion::EmptySpan);
-        assert_eq!(walked.stored_value(), EMPTY_SPAN);
         assert!(walked.digest().is_none());
 
         // The failure this prevents: a digest over zero bytes is real,
-        // and every truncated PNG would share it.
+        // and every truncated PNG would share it — so the outcome must
+        // carry no digest at all rather than that one.
         let empty_region = format!(
             "{CONTENT_DIGEST_PREFIX}{}",
             content_hash::EMPTY
                 .strip_prefix(content_hash::DIGEST_PREFIX)
                 .expect("the empty digest carries its algorithm")
         );
-        assert_ne!(walked.stored_value(), empty_region);
-        assert!(!walked.stored_value().starts_with(CONTENT_DIGEST_PREFIX));
+        assert_ne!(
+            walked.record().digest.as_deref(),
+            Some(empty_region.as_str())
+        );
+        assert_eq!(walked.record().digest, None);
     }
 
     #[test]
@@ -1148,14 +1150,10 @@ mod tests {
             ContentRegion::Digest(_)
         ));
         assert_eq!(
-            region(b"", Some(&mime("video/mp4"))).stored_value(),
-            "unsupported:video/mp4"
+            region(b"", Some(&mime("video/mp4"))),
+            ContentRegion::Unsupported("video/mp4".to_string())
         );
-        assert!(
-            region(b"", None)
-                .stored_value()
-                .starts_with(UNSUPPORTED_PREFIX)
-        );
+        assert!(matches!(region(b"", None), ContentRegion::Unsupported(_)));
     }
 
     #[test]
@@ -1413,8 +1411,8 @@ mod tests {
         // …and the content axis disagrees about exactly this pair,
         // which is what makes the two axes two axes.
         assert_ne!(
-            region(&one, Some(&png_mime())).stored_value(),
-            region(&two, Some(&png_mime())).stored_value(),
+            region(&one, Some(&png_mime())),
+            region(&two, Some(&png_mime())),
             "the content axis has to see the pixels the meta axis ignores"
         );
 
@@ -1441,13 +1439,16 @@ mod tests {
         let bare = comfy_export_seeded(None, None, 7);
         let walked = meta_of(&bare, Some(&png_mime()));
         assert_eq!(walked, MaterialMeta::EmptySpan);
-        assert_eq!(walked.stored_value(), EMPTY_SPAN);
         assert!(walked.digest().is_none());
         assert!(walked.canonical().is_none());
 
         // The failure this prevents: a digest over `{}` is real, and
-        // every metadata-less PNG in the library would share it.
-        assert_ne!(walked.stored_value(), material_meta::digest_of("{}"));
+        // every metadata-less PNG in the library would share it — so
+        // the outcome must carry no digest at all rather than that one.
+        assert_ne!(
+            walked.record().digest.as_deref(),
+            Some(material_meta::digest_of("{}").as_str())
+        );
         // A second metadata-less file would otherwise have grouped
         // with the first.
         assert_eq!(
@@ -1600,8 +1601,8 @@ mod tests {
         // holds a digest and not the marker a stopped walk would store.
         assert_eq!(digest_of(CARD_PNG), CARD_PNG_REGION);
         assert_ne!(
-            region(CARD_PNG, Some(&png_mime())).stored_value(),
-            EMPTY_SPAN
+            region(CARD_PNG, Some(&png_mime())),
+            ContentRegion::EmptySpan
         );
     }
 

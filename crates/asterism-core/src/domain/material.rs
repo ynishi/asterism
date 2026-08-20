@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::domain::axis_status::AxisStatus;
 use crate::domain::source_locator::SourceLocator;
 use crate::domain::value::{AudioFormat, ImageFormat, MimeType, VideoFormat};
 use chrono::{DateTime, Utc};
@@ -54,10 +55,11 @@ pub struct Material {
     /// [`MimeType`] for the two defects that cost.
     pub mime: Option<MimeType>,
     /// Fingerprint of **every byte** of the original
-    /// (`crate::domain::content_hash`), or `None` when it has not been
-    /// computed — a fresh material, a locator whose bytes are not
-    /// reachable (a record inside a container, a URL), or a file that
-    /// was gone when the hash job ran.
+    /// (`crate::domain::content_hash`) — a digest and nothing else, or
+    /// `None` when there is no digest.
+    /// [`content_hash_status`](Self::content_hash_status) beside it
+    /// says why: not computed yet, no bytes to read, a read that
+    /// failed.
     ///
     /// `None` means "unknown", never "unique": two materials without a
     /// hash are not duplicates of each other, they are two questions
@@ -74,12 +76,18 @@ pub struct Material {
     /// being renamed to make room for, and neither would be reviewable.
     /// The mitigation is that the two fields name each other.
     pub content_hash: Option<String>,
+    /// Why [`content_hash`](Self::content_hash) holds what it holds —
+    /// the file axis's status column.
+    pub content_hash_status: AxisStatus,
+    /// The status's free-text payload, when it carries one: the I/O
+    /// error under [`Failed`](AxisStatus::Failed). `None` otherwise.
+    pub content_hash_reason: Option<String>,
     /// Fingerprint of only the bytes that decide what the original
-    /// decodes to (`crate::domain::content_region`), or a marker saying
-    /// why there is none — `unsupported:<format>` for an artefact no
-    /// walker handles, `unsupported:empty-span` for one that walked to
-    /// nothing, `unhashable:no-bytes` for a locator with no file behind
-    /// it at all.
+    /// decodes to (`crate::domain::content_region`) — a digest and
+    /// nothing else.
+    /// [`content_region_hash_status`](Self::content_region_hash_status)
+    /// says why there is none: no walker handles the format, the walk
+    /// found nothing, the deferred migration never opened the file.
     ///
     /// The point of the axis: two exports of one picture that differ
     /// only in a `tEXt` chunk — a workflow blob, an exporter's
@@ -87,24 +95,32 @@ pub struct Material {
     /// [`content_hash`](Self::content_hash) can only see the first of
     /// those.
     ///
-    /// `None` means the same thing it means next door, and the two are
-    /// filled in together: one read of the file produces both, and one
-    /// statement writes both, so a row with one column filled is a row
-    /// from a build that predated the other.
+    /// The axes are filled in together: one read of the file produces
+    /// all of them, and one statement writes all of them, so a row with
+    /// one axis answered and another pending is a row from a build that
+    /// predated the newer column.
+    pub content_region_hash: Option<String>,
+    /// Why [`content_region_hash`](Self::content_region_hash) holds
+    /// what it holds — the content axis's status column.
     ///
     /// A material that predates the column is answered by the migration
-    /// that adds it, in two steps: the marker
-    /// [`NOT_WALKED`](crate::domain::content_region::NOT_WALKED) first —
-    /// an answer, so the ordinary walk leaves the row alone, and not a
-    /// digest, so duplicate matching does not see it — and then the real
-    /// value, computed by the step that reads the file. A row still
-    /// carrying the marker afterwards is one whose original could not be
+    /// that adds it, in two steps:
+    /// [`NotWalked`](AxisStatus::NotWalked) first — an answer, so the
+    /// ordinary walk leaves the row alone — and then the real value,
+    /// computed by the step that reads the file. A row still carrying
+    /// that status afterwards is one whose original could not be
     /// opened.
-    pub content_region_hash: Option<String>,
+    pub content_region_hash_status: AxisStatus,
+    /// The status's free-text payload, when it carries one: the
+    /// format's name under [`Unsupported`](AxisStatus::Unsupported),
+    /// the I/O error under [`Failed`](AxisStatus::Failed).
+    pub content_region_hash_reason: Option<String>,
     /// Fingerprint of the metadata the container carries *about* these
-    /// bytes (`crate::domain::material_meta`), or a marker saying why
-    /// there is none — the same marker vocabulary
-    /// [`content_region_hash`](Self::content_region_hash) uses.
+    /// bytes (`crate::domain::material_meta`) — a digest and nothing
+    /// else, with [`meta_hash_status`](Self::meta_hash_status) beside
+    /// it saying why there is none, in the same vocabulary
+    /// [`content_region_hash_status`](Self::content_region_hash_status)
+    /// uses.
     ///
     /// The complement of the one above: `content_region` is defined as
     /// the bytes that survive into the decoded result, so what it drops
@@ -117,6 +133,13 @@ pub struct Material {
     /// embedded metadata and must not be made to share one answer,
     /// which is what the `ord` axis is held open for.
     pub meta_hash: Option<String>,
+    /// Why [`meta_hash`](Self::meta_hash) holds what it holds — the
+    /// meta axis's status column.
+    pub meta_hash_status: AxisStatus,
+    /// The status's free-text payload, when it carries one — same
+    /// contract as
+    /// [`content_region_hash_reason`](Self::content_region_hash_reason).
+    pub meta_hash_reason: Option<String>,
     /// The canonical metadata object the digest beside it was taken
     /// over — a JSON object, keys sorted, no whitespace, values exactly
     /// as the container stated them.
@@ -173,11 +196,17 @@ impl Material {
             file_size_bytes,
             mime,
             // Hashing reads the whole file; the ingest path must not.
-            // The `material_hash` job fills both of these in afterwards,
+            // The `material_hash` job fills all of these in afterwards,
             // from one read.
             content_hash: None,
+            content_hash_status: AxisStatus::Pending,
+            content_hash_reason: None,
             content_region_hash: None,
+            content_region_hash_status: AxisStatus::Pending,
+            content_region_hash_reason: None,
             meta_hash: None,
+            meta_hash_status: AxisStatus::Pending,
+            meta_hash_reason: None,
             meta_kv: None,
             meta_text: None,
             created_at: now,

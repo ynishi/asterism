@@ -870,7 +870,6 @@ impl ArtefactProbe for JpegProbe {
 mod tests {
     use super::*;
     use asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX;
-    use asterism_core::domain::content_region::EMPTY_SPAN;
     // The gates and the two public readings: what a caller reaches, and
     // what every assertion below goes through, so that a refusal this
     // probe does not write is still asserted where it is now decided.
@@ -1892,9 +1891,8 @@ mod tests {
         ]);
         let walked = region(&header_only, Some(&jpeg_mime()));
         assert_eq!(walked, ContentRegion::EmptySpan);
-        assert_eq!(walked.stored_value(), EMPTY_SPAN);
         assert!(walked.digest().is_none());
-        assert!(!walked.stored_value().starts_with(CONTENT_DIGEST_PREFIX));
+        assert_eq!(walked.record().digest, None);
 
         // An SOS with nothing behind it is the same answer: a scan of
         // zero bytes is not a picture.
@@ -2106,11 +2104,15 @@ mod tests {
             matches!(content, ContentRegion::Digest(_)),
             "got {content:?}"
         );
-        assert!(content.stored_value().starts_with(CONTENT_DIGEST_PREFIX));
+        assert!(
+            content
+                .digest()
+                .is_some_and(|d| d.starts_with(CONTENT_DIGEST_PREFIX))
+        );
 
         let meta = probes::meta(&bytes, Some(&declared));
         assert!(matches!(meta, MaterialMeta::Digest { .. }), "got {meta:?}");
-        assert!(meta.stored_value().starts_with("m1-"));
+        assert!(meta.digest().is_some_and(|d| d.starts_with("m1-")));
 
         // The registry's answer and the probe's own are one value — the
         // registry picks by the declared mime and nothing else, so a
@@ -2449,10 +2451,6 @@ mod tests {
         assert_eq!(
             JpegProbe.meta(&plain, Some(&jpeg_mime())),
             MaterialMeta::EmptySpan
-        );
-        assert_eq!(
-            JpegProbe.meta(&plain, Some(&jpeg_mime())).stored_value(),
-            EMPTY_SPAN
         );
         assert_eq!(
             JpegProbe.meta_raw(&plain, Some(&jpeg_mime())),

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
+use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::disclosure::{DigitalSourceType, Half, Skipped};
 use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
@@ -127,9 +128,9 @@ impl Fixture {
                     &asset.id,
                     0,
                     &MaterialFingerprint {
-                        file: "unhashable:no-bytes".into(),
-                        content: "unhashable:no-bytes".into(),
-                        meta: "m1-sha256:0".into(),
+                        file: AxisRecord::bare(AxisStatus::NoBytes),
+                        content: AxisRecord::bare(AxisStatus::NoBytes),
+                        meta: AxisRecord::computed("m1-sha256:0".into()),
                         meta_kv: Some(meta_kv.to_string()),
                         meta_raw: None,
                         meta_text: None,
@@ -183,9 +184,9 @@ impl Fixture {
                 &asset,
                 0,
                 &MaterialFingerprint {
-                    file: "unhashable:no-bytes".into(),
-                    content: "unhashable:no-bytes".into(),
-                    meta: "unsupported:video/mp4".into(),
+                    file: AxisRecord::bare(AxisStatus::NoBytes),
+                    content: AxisRecord::bare(AxisStatus::NoBytes),
+                    meta: AxisRecord::unsupported("video/mp4".into()),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,

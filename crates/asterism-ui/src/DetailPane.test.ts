@@ -59,6 +59,7 @@ function detail(labels: string[]): AssetDetailDto {
       mime: "image/png",
       media: "image",
       content_hash: null,
+      content_hash_status: null,
       modality: "image",
       labels,
       occurred_at_ms: 1,

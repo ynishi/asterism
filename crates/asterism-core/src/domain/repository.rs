@@ -23,6 +23,7 @@ use chrono::{DateTime, Utc};
 use crate::domain::app_setting::{AppSetting, SettingKey};
 use crate::domain::asset::{Asset, AssetCard, AssetQuery};
 use crate::domain::asset_comment::AssetComment;
+use crate::domain::axis_status::AxisRecord;
 use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::dir::Dir;
 use crate::domain::dispatch::DispatchJob;
@@ -581,24 +582,26 @@ pub struct ChapterScanCandidate {
     pub mime: Option<MimeType>,
 }
 
-/// The pair of values one fingerprint pass produces for one material.
+/// The values one fingerprint pass produces for one material.
 ///
-/// A struct rather than two string arguments because the invariant is
-/// that they travel together. They come from a single read of the file
-/// and are written by a single statement, so there is no moment at
-/// which one is known and the other is not — and two positional `&str`
-/// parameters of the same type are the shape that lets a caller swap
-/// them and a compiler agree.
+/// A struct rather than loose arguments because the invariant is that
+/// they travel together. They come from a single read of the file and
+/// are written by a single statement, so there is no moment at which
+/// one is known and the other is not — and positional parameters of the
+/// same type are the shape that lets a caller swap them and a compiler
+/// agree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterialFingerprint {
-    /// File axis: `sha256:<hex>`, or the `unhashable:no-bytes` marker.
-    pub file: String,
-    /// Content axis: `cr1-sha256:<hex>`, or a marker saying why there
-    /// is no digest (`crate::domain::content_region`).
-    pub content: String,
-    /// Meta axis: `m1-sha256:<hex>`, or a marker saying why there is no
-    /// digest (`crate::domain::material_meta`).
-    pub meta: String,
+    /// File axis: the status, the `sha256:<hex>` digest when there is
+    /// one, and the reason when the status carries one
+    /// ([`AxisRecord`](crate::domain::axis_status::AxisRecord)).
+    pub file: AxisRecord,
+    /// Content axis: the status, and the `cr1-sha256:<hex>` digest when
+    /// there is one (`crate::domain::content_region`).
+    pub content: AxisRecord,
+    /// Meta axis: the status, and the `m1-sha256:<hex>` digest when
+    /// there is one (`crate::domain::material_meta`).
+    pub meta: AxisRecord,
     /// The canonical metadata object the meta digest was taken over —
     /// `Some` exactly when [`meta`](Self::meta) is a digest.
     ///
@@ -1298,6 +1301,46 @@ pub trait AssetRepository: Send + Sync {
         fingerprint: &MaterialFingerprint,
     ) -> Result<(), DomainError>;
 
+    /// Narrow write — records that one material's bytes could not be
+    /// read: every axis still `pending` (or already `failed`, which
+    /// refreshes the error) flips to
+    /// [`Failed`](crate::domain::axis_status::AxisStatus::Failed) with
+    /// `reason` (the I/O error) beside it, and every other axis is
+    /// left exactly as it was.
+    ///
+    /// The conditional per-axis write matters: a partially answered row
+    /// (a build that predates the newest column) keeps the digests it
+    /// has, and only the axes the failed read was going to fill record
+    /// the failure. Writing a whole
+    /// [`MaterialFingerprint`] here would overwrite measurements with a
+    /// statement about a read that never happened.
+    ///
+    /// **Deliberately not "every axis the walk calls unanswered".** A
+    /// `computed` axis holding a superseded-generation digest is
+    /// unanswered for the walk and still does not flip: no version bump
+    /// has shipped, so the state cannot exist today, and the bump that
+    /// creates it owes a managed migration moment of its own
+    /// ([`needs_content_walk`](crate::domain::content_hash::needs_content_walk)
+    /// records why). KNOWN LIMITATION carried with that bump: a
+    /// stale-`computed` axis on a permanently unreadable original would
+    /// sit in the progress count rather than the unreadable one, so
+    /// whoever bumps a generation revisits this CASE alongside the
+    /// re-walk it already owes.
+    ///
+    /// What this buys is the split issue #17 asked for: a row whose
+    /// original is gone stops sitting in the "still fingerprinting"
+    /// count forever ([`unhashed_material_count`](Self::unhashed_material_count)
+    /// excludes `failed`) and surfaces in
+    /// [`unreadable_material_count`](Self::unreadable_material_count)
+    /// instead — while the walk keeps retrying it, because `failed` is
+    /// deliberately not a final answer and the disk may come back.
+    async fn mark_material_unreadable(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        reason: &str,
+    ) -> Result<(), DomainError>;
+
     /// Narrow write — records one field under
     /// `extra.`[`_trace`](crate::domain::provenance::TRACE_KEY),
     /// touching no other column.
@@ -1857,15 +1900,16 @@ pub trait AssetRepository: Send + Sync {
     /// internal breakdown — reads as the cheaper shape, because a
     /// content group does contain the file group whenever both rows
     /// carry a content digest. **They do not always carry one.** A
-    /// format with no walker stores an
-    /// [`unsupported:`](crate::domain::content_region::UNSUPPORTED_PREFIX)
-    /// marker, and a material whose original could not be read when the
-    /// column was filled in stores
-    /// [`NOT_WALKED`](crate::domain::content_region::NOT_WALKED); the
-    /// content axis cannot see either, while the file axis groups both
-    /// perfectly well. Deriving one axis from the other would therefore
-    /// drop findings this port already reports today — silently, and
-    /// only for the rows least likely to be in a test fixture.
+    /// format with no walker holds the
+    /// [`Unsupported`](crate::domain::axis_status::AxisStatus::Unsupported)
+    /// status, and a material whose original could not be read when the
+    /// column was filled in holds
+    /// [`NotWalked`](crate::domain::axis_status::AxisStatus::NotWalked);
+    /// the content axis cannot see either, while the file axis groups
+    /// both perfectly well. Deriving one axis from the other would
+    /// therefore drop findings this port already reports today —
+    /// silently, and only for the rows least likely to be in a test
+    /// fixture.
     ///
     /// One axis per call also fixes what a reader is looking at: a
     /// group is the answer to one question, so the same two assets
@@ -1877,39 +1921,58 @@ pub trait AssetRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<DuplicateGroup>, DomainError>;
 
-    /// How many materials still have no answer recorded — the "not
-    /// finished looking" number that stops an empty duplicate report
-    /// from reading as "no duplicates".
+    /// How many materials are still **open work** for the fingerprint
+    /// pass — the "not finished looking" number that stops an empty
+    /// duplicate report from reading as "no duplicates".
     ///
-    /// Counts the rows
-    /// [`scan_unhashed_materials`](Self::scan_unhashed_materials) would
-    /// hand out, by the same rule
-    /// ([`needs_fingerprint`](crate::domain::content_hash::needs_fingerprint)),
-    /// and the sameness is the requirement: a count stricter than the
-    /// scan leaves a "still fingerprinting" notice that never clears,
-    /// and a scan stricter than the count shows zero remaining while
-    /// the walk is still chaining pages.
+    /// **Deliberately not the scan's rule.** The walk
+    /// ([`scan_unhashed_materials`](Self::scan_unhashed_materials))
+    /// selects by
+    /// [`needs_fingerprint`](crate::domain::content_hash::needs_fingerprint),
+    /// which includes `failed` rows so the retry happens; this count
+    /// uses [`awaits_fingerprint`](crate::domain::content_hash::awaits_fingerprint),
+    /// which excludes them so the number can reach zero. The rows in
+    /// the difference are exactly
+    /// [`unreadable_material_count`](Self::unreadable_material_count)'s,
+    /// and the differential tests pin the three-way split. Before issue
+    /// #17 the two rules were one, and a library with one permanently
+    /// missing original wore a "still fingerprinting" notice forever.
     ///
-    /// A material that can never be hashed counts nowhere: it carries a
-    /// marker on both axes ([`UNHASHABLE`](crate::domain::content_hash::UNHASHABLE)),
-    /// so it is *answered*, not pending — otherwise this number could
-    /// never reach zero on a library of conversation records and the
-    /// notice it drives would be permanent. What remains counted is
-    /// genuinely retriable: a file that was unreadable when the job ran
-    /// and may be readable next time.
+    /// A material that can never be hashed counts in neither number: it
+    /// holds `no-bytes` on every axis, which is *answered*, not
+    /// pending — otherwise this could never reach zero on a library of
+    /// conversation records.
     async fn unhashed_material_count(&self) -> Result<u64, DomainError>;
+
+    /// How many materials are stuck on an **unreadable original**: the
+    /// walk still owes them a pass and every unanswered axis says
+    /// `failed` — the original was not where the library says it is
+    /// when the job tried to read it.
+    ///
+    /// The other half of
+    /// [`unhashed_material_count`](Self::unhashed_material_count)'s
+    /// split (issue #17): these rows are not work in progress — the
+    /// number does not move on its own, the files have to come back —
+    /// so they are surfaced separately instead of holding the progress
+    /// notice open forever. The I/O error sits in each row's reason
+    /// column, so the count is a pointer to rows that can explain
+    /// themselves.
+    ///
+    /// Not persona-scoped, like its two siblings: it describes how far
+    /// a *disk* has been read.
+    async fn unreadable_material_count(&self) -> Result<u64, DomainError>;
 
     /// How many materials the content axis has **no reading of** — the
     /// rows still carrying
-    /// [`NOT_WALKED`](crate::domain::content_region::NOT_WALKED).
+    /// [`NotWalked`](crate::domain::axis_status::AxisStatus::NotWalked).
     ///
     /// Without this number a content-axis report is a lie by omission:
-    /// a row with the marker is in no content-axis group and looks from
+    /// a row in that state is in no content-axis group and looks from
     /// the outside exactly like a row that has no duplicate.
     ///
     /// # What a non-zero answer means now
     ///
-    /// The marker is written by the migration that adds the column and
+    /// The state is written by the migration that adds the column and
     /// cleared by the next step of the same chain, which reads the files
     /// (`v56_walk_deferred_content_regions`). Both run before the
     /// application accepts a request, so a running build never sees a
@@ -1923,9 +1986,9 @@ pub trait AssetRepository: Send + Sync {
     /// move on its own.
     ///
     /// [`unhashed_material_count`](Self::unhashed_material_count) cannot
-    /// stand in for it. That one counts rows with **no answer**, and
-    /// `NOT_WALKED` is an answer — it is what keeps those rows out of the
-    /// fingerprint walk in the first place.
+    /// stand in for it. That one counts open work, and `not-walked` is
+    /// an answer — it is what keeps those rows out of the fingerprint
+    /// walk in the first place.
     ///
     /// Not persona-scoped, for the same reason its sibling is not: it
     /// describes how far a *disk* has been read, and a per-persona

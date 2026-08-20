@@ -3098,6 +3098,40 @@ CREATE INDEX idx_material_content_region_hash
 /// this axis *after* the upgrade — a newly imported file matching one of
 /// these digests — is the ordinary detection path's business, and that
 /// path is still file-axis only; widening it is its own change.
+/// The marker-era stored spelling of one axis outcome — what the hash
+/// columns held **before V92** split status and digest apart.
+///
+/// The two data migrations below (V56 and V65) run at their own point
+/// in the chain, where the columns still carry the inline vocabulary,
+/// and they read files through `hash_artefact`, which is shared with
+/// the ordinary job and now answers in the split shape. This renders
+/// its answer back into the spelling their era stored, so a landed
+/// migration keeps writing exactly what it wrote when it shipped — V92
+/// then converts these rows along with everything else. Frozen here
+/// rather than borrowed from the domain, for the reason V56 carries its
+/// own locator test: a landed migration must not change what it did
+/// because a helper moved.
+fn pre_v92_stored_value(record: &asterism_core::domain::axis_status::AxisRecord) -> String {
+    use asterism_core::domain::axis_status::AxisStatus;
+
+    match record.status {
+        AxisStatus::Computed => record.digest.clone().unwrap_or_default(),
+        AxisStatus::Unsupported => format!(
+            "unsupported:{}",
+            record.reason.as_deref().unwrap_or("unknown")
+        ),
+        AxisStatus::EmptySpan => "unsupported:empty-span".to_string(),
+        AxisStatus::TooLarge => "unsupported:too-large".to_string(),
+        AxisStatus::NotWalked => "unsupported:not-walked".to_string(),
+        AxisStatus::NoBytes => "unhashable:no-bytes".to_string(),
+        // Neither existed in the marker era: `pending` was NULL, and
+        // `failed` was nothing at all. `hash_artefact` produces
+        // neither, so this arm is a reader bug made loud on the row
+        // rather than a digest invented for it.
+        AxisStatus::Pending | AxisStatus::Failed => String::new(),
+    }
+}
+
 fn v56_walk_deferred_content_regions(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     use asterism_core::domain::content_hash::UNHASHABLE;
     use asterism_core::domain::content_region::NOT_WALKED;
@@ -3196,10 +3230,11 @@ fn v56_walk_deferred_content_regions(tx: &Transaction<'_>) -> Result<(), rusqlit
             match hash_artefact(&row.locator, declared.as_ref(), MAX_CONTENT_WALK_BYTES) {
                 Ok(fingerprint) => {
                     walked += 1;
+                    let file = pre_v92_stored_value(&fingerprint.file);
                     if row
                         .stored_file
                         .as_deref()
-                        .is_some_and(|stored| stored != fingerprint.file)
+                        .is_some_and(|stored| stored != file)
                     {
                         file_digest_moved += 1;
                         // `action.`, not `diag.`: nothing malfunctioned.
@@ -3212,11 +3247,11 @@ fn v56_walk_deferred_content_regions(tx: &Transaction<'_>) -> Result<(), rusqlit
                             ord = %row.ord,
                             locator = %row.locator,
                             stored = %row.stored_file.as_deref().unwrap_or_default(),
-                            got = %fingerprint.file,
+                            got = %file,
                             "the original's bytes changed since it was fingerprinted"
                         );
                     }
-                    (Some(fingerprint.file), fingerprint.content)
+                    (Some(file), pre_v92_stored_value(&fingerprint.content))
                 }
                 Err(err) => {
                     unreadable += 1;
@@ -4318,7 +4353,7 @@ fn v65_walk_deferred_material_meta(tx: &Transaction<'_>) -> Result<(), rusqlite:
                 // make this step a re-fingerprint of the library
                 // wearing a meta-axis name.
                 update.execute(params![
-                    fingerprint.meta,
+                    pre_v92_stored_value(&fingerprint.meta),
                     fingerprint.meta_kv,
                     row.asset_id,
                     row.ord
@@ -6710,6 +6745,115 @@ DROP INDEX idx_pursuit_tx_base_event;
 ALTER TABLE pursuit_tx DROP COLUMN base_event_id;
 "#;
 
+/// V92 — moves the three-state out of the digest columns (issue #17):
+/// a status column beside each of the three hash columns, a reason
+/// column for the statuses that carry a payload, and the digest columns
+/// left holding digests and nothing else.
+///
+/// Until here `content_hash` / `content_region_hash` / `meta_hash`
+/// carried their own explanations inline — `unsupported:<mime>`,
+/// `unsupported:empty-span`, `unsupported:too-large`,
+/// `unsupported:not-walked`, `unhashable:no-bytes` — so every reader
+/// had to know the marker grammar before it could tell a measurement
+/// from a note about why there is no measurement. The established shape
+/// for that distinction (`getxattr(2)`'s errno beside a value) is a
+/// nullable payload beside a non-nullable status, and this step adopts
+/// it before a further marker or axis raises the cost of moving again.
+///
+/// # The conversion
+///
+/// One `UPDATE` computes every status from the value the column holds,
+/// spelling the marker literals inline the way every landed migration
+/// does (the domain constants may move; what this step did may not):
+///
+/// - `NULL` → `pending` — nobody has looked, on any axis.
+/// - the axis's own current-generation digest → `computed`.
+/// - `unhashable:no-bytes` → `no-bytes`; the three fixed `unsupported:`
+///   markers → their status of the same name.
+/// - any other `unsupported:<mime>` → `unsupported`, with the mime —
+///   the part of the marker that was genuinely valuable — kept in the
+///   reason column (`substr(…, 13)` strips the 12-character prefix).
+/// - anything else → `pending` on the versioned axes (a superseded
+///   generation reads as no answer, exactly as `is_axis_answer` read
+///   it) and `computed` on the file axis, whose vocabulary is not
+///   versioned — holding a value there was holding an answer.
+///
+/// A second `UPDATE` then clears the marker spellings out of the digest
+/// columns. Only the marker family is cleared, not everything
+/// non-`computed`: a digest of a superseded generation is still a
+/// digest, and the walk overwrites it — nulling it here would destroy a
+/// measurement to enforce a shape.
+///
+/// # What deliberately does not change
+///
+/// `meta_raw` keeps its own inline markers: it is a payload column, not
+/// a digest column, nothing groups on it, and its vocabulary
+/// (`material_meta_raw`) was out of the issue's scope. The `status`
+/// vocabulary's newcomer, `failed`, is written by no conversion — no
+/// pre-V92 row can carry it, because the old design recorded nothing
+/// for an unreadable original. That gap is exactly what the new column
+/// fixes going forward (`mark_material_unreadable`).
+///
+/// No index: the queries that filter on these columns are the count
+/// behind the progress notice and the backfill's page query, both of
+/// which already scanned `material` whole under the marker design.
+const V92_MATERIAL_FINGERPRINT_STATUS: &str = r#"
+ALTER TABLE material ADD COLUMN content_hash_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE material ADD COLUMN content_hash_reason TEXT;
+ALTER TABLE material ADD COLUMN content_region_hash_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE material ADD COLUMN content_region_hash_reason TEXT;
+ALTER TABLE material ADD COLUMN meta_hash_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE material ADD COLUMN meta_hash_reason TEXT;
+
+UPDATE material SET
+    content_hash_status = CASE
+        WHEN content_hash IS NULL THEN 'pending'
+        WHEN content_hash = 'unhashable:no-bytes' THEN 'no-bytes'
+        ELSE 'computed'
+    END,
+    content_region_hash_status = CASE
+        WHEN content_region_hash IS NULL THEN 'pending'
+        WHEN content_region_hash GLOB 'cr1-sha256:*' THEN 'computed'
+        WHEN content_region_hash = 'unhashable:no-bytes' THEN 'no-bytes'
+        WHEN content_region_hash = 'unsupported:empty-span' THEN 'empty-span'
+        WHEN content_region_hash = 'unsupported:too-large' THEN 'too-large'
+        WHEN content_region_hash = 'unsupported:not-walked' THEN 'not-walked'
+        WHEN content_region_hash GLOB 'unsupported:*' THEN 'unsupported'
+        ELSE 'pending'
+    END,
+    content_region_hash_reason = CASE
+        WHEN content_region_hash GLOB 'unsupported:*'
+         AND content_region_hash NOT IN
+             ('unsupported:empty-span', 'unsupported:too-large', 'unsupported:not-walked')
+        THEN substr(content_region_hash, 13)
+    END,
+    meta_hash_status = CASE
+        WHEN meta_hash IS NULL THEN 'pending'
+        WHEN meta_hash GLOB 'm1-sha256:*' THEN 'computed'
+        WHEN meta_hash = 'unhashable:no-bytes' THEN 'no-bytes'
+        WHEN meta_hash = 'unsupported:empty-span' THEN 'empty-span'
+        WHEN meta_hash = 'unsupported:too-large' THEN 'too-large'
+        WHEN meta_hash = 'unsupported:not-walked' THEN 'not-walked'
+        WHEN meta_hash GLOB 'unsupported:*' THEN 'unsupported'
+        ELSE 'pending'
+    END,
+    meta_hash_reason = CASE
+        WHEN meta_hash GLOB 'unsupported:*'
+         AND meta_hash NOT IN
+             ('unsupported:empty-span', 'unsupported:too-large', 'unsupported:not-walked')
+        THEN substr(meta_hash, 13)
+    END;
+
+UPDATE material SET content_hash = NULL
+ WHERE content_hash = 'unhashable:no-bytes';
+UPDATE material SET content_region_hash = NULL
+ WHERE content_region_hash GLOB 'unsupported:*'
+    OR content_region_hash = 'unhashable:no-bytes';
+UPDATE material SET meta_hash = NULL
+ WHERE meta_hash GLOB 'unsupported:*'
+    OR meta_hash = 'unhashable:no-bytes';
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6804,6 +6948,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V89_DROP_THE_RESTAMP_RECORD),
     Step::App(v90_drop_the_pursuit_stamp),
     Step::Sql(V91_DROP_THE_BASE_EVENT_PIN),
+    Step::Sql(V92_MATERIAL_FINGERPRINT_STATUS),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -9253,8 +9398,6 @@ mod tests {
     /// new arrivals.
     #[test]
     fn v64_adds_the_meta_axis_without_handing_the_walk_the_whole_library() {
-        use crate::sqlite::repo::asset::unfingerprinted_condition;
-
         let mut conn = test_conn();
         migrate_to(&mut conn, 63).unwrap();
 
@@ -9300,14 +9443,16 @@ mod tests {
         };
 
         // Nothing is work before the upgrade, on the two axes that
-        // existed then. The third argument is a column *expression*, so
-        // a literal that is already an answer holds that axis constant
-        // and leaves the other two being measured.
+        // existed then — evaluated in the marker-era spelling, because
+        // a database parked at V63 has no status columns yet. The third
+        // argument is a column *expression*, so a literal that is
+        // already an answer holds that axis constant and leaves the
+        // other two being measured.
         let answered = format!("'{}'", asterism_core::domain::content_region::NOT_WALKED);
         assert_eq!(
             count(
                 &conn,
-                &unfingerprinted_condition("content_hash", "content_region_hash", &answered)
+                &marker_era_unfingerprinted("content_hash", "content_region_hash", &answered)
             ),
             0,
             "the fixture starts fully answered on the axes that existed"
@@ -9319,7 +9464,7 @@ mod tests {
         assert_eq!(
             count(
                 &conn,
-                &unfingerprinted_condition("content_hash", "content_region_hash", "NULL")
+                &marker_era_unfingerprinted("content_hash", "content_region_hash", "NULL")
             ),
             stored.len() as i64,
             "without an answer written, the predicate claims every existing row"
@@ -9328,20 +9473,18 @@ mod tests {
         migrate(&mut conn).unwrap();
 
         assert_eq!(
-            count(
-                &conn,
-                &unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash")
-            ),
+            count(&conn, &status_era_unfingerprinted()),
             0,
             "the migration handed the walk rows it did not have before"
         );
 
-        // The answer written is the marker the domain names, not a
+        // The answer written is the state the domain names, not a
         // literal that drifted apart from it. The originals do not
         // exist on disk, so V65 leaves them carrying it — which is the
-        // true statement about a file it could not open.
-        let marked: Vec<Option<String>> = conn
-            .prepare("SELECT meta_hash FROM material ORDER BY asset_id")
+        // true statement about a file it could not open. Read off the
+        // status column, which is where V92 moved the marker.
+        let marked: Vec<String> = conn
+            .prepare("SELECT meta_hash_status FROM material ORDER BY asset_id")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
@@ -9350,11 +9493,10 @@ mod tests {
         assert_eq!(
             marked,
             vec![
-                Some(asterism_core::domain::content_region::NOT_WALKED.to_string()),
-                // The row with no bytes behind its locator is answered
-                // permanently instead: V65 reads the locator through the
-                // live type and writes the marker that says so.
-                Some(asterism_core::domain::content_region::NOT_WALKED.to_string()),
+                asterism_core::domain::axis_status::AxisStatus::NotWalked
+                    .as_str()
+                    .to_string();
+                2
             ],
             "every pre-existing row is answered"
         );
@@ -9379,8 +9521,6 @@ mod tests {
     /// to be exactly the rows that are work after.
     #[test]
     fn v55_adds_the_content_axis_without_handing_the_walk_the_whole_library() {
-        use crate::sqlite::repo::asset::unfingerprinted_condition;
-
         let mut conn = test_conn();
         migrate_to(&mut conn, 54).unwrap();
 
@@ -9432,7 +9572,7 @@ mod tests {
         assert_eq!(
             rows(
                 &conn,
-                &unfingerprinted_condition("content_hash", "NULL", "NULL")
+                &marker_era_unfingerprinted("content_hash", "NULL", "NULL")
             )
             .len(),
             stored.len(),
@@ -9441,19 +9581,17 @@ mod tests {
 
         migrate(&mut conn).unwrap();
 
-        let after = rows(
-            &conn,
-            &unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash"),
-        );
+        let after = rows(&conn, &status_era_unfingerprinted());
         assert_eq!(
             after, before,
             "the migration handed the walk rows it did not have before"
         );
 
-        // The answer written is the marker, and it is the one the domain
-        // names rather than a literal that drifted apart from it.
-        let marked: Vec<Option<String>> = conn
-            .prepare("SELECT content_region_hash FROM material ORDER BY asset_id")
+        // The answer written is the state the domain names, not a
+        // literal that drifted apart from it — read off the status
+        // column, which is where V92 moved the marker.
+        let marked: Vec<String> = conn
+            .prepare("SELECT content_region_hash_status FROM material ORDER BY asset_id")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
@@ -9461,8 +9599,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             marked,
-            vec![Some(asterism_core::domain::content_region::NOT_WALKED.to_string()); stored.len()],
-            "every pre-existing row is answered, with the marker the domain defines"
+            vec![
+                asterism_core::domain::axis_status::AxisStatus::NotWalked
+                    .as_str()
+                    .to_string();
+                stored.len()
+            ],
+            "every pre-existing row is answered, with the state the domain defines"
         );
 
         // A row that arrives *after* the migration starts NULL and is
@@ -9476,11 +9619,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            rows(
-                &conn,
-                &unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash")
-            )
-            .contains(&fresh),
+            rows(&conn, &status_era_unfingerprinted()).contains(&fresh),
             "a material inserted after the upgrade has to reach the walk"
         );
 
@@ -9525,6 +9664,93 @@ mod tests {
         // under `/pics/`. That is the "left carrying the marker" branch,
         // and it is why the assertion on `marked` still describes the
         // whole table after `migrate`.
+    }
+
+    /// The marker-era spelling of the fingerprint walk's condition,
+    /// frozen for the **pre-upgrade halves** of the tests in this file:
+    /// production reads the status columns now (V92), and a database
+    /// parked mid-chain does not have them yet. Same rule as
+    /// [`pre_v92_stored_value`]'s — a landed era keeps its own spelling.
+    fn marker_era_unfingerprinted(file: &str, content: &str, meta: &str) -> String {
+        let answered = |column: &str, prefix: &str| {
+            format!(
+                "({column} GLOB '{prefix}*' \
+                  OR {column} GLOB 'unsupported:*' \
+                  OR {column} = 'unhashable:no-bytes')"
+            )
+        };
+        format!(
+            "{file} IS NULL \
+             OR {content} IS NULL \
+             OR NOT {} \
+             OR {meta} IS NULL \
+             OR NOT {}",
+            answered(content, "cr1-sha256:"),
+            answered(meta, "m1-sha256:")
+        )
+    }
+
+    /// [`marker_era_unfingerprinted`]'s Rust half — what
+    /// `needs_fingerprint` answered while the columns carried the
+    /// inline vocabulary.
+    fn marker_era_owes(file: Option<&str>, content: Option<&str>, meta: Option<&str>) -> bool {
+        let answered = |value: Option<&str>, prefix: &str| {
+            value.is_some_and(|v| {
+                v.starts_with(prefix) || v.starts_with("unsupported:") || v == "unhashable:no-bytes"
+            })
+        };
+        file.is_none() || !answered(content, "cr1-sha256:") || !answered(meta, "m1-sha256:")
+    }
+
+    /// The production walk condition over the `material` table's own
+    /// columns — usable only on a database migrated **through V92**.
+    fn status_era_unfingerprinted() -> String {
+        use crate::sqlite::repo::asset::{AxisColumns, unfingerprinted_condition};
+
+        unfingerprinted_condition(
+            &AxisColumns {
+                status: "content_hash_status",
+                digest: "content_hash",
+            },
+            &AxisColumns {
+                status: "content_region_hash_status",
+                digest: "content_region_hash",
+            },
+            &AxisColumns {
+                status: "meta_hash_status",
+                digest: "meta_hash",
+            },
+        )
+    }
+
+    /// The production skip test over one migrated row — reads the
+    /// status columns V92 added beside the digests.
+    fn status_era_owes(conn: &Connection, asset: Uuid) -> bool {
+        use asterism_core::domain::axis_status::AxisStatus;
+        use asterism_core::domain::content_hash::needs_fingerprint;
+
+        type Axis = (String, Option<String>);
+        let (file, content, meta): (Axis, Axis, Axis) = conn
+            .query_row(
+                "SELECT content_hash_status, content_hash, \
+                        content_region_hash_status, content_region_hash, \
+                        meta_hash_status, meta_hash \
+                 FROM material WHERE asset_id = ?1",
+                params![asset],
+                |row| {
+                    Ok((
+                        (row.get(0)?, row.get(1)?),
+                        (row.get(2)?, row.get(3)?),
+                        (row.get(4)?, row.get(5)?),
+                    ))
+                },
+            )
+            .unwrap();
+        needs_fingerprint(
+            (AxisStatus::parse(&file.0).unwrap(), file.1.as_deref()),
+            (AxisStatus::parse(&content.0).unwrap(), content.1.as_deref()),
+            (AxisStatus::parse(&meta.0).unwrap(), meta.1.as_deref()),
+        )
     }
 
     /// Builds a PNG the walker accepts. `PngBuilder::new()` supplies the
@@ -9581,6 +9807,24 @@ mod tests {
         .unwrap()
     }
 
+    /// One axis's stored triple after the full chain — the shape V92
+    /// leaves the columns in.
+    fn axis_state_of(
+        conn: &Connection,
+        asset: Uuid,
+        column: &str,
+    ) -> (String, Option<String>, Option<String>) {
+        conn.query_row(
+            &format!(
+                "SELECT {column}_status, {column}, {column}_reason \
+                 FROM material WHERE asset_id = ?1"
+            ),
+            params![asset],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
     /// V56 is the half of the content-column migration that reads the
     /// files, and this is its whole contract: every row V55 deferred
     /// ends up carrying a digest or a marker that says why it does not.
@@ -9593,7 +9837,6 @@ mod tests {
     #[test]
     fn v56_computes_the_content_values_v55_deferred() {
         use asterism_core::domain::content_hash::{CONTENT_DIGEST_PREFIX, UNHASHABLE};
-        use asterism_core::domain::content_region::NOT_WALKED;
 
         let dir = tempfile::tempdir().unwrap();
         let write = |name: &str, bytes: &[u8]| -> String {
@@ -9658,16 +9901,8 @@ mod tests {
         };
         let before = count(&conn, "content_hash IS NULL");
         migrate(&mut conn).unwrap();
-        let unfingerprinted = |conn: &Connection| -> i64 {
-            count(
-                conn,
-                &crate::sqlite::repo::asset::unfingerprinted_condition(
-                    "content_hash",
-                    "content_region_hash",
-                    "meta_hash",
-                ),
-            )
-        };
+        let unfingerprinted =
+            |conn: &Connection| -> i64 { count(conn, &status_era_unfingerprinted()) };
 
         // The two PNGs: a real digest each, and the **same** one.
         let a_region = content_of(&conn, a).expect("a walked row carries a value");
@@ -9684,15 +9919,28 @@ mod tests {
 
         // A format with no walker says which format it declined, and a
         // locator with no bytes of its own gets the permanent answer.
+        // V56 wrote those as markers and V92, further down the same
+        // chain, moved them into the status and reason columns — so the
+        // end state read here is the split form.
         assert_eq!(
-            content_of(&conn, video).as_deref(),
-            Some("unsupported:video/mp4")
+            axis_state_of(&conn, video, "content_region_hash"),
+            (
+                "unsupported".to_string(),
+                None,
+                Some("video/mp4".to_string())
+            )
         );
-        assert_eq!(content_of(&conn, record).as_deref(), Some(UNHASHABLE));
+        assert_eq!(
+            axis_state_of(&conn, record, "content_region_hash"),
+            ("no-bytes".to_string(), None, None)
+        );
 
-        // A file that could not be read keeps the marker: "nothing
-        // walked these bytes" is still exactly true of it.
-        assert_eq!(content_of(&conn, gone).as_deref(), Some(NOT_WALKED));
+        // A file that could not be read keeps the deferred state:
+        // "nothing walked these bytes" is still exactly true of it.
+        assert_eq!(
+            axis_state_of(&conn, gone, "content_region_hash"),
+            ("not-walked".to_string(), None, None)
+        );
 
         // The file column does not move. Same bytes, same digest — and
         // the row this pass never opened keeps what it had rather than
@@ -9700,7 +9948,10 @@ mod tests {
         assert_eq!(file_of(&conn, a).as_deref(), Some(bare_file.as_str()));
         assert_eq!(file_of(&conn, b).as_deref(), Some(noted_file.as_str()));
         assert_eq!(file_of(&conn, video).as_deref(), Some(clip_file.as_str()));
-        assert_eq!(file_of(&conn, record).as_deref(), Some(UNHASHABLE));
+        assert_eq!(
+            axis_state_of(&conn, record, "content_hash"),
+            ("no-bytes".to_string(), None, None)
+        );
         assert_eq!(file_of(&conn, gone).as_deref(), Some("sha256:aaaa"));
 
         // The ordinary fingerprint walk is not handed anything by this.
@@ -11038,26 +11289,28 @@ mod tests {
 
         migrate(&mut conn).unwrap();
 
+        // The chain run above includes V92, which moved every surviving
+        // marker into the status and reason columns — so the end state
+        // asserted per row is the split form of exactly the value V72
+        // left, or the `pending` a cleared row converts to.
         for (asset, before) in &seeded {
-            let (content, meta): (Option<String>, Option<String>) = conn
-                .query_row(
-                    "SELECT content_region_hash, meta_hash FROM material WHERE asset_id = ?1",
-                    params![asset],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            if *before == STALE_JPEG_MARKER {
-                assert_eq!(
-                    content, None,
-                    "the row saying nothing reads JPEG is the one the step is for"
-                );
-            } else {
-                assert_eq!(
-                    content.as_deref(),
-                    Some(*before),
-                    "{before} is not this step's business and must survive it"
-                );
-            }
+            let expected: (&str, Option<&str>, Option<&str>) = match *before {
+                STALE_JPEG_MARKER => ("pending", None, None),
+                TOO_LARGE => ("too-large", None, None),
+                EMPTY_SPAN => ("empty-span", None, None),
+                NOT_WALKED => ("not-walked", None, None),
+                "unsupported:video/mp4" => ("unsupported", None, Some("video/mp4")),
+                "unsupported:unknown" => ("unsupported", None, Some("unknown")),
+                UNHASHABLE => ("no-bytes", None, None),
+                kept => ("computed", Some(kept), None),
+            };
+            let (status, value, reason) = axis_state_of(&conn, *asset, "content_region_hash");
+            assert_eq!(
+                (status.as_str(), value.as_deref(), reason.as_deref()),
+                expected,
+                "{before} is not this step's business and must survive it \
+                 (as its post-V92 form)"
+            );
             // The meta axis holds the same string on every one of these
             // rows, and V72 does not touch it — the JPEG probe declared
             // `meta: false` when this step was written, so clearing it
@@ -11067,7 +11320,11 @@ mod tests {
             // asserted here is therefore the end state of both, and the
             // selectivity of V76's own `WHERE` is
             // [`v76_clears_the_stale_jpeg_meta_marker_and_leaves_every_other_answer`].
-            assert_eq!(meta, None, "V76 cleared the meta column");
+            assert_eq!(
+                axis_state_of(&conn, *asset, "meta_hash"),
+                ("pending".to_string(), None, None),
+                "V76 cleared the meta column"
+            );
         }
     }
 
@@ -11086,8 +11343,6 @@ mod tests {
     /// pass over a migration that cleared the whole column.
     #[test]
     fn v72_hands_the_cleared_jpeg_row_to_the_ordinary_fingerprint_walk() {
-        use crate::sqlite::repo::asset::unfingerprinted_condition;
-        use asterism_core::domain::content_hash::needs_fingerprint;
         use asterism_core::domain::content_region::TOO_LARGE;
 
         let mut conn = test_conn();
@@ -11101,7 +11356,11 @@ mod tests {
         // clearing step.
         let gated = seed_jpeg_material_with_meta(&conn, persona, 1, TOO_LARGE, TOO_LARGE);
 
-        let owes = |conn: &Connection, asset: Uuid| -> bool {
+        // The pre-upgrade half runs in the marker era's own spellings —
+        // a database parked at V71 has no status columns — and the
+        // post-upgrade half in production's, which is the era the walk
+        // actually runs in after the chain.
+        let marker_owes = |conn: &Connection, asset: Uuid| -> bool {
             let (file, content, meta): (Option<String>, Option<String>, Option<String>) = conn
                 .query_row(
                     "SELECT content_hash, content_region_hash, meta_hash \
@@ -11110,12 +11369,11 @@ mod tests {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
-            needs_fingerprint(file.as_deref(), content.as_deref(), meta.as_deref())
+            marker_era_owes(file.as_deref(), content.as_deref(), meta.as_deref())
         };
-        let selected = |conn: &Connection| -> Vec<Uuid> {
+        let selected = |conn: &Connection, condition: &str| -> Vec<Uuid> {
             conn.prepare(&format!(
-                "SELECT asset_id FROM material WHERE {} ORDER BY asset_id",
-                unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash")
+                "SELECT asset_id FROM material WHERE {condition} ORDER BY asset_id"
             ))
             .unwrap()
             .query_map([], |row| row.get::<_, Uuid>(0))
@@ -11125,27 +11383,31 @@ mod tests {
         };
 
         assert!(
-            !owes(&conn, stale),
+            !marker_owes(&conn, stale),
             "before the step the marker reads as a final answer — that is the bug"
         );
-        assert!(!owes(&conn, gated));
+        assert!(!marker_owes(&conn, gated));
         assert!(
-            selected(&conn).is_empty(),
+            selected(
+                &conn,
+                &marker_era_unfingerprinted("content_hash", "content_region_hash", "meta_hash")
+            )
+            .is_empty(),
             "and the walk's own query agrees, so nothing is work yet"
         );
 
         migrate(&mut conn).unwrap();
 
         assert!(
-            owes(&conn, stale),
+            status_era_owes(&conn, stale),
             "a JPEG imported before the probe now owes a pass"
         );
         assert!(
-            !owes(&conn, gated),
+            !status_era_owes(&conn, gated),
             "and the file the size gate refused still does not"
         );
         assert_eq!(
-            selected(&conn),
+            selected(&conn, &status_era_unfingerprinted()),
             vec![stale],
             "the walk selects exactly the row the step cleared"
         );
@@ -11189,7 +11451,16 @@ mod tests {
         use asterism_core::domain::content_region::unsupported_format;
         use asterism_core::domain::value::{ImageFormat, MimeType};
 
-        let rendered = unsupported_format(Some(&MimeType::Image(ImageFormat::Jpeg))).stored_value();
+        // The marker-era spelling the frozen statements name, rebuilt
+        // from the domain's own rendering of the format so the
+        // drift-catch survives the V92 representation change.
+        let rendered = format!(
+            "unsupported:{}",
+            unsupported_format(Some(&MimeType::Image(ImageFormat::Jpeg)))
+                .record()
+                .reason
+                .expect("an unsupported outcome names its format")
+        );
         let cleared = |version: &str, statement: &str, column: &str| {
             let predicate = statement
                 .split_once("WHERE")
@@ -11314,26 +11585,27 @@ mod tests {
 
         migrate(&mut conn).unwrap();
 
+        // As in V72's twin: V92 runs later in the same chain, so the end
+        // state per row is the split form of the value V76 left.
         for (asset, before) in &seeded {
-            let (content, meta): (Option<String>, Option<String>) = conn
-                .query_row(
-                    "SELECT content_region_hash, meta_hash FROM material WHERE asset_id = ?1",
-                    params![asset],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            if *before == STALE_JPEG_MARKER {
-                assert_eq!(
-                    meta, None,
-                    "the row saying nothing reads JPEG is the one the step is for"
-                );
-            } else {
-                assert_eq!(
-                    meta.as_deref(),
-                    Some(*before),
-                    "{before} is not this step's business and must survive it"
-                );
-            }
+            let expected: (&str, Option<&str>, Option<&str>) = match *before {
+                STALE_JPEG_MARKER => ("pending", None, None),
+                TOO_LARGE => ("too-large", None, None),
+                EMPTY_SPAN => ("empty-span", None, None),
+                NOT_WALKED => ("not-walked", None, None),
+                "unsupported:video/mp4" => ("unsupported", None, Some("video/mp4")),
+                "unsupported:unknown" => ("unsupported", None, Some("unknown")),
+                UNHASHABLE => ("no-bytes", None, None),
+                kept => ("computed", Some(kept), None),
+            };
+            let (status, value, reason) = axis_state_of(&conn, *asset, "meta_hash");
+            assert_eq!(
+                (status.as_str(), value.as_deref(), reason.as_deref()),
+                expected,
+                "{before} is not this step's business and must survive it \
+                 (as its post-V92 form)"
+            );
+            let (_, content, _) = axis_state_of(&conn, *asset, "content_region_hash");
             assert!(
                 content.is_some_and(|value| value.starts_with("cr1-")),
                 "the meta column only"
@@ -11354,8 +11626,6 @@ mod tests {
     /// size-gated row with it.
     #[test]
     fn v76_hands_the_cleared_jpeg_row_to_the_ordinary_fingerprint_walk() {
-        use crate::sqlite::repo::asset::unfingerprinted_condition;
-        use asterism_core::domain::content_hash::needs_fingerprint;
         use asterism_core::domain::content_region::TOO_LARGE;
 
         let mut conn = test_conn();
@@ -11365,7 +11635,9 @@ mod tests {
         let stale = seed_jpeg_material_with_meta(&conn, persona, 0, &walked, STALE_JPEG_MARKER);
         let gated = seed_jpeg_material_with_meta(&conn, persona, 1, TOO_LARGE, TOO_LARGE);
 
-        let owes = |conn: &Connection, asset: Uuid| -> bool {
+        // Era-appropriate spellings on each side of the chain, as in
+        // V72's twin above.
+        let marker_owes = |conn: &Connection, asset: Uuid| -> bool {
             let (file, content, meta): (Option<String>, Option<String>, Option<String>) = conn
                 .query_row(
                     "SELECT content_hash, content_region_hash, meta_hash \
@@ -11374,12 +11646,11 @@ mod tests {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
-            needs_fingerprint(file.as_deref(), content.as_deref(), meta.as_deref())
+            marker_era_owes(file.as_deref(), content.as_deref(), meta.as_deref())
         };
-        let selected = |conn: &Connection| -> Vec<Uuid> {
+        let selected = |conn: &Connection, condition: &str| -> Vec<Uuid> {
             conn.prepare(&format!(
-                "SELECT asset_id FROM material WHERE {} ORDER BY asset_id",
-                unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash")
+                "SELECT asset_id FROM material WHERE {condition} ORDER BY asset_id"
             ))
             .unwrap()
             .query_map([], |row| row.get::<_, Uuid>(0))
@@ -11389,24 +11660,31 @@ mod tests {
         };
 
         assert!(
-            !owes(&conn, stale),
+            !marker_owes(&conn, stale),
             "before the step the marker reads as a final answer — that is the bug"
         );
-        assert!(!owes(&conn, gated));
-        assert!(selected(&conn).is_empty(), "nothing is work yet");
+        assert!(!marker_owes(&conn, gated));
+        assert!(
+            selected(
+                &conn,
+                &marker_era_unfingerprinted("content_hash", "content_region_hash", "meta_hash")
+            )
+            .is_empty(),
+            "nothing is work yet"
+        );
 
         migrate(&mut conn).unwrap();
 
         assert!(
-            owes(&conn, stale),
+            status_era_owes(&conn, stale),
             "a JPEG whose metadata nobody read now owes a pass"
         );
         assert!(
-            !owes(&conn, gated),
+            !status_era_owes(&conn, gated),
             "and the file the size gate refused still does not"
         );
         assert_eq!(
-            selected(&conn),
+            selected(&conn, &status_era_unfingerprinted()),
             vec![stale],
             "the walk selects exactly the row the step cleared"
         );
@@ -13903,9 +14181,6 @@ mod tests {
     /// and a row that genuinely owes a pass still does.
     #[test]
     fn an_existing_row_is_not_work_because_it_has_no_raw() {
-        use crate::sqlite::repo::asset::unfingerprinted_condition;
-        use asterism_core::domain::content_hash::needs_fingerprint;
-
         let mut conn = test_conn();
         migrate_to(&mut conn, 74).unwrap();
         let persona = seed_persona(&conn);
@@ -13926,21 +14201,10 @@ mod tests {
 
         migrate(&mut conn).unwrap();
 
-        let owes = |asset: Uuid| -> bool {
-            let (file, content, meta): (Option<String>, Option<String>, Option<String>) = conn
-                .query_row(
-                    "SELECT content_hash, content_region_hash, meta_hash \
-                     FROM material WHERE asset_id = ?1",
-                    params![asset],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .unwrap();
-            needs_fingerprint(file.as_deref(), content.as_deref(), meta.as_deref())
-        };
         let selected: Vec<Uuid> = conn
             .prepare(&format!(
                 "SELECT asset_id FROM material WHERE {} ORDER BY asset_id",
-                unfingerprinted_condition("content_hash", "content_region_hash", "meta_hash")
+                status_era_unfingerprinted()
             ))
             .unwrap()
             .query_map([], |row| row.get::<_, Uuid>(0))
@@ -13949,7 +14213,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            !owes(answered),
+            !status_era_owes(&conn, answered),
             "the row carries `unsupported:not-captured` on a column nothing asks about"
         );
         assert_eq!(
@@ -13959,7 +14223,7 @@ mod tests {
              fingerprint is work"
         );
         assert!(
-            owes(unfinished),
+            status_era_owes(&conn, unfinished),
             "which is what keeps the line above honest"
         );
     }
@@ -13974,5 +14238,131 @@ mod tests {
             |row| Ok(vec![row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?]),
         )
         .unwrap()
+    }
+
+    /// V92 converts every marker-era value into its status/reason
+    /// triple and leaves the digest columns holding digests and nothing
+    /// else — asserted over the full vocabulary each axis could hold on
+    /// the eve of the step, one row per shape.
+    ///
+    /// Two properties carry the weight. The mime inside an
+    /// `unsupported:<mime>` marker survives, in the reason column —
+    /// that is the part of the old design the issue called genuinely
+    /// valuable — and a value the conversion does not recognise falls
+    /// to `pending` on the versioned axes rather than being invented an
+    /// answer, exactly as `is_axis_answer` read it before.
+    #[test]
+    fn v92_moves_every_marker_into_the_status_and_reason_columns() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 91).unwrap();
+        let persona = seed_persona(&conn);
+
+        // (content-axis value before, expected (status, value, reason)
+        // after). The meta axis is exercised through the same seeding
+        // helper with its own digest tag below.
+        let region = format!("cr1-sha256:{}", "a".repeat(64));
+        let stale = format!("cr0-sha256:{}", "b".repeat(64));
+        let cases: Vec<(Option<&str>, (&str, Option<&str>, Option<&str>))> = vec![
+            (None, ("pending", None, None)),
+            (Some(&region), ("computed", Some(&region), None)),
+            // A superseded generation read as no answer before, and
+            // still does — but the digest is a measurement and stays.
+            (Some(&stale), ("pending", Some(&stale), None)),
+            (Some("unsupported:empty-span"), ("empty-span", None, None)),
+            (Some("unsupported:too-large"), ("too-large", None, None)),
+            (Some("unsupported:not-walked"), ("not-walked", None, None)),
+            (
+                Some("unsupported:video/mp4"),
+                ("unsupported", None, Some("video/mp4")),
+            ),
+            (
+                Some("unsupported:unknown"),
+                ("unsupported", None, Some("unknown")),
+            ),
+            (Some("unhashable:no-bytes"), ("no-bytes", None, None)),
+        ];
+        let seeded: Vec<(Uuid, (&str, Option<&str>, Option<&str>))> = cases
+            .iter()
+            .enumerate()
+            .map(|(ord, (before, after))| {
+                let asset = seed_asset(&conn, persona);
+                conn.execute(
+                    "INSERT INTO material (asset_id, ord, locator, mime, content_hash, \
+                                           content_region_hash, meta_hash, \
+                                           created_at, updated_at) \
+                     VALUES (?1, 0, ?2, 'image/png', 'sha256:aaaa', ?3, ?4, 0, 0)",
+                    params![
+                        asset,
+                        format!("{{\"kind\":\"file\",\"path\":\"/pics/v92-{ord}.png\"}}"),
+                        before,
+                        // The meta axis takes the same value, except the
+                        // digest shapes, which take its own tag.
+                        match *before {
+                            Some(v) if v == region => Some("m1-sha256:aaaa"),
+                            Some(v) if v == stale => Some("m0-sha256:bbbb"),
+                            other => other,
+                        },
+                    ],
+                )
+                .unwrap();
+                (asset, *after)
+            })
+            .collect();
+        // The file axis's own two markers, on one more row: a digest
+        // stays computed, and the no-bytes marker converts.
+        let no_bytes = seed_asset(&conn, persona);
+        conn.execute(
+            "INSERT INTO material (asset_id, ord, locator, mime, content_hash, \
+                                   created_at, updated_at) \
+             VALUES (?1, 0, '{\"kind\":\"file\",\"path\":\"/pics/v92-nb.png\"}', \
+                     'image/png', 'unhashable:no-bytes', 0, 0)",
+            params![no_bytes],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        for (asset, (status, value, reason)) in &seeded {
+            assert_eq!(
+                axis_state_of(&conn, *asset, "content_region_hash"),
+                (
+                    status.to_string(),
+                    value.map(str::to_string),
+                    reason.map(str::to_string)
+                ),
+                "the content axis converts by value"
+            );
+            // Every seeded row's file column held a digest, and stays
+            // computed with it.
+            assert_eq!(
+                axis_state_of(&conn, *asset, "content_hash"),
+                ("computed".to_string(), Some("sha256:aaaa".into()), None)
+            );
+        }
+        assert_eq!(
+            axis_state_of(&conn, no_bytes, "content_hash"),
+            ("no-bytes".to_string(), None, None),
+            "the file axis's marker converts like the others"
+        );
+
+        // The digest columns hold digests and nothing else — the
+        // invariant every reader now leans on.
+        let leftovers: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM material \
+                 WHERE content_hash GLOB 'unsupported:*' \
+                    OR content_hash = 'unhashable:no-bytes' \
+                    OR content_region_hash GLOB 'unsupported:*' \
+                    OR content_region_hash = 'unhashable:no-bytes' \
+                    OR meta_hash GLOB 'unsupported:*' \
+                    OR meta_hash = 'unhashable:no-bytes'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            leftovers, 0,
+            "no marker spelling survives in a digest column"
+        );
     }
 }

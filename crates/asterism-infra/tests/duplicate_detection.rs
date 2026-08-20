@@ -19,6 +19,7 @@ use asterism_core::application_support::duplicate_detection::{
 };
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
+use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::content_hash::{EMPTY, UNHASHABLE};
 use asterism_core::domain::duplicate_conflict::{
     ConflictResolution, DuplicateAxis, DuplicateConflict, FoldExclusion,
@@ -100,12 +101,12 @@ impl RecordingQueue {
 const DIGEST: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 /// The fingerprint the fixtures below detect on: [`DIGEST`] on the
-/// artefact axis, a marker on the two walking ones.
+/// artefact axis, an answered status on the two walking ones.
 fn artefact_only(digest: &str) -> MaterialFingerprint {
     MaterialFingerprint {
-        file: digest.to_string(),
-        content: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
-        meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
+        file: AxisRecord::computed(digest.to_string()),
+        content: AxisRecord::bare(AxisStatus::EmptySpan),
+        meta: AxisRecord::bare(AxisStatus::EmptySpan),
         meta_kv: None,
         meta_raw: None,
         meta_text: None,
@@ -193,17 +194,17 @@ async fn hashed_row(
         kind,
         locator,
         &MaterialFingerprint {
-            file: digest.to_string(),
+            file: AxisRecord::computed(digest.to_string()),
             // These fixtures ask an artefact-axis question, so the two
-            // walking columns are answered with a marker: the row leaves
+            // walking axes are answered with a status: the row leaves
             // the fingerprint walk the way a real pass would leave it,
-            // and a marker is not a duplicate key, so neither of those
+            // and a status carries no digest, so neither of those
             // axes finds anything and the assertions are about the axis
             // under test. `the_content_axis_fires_on_a_metadata_only_-
             // difference` and `the_meta_axis_fires_on_a_pixels_only_-
             // difference` are the fixtures that put real digests here.
-            content: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
-            meta: asterism_core::domain::content_region::EMPTY_SPAN.to_string(),
+            content: AxisRecord::bare(AxisStatus::EmptySpan),
+            meta: AxisRecord::bare(AxisStatus::EmptySpan),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
@@ -735,10 +736,14 @@ async fn markers_never_conflict_however_many_rows_share_them() {
                 fx.ports(&queue),
                 &row.id,
                 0,
+                // `computed` around a value that is not this axis's
+                // digest: the shape a hand-edited row or a careless
+                // writer produces, which is exactly what the reserved
+                // exclusion has to keep refusing.
                 &MaterialFingerprint {
-                    file: marker.to_string(),
-                    content: marker.to_string(),
-                    meta: marker.to_string(),
+                    file: AxisRecord::computed(marker.to_string()),
+                    content: AxisRecord::computed(marker.to_string()),
+                    meta: AxisRecord::computed(marker.to_string()),
                     meta_kv: None,
                     meta_text: None,
                     meta_raw: None,
@@ -1888,10 +1893,10 @@ fn fingerprint_of(png: &[u8]) -> MaterialFingerprint {
     let mime = asterism_core::domain::value::MimeType::parse("image/png");
     let meta = asterism_infra::probes::meta(png, Some(&mime));
     MaterialFingerprint {
-        file: asterism_core::domain::content_hash::of_bytes(png),
-        content: asterism_infra::probes::content(png, Some(&mime)).stored_value(),
+        file: AxisRecord::computed(asterism_core::domain::content_hash::of_bytes(png)),
+        content: asterism_infra::probes::content(png, Some(&mime)).record(),
         meta_kv: meta.canonical().map(str::to_string),
-        meta: meta.stored_value(),
+        meta: meta.record(),
         // Not a digest and not what these fixtures ask about: the
         // recovered-text column plays no part in duplicate detection.
         meta_text: None,
@@ -1932,8 +1937,11 @@ async fn the_content_axis_fires_on_a_metadata_only_difference() {
         "the region digest is what has to see past the tEXt chunk"
     );
     assert!(
-        original.content.starts_with("cr1-sha256:"),
-        "a marker is not a digest and would group nothing: {}",
+        original
+            .content
+            .digest()
+            .is_some_and(|d| d.starts_with("cr1-sha256:")),
+        "a status is not a digest and would group nothing: {:?}",
         original.content
     );
 
@@ -1963,7 +1971,11 @@ async fn the_content_axis_fires_on_a_metadata_only_difference() {
     // with "the artefact axis found it under another name".
     assert_eq!(
         fx.assets
-            .find_by_content_hash(&fx.persona, DuplicateAxis::Artefact, &recaptioned.file)
+            .find_by_content_hash(
+                &fx.persona,
+                DuplicateAxis::Artefact,
+                recaptioned.file.digest().expect("the file axis computed"),
+            )
             .await
             .unwrap()
             .len(),
@@ -1987,7 +1999,8 @@ async fn the_content_axis_fires_on_a_metadata_only_difference() {
     assert_eq!(conflict.newcomer, newcomer.id);
     assert_eq!(conflict.incumbent, incumbent.id);
     assert_eq!(
-        conflict.content_hash, recaptioned.content,
+        Some(conflict.content_hash.as_str()),
+        recaptioned.content.digest(),
         "and carries the region digest, not the file one"
     );
     assert_eq!(
@@ -2051,8 +2064,11 @@ async fn the_meta_axis_fires_on_a_pixels_only_difference() {
         "the metadata digest is what has to see past the pixels"
     );
     assert!(
-        first.meta.starts_with("m1-sha256:"),
-        "a marker is not a digest and would group nothing: {}",
+        first
+            .meta
+            .digest()
+            .is_some_and(|d| d.starts_with("m1-sha256:")),
+        "a status is not a digest and would group nothing: {:?}",
         first.meta
     );
     assert_eq!(
@@ -2097,8 +2113,8 @@ async fn the_meta_axis_fires_on_a_pixels_only_difference() {
     // the repository, so "the meta axis found it" cannot be confused
     // with "one of the others found it under another name".
     for (axis, digest) in [
-        (DuplicateAxis::Artefact, &second.file),
-        (DuplicateAxis::Content, &second.content),
+        (DuplicateAxis::Artefact, second.file.digest().unwrap()),
+        (DuplicateAxis::Content, second.content.digest().unwrap()),
     ] {
         assert_eq!(
             fx.assets
@@ -2128,7 +2144,8 @@ async fn the_meta_axis_fires_on_a_pixels_only_difference() {
     assert_eq!(conflict.newcomer, newcomer.id);
     assert_eq!(conflict.incumbent, incumbent.id);
     assert_eq!(
-        conflict.content_hash, second.meta,
+        Some(conflict.content_hash.as_str()),
+        second.meta.digest(),
         "and carries the metadata digest, not one of the others"
     );
     assert_eq!(
@@ -2162,10 +2179,18 @@ async fn only_the_strongest_agreeing_axis_is_reported() {
 
     let both = fingerprint_of(CARD_PNG);
     assert!(
-        both.content.starts_with("cr1-sha256:"),
+        both.content
+            .digest()
+            .is_some_and(|d| d.starts_with("cr1-sha256:")),
         "the weaker axes have to be able to match, or 'and stop' is untested"
     );
-    assert!(both.meta.starts_with("m1-sha256:"), "{}", both.meta);
+    assert!(
+        both.meta
+            .digest()
+            .is_some_and(|d| d.starts_with("m1-sha256:")),
+        "{:?}",
+        both.meta
+    );
 
     let incumbent = fingerprinted_row(
         &fx.assets,
@@ -2190,9 +2215,9 @@ async fn only_the_strongest_agreeing_axis_is_reported() {
 
     // Every axis really would answer: two holders on each.
     for (axis, digest) in [
-        (DuplicateAxis::Artefact, &both.file),
-        (DuplicateAxis::Content, &both.content),
-        (DuplicateAxis::Meta, &both.meta),
+        (DuplicateAxis::Artefact, both.file.digest().unwrap()),
+        (DuplicateAxis::Content, both.content.digest().unwrap()),
+        (DuplicateAxis::Meta, both.meta.digest().unwrap()),
     ] {
         assert_eq!(
             fx.assets
@@ -2215,7 +2240,7 @@ async fn only_the_strongest_agreeing_axis_is_reported() {
     // One question, on the strong axis — not two.
     let conflict = fx.only_open_conflict().await;
     assert_eq!(conflict.axis, DuplicateAxis::Artefact);
-    assert_eq!(conflict.content_hash, both.file);
+    assert_eq!(Some(conflict.content_hash.as_str()), both.file.digest());
     assert_eq!(
         fx.identical_edges().await,
         vec![(
@@ -2270,8 +2295,18 @@ async fn a_pair_agreeing_on_both_weak_axes_is_asked_about_once() {
     assert_ne!(original.file, restamped.file, "the files have to differ");
     assert_eq!(original.content, restamped.content, "same picture");
     assert_eq!(original.meta, restamped.meta, "and the same metadata");
-    assert!(original.content.starts_with("cr1-sha256:"));
-    assert!(original.meta.starts_with("m1-sha256:"));
+    assert!(
+        original
+            .content
+            .digest()
+            .is_some_and(|d| d.starts_with("cr1-sha256:"))
+    );
+    assert!(
+        original
+            .meta
+            .digest()
+            .is_some_and(|d| d.starts_with("m1-sha256:"))
+    );
 
     let incumbent = fingerprinted_row(
         &fx.assets,
@@ -2297,8 +2332,8 @@ async fn a_pair_agreeing_on_both_weak_axes_is_asked_about_once() {
     // Both weak axes would answer on their own — otherwise "one
     // question" would be a fact about a pair only one axis matched.
     for (axis, digest) in [
-        (DuplicateAxis::Content, &restamped.content),
-        (DuplicateAxis::Meta, &restamped.meta),
+        (DuplicateAxis::Content, restamped.content.digest().unwrap()),
+        (DuplicateAxis::Meta, restamped.meta.digest().unwrap()),
     ] {
         assert_eq!(
             fx.assets
@@ -2313,7 +2348,11 @@ async fn a_pair_agreeing_on_both_weak_axes_is_asked_about_once() {
     }
     assert_eq!(
         fx.assets
-            .find_by_content_hash(&fx.persona, DuplicateAxis::Artefact, &restamped.file)
+            .find_by_content_hash(
+                &fx.persona,
+                DuplicateAxis::Artefact,
+                restamped.file.digest().expect("the file axis computed"),
+            )
             .await
             .unwrap()
             .len(),
@@ -2339,7 +2378,11 @@ async fn a_pair_agreeing_on_both_weak_axes_is_asked_about_once() {
     // is the whole justification for discarding it.
     let held = fx
         .assets
-        .find_by_content_hash(&fx.persona, DuplicateAxis::Meta, &restamped.meta)
+        .find_by_content_hash(
+            &fx.persona,
+            DuplicateAxis::Meta,
+            restamped.meta.digest().expect("the meta axis computed"),
+        )
         .await
         .unwrap();
     assert_eq!(

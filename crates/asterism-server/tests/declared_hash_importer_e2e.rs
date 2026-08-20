@@ -34,8 +34,8 @@ use std::time::Duration;
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::dto::AssetDetailDto;
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery};
+use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::content_hash;
-use asterism_core::domain::content_region;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
 use asterism_core::domain::repository::{AssetRepository, MaterialFingerprint};
 use asterism_core::domain::value::{AssetId, OnDuplicate};
@@ -236,9 +236,9 @@ async fn seed_artefact_digest(db_path: &std::path::Path, asset_id: &str, digest:
             &id,
             0,
             &MaterialFingerprint {
-                file: digest.to_string(),
-                content: content_region::NOT_WALKED.to_string(),
-                meta: content_region::NOT_WALKED.to_string(),
+                file: AxisRecord::computed(digest.to_string()),
+                content: AxisRecord::bare(AxisStatus::NotWalked),
+                meta: AxisRecord::bare(AxisStatus::NotWalked),
                 meta_kv: None,
                 meta_text: None,
                 meta_raw: None,

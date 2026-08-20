@@ -82,13 +82,19 @@ function seed(conflicts: DuplicateConflictDto[], unhashedCount = 0) {
   duplicatesCatalog.report.data = {
     groups: [],
     unhashed_count: unhashedCount,
+    unreadable_count: 0,
     unwalked_count: 0,
   };
 }
 
 /** A report as the backend would hand it back. */
 function report(groups: DuplicateGroupDto[], unwalkedCount = 0) {
-  return { groups, unhashed_count: 0, unwalked_count: unwalkedCount };
+  return {
+    groups,
+    unhashed_count: 0,
+    unreadable_count: 0,
+    unwalked_count: unwalkedCount,
+  };
 }
 
 function group(axis: DuplicateAxis, contentHash: string, ids: string[]): DuplicateGroupDto {

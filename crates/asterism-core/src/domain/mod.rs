@@ -144,6 +144,7 @@ pub mod app_setting;
 pub mod asset;
 pub mod asset_comment;
 pub mod attribution;
+pub mod axis_status;
 pub mod chapter_mark;
 pub mod color;
 pub mod constellation;

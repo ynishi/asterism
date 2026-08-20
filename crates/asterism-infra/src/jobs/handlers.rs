@@ -10,8 +10,9 @@ use asterism_core::application_support::duplicate_detection::{
     Detection, DetectionOrigin, DetectionPorts, detect_duplicate,
 };
 use asterism_core::domain::asset::{Asset, ContentFlags};
+use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::constellation::plan_edges;
-use asterism_core::domain::content_hash::{self, UNHASHABLE};
+use asterism_core::domain::content_hash;
 use asterism_core::domain::derived_text::derive_text;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
 use asterism_core::domain::provenance;
@@ -675,9 +676,15 @@ pub async fn material_hash(
         // a test that read fewer columns than the walk selects on would
         // skip rows the walk keeps handing back.
         if !content_hash::needs_fingerprint(
-            material.content_hash.as_deref(),
-            material.content_region_hash.as_deref(),
-            material.meta_hash.as_deref(),
+            (
+                material.content_hash_status,
+                material.content_hash.as_deref(),
+            ),
+            (
+                material.content_region_hash_status,
+                material.content_region_hash.as_deref(),
+            ),
+            (material.meta_hash_status, material.meta_hash.as_deref()),
         ) {
             continue;
         }
@@ -1880,7 +1887,7 @@ async fn hash_material(
         // that never shrinks, and a "still fingerprinting" notice that
         // never clears.
         //
-        // Every column takes the same marker: the statement is about
+        // Every axis takes the same status: the statement is about
         // the locator, so it is equally true on every axis, and
         // answering one would leave the row in the walk for the others.
         // `meta_kv` stays empty, because there is no object — writing
@@ -1894,9 +1901,9 @@ async fn hash_material(
                 asset_id,
                 ord,
                 &MaterialFingerprint {
-                    file: UNHASHABLE.to_string(),
-                    content: UNHASHABLE.to_string(),
-                    meta: UNHASHABLE.to_string(),
+                    file: AxisRecord::bare(AxisStatus::NoBytes),
+                    content: AxisRecord::bare(AxisStatus::NoBytes),
+                    meta: AxisRecord::bare(AxisStatus::NoBytes),
                     // Nothing was read, so nobody has looked: `NULL`
                     // rather than the `{}` that would retire the row
                     // from a later pass.
@@ -1924,6 +1931,18 @@ async fn hash_material(
                 error = %err,
                 "material_hash skipped"
             );
+            // Record the failure instead of leaving the row pending:
+            // `failed` takes the row out of the "still fingerprinting"
+            // denominator and into the unreadable count, while the walk
+            // keeps retrying it — the disk may come back, and the
+            // status flips to an answer the moment a read succeeds.
+            // Best-effort like the write below: a failure to record a
+            // failure is said out loud and costs one more retry.
+            let _ = env
+                .deps
+                .assets
+                .mark_material_unreadable(asset_id, ord, &err.to_string())
+                .await;
             return HashOutcome::Skipped;
         }
         Err(join) => {
@@ -2423,10 +2442,10 @@ fn declared_axis_value<'a>(
 ) -> Option<(DuplicateAxis, &'a str)> {
     let axis = content_hash::axis_of(declared)?;
     let recomputed = match axis {
-        DuplicateAxis::Artefact => fingerprint.file.as_str(),
-        DuplicateAxis::Content => fingerprint.content.as_str(),
-        DuplicateAxis::Meta => fingerprint.meta.as_str(),
-    };
+        DuplicateAxis::Artefact => fingerprint.file.digest(),
+        DuplicateAxis::Content => fingerprint.content.digest(),
+        DuplicateAxis::Meta => fingerprint.meta.digest(),
+    }?;
     (content_hash::axis_of(recomputed) == Some(axis)).then_some((axis, recomputed))
 }
 
@@ -3331,7 +3350,6 @@ mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
     use crate::sqlite::repo::SqliteModalityRepository;
-    use asterism_core::domain::content_region;
     use asterism_core::domain::modality::ModalityDef;
     use asterism_core::domain::repository::ModalityRepository;
     use asterism_core::domain::value::Modality;
@@ -3503,8 +3521,17 @@ mod tests {
         let a = hash_artefact(&bare, Some(&mime("image/png")), MAX_CONTENT_WALK_BYTES).unwrap();
         let b = hash_artefact(&noted, Some(&mime("image/png")), MAX_CONTENT_WALK_BYTES).unwrap();
 
-        assert!(a.file.starts_with(DIGEST_PREFIX));
-        assert!(a.content.starts_with(CONTENT_DIGEST_PREFIX), "{a:?}");
+        assert!(
+            a.file
+                .digest()
+                .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
+        );
+        assert!(
+            a.content
+                .digest()
+                .is_some_and(|d| d.starts_with(CONTENT_DIGEST_PREFIX)),
+            "{a:?}"
+        );
         assert_ne!(a.file, b.file, "the two files really do differ");
         assert_eq!(a.content, b.content, "…and are the same picture");
 
@@ -3513,24 +3540,39 @@ mod tests {
         // pretend the bytes were read.
         let clip = write(&dir, "clip.mp4", b"\0\0\0\x18ftypmp42not really a movie");
         let video = hash_artefact(&clip, Some(&mime("video/mp4")), MAX_CONTENT_WALK_BYTES).unwrap();
-        assert!(video.file.starts_with(DIGEST_PREFIX));
-        assert_eq!(video.content, "unsupported:video/mp4");
+        assert!(
+            video
+                .file
+                .digest()
+                .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
+        );
+        assert_eq!(video.content, AxisRecord::unsupported("video/mp4".into()));
 
         // A `.png` that is not one: the signature check refuses, and
-        // the marker says only what is known.
+        // the status says only what is known.
         let liar = write(&dir, "liar.png", b"\xff\xd8\xff\xe0 a jpeg wearing a hat");
         let refused =
             hash_artefact(&liar, Some(&mime("image/png")), MAX_CONTENT_WALK_BYTES).unwrap();
-        assert!(refused.file.starts_with(DIGEST_PREFIX));
-        assert_eq!(refused.content, "unsupported:unknown");
+        assert!(
+            refused
+                .file
+                .digest()
+                .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
+        );
+        assert_eq!(refused.content, AxisRecord::unsupported("unknown".into()));
 
-        // A truncated PNG walks to no region, and the value stored is
-        // the marker rather than the perfectly real digest of nothing.
+        // A truncated PNG walks to no region, and the row records the
+        // status rather than the perfectly real digest of nothing.
         let whole = png(pixels, None);
         let cut = write(&dir, "cut.png", &whole[..whole.len() / 2]);
         let broken = hash_artefact(&cut, Some(&mime("image/png")), MAX_CONTENT_WALK_BYTES).unwrap();
-        assert_eq!(broken.content, content_region::EMPTY_SPAN);
-        assert!(broken.file.starts_with(DIGEST_PREFIX));
+        assert_eq!(broken.content, AxisRecord::bare(AxisStatus::EmptySpan));
+        assert!(
+            broken
+                .file
+                .digest()
+                .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
+        );
     }
 
     /// Teeth: past the size gate the file axis is still computed and
@@ -3545,7 +3587,7 @@ mod tests {
 
         let gate = (bytes.len() - 1) as u64;
         let gated = hash_artefact(&path, Some(&mime("image/png")), gate).unwrap();
-        assert_eq!(gated.content, content_region::TOO_LARGE);
+        assert_eq!(gated.content, AxisRecord::bare(AxisStatus::TooLarge));
 
         // The same file under a ceiling it fits: the file axis agrees
         // with the gated run (so the gate changed one answer, not two)
@@ -3553,9 +3595,9 @@ mod tests {
         let walked = hash_artefact(&path, Some(&mime("image/png")), gate + 1).unwrap();
         assert_eq!(walked.file, gated.file);
         assert!(
-            walked
-                .content
-                .starts_with(asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX),
+            walked.content.digest().is_some_and(
+                |d| d.starts_with(asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX)
+            ),
             "{walked:?}"
         );
     }
@@ -3569,24 +3611,30 @@ mod tests {
     /// to look at a file that is fine.
     #[test]
     fn a_declaration_is_checked_against_the_axis_it_named() {
+        let content_digest = format!(
+            "{}{}",
+            asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX,
+            "a".repeat(64)
+        );
+        let meta_digest = format!(
+            "{}{}",
+            asterism_core::domain::content_hash::META_DIGEST_PREFIX,
+            "a".repeat(64)
+        );
         let fingerprint = MaterialFingerprint {
-            file: content_hash::of_bytes(b"the whole file"),
-            content: format!(
-                "{}{}",
-                asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX,
-                "a".repeat(64)
-            ),
-            meta: format!(
-                "{}{}",
-                asterism_core::domain::content_hash::META_DIGEST_PREFIX,
-                "a".repeat(64)
-            ),
+            file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
+            content: AxisRecord::computed(content_digest.clone()),
+            meta: AxisRecord::computed(meta_digest.clone()),
             meta_kv: Some(r#"{"prompt":"a cat"}"#.to_string()),
             meta_raw: None,
             meta_text: None,
         };
 
-        for declared in [&fingerprint.file, &fingerprint.content, &fingerprint.meta] {
+        for declared in [
+            fingerprint.file.digest().unwrap(),
+            &content_digest,
+            &meta_digest,
+        ] {
             let (_, recomputed) =
                 declared_axis_value(declared, &fingerprint).expect("a tagged claim picks an axis");
             assert_eq!(recomputed, declared, "the claim agrees with its own axis");
@@ -3604,16 +3652,22 @@ mod tests {
         );
         let (axis, recomputed) = declared_axis_value(&wrong, &fingerprint).unwrap();
         assert_eq!(axis, DuplicateAxis::Content);
-        assert_eq!(recomputed, fingerprint.content);
+        assert_eq!(recomputed, content_digest);
         let note = content_hash::declaration_verdict(&wrong, recomputed, 0);
         assert_eq!(note["verified"], serde_json::json!(false));
-        assert_eq!(note["got"], serde_json::json!(fingerprint.content));
+        assert_eq!(note["got"], serde_json::json!(content_digest));
         assert_eq!(note["axis"], serde_json::json!("content"));
 
         // An untagged claim names no axis, so nothing is asserted about
         // it — including that it disagreed.
         assert!(declared_axis_value("deadbeef", &fingerprint).is_none());
-        assert!(declared_axis_value(UNHASHABLE, &fingerprint).is_none());
+        assert!(
+            declared_axis_value(
+                asterism_core::domain::content_hash::UNHASHABLE,
+                &fingerprint
+            )
+            .is_none()
+        );
     }
 
     /// Teeth: a claim on an axis this pass did **not** measure is not
@@ -3635,41 +3689,44 @@ mod tests {
         );
 
         // Every way the content axis ends up without a digest: past the
-        // size gate, no walker for the format, walked to nothing, and
-        // the row that predates the column.
-        for marker in [
-            content_region::TOO_LARGE,
-            content_region::EMPTY_SPAN,
-            content_region::NOT_WALKED,
-            "unsupported:image/jpeg",
-            "unsupported:unknown",
-            UNHASHABLE,
+        // size gate, no walker for the format, walked to nothing, the
+        // row that predates the column, no bytes at all, and a read
+        // that failed.
+        for status in [
+            AxisRecord::bare(AxisStatus::TooLarge),
+            AxisRecord::bare(AxisStatus::EmptySpan),
+            AxisRecord::bare(AxisStatus::NotWalked),
+            AxisRecord::unsupported("image/jpeg".into()),
+            AxisRecord::unsupported("unknown".into()),
+            AxisRecord::bare(AxisStatus::NoBytes),
+            AxisRecord::failed("No such file or directory".into()),
         ] {
             let fingerprint = MaterialFingerprint {
-                file: content_hash::of_bytes(b"the whole file"),
-                content: marker.to_string(),
-                meta: marker.to_string(),
+                file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
+                content: status.clone(),
+                meta: status.clone(),
                 meta_kv: None,
                 meta_raw: None,
                 meta_text: None,
             };
             assert!(
                 declared_axis_value(&declared, &fingerprint).is_none(),
-                "{marker} is not a digest to check a claim against"
+                "{status:?} is not a digest to check a claim against"
             );
         }
 
         // The same claim against a real region digest *is* checked —
         // otherwise the assertions above would hold for a function that
         // had simply stopped checking anything.
+        let region_digest = format!(
+            "{}{}",
+            asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX,
+            "b".repeat(64)
+        );
         let measured = MaterialFingerprint {
-            file: content_hash::of_bytes(b"the whole file"),
-            content: format!(
-                "{}{}",
-                asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX,
-                "b".repeat(64)
-            ),
-            meta: content_region::NOT_WALKED.to_string(),
+            file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
+            content: AxisRecord::computed(region_digest.clone()),
+            meta: AxisRecord::bare(AxisStatus::NotWalked),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
@@ -3677,7 +3734,7 @@ mod tests {
         let (axis, recomputed) =
             declared_axis_value(&declared, &measured).expect("a digest is checkable");
         assert_eq!(axis, DuplicateAxis::Content);
-        assert_eq!(recomputed, measured.content);
+        assert_eq!(recomputed, region_digest);
         assert_ne!(recomputed, declared, "and this pair is a real mismatch");
 
         // The file axis takes the same rule, and the empty-file digest
@@ -3685,9 +3742,9 @@ mod tests {
         // *grouping*, which is a different question from whether a
         // caller may declare it.
         let empty = MaterialFingerprint {
-            file: asterism_core::domain::content_hash::EMPTY.to_string(),
-            content: content_region::NOT_WALKED.to_string(),
-            meta: content_region::NOT_WALKED.to_string(),
+            file: AxisRecord::computed(asterism_core::domain::content_hash::EMPTY.to_string()),
+            content: AxisRecord::bare(AxisStatus::NotWalked),
+            meta: AxisRecord::bare(AxisStatus::NotWalked),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
@@ -3765,10 +3822,10 @@ mod tests {
         let backfill = hash_artefact(&path, row.mime.as_ref(), MAX_CONTENT_WALK_BYTES).unwrap();
         assert_eq!(per_asset, backfill);
         assert!(
-            per_asset
-                .content
-                .starts_with(asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX),
-            "a vacuous pass: both doors returned a marker ({per_asset:?})"
+            per_asset.content.digest().is_some_and(
+                |d| d.starts_with(asterism_core::domain::content_hash::CONTENT_DIGEST_PREFIX)
+            ),
+            "a vacuous pass: both doors returned no digest ({per_asset:?})"
         );
 
         driver.shutdown().await.unwrap();
@@ -3880,7 +3937,8 @@ mod tests {
         assert!(
             fingerprint
                 .file
-                .starts_with(asterism_core::domain::content_hash::DIGEST_PREFIX),
+                .digest()
+                .is_some_and(|d| d.starts_with(asterism_core::domain::content_hash::DIGEST_PREFIX)),
             "a real digest, not a marker: {fingerprint:?}"
         );
 

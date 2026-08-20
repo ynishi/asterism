@@ -265,10 +265,16 @@ pub async fn detect_duplicate(
 ) -> Result<Detection, DomainError> {
     let mut looked = false;
     for axis in DuplicateAxis::STRONGEST_FIRST.iter().copied() {
-        let digest = match axis {
-            DuplicateAxis::Artefact => fingerprint.file.as_str(),
-            DuplicateAxis::Content => fingerprint.content.as_str(),
-            DuplicateAxis::Meta => fingerprint.meta.as_str(),
+        // An axis with no digest — a status saying why there is none —
+        // has nothing to compare, which is the same `NotApplicable` the
+        // single-axis entry answers for a value that is not a duplicate
+        // key.
+        let Some(digest) = (match axis {
+            DuplicateAxis::Artefact => fingerprint.file.digest(),
+            DuplicateAxis::Content => fingerprint.content.digest(),
+            DuplicateAxis::Meta => fingerprint.meta.digest(),
+        }) else {
+            continue;
         };
         // The ports are `&dyn` behind a struct that is not `Copy`, so
         // one is built per axis from the same three references.
@@ -312,9 +318,9 @@ pub async fn detect_duplicate(
 /// - **Anything but the primary material.** The lookup's key is
 ///   `(persona, digest, ord = 0)`: a secondary original holding the same
 ///   bytes as somebody's primary is not two of the same asset.
-/// - **Values that are not digests.** The `unhashable:` marker every
-///   fragment and remote locator shares would match the entire
-///   conversation corpus, and the empty-file digest every failed
+/// - **Values that are not digests.** A status stands in for the whole
+///   set of rows that share its cause — every fragment and remote
+///   locator says `no-bytes` — and the empty-file digest every failed
 ///   download shares would match all of those; the rule is
 ///   [`is_duplicate_key`], and the lookup refuses to answer without it.
 /// - **A row that is already a headstone.** It has been folded; asking

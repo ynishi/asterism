@@ -32,8 +32,8 @@
 //!
 //! That is what it costs to read the *next* file, and it is not the
 //! whole cost of the format arriving. Every artefact already in the
-//! library carries `unsupported:<mime>` on both walking axes, and a
-//! marker is a final answer to "has anybody looked"
+//! library carries the `unsupported` status on both walking axes, and
+//! that is a final answer to "has anybody looked"
 //! ([`is_axis_answer`](crate::domain::content_hash::is_axis_answer)), so
 //! [`needs_fingerprint`](crate::domain::content_hash::needs_fingerprint)
 //! passes those rows over for good. Files imported after the probe lands
@@ -337,8 +337,8 @@ pub struct FormatClaim {
 /// failure worth designing out rather than testing for, because it is
 /// silent from every side. `hash_artefact` opens on this answer, so a
 /// format claimed only here is read whole up to the walk ceiling,
-/// refused on its signature, and stored under `unsupported:unknown`
-/// where it used to carry `unsupported:<mime>`: a column rewritten
+/// refused on its signature, and stored as `unsupported` with the
+/// reason `unknown` where it used to name the mime: an axis rewritten
 /// across a whole format with no test red.
 ///
 /// The readings live here for the mirror of that reason. A gate a
@@ -438,9 +438,9 @@ impl<P: ArtefactProbe + ?Sized> ProbeGates for P {
 ///
 /// It carries nothing, and it is not meant to. What it is worth is the
 /// call it makes unwritable, and the failure that call is: one artefact
-/// taking a digest because it reached a probe directly and
-/// `unsupported:unknown` because the identical file on disk went through
-/// a registry, with both spellings stored in the same column and nothing
+/// taking a digest because it reached a probe directly and the
+/// `unsupported` status because the identical file on disk went through
+/// a registry, with the two rows disagreeing about one file and nothing
 /// distinguishing them afterwards.
 #[derive(Debug)]
 pub struct GateOpen(());

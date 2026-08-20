@@ -11,6 +11,7 @@
 //! Keeping the read in one function is what makes the agreement
 //! structural rather than a thing two copies happen to have.
 
+use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::content_hash::{self, ContentHasher};
 use asterism_core::domain::content_region;
 use asterism_core::domain::embedded_text;
@@ -158,9 +159,9 @@ pub(crate) fn hash_artefact(
         && !embedded_text::walks_format(declared_mime)
     {
         return Ok(MaterialFingerprint {
-            file: stream_digest(&mut file)?,
-            content: content_region::unsupported_format(declared_mime).stored_value(),
-            meta: material_meta::unsupported_format(declared_mime).stored_value(),
+            file: AxisRecord::computed(stream_digest(&mut file)?),
+            content: content_region::unsupported_format(declared_mime).record(),
+            meta: material_meta::unsupported_format(declared_mime).record(),
             meta_kv: None,
             // NULL rather than a marker, which is what
             // `MetaRaw::Absent` renders to: this column holds a
@@ -178,14 +179,14 @@ pub(crate) fn hash_artefact(
     }
     if size > max_walk {
         return Ok(MaterialFingerprint {
-            file: stream_digest(&mut file)?,
-            content: content_region::TOO_LARGE.to_string(),
+            file: AxisRecord::computed(stream_digest(&mut file)?),
+            content: AxisRecord::bare(AxisStatus::TooLarge),
             // The same statement on this axis and for the same reason:
             // the metadata is there and could be read, and nothing
             // about the file is wrong — the policy declined to spend
-            // the memory. A marker that said "no walker" would send a
+            // the memory. A status that said "no walker" would send a
             // reader off to write one that exists.
-            meta: content_region::TOO_LARGE.to_string(),
+            meta: AxisRecord::bare(AxisStatus::TooLarge),
             meta_kv: None,
             // And on the bytes, where the sentence is the same one
             // again — this time about a ceiling two orders of magnitude
@@ -204,10 +205,10 @@ pub(crate) fn hash_artefact(
     file.read_to_end(&mut bytes)?;
     let meta = probes::meta(&bytes, declared_mime);
     Ok(MaterialFingerprint {
-        file: content_hash::of_bytes(&bytes),
-        content: probes::content(&bytes, declared_mime).stored_value(),
+        file: AxisRecord::computed(content_hash::of_bytes(&bytes)),
+        content: probes::content(&bytes, declared_mime).record(),
         meta_kv: meta.canonical().map(str::to_string),
-        meta: meta.stored_value(),
+        meta: meta.record(),
         // A third walk over the same buffer, and the cheapest of the
         // three: it copies the metadata chunks and reads nothing else.
         // Taken here rather than out of the reading above because the
@@ -376,7 +377,13 @@ mod tests {
     /// literal could not: a pass that stored a digest taken over one
     /// rendering beside a different rendering. The alternative was to
     /// paste a real character card's 30 KB of base64 into this file.
-    type Row = (&'static str, String, String, String, Option<String>);
+    type Row = (
+        &'static str,
+        AxisRecord,
+        AxisRecord,
+        AxisRecord,
+        Option<String>,
+    );
 
     /// **The stored fingerprint of these fixtures, frozen as literals.**
     ///
@@ -418,6 +425,14 @@ mod tests {
     /// subject, not of measurement — and the new literals were, like
     /// the originals, pasted from a measurement rather than from the
     /// hope that a test would go green.
+    ///
+    /// **The rows changed *shape* once more when V92 split status and
+    /// digest apart** (issue #17): the marker strings the walking axes
+    /// used to store became statuses beside a NULL digest, so the
+    /// frozen form here is the status/digest/reason triple the columns
+    /// hold now. No digest literal moved a character in that change —
+    /// which is the property being protected, since V92 rewrites the
+    /// representation and must not rewrite a measurement.
     #[test]
     fn these_fixtures_fingerprint_to_exactly_these_stored_values() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -475,10 +490,18 @@ mod tests {
         let frozen: Vec<Row> = vec![
             (
                 "a real PNG with tEXt",
-                "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31".into(),
-                "cr1-sha256:10225b4d3a3709c47a985ecbf8ac9db0c4e3654cfbc0608032c8252a0205b7c9"
-                    .into(),
-                "m1-sha256:eddd8329dd9e9f668395daaf7328db94c8db41190ee1f0f5a50b5907aa5eb7bd".into(),
+                AxisRecord::computed(
+                    "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31"
+                        .into(),
+                ),
+                AxisRecord::computed(
+                    "cr1-sha256:10225b4d3a3709c47a985ecbf8ac9db0c4e3654cfbc0608032c8252a0205b7c9"
+                        .into(),
+                ),
+                AxisRecord::computed(
+                    "m1-sha256:eddd8329dd9e9f668395daaf7328db94c8db41190ee1f0f5a50b5907aa5eb7bd"
+                        .into(),
+                ),
                 Some(
                     "m1-sha256:eddd8329dd9e9f668395daaf7328db94c8db41190ee1f0f5a50b5907aa5eb7bd"
                         .into(),
@@ -493,10 +516,18 @@ mod tests {
                 // literal appearing in two places rather than as a
                 // claim.
                 "a PNG carrying every excluded chunk",
-                "sha256:e79fded6bb0b1b48ee4f079314d70cc5a7927cc6fd44f1e332937e90ee8b5f7a".into(),
-                "cr1-sha256:b60d7dc769d32fee9a8b417381612225545f815d52447588b46a4ae6af799988"
-                    .into(),
-                "m1-sha256:47557e7fde82911bec6a4a03759dc7a82fd71788e7a2c565f266810f76ee5034".into(),
+                AxisRecord::computed(
+                    "sha256:e79fded6bb0b1b48ee4f079314d70cc5a7927cc6fd44f1e332937e90ee8b5f7a"
+                        .into(),
+                ),
+                AxisRecord::computed(
+                    "cr1-sha256:b60d7dc769d32fee9a8b417381612225545f815d52447588b46a4ae6af799988"
+                        .into(),
+                ),
+                AxisRecord::computed(
+                    "m1-sha256:47557e7fde82911bec6a4a03759dc7a82fd71788e7a2c565f266810f76ee5034"
+                        .into(),
+                ),
                 Some(
                     "m1-sha256:47557e7fde82911bec6a4a03759dc7a82fd71788e7a2c565f266810f76ee5034"
                         .into(),
@@ -545,20 +576,26 @@ mod tests {
                 // was replaced) moved for a reason on the other side of
                 // the walker, described in this test's doc comment.
                 "a JPEG: walked on both axes, and neither found anything",
-                "sha256:a638f3c452ed26e104b099dccbaff8dfeaf0d72e5c95709fb9d207a1713f511d".into(),
-                "unsupported:empty-span".into(),
-                "unsupported:empty-span".into(),
+                AxisRecord::computed(
+                    "sha256:a638f3c452ed26e104b099dccbaff8dfeaf0d72e5c95709fb9d207a1713f511d"
+                        .into(),
+                ),
+                AxisRecord::bare(AxisStatus::EmptySpan),
+                AxisRecord::bare(AxisStatus::EmptySpan),
                 None,
             ),
             (
                 // The same bytes as the first case with the claim taken
                 // away: the file axis is unchanged and the walking axes
-                // are markers, because nothing routes an unnamed format
-                // to a walker.
+                // carry the unsupported status, because nothing routes
+                // an unnamed format to a walker.
                 "a PNG whose row claims nothing",
-                "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31".into(),
-                "unsupported:unknown".into(),
-                "unsupported:unknown".into(),
+                AxisRecord::computed(
+                    "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31"
+                        .into(),
+                ),
+                AxisRecord::unsupported("unknown".into()),
+                AxisRecord::unsupported("unknown".into()),
                 None,
             ),
         ];
@@ -696,8 +733,9 @@ mod tests {
             kept
         );
         assert!(
-            big.content.starts_with("cr1-") && big.meta.starts_with("m1-"),
-            "the file is walked normally: {} / {}",
+            big.content.digest().is_some_and(|d| d.starts_with("cr1-"))
+                && big.meta.digest().is_some_and(|d| d.starts_with("m1-")),
+            "the file is walked normally: {:?} / {:?}",
             big.content,
             big.meta
         );
@@ -737,7 +775,7 @@ mod tests {
         // improve on it.
         let jpeg = measure(&jpeg(), Some("image/jpeg"));
         assert_eq!(jpeg.meta_raw, None);
-        assert_eq!(jpeg.meta, "unsupported:empty-span");
+        assert_eq!(jpeg.meta, AxisRecord::bare(AxisStatus::EmptySpan));
         assert_eq!(jpeg.meta_kv, None);
 
         // No probe, and no claim at all.
@@ -754,8 +792,13 @@ mod tests {
         ]);
         let walked = measure(&bare, Some("image/png"));
         assert_eq!(walked.meta_raw, None);
-        assert_eq!(walked.meta, "unsupported:empty-span");
-        assert!(walked.content.starts_with("cr1-"));
+        assert_eq!(walked.meta, AxisRecord::bare(AxisStatus::EmptySpan));
+        assert!(
+            walked
+                .content
+                .digest()
+                .is_some_and(|d| d.starts_with("cr1-"))
+        );
     }
 
     /// Past the **file** gate nothing is read, and every walking column
@@ -771,8 +814,8 @@ mod tests {
         let got = hash_artefact(path.to_str().expect("utf-8 path"), Some(&mime), 1024)
             .expect("the fixture is readable");
 
-        assert_eq!(got.content, "unsupported:too-large");
-        assert_eq!(got.meta, "unsupported:too-large");
+        assert_eq!(got.content, AxisRecord::bare(AxisStatus::TooLarge));
+        assert_eq!(got.meta, AxisRecord::bare(AxisStatus::TooLarge));
         assert_eq!(
             got.meta_raw.as_deref(),
             Some("unsupported:too-large"),
@@ -780,8 +823,8 @@ mod tests {
         );
         assert_eq!(got.meta_kv, None);
         // The file axis still answers, which is what makes the three
-        // markers a statement about a policy rather than about a
+        // statuses a statement about a policy rather than about a
         // failure to read.
-        assert!(got.file.starts_with("sha256:"));
+        assert!(got.file.digest().is_some_and(|d| d.starts_with("sha256:")));
     }
 }

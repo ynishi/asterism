@@ -10,12 +10,12 @@
 //!
 //! That is what the format costs for the next file read, not for the
 //! library already on disk. Rows imported before the probe landed hold
-//! `unsupported:image/jpeg`, and every `unsupported:` value is a final
-//! answer to "has anybody looked"
+//! the `unsupported` status with the format in the reason column, and
+//! that is a final answer to "has anybody looked"
 //! ([`is_axis_answer`](asterism_core::domain::content_hash::is_axis_answer)),
 //! so the ordinary fingerprint pass never offers them again: new imports
 //! would take digests while the rows that were there first keep the
-//! marker, and one column would hold two meanings with nothing to tell
+//! status, and one axis would hold two meanings with nothing to tell
 //! them apart. A format therefore also arrives owing a way back to the
 //! rows it was refused on, **per axis and per column**, since a probe
 //! may claim one of them a slice before the other — which is what JPEG
@@ -256,10 +256,10 @@ mod tests {
     ///
     /// The failure this catches is writing a probe and not registering
     /// it — the parser exists, its tests pass, and every artefact of its
-    /// format quietly stores `unsupported:<mime>` because nothing ever
-    /// asks it anything. That is invisible from the probe's own side and
-    /// invisible from the column's (a marker is a legitimate value), so
-    /// it is checked here.
+    /// format quietly stores the `unsupported` status because nothing
+    /// ever asks it anything. That is invisible from the probe's own
+    /// side and invisible from the row's (`unsupported` is a legitimate
+    /// state), so it is checked here.
     ///
     /// Same shape as `repo::asset`'s
     /// `the_three_column_groups_cover_the_table`, which holds a schema
@@ -288,8 +288,8 @@ mod tests {
                     claim.mime
                 );
                 assert_ne!(
-                    content(&[], declared).stored_value(),
-                    content_region::unsupported_format(declared).stored_value(),
+                    content(&[], declared),
+                    content_region::unsupported_format(declared),
                     "{:?} reaches the content fall-through instead of its probe",
                     claim.mime
                 );
@@ -301,8 +301,8 @@ mod tests {
                     claim.mime
                 );
                 assert_ne!(
-                    meta(&[], declared).stored_value(),
-                    material_meta::unsupported_format(declared).stored_value(),
+                    meta(&[], declared),
+                    material_meta::unsupported_format(declared),
                     "{:?} reaches the meta fall-through instead of its probe",
                     claim.mime
                 );
@@ -612,10 +612,13 @@ mod tests {
             "and on the meta axis too"
         );
         assert_eq!(
-            content(CARD_PNG, None).stored_value(),
-            "unsupported:unknown"
+            content(CARD_PNG, None),
+            asterism_core::domain::content_region::ContentRegion::Unsupported("unknown".into())
         );
-        assert_eq!(meta(CARD_PNG, None).stored_value(), "unsupported:unknown");
+        assert_eq!(
+            meta(CARD_PNG, None),
+            asterism_core::domain::material_meta::MaterialMeta::Unsupported("unknown".into())
+        );
 
         // The same bytes with the claim restored: a digest on both
         // sides, and the same digest. Without this half the assertions
