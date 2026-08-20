@@ -14260,9 +14260,10 @@ mod tests {
         // (content-axis value before, expected (status, value, reason)
         // after). The meta axis is exercised through the same seeding
         // helper with its own digest tag below.
+        type Converted<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
         let region = format!("cr1-sha256:{}", "a".repeat(64));
         let stale = format!("cr0-sha256:{}", "b".repeat(64));
-        let cases: Vec<(Option<&str>, (&str, Option<&str>, Option<&str>))> = vec![
+        let cases: Vec<(Option<&str>, Converted<'_>)> = vec![
             (None, ("pending", None, None)),
             (Some(&region), ("computed", Some(&region), None)),
             // A superseded generation read as no answer before, and
@@ -14281,7 +14282,7 @@ mod tests {
             ),
             (Some("unhashable:no-bytes"), ("no-bytes", None, None)),
         ];
-        let seeded: Vec<(Uuid, (&str, Option<&str>, Option<&str>))> = cases
+        let seeded: Vec<(Uuid, Converted<'_>)> = cases
             .iter()
             .enumerate()
             .map(|(ord, (before, after))| {
