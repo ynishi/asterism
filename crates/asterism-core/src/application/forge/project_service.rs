@@ -1,6 +1,10 @@
 //! Project use cases — opening the context work files under, and
 //! reading it back (#63 decisions 1–2).
 //!
+//! **Deprecated.** The model this serves is replaced by
+//! [`model`](crate::domain::forge::model), where a line is the top and
+//! nothing groups lines inside the forge.
+//!
 //! Thin next to [`pursuit_service`](super::pursuit_service), and it
 //! stays that way while the merge is unwritten: a project has no
 //! lifecycle of its own. It is opened, it is read, and everything that

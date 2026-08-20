@@ -12,6 +12,29 @@
 //! trash, no label, no rating. Integrating the conclusion back into the
 //! library is the raw layer's own business, and stays on the raw
 //! layer's verbs.
+//!
+//! # Which way the services may point
+//!
+//! A rule with two halves, and the second is the one that gets broken:
+//!
+//! - **A service here does not name a service or a port of the raw
+//!   layer.** What it needs from below, it asks through the face that
+//!   answers — [`boundary`](crate::domain::forge::boundary) — so the
+//!   thing it depends on is a contract rather than an implementation.
+//! - **Nothing in the raw layer names a service here.** Not a type,
+//!   not a port, not a function. When the raw layer needs something of
+//!   the forge, the forge answers a face; the call still happens, and
+//!   the dependency does not.
+//!
+//! Both halves say the same thing: the two sides are wired through
+//! contracts in both directions, so neither can be compiled with the
+//! other in front of it. Wire them directly and each needs the other
+//! to build, which is the state that makes either impossible to move.
+//!
+//! **Shared identity is not a crossing.** `PersonaId`, `AssetId`, the
+//! attribution triple and `DomainError` are named directly here, as
+//! they are everywhere else, because they belong to neither side. The
+//! rule is about capability, never about what something is.
 
 pub mod mapping;
 pub mod project_service;

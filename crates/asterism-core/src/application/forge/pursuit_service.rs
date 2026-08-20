@@ -1,6 +1,9 @@
 //! `PursuitService` — the lifecycle verbs of the minted unit of work
 //! (#29): open, close, reopen, and the reads that derive standing.
 //!
+//! **Deprecated.** The model this serves is replaced by
+//! [`model`](crate::domain::forge::model).
+//!
 //! The open creates one (naming intent up front), the one-way
 //! lifecycle facts (close / reopen) are recorded rather than written
 //! as a status, and the ledger takes the membership gestures.
