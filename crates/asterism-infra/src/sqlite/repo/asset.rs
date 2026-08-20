@@ -9120,8 +9120,10 @@ mod tests {
     }
 
     /// Teeth on the failure write: `mark_material_unreadable` flips
-    /// exactly the unanswered axes to `failed`, keeps every measurement
-    /// a row already holds, and is undone by the next successful pass.
+    /// exactly the `pending` axes to `failed` (the port doc says why
+    /// that is the contract, not "every axis the walk calls
+    /// unanswered"), keeps every measurement a row already holds, and
+    /// is undone by the next successful pass.
     ///
     /// The middle property is the one worth a fixture: a half-answered
     /// row (a build that predates the newest column) has digests on

@@ -53,7 +53,8 @@ pub enum AxisStatus {
     /// the one the fingerprint walk exists to drain.
     Pending,
     /// The bytes were read and the digest column holds what they hash
-    /// to. The only status under which the digest column is non-NULL.
+    /// to. The only status a fresh write pairs a digest with — the
+    /// type-level doc above says why a stored row can differ.
     Computed,
     /// No probe reads this format — or the one that claimed it found
     /// the bytes were something else. The reason column carries the
