@@ -2851,10 +2851,14 @@ Each term is asserted only on evidence that something wrote:
 
 | evidence in the container | term |
 |---|---|
-| a generator's own keys, and every recorded parent is itself synthetic (or there are none) | `trainedAlgorithmicMedia` |
-| a generator's own keys, and some recorded parent is **not** synthetic | `compositeWithTrainedAlgorithmicMedia` |
+| a generator's own keys, and no recorded parent declares a non-model origin | `trainedAlgorithmicMedia` |
+| a generator's own keys, and some recorded parent **declares** a non-model origin | `compositeWithTrainedAlgorithmicMedia` |
 | no generator keys, but EXIF names a camera | `digitalCapture` |
 | none of the above | nothing is written |
+
+Declares, in the second row: a parent whose container says nothing
+is unknown ([`ParentOrigin::Unknown`]), and unknown moves nothing —
+it is a statement about what the caller knows, not about the file.
 
 The last row is the important one. An artefact nothing established
 gets no `DigitalSourceType` property, which is a different statement
@@ -2875,7 +2879,7 @@ does. Both remain assertable by hand.
 
 ## Functions
 
-- `is_synthetic` — Whether a container's metadata says a generator made the file.
+- `declared_origin` — What a container's metadata declares about the file's origin.
 - `read_evidence` — Reads the canonical metadata object a probe stored.
 - `record_for` — Builds the record for one artefact.
 
@@ -2883,6 +2887,7 @@ does. Both remain assertable by hand.
 
 - `ContainerEvidence` — What a container's metadata establishes about how a file was made.
 - `ParentEvidence` — What a parent contributes to its child's disclosure.
+- `ParentOrigin` — What a parent's own container declares about how it was made.
 - `PromptDisclosure` — Whether an artefact's prompt is disclosed in the exported file.
 
 ## Constants
