@@ -1266,13 +1266,39 @@ fn stage(path: &Path) -> std::io::Result<tempfile::NamedTempFile> {
     Ok(temporary)
 }
 
-/// Moves a finished temporary over its target.
+/// Moves a finished temporary over its target, durably.
 ///
 /// The temporary removes itself when dropped, so the failure path needs
 /// no cleanup of its own — which is the part the hand-rolled version
 /// kept having to remember at each new return.
+///
+/// Durable, not merely atomic. The rename is atomic in the namespace,
+/// but on power loss between the write and the writeback the name
+/// could point at bytes that never reached the disk — a short file
+/// where the user's original was, which is the opposite of what this
+/// module advertises. So the data is fsynced before the rename and the
+/// directory after it, the same order the blob store writes its bytes
+/// in. The cost is real on a large video and it is paid on purpose:
+/// the alternative prices durability per file, and "whether power loss
+/// eats your original" is not a property that should depend on a
+/// setting. An fsync that fails is a failure like any other, and the
+/// two sit on different sides of the rename: the data fsync stops the
+/// caller with the original untouched, while a directory fsync that
+/// fails has already replaced it — the new bytes are in the namespace
+/// and the name is just not crash-durable yet, so that error means
+/// "written, not yet safe" rather than "not written". A caller that
+/// re-applies on it rewrites a file already carrying the disclosure,
+/// which the derived-from-rows design makes a repeat, not a loss.
 fn commit(temporary: tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
-    temporary.persist(path).map(|_| ()).map_err(|e| e.error)
+    // The data first: a rename made durable ahead of its content would
+    // pin the name to bytes the disk does not hold yet.
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map(|_| ()).map_err(|e| e.error)?;
+    // Then the rename itself: the new directory entry lives in the
+    // directory's own blocks, and until they are written back the old
+    // entry is what a crash recovers.
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::File::open(directory)?.sync_all()
 }
 
 /// Replaces `path`'s contents through a temporary and a rename.
