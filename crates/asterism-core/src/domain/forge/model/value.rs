@@ -113,6 +113,20 @@ impl Content {
     pub fn as_uuid(&self) -> &Uuid {
         self.0.as_uuid()
     }
+
+    /// The id itself, for the one place that has to say it out loud.
+    ///
+    /// Crate-visible rather than public: the only caller that should
+    /// ever want this is the client that translates a reference into
+    /// the vocabulary a contract is stated in
+    /// ([`boundary`](crate::domain::forge::boundary)). Rust cannot
+    /// narrow visibility to a sibling module, so the restriction is
+    /// stated rather than held — and what will hold it is the crate
+    /// split, where a caller outside the forge has no path to reach
+    /// this at all.
+    pub(crate) fn asset(&self) -> AssetId {
+        self.0
+    }
 }
 
 /// A name something can answer to: trimmed, and never blank.

@@ -94,7 +94,9 @@
 //!
 //! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
+pub mod boundary;
 pub mod line;
+pub mod lines;
 pub mod model;
 pub mod project;
 pub mod pursuit;
