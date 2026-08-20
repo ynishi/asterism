@@ -23,9 +23,8 @@
 //!   history like everything else.
 //! - [`LineEvent`] is one verb applied to one entry.
 //!   [`LineVerb`] carries each verb's payload so a caller cannot
-//!   file an add without a name or a delete with an asset (the
-//!   `RestampSubject` stance); storage enforces the same pairing with
-//!   two-way CHECKs.
+//!   file an add without a name or a delete with an asset; storage
+//!   enforces the same pairing with two-way CHECKs.
 //! - [`Merge`] is the record that one satisfied close applied its
 //!   verbs — approval *is* the merge event, so every event names the
 //!   merge it landed under, and who approved derives through the
@@ -36,8 +35,8 @@
 //! A line *references* asset ids; it never annotates or mutates
 //! an asset (the PR #62 rule). A dead entry's asset row stays live and
 //! restorable — `delete` is a statement about the canonical set, not
-//! about bytes, the same distance `CullVerdict::Reject` keeps from
-//! trash.
+//! about bytes, and it keeps the same distance from trash that every
+//! other forge verb does.
 //!
 //! # Invariants (service-enforced, entity-checked where local)
 //!
@@ -57,9 +56,10 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::domain::value::{
-    AssetId, LineEntryId, LineEventId, LineId, MergeId, PersonaId, ProjectId, PursuitEventId,
+use crate::domain::forge::value::{
+    LineEntryId, LineEventId, LineId, MergeId, ProjectId, PursuitEventId,
 };
+use crate::domain::value::{AssetId, PersonaId};
 use crate::error::DomainError;
 
 /// Rejects a blank name so "named" means something; returns the
@@ -168,9 +168,8 @@ impl LineEntry {
 
 /// The closed set of merge verbs, payload included (#63 decision 2).
 /// An enum rather than `(kind, Option, Option)` columns so a caller
-/// cannot file an `add` without a name or a `delete` carrying an asset
-/// — the `RestampSubject` stance; the schema states the same pairing
-/// as two-way CHECKs.
+/// cannot file an `add` without a name or a `delete` carrying an asset;
+/// the schema states the same pairing as two-way CHECKs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineVerb {
     /// A new entry enters the canonical set, named.

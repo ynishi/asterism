@@ -302,7 +302,6 @@ async fn export_original(
                 action: "write".into(),
                 params_json,
                 operator_ai: None,
-                pursuit_id: None,
             },
             &unattributed(),
         )

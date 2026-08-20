@@ -26,19 +26,10 @@
 /// {
 ///   "schema": "asterism.sidecar/1",
 ///   "dispatch_id": "<DispatchId>",
-///   "pursuit_id": "<PursuitId>",
 ///   "exporter_slug": "file",
 ///   "source_asset_id": "<AssetId>"
 /// }
 /// ```
-///
-/// `pursuit_id` (#29) is present when the dispatch carried its stamp:
-/// the dispatch names the hop the file travelled through, the pursuit
-/// names the line of work it belongs to. On re-ingest both are
-/// **claims** — recorded in `_trace` and resolved independently. The
-/// rule the membership read follows (a later slice of #29): where the
-/// dispatch join and a sidecar copy disagree, the dispatch row's own
-/// stamp answers, because the copy can be stale after a restamp.
 pub const SIDECAR_IDENTITY_KEY: &str = "_asterism";
 
 /// Field inside the identity block naming the dispatch (the hop).
@@ -48,11 +39,6 @@ pub const SIDECAR_IDENTITY_KEY: &str = "_asterism";
 /// other, and a divergence between their spellings fails silently as
 /// "no identity in this sidecar".
 pub const SIDECAR_DISPATCH_ID_FIELD: &str = "dispatch_id";
-
-/// Field inside the identity block naming the pursuit (the line of
-/// work, #29). Same silent-divergence reasoning as
-/// [`SIDECAR_DISPATCH_ID_FIELD`].
-pub const SIDECAR_PURSUIT_ID_FIELD: &str = "pursuit_id";
 
 /// Version tag written into the identity block.
 ///

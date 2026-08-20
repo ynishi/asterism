@@ -108,12 +108,6 @@ pub struct DispatchContext<'a> {
     /// Stable id of *this* dispatch. Reified derived Assets carry it
     /// as `session_id` so the grid clusters per-dispatch siblings.
     pub dispatch_id: &'a str,
-    /// Pursuit this round is filed under (#29), when the job carries
-    /// the stamp — exporters that write a sidecar copy it out beside
-    /// `dispatch_id`, so a returning artefact can name its line of
-    /// work even where the dispatch row join is unavailable. `None`
-    /// on rows that predate the stamp's backfill invariant.
-    pub pursuit_id: Option<&'a str>,
     /// Exporter action (`"img2img"`, `"txt2img"`, `"lora_bake"`,
     /// `"multimodal_chat"`, …). Open slug space — new actions are
     /// added as data changes, exporters advertise which they support

@@ -10,10 +10,12 @@
 use std::sync::Arc;
 
 use asterism_core::DomainError;
+use asterism_core::application::DispatchService;
+use asterism_core::application::forge::PursuitService;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, PursuitService, QueryGroupService,
-    SessionService, SnapshotService, ThreadService, ThumbService,
+    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SessionService,
+    SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
@@ -39,8 +41,8 @@ pub struct AppState {
     /// Immutable content-addressed snapshot lifecycle (seeds outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Pursuit lifecycle — the line of work a dispatch files itself
-    /// under, named here by the owner rather than minted for them.
+    /// Pursuit lifecycle — the line of work a dispatch is filed under
+    /// when the owner names one, opened here and nowhere else.
     pub pursuit_service: Arc<PursuitService>,
     /// Outbound dispatch lifecycle (create → apalis → reify → new Asset
     /// via each registered `Exporter`).

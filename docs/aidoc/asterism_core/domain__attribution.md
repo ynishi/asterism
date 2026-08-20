@@ -3,7 +3,7 @@
 Attribution — *who* a record is by, *what* operated on their behalf,
 and *through which channel* that answer arrived.
 
-This module is the source of truth for the attribution doctrine. One
+This module is the source of truth for how a write is attributed. One
 triple travels together: `(author, operator, via)`. It is carried on
 the write path by [`AttributionContext`] and restored from the stored
 columns by [`PersistedAttribution`]; the individual values are
@@ -43,8 +43,8 @@ which folds "human vs agent" into one enum, is: `Human` ≈
 `(author = unrecorded, operator = s)`, `Persona` ≈ register.
 [`CommentAuthor::User`](crate::domain::asset_comment::CommentAuthor::User)
 is the comment-side alias of [`Author::Owner`]. Unifying the types
-is deliberately not attempted here — the doctrine (which value means
-what) comes first.
+is deliberately not attempted here — settling which value means
+what comes first.
 
 # Who the owner is
 

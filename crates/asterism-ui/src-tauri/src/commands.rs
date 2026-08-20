@@ -30,12 +30,12 @@ use asterism_contract::command::{
     PurgePersonaCommand, RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand,
     RenameDirCommand, RenameGroupCommand, RenameSessionCommand, ReopenPursuitCommand,
     ReorderGroupAssetsCommand, ReorderGroupChildrenCommand, ReorderPersonasCommand,
-    ResetSettingCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
-    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
-    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
-    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
-    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
-    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    ResetSettingCommand, ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
+    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
+    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
+    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetPageDto,
@@ -1620,7 +1620,7 @@ pub async fn redispatch(
 }
 
 // ---------------------------------------------------------------------------
-// Pursuit — the line of work a dispatch files itself under (#29).
+// Pursuit — the unit of work assets are filed under (#29).
 //
 // Attribution is `owner_surface` throughout, like every other command in
 // this file: a write arriving here came from the person sitting in front
@@ -1629,12 +1629,10 @@ pub async fn redispatch(
 // stated to the desktop app would be a claim about somebody else.
 // ---------------------------------------------------------------------------
 
-/// Opens a pursuit and names what it is for, ahead of the first round.
+/// Opens a pursuit and names what it is for, ahead of any work in it.
 ///
-/// Not required to have one: a dispatch started without a `pursuit_id`
-/// mints its own. This is the "start a new line of work" affordance, and
-/// the path that creates a pursuit at an id a returning artefact already
-/// claims.
+/// This is the "start a new line of work" affordance, and the path that
+/// creates a pursuit at an id it was known by elsewhere.
 #[tauri::command]
 pub async fn open_pursuit(
     state: State<'_, AppState>,
@@ -1676,21 +1674,6 @@ pub async fn reopen_pursuit(
         .await?)
 }
 
-/// Re-files a dispatch round under another pursuit, recording the filing
-/// it replaced. The repair verb for work that landed in the wrong line;
-/// what happened in the round is untouched and the move never crosses
-/// personas.
-#[tauri::command]
-pub async fn restamp_dispatch(
-    state: State<'_, AppState>,
-    command: RestampDispatchCommand,
-) -> Result<DispatchDto, UiError> {
-    Ok(state
-        .pursuit_service
-        .restamp_dispatch(command, &AttributionContext::owner_surface())
-        .await?)
-}
-
 /// One pursuit with its standing derived from the latest event.
 #[tauri::command]
 pub async fn get_pursuit(state: State<'_, AppState>, id: String) -> Result<PursuitDto, UiError> {
@@ -1717,8 +1700,8 @@ pub async fn pursuit_events(
     Ok(state.pursuit_service.events(&id).await?)
 }
 
-/// One pursuit opened up: the row and its standing, the rounds filed
-/// under it, the returns that resolved to it, and its events.
+/// One pursuit opened up: the row and its standing, its events, and its
+/// ledger.
 #[tauri::command]
 pub async fn pursuit_view(
     state: State<'_, AppState>,

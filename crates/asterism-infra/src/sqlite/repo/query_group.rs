@@ -1180,58 +1180,7 @@ mod tests {
             Arc::new(SqliteGroupRepository::new(isle.clone())),
             query_groups,
             qgs,
-            Arc::new(crate::sqlite::repo::SqlitePursuitRepository::new(
-                isle.clone(),
-            )),
         )
-    }
-
-    /// Always-mint, observed through the service: no supplied id ⇒ the
-    /// row comes back stamped with a fresh pursuit; a supplied id is
-    /// used as-is; a second unstamped request mints separately (the
-    /// mint scope is the request, and correlation is explicit, never
-    /// inferred from the shared members).
-    #[tokio::test]
-    async fn dispatch_run_always_stamps_a_pursuit() {
-        use asterism_contract::command::DispatchRunCommand;
-        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
-        let persona = seed_persona(&isle).await;
-        let a = seed_asset(&isle, &persona, 100, "[]").await;
-        let svc = build_dispatch_service(&isle);
-        let volatile_run = |pursuit_id: Option<String>| DispatchRunCommand {
-            persona_id: persona.to_string(),
-            group_id: None,
-            asset_ids: vec![a.to_string()],
-            exporter_slug: "file".into(),
-            action: "export".into(),
-            params_json: String::new(),
-            operator_ai: None,
-            pursuit_id,
-        };
-
-        let first = svc.run(volatile_run(None), &nobody()).await.unwrap();
-        let minted = first
-            .pursuit_id
-            .expect("an unstamped request is minted a pursuit");
-
-        let second = svc
-            .run(volatile_run(Some(minted.clone())), &nobody())
-            .await
-            .unwrap();
-        assert_eq!(
-            second.pursuit_id.as_deref(),
-            Some(minted.as_str()),
-            "a supplied id files the round as-is"
-        );
-
-        let third = svc.run(volatile_run(None), &nobody()).await.unwrap();
-        let reminted = third.pursuit_id.expect("stamped");
-        assert_ne!(
-            reminted, minted,
-            "separate unstamped requests mint separately — same members is not correlation"
-        );
-
-        driver.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1256,7 +1205,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1283,7 +1231,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1339,7 +1286,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1382,7 +1328,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1395,7 +1340,6 @@ mod tests {
             .redispatch(
                 RedispatchCommand {
                     dispatch_id: dto.id.clone(),
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1431,7 +1375,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )
@@ -1448,7 +1391,6 @@ mod tests {
                     action: "export".into(),
                     params_json: String::new(),
                     operator_ai: None,
-                    pursuit_id: None,
                 },
                 &nobody(),
             )

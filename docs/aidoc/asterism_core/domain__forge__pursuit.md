@@ -21,9 +21,6 @@ the pursuit is a projection over the stamped events.
   **standing is derived on read** by [`standing`] — latest event by
   `(created_at, id)` wins, no row means open. A repeat close is a new
   fact, not an error.
-- [`PursuitRestamp`] records a move of a stamped event between
-  pursuits — the repair verb for mis-filed correlation. The stamped
-  column holds the current filing; the restamp row holds the move.
 
 # Invariants (service-enforced, entity-checked where local)
 
@@ -50,7 +47,5 @@ the pursuit is a projection over the stamped events.
 - `Pursuit` — The minted unit of work. Thin and immutable: identity plus intent
 - `PursuitEvent` — One lifecycle fact about a pursuit.
 - `PursuitEventKind` — The closed set of lifecycle facts. One-way: no event edits another,
-- `PursuitRestamp` — One recorded move of a stamped event between pursuits — the repair
 - `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
-- `RestampSubject` — What a restamp moved. An enum rather than a `(kind, uuid)` pair so a
 

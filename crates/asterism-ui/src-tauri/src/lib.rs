@@ -355,7 +355,6 @@ pub fn run() {
             commands::open_pursuit,
             commands::close_pursuit,
             commands::reopen_pursuit,
-            commands::restamp_dispatch,
             commands::get_pursuit,
             commands::list_pursuits,
             commands::pursuit_events,

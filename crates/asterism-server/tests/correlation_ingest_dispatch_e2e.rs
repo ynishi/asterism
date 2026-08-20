@@ -137,7 +137,6 @@ async fn naming_the_export_links_the_return_to_every_artefact_it_produced() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
             },
             &unattributed(),
         )

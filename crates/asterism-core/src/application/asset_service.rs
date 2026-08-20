@@ -247,11 +247,6 @@ pub struct AssetService {
     /// `preview_gen` job writes; the naming contract between the two
     /// is `domain::render::video_preview_path` and siblings.
     previews_dir: std::path::PathBuf,
-    /// Pursuit lookups for the sidecar claim lane (#29): a returning
-    /// artefact's `_asterism.pursuit_id` is a claim, and resolving it
-    /// means one `find` + a persona comparison — the same
-    /// parse-then-resolve honesty the dispatch claim gets.
-    pursuits: Arc<dyn crate::domain::repository::PursuitRepository>,
 }
 
 impl AssetService {
@@ -276,7 +271,6 @@ impl AssetService {
         query_group_invalidator: crate::application::query_group_invalidation::QueryGroupInvalidator,
         sessions: Arc<crate::application::SessionService>,
         previews_dir: std::path::PathBuf,
-        pursuits: Arc<dyn crate::domain::repository::PursuitRepository>,
     ) -> Self {
         Self {
             assets,
@@ -297,7 +291,6 @@ impl AssetService {
             query_group_invalidator,
             sessions,
             previews_dir,
-            pursuits,
         }
     }
 
@@ -338,76 +331,26 @@ impl AssetService {
     /// artefact, and losing the artefact because its label is wrong is
     /// the wrong trade. Everything that fails becomes an
     /// [`ResolvedOrigin::Unresolved`] note the user can act on later.
-    /// The second half of the return is the sidecar's **pursuit
-    /// claim** (#29), raw: only the `sidecar` form can carry one — the
-    /// exporter writes `_asterism.pursuit_id` next to `dispatch_id` —
-    /// and it travels beside the origin rather than inside it because
-    /// it answers a different question (which line of work, not which
-    /// parents) and resolves against a different table.
     async fn resolve_origin(
         &self,
         declared: Option<&str>,
         locator: &SourceLocator,
-    ) -> (ResolvedOrigin, Option<String>) {
+    ) -> ResolvedOrigin {
         let Some(claim) = declared else {
-            return (ResolvedOrigin::None, None);
+            return ResolvedOrigin::None;
         };
         let parsed = match provenance::parse(claim) {
             Ok(parsed) => parsed,
-            Err(e) => return (ResolvedOrigin::unresolved(claim, e.to_string()), None),
+            Err(e) => return ResolvedOrigin::unresolved(claim, e.to_string()),
         };
         match parsed {
-            ProvenanceRef::Asset(parent) => (
-                self.resolve_asset_parent(claim, parent, "asset").await,
-                None,
-            ),
-            ProvenanceRef::Dispatch(dispatch) => (
+            ProvenanceRef::Asset(parent) => self.resolve_asset_parent(claim, parent, "asset").await,
+            ProvenanceRef::Dispatch(dispatch) => {
                 self.resolve_dispatch_parents(claim, dispatch, "dispatch")
-                    .await,
-                None,
-            ),
+                    .await
+            }
             ProvenanceRef::Sidecar => self.resolve_sidecar(claim, locator).await,
         }
-    }
-
-    /// Resolves a sidecar's pursuit claim: it names a pursuit iff the
-    /// pursuit exists in the ingesting asset's persona — standing is
-    /// deliberately not consulted (filing a return under a closed
-    /// pursuit is a legal act; the log records it, live standing
-    /// re-derives). The claim is recorded either way
-    /// (`_trace.pursuit_id` + `pursuit_resolved`), an unresolvable one
-    /// is never a reason to refuse the file — the same honesty rules as
-    /// the dispatch claim — and `pursuit_resolved: true` is never
-    /// demoted afterwards (a later purge of the pursuit leaves the note
-    /// standing, exactly as `resolved` behaves).
-    ///
-    /// A lookup *failure* reads as unresolved rather than aborting the
-    /// ingest (a lost artefact cannot be retried; a recorded claim
-    /// can), but unlike "no such pursuit" it is logged: a transient DB
-    /// error must not silently masquerade as a fact about the library.
-    async fn resolve_pursuit_claim(
-        &self,
-        claim: Option<String>,
-        persona_id: &crate::domain::value::PersonaId,
-    ) -> Option<(String, bool)> {
-        let claim = claim?;
-        let resolved = match crate::application::mapping::parse_pursuit_id(claim.trim()) {
-            Err(_) => false,
-            Ok(id) => match self.pursuits.find(&id).await {
-                Ok(Some(pursuit)) => pursuit.persona_id == *persona_id,
-                Ok(None) => false,
-                Err(err) => {
-                    tracing::warn!(
-                        event = "diag.ingest.pursuit_claim_lookup_failed",
-                        pursuit_id = %id,
-                        error = %err,
-                        "pursuit claim recorded unresolved because the lookup failed"
-                    );
-                    false
-                }
-            },
-        };
-        Some((claim, resolved))
     }
 
     /// Resolves a directly-named parent asset.
@@ -482,29 +425,19 @@ impl AssetService {
     /// before the identity block (and hand-written ones) usable — at
     /// the cost of a shorter chain, which `_trace.form` records so the
     /// difference stays visible.
-    /// Returns the origin plus the sidecar's raw pursuit claim (#29) —
-    /// `None` until the body parses, since a claim that was never read
-    /// is not a claim that failed.
-    async fn resolve_sidecar(
-        &self,
-        claim: &str,
-        locator: &SourceLocator,
-    ) -> (ResolvedOrigin, Option<String>) {
+    async fn resolve_sidecar(&self, claim: &str, locator: &SourceLocator) -> ResolvedOrigin {
         // A record addresses something *inside* a container file; there
         // is no "file next to it" to read. The variant is the whole
         // test now — the `contains('#')` this replaced also refused a
         // file whose own name carried a `#`, which has a sidecar like
         // any other file.
         if let SourceLocator::Record(record) = locator {
-            return (
-                ResolvedOrigin::unresolved(
-                    claim,
-                    format!(
-                        "{} addresses a record inside a container, so it has no sidecar",
-                        record.container().as_str()
-                    ),
+            return ResolvedOrigin::unresolved(
+                claim,
+                format!(
+                    "{} addresses a record inside a container, so it has no sidecar",
+                    record.container().as_str()
                 ),
-                None,
             );
         }
         // The sidecar is a JSON file this codebase's exporters write,
@@ -527,12 +460,9 @@ impl AssetService {
             // for one that failed would be the fabrication this type
             // exists to stop.
             Err(e) => {
-                return (
-                    ResolvedOrigin::unresolved(
-                        claim,
-                        format!("sidecar path {sidecar_path} is not a locator: {e}"),
-                    ),
-                    None,
+                return ResolvedOrigin::unresolved(
+                    claim,
+                    format!("sidecar path {sidecar_path} is not a locator: {e}"),
                 );
             }
         };
@@ -543,51 +473,21 @@ impl AssetService {
         {
             Ok(mut texts) => texts.pop().flatten(),
             Err(e) => {
-                return (
-                    ResolvedOrigin::unresolved(claim, format!("sidecar read failed: {e}")),
-                    None,
-                );
+                return ResolvedOrigin::unresolved(claim, format!("sidecar read failed: {e}"));
             }
         };
         let Some(text) = text else {
-            return (
-                ResolvedOrigin::unresolved(claim, format!("no sidecar at {sidecar_path}")),
-                None,
-            );
+            return ResolvedOrigin::unresolved(claim, format!("no sidecar at {sidecar_path}"));
         };
         let body: serde_json::Value = match serde_json::from_str(&text) {
             Ok(body) => body,
             Err(e) => {
-                return (
-                    ResolvedOrigin::unresolved(
-                        claim,
-                        format!("sidecar {sidecar_path} is not readable JSON: {e}"),
-                    ),
-                    None,
+                return ResolvedOrigin::unresolved(
+                    claim,
+                    format!("sidecar {sidecar_path} is not readable JSON: {e}"),
                 );
             }
         };
-        // Read once the body parses, and carried on every branch below:
-        // the pursuit claim answers "which line of work", which stays
-        // recordable even when the derivation half of the sidecar is
-        // truncated or names nothing resolvable.
-        //
-        // Bounded before it is a claim at all: the value lands verbatim
-        // in `asset.extra` on the success path too, and the sidecar
-        // read admits multi-megabyte files — a PursuitId renders 36
-        // chars, so anything past a generous hand-written slack is a
-        // payload, not an id, and is treated like the non-string case:
-        // absent. (A non-string value is also absent, as it is for
-        // `dispatch_id` — a sidecar states what it knows, in the shape
-        // the schema gave it.)
-        const PURSUIT_CLAIM_MAX_LEN: usize = 128;
-        let pursuit_claim = body
-            .get(provenance::SIDECAR_IDENTITY_KEY)
-            .and_then(|id| id.get(asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD))
-            .and_then(|v| v.as_str())
-            .filter(|v| v.len() <= PURSUIT_CLAIM_MAX_LEN)
-            .map(str::to_string);
-
         if let Some(raw) = body
             .get(provenance::SIDECAR_IDENTITY_KEY)
             .and_then(|id| id.get(asterism_contract::sidecar::SIDECAR_DISPATCH_ID_FIELD))
@@ -603,10 +503,10 @@ impl AssetService {
                     format!("sidecar {sidecar_path} names dispatch {raw:?}, which is not an id"),
                 ),
             };
-            return (origin, pursuit_claim);
+            return origin;
         }
 
-        let origin = match body.get("id").and_then(|v| v.as_str()) {
+        match body.get("id").and_then(|v| v.as_str()) {
             Some(raw) => match provenance::parse(&format!("asset:{raw}")) {
                 Ok(ProvenanceRef::Asset(parent)) => {
                     self.resolve_asset_parent(claim, parent, "sidecar-asset")
@@ -621,8 +521,7 @@ impl AssetService {
                 claim,
                 format!("sidecar {sidecar_path} names neither a dispatch nor an asset"),
             ),
-        };
-        (origin, pursuit_claim)
+        }
     }
 
     /// Writes the `DerivedFrom` edges a resolved claim asserts,
@@ -770,11 +669,8 @@ impl AssetService {
             .find(&id)
             .await?
             .ok_or(DomainError::AssetNotFound(id))?;
-        let (origin, pursuit_claim) = self
+        let origin = self
             .resolve_origin(Some(&command.derived_from), &asset.source.locator)
-            .await;
-        let pursuit = self
-            .resolve_pursuit_claim(pursuit_claim, &asset.persona_id)
             .await;
         // Channel bookkeeping (`_trace.source`): this endpoint *is* the
         // after-the-fact declaration channel, so every claim through it
@@ -785,16 +681,10 @@ impl AssetService {
         // through which agent. `asset.author` / `asset.operator_ai` are
         // deliberately left alone — repairing a link is not authoring
         // the asset.
-        //
-        // A re-declaration that no longer carries a pursuit claim loses
-        // the recorded one: `pursuit_id` / `pursuit_resolved` are
-        // claim-owned fields, and the clear-then-write in
-        // `merge_claim_note` is the demotion the design promises.
         if let Some(note) = origin.trace_note(
             Some(provenance::source::MANUAL),
             operator.as_ref().map(OperatorRef::as_str),
             relation,
-            pursuit,
         ) {
             merge_claim_note(&mut asset.extra, note);
         }
@@ -948,9 +838,7 @@ impl AssetService {
     /// its original note; churning the reason on every sweep would
     /// stamp `updated_at` on rows nothing happened to.
     ///
-    /// Returns how many notes were repaired — a dispatch claim
-    /// resolving, a pursuit claim resolving (#29), or both in one
-    /// pass; the two halves repair independently.
+    /// Returns how many notes were repaired.
     pub async fn reresolve_unresolved(&self) -> Result<u32, DomainError> {
         let ids = self
             .assets
@@ -1010,50 +898,31 @@ impl AssetService {
                 .unwrap_or_default();
             // What the note already answered, read before the re-resolve
             // so "did anything change" has a before to compare against —
-            // the widened worklist (unresolved pursuit claims ride it
-            // too) would otherwise rewrite rows nothing happened to on
-            // every sweep.
+            // the sweep would otherwise rewrite rows nothing happened to
+            // every time it ran.
             let prior_resolved = asset
                 .extra
                 .get(provenance::TRACE_KEY)
                 .and_then(|t| t.get("resolved"))
                 .and_then(|v| v.as_bool())
                 == Some(true);
-            let prior_pursuit_resolved = asset
-                .extra
-                .get(provenance::TRACE_KEY)
-                .and_then(|t| t.get("pursuit_resolved"))
-                .and_then(|v| v.as_bool());
-            let (origin, pursuit_claim) = self
+            let origin = self
                 .resolve_origin(Some(&claim), &asset.source.locator)
                 .await;
-            let pursuit = self
-                .resolve_pursuit_claim(pursuit_claim, &asset.persona_id)
-                .await;
-            // The two halves repair independently: a derivation that
-            // still resolves nothing must not hold a pursuit answer
-            // hostage — a return restored before its pursuit was known
-            // is the widened worklist's own motivating case, and its
-            // dispatch half may stay broken forever. A note that
-            // changed in neither half is left untouched: rewriting it
-            // would stamp `updated_at` on rows nothing happened to,
-            // every sweep.
-            let dispatch_repaired =
-                matches!(&origin, ResolvedOrigin::Resolved { .. }) && !prior_resolved;
-            let pursuit_repaired =
-                matches!(&pursuit, Some((_, true))) && prior_pursuit_resolved == Some(false);
-            if !dispatch_repaired && !pursuit_repaired {
+            // A note that changed is the only one rewritten: doing it
+            // unconditionally would stamp `updated_at` on rows nothing
+            // happened to, every sweep.
+            let ResolvedOrigin::Resolved { parents, .. } = &origin else {
+                continue;
+            };
+            if prior_resolved {
                 continue;
             }
-            let parents = match &origin {
-                ResolvedOrigin::Resolved { parents, .. } => parents.clone(),
-                _ => Vec::new(),
-            };
+            let parents = parents.clone();
             if let Some(note) = origin.trace_note(
                 prior_source.as_deref(),
                 prior_operator.as_deref(),
                 prior_relation,
-                pursuit,
             ) {
                 merge_claim_note(&mut asset.extra, note);
             }
@@ -1380,11 +1249,8 @@ impl AssetService {
                 Ok(ProvenanceRef::Sidecar) => provenance::source::EMBEDDED,
                 _ => provenance::source::PUSHED,
             });
-        let (origin, pursuit_claim) = self
+        let origin = self
             .resolve_origin(declared_origin.as_deref(), &asset.source.locator)
-            .await;
-        let pursuit = self
-            .resolve_pursuit_claim(pursuit_claim, &asset.persona_id)
             .await;
         // No `operator` on an ingest-time note: this asset carries its
         // own `operator_ai` column, and the ingest is the operation that
@@ -1403,7 +1269,6 @@ impl AssetService {
             claim_source,
             None,
             crate::domain::provenance::ClaimRelation::DerivedFrom,
-            pursuit,
         ) {
             merge_claim_note(&mut asset.extra, note);
         }
@@ -5400,17 +5265,11 @@ impl ResolvedOrigin {
     /// `derived_from`. So absent reads as
     /// [`ClaimRelation::DerivedFrom`](crate::domain::provenance::ClaimRelation::DerivedFrom)
     /// and new notes say so out loud.
-    ///
-    /// `pursuit` is the sidecar's pursuit claim with its resolution
-    /// (#29), written on resolved and unresolved notes alike — which
-    /// line of work a return belongs to is answerable even when its
-    /// derivation is not. Absent when the claim form cannot carry one.
     fn trace_note(
         &self,
         source: Option<&str>,
         operator: Option<&str>,
         relation: crate::domain::provenance::ClaimRelation,
-        pursuit: Option<(String, bool)>,
     ) -> Option<serde_json::Value> {
         let mut note = match self {
             Self::None => return None,
@@ -5443,10 +5302,6 @@ impl ResolvedOrigin {
         }
         if let Some(operator) = operator {
             note["operator"] = serde_json::json!(operator);
-        }
-        if let Some((claim, resolved)) = pursuit {
-            note["pursuit_id"] = serde_json::json!(claim);
-            note["pursuit_resolved"] = serde_json::json!(resolved);
         }
         Some(note)
     }

@@ -203,7 +203,6 @@ mod tests {
             inputs: &[],
             selection_id: "sel-1",
             dispatch_id: "disp-1",
-            pursuit_id: None,
             persona_id: "persona-1",
             action: "txt2img",
             params,

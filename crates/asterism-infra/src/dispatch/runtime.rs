@@ -238,7 +238,6 @@ pub async fn run_dispatch_run(
     // carries the snapshot id.
     let selection_str = job.snapshot_id.to_string();
     let dispatch_str = job.id.to_string();
-    let pursuit_str = job.pursuit_id.map(|p| p.to_string());
     let inputs: Vec<asterism_contract::dto::AssetCardDto> = cards
         .iter()
         .map(|c| {
@@ -256,7 +255,6 @@ pub async fn run_dispatch_run(
         inputs: &inputs,
         selection_id: &selection_str,
         dispatch_id: &dispatch_str,
-        pursuit_id: pursuit_str.as_deref(),
         action: &job.action,
         params: &job.params,
         persona_id: &persona_str,

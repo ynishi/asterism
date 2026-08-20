@@ -704,14 +704,6 @@ fn stamp_sidecar_identity(
     // drift between the two fails silently as "no identity here".
     identity[asterism_contract::sidecar::SIDECAR_DISPATCH_ID_FIELD] =
         serde_json::json!(ctx.dispatch_id);
-    // The pursuit stamp travels beside the dispatch id (#29): the
-    // dispatch names the hop, the pursuit names the line of work, and
-    // a returning artefact can keep the second even when truncation
-    // costs it the first. Absent rather than null when the job
-    // predates the stamp — a sidecar states what it knows.
-    if let Some(pursuit) = ctx.pursuit_id {
-        identity[asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD] = serde_json::json!(pursuit);
-    }
     match body {
         serde_json::Value::Object(map) => {
             map.insert(SIDECAR_IDENTITY_KEY.to_string(), identity);
@@ -904,7 +896,6 @@ mod tests {
         let ctx = DispatchContext {
             selection_id: "sel-1",
             dispatch_id: "disp-1",
-            pursuit_id: None,
             persona_id: "p1",
             action: ACTION_WRITE,
             params: &params,
@@ -964,7 +955,6 @@ mod tests {
         let ctx = DispatchContext {
             selection_id: "sel-1",
             dispatch_id: "disp-1",
-            pursuit_id: None,
             persona_id: "p1",
             action: ACTION_WRITE,
             params: &params,
@@ -1003,7 +993,6 @@ mod tests {
         let ctx = DispatchContext {
             selection_id: "sel-1",
             dispatch_id: "0198c1c2-0000-7000-8000-000000000001",
-            pursuit_id: Some("0198c1c2-0000-7000-8000-0000000000aa"),
             persona_id: "p1",
             action: ACTION_WRITE,
             params: &params,
@@ -1028,11 +1017,6 @@ mod tests {
         assert_eq!(
             identity.get("dispatch_id").and_then(|v| v.as_str()),
             Some("0198c1c2-0000-7000-8000-000000000001")
-        );
-        // The line of work travels beside the hop (#29).
-        assert_eq!(
-            identity.get("pursuit_id").and_then(|v| v.as_str()),
-            Some("0198c1c2-0000-7000-8000-0000000000aa")
         );
         assert_eq!(
             identity.get("exporter_slug").and_then(|v| v.as_str()),
@@ -1062,7 +1046,6 @@ mod tests {
         let ctx = DispatchContext {
             selection_id: "sel-1",
             dispatch_id: "disp-1",
-            pursuit_id: None,
             persona_id: "p1",
             action: ACTION_WRITE,
             params: &params,

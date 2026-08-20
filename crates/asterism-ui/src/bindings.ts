@@ -114,7 +114,7 @@ export type PromoteTagToGroupCommand = { tag_id: string; persona_id: string; nam
 
 export type PromoteTagToGroupResult = { group_id: string; persona_id: string; name: string; asset_count: number; };
 
-export type CreateDispatchCommand = { snapshot_id: string; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; pursuit_id: string | null; };
+export type CreateDispatchCommand = { snapshot_id: string; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; };
 
 export type PromoteSnapshotToGroupCommand = { snapshot_id: string; name: string; description: string | null; dir_id: string | null; };
 
@@ -126,9 +126,9 @@ export type CreateQueryGroupCommand = { persona_id: string; name: string; query_
 
 export type UpdateQueryGroupQueryCommand = { group_id: string; query_json: string; };
 
-export type DispatchRunCommand = { persona_id: string; group_id: string | null; asset_ids: string[]; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; pursuit_id: string | null; };
+export type DispatchRunCommand = { persona_id: string; group_id: string | null; asset_ids: string[]; exporter_slug: string; action: string; params_json: string; operator_ai: string | null; };
 
-export type RedispatchCommand = { dispatch_id: string; pursuit_id: string | null; };
+export type RedispatchCommand = { dispatch_id: string; };
 
 export type CreateSavedQueryCommand = { persona_id: string; name: string; filter_json: string; sort_json: string; position: number | null; };
 
@@ -242,7 +242,7 @@ export type JobsSnapshotDto = { total: number; done: number; pending: number; ru
 
 export type SnapshotDto = { id: string; persona_id: string; content_hash: string; asset_ids: string[]; created_at_ms: number; };
 
-export type DispatchDto = { id: string; snapshot_id: string; persona_id: string; pursuit_id: string | null; exporter_slug: string; action: string; params_json: string; handle_json: string | null; attempt_json: string | null; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; };
+export type DispatchDto = { id: string; snapshot_id: string; persona_id: string; exporter_slug: string; action: string; params_json: string; handle_json: string | null; attempt_json: string | null; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; };
 
 export type SavedQueryDto = { id: string; persona_id: string; name: string; filter_json: string; sort_json: string; position: number; created_at_ms: number; updated_at_ms: number; };
 
@@ -306,27 +306,17 @@ export type MessageRefDto = { kind: string; id: string; };
 
 export type OpenPursuitCommand = { persona_id: string; pursuit_id: string | null; project_id: string | null; parent_pursuit_id: string | null; title: string | null; note: string | null; operator_ai: string | null; };
 
-export type ClosePursuitCommand = { pursuit_id: string; outcome: string; verdicts: { asset_id: string; verdict: string; note: string | null; }[]; note: string | null; cull_note: string | null; operator_ai: string | null; };
-
-export type CullVerdictEntry = { asset_id: string; verdict: string; note: string | null; };
+export type ClosePursuitCommand = { pursuit_id: string; outcome: string; note: string | null; operator_ai: string | null; };
 
 export type RecordPursuitTxCommand = { pursuit_id: string; kind: string; asset_id: string; origin: string | null; note: string | null; operator_ai: string | null; };
 
 export type ReopenPursuitCommand = { pursuit_id: string; note: string | null; operator_ai: string | null; };
 
-export type RestampDispatchCommand = { dispatch_id: string; to_pursuit_id: string; operator_ai: string | null; };
-
 export type PursuitDto = { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; };
 
 export type PursuitEventDto = { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; };
 
-export type PursuitViewDto = { pursuit: { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; }; rounds: { id: string; snapshot_id: string; persona_id: string; pursuit_id: string | null; exporter_slug: string; action: string; params_json: string; handle_json: string | null; attempt_json: string | null; state: string; state_message: string | null; progress_current: number | null; progress_total: number | null; output_asset_ids: string[]; created_at_ms: number; updated_at_ms: number; completed_at_ms: number | null; source_group_id: string | null; source_query_json: string | null; operator_ai: string | null; }[]; returns: string[]; events: { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; }[]; txs: { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; }[]; culls: { id: string; pursuit_id: string; pursuit_event_id: string; candidate_snapshot_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; members: { asset_id: string; verdict: string; note: string | null; }[]; }[]; };
+export type PursuitViewDto = { pursuit: { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; }; events: { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; }[]; txs: { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; }[]; };
 
 export type PursuitTxDto = { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; };
-
-export type CullDto = { id: string; pursuit_id: string; pursuit_event_id: string; candidate_snapshot_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; members: { asset_id: string; verdict: string; note: string | null; }[]; };
-
-export type CullMemberDto = { asset_id: string; verdict: string; note: string | null; };
-
-export type AssetCullDto = { cull_id: string; pursuit_id: string; candidate_snapshot_id: string; verdict: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; };
 

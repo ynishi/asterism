@@ -13,9 +13,12 @@
 //!   set redirects it through the folds that happened since (the
 //!   "paths that name a row keep it" half of the fold read rule).
 //! - [`forge`]           — the verbs of a line of work: the pursuit
-//!   lifecycle and the rounds filed under it. Grouped because they are
-//!   the services whose writes carry intent rather than content
-//!   (doctrine 6).
+//!   lifecycle and the project it files under. Grouped because they are
+//!   the services whose writes carry intent rather than content; the
+//!   boundary they keep is in [`domain::forge`](crate::domain::forge).
+//! - [`dispatch_service`] — starts an export against a frozen input
+//!   set. It names no forge type, and a raw-layer export files itself
+//!   under no line of work.
 //! - `attribution_intake` — the single check on the attribution fields a
 //!   command still carries (a remote caller's assertion arriving through
 //!   the owner's own surface).
@@ -58,6 +61,7 @@ pub mod asset_comment_service;
 pub mod asset_service;
 pub(crate) mod attribution_intake;
 pub mod disclosure_service;
+pub mod dispatch_service;
 pub mod fold_redirect;
 pub mod forge;
 pub mod mapping;
@@ -77,9 +81,7 @@ pub mod thumb_service;
 pub use app_setting_service::AppSettingService;
 pub use asset_comment_service::AssetCommentService;
 pub use asset_service::{AssetService, INBOX_LABEL, OriginalFileRef};
-pub use forge::dispatch_service::DispatchService;
-pub use forge::project_service::ProjectService;
-pub use forge::pursuit_service::PursuitService;
+pub use dispatch_service::DispatchService;
 pub use material_layer_service::MaterialLayerService;
 pub use material_mark_service::MaterialMarkService;
 pub use modality_service::ModalityService;

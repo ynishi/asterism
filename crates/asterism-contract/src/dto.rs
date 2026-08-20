@@ -1246,10 +1246,6 @@ pub struct DispatchDto {
     pub snapshot_id: String,
     /// Persona bucket.
     pub persona_id: String,
-    /// Pursuit this round is filed under (#29). `None` only on rows
-    /// that predate the stamp's backfill invariant; moved only by the
-    /// restamp verb, never by a state save.
-    pub pursuit_id: Option<String>,
     /// Exporter slug (`comfy` / `gemini` / `vdsl` / `alc-sd-bake`).
     pub exporter_slug: String,
     /// Action string handed to the exporter (`img2img` / `txt2img` /
@@ -1424,8 +1420,8 @@ pub struct PursuitDto {
     /// Pursuit this one was spawned from (`None` for a root). Set at
     /// creation, immutable.
     pub parent_id: Option<String>,
-    /// Short human label (`None` for an anonymous, implicitly minted
-    /// pursuit — display names for those are synthesized, not stored).
+    /// Short human label (`None` for a pursuit opened without one —
+    /// display names for those are synthesized, not stored).
     pub title: Option<String>,
     /// One short free-text slot.
     pub note: Option<String>,
@@ -1462,24 +1458,11 @@ pub struct PursuitEventDto {
 pub struct PursuitViewDto {
     /// The pursuit itself, standing included.
     pub pursuit: PursuitDto,
-    /// Its rounds — the dispatch jobs stamped with it, oldest first.
-    pub rounds: Vec<DispatchDto>,
-    /// Its returns — asset ids whose ingest note resolved to one of
-    /// the rounds (the dispatch join) or to the pursuit directly (the
-    /// claim lane), ingest order. What a round minted in-library is
-    /// not here: those ride on the round's own `output_asset_ids`
-    /// above — returns are what came back from outside. Ids rather
-    /// than cards: the asset surfaces already know how to open an id,
-    /// and this view answers membership, not display.
-    pub returns: Vec<String>,
     /// The lifecycle facts, oldest first.
     pub events: Vec<PursuitEventDto>,
     /// The membership ledger, oldest first — every entry, removal and
     /// reversal, one row per gesture (#22).
     pub txs: Vec<PursuitTxDto>,
-    /// The culls, oldest first — one per close event that had
-    /// something to record.
-    pub culls: Vec<CullDto>,
 }
 
 /// One gesture in a pursuit's append-only membership ledger (#22):
@@ -1511,79 +1494,6 @@ pub struct PursuitTxDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
     /// When the gesture was recorded (unix epoch ms).
-    pub created_at_ms: i64,
-}
-
-/// The record of one close's narrowing (#22): who decided what, out
-/// of which frozen candidate set. One cull per close event; a repeat
-/// close reads as a second record, never an overwrite.
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct CullDto {
-    /// Cull id (UUID hyphenated).
-    pub id: String,
-    /// Pursuit whose close this records.
-    pub pursuit_id: String,
-    /// The close event the cull belongs to.
-    pub pursuit_event_id: String,
-    /// The candidate set — derived from the ledger and frozen at
-    /// close. What every verdict below is "out of".
-    pub candidate_snapshot_id: String,
-    /// One short free-text slot for the act.
-    pub note: Option<String>,
-    /// Kind of the recorded author (`owner` / `persona` / …) — who
-    /// made the act. Absent means unrecorded. This is the "who
-    /// decided" half of #22's acceptance question; the verdicts below
-    /// are its "what, out of what".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author_kind: Option<String>,
-    /// Agent that made the act — the same open slug
-    /// [`AssetDto::operator_ai`] carries. Absent means unrecorded;
-    /// caller-asserted, never authenticated.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operator_ai: Option<String>,
-    /// When the act was recorded (unix epoch ms).
-    pub created_at_ms: i64,
-    /// The member verdicts, asset id ascending. Absence of a
-    /// candidate here means the act said nothing about it.
-    pub members: Vec<CullMemberDto>,
-}
-
-/// One member's verdict within a cull (#22).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct CullMemberDto {
-    /// The judged asset.
-    pub asset_id: String,
-    /// `keep` / `reject` — two values, no third; "unjudged" is the
-    /// absence of a row.
-    pub verdict: String,
-    /// One short free-text slot — the grounds, when stated.
-    pub note: Option<String>,
-}
-
-/// One verdict about one asset, joined to the cull it belongs to
-/// (#22) — the acceptance read: who decided to keep or drop this
-/// asset, out of which set, in which line of work.
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct AssetCullDto {
-    /// The cull the verdict belongs to.
-    pub cull_id: String,
-    /// The line of work.
-    pub pursuit_id: String,
-    /// The candidate set the verdict was out of.
-    pub candidate_snapshot_id: String,
-    /// `keep` / `reject`.
-    pub verdict: String,
-    /// The grounds, when stated.
-    pub note: Option<String>,
-    /// Kind of the recorded author of the act (`owner` / `persona` /
-    /// …) — the "who decided" of #22. Absent means unrecorded.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author_kind: Option<String>,
-    /// Agent that made the act. Absent means unrecorded;
-    /// caller-asserted, never authenticated.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operator_ai: Option<String>,
-    /// When the act was recorded (unix epoch ms).
     pub created_at_ms: i64,
 }
 
@@ -1668,7 +1578,7 @@ pub struct AssetCommentDto {
 }
 
 /// One mark placed into an Asset's material — the coordinate space its
-/// content carries, rather than the asset as a catalogue entry.
+/// content carries, rather than the asset as a row.
 ///
 /// The anchor arrives flattened: a `anchor_kind` slug plus the columns
 /// that kind populates. The alternative — a tagged sub-object — would

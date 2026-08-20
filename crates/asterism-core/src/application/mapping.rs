@@ -779,22 +779,6 @@ pub fn parse_dispatch_id(value: &str) -> Result<DispatchId, DomainError> {
     Ok(DispatchId::from_uuid(parse_uuid(value, "dispatch_id")?))
 }
 
-/// Parses the wire representation of a pursuit id.
-pub fn parse_pursuit_id(value: &str) -> Result<crate::domain::value::PursuitId, DomainError> {
-    Ok(crate::domain::value::PursuitId::from_uuid(parse_uuid(
-        value,
-        "pursuit_id",
-    )?))
-}
-
-/// Parses the wire representation of a project id.
-pub fn parse_project_id(value: &str) -> Result<crate::domain::value::ProjectId, DomainError> {
-    Ok(crate::domain::value::ProjectId::from_uuid(parse_uuid(
-        value,
-        "project_id",
-    )?))
-}
-
 /// Parses the wire representation of an asset-comment id.
 pub fn parse_asset_comment_id(value: &str) -> Result<AssetCommentId, DomainError> {
     Ok(AssetCommentId::from_uuid(parse_uuid(value, "comment_id")?))
@@ -1093,7 +1077,6 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
         id: job.id.to_string(),
         snapshot_id: job.snapshot_id.to_string(),
         persona_id: job.persona_id.to_string(),
-        pursuit_id: job.pursuit_id.map(|p| p.to_string()),
         exporter_slug: job.exporter_slug.clone(),
         action: job.action.clone(),
         params_json: match &job.params {

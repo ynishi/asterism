@@ -1,5 +1,5 @@
-//! The forge layer — the intentional history over the catalogue: a line
-//! of work, what it filed under itself, and the conclusion it reached.
+//! The forge layer — the intentional history over the raw layer: a line
+//! of work, what it took up, and the conclusion it reached.
 //!
 //! Everything else in [`domain`](crate::domain) answers what is true of
 //! the stored bytes. This module answers what somebody was *trying to
@@ -16,60 +16,58 @@
 //!   open
 //!     │
 //!     v
-//!   round ──> OUT ──> [ the work happens elsewhere ] ──> IN
-//!     ^        │                                          │
-//!     │     dispatch + frozen inputs + sidecar     returns resolve
-//!     │                                            through _trace
-//!     │                                                   │
-//!     └──── what survives feeds the next round <── culling
-//!                                                        │
-//!                                                        v
-//!                                                      close
-//!                          pursuit_event.closed_satisfied + kept set
+//!   IN ──> the ledger ──> what the line of work is on
+//!     ^                            │
+//!     │                            │
+//!     └──── an asset the owner ─────┤
+//!           already holds           │
+//!                                   v
+//!                                 close
+//!                          pursuit_event.closed_satisfied
 //!                          (or .closed_abandoned — nothing lands)
 //! ```
 //!
-//! [`pursuit`] is the minted unit of work and its lifecycle facts. A
-//! round is a [`dispatch`](crate::domain::dispatch) — an exporter
-//! invocation against a frozen input set — and it is a *core* module,
-//! because what it records is that a call was made and what came back,
-//! not what anybody was after. The forge's part is the stamp: which
-//! pursuit that round was filed under. A round's outputs and the
-//! artefacts that come back are ordinary catalogue rows too — the forge
-//! does not hold a working copy, and there is no state to integrate at
-//! the end. What the close integrates is a *decision*.
+//! [`pursuit`] is the minted unit of work and its lifecycle facts. What
+//! it takes up is an asset the owner already manages — an ordinary
+//! raw-layer row, staged into the pursuit by a ledger gesture. The
+//! forge does not hold a working copy, and there is no state to
+//! integrate at the end. What the close integrates is a *decision*.
 //!
-//! **Culling** — the narrowing between a return and the next round or
-//! the close — is recorded (#22, model on #63). Mid-work it moves
-//! through the ledger ([`tx`]): every entry, removal and reversal is
-//! an append-only gesture, and membership derives on read. At a
-//! satisfied close the [`cull`] converts the final state into
-//! verdicts — keep or reject, out of the candidate set the ledger
-//! accumulated, frozen at that moment — and what survives is the next
-//! round's input, or the kept set the close freezes.
+//! **Membership** — what a line of work is working on — moves through
+//! the ledger ([`tx`]): every entry, removal and reversal is an
+//! append-only gesture, and membership derives on read. The close
+//! records that the line of work ended and selects nothing out of it.
 //!
 //! # The boundary
 //!
 //! - **The forge names the core; what it writes there is correlation,
 //!   never judgement.** A pursuit refers to content through frozen sets
-//!   ([`Snapshot`]) and ids. The one thing this layer puts on a core row
-//!   is the id that lets the two rejoin after a round trip — the
-//!   `_dispatch` stamp on a reified output, the `_trace` claim a
-//!   returning artefact carries. What the forge has to say about an
-//!   asset — lifecycle events, ledger gestures, cull verdicts — lives
-//!   on forge rows that name core ids. A verdict written onto a core
-//!   row itself would put the forge's vocabulary on the core's rows and
-//!   hand every downstream reader (dedupe, lineage, restore) an
-//!   ambiguity to inherit.
-//! - **Intent lives only here.** `title`, `note`, and the actor triple
-//!   are forge properties. A core row may record who wrote it — that is
-//!   bookkeeping, and doctrine 2 already allows it — but never *why*.
+//!   ([`Snapshot`]) and ids, and writes nothing onto a core row at all.
+//!   What the forge has to say about an asset — lifecycle events,
+//!   ledger gestures — lives on forge rows that name core ids. An
+//!   intent written onto a core row itself would put the forge's
+//!   vocabulary on the core's rows and hand every downstream reader
+//!   (dedupe, lineage, restore) an ambiguity to inherit.
+//! - **Intent lives only here.** `title` and `note` are forge
+//!   properties; a core row may record who wrote it but never *why*.
+//!   The actor triple is **not** a forge property —
+//!   [`Asset`](crate::domain::asset::Asset) carries it too, so
+//!   [`attribution`](crate::domain::attribution) is a core module the
+//!   forge uses rather than one it owns. Moving it here would make
+//!   `Asset::new` depend on the forge, which is the arrow above turned
+//!   around.
 //! - **The core does not need the forge.** Importing, deduplicating,
-//!   rating and trashing all work with no pursuit in sight. The minting
-//!   rule (doctrine 5) binds the forge's own events, not the catalogue.
+//!   rating and trashing all work with no pursuit in sight. Sending
+//!   anything out is the raw layer's own business, and the forge has
+//!   no part in it.
 //!
 //! # What is deliberately not here
 //!
+//! **Sending work out.** The forge stages what the owner already holds
+//! and records what became of it; it does not export, does not start a
+//! dispatch, and does not wait for anything to come back. Export lives
+//! in the raw layer, where what it records is a thing that happened to
+//! the bytes.
 //! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
 //! the core by, and belongs to the core: it is content-addressed,
 //! deduplicated persona-wide, and carries no story about who froze it.
@@ -79,7 +77,7 @@
 //! to — the shape rhymes with a gate, and the resemblance has misled
 //! before: worth is not identity, and a fold is not a selection.
 //! [`provenance`](crate::domain::provenance) is how a returning artefact
-//! reattaches to the round that produced it: what it declares about
+//! reattaches to the dispatch that produced it: what it declares about
 //! where it came from, and whether that resolved. It is a claim the
 //! artefact
 //! carries rather than a statement the operator makes: the exporter
@@ -92,12 +90,13 @@
 //!
 //! Background: the workflow design on #21, implemented by #29 and #34.
 //! The full domain model this layer is growing toward — mainline,
-//! targeted IN, cull, merge-on-close — is drafted on #63.
+//! targeted IN, merge-on-close — is drafted on #63.
 //!
 //! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
-pub mod cull;
 pub mod line;
 pub mod project;
 pub mod pursuit;
+pub mod repository;
 pub mod tx;
+pub mod value;

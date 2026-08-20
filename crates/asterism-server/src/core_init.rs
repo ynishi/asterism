@@ -19,10 +19,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use asterism_core::DomainError;
+use asterism_core::application::DispatchService;
 use asterism_core::application::disclosure_service::DisclosureService;
 use asterism_core::application::query_group_invalidation::QueryGroupInvalidator;
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
+    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
     SessionService, SnapshotService, ThreadService, ThumbService,
 };
@@ -416,10 +417,10 @@ pub struct CoreCtx {
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
     /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
-    pub pursuit_service: Arc<asterism_core::application::PursuitService>,
+    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
     /// The context those pursuits file under, and the owner of the
     /// line their satisfied closes land on (#63).
-    pub project_service: Arc<asterism_core::application::ProjectService>,
+    pub project_service: Arc<asterism_core::application::forge::ProjectService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
@@ -818,7 +819,6 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
-        pursuits.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
@@ -828,7 +828,6 @@ pub async fn init_core_with(
         personas.clone(),
         asset_service.clone(),
         job_queue_arc.clone(),
-        pursuits.clone(),
     ));
     // Kick one retention sweep per `Full` startup. The sweep is
     // self-chaining while pages come back full, so this single enqueue
@@ -1029,23 +1028,19 @@ pub async fn init_core_with(
         groups_arc.clone(),
         query_groups.clone(),
         query_group_service.clone(),
-        pursuits.clone(),
     ));
-    // Lifecycle verbs of the unit of work (#29); the close freeze goes
-    // through the snapshot service so kept ids get the same hydration
-    // every other freeze gets.
-    let pursuit_service = Arc::new(asterism_core::application::PursuitService::new(
+    // Lifecycle verbs of the unit of work (#29). No snapshot service
+    // here: the close records a fact and freezes nothing.
+    let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
         pursuits.clone(),
         projects.clone(),
         personas.clone(),
-        dispatches.clone(),
         assets_arc.clone(),
-        snapshot_service.clone(),
     ));
     // The context those pursuits file under (#63). No lifecycle of its
     // own: opened, read, and everything that happens to it happens
     // through the pursuits filed under it.
-    let project_service = Arc::new(asterism_core::application::ProjectService::new(
+    let project_service = Arc::new(asterism_core::application::forge::ProjectService::new(
         projects.clone(),
         personas.clone(),
     ));

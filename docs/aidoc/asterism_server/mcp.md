@@ -35,7 +35,6 @@ agent should read, not a broken call.
 ## Types
 
 - `AssetCommentsParams` — `asset_comments` input.
-- `AssetCullsParams` — `asset_culls` input.
 - `AssetLineageParams` — `asset_lineage` input — mirrors the HTTP `LineageParams` query pair
 - `AsterismMcp` — The MCP server handler — a thin tool facade over [`ServerCtx`].
 - `CatalogOverviewParams` — `catalog_overview` input.

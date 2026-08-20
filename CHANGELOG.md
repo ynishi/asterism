@@ -684,6 +684,104 @@ and this project adheres to
   variables overrides locally with `CARGO_PROFILE_DEV_DEBUG=2` without touching
   the tree. (#85)
 
+- **A dispatch carries the pursuit its caller named, and nothing when it named
+  none.** Always-mint made every start verb open a `Pursuit` row: supply no
+  `pursuit_id` and the server minted one for you, so exporting a selection — a
+  catalogue capability, and the one thing the forge is not required for — could
+  not happen without a forge object being written. `DispatchService` is a raw
+  dispatcher again. It stamps what the caller supplied, leaves the stamp `None`
+  where nobody supplied one, and names no forge type at all: the wire field
+  stays `pursuit_id` and parses to `CorrelationId`, an id of the raw layer's own
+  — which the stamp's own removal, further down, deletes in turn. `redispatch`
+  still inherits the prior round's stamp, because naming the prior round is
+  itself explicit, and inherits nothing where the prior carried nothing.
+
+  The existence check went with it, which is the part worth stating plainly: a
+  supplied id is no longer read at all, so nothing here refuses an id that names
+  no live pursuit or one belonging to another persona. That check is about a
+  forge object, and answering it from a catalogue verb is what coupled the two
+  in the first place; the forge-side export path where it belongs does not exist
+  yet, and `restamp` is what corrects a filing until it does. Existing stamped
+  rows are untouched — the V79 backfill stands, and a `pursuit` row with no
+  project is still residue of the retired rule rather than a mode.
+
+- **The six doctrines are gone, and `dispatch` is a raw-layer module again.**
+  `domain::mod`'s doctrine list was a second copy of reasoning that already
+  lived next to the types, and it had drifted: read against those types, four of
+  the six were contradicted by them, and the boundary the sixth declared was
+  broken in eight files. Five modules cited it by number, which made the drift
+  read as authority. Nothing is lost by deleting it — `attribution.rs`,
+  `snapshot.rs`, `edge.rs` and `forge/pursuit.rs` each state their own rule
+  where it is enforced, and the citations now point there. The rewrite of
+  doctrine 6 that a later entry here records — naming its three modules instead
+  of describing two of them — goes the same way: this deletes what that
+  corrected.
+
+  What stands in its place is the one rule a module doc is the right home for:
+  the forge uses catalogue types, the catalogue uses a forge id and nothing
+  else. It is written with the state of the tree beside it rather than as an
+  assertion, because asserting a boundary the dependency graph does not have is
+  the defect #81 was opened about. By the end of this entry no file outside the
+  forge uses a forge type — and nothing enforces that, which the doc says in as
+  many words: the next `use` restores the dependency and no gate notices. The
+  crate split is what would make it a rule rather than a fact.
+
+  Applying that rule moved two things. `dispatch` is a catalogue module: an
+  exporter running over a frozen set is something that happened to the bytes, it
+  runs with no pursuit in sight, and deleting the forge leaves it working while
+  deleting it takes the ability to send anything out. And the claim that the
+  actor triple is a forge property is withdrawn — `Asset` carries the same
+  triple, so `attribution` is a catalogue module the forge uses, and moving it
+  across during the crate split would have turned the arrow around. The three
+  forge services are no longer re-exported from `application`'s root; callers
+  name `application::forge::` and the grouping shows at the use site.
+
+  Two moves follow the same rule further. The forge's ids leave `domain::value`:
+  ten of the eleven are named nowhere outside the forge, and the eleventh is the
+  dispatch stamp, which `DispatchJob` now carries as an opaque `CorrelationId`
+  the forge converts at its own boundary. The field, the column and the sidecar
+  key stay `pursuit_id` — three names for one value would buy nothing, and the
+  name was never the coupling. And the forge's two persistence ports leave
+  `domain::repository` for `domain::forge::repository`, which leaves the raw
+  layer's central service holding a `bool`: `CorrelationResolver` answers
+  whether a returning artefact's stamp names anything live in its persona, which
+  is all ingest ever asked of a pursuit. Both that resolver and the stamp it
+  answered for are deleted further down, so neither ships.
+
+  The last crossing was a write, and it moved rather than being translated. The
+  dispatch runner used to append one ledger row per output it reified, which put
+  a catalogue service on the forge's write port; it now enqueues
+  `pursuit_ledger_file` with the dispatch id, and the forge does the writing.
+  Everything the filing needs is a column of the row by then, and the write was
+  never atomic with the reify anyway — the dispatch was already saved as `Done`
+  before the first row. **What the move adds is a window.** A close landing
+  before the job runs freezes its candidate set without those outputs, and that
+  is permanent; the queue has no retry policy and this kind has no backfill, so
+  a filing lost that way stays lost. The window closed a different way: the job
+  kind, its handler and the enqueue are deleted further down, and nothing on
+  this branch files a ledger at all.
+
+  None of this is enforceable yet, and the doc says so rather than implying
+  otherwise. Nothing stops an implementation of that `bool` port from being
+  three lines over the forge port it replaced; what a narrow port buys is that
+  doing so is a visible choice at a wiring site instead of the default shape of
+  the service. Cutting `asterism-forge` into its own crate is what would move
+  the refusal into the compiler.
+
+- **The word `catalogue` is gone from the crates.** It came from the six deleted
+  design claims, where it named the half that is not the forge; the claims went
+  and the word stayed, naming nothing that was ever defined. The layer it
+  pointed at is the raw layer, and that is what the prose says now, or the
+  concrete module where a sentence was really about `dispatch` or about an asset
+  row. Every mention was a doc comment, a code comment or a test fixture — no
+  type, column or wire key was ever named after it, and the one string a caller
+  reads (the MCP ingest description's example of an outside identifier) is now
+  an edition number.
+
+  No mention stays anywhere in the crates. `asterism-importer-sdk` keeps its own
+  `catalogue` module, which is an unrelated type — a list of import targets, not
+  a name for the store.
+
 - **The forge has a name in the tree, and the boundary it keeps is written
   down.** `pursuit` sat beside `tag` and `group` as one module among forty-six,
   and the flatness cost something specific: the design that introduced it said
@@ -1016,6 +1114,166 @@ and this project adheres to
   default has a sibling asserting the property itself, plus the negative case;
   both fail by name if the sort is removed, which is the point — the function
   reads like a no-op and will invite deletion.
+
+- **The dispatch stamp stops being a foreign key** (#81).
+  `dispatch_job.pursuit_id` has referenced `pursuit(id)` with
+  `ON DELETE RESTRICT` since V79, and it was the one foreign key anywhere in the
+  schema pointing from a catalogue table into a forge one — every other
+  reference to `pursuit`, `project`, `line` and `cull` is forge-internal. So a
+  boundary the rest of this section describes as a fact about the tree was
+  contradicted by the database: drop the forge's tables and the catalogue's own
+  schema stops standing up.
+
+  V87 rebuilds `dispatch_job` without it. The column survives with its name, its
+  type, its rows and its index, because what it records — which pursuit this
+  round was filed under — is a fact about the round, and facts about a round are
+  what the table is for; what the constraint added on top was an ownership claim
+  the forge does not have. Deleting a pursuit that dispatches still name now
+  succeeds, and those rows are left alone, each keeping its stamp as a value
+  that resolves to nothing. Nothing rewrites them to NULL: "filed under a
+  pursuit that has since been deleted" and "never filed" are different
+  histories. Nothing refuses a stamp naming no row on the way in either — the
+  existence wall the previous entry left one layer down is gone too, which the
+  `DispatchService` module doc now says rather than claiming otherwise.
+
+  SQLite cannot drop a constraint, so this is a table rebuild, and the
+  twenty-five columns are named on both sides rather than copied with `SELECT *`
+  — a column-order surprise over a list that long should fail loudly instead of
+  transposing data. All four indexes are recreated, not the two the change is
+  about. The persona purge is unchanged: `dispatch_job` still leads, now for its
+  snapshot edge alone.
+
+### Removed
+
+- **The base-event pin — the version claim a targeted `in` could make** (#63).
+  `TxTarget::base_event_id`, the `pursuit_tx.base_event_id` column, the CHECK
+  pairing it to a target and the index over it are gone (V91). A pursuit is cut
+  from a line and its `in` already names the entry it works on; a claim about
+  which version of that entry the caller was looking at is a second statement,
+  and nothing was ever built to make it. No command carried one, the single
+  production writer hard-codes the target both columns derive from to `None`,
+  and no reader ever asked what the column held — so the `Option` was saying
+  "nothing fills this yet" rather than stating a model. `TxTarget` survives as a
+  one-field struct, `target_entry_id` and its own CHECK are untouched, and
+  `PursuitTxKind::from_columns` takes one fewer argument.
+
+  **Nothing on the wire changes.** No command, DTO, HTTP route, MCP tool or
+  TypeScript binding ever carried the pin, so a caller cannot tell the
+  difference. **No row loses a value either**: every row this codebase has
+  written holds NULL here, and `git log -S` finds no revision of the writer that
+  did otherwise. A row written by hand against a real profile is the case no
+  migration can answer for, and its value is dropped like any other.
+
+  The name stays in two places, both of which are records of a past shape rather
+  than claims about today: V85's DDL, which still adds the column because a
+  database walking the chain from scratch has to reach the shape V91 alters, and
+  V91's own step and test.
+
+- **The cull — the close's record of what it kept and what it dropped** (#22).
+  The concept is gone from every layer at once: `domain::forge::cull` and its
+  `Cull`, `CullMember`, `CullVerdict`, `RequestedVerdict` and
+  `resolve_verdicts`; `CullId`; the `culls_of` and `culls_for_asset` ports, and
+  the cull argument of `append_close`, which is now
+  `append_close(&self, event: &PursuitEvent)`; `CullDto`, `CullMemberDto`,
+  `AssetCullDto`, `CullVerdictEntry`, and the `verdicts` and `cull_note` fields
+  of `ClosePursuitCommand`; the `GET /asterism/assets/{id}/culls` route and the
+  `asset_culls` MCP tool; and the sentences the `pursuit_close`, `pursuit_view`
+  and `pursuit_tx` tool descriptions spent on verdicts. `PursuitViewDto` no
+  longer carries `culls`.
+
+  **What a satisfied close now does, and what it no longer says.** A close
+  records that a line of work ended, and nothing else. Its `snapshot_id` is
+  always `None`, because the kept set it used to freeze was defined as the
+  `keep` verdicts and there are no verdicts to define it — no substitute
+  selection was invented to fill the gap, and the ledger was not quietly
+  promoted into one. So `satisfied` and `abandoned` now differ in what they say
+  about how the work ended rather than in what they write. Read a `None`
+  `snapshot_id` as "this close froze nothing", not as "this close concluded with
+  nothing kept": the second was a decision the old close could record and the
+  new one cannot make. Rows written before this change keep the snapshot they
+  recorded, and `PursuitEvent::snapshot_id` is still read on the way out for
+  their sake — nothing writes it now. What a pursuit was working on stays where
+  it always was, in the ledger the close leaves untouched and `pursuit_view`
+  still returns. `PursuitService` correspondingly no longer takes a
+  `SnapshotService`.
+
+- **The `cull` and `cull_member` tables, and the restamp subject that named
+  them** (V88). V82 created both and is released, so it stands as written; V88
+  drops them. Leaving them would not have been neutral — both hold `RESTRICT`
+  edges into `pursuit`, `persona`, `pursuit_event` and `snapshot`, so rows
+  written before this change would go on refusing a persona purge through tables
+  nothing in the code can any longer explain, and the purge path would have had
+  to keep naming the concept in order to clear it. **This destroys those rows**;
+  the candidate snapshots they pointed at remain, unreferenced, as any other
+  unreferenced freeze does. `pursuit_restamp` is rebuilt in the same step to
+  narrow its `subject_kind` CHECK back to `('dispatch')`: V82 widened it to
+  admit a second subject kind that no verb ever minted, so the copy translates
+  nothing.
+
+- **Dispatch, out of the forge** (#29). The forge selects an asset the person
+  already manages and stages it into a pursuit. That is the whole of it: no
+  export, no round, no returning artefact of its own. What went with the round:
+  `PursuitService::restamp_dispatch` and `file_dispatch_outputs`, the service's
+  `DispatchRepository` port, the `rounds` a `pursuit_view` used to compose;
+  `RestampSubject`, `PursuitRestamp` and the `restamp` port — the subject enum
+  had one variant, so the verb and its record left with it;
+  `RestampDispatchCommand` and `PursuitViewDto.rounds`; the
+  `POST /asterism/pursuits/restamp-dispatch` route, the
+  `pursuit_restamp_dispatch` MCP tool and Tauri command; and
+  `JobKind::PursuitLedgerFile` with the `pursuit_ledger_file` handler, its
+  dispatcher arm, the `pursuit_service` cell on `JobDeps`, and the enqueue the
+  dispatch runner made after `reify`.
+
+  **`DispatchService` is not deleted.** It was a raw-layer capability filed
+  under the forge, and it moves out intact to
+  `asterism_core::application::dispatch_service` — same verbs, same behaviour,
+  changed import path. Exporting still works and still stamps the pursuit its
+  caller names; what no longer happens is the forge asking for anything back.
+  The stamp is now written by the catalogue and read by whoever asks what it
+  resolves to, and nothing files an export's outputs into a pursuit's ledger. An
+  asset enters a pursuit because somebody recorded that it did, through
+  `pursuit_tx`.
+
+- **The `pursuit_restamp` table** (V89). With the verb gone the table is
+  unreachable — nothing reads it, nothing writes it, and the persona purge no
+  longer sweeps it. **This destroys those rows**, which recorded which pursuit a
+  round was re-filed under. `dispatch_job.pursuit_id` and its index outlive this
+  step, still written on every export; V90 below is what takes them.
+
+- **The pursuit stamp on a dispatch, and the whole lane that resolved it**
+  (V90). A dispatch is a raw-layer export — a frozen input, an exporter, an
+  action, and what came back — and which line of work somebody was on when they
+  started it is not a fact about the export. So `dispatch_job.pursuit_id` and
+  `idx_dispatch_pursuit` are gone, with `DispatchJob.pursuit_id`,
+  `DispatchDto.pursuit_id`, and the `pursuit_id` field of
+  `CreateDispatchCommand`, `DispatchRunCommand` and `RedispatchCommand`. The
+  exporter context no longer carries one, so a sidecar's identity block is
+  `dispatch_id` and the source id alone: `SIDECAR_PURSUIT_ID_FIELD` is gone from
+  the contract.
+
+  The reads built on the stamp go with it. `DispatchRepository::list_rounds` had
+  no production caller left; `PursuitRepository::returns_of` did — the pursuit
+  view — and its adapter joined through the column it can no longer name, so
+  `PursuitViewDto.returns` is gone and a pursuit view is now the row, its
+  events, and its ledger. On the ingest side the sidecar's `pursuit_id` claim
+  and everything that answered it are deleted in full: the `CorrelationResolver`
+  port and its adapter, `parse_correlation_id`,
+  `AssetService::resolve_pursuit_claim`, the `_trace.pursuit_id` and
+  `_trace.pursuit_resolved` note fields, and the `trace_pursuit_id` generated
+  column with its partial index. The re-resolve sweep is back to the one
+  question it started with — did this derivation become answerable.
+
+  **This destroys the filing.** Every dispatch row loses which pursuit it was
+  started under, and nothing else records it: the restamp table went one step
+  earlier, and the `_trace` bag keeps its `pursuit_id` text only because that
+  bag is what an ingest recorded rather than what the schema asserts. Nothing
+  re-derives the stamp afterwards. Two rebuilds land here rather than one — V87
+  took the foreign key off the column three steps ago and this takes the column
+  — because folding them would mean renumbering steps that already exist, and
+  V87 answers a question of its own that its test still asks. `dispatch_job` is
+  rebuilt with every column named on both sides; `asset` gets a plain
+  `DROP COLUMN`, since the column is VIRTUAL generated and rebuilding the
+  library's largest table to remove an expression would cost the whole table.
 
 ### Fixed
 

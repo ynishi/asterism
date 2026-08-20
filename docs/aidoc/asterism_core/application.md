@@ -15,9 +15,12 @@ Application layer — use-case services.
   set redirects it through the folds that happened since (the
   "paths that name a row keep it" half of the fold read rule).
 - [`forge`]           — the verbs of a line of work: the pursuit
-  lifecycle and the rounds filed under it. Grouped because they are
-  the services whose writes carry intent rather than content
-  (doctrine 6).
+  lifecycle and the project it files under. Grouped because they are
+  the services whose writes carry intent rather than content; the
+  boundary they keep is in [`domain::forge`](crate::domain::forge).
+- [`dispatch_service`] — starts an export against a frozen input
+  set. It names no forge type, and a raw-layer export files itself
+  under no line of work.
 - `attribution_intake` — the single check on the attribution fields a
   command still carries (a remote caller's assertion arriving through
   the owner's own surface).

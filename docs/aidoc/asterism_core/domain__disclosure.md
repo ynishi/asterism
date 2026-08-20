@@ -51,8 +51,8 @@ Each term is asserted only on evidence that something wrote:
 
 The last row is the important one. An artefact nothing established
 gets no `DigitalSourceType` property, which is a different statement
-from every term in the vocabulary — the same doctrine
-[`attribution`](crate::domain::attribution) states for an absent
+from every term in the vocabulary — the same reading
+[`attribution`](crate::domain::attribution) gives an absent
 author. A missing mark on a synthetic file is a gap; a wrong mark on
 one is a false statement, and only the second is unrecoverable.
 

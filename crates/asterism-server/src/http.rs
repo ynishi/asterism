@@ -47,19 +47,18 @@ use asterism_contract::command::{
     RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
     RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReopenPursuitCommand,
     ReorderGroupAssetsCommand, ReorderGroupChildrenCommand, ReorderPersonasCommand,
-    ResetSettingCommand, ResolveDuplicateConflictCommand, RestampDispatchCommand,
-    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
-    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
-    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
-    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
-    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
-    UpdateSeriesStrategyCommand,
+    ResetSettingCommand, ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
+    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
+    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
+    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
+    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
+    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
-    AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetCullDto, AssetDetailDto, AssetDto,
-    AssetIndexPageDto, AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
-    DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
-    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
+    AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
+    AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto, DirDto, DispatchDto,
+    DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto, EventDto, GroupDto,
+    GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
     MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
     ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
     PursuitDto, PursuitEventDto, PursuitTxDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto,
@@ -264,7 +263,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/asterism/comments/delete", post(delete_asset_comment))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
-        // on the catalogue entry.
+        // on the asset row.
         .route(
             "/asterism/assets/{id}/material-marks",
             get(list_material_marks).post(post_material_mark),
@@ -388,24 +387,18 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             post(promote_snapshot_to_group),
         )
         .route("/asterism/dispatch/{id}", get(get_dispatch))
-        // Pursuit — the unit of work every dispatch files itself
-        // under. Always-mint means these rows exist whether or not a
-        // caller ever names one, so the lifecycle verbs are what make
-        // them nameable, closable and repairable from outside the
-        // process. Plural, for the reason the module doc gives.
+        // Pursuit — the unit of work a caller files what it is working
+        // on under. These verbs are the only way one exists at all:
+        // open it, then name its id on the gestures that belong to it.
+        // Plural, for the reason the module doc gives.
         .route("/asterism/pursuits", get(list_pursuits))
         .route("/asterism/pursuits/open", post(open_pursuit))
         .route("/asterism/pursuits/close", post(close_pursuit))
         .route("/asterism/pursuits/reopen", post(reopen_pursuit))
-        .route(
-            "/asterism/pursuits/restamp-dispatch",
-            post(restamp_dispatch),
-        )
         .route("/asterism/pursuits/tx", post(record_pursuit_tx))
         .route("/asterism/pursuits/{id}", get(get_pursuit))
         .route("/asterism/pursuits/{id}/events", get(pursuit_events))
         .route("/asterism/pursuits/{id}/view", get(pursuit_view))
-        .route("/asterism/assets/{id}/culls", get(asset_culls))
         .route("/asterism/exporters", get(list_exporters))
         // App-level Threads primitive.
         // UI and Claude Code / agents both hit the same rows via
@@ -2707,9 +2700,9 @@ async fn list_pursuits(
     ))
 }
 
-/// `POST /asterism/pursuits/open` — name a line of work before the
-/// first round, or create one at an id a returning artefact already
-/// claims.
+/// `POST /asterism/pursuits/open` — name a line of work before any is
+/// recorded against it, or create one at an id it was known by
+/// elsewhere.
 async fn open_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Json(command): Json<OpenPursuitCommand>,
@@ -2718,12 +2711,11 @@ async fn open_pursuit(
     Ok(Json(ctx.pursuit_service.open(command, &attribution).await?))
 }
 
-/// `POST /asterism/pursuits/close` — record a conclusion. `satisfied`
-/// records the cull: verdicts resolve against the pursuit's own
-/// ledger, the candidate set is frozen from it, and the kept set the
-/// event freezes is the `keep` verdicts. `abandoned` records the fact
-/// and applies nothing. Repeatable: a second close is a second fact,
-/// never an overwrite.
+/// `POST /asterism/pursuits/close` — record a conclusion. Both
+/// outcomes record the fact and apply nothing else; `satisfied` and
+/// `abandoned` differ in what they say about how the line of work
+/// ended. Repeatable: a second close is a second fact, never an
+/// overwrite.
 async fn close_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Json(command): Json<ClosePursuitCommand>,
@@ -2748,24 +2740,6 @@ async fn record_pursuit_tx(
     ))
 }
 
-/// Query for `GET /asterism/assets/{id}/culls`.
-#[derive(Deserialize)]
-struct AssetCullsQuery {
-    #[serde(default = "default_pursuit_limit")]
-    limit: u32,
-}
-
-/// `GET /asterism/assets/{id}/culls` — every verdict ever recorded
-/// about one asset, most-recent first: who decided to keep or drop
-/// it, out of which set, in which line of work (#22).
-async fn asset_culls(
-    State(ctx): State<Arc<ServerCtx>>,
-    Path(id): Path<String>,
-    Query(q): Query<AssetCullsQuery>,
-) -> ApiResult<Vec<AssetCullDto>> {
-    Ok(Json(ctx.pursuit_service.asset_culls(&id, q.limit).await?))
-}
-
 /// `POST /asterism/pursuits/reopen` — record that the line of work
 /// carried on. Legal on an already-open pursuit, where it changes no
 /// standing and still leaves a fact.
@@ -2776,23 +2750,6 @@ async fn reopen_pursuit(
     let attribution = asserted(None, None, command.operator_ai.as_deref())?;
     Ok(Json(
         ctx.pursuit_service.reopen(command, &attribution).await?,
-    ))
-}
-
-/// `POST /asterism/pursuits/restamp-dispatch` — re-file a round under
-/// another pursuit, recorded with the filing it replaced. The repair
-/// verb for a surface that lost the context, not an edit: what
-/// happened in the round is untouched, and the move never crosses
-/// personas.
-async fn restamp_dispatch(
-    State(ctx): State<Arc<ServerCtx>>,
-    Json(command): Json<RestampDispatchCommand>,
-) -> ApiResult<DispatchDto> {
-    let attribution = asserted(None, None, command.operator_ai.as_deref())?;
-    Ok(Json(
-        ctx.pursuit_service
-            .restamp_dispatch(command, &attribution)
-            .await?,
     ))
 }
 
@@ -2816,9 +2773,9 @@ async fn pursuit_events(
 }
 
 /// `GET /asterism/pursuits/{id}/view` — the pursuit opened up: the
-/// row, its rounds, the returns filed under it, and its events. One
-/// read because that is what a caller asking "what is in this line of
-/// work" wants; the pieces stay separately readable above.
+/// row, its events, and its ledger. One read because that is what a
+/// caller asking "what is in this line of work" wants; the pieces stay
+/// separately readable above.
 async fn pursuit_view(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,

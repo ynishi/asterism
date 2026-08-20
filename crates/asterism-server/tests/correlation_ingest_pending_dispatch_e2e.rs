@@ -128,7 +128,6 @@ async fn an_export_that_has_produced_nothing_yet_is_recorded_not_guessed() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
             },
             &unattributed(),
         )
@@ -244,7 +243,6 @@ async fn a_pending_claim_resolves_itself_once_the_export_lands() {
                 action: "write".into(),
                 params_json: String::new(),
                 operator_ai: None,
-                pursuit_id: None,
             },
             &unattributed(),
         )

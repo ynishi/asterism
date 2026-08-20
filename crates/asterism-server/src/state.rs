@@ -10,11 +10,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use asterism_core::application::DispatchService;
+use asterism_core::application::forge::{ProjectService, PursuitService};
 use asterism_core::application::{
-    AppSettingService, AssetCommentService, AssetService, DispatchService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, ProjectService, PursuitService,
-    QueryGroupService, SeriesStrategyService, SessionService, SnapshotService, ThreadService,
-    ThumbService,
+    AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
+    SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_infra::dispatch::ExporterRegistry;
 
@@ -36,8 +37,9 @@ pub struct ServerCtx {
     /// Immutable content-addressed snapshots (seeds for outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Lifecycle verbs of the pursuit — the unit of work every
-    /// dispatch files itself under (#29).
+    /// Lifecycle verbs of the pursuit — the unit of work a caller
+    /// files what it is working on under (#29), opened through these
+    /// verbs and no others.
     pub pursuit_service: Arc<PursuitService>,
     /// The context pursuits file under (#63) — opened deliberately,
     /// and the owner of the line a satisfied close lands on.
@@ -63,7 +65,7 @@ pub struct ServerCtx {
     /// commands write.
     pub asset_comment_service: Arc<AssetCommentService>,
     /// Marks placed into an Asset's material — a position inside the
-    /// content rather than a note on the catalogue entry. Same rows the
+    /// content rather than a note on the asset row. Same rows the
     /// UI's four Tauri commands write.
     pub material_mark_service: Arc<MaterialMarkService>,
     /// The bands of marks over an Asset's material — which reading of

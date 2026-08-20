@@ -4,12 +4,12 @@
 model on #63): every asset that enters the line of work, every
 mid-work removal, and every reversal, one row per gesture.
 
-The ledger is what makes a cull's "out of what" answerable without
-being handed in: the candidate set is **what the pursuit
-accumulated**, derived here and frozen at close — never a
-caller-supplied snapshot. Mid-work tidying feels like free
-manipulation on the surface; underneath, every gesture is a ledger
-entry, which is the difference between a workspace and a record.
+The ledger is what makes "what is this line of work on" answerable
+without being handed in: membership is **what the pursuit
+accumulated**, derived here — never a caller-supplied snapshot.
+Mid-work tidying feels like free manipulation on the surface;
+underneath, every gesture is a ledger entry, which is the
+difference between a workspace and a record.
 
 # Shape
 
@@ -22,9 +22,8 @@ entry, which is the difference between a workspace and a record.
   present, `remove` means removed, `update` changes nothing. No
   row is ever edited.
 - The asset reference is an id, not a foreign key: the ledger is
-  history and history outlives the asset (the
-  `dispatch_job.output_asset_ids` stance). The candidate *set*
-  survives independently in the snapshot the cull freezes.
+  history and history outlives the asset (the same stance every
+  raw-layer row taking an id list holds).
 
 ## Functions
 

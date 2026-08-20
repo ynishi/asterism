@@ -68,11 +68,6 @@
       "docs": "`asset_comments` input."
     },
     {
-      "path": "asterism_server::mcp::AssetCullsParams",
-      "kind": "struct",
-      "docs": "`asset_culls` input."
-    },
-    {
       "path": "asterism_server::mcp::AssetLineageParams",
       "kind": "struct",
       "docs": "`asset_lineage` input — mirrors the HTTP `LineageParams` query pair\nplus the path segment."

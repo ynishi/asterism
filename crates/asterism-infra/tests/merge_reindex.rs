@@ -179,7 +179,6 @@ async fn fixture() -> Fixture {
         ),
         sessions,
         previews.path().to_path_buf(),
-        Arc::new(repo::SqlitePursuitRepository::new(isle.clone())),
     ));
 
     Fixture {
