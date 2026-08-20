@@ -25,9 +25,8 @@ sequence itself, not a second record of it.
   history like everything else.
 - [`LineEvent`] is one verb applied to one entry.
   [`LineVerb`] carries each verb's payload so a caller cannot
-  file an add without a name or a delete with an asset (the
-  `RestampSubject` stance); storage enforces the same pairing with
-  two-way CHECKs.
+  file an add without a name or a delete with an asset; storage
+  enforces the same pairing with two-way CHECKs.
 - [`Merge`] is the record that one satisfied close applied its
   verbs — approval *is* the merge event, so every event names the
   merge it landed under, and who approved derives through the
@@ -38,8 +37,8 @@ sequence itself, not a second record of it.
 A line *references* asset ids; it never annotates or mutates
 an asset (the PR #62 rule). A dead entry's asset row stays live and
 restorable — `delete` is a statement about the canonical set, not
-about bytes, the same distance `CullVerdict::Reject` keeps from
-trash.
+about bytes, and it keeps the same distance from trash that every
+other forge verb does.
 
 # Invariants (service-enforced, entity-checked where local)
 

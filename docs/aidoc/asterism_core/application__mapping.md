@@ -43,8 +43,6 @@ so on) live in `asterism-contract`'s crate docs.
 - `parse_message_ref` — Parses one wire `MessageRefDto` chip into an [`EntityRef`].
 - `parse_ms` — Parses a unix-epoch-milliseconds timestamp from the wire (returns a
 - `parse_persona_id` — Parses the wire representation of a persona id.
-- `parse_project_id` — Parses the wire representation of a project id.
-- `parse_pursuit_id` — Parses the wire representation of a pursuit id.
 - `parse_snapshot_id` — Parses the wire representation of a snapshot id.
 - `parse_tag_id` — Parses the wire representation of a tag id.
 - `parse_thread_anchor` — Parses a `(anchor_kind, anchor_id)` wire pair into a

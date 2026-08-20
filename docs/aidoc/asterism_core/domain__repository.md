@@ -4,6 +4,16 @@ Repository ports — the persistence traits declared here and implemented
 in `asterism-infra` (dependency inversion: trait declarations belong to
 the consuming crate).
 
+**The raw layer's ports, and only those.** The forge's are in
+[`domain::forge::repository`](crate::domain::forge::repository), so
+that adding one here does not mean opening the file that holds the
+forge's. The raw layer needs nothing of a pursuit.
+
+The rule the whole tree is measured against is one verb — *uses* —
+and it is stated once, in [`domain`](crate::domain). Doc links
+pointing at forge paths are prose about the boundary rather than a
+crossing of it; a `use` is the thing that counts.
+
 Every trait is `Send + Sync` because Tauri v2 uses a multi-threaded
 tokio runtime. Hot-path list / search methods return the `AssetCard`
 projection instead of full `Asset` entities.
@@ -58,8 +68,6 @@ projection instead of full `Asset` entities.
 - `PersonaRepository` — Persistence port for [`Persona`].
 - `PersonaThemeRepository` — Persistence port for [`PersonaTheme`]. The theme is a 1:1 side
 - `ProgressEmitter` — Port for pushing job progress to the UI. In Tauri, the adapter emits
-- `ProjectRepository` — Persistence port for the forge's project and its lines (#63
-- `PursuitRepository` — Persistence port for the pursuit family (#29): the minted unit of
 - `QueryGroupRepository` — Persistence port for the Query Group evaluation core.
 - `SeriesRepository` — Persistence port for the series axis — the [`Strategy`] rules
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality

@@ -70,7 +70,7 @@
     {
       "path": "asterism_contract::command::ClosePursuitCommand",
       "kind": "struct",
-      "docs": "Closes a pursuit (#29, verdicts on #22): records a one-way\nlifecycle fact, never a status write. A repeat close is a new fact\n— standing re-derives from the latest event.\n\nA `satisfied` close is where the cull is recorded: the candidate\nset is derived from the pursuit's own ledger (never supplied\nhere), frozen into a snapshot, and the verdicts below are resolved\nagainst it — a member removed mid-work and not spoken for culls as\n`reject`, an untouched member without a verdict gets no row, and\nthe kept set the event freezes is exactly the `keep` verdicts."
+      "docs": "Closes a pursuit (#29): records a one-way lifecycle fact, never a\nstatus write. A repeat close is a new fact — standing re-derives\nfrom the latest event.\n\nBoth outcomes record the ending and apply nothing else. Neither\nselects among the pursuit's members, and neither writes a snapshot\nonto the event: the close says the line of work ended, and the\nledger says what entered it."
     },
     {
       "path": "asterism_contract::command::ConflictResolution",
@@ -126,11 +126,6 @@
       "path": "asterism_contract::command::CreateThreadCommand",
       "kind": "struct",
       "docs": "Creates a Thread anchored to the given axis.\n\n`anchor_kind`:\n- `\"app_global\"` — the Home-tab Inbox / free-form axis.\n  `anchor_id` must be `None`.\n- `\"snapshot\"` — attaches to a Snapshot. `anchor_id` is required\n  and must reference an existing Snapshot.\n- `\"query_group\"` — attaches to a query Group. `anchor_id` is\n  required.\n- `\"card\"` — attaches to an Asset. `anchor_id` is required.\n\n`title` is trimmed; a blank / whitespace-only value is rejected."
-    },
-    {
-      "path": "asterism_contract::command::CullVerdictEntry",
-      "kind": "struct",
-      "docs": "One requested verdict within a `satisfied` close (#22)."
     },
     {
       "path": "asterism_contract::command::DeclareAssetMetaCommand",
@@ -315,7 +310,7 @@
     {
       "path": "asterism_contract::command::OpenPursuitCommand",
       "kind": "struct",
-      "docs": "Opens a pursuit explicitly — the \"start new pursuit\" affordance\n(#29). Optional: a dispatch arriving unstamped mints one anyway\n(always-mint); pre-creating simply lets the caller name the intent\nup front. An empty pursuit that never receives work is an honest\nrecord, closable as abandoned."
+      "docs": "Opens a pursuit — the \"start new pursuit\" affordance (#29), and\nthe only way one comes into being. A caller names the intent here,\nthen records what goes in through the ledger. An empty pursuit that\nnever receives work is an honest record, closable as abandoned."
     },
     {
       "path": "asterism_contract::command::OrganizeByLocationCommand",
@@ -483,11 +478,6 @@
       "docs": "Answers one duplicate question — the panel's confirm.\n\nWrites the answer onto the queue row and, for `folded`, enqueues the\nfold. Nothing is deleted either way: a closed row is the record that\nthe question was raised and ruled on, and it is also what keeps the\nsame pair from being asked again."
     },
     {
-      "path": "asterism_contract::command::RestampDispatchCommand",
-      "kind": "struct",
-      "docs": "Moves a dispatch's pursuit filing — the restamp repair verb (#29),\nfor when the carrying failed (a context-losing surface minted\nfragments, a pre-created pursuit was stranded). The move is\nrecorded with the prior filing it replaced — read on the server\ninside the same transaction that moves the stamp, so the record is\nnever stale — and it never touches what happened, never crosses\npersonas. The command carries no caller-observed `from`: a caller\nacting on an old view moves whatever filing is current\n(compare-and-swap against the caller's own read is a possible\nlater addition, not a promise this verb makes)."
-    },
-    {
       "path": "asterism_contract::command::RestoreAssetCommand",
       "kind": "struct",
       "docs": "Returns a trashed asset to the live set. Idempotent."
@@ -613,11 +603,6 @@
       "docs": "One row of a sidebar count aggregation — `(key, asset_count)`.\n\nThe `key` string carries different id shapes depending on the\naxis being counted (persona UUID for\n`list_persona_asset_counts`, modality slug for\n`list_modality_asset_counts`); the UI resolves it against the\naxis's own name map."
     },
     {
-      "path": "asterism_contract::dto::AssetCullDto",
-      "kind": "struct",
-      "docs": "One verdict about one asset, joined to the cull it belongs to\n(#22) — the acceptance read: who decided to keep or drop this\nasset, out of which set, in which line of work."
-    },
-    {
       "path": "asterism_contract::dto::AssetDetailDto",
       "kind": "struct",
       "docs": "Composite response for the detail view (asset + tags + edges)."
@@ -656,16 +641,6 @@
       "path": "asterism_contract::dto::ConstellationItemDto",
       "kind": "struct",
       "docs": "One hover-burst item — an edge paired with the card it lands on."
-    },
-    {
-      "path": "asterism_contract::dto::CullDto",
-      "kind": "struct",
-      "docs": "The record of one close's narrowing (#22): who decided what, out\nof which frozen candidate set. One cull per close event; a repeat\nclose reads as a second record, never an overwrite."
-    },
-    {
-      "path": "asterism_contract::dto::CullMemberDto",
-      "kind": "struct",
-      "docs": "One member's verdict within a cull (#22)."
     },
     {
       "path": "asterism_contract::dto::DERIVED_COVER_MAX_CHARS",
@@ -800,7 +775,7 @@
     {
       "path": "asterism_contract::dto::MaterialMarkDto",
       "kind": "struct",
-      "docs": "One mark placed into an Asset's material — the coordinate space its\ncontent carries, rather than the asset as a catalogue entry.\n\nThe anchor arrives flattened: a `anchor_kind` slug plus the columns\nthat kind populates. The alternative — a tagged sub-object — would\nput the wire shape at odds with both the storage row and the\n`AssetCommentDto` beside it, for a payload that is two integers wide.\n\n`body` / `author_kind` / `author_persona_id` / `created_at_ms` /\n`edited_at_ms` deliberately carry the same names and types as on\n[`AssetCommentDto`]: one note vocabulary, spelled once.\n\n**The band the mark sits in is not on this shape.** Every mark\nbelongs to a [`MaterialLayerDto`] — an annotation band, resolved for\nthe caller when the mark is placed — but no surface asks which one:\na person clicking a timeline is answering \"where\", not \"in which of\nmy passes over this file\", and the marks read back through\n`list_material_marks` are the asset's, not one band's. Adding\n`layer_id` here would be putting a field on the wire (and into the\ngenerated bindings, which are tracked) before anything reads it, and\na field nobody reads is one nobody notices going wrong. It arrives\nwhen a surface offers a second annotation band to choose between."
+      "docs": "One mark placed into an Asset's material — the coordinate space its\ncontent carries, rather than the asset as a row.\n\nThe anchor arrives flattened: a `anchor_kind` slug plus the columns\nthat kind populates. The alternative — a tagged sub-object — would\nput the wire shape at odds with both the storage row and the\n`AssetCommentDto` beside it, for a payload that is two integers wide.\n\n`body` / `author_kind` / `author_persona_id` / `created_at_ms` /\n`edited_at_ms` deliberately carry the same names and types as on\n[`AssetCommentDto`]: one note vocabulary, spelled once.\n\n**The band the mark sits in is not on this shape.** Every mark\nbelongs to a [`MaterialLayerDto`] — an annotation band, resolved for\nthe caller when the mark is placed — but no surface asks which one:\na person clicking a timeline is answering \"where\", not \"in which of\nmy passes over this file\", and the marks read back through\n`list_material_marks` are the asset's, not one band's. Adding\n`layer_id` here would be putting a field on the wire (and into the\ngenerated bindings, which are tracked) before anything reads it, and\na field nobody reads is one nobody notices going wrong. It arrives\nwhen a surface offers a second annotation band to choose between."
     },
     {
       "path": "asterism_contract::dto::MergeAssetsDto",
@@ -1065,12 +1040,7 @@
     {
       "path": "asterism_contract::sidecar::SIDECAR_IDENTITY_KEY",
       "kind": "constant",
-      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"pursuit_id\": \"<PursuitId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```\n\n`pursuit_id` (#29) is present when the dispatch carried its stamp:\nthe dispatch names the hop the file travelled through, the pursuit\nnames the line of work it belongs to. On re-ingest both are\n**claims** — recorded in `_trace` and resolved independently. The\nrule the membership read follows (a later slice of #29): where the\ndispatch join and a sidecar copy disagree, the dispatch row's own\nstamp answers, because the copy can be stale after a restamp."
-    },
-    {
-      "path": "asterism_contract::sidecar::SIDECAR_PURSUIT_ID_FIELD",
-      "kind": "constant",
-      "docs": "Field inside the identity block naming the pursuit (the line of\nwork, #29). Same silent-divergence reasoning as\n[`SIDECAR_DISPATCH_ID_FIELD`]."
+      "docs": "Key under which a sidecar carries the export's own identity.\n\nUnderscore-prefixed so it cannot collide with an `AssetCardDto`\nfield name, present or future.\n\nThe value is an object:\n\n```json\n{\n  \"schema\": \"asterism.sidecar/1\",\n  \"dispatch_id\": \"<DispatchId>\",\n  \"exporter_slug\": \"file\",\n  \"source_asset_id\": \"<AssetId>\"\n}\n```"
     },
     {
       "path": "asterism_contract::sidecar::SIDECAR_SCHEMA",

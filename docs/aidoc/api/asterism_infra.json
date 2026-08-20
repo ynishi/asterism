@@ -800,7 +800,7 @@
     {
       "path": "asterism_infra::sqlite::repo::pursuit",
       "kind": "module",
-      "docs": "SQLite adapter for the `PursuitRepository` port (#29, extended by\n#22).\n\nSix tables, one concern: `pursuit` (thin, immutable, insert-only),\n`pursuit_event` (append-only lifecycle facts), `pursuit_restamp`\n(the recorded repair verb), `pursuit_tx` (the append-only\nmembership ledger), and `cull` / `cull_member` (the record of a\nclose's narrowing). The multi-table writes — restamp, and the\nclose-with-cull — each run in a single transaction here, because\n\"the move is recorded\" and \"the stamp moved\" (respectively \"the\npursuit closed\" and \"this is what it decided\") must not be\nseparable facts."
+      "docs": "SQLite adapter for the `PursuitRepository` port (#29, extended by\n#22).\n\nThree tables, one concern: `pursuit` (thin, immutable,\ninsert-only), `pursuit_event` (append-only lifecycle facts), and\n`pursuit_tx` (the append-only membership ledger). Every write here\nlands on one table; nothing in this adapter spans two."
     },
     {
       "path": "asterism_infra::sqlite::repo::pursuit::SqlitePursuitRepository",

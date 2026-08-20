@@ -104,7 +104,7 @@ here without choosing.
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
-- `open_pursuit` — Opens a pursuit and names what it is for, ahead of the first round.
+- `open_pursuit` — Opens a pursuit and names what it is for, ahead of any work in it.
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -117,7 +117,7 @@ here without choosing.
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
 - `purge_persona` — Permanently deletes an already-trashed persona and everything it
 - `pursuit_events` — A pursuit's lifecycle facts, oldest first.
-- `pursuit_view` — One pursuit opened up: the row and its standing, the rounds filed
+- `pursuit_view` — One pursuit opened up: the row and its standing, its events, and its
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -136,7 +136,6 @@ here without choosing.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.
 - `reset_setting` — Clears one setting override and returns the value that now applies.
 - `resolve_duplicate_conflict` — Answers one duplicate question — `folded` (queues the fold onto
-- `restamp_dispatch` — Re-files a dispatch round under another pursuit, recording the filing
 - `restore_asset` — Returns a trashed asset to the live set.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.

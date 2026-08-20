@@ -460,7 +460,7 @@
     {
       "path": "asterism_ui::commands::open_pursuit",
       "kind": "function",
-      "docs": "Opens a pursuit and names what it is for, ahead of the first round.\n\nNot required to have one: a dispatch started without a `pursuit_id`\nmints its own. This is the \"start a new line of work\" affordance, and\nthe path that creates a pursuit at an id a returning artefact already\nclaims."
+      "docs": "Opens a pursuit and names what it is for, ahead of any work in it.\n\nThis is the \"start a new line of work\" affordance, and the path that\ncreates a pursuit at an id it was known by elsewhere."
     },
     {
       "path": "asterism_ui::commands::paste_image_import",
@@ -525,7 +525,7 @@
     {
       "path": "asterism_ui::commands::pursuit_view",
       "kind": "function",
-      "docs": "One pursuit opened up: the row and its standing, the rounds filed\nunder it, the returns that resolved to it, and its events."
+      "docs": "One pursuit opened up: the row and its standing, its events, and its\nledger."
     },
     {
       "path": "asterism_ui::commands::random_assets",
@@ -616,11 +616,6 @@
       "path": "asterism_ui::commands::resolve_duplicate_conflict",
       "kind": "function",
       "docs": "Answers one duplicate question — `folded` (queues the fold onto\n`keeper_id`, which must be one of the pair) or `kept` (both rows\nstay). Refused when the row was already answered or when either\nside has since been folded away or trashed."
-    },
-    {
-      "path": "asterism_ui::commands::restamp_dispatch",
-      "kind": "function",
-      "docs": "Re-files a dispatch round under another pursuit, recording the filing\nit replaced. The repair verb for work that landed in the wrong line;\nwhat happened in the round is untouched and the move never crosses\npersonas."
     },
     {
       "path": "asterism_ui::commands::restore_asset",

@@ -40,9 +40,9 @@ its URI.
 
 There is no `Unknown` variant. An artefact whose origin nothing
 established gets no `DigitalSourceType` property at all — the same
-doctrine
+reading
 [`attribution`](crate::domain::attribution)
-states for an absent author: absence is a question nobody has
+gives an absent author: absence is a question nobody has
 answered, and a vocabulary term meaning "we do not know" would be an
 answer. It also matters legally in the one direction that is not
 symmetric: a missing mark on a synthetic file is a gap, while a wrong

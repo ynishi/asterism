@@ -56,9 +56,10 @@ the private design notes.
 - [`application::asset_comment_service`](application__asset_comment_service.md): `AssetCommentService` — thread lifecycle on an Asset.
 - [`application::asset_service`](application__asset_service.md): `AssetService` — asset lifecycle, grid reads, and detail views.
 - [`application::disclosure_service`](application__disclosure_service.md): Building an artefact's disclosure out of the library, and putting it
+- [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
-- [`application::forge::dispatch_service`](application__forge__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
+- [`application::forge::mapping`](application__forge__mapping.md): Wire parsing for the forge's own ids.
 - [`application::forge::project_service`](application__forge__project_service.md): Project use cases — opening the context work files under, and
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): `PursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
@@ -101,12 +102,13 @@ the private design notes.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
 - [`domain::embedded_text`](domain__embedded_text.md): `embedded_text` — the words a container wrote *into* an artefact,
-- [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the catalogue: a line
-- [`domain::forge::cull`](domain__forge__cull.md): `Cull` — the record of one close's narrowing (#22, model on #63):
+- [`domain::forge`](domain__forge.md): The forge layer — the intentional history over the raw layer: a line
 - [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
 - [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
+- [`domain::forge::repository`](domain__forge__repository.md): The forge's persistence ports.
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
+- [`domain::forge::value`](domain__forge__value.md): The forge's surrogate ids.
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.

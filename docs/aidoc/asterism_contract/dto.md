@@ -12,7 +12,6 @@ the domain types.
 - `AssetCardDto` — Lightweight card representation used on the grid (wire form of
 - `AssetCommentDto` — One comment attached to an Asset.
 - `AssetCountEntryDto` — One row of a sidebar count aggregation — `(key, asset_count)`.
-- `AssetCullDto` — One verdict about one asset, joined to the cull it belongs to
 - `AssetDetailDto` — Composite response for the detail view (asset + tags + edges).
 - `AssetDto` — Full asset payload used on the detail view.
 - `AssetIndexEntryDto` — Index-only wire form for 6-figure grids.
@@ -21,8 +20,6 @@ the domain types.
 - `AssetTextDto` — Full source text of one asset, resolved from the original
 - `ChapterMarkDto` — One named section of a material — an entry in a chapter list.
 - `ConstellationItemDto` — One hover-burst item — an edge paired with the card it lands on.
-- `CullDto` — The record of one close's narrowing (#22): who decided what, out
-- `CullMemberDto` — One member's verdict within a cull (#22).
 - `DerivedDto` — One thing an exporter produced, ready for the core to reify
 - `DiagDto` — One persisted diagnostic (`GET /asterism/diag`).
 - `DirDto` — A sidebar organisation folder. Dirs contain dirs and groups —
