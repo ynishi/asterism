@@ -28,6 +28,19 @@ and this project adheres to
 
 ### Added
 
+- **The forge has a model of its own** (#63). A line is a repository — the top
+  of the forge, with one canonical history and everything on it derived by
+  folding that history. A history begins at a genesis and grows by one change
+  point at a time, each carrying a table of rows over three axes: existence,
+  content, name. Order is the parent chain's, never a clock's, so two nodes
+  minted in the same millisecond are still ordered and a clock that steps
+  backwards changes nothing. Two entries cannot answer to one name, judged after
+  the whole table is applied — handing a name from one entry to another in a
+  single change point is one gesture rather than a collision. Nothing removes
+  anything: taking an entry off the line is a change point that says so, and
+  what was dropped stays readable. Domain only for now — no storage, no
+  transport, nothing wired.
+
 - **The digital source type can be asserted by hand** (#23). The last route of
   the provenance policy: an artefact this app generated is known synthetic, an
   imported declaration is trusted, and what is neither is unknown — until the
@@ -699,6 +712,12 @@ and this project adheres to
 - **Issue labels.** `CONTRIBUTING.md` names four categories — `bug`,
   `enhancement`, `refactor`, `chore` — and asks for at least one on every issue.
   `refactor` and `chore` are new to this repository.
+
+### Deprecated
+
+- **`ProjectService` and `PursuitService`** (#63). They serve the shapes the new
+  forge model replaces: a project grouping lines inside the forge, and a
+  membership ledger over assets. Nothing new is added to either.
 
 ### Changed
 
