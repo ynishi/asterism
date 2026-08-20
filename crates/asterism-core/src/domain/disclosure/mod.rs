@@ -58,15 +58,26 @@
 //! author. A missing mark on a synthetic file is a gap; a wrong mark on
 //! one is a false statement, and only the second is unrecoverable.
 //!
-//! Two terms have no automatic producer and are not reachable from here
-//! at all.
+//! Two terms have no automatic producer and are never inferred.
 //! [`HumanEdits`](DigitalSourceType::HumanEdits)
 //! would have to be inferred from the *absence* of a machine, which
 //! manufactures exactly the evidence a copyright claim needs it to
 //! record.
 //! [`AlgorithmicMedia`](DigitalSourceType::AlgorithmicMedia)
 //! needs a producer that says so about itself, and none in this corpus
-//! does. Both remain assertable by hand.
+//! does. Both are assertable by hand, and only by hand.
+//!
+//! # Asserted, and then signed verbatim
+//!
+//! The hand-assertion route ([`SOURCE_TYPE_KEY`],
+//! [`asserted_source_type`]) is the person's own voice in the table
+//! above, and it outranks every row of it: the certificate the
+//! manifest is signed under is theirs, so their explicit statement is
+//! the claim. The ordinary use is the artefact nothing established —
+//! the scanned film, the file whose metadata a pipeline stripped —
+//! where the assertion is the only voice there is. A parent carrying
+//! one reads as *declared* ([`ParentOrigin::declared`]), never as
+//! unknown.
 
 pub mod outcome;
 pub mod record;
@@ -130,6 +141,24 @@ pub enum ParentOrigin {
     /// The parent's container declares nothing either way. A statement
     /// about the caller's knowledge, not about the file.
     Unknown,
+}
+
+impl ParentOrigin {
+    /// The origin a person's asserted term declares.
+    ///
+    /// An assertion is a declaration on the same footing as the
+    /// container's own — that is the point of taking one — so it maps
+    /// onto the same two sides the container evidence does, by the term
+    /// vocabulary's own reading of "synthetic". It can never map to
+    /// [`Unknown`](Self::Unknown): a person who asserted a term has
+    /// answered the question.
+    pub fn declared(ty: DigitalSourceType) -> Self {
+        if ty.is_synthetic() {
+            Self::Synthetic
+        } else {
+            Self::NotSynthetic
+        }
+    }
 }
 
 /// What a parent contributes to its child's disclosure.
@@ -248,6 +277,40 @@ pub fn declared_origin(meta_kv: Option<&str>) -> ParentOrigin {
 /// with the moment added by whoever recorded it.
 pub const DISCLOSURE_NOTE_KEY: &str = "disclosure";
 
+/// Key under which a person's source-type assertion is recorded, inside
+/// `extra.`[`_trace`](crate::domain::provenance::TRACE_KEY).
+///
+/// This is the hand-assertion route the module docs promise: for an
+/// artefact whose container declares nothing, the signer states what it
+/// is, and the statement is signed verbatim — their claim, under their
+/// certificate. Beside the other keys here for the reason
+/// [`DISCLOSURE_NOTE_KEY`] is: the module that owns the concept owns
+/// the spelling.
+///
+/// The value is an [`album_meta::entry`]-shaped statement — `value`
+/// (the term's URI; the verb accepts the short name too but stores the
+/// spelling every emitter writes), `source`, `operator`,
+/// `declared_at_ms` — written by the declare verb and read back by
+/// [`asserted_source_type`].
+///
+/// [`album_meta::entry`]: crate::domain::album_meta::entry
+pub const SOURCE_TYPE_KEY: &str = "source_type";
+
+/// The source type a person asserted on this asset, if any.
+///
+/// Reads the statement [`SOURCE_TYPE_KEY`] files. A value that does not
+/// parse as a term reads as no assertion rather than an error: the
+/// declare verb refuses unknown terms at the door, so an unreadable
+/// stored value is damage, and damage must not fabricate a claim.
+pub fn asserted_source_type(extra: &serde_json::Value) -> Option<DigitalSourceType> {
+    extra
+        .get(crate::domain::provenance::TRACE_KEY)?
+        .get(SOURCE_TYPE_KEY)?
+        .get("value")?
+        .as_str()
+        .and_then(|value| DigitalSourceType::parse(value).ok())
+}
+
 /// Whether an artefact's prompt is disclosed in the exported file.
 ///
 /// # Why this is a parameter and not a constant
@@ -330,14 +393,16 @@ pub enum PromptDisclosure {
 ///
 /// `meta_kv` is the canonical metadata of the material the file came
 /// from; `parents` are its recorded `derived_from` edges, in the order
-/// they were read; `prompts` decides whether the prompt is disclosed at
-/// all ([`PromptDisclosure`]).
+/// they were read; `asserted` is the person's own source-type statement
+/// when one is recorded ([`asserted_source_type`]); `prompts` decides
+/// whether the prompt is disclosed at all ([`PromptDisclosure`]).
 pub fn record_for(
     asset_id: &str,
     title: Option<&str>,
     dispatch_id: Option<&str>,
     meta_kv: Option<&str>,
     parents: &[ParentEvidence],
+    asserted: Option<DigitalSourceType>,
     prompts: PromptDisclosure,
 ) -> DisclosureRecord {
     let evidence = meta_kv.map(read_evidence).unwrap_or_default();
@@ -351,7 +416,7 @@ pub fn record_for(
         record = record.with_title(title);
     }
 
-    if evidence.generated {
+    let evidence_type = if evidence.generated {
         // A parent *declared* non-synthetic is the whole difference
         // between the two terms — it is what makes this a model
         // altering material that did not come from one. Declared, not
@@ -360,7 +425,7 @@ pub fn record_for(
         // put that assertion into a signed claim. When every parent is
         // synthetic or unknown, the term stays at what the child's own
         // container states.
-        record = record.with_source_type(
+        Some(
             if parents
                 .iter()
                 .any(|p| p.origin == ParentOrigin::NotSynthetic)
@@ -369,7 +434,30 @@ pub fn record_for(
             } else {
                 DigitalSourceType::TrainedAlgorithmicMedia
             },
-        );
+        )
+    } else if evidence.captured {
+        Some(DigitalSourceType::DigitalCapture)
+    } else {
+        None
+    };
+
+    // The person's assertion outranks the container's word. The
+    // certificate the manifest is signed under is theirs, so their
+    // explicit statement is the claim — signed verbatim, whatever the
+    // container carries. The ordinary use is the artefact nothing
+    // established, where the assertion is the only voice; the override
+    // is the person correcting a container that is wrong about their
+    // own work, which is theirs to do and theirs to answer for.
+    let source_type = asserted.or(evidence_type);
+    if let Some(source_type) = source_type {
+        record = record.with_source_type(source_type);
+    }
+
+    // The generator's own statements ride only under a term that admits
+    // a generator. `AISystemUsed` or a prompt beside a term the signer
+    // chose precisely to say "no model made this" would put the
+    // container's contradiction into their signed claim.
+    if evidence.generated && source_type.is_some_and(|ty| ty.is_synthetic()) {
         if let Some(system) = evidence.system {
             // No version: neither family states one under a keyword of
             // its own, and digging one out of a free-text blob would be
@@ -379,8 +467,6 @@ pub fn record_for(
         if let (PromptDisclosure::Embed, Some(prompt)) = (prompts, evidence.prompt) {
             record = record.with_prompt(prompt);
         }
-    } else if evidence.captured {
-        record = record.with_source_type(DigitalSourceType::DigitalCapture);
     }
 
     record
@@ -418,6 +504,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -439,6 +526,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(record.ai_system.as_deref(), Some("ComfyUI"));
@@ -456,6 +544,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -481,6 +570,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(record.prompt, None);
@@ -500,6 +590,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", ParentOrigin::NotSynthetic)],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -507,6 +598,115 @@ mod tests {
             Some(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia)
         );
         assert_eq!(record.parents, vec!["parent-1".to_string()]);
+    }
+
+    #[test]
+    fn an_assertion_speaks_where_nothing_was_established() {
+        // The ordinary use of the hand-assertion route: a container
+        // that declares nothing, and a person who knows what the file
+        // is. Their term is the record's term.
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            None,
+            &[],
+            Some(DigitalSourceType::DigitalCapture),
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(record.source_type, Some(DigitalSourceType::DigitalCapture));
+    }
+
+    #[test]
+    fn an_assertion_outranks_the_container() {
+        // The certificate is the signer's, so their explicit statement
+        // is the claim. And the generator's own statements do not ride
+        // under a term chosen to say no model made this: an
+        // `AISystemUsed` beside `humanEdits` would sign the
+        // contradiction.
+        let meta_kv = meta(&[(
+            "parameters",
+            "1girl, purple eyes\nNegative prompt: blurry\nSteps: 20",
+        )]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            Some(DigitalSourceType::HumanEdits),
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(record.source_type, Some(DigitalSourceType::HumanEdits));
+        assert_eq!(record.ai_system, None);
+        assert_eq!(record.prompt, None);
+    }
+
+    #[test]
+    fn a_synthetic_assertion_keeps_the_generators_own_statements() {
+        // Asserting the term the evidence already implies changes
+        // nothing else: the system name and the prompt are the
+        // container's own statements and a synthetic term admits them.
+        let meta_kv = meta(&[("workflow", "{}")]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[],
+            Some(DigitalSourceType::TrainedAlgorithmicMedia),
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(
+            record.source_type,
+            Some(DigitalSourceType::TrainedAlgorithmicMedia)
+        );
+        assert_eq!(record.ai_system.as_deref(), Some("ComfyUI"));
+    }
+
+    #[test]
+    fn an_asserted_term_reads_back_and_damage_reads_as_no_assertion() {
+        let extra = serde_json::json!({
+            "_trace": { "source_type": { "value": "digitalCapture" } }
+        });
+        assert_eq!(
+            asserted_source_type(&extra),
+            Some(DigitalSourceType::DigitalCapture)
+        );
+        // The declare verb refuses unknown terms at the door, so an
+        // unreadable stored value is damage — and damage must not
+        // fabricate a claim.
+        for damaged in [
+            serde_json::json!({ "_trace": { "source_type": { "value": "notATerm" } } }),
+            serde_json::json!({ "_trace": { "source_type": "digitalCapture" } }),
+            serde_json::json!({ "_trace": {} }),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(asserted_source_type(&damaged), None, "for {damaged}");
+        }
+    }
+
+    #[test]
+    fn a_declared_term_maps_onto_the_two_sides_a_container_declares() {
+        assert_eq!(
+            ParentOrigin::declared(DigitalSourceType::TrainedAlgorithmicMedia),
+            ParentOrigin::Synthetic
+        );
+        assert_eq!(
+            ParentOrigin::declared(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia),
+            ParentOrigin::Synthetic
+        );
+        // The vocabulary's own reading: no trained model stands behind
+        // any of the three, so a child over them is a model altering
+        // material that did not come from one.
+        for ty in [
+            DigitalSourceType::AlgorithmicMedia,
+            DigitalSourceType::DigitalCapture,
+            DigitalSourceType::HumanEdits,
+        ] {
+            assert_eq!(ParentOrigin::declared(ty), ParentOrigin::NotSynthetic);
+        }
     }
 
     #[test]
@@ -522,6 +722,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", ParentOrigin::Unknown)],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -569,6 +770,7 @@ mod tests {
                 parent("parent-1", ParentOrigin::Unknown),
                 parent("parent-2", ParentOrigin::NotSynthetic),
             ],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -591,6 +793,7 @@ mod tests {
                 parent("parent-1", ParentOrigin::Synthetic),
                 parent("parent-2", ParentOrigin::Synthetic),
             ],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -612,6 +815,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(record.source_type, Some(DigitalSourceType::DigitalCapture));
@@ -631,6 +835,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[parent("parent-1", ParentOrigin::NotSynthetic)],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -648,7 +853,15 @@ mod tests {
             Some("not json"),
             Some(r#"{"Software":"GIMP"}"#),
         ] {
-            let record = record_for("asset-1", None, None, meta_kv, &[], PromptDisclosure::Embed);
+            let record = record_for(
+                "asset-1",
+                None,
+                None,
+                meta_kv,
+                &[],
+                None,
+                PromptDisclosure::Embed,
+            );
             assert_eq!(record.source_type, None, "for {meta_kv:?}");
             assert!(!record.discloses_anything(), "for {meta_kv:?}");
         }
@@ -681,6 +894,7 @@ mod tests {
             Some("dispatch-1"),
             None,
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert_eq!(record.asset_id, "asset-1");
@@ -707,6 +921,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Withhold,
         );
         assert_eq!(withheld.prompt, None);
@@ -726,6 +941,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         assert!(embedded.prompt.is_some());
@@ -749,6 +965,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Embed,
         );
         let prompt = embedded.prompt.expect("embedded");
@@ -761,6 +978,7 @@ mod tests {
             None,
             Some(&meta_kv),
             &[],
+            None,
             PromptDisclosure::Withhold,
         );
         assert_eq!(withheld.prompt, None);

@@ -381,6 +381,61 @@ async fn a_generated_child_of_a_generated_parent_is_not_a_composite() {
     fx.close().await;
 }
 
+/// A hand-asserted parent is a declared one, never an unknown one — the
+/// acceptance bar the assertion route carries on #23. The scanned
+/// photograph: no container metadata at all, its owner asserts
+/// `digitalCapture`, and the child over it becomes an honest composite
+/// where an unasserted parent would have left it trained.
+#[tokio::test]
+async fn an_asserted_parent_turns_its_child_into_a_composite() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let scan = fx.seed_asset(persona, None, None).await;
+    let child = fx.seed_asset(persona, None, Some(&comfy())).await;
+    fx.seed_derived_from(child, scan).await;
+
+    // The same statement `declare_source_type` files, written through
+    // the repository: these fixtures are about what the disclosure
+    // service reads back, and the verb's own validation has its tests
+    // beside the verb.
+    let mut parent = fx.assets.find(&scan).await.unwrap().unwrap();
+    parent.extra = serde_json::json!({
+        "_trace": { "source_type": { "value": "digitalCapture", "source": "manual" } }
+    });
+    fx.assets.save(&parent).await.unwrap();
+
+    let record = fx.service.record_for(&child, None).await.unwrap();
+    assert_eq!(
+        record.source_type,
+        Some(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia),
+        "a declared non-model parent is what makes the composite claim honest"
+    );
+    fx.close().await;
+}
+
+/// An assertion on the exported asset itself outranks its container:
+/// the signer's explicit statement is the claim, signed verbatim.
+#[tokio::test]
+async fn an_asserted_child_signs_the_signers_term() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let asset = fx.seed_asset(persona, None, Some(&comfy())).await;
+
+    let mut row = fx.assets.find(&asset).await.unwrap().unwrap();
+    row.extra = serde_json::json!({
+        "_trace": { "source_type": { "value": "humanEdits", "source": "manual" } }
+    });
+    fx.assets.save(&row).await.unwrap();
+
+    let record = fx.service.record_for(&asset, None).await.unwrap();
+    assert_eq!(record.source_type, Some(DigitalSourceType::HumanEdits));
+    assert_eq!(
+        record.ai_system, None,
+        "the generator's statements do not ride under a term chosen to deny one"
+    );
+    fx.close().await;
+}
+
 /// A parent that declared nothing does not turn the child into a
 /// composite: composite asserts that material from outside a model is
 /// in the file, and an unknown parent is not evidence of that.
