@@ -1277,6 +1277,20 @@ and this project adheres to
 
 ### Fixed
 
+- **An unknown parent no longer makes its child a composite** (#23). The fork
+  between `trainedAlgorithmicMedia` and `compositeWithTrainedAlgorithmicMedia`
+  read a `bool`, so a parent that declared nothing — no metadata, an unreadable
+  blob — counted the same as one that declared a camera, and the manifest
+  claimed "a model altered material that did not come from one" about a parent
+  nobody knows anything about. Parent evidence is now three-valued
+  (`ParentOrigin`: declared synthetic, declared non-synthetic, unknown):
+  composite requires a positively declared non-model parent, and an unknown
+  parent moves nothing — the term stays at what the child's own container
+  states. This follows the provenance policy recorded on #23: the app's own
+  generation path is known synthetic, imported declarations are trusted as the
+  user's responsibility, and everything else is unknown — signed only as what
+  the signer explicitly states, never converted into an assertion by a default.
+
 - **The disclosure rewrite is durable, not merely atomic** (#23). The staged
   rewrite — temporary in the target's directory, then a rename — was atomic in
   the namespace and nothing more: no `fsync` before the rename, so on power loss
