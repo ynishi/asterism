@@ -1211,9 +1211,10 @@ rust-test-pkg +packages:
 # to `cargo test` verbatim.
 #
 # The edit loop's recipe. `rust-test-pkg` is still a whole crate, and a
-# crate is not a small unit here: `asterism-core` builds 413 tests and
-# `asterism-server` links 44 separate integration binaries, so "narrow"
-# at package granularity is still minutes for a one-line change. Nothing
+# crate is not a small unit here: `asterism-core` builds its whole unit
+# suite and `asterism-server` links every one of its integration
+# binaries, so "narrow" at package granularity is still minutes for a
+# one-line change. Nothing
 # above this line could say *which* test, and that is what makes the
 # gates unusable while actually writing code.
 #
@@ -1508,14 +1509,14 @@ rust-test-changed:
     # `cargo test -p asterism-ui` still links the Tauri stack on top of
     # `asterism-core` and `asterism-infra` before running none. On the
     # branch that added this, seven lines of import churn in that crate
-    # cost more wall clock than the other five packages together.
+    # cost more wall clock than every other package it touched together.
     #
     # Named, not inferred — the call `changed-packages` already makes
     # for `scripts/check-commit-msg.py`, for the same reason. Deciding
     # this by pattern-matching sources reads "no match" and "could not
     # look" as one answer, and has to keep up with every spelling of a
     # test attribute: this tree writes
-    # `#[tokio::test(flavor = "multi_thread")]` 167 times, which the
+    # `#[tokio::test(flavor = "multi_thread")]` throughout, which the
     # obvious pattern misses. Both mistakes point the expensive way — a
     # suite that never ran, reported green.
     #
