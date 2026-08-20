@@ -42,10 +42,14 @@
 //!
 //! | evidence in the container | term |
 //! |---|---|
-//! | a generator's own keys, and every recorded parent is itself synthetic (or there are none) | `trainedAlgorithmicMedia` |
-//! | a generator's own keys, and some recorded parent is **not** synthetic | `compositeWithTrainedAlgorithmicMedia` |
+//! | a generator's own keys, and no recorded parent declares a non-model origin | `trainedAlgorithmicMedia` |
+//! | a generator's own keys, and some recorded parent **declares** a non-model origin | `compositeWithTrainedAlgorithmicMedia` |
 //! | no generator keys, but EXIF names a camera | `digitalCapture` |
 //! | none of the above | nothing is written |
+//!
+//! Declares, in the second row: a parent whose container says nothing
+//! is unknown ([`ParentOrigin::Unknown`]), and unknown moves nothing —
+//! it is a statement about what the caller knows, not about the file.
 //!
 //! The last row is the important one. An artefact nothing established
 //! gets no `DigitalSourceType` property, which is a different statement
@@ -108,22 +112,43 @@ mod capture_keys {
 /// for one once a generator key has established that there is one.
 const SOFTWARE: &str = "Software";
 
+/// What a parent's own container declares about how it was made.
+///
+/// Three values, not two. The `bool` this replaces read a parent that
+/// declared nothing the same as one that declared a camera, and the
+/// difference is the whole question: a declaration is somebody's claim,
+/// carried into the manifest on their word, while absence is a question
+/// nobody has answered. Converting the second into the first would put
+/// words into a signed claim that no evidence said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParentOrigin {
+    /// The parent's container declares that a generator made it.
+    Synthetic,
+    /// The parent's container positively declares an origin outside a
+    /// model — today, capture metadata naming a camera.
+    NotSynthetic,
+    /// The parent's container declares nothing either way. A statement
+    /// about the caller's knowledge, not about the file.
+    Unknown,
+}
+
 /// What a parent contributes to its child's disclosure.
 ///
-/// Only one bit of it matters, and the caller establishes that bit the
-/// same way this module establishes it for the child: by looking at the
-/// parent's own stored metadata ([`is_synthetic`]).
+/// The caller establishes the origin the same way this module
+/// establishes the child's: from the parent's own stored metadata
+/// ([`declared_origin`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParentEvidence {
     /// The parent's id, as it will appear in the manifest.
     pub asset_id: String,
-    /// Whether a generator produced the parent.
+    /// What the parent's container declares about its origin.
     ///
     /// This is what separates "a model made this" from "a model altered
     /// a photograph": a synthetic child of a synthetic parent is still
-    /// `trainedAlgorithmicMedia`, and only a non-synthetic parent turns
-    /// it into a composite.
-    pub synthetic: bool,
+    /// `trainedAlgorithmicMedia`, and only a parent *declared*
+    /// non-synthetic turns it into a composite. An unknown parent moves
+    /// nothing.
+    pub origin: ParentOrigin,
 }
 
 /// What a container's metadata establishes about how a file was made.
@@ -186,13 +211,28 @@ pub fn read_evidence(meta_kv: &str) -> ContainerEvidence {
     }
 }
 
-/// Whether a container's metadata says a generator made the file.
+/// What a container's metadata declares about the file's origin.
 ///
-/// The same question [`read_evidence`] answers, exposed on its own
-/// because it is what a caller asks about a *parent* — establishing the
-/// one bit of [`ParentEvidence`] without materialising the rest.
-pub fn is_synthetic(meta_kv: Option<&str>) -> bool {
-    meta_kv.is_some_and(|meta_kv| read_evidence(meta_kv).generated)
+/// The parent-side reading of [`read_evidence`], exposed on its own
+/// because it is what a caller asks about a *parent* — establishing
+/// [`ParentEvidence::origin`] without materialising the rest. A blob
+/// whose keys declare a generator is [`Synthetic`](ParentOrigin);
+/// one that names a camera and no generator is
+/// [`NotSynthetic`](ParentOrigin); no metadata, an unreadable blob, or
+/// keys that say neither is [`Unknown`](ParentOrigin) — and stays so,
+/// because absence is not a declaration.
+pub fn declared_origin(meta_kv: Option<&str>) -> ParentOrigin {
+    let Some(meta_kv) = meta_kv else {
+        return ParentOrigin::Unknown;
+    };
+    let evidence = read_evidence(meta_kv);
+    if evidence.generated {
+        ParentOrigin::Synthetic
+    } else if evidence.captured {
+        ParentOrigin::NotSynthetic
+    } else {
+        ParentOrigin::Unknown
+    }
 }
 
 /// Key under which what became of an artefact's disclosure is recorded,
@@ -312,14 +352,24 @@ pub fn record_for(
     }
 
     if evidence.generated {
-        // A parent that is not itself synthetic is the whole difference
+        // A parent *declared* non-synthetic is the whole difference
         // between the two terms — it is what makes this a model
-        // altering material that did not come from one.
-        record = record.with_source_type(if parents.iter().any(|p| !p.synthetic) {
-            DigitalSourceType::CompositeWithTrainedAlgorithmicMedia
-        } else {
-            DigitalSourceType::TrainedAlgorithmicMedia
-        });
+        // altering material that did not come from one. Declared, not
+        // merely undeclared: composite asserts that outside material is
+        // in the file, and a parent nobody knows anything about cannot
+        // put that assertion into a signed claim. When every parent is
+        // synthetic or unknown, the term stays at what the child's own
+        // container states.
+        record = record.with_source_type(
+            if parents
+                .iter()
+                .any(|p| p.origin == ParentOrigin::NotSynthetic)
+            {
+                DigitalSourceType::CompositeWithTrainedAlgorithmicMedia
+            } else {
+                DigitalSourceType::TrainedAlgorithmicMedia
+            },
+        );
         if let Some(system) = evidence.system {
             // No version: neither family states one under a keyword of
             // its own, and digging one out of a free-text blob would be
@@ -348,10 +398,10 @@ mod tests {
         serde_json::to_string(&fields).unwrap()
     }
 
-    fn parent(id: &str, synthetic: bool) -> ParentEvidence {
+    fn parent(id: &str, origin: ParentOrigin) -> ParentEvidence {
         ParentEvidence {
             asset_id: id.to_string(),
-            synthetic,
+            origin,
         }
     }
 
@@ -449,7 +499,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
-            &[parent("parent-1", false)],
+            &[parent("parent-1", ParentOrigin::NotSynthetic)],
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -457,6 +507,74 @@ mod tests {
             Some(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia)
         );
         assert_eq!(record.parents, vec!["parent-1".to_string()]);
+    }
+
+    #[test]
+    fn a_generated_child_of_an_unknown_parent_stays_trained_algorithmic_media() {
+        // Composite asserts that material from outside a model is in
+        // the file. A parent that declared nothing is not evidence of
+        // that — absence converted into the assertion would be a signed
+        // claim no evidence made.
+        let meta_kv = meta(&[("workflow", "{}")]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[parent("parent-1", ParentOrigin::Unknown)],
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(
+            record.source_type,
+            Some(DigitalSourceType::TrainedAlgorithmicMedia)
+        );
+        assert_eq!(record.parents, vec!["parent-1".to_string()]);
+    }
+
+    #[test]
+    fn declared_origin_reads_a_declaration_and_never_invents_one() {
+        // A generator's keys declare a generator; a camera's keys with
+        // no generator declare a capture; anything else is unknown —
+        // including a generator beside a camera, where the generator's
+        // processing is the later word.
+        assert_eq!(
+            declared_origin(Some(&meta(&[("workflow", "{}")]))),
+            ParentOrigin::Synthetic
+        );
+        assert_eq!(
+            declared_origin(Some(&meta(&[("exif:0x010f", "Canon")]))),
+            ParentOrigin::NotSynthetic
+        );
+        assert_eq!(
+            declared_origin(Some(&meta(&[("workflow", "{}"), ("exif:0x010f", "Canon")]))),
+            ParentOrigin::Synthetic
+        );
+        assert_eq!(declared_origin(Some(&meta(&[]))), ParentOrigin::Unknown);
+        assert_eq!(declared_origin(Some("not json")), ParentOrigin::Unknown);
+        assert_eq!(declared_origin(None), ParentOrigin::Unknown);
+    }
+
+    #[test]
+    fn one_declared_non_synthetic_parent_composites_beside_unknowns() {
+        // Unknown neighbours do not dilute a declaration: one parent
+        // that declares outside material is enough, however many others
+        // said nothing.
+        let meta_kv = meta(&[("workflow", "{}")]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &[
+                parent("parent-1", ParentOrigin::Unknown),
+                parent("parent-2", ParentOrigin::NotSynthetic),
+            ],
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(
+            record.source_type,
+            Some(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia)
+        );
     }
 
     #[test]
@@ -469,7 +587,10 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
-            &[parent("parent-1", true), parent("parent-2", true)],
+            &[
+                parent("parent-1", ParentOrigin::Synthetic),
+                parent("parent-2", ParentOrigin::Synthetic),
+            ],
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -509,7 +630,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
-            &[parent("parent-1", false)],
+            &[parent("parent-1", ParentOrigin::NotSynthetic)],
             PromptDisclosure::Embed,
         );
         assert_eq!(
@@ -534,15 +655,20 @@ mod tests {
     }
 
     #[test]
-    fn the_parent_bit_is_read_the_same_way_the_child_is() {
-        // `is_synthetic` is what a caller uses to build `ParentEvidence`,
-        // so it has to agree with the evidence reader the child goes
-        // through — otherwise a parent could be synthetic as a parent
-        // and not as an asset.
+    fn the_parent_origin_is_read_the_same_way_the_child_is() {
+        // `declared_origin` is what a caller uses to build
+        // `ParentEvidence`, so it has to agree with the evidence reader
+        // the child goes through — otherwise a parent could be
+        // synthetic as a parent and not as an asset. And an editor's
+        // `Software` keyword is not a declaration either way: GIMP on
+        // its own leaves the origin unknown, the same reading the child
+        // gets.
         let generated = meta(&[("workflow", "{}")]);
-        assert!(is_synthetic(Some(&generated)));
-        assert!(!is_synthetic(Some(&meta(&[("Software", "GIMP")]))));
-        assert!(!is_synthetic(None));
+        assert_eq!(declared_origin(Some(&generated)), ParentOrigin::Synthetic);
+        assert_eq!(
+            declared_origin(Some(&meta(&[("Software", "GIMP")]))),
+            ParentOrigin::Unknown
+        );
     }
 
     #[test]
