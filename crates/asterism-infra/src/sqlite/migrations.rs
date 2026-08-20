@@ -6326,7 +6326,7 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
 /// naming no row on the way in either.
 ///
 /// SQLite cannot drop a constraint, so this is the canonical rebuild —
-/// `CREATE dispatch_job_v86` → `INSERT … SELECT` → drop → rename →
+/// `CREATE dispatch_job_v87` → `INSERT … SELECT` → drop → rename →
 /// recreate every index — in the V31 / V38 shape, and specifically the
 /// V82 `pursuit_restamp` shape for a rebuild whose whole purpose is a
 /// constraint. Two things that rebuild did not have to handle:
@@ -6352,14 +6352,14 @@ ALTER TABLE asset_comment ADD COLUMN gesture TEXT
 /// re-declared on the new table, and a copy that landed a row past one
 /// of them surfaces here rather than at the next write.
 fn v87_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
-    tx.execute_batch(V86_DISPATCH_STAMP_UNBOUND)?;
+    tx.execute_batch(V87_DISPATCH_STAMP_UNBOUND)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
     let mut rows = stmt.query([])?;
     if rows.next()?.is_some() {
         return Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-            Some("v86: foreign_key_check reported violations after the rebuild".into()),
+            Some("v87: foreign_key_check reported violations after the rebuild".into()),
         ));
     }
     Ok(())
@@ -6370,8 +6370,8 @@ fn v87_dispatch_stamp_is_a_value(tx: &Transaction<'_>) -> Result<(), rusqlite::E
 /// history (V19's rebuild, then V48, V50, V79, V83) rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
 /// nothing.
-const V86_DISPATCH_STAMP_UNBOUND: &str = r#"
-CREATE TABLE dispatch_job_v86 (
+const V87_DISPATCH_STAMP_UNBOUND: &str = r#"
+CREATE TABLE dispatch_job_v87 (
     id                BLOB PRIMARY KEY,
     snapshot_id       BLOB NOT NULL REFERENCES snapshot(id) ON DELETE RESTRICT,
     persona_id        BLOB NOT NULL REFERENCES persona(id) ON DELETE CASCADE,
@@ -6399,7 +6399,7 @@ CREATE TABLE dispatch_job_v86 (
     attempt_payload   TEXT
 ) STRICT;
 
-INSERT INTO dispatch_job_v86
+INSERT INTO dispatch_job_v87
        (id, snapshot_id, persona_id, exporter_slug, action, params_json,
         state_slug, state_message, progress_current, progress_total,
         handle_kind, handle_payload, output_asset_ids, created_at,
@@ -6415,7 +6415,7 @@ SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json,
   FROM dispatch_job;
 
 DROP TABLE dispatch_job;
-ALTER TABLE dispatch_job_v86 RENAME TO dispatch_job;
+ALTER TABLE dispatch_job_v87 RENAME TO dispatch_job;
 
 CREATE INDEX idx_dispatch_persona_created
     ON dispatch_job(persona_id, created_at DESC);
@@ -6467,14 +6467,14 @@ CREATE INDEX idx_dispatch_pursuit
 /// the rebuild, since a table going away is exactly what would leave a
 /// dangling edge if anything still pointed at one.
 fn v88_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
-    tx.execute_batch(V87_DROP_CLOSE_RECORD)?;
+    tx.execute_batch(V88_DROP_CLOSE_RECORD)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
     let mut rows = stmt.query([])?;
     if rows.next()?.is_some() {
         return Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-            Some("v87: foreign_key_check reported violations after the drop".into()),
+            Some("v88: foreign_key_check reported violations after the drop".into()),
         ));
     }
     Ok(())
@@ -6483,11 +6483,11 @@ fn v88_drop_the_close_record(tx: &Transaction<'_>) -> Result<(), rusqlite::Error
 /// DDL half of V88 — see [`v88_drop_the_close_record`] for the
 /// choices. The member table goes first: it is the side that holds the
 /// edge.
-const V87_DROP_CLOSE_RECORD: &str = r#"
+const V88_DROP_CLOSE_RECORD: &str = r#"
 DROP TABLE cull_member;
 DROP TABLE cull;
 
-CREATE TABLE pursuit_restamp_v87 (
+CREATE TABLE pursuit_restamp_v88 (
     id              BLOB PRIMARY KEY,
     subject_kind    TEXT NOT NULL
         CHECK (subject_kind IN ('dispatch')),
@@ -6501,9 +6501,9 @@ CREATE TABLE pursuit_restamp_v87 (
     created_at      INTEGER NOT NULL
 ) STRICT;
 
-INSERT INTO pursuit_restamp_v87 SELECT * FROM pursuit_restamp;
+INSERT INTO pursuit_restamp_v88 SELECT * FROM pursuit_restamp;
 DROP TABLE pursuit_restamp;
-ALTER TABLE pursuit_restamp_v87 RENAME TO pursuit_restamp;
+ALTER TABLE pursuit_restamp_v88 RENAME TO pursuit_restamp;
 
 CREATE INDEX idx_pursuit_restamp_subject
     ON pursuit_restamp(subject_kind, subject_id);
@@ -6570,7 +6570,7 @@ DROP TABLE pursuit_restamp;
 /// The two halves need different tools:
 ///
 /// - `dispatch_job` gets the canonical rebuild — `CREATE
-///   dispatch_job_v89` → `INSERT … SELECT` → drop → rename → recreate
+///   dispatch_job_v90` → `INSERT … SELECT` → drop → rename → recreate
 ///   every index — in the V87 shape it rebuilt for the constraint, one
 ///   column shorter. Every column is named on both sides for the
 ///   reason V87 gives: a twenty-four-column list should fail loudly
@@ -6594,14 +6594,14 @@ DROP TABLE pursuit_restamp;
 /// re-declared on the new table, and a copy that landed a row past one
 /// of them surfaces here rather than at the next write.
 fn v90_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
-    tx.execute_batch(V89_DROP_THE_PURSUIT_STAMP)?;
+    tx.execute_batch(V90_DROP_THE_PURSUIT_STAMP)?;
 
     let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
     let mut rows = stmt.query([])?;
     if rows.next()?.is_some() {
         return Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
-            Some("v89: foreign_key_check reported violations after the rebuild".into()),
+            Some("v90: foreign_key_check reported violations after the rebuild".into()),
         ));
     }
     Ok(())
@@ -6612,8 +6612,8 @@ fn v90_drop_the_pursuit_stamp(tx: &Transaction<'_>) -> Result<(), rusqlite::Erro
 /// read off the migration history rather than off
 /// `DispatchRow::COLUMNS`, which is a read order and owes this table
 /// nothing.
-const V89_DROP_THE_PURSUIT_STAMP: &str = r#"
-CREATE TABLE dispatch_job_v89 (
+const V90_DROP_THE_PURSUIT_STAMP: &str = r#"
+CREATE TABLE dispatch_job_v90 (
     id                BLOB PRIMARY KEY,
     snapshot_id       BLOB NOT NULL REFERENCES snapshot(id) ON DELETE RESTRICT,
     persona_id        BLOB NOT NULL REFERENCES persona(id) ON DELETE CASCADE,
@@ -6640,7 +6640,7 @@ CREATE TABLE dispatch_job_v89 (
     attempt_payload   TEXT
 ) STRICT;
 
-INSERT INTO dispatch_job_v89
+INSERT INTO dispatch_job_v90
        (id, snapshot_id, persona_id, exporter_slug, action, params_json,
         state_slug, state_message, progress_current, progress_total,
         handle_kind, handle_payload, output_asset_ids, created_at,
@@ -6656,7 +6656,7 @@ SELECT id, snapshot_id, persona_id, exporter_slug, action, params_json,
   FROM dispatch_job;
 
 DROP TABLE dispatch_job;
-ALTER TABLE dispatch_job_v89 RENAME TO dispatch_job;
+ALTER TABLE dispatch_job_v90 RENAME TO dispatch_job;
 
 CREATE INDEX idx_dispatch_persona_created
     ON dispatch_job(persona_id, created_at DESC);
