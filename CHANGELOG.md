@@ -1292,7 +1292,12 @@ and this project adheres to
   replaced it — "written, not yet crash-durable" rather than "not written", and
   a re-apply on that error is a repeat, not a loss, since the disclosure is
   derived from rows. No size threshold and no setting, because "whether power
-  loss eats your original" is not a property that should depend on either.
+  loss eats your original" is not a property that should depend on either. On
+  Apple platforms the syncs mean more than they read: macOS's plain `fsync`
+  stops at the drive's volatile cache, so the standard library issues
+  `fcntl(F_FULLFSYNC)` for `sync_all` there — a real flush, with no fallback, so
+  a volume that cannot promise it (an SMB share, some enclosures) errors and the
+  stamp stops, the same stance as every other fsync failure.
 
 - **The stamp says what it withheld, and a stamp racing the fingerprint is
   refused instead of writing an unmarked file** (#23). The last two correctness
