@@ -89,12 +89,13 @@
 //! surfaces both layers write to.
 //!
 //! Background: the workflow design on #21, implemented by #29 and #34.
-//! The full domain model this layer is growing toward — mainline,
-//! targeted IN, merge-on-close — is drafted on #63.
+//! The domain model this layer is growing toward is #63, and its
+//! canonical half is [`model`].
 //!
 //! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
 pub mod line;
+pub mod model;
 pub mod project;
 pub mod pursuit;
 pub mod repository;
