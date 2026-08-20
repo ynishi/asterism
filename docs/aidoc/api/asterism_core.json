@@ -1105,7 +1105,7 @@
     {
       "path": "asterism_core::domain::disclosure::record::DisclosureRecord",
       "kind": "struct",
-      "docs": "What one exported artefact will disclose.\n\nBuilt through [`for_asset`](Self::for_asset) and the `with_*` chain\nso that adding a field cannot silently produce a record where a\ncaller's positional argument moved."
+      "docs": "What one exported artefact will disclose.\n\nBuilt through [`for_asset`](Self::for_asset) and the `with_*` chain\nso that adding a field cannot silently produce a record where a\ncaller's positional argument moved.\n\nDeliberately no `Default`: it would construct the one state the\nfield docs forbid — a record with an empty `asset_id` — and that\nrecord reaches a signed assertion nobody can correct afterwards."
     },
     {
       "path": "asterism_core::domain::disclosure::record_for",
