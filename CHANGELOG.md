@@ -10,6 +10,22 @@ and this project adheres to
 
 ### Added
 
+- **The digital source type can be asserted by hand** (#23). The last route of
+  the provenance policy: an artefact this app generated is known synthetic, an
+  imported declaration is trusted, and what is neither is unknown — until the
+  signer states what it is, and the statement is signed verbatim, their claim
+  under their certificate. `POST /asterism/assets/{id}/source-type` records the
+  IPTC term (URI or short name; unknown terms are refused at the door, since
+  everything downstream signs this verbatim), an absent `source_type` retracts
+  it, and the assertion outranks the container when both speak — with the
+  generator's own statements (`AISystemUsed`, the prompt) dropped under a term
+  chosen to say no model made this, so the container's contradiction never
+  enters the signed claim. A parent carrying an assertion reads as declared,
+  never unknown: assert `digitalCapture` on a scanned photograph with no
+  metadata at all, and the generated child over it becomes an honest
+  `compositeWithTrainedAlgorithmicMedia` where an unasserted parent would have
+  left it `trainedAlgorithmicMedia`.
+
 - **The signing key can live in the macOS Keychain** (#23).
   `ASTERISM_DISCLOSURE_KEYCHAIN_KEY` names a private key by its Keychain label,
   in place of the key-file path — one of the two, never both. The key —
