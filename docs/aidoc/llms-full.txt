@@ -139,6 +139,7 @@ convert them into domain types and surface any validation failures as
 - `CreateThreadCommand` — Creates a Thread anchored to the given axis.
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
+- `DeclareSourceTypeCommand` — Declares — or retracts — the asset's digital source type by hand.
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
 - `DeleteChapterMarkCommand` — Removes one section from a structure band the person owns.
 - `DeleteDirCommand` — Deletes an **empty** Dir. Rejected while the dir still contains
@@ -2867,18 +2868,30 @@ from every term in the vocabulary — the same reading
 author. A missing mark on a synthetic file is a gap; a wrong mark on
 one is a false statement, and only the second is unrecoverable.
 
-Two terms have no automatic producer and are not reachable from here
-at all.
+Two terms have no automatic producer and are never inferred.
 [`HumanEdits`](DigitalSourceType::HumanEdits)
 would have to be inferred from the *absence* of a machine, which
 manufactures exactly the evidence a copyright claim needs it to
 record.
 [`AlgorithmicMedia`](DigitalSourceType::AlgorithmicMedia)
 needs a producer that says so about itself, and none in this corpus
-does. Both remain assertable by hand.
+does. Both are assertable by hand, and only by hand.
+
+# Asserted, and then signed verbatim
+
+The hand-assertion route ([`SOURCE_TYPE_KEY`],
+[`asserted_source_type`]) is the person's own voice in the table
+above, and it outranks every row of it: the certificate the
+manifest is signed under is theirs, so their explicit statement is
+the claim. The ordinary use is the artefact nothing established —
+the scanned film, the file whose metadata a pipeline stripped —
+where the assertion is the only voice there is. A parent carrying
+one reads as *declared* ([`ParentOrigin::declared`]), never as
+unknown.
 
 ## Functions
 
+- `asserted_source_type` — The source type a person asserted on this asset, if any.
 - `declared_origin` — What a container's metadata declares about the file's origin.
 - `read_evidence` — Reads the canonical metadata object a probe stored.
 - `record_for` — Builds the record for one artefact.
@@ -2893,6 +2906,7 @@ does. Both remain assertable by hand.
 ## Constants
 
 - `DISCLOSURE_NOTE_KEY` — Key under which what became of an artefact's disclosure is recorded,
+- `SOURCE_TYPE_KEY` — Key under which a person's source-type assertion is recorded, inside
 
 
 <!-- asterism_core/domain__disclosure__outcome.md -->

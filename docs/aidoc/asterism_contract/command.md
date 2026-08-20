@@ -35,6 +35,7 @@ convert them into domain types and surface any validation failures as
 - `CreateThreadCommand` — Creates a Thread anchored to the given axis.
 - `DeclareAssetMetaCommand` — Records — or removes — one AlbumMeta statement on an asset.
 - `DeclareProvenanceCommand` — Declares (or repairs) the origin of an asset that is already in
+- `DeclareSourceTypeCommand` — Declares — or retracts — the asset's digital source type by hand.
 - `DeleteAssetCommentCommand` — Deletes an `AssetComment` by id. Idempotent.
 - `DeleteChapterMarkCommand` — Removes one section from a structure band the person owns.
 - `DeleteDirCommand` — Deletes an **empty** Dir. Rejected while the dir still contains
