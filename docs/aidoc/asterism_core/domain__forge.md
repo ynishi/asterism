@@ -52,12 +52,18 @@ records that the line of work ended and selects nothing out of it.
   (dedupe, lineage, restore) an ambiguity to inherit.
 - **Intent lives only here.** `title` and `note` are forge
   properties; a core row may record who wrote it but never *why*.
-  The actor triple is **not** a forge property —
-  [`Asset`](crate::domain::asset::Asset) carries it too, so
+  Who wrote something is **not** a forge property either —
+  [`Asset`](crate::domain::asset::Asset) records it too, so
   [`attribution`](crate::domain::attribution) is a core module the
   forge uses rather than one it owns. Moving it here would make
   `Asset::new` depend on the forge, which is the arrow above turned
   around.
+
+  What the forge does own is its own word for it. A node records an
+  [`Actor`](model::act::Actor) — a handle and a kind — because the
+  forge's actors include a line's own rule, which is not a person
+  and cannot be written as one. Who a handle stands for is asked
+  through [`boundary::Actors`], and answered outside.
 - **The core does not need the forge.** Importing, deduplicating,
   rating and trashing all work with no pursuit in sight. Sending
   anything out is the raw layer's own business, and the forge has
@@ -91,8 +97,9 @@ whether or not anybody is pursuing anything.
 surfaces both layers write to.
 
 Background: the workflow design on #21, implemented by #29 and #34.
-The full domain model this layer is growing toward — mainline,
-targeted IN, merge-on-close — is drafted on #63.
+The domain model this layer is growing toward is #63, and [`model`]
+is where it is written down — both logs, and the one act that moves
+them together.
 
 [`Snapshot`]: crate::domain::snapshot::Snapshot
 

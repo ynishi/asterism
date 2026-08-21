@@ -1,0 +1,36 @@
+# asterism-core::application::forge::line_service
+
+Line use cases — opening one, reading what is on it, and moving its
+own description.
+
+```text
+  open / rename / set_strategy      writes the line's description
+  get / states / strategies         reads
+```
+
+Nothing here writes to a line's history. A line moves when work
+ends, and that is [`PursuitService::close`](super::PursuitService),
+which is also the only place both logs are written at once.
+
+# What this service is allowed to decide
+
+Nothing. It loads, calls the model, and writes back what came out.
+The two checks it does make are not judgements: that a line exists
+before it is written to, and that the rule a caller names is one
+this deployment carries. Both are lookups with one answer.
+
+# Choosing a rule is a real choice
+
+[`LineService::strategies`] exists so that it can be made. A line
+settles collisions by a rule, and the rules differ in what happens
+to somebody's work — so the list a person picks from is built from
+the rules themselves, and every one of them says what it does.
+
+There is no fallback for a name nothing answers to. A line settled
+by whatever rule happened to be available would be settled by a
+rule nobody chose, and no record would say so.
+
+## Types
+
+- `LineService` — Line use-case service.
+
