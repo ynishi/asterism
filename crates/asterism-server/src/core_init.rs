@@ -487,7 +487,7 @@ pub struct CoreCtx {
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
     /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
-    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
+    pub legacy_pursuit_service: Arc<asterism_core::application::forge::LegacyPursuitService>,
     /// The context those pursuits file under, and the owner of the
     /// line their satisfied closes land on (#63).
     pub project_service: Arc<asterism_core::application::forge::ProjectService>,
@@ -1101,12 +1101,14 @@ pub async fn init_core_with(
     ));
     // Lifecycle verbs of the unit of work (#29). No snapshot service
     // here: the close records a fact and freezes nothing.
-    let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
-        pursuits.clone(),
-        projects.clone(),
-        personas.clone(),
-        assets_arc.clone(),
-    ));
+    let legacy_pursuit_service = Arc::new(
+        asterism_core::application::forge::LegacyPursuitService::new(
+            pursuits.clone(),
+            projects.clone(),
+            personas.clone(),
+            assets_arc.clone(),
+        ),
+    );
     // The context those pursuits file under (#63). No lifecycle of its
     // own: opened, read, and everything that happens to it happens
     // through the pursuits filed under it.
@@ -1246,7 +1248,7 @@ pub async fn init_core_with(
         thumb_service: Arc::new(ThumbService::new(Arc::new(thumbs))),
         snapshot_service,
         dispatch_service,
-        pursuit_service,
+        legacy_pursuit_service,
         project_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),

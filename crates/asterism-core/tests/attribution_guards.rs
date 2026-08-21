@@ -371,22 +371,64 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "project_service::list",
         "read — a persona's projects, each with its lines",
     ),
-    // ---- pursuit_service: reads (#29)
+    // ---- legacy_pursuit_service: reads (#29)
     (
-        "pursuit_service::get",
+        "legacy_pursuit_service::get",
         "read — one pursuit plus its derived standing",
     ),
     (
-        "pursuit_service::events",
+        "legacy_pursuit_service::events",
         "read — a pursuit's lifecycle facts, oldest first",
     ),
     (
-        "pursuit_service::list",
+        "legacy_pursuit_service::list",
         "read — a persona's pursuits with derived standing",
     ),
     (
-        "pursuit_service::view",
+        "legacy_pursuit_service::view",
         "read — one pursuit with its events and ledger",
+    ),
+    // ---- line_service: reads (#63)
+    (
+        "line_service::get",
+        "read — one line, history included, because the rules the model \
+         holds are about the chain",
+    ),
+    (
+        "line_service::states",
+        "read — what is on the line, folded out of its history on the spot",
+    ),
+    (
+        "line_service::strategies",
+        "read — the rules a line can be pointed at, built from the rules \
+         this instance carries so that somebody can choose one",
+    ),
+    (
+        "line_service::list",
+        "read — every line there is, unscoped, because a line carries \
+         no owner for this layer to scope by",
+    ),
+    // ---- pursuit_service: reads (#63)
+    (
+        "pursuit_service::get",
+        "read — one line of work with every pass on it",
+    ),
+    (
+        "pursuit_service::collisions",
+        "read — what this work writes that the line has moved since, \
+         derived from the two logs on every call and stored nowhere",
+    ),
+    (
+        "pursuit_service::of_line",
+        "read — every piece of work against a line, ended work included",
+    ),
+    (
+        "pursuit_service::children",
+        "read — the work filed under a larger piece of work, one level",
+    ),
+    (
+        "pursuit_service::behind",
+        "read — what the line has recorded since this work was cut from it",
     ),
     // ---- provenance_service
     (

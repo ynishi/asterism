@@ -103,7 +103,7 @@ async fn open(
     parent: Option<&str>,
     title: Option<&str>,
 ) -> asterism_contract::dto::PursuitDto {
-    core.pursuit_service
+    core.legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: persona_id.to_string(),
@@ -123,7 +123,7 @@ async fn open(
 /// Brings an asset into a pursuit's ledger (`in` / `imported` — the
 /// seeded fixtures came from outside).
 async fn tx_in(core: &CoreCtx, pursuit_id: &str, asset_id: &str) {
-    core.pursuit_service
+    core.legacy_pursuit_service
         .record_tx(
             RecordPursuitTxCommand {
                 pursuit_id: pursuit_id.to_string(),
@@ -144,7 +144,7 @@ async fn close(
     pursuit_id: &str,
     outcome: &str,
 ) -> Result<asterism_contract::dto::PursuitEventDto, asterism_core::DomainError> {
-    core.pursuit_service
+    core.legacy_pursuit_service
         .close(
             ClosePursuitCommand {
                 pursuit_id: pursuit_id.to_string(),
@@ -174,7 +174,7 @@ async fn open_names_intent_and_walls_parenthood() {
 
     let stranger = register(&core, "open-stranger").await;
     let crossing = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: stranger.id.clone(),
@@ -212,7 +212,7 @@ async fn close_records_the_fact_and_leaves_the_ledger_where_it_is() {
         "the close freezes nothing: {closed:?}"
     );
     assert_eq!(
-        core.pursuit_service
+        core.legacy_pursuit_service
             .get(&pursuit.id)
             .await
             .unwrap()
@@ -223,7 +223,7 @@ async fn close_records_the_fact_and_leaves_the_ledger_where_it_is() {
     // What the line of work was on is still readable afterwards,
     // because the close never touched it.
     let view = core
-        .pursuit_service
+        .legacy_pursuit_service
         .view(&pursuit.id)
         .await
         .expect("view the closed pursuit");
@@ -250,7 +250,7 @@ async fn either_outcome_records_a_fact_and_the_latest_one_wins() {
         .expect("a repeat close is a new fact, not an error");
     assert_eq!(abandoned.snapshot_id, None);
     assert_eq!(
-        core.pursuit_service
+        core.legacy_pursuit_service
             .get(&pursuit.id)
             .await
             .unwrap()
@@ -269,7 +269,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
     close(&core, &pursuit.id, "satisfied")
         .await
         .expect("first close");
-    core.pursuit_service
+    core.legacy_pursuit_service
         .reopen(
             ReopenPursuitCommand {
                 pursuit_id: pursuit.id.clone(),
@@ -281,7 +281,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
         .await
         .expect("reopen");
     assert_eq!(
-        core.pursuit_service
+        core.legacy_pursuit_service
             .get(&pursuit.id)
             .await
             .unwrap()
@@ -294,7 +294,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
         .expect("second close");
 
     let history: Vec<String> = core
-        .pursuit_service
+        .legacy_pursuit_service
         .events(&pursuit.id)
         .await
         .expect("history")
@@ -308,7 +308,7 @@ async fn the_log_is_append_only_and_standing_is_a_projection() {
     );
 
     let listed = core
-        .pursuit_service
+        .legacy_pursuit_service
         .list(&persona.id, 10)
         .await
         .expect("list");
@@ -339,7 +339,7 @@ async fn a_closed_pursuit_is_a_standing_and_not_a_lock() {
     // The view composes what the record holds: the close fact, and the
     // gesture the close did not refuse.
     let opened = core
-        .pursuit_service
+        .legacy_pursuit_service
         .view(&target.id)
         .await
         .expect("view the pursuit");

@@ -276,7 +276,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
     // names — that is the point of it: an export is a raw-layer verb
     // and puts nothing into a line of work.
     let pursuit = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: persona.id.clone(),
@@ -357,7 +357,7 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
     // work at all. Asserted here because this is the only harness that
     // drives a real reify with a recording queue.
     let filed = core
-        .pursuit_service
+        .legacy_pursuit_service
         .view(&pursuit.id)
         .await
         .expect("view the pursuit the export never named");

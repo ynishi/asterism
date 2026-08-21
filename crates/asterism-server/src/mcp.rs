@@ -574,7 +574,12 @@ impl AsterismMcp {
                 Ok(attribution) => attribution,
                 Err(err) => return Ok(domain_error(err)),
             };
-        match self.ctx.pursuit_service.open(command, &attribution).await {
+        match self
+            .ctx
+            .legacy_pursuit_service
+            .open(command, &attribution)
+            .await
+        {
             Ok(pursuit) => ok_json(&pursuit),
             Err(err) => Ok(domain_error(err)),
         }
@@ -592,7 +597,12 @@ impl AsterismMcp {
                 Ok(attribution) => attribution,
                 Err(err) => return Ok(domain_error(err)),
             };
-        match self.ctx.pursuit_service.close(command, &attribution).await {
+        match self
+            .ctx
+            .legacy_pursuit_service
+            .close(command, &attribution)
+            .await
+        {
             Ok(event) => ok_json(&event),
             Err(err) => Ok(domain_error(err)),
         }
@@ -610,7 +620,12 @@ impl AsterismMcp {
                 Ok(attribution) => attribution,
                 Err(err) => return Ok(domain_error(err)),
             };
-        match self.ctx.pursuit_service.reopen(command, &attribution).await {
+        match self
+            .ctx
+            .legacy_pursuit_service
+            .reopen(command, &attribution)
+            .await
+        {
             Ok(event) => ok_json(&event),
             Err(err) => Ok(domain_error(err)),
         }
@@ -623,7 +638,12 @@ impl AsterismMcp {
         &self,
         Parameters(params): Parameters<PursuitViewParams>,
     ) -> Result<CallToolResult, McpError> {
-        match self.ctx.pursuit_service.view(&params.pursuit_id).await {
+        match self
+            .ctx
+            .legacy_pursuit_service
+            .view(&params.pursuit_id)
+            .await
+        {
             Ok(view) => ok_json(&view),
             Err(err) => Ok(domain_error(err)),
         }
@@ -643,7 +663,7 @@ impl AsterismMcp {
             };
         match self
             .ctx
-            .pursuit_service
+            .legacy_pursuit_service
             .record_tx(command, &attribution)
             .await
         {

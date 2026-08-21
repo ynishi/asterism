@@ -28,6 +28,87 @@ and this project adheres to
 
 ### Added
 
+- **The forge has a model of its own** (#63). A line is a repository — the top
+  of the forge, with one canonical history and everything on it derived by
+  folding that history. A history begins at a genesis and grows by one change
+  point at a time, each carrying a table of rows over three axes: existence,
+  content, name. Order is the parent chain's, never a clock's, so two nodes
+  minted in the same millisecond are still ordered and a clock that steps
+  backwards changes nothing. Two entries cannot answer to one name, judged after
+  the whole table is applied — handing a name from one entry to another in a
+  single change point is one gesture rather than a collision. Nothing removes
+  anything: taking an entry off the line is a change point that says so, and
+  what was dropped stays readable. Domain only for now — no storage, no
+  transport, nothing wired.
+
+- **Work can be put on a line, and the two are one act** (#63). The other half
+  of the forge's model, and the layer that drives it. Work opens against a line,
+  cut from wherever the line is at that moment, and writes passes that never
+  read the line — the operation that happens most often is the one that cannot
+  contend with anybody. What a pass asks for only means something measured
+  against a line, and that happens when the work ends: ending it as satisfied
+  produces the close and the change point together, in one value that cannot be
+  taken apart, written through one call that keeps all of it or none of it.
+  Neither constructor is reachable from outside the model, so a satisfied close
+  without its change point is not a thing that can be built. A close that loses
+  the head is not reported: the line is read again and the ending decided again,
+  against the line as it now is, which is a fresh answer rather than the same
+  one retried.
+
+  A collision is an axis this work's request would move that the line moved
+  after the work was cut, and that is the whole definition. It is computed from
+  the two logs whenever it is asked, never stored, so nothing can go stale and
+  there is no flag to clear — and nothing in it mentions what anybody looked at,
+  because the model keeps no record of reading. What clears a collision is the
+  work asking for something else, which means **an axis stops colliding only
+  when the work stops asking for it**: requesting the same value a second time
+  changes nothing, since a fold keeps the last value and not the arguments for
+  it.
+
+  Resolving is therefore ordinary work, and automatic resolution writes what a
+  person would have written by hand, in the same four verbs, into an ordinary
+  pass. Five rules ship and a line names one — keep the line's version and carry
+  this work's onto a new entry; keep this work's under the contested name and
+  move the line's aside; put both aside and take the old entry off; write this
+  work's version down and then remove it, so what was tried stays readable; or
+  write nothing and leave the collision standing for somebody to answer. Rules
+  say what they do, so choosing one is a choice somebody makes rather than a
+  default they inherit. What a rule returns is checked rather than trusted: the
+  model folds it in and refuses the rule if the collisions it was asked about
+  are still there. What a rule writes is recorded as the server rather than as
+  the person who asked for it.
+
+  Who did a thing is the forge's own word now: a handle, and whether it was a
+  person or the server. What the handle stands for — which authenticated user,
+  which instance — is asked through a new face and answered outside, because the
+  binding has not happened yet and a node that recorded today's answer would
+  have to be rewritten the day the real one arrives. The cost is stated where it
+  is paid: a forge node no longer records which agent carried an operation out.
+  Time is asked for rather than read, alone among this codebase's services,
+  because a timestamp here is evidence in a record that never moves and nothing
+  orders anything by it — so a wrong one breaks nothing and misleads for good.
+
+  Work can be discussed as well as done. A thread hangs off a pursuit, one pass,
+  one entry as one pass had it, or what landed — the four things worth remarking
+  on — and it is the forge's own rather than the annotation surface the layer
+  below has, which anchors to snapshots and cards and could not learn these four
+  without learning what a pursuit is. The entry anchor names the pass as well as
+  the entry, so a remark about one attempt does not follow that entry into every
+  other pursuit it is ever carried into. Nothing is overwritten: a correction
+  appends a revision and every earlier wording stays readable. Nothing is
+  resolved either — whether a remark is dealt with is a word people use about
+  their work rather than a shape the record has, so a later message says it.
+
+  Lines can be listed, work can be found by the line it is against, and work
+  filed under a larger piece of work can be found by its parent — the last one a
+  plain omission, since a pursuit has named its parent since it was written and
+  nothing could read it back. Ended work is in those listings, because a listing
+  that showed only what is open would hide what was tried and abandoned.
+
+  Still domain and application only: no storage, no transport. The service the
+  new one replaces has been renamed `LegacyPursuitService`, since what is
+  leaving should carry the qualified name.
+
 - **JSON documents share an identity across member order** (#16). A whole
   `.json` file now declares `application/json` and takes a content-axis digest
   (`cr1-`) over a stated canonical reading: member order and inter-token
@@ -713,6 +794,12 @@ and this project adheres to
 - **Issue labels.** `CONTRIBUTING.md` names four categories — `bug`,
   `enhancement`, `refactor`, `chore` — and asks for at least one on every issue.
   `refactor` and `chore` are new to this repository.
+
+### Deprecated
+
+- **`ProjectService` and `PursuitService`** (#63). They serve the shapes the new
+  forge model replaces: a project grouping lines inside the forge, and a
+  membership ledger over assets. Nothing new is added to either.
 
 ### Changed
 
