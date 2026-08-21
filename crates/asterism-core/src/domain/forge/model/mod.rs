@@ -119,10 +119,13 @@
 //! vocabulary.
 //!
 //! Every one of those imports is marked `SHARED KERNEL` at its `use`
-//! line, tests included, so grepping that phrase lists every edge out
-//! of this module that stays inside this crate. Nothing else reaches
-//! out: no line of this module names storage, a port, a transaction,
-//! or a type from the raw layer.
+//! line, which is worth reading where it sits. It is not what holds
+//! the rule: a new import written without the comment is invisible to
+//! a grep, and that is the case that matters. What holds it is
+//! `tests/forge_boundary.rs`, which reads every line of forge code
+//! that is not a test and refuses anything the forge is not entitled
+//! to name — so the list of what may cross is checked whether or not
+//! anybody remembered to mark it.
 //!
 //! Three third-party crates come too, and the grep does not list them
 //! because they are not this crate's to hand over: `uuid`, `chrono`,

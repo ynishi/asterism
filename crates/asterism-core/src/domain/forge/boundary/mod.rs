@@ -87,6 +87,18 @@
 //! the forge's words; the contract sees only its own. Neither of them
 //! has to know the other exists.
 //!
+//! # What holds this
+//!
+//! `tests/forge_boundary.rs` reads every line of forge code that is
+//! not a test and refuses anything named outside the forge that is not
+//! on a list with a reason beside it. Until the forge is a crate, that
+//! test is the arrow: a module boundary stops nothing, and
+//! `use crate::domain::asset::Asset` in a model file compiles today.
+//!
+//! It also means the shared vocabulary has a written surface. What
+//! crosses is five names, each with the reason it is shared rather
+//! than borrowed, which is what the split lifts when it happens.
+//!
 //! # What lives here later
 //!
 //! The contracts are declared in this module because there is nowhere
