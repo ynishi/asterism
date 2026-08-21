@@ -1372,12 +1372,16 @@ struct DuplicateReportParams {
 /// bytes that decide the decoded result), newest group first, each
 /// group's members oldest first.
 ///
-/// Two counts ride along so an empty report can be read correctly.
+/// Three counts ride along so an empty report can be read correctly.
 /// `unhashed_count` non-zero means the library has not finished being
-/// fingerprinted. `unwalked_count` non-zero means the content axis has
-/// no reading of that many materials — the migration that fills the
-/// column in could not open their originals — so a content-axis answer
-/// is silent about them until the files are back.
+/// fingerprinted; it converges to zero on its own. `unreadable_count`
+/// non-zero means that many originals could not be read when the
+/// fingerprint pass tried — the walk keeps retrying them, but the
+/// number moves only when the files come back. `unwalked_count`
+/// non-zero means the content axis has no reading of that many
+/// materials — the migration that fills the column in could not open
+/// their originals — so a content-axis answer is silent about them
+/// until the files are back.
 async fn list_duplicate_groups(
     State(ctx): State<Arc<ServerCtx>>,
     Query(params): Query<DuplicateReportParams>,

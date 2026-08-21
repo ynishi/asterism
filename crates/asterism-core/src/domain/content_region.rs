@@ -48,53 +48,50 @@
 //! side, where fragmented files walk to zero samples and produced
 //! exactly that collision.
 
+use crate::domain::measurement::{Measurement, MeasurementStatus};
 use crate::domain::value::MimeType;
 
-/// Tag on every value that says "no digest on this axis, use the file
-/// axis" — the shared prefix of [`ContentRegion::Unsupported`] and
-/// [`EMPTY_SPAN`].
+/// The **legacy stored prefix** of "no digest on this axis" — what the
+/// hash columns carried before V92 moved the distinction into a status
+/// column ([`MeasurementStatus`]) and the format's name into a reason column.
 ///
-/// One prefix for both because duplicate grouping asks a single
-/// question of a stored value: is it a digest of this axis. Anything
-/// under this tag is not, and a marker added later is excluded by the
-/// same rule that excludes today's without an edit at the query.
+/// No runtime writer produces it any more. It is kept because it is
+/// written into live databases: the V92 conversion maps every value
+/// under it, and the frozen migrations that wrote it (V55, V64, V75)
+/// spell it in their own SQL.
 pub const UNSUPPORTED_PREFIX: &str = "unsupported:";
 
-/// Value stored when a probe claimed the format and its reading yielded
-/// no region: a PNG with no `IDAT` chunk, or one whose chunk structure
-/// ended before it was complete.
+/// Legacy stored spelling of [`MeasurementStatus::EmptySpan`]: a probe claimed
+/// the format and its reading yielded no region — a PNG with no `IDAT`
+/// chunk, or one whose chunk structure ended before it was complete.
 ///
-/// A truncated file and a bomb both land here, and the label reads as
+/// A truncated file and a bomb both land there, and the status reads as
 /// the thing they have in common: there is no complete region to stand
-/// behind. Splitting them into two markers was considered and dropped —
-/// the vocabulary a column carries is read by SQL, DTOs and the panel,
-/// and the extra literal would buy a diagnosis that the file axis and
-/// the file's size already give.
+/// behind. Splitting them was considered and dropped — the diagnosis is
+/// what the file axis and the file's size already give. Kept for the
+/// V92 conversion and the frozen migrations that wrote it.
 pub const EMPTY_SPAN: &str = "unsupported:empty-span";
 
-/// Value stored when the format *is* one a probe walks and the job
-/// declined to hand it the bytes, because reading the file whole would
-/// have cost more memory than the job is willing to spend
+/// Legacy stored spelling of [`MeasurementStatus::TooLarge`]: the format *is*
+/// one a probe walks and the job declined to hand it the bytes, because
+/// reading the file whole would have cost more memory than the job is
+/// willing to spend
 /// ([`walks_content`](crate::domain::probe::ProbeGates::walks_content)
 /// explains why the size question reaches the job at all).
 ///
-/// A third marker, after [`EMPTY_SPAN`] argued against splitting one.
-/// The difference is what the value says is true. A truncated PNG and a
-/// bomb share a true statement — there is no complete region — and the
-/// file's size tells a reader which of the two it was looking at. A file
-/// skipped for size has the opposite statement: the region is there and
-/// could be computed, and nothing about the file is wrong. Folding it
-/// into `unsupported:<mime>` would say the format has no walker, which
-/// is false and sends the reader off to write one that exists; folding
-/// it into [`EMPTY_SPAN`] would say the walk found nothing, and no walk
-/// ran. It is also the only marker here that a *policy* change clears
-/// rather than a change to the file, which is worth being able to count
-/// separately from the ones that will never move.
+/// Its own status rather than a spelling of the other two because the
+/// statements differ: a truncated PNG has no complete region and the
+/// file is wrong; a file skipped for size has a region that could be
+/// computed and nothing about the file is wrong. It is also the only
+/// status a *policy* change clears rather than a change to the file.
+/// Kept for the V92 conversion.
 pub const TOO_LARGE: &str = "unsupported:too-large";
 
-/// Value written to the content column of every material that existed
-/// before the column did — **the unfinished half of a migration, named
-/// row by row.**
+/// Legacy stored spelling of [`MeasurementStatus::NotWalked`]: written to the
+/// content column of every material that existed before the column did
+/// — **the unfinished half of a migration, named row by row.** Kept for
+/// the V92 conversion and the frozen migrations that wrote it; the
+/// reasoning below is the record of why the state exists at all.
 ///
 /// Not a walk outcome: no [`ContentRegion`] maps to it and no probe
 /// returns it. It is written once, by the schema migration that adds
@@ -184,12 +181,15 @@ pub enum ContentRegion {
 }
 
 impl ContentRegion {
-    /// The literal to store in the material's content-hash column.
-    pub fn stored_value(&self) -> String {
+    /// What to store for this outcome — the status column's word, the
+    /// digest column's value, the reason column's payload
+    /// ([`Measurement`]). The marker strings the outcomes used to render
+    /// to are the pre-V92 form; see the constants above.
+    pub fn record(&self) -> Measurement {
         match self {
-            Self::Digest(value) => value.clone(),
-            Self::Unsupported(format) => format!("{UNSUPPORTED_PREFIX}{format}"),
-            Self::EmptySpan => EMPTY_SPAN.to_string(),
+            Self::Digest(value) => Measurement::computed(value.clone()),
+            Self::Unsupported(format) => Measurement::unsupported(format.clone()),
+            Self::EmptySpan => Measurement::bare(MeasurementStatus::EmptySpan),
         }
     }
 
@@ -244,26 +244,26 @@ mod tests {
         MimeType::parse(raw)
     }
 
-    /// The three outcomes render to three different columns' worth of
-    /// value, and only one of them is a fingerprint.
+    /// The three outcomes render to three different stored triples, and
+    /// only one of them carries a digest.
     #[test]
-    fn each_outcome_stores_its_own_literal_and_only_one_is_a_digest() {
-        let digest = ContentRegion::Digest(format!(
-            "{}{}",
-            content_hash::CONTENT_DIGEST_PREFIX,
-            "a".repeat(64)
-        ));
-        assert_eq!(
-            digest.stored_value(),
-            format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64))
-        );
+    fn each_outcome_stores_its_own_record_and_only_one_is_a_digest() {
+        let value = format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64));
+        let digest = ContentRegion::Digest(value.clone());
+        assert_eq!(digest.record(), Measurement::computed(value));
         assert!(digest.digest().is_some());
 
         let unsupported = ContentRegion::Unsupported("video/mp4".to_string());
-        assert_eq!(unsupported.stored_value(), "unsupported:video/mp4");
+        assert_eq!(
+            unsupported.record(),
+            Measurement::unsupported("video/mp4".to_string())
+        );
         assert!(unsupported.digest().is_none());
 
-        assert_eq!(ContentRegion::EmptySpan.stored_value(), EMPTY_SPAN);
+        assert_eq!(
+            ContentRegion::EmptySpan.record(),
+            Measurement::bare(MeasurementStatus::EmptySpan)
+        );
         assert!(ContentRegion::EmptySpan.digest().is_none());
     }
 
@@ -360,9 +360,12 @@ mod tests {
                 "{raw:?}"
             );
             assert_eq!(
-                unsupported_format(parsed.as_ref()).stored_value(),
-                "unsupported:unknown",
-                "{raw:?}: never a colon with nothing after it"
+                unsupported_format(parsed.as_ref())
+                    .record()
+                    .reason
+                    .as_deref(),
+                Some(UNKNOWN_FORMAT),
+                "{raw:?}: never a reason that says nothing"
             );
         }
     }

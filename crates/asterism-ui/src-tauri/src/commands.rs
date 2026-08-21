@@ -129,9 +129,11 @@ pub async fn list_color_asset_counts(
 /// `axis` (`"artefact"` by default, `"content"` for the bytes that
 /// decide the decoded result), optionally persona-scoped.
 ///
-/// Both counts ride along so the panel never has to present an empty
+/// The counts ride along so the panel never has to present an empty
 /// report as a clean bill of health: `unhashed_count` is "still
-/// looking", `unwalked_count` is "the content axis has no reading of
+/// looking", `unreadable_count` is "these originals could not be read
+/// when the pass tried, and the number will not move until the files
+/// come back", `unwalked_count` is "the content axis has no reading of
 /// these files, because the migration that fills the column in could not
 /// open their originals".
 #[tauri::command]

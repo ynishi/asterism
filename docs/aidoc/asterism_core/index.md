@@ -117,6 +117,7 @@ the private design notes.
 - [`domain::material_mark`](domain__material_mark.md): `MaterialMark` — a mark placed into an Asset's **material**: the
 - [`domain::material_meta`](domain__material_meta.md): `material_meta` — the canonical form the metadata a container
 - [`domain::material_meta_raw`](domain__material_meta_raw.md): `material_meta_raw` — the container's metadata bytes, kept verbatim,
+- [`domain::measurement`](domain__measurement.md): `measurement` — what a fingerprint column's *status* can say, now
 - [`domain::merge_plan`](domain__merge_plan.md): `MergePlan` — a person's ruling that a set of rows is one thing, and
 - [`domain::modality`](domain__modality.md): `ModalityDef` — the open Modality master entry (the `modality` table).
 - [`domain::observation`](domain__observation.md): Observability domain — the four streams and their policies.

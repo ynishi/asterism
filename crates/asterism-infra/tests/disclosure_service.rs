@@ -22,6 +22,7 @@ use asterism_core::domain::disclosure::PromptDisclosure;
 use asterism_core::domain::disclosure::{DigitalSourceType, Half, Skipped};
 use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
 use asterism_core::domain::material::Material;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::persona::Persona;
 use asterism_core::domain::repository::{
     AssetRepository, EdgeRepository, MaterialFingerprint, PersonaRepository,
@@ -127,9 +128,9 @@ impl Fixture {
                     &asset.id,
                     0,
                     &MaterialFingerprint {
-                        file: "unhashable:no-bytes".into(),
-                        content: "unhashable:no-bytes".into(),
-                        meta: "m1-sha256:0".into(),
+                        file: Measurement::bare(MeasurementStatus::NoBytes),
+                        content: Measurement::bare(MeasurementStatus::NoBytes),
+                        meta: Measurement::computed("m1-sha256:0".into()),
                         meta_kv: Some(meta_kv.to_string()),
                         meta_raw: None,
                         meta_text: None,
@@ -183,9 +184,9 @@ impl Fixture {
                 &asset,
                 0,
                 &MaterialFingerprint {
-                    file: "unhashable:no-bytes".into(),
-                    content: "unhashable:no-bytes".into(),
-                    meta: "unsupported:video/mp4".into(),
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::unsupported("video/mp4".into()),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,

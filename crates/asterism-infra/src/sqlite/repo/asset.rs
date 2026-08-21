@@ -19,6 +19,7 @@ use asterism_core::domain::duplicate_conflict::{
     ConflictResolution, DuplicateConflict, FoldExclusion,
 };
 use asterism_core::domain::material::Material;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::merge_plan::MergePlan;
 use asterism_core::domain::repository::{
     AssetRepository, ChapterScanCandidate, DimsCandidate, DimsProbe, DimsScope, DimsWritePolicy,
@@ -137,59 +138,130 @@ fn axis_column(axis: DuplicateAxis, table: &str) -> String {
     format!("{table}.{column}")
 }
 
+/// One axis's status and digest columns, table-qualified — the unit the
+/// fingerprint conditions below are built from.
+///
+/// A struct rather than positional `&str` pairs because every condition
+/// takes three of them and the columns of one axis must not be crossed
+/// with another's: six positional strings of the same type are the
+/// shape that lets a caller swap two and a compiler agree.
+pub(crate) struct AxisColumns<'a> {
+    /// The status column (`…_status`, non-nullable).
+    pub(crate) status: &'a str,
+    /// The digest column beside it (nullable).
+    pub(crate) digest: &'a str,
+}
+
+/// The SQL of [`is_axis_answer`](asterism_core::domain::content_hash::is_axis_answer)'s
+/// complement for one axis: `pending` or `failed`, or a `computed`
+/// digest whose tag is not the axis's current generation.
+///
+/// The status column is `NOT NULL`, so the three-valued-logic traps the
+/// marker-era condition had to spell out have no NULL to fall into; the
+/// one nullable read (`digest`) is guarded explicitly all the same,
+/// because a `computed` row with no digest is a row some writer got
+/// wrong, and "got wrong" must read as work rather than vanish.
+fn axis_unanswered_sql(axis: DuplicateAxis, columns: &AxisColumns<'_>) -> String {
+    use asterism_core::domain::content_hash;
+    use asterism_core::domain::measurement::MeasurementStatus;
+
+    let status = columns.status;
+    let pending = MeasurementStatus::Pending.as_str();
+    let failed = MeasurementStatus::Failed.as_str();
+    let computed = MeasurementStatus::Computed.as_str();
+    match axis {
+        // The file axis's vocabulary is not versioned: holding a value
+        // is holding an answer, so only the status is asked.
+        DuplicateAxis::Artefact => format!("{status} IN ('{pending}', '{failed}')"),
+        DuplicateAxis::Content | DuplicateAxis::Meta => {
+            let digest = columns.digest;
+            let prefix = content_hash::digest_prefix(axis);
+            format!(
+                "({status} IN ('{pending}', '{failed}') \
+                  OR ({status} = '{computed}' \
+                      AND ({digest} IS NULL OR NOT {digest} GLOB '{prefix}*')))"
+            )
+        }
+    }
+}
+
+/// The SQL of [`axis_open_work`](asterism_core::domain::content_hash::axis_open_work)
+/// for one axis: [`axis_unanswered_sql`] minus `failed`.
+fn axis_open_work_sql(axis: DuplicateAxis, columns: &AxisColumns<'_>) -> String {
+    use asterism_core::domain::content_hash;
+    use asterism_core::domain::measurement::MeasurementStatus;
+
+    let status = columns.status;
+    let pending = MeasurementStatus::Pending.as_str();
+    let computed = MeasurementStatus::Computed.as_str();
+    match axis {
+        DuplicateAxis::Artefact => format!("{status} = '{pending}'"),
+        DuplicateAxis::Content | DuplicateAxis::Meta => {
+            let digest = columns.digest;
+            let prefix = content_hash::digest_prefix(axis);
+            format!(
+                "({status} = '{pending}' \
+                  OR ({status} = '{computed}' \
+                      AND ({digest} IS NULL OR NOT {digest} GLOB '{prefix}*')))"
+            )
+        }
+    }
+}
+
 /// The `WHERE` fragment naming the materials that still owe a
 /// fingerprint pass — the SQL dialect of
 /// [`needs_fingerprint`](asterism_core::domain::content_hash::needs_fingerprint).
 ///
 /// Built here, from one function, because the rule is evaluated by two
 /// statements that have to agree exactly: the backfill's page query and
-/// the count behind the "still fingerprinting" notice. They used to
-/// share a literal (`content_hash IS NULL`) short enough to retype
-/// correctly; with a second column and a versioned vocabulary it is no
-/// longer that, and the failure of retyping it is invisible — the count
-/// and the walk simply describe different sets, and the notice either
-/// never clears or clears while work remains.
-///
-/// The domain owns the rule and the third evaluation of it is the
-/// per-asset job's skip test, in Rust;
+/// the per-asset job's skip test (the third evaluation, in Rust). They
+/// used to share a literal (`content_hash IS NULL`) short enough to
+/// retype correctly; with three axes and a versioned vocabulary it is
+/// no longer that, and the failure of retyping it is invisible — the
+/// two simply describe different sets, and the walk either skips rows
+/// or re-reads files that were already read.
 /// `the_sql_fingerprint_filter_matches_the_domain_predicate` runs one
 /// vector of column shapes through this and through the domain and
 /// requires the verdicts to match.
 ///
-/// **The NULL cases are spelled out rather than left to the GLOBs.** A
-/// `GLOB` against NULL is NULL, and `NOT NULL` is NULL, which is not
-/// true — so a row with no value at all in a versioned column would
-/// fail the test that is supposed to be selecting it.
+/// **Not the count's rule any more.** The progress count uses
+/// [`awaiting_fingerprint_condition`], which excludes `failed` rows so
+/// the number can reach zero; this one includes them so the walk
+/// retries an unreadable original on every pass. The split is issue
+/// #17's, and the differential test pins the difference to exactly the
+/// `failed`-only rows.
 pub(crate) fn unfingerprinted_condition(
-    file_column: &str,
-    content_column: &str,
-    meta_column: &str,
+    file: &AxisColumns<'_>,
+    content: &AxisColumns<'_>,
+    meta: &AxisColumns<'_>,
 ) -> String {
-    use asterism_core::domain::content_hash::{
-        CONTENT_DIGEST_PREFIX, META_DIGEST_PREFIX, UNHASHABLE,
-    };
-    use asterism_core::domain::content_region::UNSUPPORTED_PREFIX;
-
-    // One fragment per versioned column, built the same way: the
-    // domain's `is_axis_answer` is a prefix test on that axis's tag plus
-    // the two markers, and the markers are shared across axes because
-    // they say something about the artefact rather than about the
-    // measurement.
-    let answered = |column: &str, prefix: &str| {
-        format!(
-            "({column} GLOB '{prefix}*' \
-              OR {column} GLOB '{UNSUPPORTED_PREFIX}*' \
-              OR {column} = '{UNHASHABLE}')"
-        )
-    };
     format!(
-        "{file_column} IS NULL \
-         OR {content_column} IS NULL \
-         OR NOT {} \
-         OR {meta_column} IS NULL \
-         OR NOT {}",
-        answered(content_column, CONTENT_DIGEST_PREFIX),
-        answered(meta_column, META_DIGEST_PREFIX)
+        "{} OR {} OR {}",
+        axis_unanswered_sql(DuplicateAxis::Artefact, file),
+        axis_unanswered_sql(DuplicateAxis::Content, content),
+        axis_unanswered_sql(DuplicateAxis::Meta, meta)
+    )
+}
+
+/// The `WHERE` fragment behind the "still fingerprinting" count — the
+/// SQL dialect of
+/// [`awaits_fingerprint`](asterism_core::domain::content_hash::awaits_fingerprint).
+///
+/// [`unfingerprinted_condition`] minus the `failed` rows: open work
+/// that one successful pass finishes, which is what a number that is
+/// supposed to reach zero may count. The rows in the difference are
+/// [`unreadable`](asterism_core::domain::content_hash::fingerprint_unreadable),
+/// counted by their own port method.
+pub(crate) fn awaiting_fingerprint_condition(
+    file: &AxisColumns<'_>,
+    content: &AxisColumns<'_>,
+    meta: &AxisColumns<'_>,
+) -> String {
+    format!(
+        "{} OR {} OR {}",
+        axis_open_work_sql(DuplicateAxis::Artefact, file),
+        axis_open_work_sql(DuplicateAxis::Content, content),
+        axis_open_work_sql(DuplicateAxis::Meta, meta)
     )
 }
 
@@ -198,26 +270,27 @@ pub(crate) fn unfingerprinted_condition(
 /// [`needs_content_walk`](asterism_core::domain::content_hash::needs_content_walk).
 ///
 /// A different question from [`unfingerprinted_condition`] over the same
-/// column, and kept in a separate function for the reason the domain
-/// gives for keeping the two predicates apart: a value that is an
+/// axis, and kept in a separate function for the reason the domain
+/// gives for keeping the two predicates apart: a status that is an
 /// *answer* to one is *work* for the other, so a single fragment with a
 /// flag would put the whole pre-existing library into the ordinary
 /// walk's page query the first time somebody passed the flag wrong.
 ///
-/// Equality against the one marker, quoted rather than bound, because
-/// this is composed into statements that carry their own parameters —
-/// `the_digest_prefixes_are_glob_safe` is what keeps the interpolation
-/// honest.
+/// Equality against the one status, quoted rather than bound, because
+/// this is composed into statements that carry their own parameters.
 ///
-/// **The migration that clears the marker deliberately does not call
+/// **The migration that clears the state deliberately does not call
 /// this.** Migration steps are append-only and frozen once shipped; a
 /// step reaching into a helper that a later wave may widen would make an
-/// old migration change what it did. It spells the same equality itself,
-/// against the same domain constant.
-pub(crate) fn unwalked_condition(content_column: &str) -> String {
-    use asterism_core::domain::content_region::NOT_WALKED;
+/// old migration change what it did. V56 spells its own equality against
+/// the marker spelling its era stored.
+pub(crate) fn unwalked_condition(content_status_column: &str) -> String {
+    use asterism_core::domain::measurement::MeasurementStatus;
 
-    format!("{content_column} = '{}'", NOT_WALKED.replace('\'', "''"))
+    format!(
+        "{content_status_column} = '{}'",
+        MeasurementStatus::NotWalked.as_str()
+    )
 }
 
 /// Table-qualifies a bare column list (`"id, persona_id, …"` →
@@ -1650,6 +1723,12 @@ struct MaterialRow {
     meta_hash: Option<String>,
     meta_kv: Option<String>,
     meta_text: Option<String>,
+    content_hash_status: String,
+    content_hash_reason: Option<String>,
+    content_region_hash_status: String,
+    content_region_hash_reason: Option<String>,
+    meta_hash_status: String,
+    meta_hash_reason: Option<String>,
 }
 
 impl MaterialRow {
@@ -1659,7 +1738,10 @@ impl MaterialRow {
     /// each following column under the previous one's name.
     const COLUMNS: &'static str = "ord, locator, file_size_bytes, mime, content_hash, \
                                    created_at, updated_at, content_region_hash, \
-                                   meta_hash, meta_kv, meta_text";
+                                   meta_hash, meta_kv, meta_text, \
+                                   content_hash_status, content_hash_reason, \
+                                   content_region_hash_status, content_region_hash_reason, \
+                                   meta_hash_status, meta_hash_reason";
 
     fn from_row(row: &rusqlite::Row<'_>) -> Result<Self, rusqlite::Error> {
         Ok(Self {
@@ -1674,6 +1756,12 @@ impl MaterialRow {
             meta_hash: row.get(8)?,
             meta_kv: row.get(9)?,
             meta_text: row.get(10)?,
+            content_hash_status: row.get(11)?,
+            content_hash_reason: row.get(12)?,
+            content_region_hash_status: row.get(13)?,
+            content_region_hash_reason: row.get(14)?,
+            meta_hash_status: row.get(15)?,
+            meta_hash_reason: row.get(16)?,
         })
     }
 
@@ -1704,8 +1792,17 @@ impl MaterialRow {
             // is a row to carry, not a mapping to fail.
             mime: self.mime.as_deref().map(MimeType::parse),
             content_hash: self.content_hash,
+            // The status set is closed, and a spelling this build does
+            // not name is refused rather than degraded — `role` and
+            // `on_duplicate` state the rule.
+            content_hash_status: MeasurementStatus::parse(&self.content_hash_status)?,
+            content_hash_reason: self.content_hash_reason,
             content_region_hash: self.content_region_hash,
+            content_region_hash_status: MeasurementStatus::parse(&self.content_region_hash_status)?,
+            content_region_hash_reason: self.content_region_hash_reason,
             meta_hash: self.meta_hash,
+            meta_hash_status: MeasurementStatus::parse(&self.meta_hash_status)?,
+            meta_hash_reason: self.meta_hash_reason,
             meta_kv: self.meta_kv,
             meta_text: self.meta_text,
             created_at: ms_to_datetime(self.created_at)?,
@@ -3351,14 +3448,16 @@ impl AssetRepository for SqliteAssetRepository {
                 )?;
                 for (ord, locator, size, mime, created, updated) in &materials {
                     tx.execute(
-                        // Neither hash column appears in either list, by
-                        // the same rule as `asset.palette` above:
-                        // `set_material_fingerprint` owns both. Insert
-                        // leaves them NULL (unknown, which is what a
-                        // material with unread bytes is), a metadata
-                        // round-trip cannot erase a fingerprint computed
-                        // in between, and NULL is what puts a freshly
-                        // arrived row in front of the walk.
+                        // No hash or status column appears in either
+                        // list, by the same rule as `asset.palette`
+                        // above: `set_material_fingerprint` owns them.
+                        // Insert leaves the digests NULL and the status
+                        // columns at their schema `DEFAULT 'pending'`
+                        // (unknown, which is what a material with unread
+                        // bytes is), a metadata round-trip cannot erase
+                        // a fingerprint computed in between, and
+                        // `pending` is what puts a freshly arrived row
+                        // in front of the walk.
                         "INSERT INTO material
                              (asset_id, ord, locator, file_size_bytes, mime,
                               created_at, updated_at)
@@ -4146,11 +4245,81 @@ impl AssetRepository for SqliteAssetRepository {
         self.isle
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE material SET content_hash = ?1, content_region_hash = ?2, \
-                                         meta_hash = ?3, meta_kv = ?4, meta_raw = ?5, \
-                                         meta_text = ?6 \
-                      WHERE asset_id = ?7 AND ord = ?8",
-                    params![file, content, meta, meta_kv, meta_raw, meta_text, uuid, ord],
+                    "UPDATE material SET \
+                         content_hash = ?1, content_hash_status = ?2, \
+                         content_hash_reason = ?3, \
+                         content_region_hash = ?4, content_region_hash_status = ?5, \
+                         content_region_hash_reason = ?6, \
+                         meta_hash = ?7, meta_hash_status = ?8, meta_hash_reason = ?9, \
+                         meta_kv = ?10, meta_raw = ?11, meta_text = ?12 \
+                      WHERE asset_id = ?13 AND ord = ?14",
+                    params![
+                        file.digest,
+                        file.status.as_str(),
+                        file.reason,
+                        content.digest,
+                        content.status.as_str(),
+                        content.reason,
+                        meta.digest,
+                        meta.status.as_str(),
+                        meta.reason,
+                        meta_kv,
+                        meta_raw,
+                        meta_text,
+                        uuid,
+                        ord
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn mark_material_unreadable(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        reason: &str,
+    ) -> Result<(), DomainError> {
+        let uuid = *asset_id.as_uuid();
+        let ord = i64::from(ord);
+        let reason = reason.to_string();
+        let pending = MeasurementStatus::Pending.as_str();
+        let failed = MeasurementStatus::Failed.as_str();
+        self.isle
+            .call(move |conn| {
+                // Per-axis conditional: only the axes the failed read
+                // was going to fill record the failure — an answered
+                // axis keeps its measurement, and `failed` refreshed
+                // over `failed` keeps the newest error. Every CASE
+                // reads the row's pre-update values, so the reason
+                // clause can test the same status its neighbour is
+                // rewriting.
+                conn.execute(
+                    &format!(
+                        "UPDATE material SET \
+                             content_hash_reason = CASE \
+                                 WHEN content_hash_status IN ('{pending}', '{failed}') \
+                                 THEN ?1 ELSE content_hash_reason END, \
+                             content_hash_status = CASE \
+                                 WHEN content_hash_status IN ('{pending}', '{failed}') \
+                                 THEN '{failed}' ELSE content_hash_status END, \
+                             content_region_hash_reason = CASE \
+                                 WHEN content_region_hash_status IN ('{pending}', '{failed}') \
+                                 THEN ?1 ELSE content_region_hash_reason END, \
+                             content_region_hash_status = CASE \
+                                 WHEN content_region_hash_status IN ('{pending}', '{failed}') \
+                                 THEN '{failed}' ELSE content_region_hash_status END, \
+                             meta_hash_reason = CASE \
+                                 WHEN meta_hash_status IN ('{pending}', '{failed}') \
+                                 THEN ?1 ELSE meta_hash_reason END, \
+                             meta_hash_status = CASE \
+                                 WHEN meta_hash_status IN ('{pending}', '{failed}') \
+                                 THEN '{failed}' ELSE meta_hash_status END \
+                          WHERE asset_id = ?2 AND ord = ?3"
+                    ),
+                    params![reason, uuid, ord],
                 )?;
                 Ok(())
             })
@@ -4239,9 +4408,18 @@ impl AssetRepository for SqliteAssetRepository {
                       ORDER BY m.asset_id, m.ord \
                       LIMIT ?1",
                     unfingerprinted_condition(
-                        "m.content_hash",
-                        "m.content_region_hash",
-                        "m.meta_hash"
+                        &AxisColumns {
+                            status: "m.content_hash_status",
+                            digest: "m.content_hash"
+                        },
+                        &AxisColumns {
+                            status: "m.content_region_hash_status",
+                            digest: "m.content_region_hash"
+                        },
+                        &AxisColumns {
+                            status: "m.meta_hash_status",
+                            digest: "m.meta_hash"
+                        }
                     )
                 );
                 let sql = sql.as_str();
@@ -4599,7 +4777,15 @@ impl AssetRepository for SqliteAssetRepository {
     ) -> Result<Vec<FingerprintedMaterial>, DomainError> {
         let cursor = after.map(|(id, ord)| (*id.as_uuid(), i64::from(ord)));
         let limit = i64::from(limit);
-        let rows: Vec<(Uuid, i64, String, String, String, Option<String>)> = self
+        type FingerprintRow = (
+            Uuid,
+            i64,
+            (String, Option<String>, Option<String>),
+            (String, Option<String>, Option<String>),
+            (String, Option<String>, Option<String>),
+            Option<String>,
+        );
+        let rows: Vec<FingerprintRow> = self
             .isle
             .call(move |conn| {
                 // `NOT (…)` over the *same* builder the hashing walk
@@ -4613,16 +4799,29 @@ impl AssetRepository for SqliteAssetRepository {
                 // cursor skips the remaining `ord > 0` materials of an
                 // asset a page boundary cut through.
                 let sql = format!(
-                    "SELECT m.asset_id, m.ord, m.content_hash, m.content_region_hash, \
-                            m.meta_hash, m.meta_kv \
+                    "SELECT m.asset_id, m.ord, \
+                            m.content_hash_status, m.content_hash, m.content_hash_reason, \
+                            m.content_region_hash_status, m.content_region_hash, \
+                            m.content_region_hash_reason, \
+                            m.meta_hash_status, m.meta_hash, m.meta_hash_reason, \
+                            m.meta_kv \
                        FROM material m \
                       WHERE NOT ({}) {{CURSOR}} \
                       ORDER BY m.asset_id, m.ord \
                       LIMIT ?1",
                     unfingerprinted_condition(
-                        "m.content_hash",
-                        "m.content_region_hash",
-                        "m.meta_hash"
+                        &AxisColumns {
+                            status: "m.content_hash_status",
+                            digest: "m.content_hash"
+                        },
+                        &AxisColumns {
+                            status: "m.content_region_hash_status",
+                            digest: "m.content_region_hash"
+                        },
+                        &AxisColumns {
+                            status: "m.meta_hash_status",
+                            digest: "m.meta_hash"
+                        }
                     )
                 );
                 let sql = sql.as_str();
@@ -4630,10 +4829,10 @@ impl AssetRepository for SqliteAssetRepository {
                     Ok((
                         r.get(0)?,
                         r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
+                        (r.get(2)?, r.get(3)?, r.get(4)?),
+                        (r.get(5)?, r.get(6)?, r.get(7)?),
+                        (r.get(8)?, r.get(9)?, r.get(10)?),
+                        r.get(11)?,
                     ))
                 };
                 match cursor {
@@ -4654,16 +4853,22 @@ impl AssetRepository for SqliteAssetRepository {
             })
             .await
             .map_err(infra_err)?;
-        Ok(rows
-            .into_iter()
-            .map(
-                |(asset_id, ord, file, content, meta, meta_kv)| FingerprintedMaterial {
+        let axis = |(status, digest, reason): (String, Option<String>, Option<String>)| -> Result<Measurement, DomainError> {
+            Ok(Measurement {
+                status: MeasurementStatus::parse(&status)?,
+                digest,
+                reason,
+            })
+        };
+        rows.into_iter()
+            .map(|(asset_id, ord, file, content, meta, meta_kv)| {
+                Ok(FingerprintedMaterial {
                     asset_id: AssetId::from_uuid(asset_id),
                     ord: ord.max(0) as u32,
                     fingerprint: MaterialFingerprint {
-                        file,
-                        content,
-                        meta,
+                        file: axis(file)?,
+                        content: axis(content)?,
+                        meta: axis(meta)?,
                         meta_kv,
                         // **Not selected.** This walk pages the whole
                         // library to re-derive conflicts from digests,
@@ -4678,14 +4883,19 @@ impl AssetRepository for SqliteAssetRepository {
                         // walk never compares recovered text.
                         meta_text: None,
                     },
-                },
-            )
-            .collect())
+                })
+            })
+            .collect()
     }
 
-    /// The same predicate as the scan above, from the same builder —
-    /// the two answering different sets is what makes the progress
-    /// notice lie in one direction or the other.
+    /// **Deliberately not the scan's predicate** — the walk retries
+    /// `failed` rows and this count excludes them, which is the split
+    /// that lets the progress notice reach zero while an unreadable
+    /// original stays visible in
+    /// [`unreadable_material_count`](Self::unreadable_material_count).
+    /// The differential tests pin the two conditions to the domain's
+    /// pair of rules, and the difference to exactly the failed-only
+    /// rows.
     async fn unhashed_material_count(&self) -> Result<u64, DomainError> {
         let count: i64 = self
             .isle
@@ -4693,10 +4903,19 @@ impl AssetRepository for SqliteAssetRepository {
                 conn.query_row(
                     &format!(
                         "SELECT COUNT(*) FROM material WHERE {}",
-                        unfingerprinted_condition(
-                            "content_hash",
-                            "content_region_hash",
-                            "meta_hash"
+                        awaiting_fingerprint_condition(
+                            &AxisColumns {
+                                status: "content_hash_status",
+                                digest: "content_hash"
+                            },
+                            &AxisColumns {
+                                status: "content_region_hash_status",
+                                digest: "content_region_hash"
+                            },
+                            &AxisColumns {
+                                status: "meta_hash_status",
+                                digest: "meta_hash"
+                            }
                         )
                     ),
                     params![],
@@ -4708,14 +4927,50 @@ impl AssetRepository for SqliteAssetRepository {
         Ok(count.max(0) as u64)
     }
 
-    /// Equality against one marker, not a prefix test over the family,
-    /// and the same fragment the migration selects by
-    /// ([`unwalked_condition`]) rather than a second spelling of it.
+    /// The other half of the split: rows the walk still owes a pass
+    /// where nothing is open work — every unanswered axis says
+    /// `failed`. Stated as the conjunction of the two builders rather
+    /// than as a third spelling, so the three sets (open work,
+    /// unreadable, answered) partition by construction.
+    async fn unreadable_material_count(&self) -> Result<u64, DomainError> {
+        let count: i64 = self
+            .isle
+            .call(move |conn| {
+                let file = AxisColumns {
+                    status: "content_hash_status",
+                    digest: "content_hash",
+                };
+                let content = AxisColumns {
+                    status: "content_region_hash_status",
+                    digest: "content_region_hash",
+                };
+                let meta = AxisColumns {
+                    status: "meta_hash_status",
+                    digest: "meta_hash",
+                };
+                conn.query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM material WHERE ({}) AND NOT ({})",
+                        unfingerprinted_condition(&file, &content, &meta),
+                        awaiting_fingerprint_condition(&file, &content, &meta)
+                    ),
+                    params![],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(count.max(0) as u64)
+    }
+
+    /// Equality against one status, not a family of them, and the same
+    /// fragment the walk-selection uses ([`unwalked_condition`]) rather
+    /// than a second spelling of it.
     ///
-    /// The other `unsupported:` values are answers that will not change
-    /// — a format with no walker, a file past the size gate, a walk that
+    /// The other answer statuses are answers that will not change — a
+    /// format with no walker, a file past the size gate, a walk that
     /// found no region — and counting them here would report a problem
-    /// nothing can fix. `NOT_WALKED` is the only one that means "these
+    /// nothing can fix. `not-walked` is the only one that means "these
     /// bytes were never read", which after the migration that reads them
     /// leaves exactly the originals it could not open.
     async fn unwalked_material_count(&self) -> Result<u64, DomainError> {
@@ -4725,7 +4980,7 @@ impl AssetRepository for SqliteAssetRepository {
                 conn.query_row(
                     &format!(
                         "SELECT COUNT(*) FROM material WHERE {}",
-                        unwalked_condition("content_region_hash")
+                        unwalked_condition("content_region_hash_status")
                     ),
                     params![],
                     |r| r.get(0),
@@ -5085,13 +5340,12 @@ impl AssetRepository for SqliteAssetRepository {
             .call(move |conn| {
                 // Which column carries the axis's fingerprint, and
                 // which of its values may stand for sameness, are both
-                // asked rather than spelled: the markers the content
-                // column carries (`unsupported:not-walked` on a row
-                // whose original could not be read, `unsupported:<mime>`
-                // on every format with no walker) are strings many rows
-                // share,
-                // so a `GROUP BY` that admitted them would report most
-                // of the library as one duplicate set.
+                // asked rather than spelled: the digest column holds
+                // digests and NULLs now, but a value that reached it
+                // some other way — a hand-edited row, a superseded
+                // generation — must still be refused, and the empty
+                // digest every zero-input artefact shares is a real
+                // digest a `GROUP BY` must not admit.
                 let column = axis_column(axis, "m");
                 let hash_filter = duplicate_key_condition(axis, &column);
                 let sql = |persona_clause: &str| {
@@ -5921,43 +6175,60 @@ mod tests {
         AttributionContext::asserted(None, None).unwrap()
     }
 
+    /// Reads a fixture value in the compact spelling the fixtures in
+    /// this file have always used — a digest, or one of the marker-era
+    /// strings — and renders the stored triple the columns hold now.
+    /// The mapping is the same one V92 performs, restated small so a
+    /// fixture stays one legible string per axis.
+    fn record_of(value: &str) -> Measurement {
+        match value {
+            "unhashable:no-bytes" => Measurement::bare(MeasurementStatus::NoBytes),
+            "unsupported:empty-span" => Measurement::bare(MeasurementStatus::EmptySpan),
+            "unsupported:too-large" => Measurement::bare(MeasurementStatus::TooLarge),
+            "unsupported:not-walked" => Measurement::bare(MeasurementStatus::NotWalked),
+            v => match v.strip_prefix("unsupported:") {
+                Some(format) => Measurement::unsupported(format.to_string()),
+                None => Measurement::computed(v.to_string()),
+            },
+        }
+    }
+
     /// A fingerprint whose file axis is `file` and whose two walking
-    /// axes are answered by markers — the shape a material that is not a
-    /// walkable picture ends up with.
+    /// axes are answered by statuses — the shape a material that is not
+    /// a walkable picture ends up with.
     ///
     /// For the tests below that are about the file axis: they still have
     /// to write every column, because the verb writes every column, and
-    /// a test that left one NULL would leave its row in the fingerprint
-    /// walk and quietly change what the *other* assertions in the same
-    /// test are measuring.
+    /// a test that left one pending would leave its row in the
+    /// fingerprint walk and quietly change what the *other* assertions
+    /// in the same test are measuring.
     fn file_axis(file: &str) -> MaterialFingerprint {
         MaterialFingerprint {
-            file: file.to_string(),
-            content: asterism_core::domain::content_region::unsupported_format(None).stored_value(),
-            meta: asterism_core::domain::material_meta::unsupported_format(None).stored_value(),
+            file: record_of(file),
+            content: asterism_core::domain::content_region::unsupported_format(None).record(),
+            meta: asterism_core::domain::material_meta::unsupported_format(None).record(),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
         }
     }
 
-    /// The file and content columns spelled out — for the tests that are
-    /// about the difference between those two. The meta column takes the
-    /// same marker `file_axis` gives it, since nothing here is asking
+    /// The file and content axes spelled out — for the tests that are
+    /// about the difference between those two. The meta axis takes the
+    /// same status `file_axis` gives it, since nothing here is asking
     /// about it.
     fn both_axes(file: &str, content: &str) -> MaterialFingerprint {
         MaterialFingerprint {
-            file: file.to_string(),
-            content: content.to_string(),
+            content: record_of(content),
             ..file_axis(file)
         }
     }
 
-    /// The meta column spelled out, the other two answered by markers —
+    /// The meta axis spelled out, the other two answered elsewhere —
     /// the mirror of `both_axes` for the third axis.
     fn meta_axis(file: &str, meta: &str, meta_kv: Option<&str>) -> MaterialFingerprint {
         MaterialFingerprint {
-            meta: meta.to_string(),
+            meta: record_of(meta),
             meta_kv: meta_kv.map(str::to_string),
             ..file_axis(file)
         }
@@ -7729,138 +8000,184 @@ mod tests {
         }
     }
 
-    /// The fingerprint walk's selection is the same rule in two
-    /// languages — [`content_hash::needs_fingerprint`] for the
-    /// per-asset job's skip test, [`unfingerprinted_condition`] for the
-    /// page query and the count. One vector of `(file, content, meta)`
-    /// column shapes goes through both, including the `NULL`s, which are
-    /// where a three-valued logic mistake hides: a `GLOB` against `NULL`
-    /// is `NULL`, and `NOT NULL` is `NULL` rather than true, so a naive
-    /// spelling drops exactly the rows the walk exists to find.
-    ///
-    /// The two versioned columns are varied **independently**. A vector
-    /// that moved them together would pass against a condition that read
-    /// only one of them, which is the shape a third column arrives as.
-    #[test]
-    fn the_sql_fingerprint_filter_matches_the_domain_predicate() {
+    /// One axis's column shapes, exercised on every axis by the
+    /// differential test below: a status, and what the digest column
+    /// holds beside it.
+    fn axis_shapes(axis: DuplicateAxis) -> Vec<(MeasurementStatus, Option<String>)> {
         use asterism_core::domain::content_hash;
-        use asterism_core::domain::content_region;
 
-        let digest = content_hash::of_bytes(b"star");
-        let region = format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64));
-        let meta = format!("{}{}", content_hash::META_DIGEST_PREFIX, "a".repeat(64));
-        let answered_meta = Some(meta.clone());
-        let samples: Vec<(Option<String>, Option<String>, Option<String>)> = vec![
-            // Nothing looked yet.
-            (None, None, None),
-            // Half-written, every way round — including the two that
-            // differ only in which versioned column is missing.
-            (Some(digest.clone()), None, None),
-            (None, Some(region.clone()), answered_meta.clone()),
-            (Some(digest.clone()), Some(region.clone()), None),
-            (Some(digest.clone()), None, answered_meta.clone()),
-            // Answered.
-            (
-                Some(digest.clone()),
-                Some(region.clone()),
-                answered_meta.clone(),
-            ),
-            (
-                Some(digest.clone()),
-                Some(content_region::EMPTY_SPAN.to_string()),
-                Some(content_region::EMPTY_SPAN.to_string()),
-            ),
-            (
-                Some(digest.clone()),
-                Some(content_region::TOO_LARGE.to_string()),
-                Some(content_region::TOO_LARGE.to_string()),
-            ),
-            (
-                Some(digest.clone()),
-                Some(content_region::NOT_WALKED.to_string()),
-                Some(content_region::NOT_WALKED.to_string()),
-            ),
-            (
-                Some(digest.clone()),
-                Some("unsupported:video/mp4".to_string()),
-                Some("unsupported:video/mp4".to_string()),
-            ),
-            (
-                Some(content_hash::UNHASHABLE.to_string()),
-                Some(content_hash::UNHASHABLE.to_string()),
-                Some(content_hash::UNHASHABLE.to_string()),
-            ),
-            // Not answers: an earlier generation of either definition,
-            // and one axis's digest sitting in another's column.
-            (
-                Some(digest.clone()),
-                Some(format!("cr0-sha256:{}", "b".repeat(64))),
-                answered_meta.clone(),
-            ),
-            (
-                Some(digest.clone()),
-                Some(region.clone()),
-                Some(format!("m0-sha256:{}", "b".repeat(64))),
-            ),
-            (
-                Some(digest.clone()),
-                Some(digest.clone()),
-                answered_meta.clone(),
-            ),
-            (
-                Some(digest.clone()),
-                Some(region.clone()),
-                Some(region.clone()),
-            ),
-            (
-                Some(digest.clone()),
-                Some(String::new()),
-                answered_meta.clone(),
-            ),
-            (
-                Some(digest.clone()),
-                Some(region.clone()),
-                Some(String::new()),
-            ),
-        ];
+        let own = match axis {
+            DuplicateAxis::Artefact => content_hash::of_bytes(b"star"),
+            DuplicateAxis::Content => {
+                format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64))
+            }
+            DuplicateAxis::Meta => {
+                format!("{}{}", content_hash::META_DIGEST_PREFIX, "a".repeat(64))
+            }
+        };
+        let stale = match axis {
+            DuplicateAxis::Artefact => content_hash::of_bytes(b"another file"),
+            DuplicateAxis::Content => format!("cr0-sha256:{}", "b".repeat(64)),
+            DuplicateAxis::Meta => format!("m0-sha256:{}", "b".repeat(64)),
+        };
+        // Another axis's digest sitting in this one's column — the
+        // shape a column mix-up produces.
+        let crossed = match axis {
+            DuplicateAxis::Artefact => {
+                format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64))
+            }
+            DuplicateAxis::Content | DuplicateAxis::Meta => content_hash::of_bytes(b"star"),
+        };
+        vec![
+            (MeasurementStatus::Pending, None),
+            (MeasurementStatus::Computed, Some(own)),
+            (MeasurementStatus::Computed, Some(stale)),
+            (MeasurementStatus::Computed, Some(crossed)),
+            // A `computed` row with no digest is a writer bug; on the
+            // versioned axes it has to read as work rather than vanish
+            // into the NULL rules (the file axis reads any `computed`
+            // as an answer — its vocabulary is not versioned).
+            (MeasurementStatus::Computed, None),
+            (MeasurementStatus::Unsupported, None),
+            (MeasurementStatus::EmptySpan, None),
+            (MeasurementStatus::TooLarge, None),
+            (MeasurementStatus::NotWalked, None),
+            (MeasurementStatus::NoBytes, None),
+            (MeasurementStatus::Failed, None),
+        ]
+    }
+
+    /// The fingerprint rules are each stated in two languages — Rust
+    /// for the per-asset job's skip test, SQL for the page query and
+    /// the counts — and there are **two rules now**: the walk's
+    /// ([`content_hash::needs_fingerprint`] / [`unfingerprinted_condition`])
+    /// and the progress count's ([`content_hash::awaits_fingerprint`] /
+    /// [`awaiting_fingerprint_condition`]), split so `failed` rows
+    /// retry without holding the notice open (issue #17). One vector of
+    /// per-axis `(status, digest)` shapes goes through all four, every
+    /// verdict has to match its twin — and the two rules' difference
+    /// has to be exactly the rows [`content_hash::fingerprint_unreadable`]
+    /// names, which is what pins the three-way split (open work /
+    /// unreadable / answered) to one partition.
+    ///
+    /// The three axes are varied **independently**: a vector that moved
+    /// them together would pass against a condition that read only one
+    /// of them, which is the shape a fourth column arrives as. Full
+    /// cross-product on one varying axis at a time, with the other two
+    /// held answered.
+    #[test]
+    fn the_sql_fingerprint_filters_match_the_domain_predicates() {
+        use asterism_core::domain::content_hash;
+
+        let answered: Vec<(MeasurementStatus, Option<String>)> = DuplicateAxis::STRONGEST_FIRST
+            .iter()
+            .map(|axis| axis_shapes(*axis)[1].clone())
+            .collect();
+        // Every axis's shapes in every slot, one axis varying at a
+        // time, plus the all-pending and all-failed rows the single
+        // sweep cannot produce.
+        let mut samples: Vec<Vec<(MeasurementStatus, Option<String>)>> = Vec::new();
+        for (slot, axis) in DuplicateAxis::STRONGEST_FIRST.iter().enumerate() {
+            for shape in axis_shapes(*axis) {
+                let mut row = answered.clone();
+                row[slot] = shape;
+                samples.push(row);
+            }
+        }
+        samples.push(vec![(MeasurementStatus::Pending, None); 3]);
+        samples.push(vec![(MeasurementStatus::Failed, None); 3]);
+        // Failed beside pending: still open work, not unreadable.
+        samples.push(vec![
+            (MeasurementStatus::Failed, None),
+            (MeasurementStatus::Pending, None),
+            answered[2].clone(),
+        ]);
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute(
-            "CREATE TABLE probe (n INTEGER PRIMARY KEY, f TEXT, c TEXT, m TEXT)",
+            "CREATE TABLE probe (n INTEGER PRIMARY KEY, \
+                                 fs TEXT NOT NULL, f TEXT, \
+                                 cs TEXT NOT NULL, c TEXT, \
+                                 ms TEXT NOT NULL, m TEXT)",
             params![],
         )
         .unwrap();
-        for (n, (file, content, meta)) in samples.iter().enumerate() {
+        for (n, row) in samples.iter().enumerate() {
             conn.execute(
-                "INSERT INTO probe (n, f, c, m) VALUES (?1, ?2, ?3, ?4)",
-                params![n as i64, file, content, meta],
+                "INSERT INTO probe (n, fs, f, cs, c, ms, m) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    n as i64,
+                    row[0].0.as_str(),
+                    row[0].1,
+                    row[1].0.as_str(),
+                    row[1].1,
+                    row[2].0.as_str(),
+                    row[2].1
+                ],
             )
             .unwrap();
         }
 
-        let condition = unfingerprinted_condition("f", "c", "m");
-        let selected: std::collections::HashSet<i64> = conn
-            .prepare(&format!("SELECT n FROM probe WHERE {condition}"))
-            .unwrap()
-            .query_map(params![], |r| r.get::<_, i64>(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
+        let file = AxisColumns {
+            status: "fs",
+            digest: "f",
+        };
+        let content = AxisColumns {
+            status: "cs",
+            digest: "c",
+        };
+        let meta = AxisColumns {
+            status: "ms",
+            digest: "m",
+        };
+        let select = |condition: &str| -> std::collections::HashSet<i64> {
+            conn.prepare(&format!("SELECT n FROM probe WHERE {condition}"))
+                .unwrap()
+                .query_map(params![], |r| r.get::<_, i64>(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let walk_condition = unfingerprinted_condition(&file, &content, &meta);
+        let count_condition = awaiting_fingerprint_condition(&file, &content, &meta);
+        let walk = select(&walk_condition);
+        let counted = select(&count_condition);
 
-        for (n, (file, content, meta)) in samples.iter().enumerate() {
+        for (n, row) in samples.iter().enumerate() {
+            let axes = (
+                (row[0].0, row[0].1.as_deref()),
+                (row[1].0, row[1].1.as_deref()),
+                (row[2].0, row[2].1.as_deref()),
+            );
             assert_eq!(
-                content_hash::needs_fingerprint(
-                    file.as_deref(),
-                    content.as_deref(),
-                    meta.as_deref()
-                ),
-                selected.contains(&(n as i64)),
-                "Rust and SQL disagree about {file:?} / {content:?} / {meta:?} \
-                 (condition: {condition})"
+                content_hash::needs_fingerprint(axes.0, axes.1, axes.2),
+                walk.contains(&(n as i64)),
+                "walk: Rust and SQL disagree about {row:?} (condition: {walk_condition})"
+            );
+            assert_eq!(
+                content_hash::awaits_fingerprint(axes.0, axes.1, axes.2),
+                counted.contains(&(n as i64)),
+                "count: Rust and SQL disagree about {row:?} (condition: {count_condition})"
+            );
+            // The three-way split: what the walk selects and the count
+            // does not is exactly the unreadable set.
+            assert_eq!(
+                content_hash::fingerprint_unreadable(axes.0, axes.1, axes.2),
+                walk.contains(&(n as i64)) && !counted.contains(&(n as i64)),
+                "unreadable is not the walk-minus-count difference for {row:?}"
             );
         }
-        assert!(!selected.is_empty(), "no sample is work");
-        assert!(selected.len() < samples.len(), "every sample is work");
+        assert!(
+            counted.is_subset(&walk),
+            "a row can only count toward progress if the walk will reach it"
+        );
+        assert!(!walk.is_empty(), "no sample is work");
+        assert!(walk.len() < samples.len(), "every sample is work");
+        assert!(
+            walk.len() > counted.len(),
+            "no sample is unreadable, so the split above is vacuous"
+        );
     }
 
     /// [`duplicate_key_condition`] and [`unfingerprinted_condition`]
@@ -7895,50 +8212,42 @@ mod tests {
     /// The migration's selection is the same rule in two languages —
     /// [`content_hash::needs_content_walk`] in Rust,
     /// [`unwalked_condition`] in SQL — and the vector below is shared
-    /// with the fingerprint rule's own differential test on purpose.
+    /// with the fingerprint rule's own differential test on purpose
+    /// ([`axis_shapes`]).
     ///
     /// Running one set of column shapes through **both** conditions is
     /// what pins the thing the design turns on: the two select disjoint
-    /// sets over the same column. A change that made the ordinary walk
-    /// admit `NOT_WALKED` — the shape that hands a whole pre-existing
+    /// sets over the same axis. A change that made the ordinary walk
+    /// admit `not-walked` — the shape that hands a whole pre-existing
     /// library to the pass meant for new arrivals — shows up here as an
     /// overlap rather than as a silent doubling of work.
     #[test]
     fn the_sql_unwalked_filter_matches_the_domain_predicate() {
         use asterism_core::domain::content_hash;
-        use asterism_core::domain::content_region;
 
         let digest = content_hash::of_bytes(b"star");
-        let region = format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64));
-        let samples: Vec<Option<String>> = vec![
-            None,
-            Some(content_region::NOT_WALKED.to_string()),
-            Some(region.clone()),
-            Some(content_region::EMPTY_SPAN.to_string()),
-            Some(content_region::TOO_LARGE.to_string()),
-            Some("unsupported:video/mp4".to_string()),
-            Some(content_hash::UNHASHABLE.to_string()),
-            Some(format!("cr0-sha256:{}", "b".repeat(64))),
-            Some(digest.clone()),
-            Some(String::new()),
-        ];
+        let samples = axis_shapes(DuplicateAxis::Content);
 
-        // The meta column holds an answer on every row, for the reason
-        // the file column holds a digest on every row: this test is
-        // about the content column, and a second column that was work
+        // The meta axis holds an answer on every row, for the reason
+        // the file axis holds a digest on every row: this test is
+        // about the content axis, and a second axis that was work
         // would make the ordinary walk select everything and the
         // disjointness below vacuous from the other side.
         let meta_answer = format!("{}{}", content_hash::META_DIGEST_PREFIX, "c".repeat(64));
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute(
-            "CREATE TABLE probe (n INTEGER PRIMARY KEY, f TEXT, c TEXT, m TEXT)",
+            "CREATE TABLE probe (n INTEGER PRIMARY KEY, \
+                                 fs TEXT NOT NULL, f TEXT, \
+                                 cs TEXT NOT NULL, c TEXT, \
+                                 ms TEXT NOT NULL, m TEXT)",
             params![],
         )
         .unwrap();
-        for (n, content) in samples.iter().enumerate() {
+        for (n, (status, content)) in samples.iter().enumerate() {
             conn.execute(
-                "INSERT INTO probe (n, f, c, m) VALUES (?1, ?2, ?3, ?4)",
-                params![n as i64, digest, content, meta_answer],
+                "INSERT INTO probe (n, fs, f, cs, c, ms, m) \
+                 VALUES (?1, 'computed', ?2, ?3, ?4, 'computed', ?5)",
+                params![n as i64, digest, status.as_str(), content, meta_answer],
             )
             .unwrap();
         }
@@ -7952,22 +8261,40 @@ mod tests {
                 .unwrap()
         };
 
-        let condition = unwalked_condition("c");
+        let condition = unwalked_condition("cs");
         let migration = select(&condition);
-        for (n, content) in samples.iter().enumerate() {
+        for (n, (status, _)) in samples.iter().enumerate() {
             assert_eq!(
-                content_hash::needs_content_walk(content.as_deref()),
+                content_hash::needs_content_walk(*status),
                 migration.contains(&(n as i64)),
-                "Rust and SQL disagree about {content:?} (condition: {condition})"
+                "Rust and SQL disagree about {} (condition: {condition})",
+                status.as_str()
             );
         }
-        assert_eq!(migration.len(), 1, "exactly one sample is the marker");
+        assert_eq!(
+            migration.len(),
+            1,
+            "exactly one sample is the deferred state"
+        );
 
-        // The two passes over one column must not both claim a row. The
+        // The two passes over one axis must not both claim a row. The
         // file side of every sample holds a digest, so whatever the
-        // ordinary walk selects here it selects on the content column
+        // ordinary walk selects here it selects on the content axis
         // alone — which is the comparison worth making.
-        let ordinary = select(&unfingerprinted_condition("f", "c", "m"));
+        let ordinary = select(&unfingerprinted_condition(
+            &AxisColumns {
+                status: "fs",
+                digest: "f",
+            },
+            &AxisColumns {
+                status: "cs",
+                digest: "c",
+            },
+            &AxisColumns {
+                status: "ms",
+                digest: "m",
+            },
+        ));
         assert!(
             ordinary.is_disjoint(&migration),
             "a row claimed by both passes would be read twice: \
@@ -8038,9 +8365,9 @@ mod tests {
                 &asset.id,
                 0,
                 &MaterialFingerprint {
-                    file: UNHASHABLE.to_string(),
-                    content: UNHASHABLE.to_string(),
-                    meta: UNHASHABLE.to_string(),
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::bare(MeasurementStatus::NoBytes),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,
@@ -8539,15 +8866,15 @@ mod tests {
                 id,
                 0,
                 &MaterialFingerprint {
-                    file: digest.clone(),
-                    content: answer.to_string(),
-                    // This test is about the content column's
-                    // vocabulary, so the third column is held at one
-                    // value that is an answer on any axis. Writing
+                    file: Measurement::computed(digest.clone()),
+                    content: record_of(answer),
+                    // This test is about the content axis's
+                    // vocabulary, so the third axis is held at one
+                    // state that is an answer on any axis. Writing
                     // `answer` here would put a `cr1-` digest in the
                     // meta column, where it is not an answer, and the
                     // count below would be measuring that instead.
-                    meta: content_region::EMPTY_SPAN.to_string(),
+                    meta: Measurement::bare(MeasurementStatus::EmptySpan),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,
@@ -8578,7 +8905,9 @@ mod tests {
             let stale = stale.clone();
             move |conn| {
                 conn.execute(
-                    "UPDATE material SET content_region_hash = ?2 WHERE asset_id = ?1",
+                    "UPDATE material SET content_region_hash_status = 'computed', \
+                                         content_region_hash = ?2 \
+                      WHERE asset_id = ?1",
                     params![uuid, stale],
                 )?;
                 Ok(())
@@ -8589,20 +8918,21 @@ mod tests {
         assert_eq!(repo.unhashed_material_count().await.unwrap(), 1);
     }
 
-    /// Teeth: the count and the scan describe the same set of rows.
+    /// Teeth: the scan, the progress count and the unreadable count
+    /// partition the fixture exactly as the domain rules say they do.
     ///
-    /// Two statements, one rule. The way this breaks is that somebody
-    /// fixes one of them — and neither direction is visible from the
-    /// outside: a count that is larger leaves a progress notice that
-    /// never clears, a count that is smaller reports "done" while the
-    /// walk is still chaining pages over work it will not admit to.
+    /// The scan and the counts are separate statements, and the way
+    /// this breaks is that somebody fixes one of them — a scan wider
+    /// than the count chains pages over work the notice will not admit
+    /// to, a count wider than the scan leaves a notice that never
+    /// clears. Since issue #17 the two are *deliberately* different by
+    /// exactly one set: the `failed` rows, which the scan retries and
+    /// the progress count leaves to `unreadable_material_count`.
     ///
-    /// The fixture puts a row in each state the two columns can be in,
-    /// including the half-written shape a pre-column database has.
+    /// The fixture puts a row in each state the axes can be in,
+    /// including the half-written shapes a pre-column database has.
     #[tokio::test]
-    async fn the_count_and_the_scan_answer_the_same_rows() {
-        use asterism_core::domain::content_region;
-
+    async fn the_counts_and_the_scan_split_the_rows_the_way_the_domain_says() {
         let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
         let repo = SqliteAssetRepository::new(isle.clone());
         let persona = seed_persona(&isle).await;
@@ -8610,68 +8940,100 @@ mod tests {
         let digest = content_hash::of_bytes(b"the whole file");
         let region = format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64));
         let meta = format!("{}{}", content_hash::META_DIGEST_PREFIX, "a".repeat(64));
-        /// One fixture row: label, the three columns as stored, and
-        /// whether the walk should call it work.
+        /// Whether the fixture expects a row in the walk, in the
+        /// progress count, or in neither.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Expect {
+            Open,
+            Unreadable,
+            Answered,
+        }
+        /// One fixture row: label, each axis as `(status, value)`, and
+        /// where it belongs.
         type ColumnState<'a> = (
             &'a str,
-            Option<&'a str>,
-            Option<&'a str>,
-            Option<&'a str>,
-            bool,
+            (&'a str, Option<&'a str>),
+            (&'a str, Option<&'a str>),
+            (&'a str, Option<&'a str>),
+            Expect,
         );
-        let states: [ColumnState<'_>; 8] = [
-            ("nothing written", None, None, None, true),
+        let pending = ("pending", None);
+        let states: [ColumnState<'_>; 10] = [
+            ("nothing written", pending, pending, pending, Expect::Open),
             (
                 "file only — the pre-column shape",
-                Some(&digest),
-                None,
-                None,
-                true,
+                ("computed", Some(&digest)),
+                pending,
+                pending,
+                Expect::Open,
             ),
-            ("content only", None, Some(&region), None, true),
+            (
+                "content only",
+                pending,
+                ("computed", Some(&region)),
+                pending,
+                Expect::Open,
+            ),
             (
                 "all answered",
-                Some(&digest),
-                Some(&region),
-                Some(&meta),
-                false,
+                ("computed", Some(&digest)),
+                ("computed", Some(&region)),
+                ("computed", Some(&meta)),
+                Expect::Answered,
             ),
             (
-                "answered by a marker",
-                Some(&digest),
-                Some(content_region::NOT_WALKED),
-                Some(content_region::NOT_WALKED),
-                false,
+                "answered by a status",
+                ("computed", Some(&digest)),
+                ("not-walked", None),
+                ("not-walked", None),
+                Expect::Answered,
             ),
             (
                 "an earlier region definition",
-                Some(&digest),
-                Some("cr0-sha256:beef"),
-                Some(&meta),
-                true,
+                ("computed", Some(&digest)),
+                ("computed", Some("cr0-sha256:beef")),
+                ("computed", Some(&meta)),
+                Expect::Open,
             ),
             // The two shapes a build that predates the meta columns
             // leaves behind, and the one that predates their current
             // generation. Without these the fixture would agree with a
-            // condition that never reads the third column.
+            // condition that never reads the third axis.
             (
                 "file and content only — the pre-meta-column shape",
-                Some(&digest),
-                Some(&region),
-                None,
-                true,
+                ("computed", Some(&digest)),
+                ("computed", Some(&region)),
+                pending,
+                Expect::Open,
             ),
             (
                 "an earlier meta definition",
-                Some(&digest),
-                Some(&region),
-                Some("m0-sha256:beef"),
-                true,
+                ("computed", Some(&digest)),
+                ("computed", Some(&region)),
+                ("computed", Some("m0-sha256:beef")),
+                Expect::Open,
+            ),
+            // The split issue #17 asked for: an unreadable original is
+            // the walk's to retry and the unreadable count's to report,
+            // and it is not progress.
+            (
+                "every axis failed — an unreadable original",
+                ("failed", None),
+                ("failed", None),
+                ("failed", None),
+                Expect::Unreadable,
+            ),
+            (
+                "failed beside pending — still open work",
+                ("failed", None),
+                pending,
+                ("computed", Some(&meta)),
+                Expect::Open,
             ),
         ];
 
         let mut expected = Vec::new();
-        for (label, file, content, meta) in states.iter().map(|(l, f, c, m, _)| (l, f, c, m)) {
+        for (label, file, content, meta, _) in states.iter() {
             let locator = format!("/pics/{}.png", label.replace(' ', "-"));
             let mut asset = Asset::new(
                 persona,
@@ -8691,17 +9053,21 @@ mod tests {
             // is the point of it, and also why the predicate still has
             // to be right about them.
             let uuid = *asset.id.as_uuid();
-            let (file, content, meta) = (
-                file.map(str::to_string),
-                content.map(str::to_string),
-                meta.map(str::to_string),
+            let write = (
+                (file.0.to_string(), file.1.map(str::to_string)),
+                (content.0.to_string(), content.1.map(str::to_string)),
+                (meta.0.to_string(), meta.1.map(str::to_string)),
             );
             isle.call(move |conn| {
                 conn.execute(
-                    "UPDATE material SET content_hash = ?2, content_region_hash = ?3, \
-                                         meta_hash = ?4 \
+                    "UPDATE material SET \
+                         content_hash_status = ?2, content_hash = ?3, \
+                         content_region_hash_status = ?4, content_region_hash = ?5, \
+                         meta_hash_status = ?6, meta_hash = ?7 \
                       WHERE asset_id = ?1",
-                    params![uuid, file, content, meta],
+                    params![
+                        uuid, write.0.0, write.0.1, write.1.0, write.1.1, write.2.0, write.2.1
+                    ],
                 )?;
                 Ok(())
             })
@@ -8710,13 +9076,18 @@ mod tests {
             expected.push(asset.id);
         }
 
-        let work: Vec<AssetId> = expected
-            .iter()
-            .zip(states.iter())
-            .filter(|(_, (_, _, _, _, is_work))| *is_work)
-            .map(|(id, _)| *id)
-            .collect();
+        let by_expect = |wanted: Expect| -> std::collections::HashSet<AssetId> {
+            expected
+                .iter()
+                .zip(states.iter())
+                .filter(|(_, (_, _, _, _, expect))| *expect == wanted)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        let open = by_expect(Expect::Open);
+        let unreadable = by_expect(Expect::Unreadable);
 
+        // The scan is the walk's rule: open work plus the retries.
         let scanned: std::collections::HashSet<AssetId> = repo
             .scan_unhashed_materials(None, 100)
             .await
@@ -8726,18 +9097,143 @@ mod tests {
             .collect();
         assert_eq!(
             scanned,
-            work.iter()
+            open.union(&unreadable)
                 .copied()
                 .collect::<std::collections::HashSet<_>>(),
-            "the scan picked a different set than the fixture calls work"
+            "the scan picked a different set than the fixture calls the walk's"
         );
+        // The progress count is only the open work…
         assert_eq!(
             repo.unhashed_material_count().await.unwrap(),
-            work.len() as u64,
-            "the count and the scan have to be the same statement"
+            open.len() as u64,
+            "the progress count has to be the open-work set exactly"
         );
-        // Not vacuous in either direction.
-        assert!(!work.is_empty() && work.len() < expected.len());
+        // …and the difference is exactly the unreadable set.
+        assert_eq!(
+            repo.unreadable_material_count().await.unwrap(),
+            unreadable.len() as u64,
+            "the unreadable count has to be the failed-only set exactly"
+        );
+        // Not vacuous in any direction.
+        assert!(!open.is_empty() && !unreadable.is_empty());
+        assert!(open.len() + unreadable.len() < expected.len());
+    }
+
+    /// Teeth on the failure write: `mark_material_unreadable` flips
+    /// exactly the `pending` axes to `failed` (the port doc says why
+    /// that is the contract, not "every axis the walk calls
+    /// unanswered"), keeps every measurement a row already holds, and
+    /// is undone by the next successful pass.
+    ///
+    /// The middle property is the one worth a fixture: a half-answered
+    /// row (a build that predates the newest column) has digests on
+    /// some axes, and a failure write that touched those would overwrite
+    /// measurements with a statement about a read that never happened.
+    #[tokio::test]
+    async fn a_failed_read_marks_only_the_axes_it_was_going_to_fill() {
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteAssetRepository::new(isle.clone());
+        let persona = seed_persona(&isle).await;
+
+        let locator = "/pics/half-answered.png";
+        let mut asset = Asset::new(
+            persona,
+            SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), locator).unwrap(),
+            None,
+            chrono::Utc::now(),
+            &nobody(),
+        );
+        asset.materials = vec![asterism_core::domain::material::Material::primary(
+            loc(locator),
+            Some(1),
+            chrono::Utc::now(),
+        )];
+        repo.save(&asset).await.unwrap();
+
+        // Half-answered: the file axis holds a digest, the content axis
+        // an answered status, the meta axis nothing yet — written raw
+        // because the verb refuses to produce this shape.
+        let digest = content_hash::of_bytes(b"the whole file");
+        isle.call({
+            let uuid = *asset.id.as_uuid();
+            let digest = digest.clone();
+            move |conn| {
+                conn.execute(
+                    "UPDATE material SET \
+                         content_hash_status = 'computed', content_hash = ?2, \
+                         content_region_hash_status = 'empty-span' \
+                      WHERE asset_id = ?1",
+                    params![uuid, digest],
+                )?;
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+
+        repo.mark_material_unreadable(&asset.id, 0, "No such file or directory")
+            .await
+            .unwrap();
+
+        let after = repo.find(&asset.id).await.unwrap().unwrap();
+        let material = &after.materials[0];
+        assert_eq!(material.content_hash_status, MeasurementStatus::Computed);
+        assert_eq!(material.content_hash.as_deref(), Some(digest.as_str()));
+        assert_eq!(
+            material.content_hash_reason, None,
+            "answered axes keep silent"
+        );
+        assert_eq!(
+            material.content_region_hash_status,
+            MeasurementStatus::EmptySpan
+        );
+        assert_eq!(material.meta_hash_status, MeasurementStatus::Failed);
+        assert_eq!(
+            material.meta_hash_reason.as_deref(),
+            Some("No such file or directory"),
+            "the failed axis carries the reason"
+        );
+
+        // Failed refreshed over failed keeps the newest error…
+        repo.mark_material_unreadable(&asset.id, 0, "Permission denied")
+            .await
+            .unwrap();
+        let refreshed = repo.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            refreshed.materials[0].meta_hash_reason.as_deref(),
+            Some("Permission denied")
+        );
+
+        // …and the row is in the unreadable count, out of the progress
+        // count, and still the walk's to retry.
+        assert_eq!(repo.unhashed_material_count().await.unwrap(), 0);
+        assert_eq!(repo.unreadable_material_count().await.unwrap(), 1);
+        assert_eq!(
+            repo.scan_unhashed_materials(None, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|m| m.asset_id)
+                .collect::<Vec<_>>(),
+            vec![asset.id],
+            "the retry survives the split"
+        );
+
+        // A successful pass is the exit: the failure state and its
+        // reason are gone, not carried beside the answer.
+        repo.set_material_fingerprint(&asset.id, 0, &file_axis(&digest))
+            .await
+            .unwrap();
+        let healed = repo.find(&asset.id).await.unwrap().unwrap();
+        assert_eq!(
+            healed.materials[0].meta_hash_status,
+            MeasurementStatus::Unsupported
+        );
+        assert_eq!(
+            healed.materials[0].meta_hash_reason.as_deref(),
+            Some("unknown")
+        );
+        assert_eq!(repo.unreadable_material_count().await.unwrap(), 0);
     }
 
     /// Teeth: one call fills every column, so no reader ever sees a row
@@ -8779,9 +9275,13 @@ mod tests {
         let canonical = r#"{"prompt":"a cat","workflow":"{}"}"#;
         let raw = "undefined:AAAAC3RFWHRwcm9tcHQ=";
         let fingerprint = MaterialFingerprint {
-            file: content_hash::of_bytes(b"the whole file"),
-            content: format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64)),
-            meta: asterism_core::domain::material_meta::digest_of(canonical),
+            file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+            content: Measurement::computed(format!(
+                "{}{}",
+                content_hash::CONTENT_DIGEST_PREFIX,
+                "a".repeat(64)
+            )),
+            meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(canonical)),
             meta_kv: Some(canonical.to_string()),
             meta_raw: Some(raw.to_string()),
             meta_text: None,
@@ -8793,16 +9293,20 @@ mod tests {
         let after = repo.find(&asset.id).await.unwrap().unwrap();
         assert_eq!(
             after.materials[0].content_hash.as_deref(),
-            Some(fingerprint.file.as_str())
+            fingerprint.file.digest()
+        );
+        assert_eq!(
+            after.materials[0].content_hash_status,
+            MeasurementStatus::Computed
         );
         assert_eq!(
             after.materials[0].content_region_hash.as_deref(),
-            Some(fingerprint.content.as_str()),
+            fingerprint.content.digest(),
             "the second column has to arrive with the first, and to be read back"
         );
         assert_eq!(
             after.materials[0].meta_hash.as_deref(),
-            Some(fingerprint.meta.as_str()),
+            fingerprint.meta.digest(),
             "and so does the third"
         );
         assert_eq!(
@@ -8844,9 +9348,18 @@ mod tests {
 
         assert!(
             !content_hash::needs_fingerprint(
-                after.materials[0].content_hash.as_deref(),
-                after.materials[0].content_region_hash.as_deref(),
-                after.materials[0].meta_hash.as_deref(),
+                (
+                    after.materials[0].content_hash_status,
+                    after.materials[0].content_hash.as_deref()
+                ),
+                (
+                    after.materials[0].content_region_hash_status,
+                    after.materials[0].content_region_hash.as_deref()
+                ),
+                (
+                    after.materials[0].meta_hash_status,
+                    after.materials[0].meta_hash.as_deref()
+                ),
             ),
             "the row the verb left behind is not work"
         );
@@ -8897,9 +9410,15 @@ mod tests {
             &asset.id,
             0,
             &MaterialFingerprint {
-                file: content_hash::of_bytes(b"the whole file"),
-                content: format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64)),
-                meta: asterism_core::domain::material_meta::digest_of(digest_body),
+                file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+                content: Measurement::computed(format!(
+                    "{}{}",
+                    content_hash::CONTENT_DIGEST_PREFIX,
+                    "a".repeat(64)
+                )),
+                meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(
+                    digest_body,
+                )),
                 meta_kv: Some(digest_body.to_string()),
                 meta_raw: None,
                 meta_text: Some(recovered.to_string()),
@@ -8927,9 +9446,15 @@ mod tests {
             &asset.id,
             0,
             &MaterialFingerprint {
-                file: content_hash::of_bytes(b"the whole file"),
-                content: format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64)),
-                meta: asterism_core::domain::material_meta::digest_of(digest_body),
+                file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+                content: Measurement::computed(format!(
+                    "{}{}",
+                    content_hash::CONTENT_DIGEST_PREFIX,
+                    "a".repeat(64)
+                )),
+                meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(
+                    digest_body,
+                )),
                 meta_kv: Some(digest_body.to_string()),
                 meta_raw: None,
                 meta_text: Some("{}".to_string()),
@@ -9061,9 +9586,15 @@ mod tests {
         // This is the per-asset job's test, verbatim.
         assert!(
             content_hash::needs_fingerprint(
-                material.content_hash.as_deref(),
-                material.content_region_hash.as_deref(),
-                material.meta_hash.as_deref(),
+                (
+                    material.content_hash_status,
+                    material.content_hash.as_deref()
+                ),
+                (
+                    material.content_region_hash_status,
+                    material.content_region_hash.as_deref()
+                ),
+                (material.meta_hash_status, material.meta_hash.as_deref()),
             ),
             "a row answered on one axis only is still work"
         );
@@ -11209,20 +11740,25 @@ mod tests {
             .await;
         }
 
-        // The rows are there and they do share the value — without this
+        // The rows are there and they do share a state — without this
         // the refusal below would be indistinguishable from an empty
-        // table.
+        // table. What they share moved in V92: the marker string became
+        // the `no-bytes` status, and the digest column went NULL, so a
+        // lookup that reached SQL with the legacy spelling would now
+        // match nothing *by luck*. The refusal below is what makes it
+        // not luck.
         let sharing = isle
             .call(|conn| {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM material WHERE content_hash = ?1",
-                    params![UNHASHABLE],
+                    "SELECT COUNT(*) FROM material \
+                     WHERE content_hash_status = 'no-bytes' AND content_hash IS NULL",
+                    params![],
                     |r| r.get::<_, i64>(0),
                 )
             })
             .await
             .unwrap();
-        assert_eq!(sharing, 3, "three rows would have matched the marker");
+        assert_eq!(sharing, 3, "three rows share the no-bytes state");
 
         for value in [UNHASHABLE, EMPTY, "phash:0f0f", "", "sha256"] {
             let err = repo

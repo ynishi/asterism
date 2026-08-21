@@ -65,8 +65,8 @@
 //! number formatting between two files the container itself calls
 //! identical.
 
-use crate::domain::content_region::UNSUPPORTED_PREFIX;
 use crate::domain::duplicate_conflict::DuplicateAxis;
+use crate::domain::measurement::MeasurementStatus;
 use crate::error::DomainError;
 
 /// The notation itself — the `sha256:` tag, the incremental hasher, and
@@ -89,21 +89,20 @@ use crate::error::DomainError;
 /// versioned container tags — is domain, and none of it moved.
 pub use asterism_contract::digest::{ContentHasher, DIGEST_PREFIX, of_bytes};
 
-/// Tag on the value stored for a material that can never have a
-/// digest — a record inside a container file, or a locator that is not
+/// The **legacy stored spelling** of "this material can never have a
+/// digest" — a record inside a container file, or a locator that is not
 /// on this disk (every shape
 /// [`SourceLocator::local_path`](crate::domain::source_locator::SourceLocator::local_path)
 /// answers `None` for).
 ///
-/// Recorded rather than left NULL so "we looked and there is nothing
-/// to read" stops being indistinguishable from "we have not looked
-/// yet". Without it the backfill re-walks those rows on every startup
-/// forever, and the "still fingerprinting" notice never clears — a
-/// permanent warning is a warning nobody reads.
-///
-/// A transient failure (the file has moved, the disk is unplugged)
-/// deliberately does **not** get this marker: that answer can change,
-/// so the row stays NULL and the next pass tries again.
+/// Until V92 this string sat in the digest columns themselves, so that
+/// "we looked and there is nothing to read" stayed distinguishable from
+/// "we have not looked yet". The distinction now lives in the status
+/// column beside each digest
+/// ([`MeasurementStatus::NoBytes`](crate::domain::measurement::MeasurementStatus::NoBytes)),
+/// and no runtime writer produces this spelling any more. It is kept
+/// because it is written into live databases: the V92 conversion maps
+/// it, and a reader of a pre-V92 dump still meets it.
 pub const UNHASHABLE: &str = "unhashable:no-bytes";
 
 /// The digest of zero bytes — the one fingerprint every empty file
@@ -179,14 +178,14 @@ pub const fn digest_prefix(axis: DuplicateAxis) -> &'static str {
 /// for sameness — what an adapter has to name one by one, because a
 /// prefix test cannot exclude them.
 ///
-/// The `unsupported:` markers are **not** in either list, and that is
-/// the shape difference worth noticing: they do not carry the digest
-/// prefix, so the prefix test has already refused them. A list entry
-/// for them would be an exclusion that excludes nothing on a value the
-/// rule never admitted. What the content axis does need excluded is the
-/// digest over an empty region, for the same reason the file axis
-/// excludes [`EMPTY`] — one value shared by every artefact that had
-/// nothing to hash.
+/// The `unsupported:` markers are **not** in either list, and that was
+/// the shape difference worth noticing while they were stored values:
+/// they do not carry the digest prefix, so the prefix test refused
+/// them without a list entry. Since V92 they are not stored at all —
+/// the status column carries the distinction — and the lists hold only
+/// what they always genuinely needed to: the real digest every
+/// artefact with nothing to hash would share, [`EMPTY`] on the file
+/// axis and its siblings on the other two.
 pub const fn reserved_values(axis: DuplicateAxis) -> &'static [&'static str] {
     match axis {
         DuplicateAxis::Artefact => RESERVED_VALUES,
@@ -339,43 +338,90 @@ pub const META_EMPTY: &str =
 /// [`RESERVED_VALUES`] for the meta axis.
 pub const META_RESERVED_VALUES: &[&str] = &[META_EMPTY];
 
-/// Whether a **versioned** column holds an answer — a digest of the
-/// current generation, or a marker saying why there is none.
+/// Whether one axis holds a **final answer** — the rule that decides
+/// whether the fingerprint walk still has work to do on it.
 ///
 /// This is not [`is_duplicate_key`] with the sign flipped. That rule
-/// asks whether a value may stand for "the same thing"; this one asks
-/// whether anybody has looked, which is the question that decides
-/// whether the fingerprint walk still has work to do on a row. Every
-/// `unsupported:` marker fails the first and passes the second: it is
-/// not a fingerprint, and it is a final answer.
+/// asks whether a digest may stand for "the same thing"; this one asks
+/// whether anybody has looked and settled the question. The two
+/// disagree on purpose: every non-`computed` answer status is a final
+/// answer and none of them is a digest.
 ///
-/// The digest test is against the **current** prefix, so a value written
-/// under an earlier definition (`cr0-sha256:…`) reads as no answer and
-/// the row returns to the walk. That is the whole point of versioning
-/// the tag — but it also means bumping the version puts the entire
-/// library back in front of the walk, which is a decision about
-/// somebody's disk rather than a consequence of shipping. Whoever bumps
-/// it owes the same answer the column's arrival owed, and
-/// [`NOT_WALKED`](crate::domain::content_region::NOT_WALKED) records
-/// how that one was given.
+/// Read off the status column first, and off the digest only where the
+/// status says there is one:
+///
+/// - [`Pending`](MeasurementStatus::Pending) — nobody has looked. Work.
+/// - [`Failed`](MeasurementStatus::Failed) — somebody looked and the bytes
+///   could not be read, which is an answer that can change (the disk
+///   comes back). Work for the walk, so the retry happens; **not** open
+///   work for the progress count, which is [`axis_open_work`]'s side of
+///   the split.
+/// - [`Computed`](MeasurementStatus::Computed) — an answer if the digest is of
+///   the **current** generation. On the two versioned axes a value
+///   written under an earlier definition (`cr0-sha256:…`) reads as no
+///   answer and the row returns to the walk; that is the whole point of
+///   versioning the tag — but it also means bumping the version puts
+///   the entire library back in front of the walk, which is a decision
+///   about somebody's disk rather than a consequence of shipping.
+///   Whoever bumps it owes the same answer the column's arrival owed,
+///   and [`MeasurementStatus::NotWalked`] records how that one was given. The
+///   **artefact** axis's vocabulary is not versioned, so there holding
+///   a value at all is holding an answer — the same asymmetry the old
+///   `IS NULL` test spelled.
+/// - Everything else — a statement about the artefact that no re-read
+///   improves on: no probe reads the format, the walk found nothing,
+///   the policy declined the bytes, the deferred migration has not
+///   reached it, there are no bytes at all.
 ///
 /// # Why the axis is an argument
 ///
-/// The same reason [`is_duplicate_key`] takes one. Two columns are
-/// versioned now — the content region's and the metadata's — and they
-/// hold different vocabularies read by one question. A second function
-/// beside this one would be the same three lines with a constant
-/// swapped, and the day a third marker is added it would be added to
-/// one of them.
+/// The same reason [`is_duplicate_key`] takes one. Three columns are
+/// read by one question, and a per-axis function would be the same
+/// `match` with a constant swapped — the day a rule changes it would
+/// change in one of them.
+pub fn is_axis_answer(
+    axis: DuplicateAxis,
+    status: MeasurementStatus,
+    digest: Option<&str>,
+) -> bool {
+    match status {
+        MeasurementStatus::Pending | MeasurementStatus::Failed => false,
+        MeasurementStatus::Computed => match axis {
+            DuplicateAxis::Artefact => true,
+            DuplicateAxis::Content | DuplicateAxis::Meta => {
+                digest.is_some_and(|value| value.starts_with(digest_prefix(axis)))
+            }
+        },
+        MeasurementStatus::Unsupported
+        | MeasurementStatus::EmptySpan
+        | MeasurementStatus::TooLarge
+        | MeasurementStatus::NotWalked
+        | MeasurementStatus::NoBytes => true,
+    }
+}
+
+/// Whether one axis is **open work** — the progress side of the split
+/// [`is_axis_answer`] describes under `Failed`.
 ///
-/// The **artefact** axis is deliberately not asked this. Its vocabulary
-/// is not versioned — a digest or the one marker — so holding anything
-/// at all is holding an answer, and `IS NULL` is the whole test
-/// ([`needs_fingerprint`] is where that asymmetry is spelled).
-pub fn is_axis_answer(axis: DuplicateAxis, value: &str) -> bool {
-    value.starts_with(digest_prefix(axis))
-        || value.starts_with(UNSUPPORTED_PREFIX)
-        || value == UNHASHABLE
+/// `Pending` and a stale-generation digest are work that one successful
+/// pass finishes, so they belong in the number that is supposed to
+/// reach zero. `Failed` does not: the pass already ran and the file was
+/// not where the library says it is, which no amount of walking fixes.
+/// Counting those rows in the same denominator is what kept the "still
+/// fingerprinting" notice from ever clearing — a permanent warning is a
+/// warning nobody reads — so they are excluded here and surfaced as
+/// their own count, with the reason on the row (issue #17's second
+/// half).
+pub fn axis_open_work(
+    axis: DuplicateAxis,
+    status: MeasurementStatus,
+    digest: Option<&str>,
+) -> bool {
+    match status {
+        MeasurementStatus::Pending => true,
+        MeasurementStatus::Computed => !is_axis_answer(axis, status, digest),
+        _ => false,
+    }
 }
 
 /// Whether one material still owes a fingerprint pass — **the** rule,
@@ -397,11 +443,21 @@ pub fn is_axis_answer(axis: DuplicateAxis, value: &str) -> bool {
 /// whole test. The content and meta columns are versioned, so what they
 /// hold has to be read ([`is_axis_answer`]).
 ///
-/// A row where only some columns are filled is work, not a partial
+/// A row where only some axes are answered is work, not a partial
 /// result: the pass computes all of them from one read and writes them
-/// in one statement, so a half-filled row can only come from a build
+/// in one statement, so a half-answered row can only come from a build
 /// that predates the newest column, and re-reading is how it gets
 /// finished.
+///
+/// # This is the walk's rule, not the progress count's
+///
+/// The two used to be one rule, and the split is deliberate (issue
+/// #17): a `Failed` axis is work *here* — the walk retries it, because
+/// an unreadable file can come back — and not work for
+/// [`awaits_fingerprint`], which drives the number a person watches
+/// reach zero. A count that included the permanent failures never
+/// cleared, and a walk that excluded them never noticed the disk was
+/// plugged back in; each rule keeps the half it can be right about.
 ///
 /// # `material.meta_raw` is written by this pass and is not asked here
 ///
@@ -425,10 +481,51 @@ pub fn is_axis_answer(axis: DuplicateAxis, value: &str) -> bool {
 /// ([`NOT_CAPTURED`](crate::domain::material_meta_raw::NOT_CAPTURED))
 /// rather than NULL, so that the deferred set stays selectable by
 /// whoever writes that pass.
-pub fn needs_fingerprint(file: Option<&str>, content: Option<&str>, meta: Option<&str>) -> bool {
-    file.is_none()
-        || !content.is_some_and(|value| is_axis_answer(DuplicateAxis::Content, value))
-        || !meta.is_some_and(|value| is_axis_answer(DuplicateAxis::Meta, value))
+pub fn needs_fingerprint(
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
+) -> bool {
+    !is_axis_answer(DuplicateAxis::Artefact, file.0, file.1)
+        || !is_axis_answer(DuplicateAxis::Content, content.0, content.1)
+        || !is_axis_answer(DuplicateAxis::Meta, meta.0, meta.1)
+}
+
+/// Whether one material still counts toward the "still fingerprinting"
+/// notice — the progress half of the split [`needs_fingerprint`]
+/// describes.
+///
+/// Any axis that is [`open work`](axis_open_work) keeps the row in the
+/// denominator: `pending`, or a digest of a superseded generation. A
+/// row whose only remaining work is retrying a `failed` read does not —
+/// it is not going to move on its own, and the number this drives is
+/// supposed to reach zero. Those rows are
+/// [`fingerprint_unreadable`]'s to count.
+pub fn awaits_fingerprint(
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
+) -> bool {
+    axis_open_work(DuplicateAxis::Artefact, file.0, file.1)
+        || axis_open_work(DuplicateAxis::Content, content.0, content.1)
+        || axis_open_work(DuplicateAxis::Meta, meta.0, meta.1)
+}
+
+/// Whether one material is stuck on an unreadable original: the walk
+/// still owes it a pass ([`needs_fingerprint`]) and nothing about it is
+/// open work ([`awaits_fingerprint`]) — every unanswered axis is
+/// `failed`.
+///
+/// The set behind `unreadable_material_count`: rows whose originals are
+/// not where the library says they are. Surfaced as its own number,
+/// with the I/O error in the reason column, rather than folded into the
+/// progress count it would keep from ever reaching zero.
+pub fn fingerprint_unreadable(
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
+) -> bool {
+    needs_fingerprint(file, content, meta) && !awaits_fingerprint(file, content, meta)
 }
 
 /// Whether one material is still owed the **data migration** that
@@ -468,14 +565,15 @@ pub fn needs_fingerprint(file: Option<&str>, content: Option<&str>, meta: Option
 /// (`v55_adds_the_content_axis_without_handing_the_walk_the_whole_library`)
 /// go on proving that unchanged while this exists beside it.
 ///
-/// # Equality against one marker, not the family
+/// # Equality against one status, not the family
 ///
-/// The other `unsupported:` values are answers no later pass improves
-/// on: a format with no walker, a file past the size gate, a walk that
-/// found no region. Selecting the family would re-read every video in
-/// the library in order to write back the marker it already carries.
-/// `NOT_WALKED` is the only one whose cause is "the bytes were never
-/// spent", which is the only thing spending them now can change.
+/// The other answer statuses are answers no later pass improves on: a
+/// format with no walker, a file past the size gate, a walk that found
+/// no region. Selecting them would re-read every video in the library
+/// in order to write back the status it already carries.
+/// [`NotWalked`](MeasurementStatus::NotWalked) is the only one whose cause is
+/// "the bytes were never spent", which is the only thing spending them
+/// now can change.
 ///
 /// # The next region version selects the same way and must not run the
 /// same way
@@ -498,12 +596,11 @@ pub fn needs_fingerprint(file: Option<&str>, content: Option<&str>, meta: Option
 /// timed by the person whose disk it is — rather than a second copy of
 /// the step that fills the column in today.
 ///
-/// The `Option` is the column, so `None` (nothing written at all) is
-/// **not** work here: that row belongs to [`needs_fingerprint`], and
-/// claiming it in both places would hand one file to two passes that
-/// each read it.
-pub fn needs_content_walk(content: Option<&str>) -> bool {
-    content == Some(crate::domain::content_region::NOT_WALKED)
+/// `Pending` (nothing written at all) is **not** work here: that row
+/// belongs to [`needs_fingerprint`], and claiming it in both places
+/// would hand one file to two passes that each read it.
+pub fn needs_content_walk(content_status: MeasurementStatus) -> bool {
+    content_status == MeasurementStatus::NotWalked
 }
 
 /// Hex characters in a SHA-256 digest.
@@ -873,66 +970,151 @@ mod tests {
     }
 
     /// The rule the fingerprint walk stops on. An answer is not the same
-    /// thing as a fingerprint: every `unsupported:` marker is a final
-    /// answer and none of them is a digest, and a walk that read them as
-    /// unanswered would pick the same rows up on every pass forever.
+    /// thing as a fingerprint: every non-`computed` answer status is a
+    /// final answer and none of them is a digest, and a walk that read
+    /// them as unanswered would pick the same rows up on every pass
+    /// forever.
     #[test]
-    fn a_material_owes_a_pass_until_every_column_holds_an_answer() {
+    fn a_material_owes_a_pass_until_every_axis_holds_an_answer() {
+        use MeasurementStatus::{Computed, Failed, Pending};
+
         let file = of_bytes(b"star");
         let content = format!("{CONTENT_DIGEST_PREFIX}{}", "b".repeat(64));
         let meta = format!("{META_DIGEST_PREFIX}{}", "d".repeat(64));
+        let done_file = (Computed, Some(file.as_str()));
+        let done_content = (Computed, Some(content.as_str()));
+        let done_meta = (Computed, Some(meta.as_str()));
+        let blank = (Pending, None);
 
-        // Nothing looked yet, and the half-written shapes: any of them
-        // is work, because a pass writes every column together.
-        assert!(needs_fingerprint(None, None, None));
-        assert!(needs_fingerprint(Some(&file), None, None));
-        assert!(needs_fingerprint(None, Some(&content), Some(&meta)));
-        assert!(needs_fingerprint(Some(&file), Some(&content), None));
-        assert!(needs_fingerprint(Some(&file), None, Some(&meta)));
+        // Nothing looked yet, and the half-answered shapes: any of them
+        // is work, because a pass writes every axis together.
+        assert!(needs_fingerprint(blank, blank, blank));
+        assert!(needs_fingerprint(done_file, blank, blank));
+        assert!(needs_fingerprint(blank, done_content, done_meta));
+        assert!(needs_fingerprint(done_file, done_content, blank));
+        assert!(needs_fingerprint(done_file, blank, done_meta));
 
-        // All answered — a digest, or any marker saying why there is
+        // All answered — a digest, or any status saying why there is
         // no digest.
-        assert!(!needs_fingerprint(Some(&file), Some(&content), Some(&meta)));
+        assert!(!needs_fingerprint(done_file, done_content, done_meta));
         for answered in [
-            crate::domain::content_region::EMPTY_SPAN,
-            crate::domain::content_region::TOO_LARGE,
-            crate::domain::content_region::NOT_WALKED,
-            "unsupported:video/mp4",
-            UNHASHABLE,
+            MeasurementStatus::Unsupported,
+            MeasurementStatus::EmptySpan,
+            MeasurementStatus::TooLarge,
+            MeasurementStatus::NotWalked,
+            MeasurementStatus::NoBytes,
         ] {
+            let settled = (answered, None);
             assert!(
-                !needs_fingerprint(Some(&file), Some(answered), Some(answered)),
-                "{answered} is an answer, so the row is not work"
+                !needs_fingerprint(done_file, settled, settled),
+                "{} is an answer, so the row is not work",
+                answered.as_str()
             );
-            // The markers are shared across the two versioned axes on
+            // The statuses are shared across the two versioned axes on
             // purpose: they say something about the artefact, not about
             // which measurement was attempted.
-            assert!(is_axis_answer(DuplicateAxis::Content, answered));
-            assert!(is_axis_answer(DuplicateAxis::Meta, answered));
+            assert!(is_axis_answer(DuplicateAxis::Content, answered, None));
+            assert!(is_axis_answer(DuplicateAxis::Meta, answered, None));
         }
 
-        // A value from an earlier definition is not an answer to the
+        // A digest from an earlier definition is not an answer to the
         // question being asked now — on either versioned axis.
+        let stale_content = format!("cr0-sha256:{}", "c".repeat(64));
+        let stale_meta = format!("m0-sha256:{}", "d".repeat(64));
         assert!(needs_fingerprint(
-            Some(&file),
-            Some(&format!("cr0-sha256:{}", "c".repeat(64))),
-            Some(&meta)
+            done_file,
+            (Computed, Some(&stale_content)),
+            done_meta
         ));
         assert!(needs_fingerprint(
-            Some(&file),
-            Some(&content),
-            Some(&format!("m0-sha256:{}", "d".repeat(64)))
+            done_file,
+            done_content,
+            (Computed, Some(&stale_meta))
         ));
         // Neither is one axis's digest sitting in another's column,
         // which is what a column mix-up looks like from here.
-        assert!(needs_fingerprint(Some(&file), Some(&file), Some(&meta)));
         assert!(needs_fingerprint(
-            Some(&file),
-            Some(&content),
+            done_file,
+            (Computed, Some(&file)),
+            done_meta
+        ));
+        assert!(needs_fingerprint(
+            done_file,
+            done_content,
+            (Computed, Some(&content))
+        ));
+        assert!(!is_axis_answer(
+            DuplicateAxis::Content,
+            Computed,
+            Some(&file)
+        ));
+        assert!(!is_axis_answer(
+            DuplicateAxis::Meta,
+            Computed,
             Some(&content)
         ));
-        assert!(!is_axis_answer(DuplicateAxis::Content, &file));
-        assert!(!is_axis_answer(DuplicateAxis::Meta, &content));
+        // The artefact axis's vocabulary is not versioned, so there
+        // holding a value at all is holding an answer — the asymmetry
+        // the old `IS NULL` test spelled.
+        assert!(is_axis_answer(
+            DuplicateAxis::Artefact,
+            Computed,
+            Some("phash:0f0f0f0f")
+        ));
+
+        // A failed read is work for the walk — the retry is the visible
+        // exit an unreadable original keeps.
+        let failed = (Failed, None);
+        assert!(needs_fingerprint(done_file, failed, failed));
+        assert!(needs_fingerprint(failed, failed, failed));
+    }
+
+    /// The split issue #17 asked for: `failed` rows leave the progress
+    /// denominator and become their own count, while staying work for
+    /// the walk so the retry survives.
+    #[test]
+    fn an_unreadable_original_is_counted_apart_from_open_work() {
+        use MeasurementStatus::{Computed, Failed, Pending};
+
+        let file = of_bytes(b"star");
+        let content = format!("{CONTENT_DIGEST_PREFIX}{}", "b".repeat(64));
+        let meta = format!("{META_DIGEST_PREFIX}{}", "d".repeat(64));
+        let done_file = (Computed, Some(file.as_str()));
+        let done_content = (Computed, Some(content.as_str()));
+        let done_meta = (Computed, Some(meta.as_str()));
+        let blank = (Pending, None);
+        let failed = (Failed, None);
+
+        // Open work counts toward progress and is not "unreadable".
+        assert!(awaits_fingerprint(blank, blank, blank));
+        assert!(!fingerprint_unreadable(blank, blank, blank));
+
+        // A row whose only remaining work is retrying a failed read:
+        // out of the denominator, into the unreadable count.
+        assert!(!awaits_fingerprint(failed, failed, failed));
+        assert!(fingerprint_unreadable(failed, failed, failed));
+        assert!(!awaits_fingerprint(done_file, failed, failed));
+        assert!(fingerprint_unreadable(done_file, failed, failed));
+
+        // Mixed: one axis pending, one failed — still in progress (a
+        // pass is going to run anyway), so not counted twice.
+        assert!(awaits_fingerprint(blank, failed, done_meta));
+        assert!(!fingerprint_unreadable(blank, failed, done_meta));
+
+        // A stale generation is open work, not an unreadable original.
+        let stale = format!("cr0-sha256:{}", "c".repeat(64));
+        assert!(awaits_fingerprint(
+            done_file,
+            (Computed, Some(&stale)),
+            done_meta
+        ));
+
+        // Fully answered rows are in neither number.
+        assert!(!awaits_fingerprint(done_file, done_content, done_meta));
+        assert!(!fingerprint_unreadable(done_file, done_content, done_meta));
+        let settled = (MeasurementStatus::NoBytes, None);
+        assert!(!awaits_fingerprint(settled, settled, settled));
+        assert!(!fingerprint_unreadable(settled, settled, settled));
     }
 
     /// The two predicates split the same column, and the split is what
@@ -946,51 +1128,45 @@ mod tests {
     /// files from the other end.
     #[test]
     fn the_migration_claims_exactly_the_rows_the_ordinary_walk_calls_answered() {
-        use crate::domain::content_region;
+        use MeasurementStatus::{Computed, NotWalked, Pending};
 
         let file = of_bytes(b"star");
-        let region = format!("{CONTENT_DIGEST_PREFIX}{}", "b".repeat(64));
         let meta = format!("{META_DIGEST_PREFIX}{}", "d".repeat(64));
+        let done_file = (Computed, Some(file.as_str()));
+        let done_meta = (Computed, Some(meta.as_str()));
 
-        // The one value the migration is about, and the two rules
+        // The one status the migration is about, and the two rules
         // disagreeing about it on purpose.
-        assert!(needs_content_walk(Some(content_region::NOT_WALKED)));
-        assert!(!needs_fingerprint(
-            Some(&file),
-            Some(content_region::NOT_WALKED),
-            Some(&meta)
-        ));
+        assert!(needs_content_walk(NotWalked));
+        assert!(!needs_fingerprint(done_file, (NotWalked, None), done_meta));
 
         // Nothing else is the migration's work — including the states
         // that are work for the other pass, which is the direction that
         // would give one file to two walks.
         for other in [
-            region.as_str(),
-            content_region::EMPTY_SPAN,
-            content_region::TOO_LARGE,
-            "unsupported:video/mp4",
-            UNHASHABLE,
-            &format!("cr0-sha256:{}", "c".repeat(64)),
-            &file,
-            "",
+            MeasurementStatus::Pending,
+            MeasurementStatus::Computed,
+            MeasurementStatus::Unsupported,
+            MeasurementStatus::EmptySpan,
+            MeasurementStatus::TooLarge,
+            MeasurementStatus::NoBytes,
+            MeasurementStatus::Failed,
         ] {
             assert!(
-                !needs_content_walk(Some(other)),
-                "{other} is not a row the migration was deferred for"
+                !needs_content_walk(other),
+                "{} is not a row the migration was deferred for",
+                other.as_str()
             );
         }
-        assert!(
-            !needs_content_walk(None),
-            "a row with no answer at all belongs to the fingerprint walk"
-        );
-        // …and those two states really are work for the other rule, so
+        // …and the pending state really is work for the other rule, so
         // the loop above is a split rather than a predicate that refuses
         // everything.
-        assert!(needs_fingerprint(Some(&file), None, Some(&meta)));
+        assert!(needs_fingerprint(done_file, (Pending, None), done_meta));
+        let stale = format!("cr0-sha256:{}", "c".repeat(64));
         assert!(needs_fingerprint(
-            Some(&file),
-            Some(&format!("cr0-sha256:{}", "c".repeat(64))),
-            Some(&meta)
+            done_file,
+            (Computed, Some(&stale)),
+            done_meta
         ));
     }
 

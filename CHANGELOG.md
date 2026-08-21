@@ -8,6 +8,24 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- **The three-state moved out of the digest columns** (#17). The
+  `unsupported:<mime>` / `unhashable:no-bytes` marker strings that rode inside
+  `material.content_hash`, `content_region_hash` and `meta_hash` became a status
+  column beside each digest (`pending` / `computed` / `unsupported` /
+  `empty-span` / `too-large` / `not-walked` / `no-bytes` / `failed`), with the
+  media type — the genuinely valuable part of the old marker — kept in a reason
+  column; the digest columns now hold digests and nothing else, and a migration
+  converts every stored row. On the wire, `AssetDto.content_hash` stops carrying
+  markers and a `content_hash_status` field says why a digest is absent. The
+  second half of the issue rides along: a read that fails now records `failed`
+  with the I/O error instead of staying silently pending, so the "still
+  fingerprinting" count can actually reach zero — the walk still retries those
+  rows every pass, but they surface as the report's new `unreadable_count` (an
+  original that is moved, deleted, or on a disconnected disk) instead of holding
+  the progress notice open forever.
+
 ### Added
 
 - **The digital source type can be asserted by hand** (#23). The last route of

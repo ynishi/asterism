@@ -76,6 +76,7 @@ function group(hash: string, ids: string[]): DuplicateGroupDto {
 const REPORT: DuplicateReportDto = {
   groups: [group("h1", ["a", "b", "c"]), group("h2", ["x", "y"])],
   unhashed_count: 0,
+  unreadable_count: 0,
   unwalked_count: 0,
 };
 

@@ -165,6 +165,7 @@ pub mod material_layer;
 pub mod material_mark;
 pub mod material_meta;
 pub mod material_meta_raw;
+pub mod measurement;
 pub mod merge_plan;
 pub mod modality;
 pub mod observation;

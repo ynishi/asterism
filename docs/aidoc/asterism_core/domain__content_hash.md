@@ -69,11 +69,14 @@ identical.
 
 ## Functions
 
+- `awaits_fingerprint` — Whether one material still counts toward the "still fingerprinting"
 - `axis_of` — Which question a stored value answers, read off its tag — `None`
+- `axis_open_work` — Whether one axis is **open work** — the progress side of the split
 - `declaration_claim` — The note recorded at registration: the claim, and nothing else.
 - `declaration_verdict` — The note the hash job writes once it has read the bytes: the same
 - `digest_prefix` — The algorithm tag values on `axis` carry — the half of
-- `is_axis_answer` — Whether a **versioned** column holds an answer — a digest of the
+- `fingerprint_unreadable` — Whether one material is stuck on an unreadable original: the walk
+- `is_axis_answer` — Whether one axis holds a **final answer** — the rule that decides
 - `is_duplicate_key` — Whether a stored value may stand for "the same picture" — the rule
 - `needs_content_walk` — Whether one material is still owed the **data migration** that
 - `needs_fingerprint` — Whether one material still owes a fingerprint pass — **the** rule,
@@ -91,5 +94,5 @@ identical.
 - `META_EMPTY` — The meta-axis digest of the empty rendering (`{}`) — the [`EMPTY`]
 - `META_RESERVED_VALUES` — [`RESERVED_VALUES`] for the meta axis.
 - `RESERVED_VALUES` — The values a hash column holds that stand for something other than
-- `UNHASHABLE` — Tag on the value stored for a material that can never have a
+- `UNHASHABLE` — The **legacy stored spelling** of "this material can never have a
 

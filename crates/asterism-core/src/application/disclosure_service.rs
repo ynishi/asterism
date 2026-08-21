@@ -37,6 +37,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::disclosure::{DisclosureRecord, Stamped};
+use crate::domain::measurement::MeasurementStatus;
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
 use crate::domain::edge::EdgeKind;
@@ -159,19 +160,25 @@ impl DisclosureService {
         // something that has no bytes.
         //
         // `meta_kv` alone is not enough to read, because its `None`
-        // used to merge three states the storage keeps apart: the
-        // fingerprint job has not run (`meta_hash` is `NULL`), a probe
-        // read the container and this is what it holds (`meta_hash` is
-        // a digest), and no probe reads this format (`meta_hash` is a
-        // marker). The first is not an answer — it is the question not
-        // yet asked — and a record built on it stamps an unmarked file
-        // that cannot be told afterwards from one with nothing to say.
-        // The refusal is the fix: the automatic path already orders the
-        // stamp after the hash, so what this catches is a caller
-        // racing the fingerprint or re-applying before it ran.
+        // merges states the storage keeps apart: the fingerprint job
+        // has not run, a probe read the container and this is what it
+        // holds, and no probe reads this format. The status column
+        // beside the digest is where the distinction lives, and the
+        // two statuses that are not answers — `pending` (the question
+        // not yet asked) and `failed` (asked, and the bytes could not
+        // be read) — are refused: a record built on either stamps an
+        // unmarked file that cannot be told afterwards from one with
+        // nothing to say. The automatic path already orders the stamp
+        // after the hash, so what this catches is a caller racing the
+        // fingerprint or re-applying before it ran.
         let meta_kv = match asset.materials.first() {
             None => None,
-            Some(material) if material.meta_hash.is_none() => {
+            Some(material)
+                if matches!(
+                    material.meta_hash_status,
+                    MeasurementStatus::Pending | MeasurementStatus::Failed
+                ) =>
+            {
                 return Err(DomainError::Conflict(format!(
                     "asset {asset_id} has not had its metadata fingerprinted yet: \
                      a disclosure built now would read \"nothing established\" \

@@ -91,7 +91,12 @@ import { SvelteSet } from "svelte/reactivity";
 import { api } from "../api";
 import { Resource } from "./_resource.svelte";
 
-const EMPTY: DuplicateReportDto = { groups: [], unhashed_count: 0, unwalked_count: 0 };
+const EMPTY: DuplicateReportDto = {
+  groups: [],
+  unhashed_count: 0,
+  unreadable_count: 0,
+  unwalked_count: 0,
+};
 const NO_CONFLICTS: DuplicateConflictDto[] = [];
 
 /**
@@ -293,6 +298,12 @@ class DuplicatesCatalog {
   groups = $derived(this.report.data.groups);
   /** Materials still waiting to be fingerprinted. */
   unhashed = $derived(this.report.data.unhashed_count);
+  /**
+   * Materials whose original could not be read when the fingerprint
+   * pass tried. Not a smaller `unhashed`: that one converges to zero
+   * on its own, this one moves only when the files come back.
+   */
+  unreadable = $derived(this.report.data.unreadable_count);
   /** Materials the content axis has never looked at (file header). */
   unwalked = $derived(this.report.data.unwalked_count);
   /** Assets that would disappear if every group were resolved to one. */

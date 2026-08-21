@@ -502,34 +502,37 @@ pub struct AssetDto {
     /// Fingerprint of the primary material's bytes — the value the
     /// duplicate report groups on (`asterism_core::domain::content_hash`).
     ///
-    /// Three states, and telling them apart is the whole use of the
-    /// field:
+    /// A `sha256:<hex>` digest or absent, and nothing else — the marker
+    /// strings that used to travel in this field (`unhashable:no-bytes`)
+    /// moved to [`content_hash_status`](Self::content_hash_status)
+    /// beside it, which is where "we looked and there is nothing to
+    /// read" now stays distinguishable from "nobody has looked yet".
     ///
-    /// - `sha256:<hex>` — a real digest: these bytes were read, and
-    ///   this is what they hash to.
-    /// - `unhashable:no-bytes` — the marker for a material that can
-    ///   never have a digest, because there are no bytes to read: a
-    ///   record addressed *inside* a container file, or a locator that
-    ///   is not on this disk. It reaches the wire **verbatim** rather
-    ///   than folded into absence — "we looked and there is nothing to
-    ///   read" is an answer, "nobody has looked yet" is not, and a
-    ///   consumer waiting for a hash that is never coming is the bug
-    ///   collapsing them produces.
-    /// - Absent — not computed yet (hashing runs after ingest, in a
-    ///   job), **or** the entity was not hydrated on the path that
-    ///   built this payload. The same two-way silence
-    ///   [`AssetDto::mime`] carries: `None` is "unknown", never "not
-    ///   applicable".
+    /// Absent means not computed yet (hashing runs after ingest, in a
+    /// job), **or** the entity was not hydrated on the path that built
+    /// this payload — the same two-way silence [`AssetDto::mime`]
+    /// carries. The status field resolves the first ambiguity when it
+    /// is present.
     ///
     /// No state here is evidence that the asset is *not* a duplicate.
     /// A digest says which rows match; absence says nobody answered the
     /// question — reading it as uniqueness is the one wrong inference
-    /// available. (The predicate this used to name,
-    /// `is_hashable_locator`, is gone: the question is now which shape
-    /// the locator is, and "not a local file" means "no fingerprint for
-    /// this one" — never "known unique".)
+    /// available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    /// Why [`content_hash`](Self::content_hash) holds what it holds —
+    /// the primary material's file-axis status
+    /// (`asterism_core::domain::measurement`): `pending`, `computed`,
+    /// `no-bytes` (a record inside a container, a remote locator — no
+    /// digest is ever coming) or `failed` (the original could not be
+    /// read when the job ran; the walk retries it).
+    ///
+    /// Absent exactly when the entity was not hydrated with materials
+    /// on the path that built this payload — so a consumer that sees
+    /// `content_hash` absent can tell "not computed" from "not loaded"
+    /// by whether this field came along.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash_status: Option<String>,
     /// Semantic classification slug (`None` = unclassified).
     pub modality: Option<String>,
     /// Free-form labels.
@@ -2225,21 +2228,34 @@ pub struct DuplicateReportDto {
     /// Groups sharing a fingerprint on the requested axis, newest group
     /// first. Every group repeats the axis it was grouped on.
     pub groups: Vec<DuplicateGroupDto>,
-    /// Materials with no answer recorded yet. Non-zero means the
-    /// report is still incomplete.
+    /// Materials with open fingerprint work. Non-zero means the report
+    /// is still incomplete, and the number converges to zero as the
+    /// walk runs.
     ///
-    /// Files that can never be fingerprinted (a record inside a
-    /// conversation log, a remote locator) are **not** counted — they
-    /// carry an explicit "no bytes to read" marker, so the number
-    /// converges to zero on a healthy library instead of sitting at
-    /// the conversation corpus's size forever. What keeps it non-zero
-    /// is a file that was unreadable when the job ran: an unplugged
-    /// disk, a moved original.
+    /// Two kinds of row are **not** counted, so that it can actually
+    /// get there. Files that can never be fingerprinted (a record
+    /// inside a conversation log, a remote locator) carry an explicit
+    /// `no-bytes` status — they are answered, not pending. Files whose
+    /// original could not be *read* when the job ran carry `failed` and
+    /// are [`unreadable_count`](Self::unreadable_count)'s instead:
+    /// counting them here is what used to keep this number from ever
+    /// reaching zero (issue #17).
     pub unhashed_count: u64,
-    /// Materials the **content axis has no reading of**: rows still
-    /// carrying `unsupported:not-walked`.
+    /// Materials whose original could not be read when the fingerprint
+    /// pass tried: a moved or deleted file, a disk that was not plugged
+    /// in. The I/O error is recorded on each row's reason column.
     ///
-    /// The marker is written over every pre-existing row by the
+    /// Not a smaller `unhashed_count` and not a progress bar: the walk
+    /// keeps retrying these rows on every pass, so the number heals
+    /// itself when the files come back — but it does not move on its
+    /// own, and a caller that folds it into the progress notice
+    /// re-creates the permanent warning the split removed.
+    #[serde(default)]
+    pub unreadable_count: u64,
+    /// Materials the **content axis has no reading of**: rows still
+    /// carrying the `not-walked` status.
+    ///
+    /// The state is written over every pre-existing row by the
     /// migration that adds the column and cleared by the next step of
     /// the same chain, which reads the files. Both run before the
     /// application serves anything, so what is counted here is not a

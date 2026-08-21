@@ -86,6 +86,7 @@
 - [asterism-core::domain::material_mark](asterism_core/domain__material_mark.md): `MaterialMark` — a mark placed into an Asset's **material**: the
 - [asterism-core::domain::material_meta](asterism_core/domain__material_meta.md): `material_meta` — the canonical form the metadata a container
 - [asterism-core::domain::material_meta_raw](asterism_core/domain__material_meta_raw.md): `material_meta_raw` — the container's metadata bytes, kept verbatim,
+- [asterism-core::domain::measurement](asterism_core/domain__measurement.md): `measurement` — what a fingerprint column's *status* can say, now
 - [asterism-core::domain::merge_plan](asterism_core/domain__merge_plan.md): `MergePlan` — a person's ruling that a set of rows is one thing, and
 - [asterism-core::domain::modality](asterism_core/domain__modality.md): `ModalityDef` — the open Modality master entry (the `modality` table).
 - [asterism-core::domain::observation](asterism_core/domain__observation.md): Observability domain — the four streams and their policies.

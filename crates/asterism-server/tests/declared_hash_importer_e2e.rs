@@ -35,8 +35,8 @@ use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
 use asterism_contract::dto::AssetDetailDto;
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery};
 use asterism_core::domain::content_hash;
-use asterism_core::domain::content_region;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::repository::{AssetRepository, MaterialFingerprint};
 use asterism_core::domain::value::{AssetId, OnDuplicate};
 use asterism_importer_image::ImageParser;
@@ -236,9 +236,9 @@ async fn seed_artefact_digest(db_path: &std::path::Path, asset_id: &str, digest:
             &id,
             0,
             &MaterialFingerprint {
-                file: digest.to_string(),
-                content: content_region::NOT_WALKED.to_string(),
-                meta: content_region::NOT_WALKED.to_string(),
+                file: Measurement::computed(digest.to_string()),
+                content: Measurement::bare(MeasurementStatus::NotWalked),
+                meta: Measurement::bare(MeasurementStatus::NotWalked),
                 meta_kv: None,
                 meta_text: None,
                 meta_raw: None,
