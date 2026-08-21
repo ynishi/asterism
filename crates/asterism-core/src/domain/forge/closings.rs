@@ -55,7 +55,7 @@ use async_trait::async_trait;
 
 use crate::domain::forge::model::closing::Closing;
 use crate::domain::forge::model::value::{ChangePointId, LineId, PursuitId};
-// SHARED KERNEL: `DomainError` is a boundary type.
+// SHARED VOCABULARY: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
 /// Keeps what ending work produced.

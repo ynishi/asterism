@@ -10,12 +10,14 @@
 //! code that is not a test, collects what it names outside the forge,
 //! and refuses anything not on the list below with a reason beside it.
 //!
-//! # This is the list, and the `SHARED KERNEL` comments are not
+//! # This is the list, and the `SHARED VOCABULARY` comments are not
 //!
-//! Those comments mark the same edges at the point of use, and they
-//! are worth reading, but they cannot be the authority: a new import
-//! without one is invisible to a grep, which is exactly the case that
-//! matters. The list here is checked whether anybody remembers or not.
+//! That comment marks the same edges at the point of use — a word
+//! neither side owns, which a contract may therefore be written in —
+//! and it is worth reading where it sits. It cannot be the authority:
+//! an import written without one is invisible to a grep, which is
+//! exactly the case that matters. The list here is checked whether
+//! anybody remembered or not.
 //!
 //! # Two populations, and the second is shrinking
 //!
@@ -30,13 +32,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// What the forge may name outside itself, and why each one is not a
-/// leak.
+/// The words a contract across this boundary may be written in, and
+/// why each one belongs to neither side.
 ///
 /// Adding to this list is a decision about what the forge crate would
-/// have to depend on. It is not a place to record that something
-/// compiles.
-const LIFT_SURFACE: &[(&str, &str)] = &[
+/// have to depend on when it is lifted out. It is not a place to
+/// record that something compiles.
+const SHARED_VOCABULARY: &[(&str, &str)] = &[
     (
         "crate::error::DomainError",
         "the shared failure. A port is where failures from outside \
@@ -150,8 +152,8 @@ fn reaches_outside(code: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn the_forge_names_nothing_outside_itself_that_is_not_on_the_list() {
-    let allowed: BTreeSet<&str> = LIFT_SURFACE.iter().map(|(path, _)| *path).collect();
+fn the_forge_names_nothing_outside_itself_but_the_shared_vocabulary() {
+    let allowed: BTreeSet<&str> = SHARED_VOCABULARY.iter().map(|(path, _)| *path).collect();
     let leaving: BTreeSet<&str> = LEAVING.iter().copied().collect();
 
     let mut unexpected = Vec::new();
@@ -169,18 +171,18 @@ fn the_forge_names_nothing_outside_itself_that_is_not_on_the_list() {
 
     assert!(
         unexpected.is_empty(),
-        "the forge reaches for something that is not on its lift surface. Either \
-         it belongs there — add it to `LIFT_SURFACE` with the reason it is \
-         shared rather than borrowed — or it is the coupling this guard exists \
-         to catch: {unexpected:#?}"
+        "the forge names something outside itself that no contract is written \
+         in. Either it belongs to neither side — add it to `SHARED_VOCABULARY` \
+         with the reason — or it is the coupling this guard exists to catch: \
+         {unexpected:#?}"
     );
 }
 
 /// A reason is the work; the entry without one is a note that
 /// something compiles.
 #[test]
-fn every_entry_on_the_lift_surface_says_why_it_is_there() {
-    for (path, reason) in LIFT_SURFACE {
+fn every_shared_word_says_why_it_is_shared() {
+    for (path, reason) in SHARED_VOCABULARY {
         assert!(
             path.starts_with("crate::"),
             "an entry names a path from the crate root: {path}"
@@ -191,10 +193,10 @@ fn every_entry_on_the_lift_surface_says_why_it_is_there() {
         );
     }
 
-    let named: BTreeSet<&str> = LIFT_SURFACE.iter().map(|(path, _)| *path).collect();
+    let named: BTreeSet<&str> = SHARED_VOCABULARY.iter().map(|(path, _)| *path).collect();
     assert_eq!(
         named.len(),
-        LIFT_SURFACE.len(),
+        SHARED_VOCABULARY.len(),
         "an entry is listed twice; two reasons for one import means one of \
          them is not the reason"
     );

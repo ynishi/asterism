@@ -55,7 +55,7 @@
 use async_trait::async_trait;
 
 use crate::domain::forge::model::value::ActorId;
-// SHARED KERNEL: the attribution triple and the error are boundary
+// SHARED VOCABULARY: the attribution triple and the error are boundary
 // types — the vocabulary a contract is allowed to be stated in. This
 // module is where the forge's words stop and theirs begin.
 use crate::domain::attribution::AttributionContext;

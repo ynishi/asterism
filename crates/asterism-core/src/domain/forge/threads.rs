@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::thread::{Anchor, Message, Revision, Thread};
 use crate::domain::forge::model::value::{MessageId, ThreadId};
-// SHARED KERNEL: `DomainError` is a boundary type.
+// SHARED VOCABULARY: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
 /// Keeps what was said.

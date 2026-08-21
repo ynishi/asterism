@@ -25,7 +25,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::forge::model::value::Content;
-// SHARED KERNEL: ids and the error are boundary types — the shared
+// SHARED VOCABULARY: ids and the error are boundary types — the shared
 // vocabulary a contract is allowed to be stated in.
 use crate::domain::value::{AssetId, PersonaId};
 use crate::error::DomainError;

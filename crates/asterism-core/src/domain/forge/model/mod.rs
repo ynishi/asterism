@@ -118,7 +118,7 @@
 //! be a rule, and a wider set cannot be spelled in a narrower
 //! vocabulary.
 //!
-//! Every one of those imports is marked `SHARED KERNEL` at its `use`
+//! Every one of those imports is marked `SHARED VOCABULARY` at its `use`
 //! line, which is worth reading where it sits. It is not what holds
 //! the rule: a new import written without the comment is invisible to
 //! a grep, and that is the case that matters. What holds it is

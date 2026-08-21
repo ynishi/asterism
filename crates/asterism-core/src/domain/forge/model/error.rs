@@ -25,7 +25,7 @@ use crate::domain::forge::model::change::Collision;
 use crate::domain::forge::model::strategy::StrategyError;
 use crate::domain::forge::model::value::Name;
 
-// SHARED KERNEL: `DomainError` is a boundary type. This module is the
+// SHARED VOCABULARY: `DomainError` is a boundary type. This module is the
 // only one in the model that names it — everything else refuses in the
 // forge's own vocabulary and converts at this edge.
 use crate::error::DomainError;

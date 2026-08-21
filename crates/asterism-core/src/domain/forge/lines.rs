@@ -53,7 +53,7 @@ use async_trait::async_trait;
 use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::line::Line;
 use crate::domain::forge::model::value::{LineId, Name, StrategyId};
-// SHARED KERNEL: `DomainError` is a boundary type.
+// SHARED VOCABULARY: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
 /// Keeps lines.

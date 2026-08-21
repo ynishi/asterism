@@ -29,12 +29,12 @@
 use uuid::Uuid;
 
 use crate::domain::forge::model::error::ForgeError;
-// SHARED KERNEL: `AssetId` is a boundary type — the third crate both
-// sides depend on, and neither owns. Grep `SHARED KERNEL` for every
+// SHARED VOCABULARY: `AssetId` is a boundary type — the third crate both
+// sides depend on, and neither owns. Grep `SHARED VOCABULARY` for every
 // edge out of this module.
 use crate::domain::value::AssetId;
 
-// SHARED KERNEL (candidate): `define_uuid_id!` is not on the boundary
+// SHARED VOCABULARY (candidate): `define_uuid_id!` is not on the boundary
 // list, and this is the only edge out of the model that is not. It
 // shapes nothing — it is how an id newtype is spelled — so it moves
 // with the split rather than before it.

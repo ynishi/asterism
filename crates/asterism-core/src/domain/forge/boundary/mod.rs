@@ -95,9 +95,9 @@
 //! test is the arrow: a module boundary stops nothing, and
 //! `use crate::domain::asset::Asset` in a model file compiles today.
 //!
-//! It also means the shared vocabulary has a written surface. What
-//! crosses is five names, each with the reason it is shared rather
-//! than borrowed, which is what the split lifts when it happens.
+//! It also means the shared vocabulary has a written surface: five
+//! names, each with the reason it belongs to neither side. That is
+//! what the split lifts when it happens.
 //!
 //! # What lives here later
 //!

@@ -46,7 +46,7 @@ use async_trait::async_trait;
 
 use crate::domain::forge::model::pursuit::{Pursuit, Round};
 use crate::domain::forge::model::value::{LineId, NodeId, PursuitId};
-// SHARED KERNEL: `DomainError` is a boundary type.
+// SHARED VOCABULARY: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
 /// Keeps work logs.
