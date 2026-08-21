@@ -93,8 +93,8 @@ pub enum ForgeError {
     #[error("two entries would be on the line under the name {0:?}")]
     NameTaken(Name),
 
-    /// A pass wrote nothing and looked at nothing.
-    #[error("a pass writes something or takes something in — otherwise nothing happened")]
+    /// A pass carried no operations.
+    #[error("a pass writes something — otherwise nothing happened")]
     EmptyRound,
 
     /// Work that has ended was written to.
@@ -148,12 +148,15 @@ pub enum ForgeError {
     )]
     NothingToRecord,
 
-    /// The line moved axes this work also moves, and this work has not
-    /// looked at the change points that moved them.
+    /// The line moved axes this work still asks to move, after the
+    /// work was cut from it.
     ///
     /// Carries them so a caller can say which, rather than sending
     /// anybody back to recompute what the refusal already knew.
-    #[error("{} axes moved on the line since this work was cut and have not been looked at", .0.len())]
+    #[error(
+        "{} axes this work asks for moved on the line after the work was cut from it",
+        .0.len()
+    )]
     Collides(Vec<Collision>),
 }
 

@@ -226,13 +226,14 @@ impl PursuitService {
         ))
     }
 
-    /// What this work would write that the line has already moved, and
-    /// that this work has not looked at.
+    /// What this work still asks to write that the line moved after
+    /// the work was cut from it.
     ///
     /// Derived from the two logs on every call, so it cannot go stale
     /// and there is no flag anybody has to clear. What clears a
-    /// collision is [`resolve`](Self::resolve) — looking, and then
-    /// writing the axis anyway.
+    /// collision is the work asking for something else — writing a
+    /// pass that stops requesting the axis, which
+    /// [`resolve`](Self::resolve) does under the line's own rule.
     pub async fn collisions(&self, id: &PursuitId) -> Result<Vec<Collision>, DomainError> {
         let pursuit = self.get(id).await?;
         let line = self.line(&pursuit.of()).await?;

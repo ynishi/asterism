@@ -4,7 +4,7 @@
 //!   Pursuit ── of : →Line ── parent? : →Pursuit
 //!    └ WorkLog
 //!        Open ──▶ Round ──▶ Round ──▶ Close?
-//!          │        │  └ ops / taken in
+//!          │        │  └ ops
 //!          │        └ parent
 //!          └ base : the change point this was cut from
 //! ```

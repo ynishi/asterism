@@ -139,7 +139,7 @@ impl Closing {
 /// - [`NothingToRecord`](ForgeError::NothingToRecord) — everything the
 ///   work would change, the line already says. Close it as abandoned.
 /// - [`Collides`](ForgeError::Collides) — the line moved axes this
-///   work moves, and this work has not looked at what moved them.
+///   work still asks to move, after the work was cut from it.
 ///
 /// An abandoned close skips all but the first two: work that is giving
 /// up does not have to be reconcilable with anything.
