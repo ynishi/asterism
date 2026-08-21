@@ -632,6 +632,7 @@ the private design notes.
 - [`domain::material_mark`](domain__material_mark.md): `MaterialMark` — a mark placed into an Asset's **material**: the
 - [`domain::material_meta`](domain__material_meta.md): `material_meta` — the canonical form the metadata a container
 - [`domain::material_meta_raw`](domain__material_meta_raw.md): `material_meta_raw` — the container's metadata bytes, kept verbatim,
+- [`domain::measurement`](domain__measurement.md): `measurement` — what a fingerprint column's *status* can say, now
 - [`domain::merge_plan`](domain__merge_plan.md): `MergePlan` — a person's ruling that a set of rows is one thing, and
 - [`domain::modality`](domain__modality.md): `ModalityDef` — the open Modality master entry (the `modality` table).
 - [`domain::observation`](domain__observation.md): Observability domain — the four streams and their policies.
@@ -2578,11 +2579,14 @@ identical.
 
 ## Functions
 
+- `awaits_fingerprint` — Whether one material still counts toward the "still fingerprinting"
 - `axis_of` — Which question a stored value answers, read off its tag — `None`
+- `axis_open_work` — Whether one axis is **open work** — the progress side of the split
 - `declaration_claim` — The note recorded at registration: the claim, and nothing else.
 - `declaration_verdict` — The note the hash job writes once it has read the bytes: the same
 - `digest_prefix` — The algorithm tag values on `axis` carry — the half of
-- `is_axis_answer` — Whether a **versioned** column holds an answer — a digest of the
+- `fingerprint_unreadable` — Whether one material is stuck on an unreadable original: the walk
+- `is_axis_answer` — Whether one axis holds a **final answer** — the rule that decides
 - `is_duplicate_key` — Whether a stored value may stand for "the same picture" — the rule
 - `needs_content_walk` — Whether one material is still owed the **data migration** that
 - `needs_fingerprint` — Whether one material still owes a fingerprint pass — **the** rule,
@@ -2600,7 +2604,7 @@ identical.
 - `META_EMPTY` — The meta-axis digest of the empty rendering (`{}`) — the [`EMPTY`]
 - `META_RESERVED_VALUES` — [`RESERVED_VALUES`] for the meta axis.
 - `RESERVED_VALUES` — The values a hash column holds that stand for something other than
-- `UNHASHABLE` — Tag on the value stored for a material that can never have a
+- `UNHASHABLE` — The **legacy stored spelling** of "this material can never have a
 
 
 <!-- asterism_core/domain__content_region.md -->
@@ -2666,11 +2670,11 @@ exactly that collision.
 
 ## Constants
 
-- `EMPTY_SPAN` — Value stored when a probe claimed the format and its reading yielded
-- `NOT_WALKED` — Value written to the content column of every material that existed
-- `TOO_LARGE` — Value stored when the format *is* one a probe walks and the job
+- `EMPTY_SPAN` — Legacy stored spelling of [`MeasurementStatus::EmptySpan`]: a probe claimed
+- `NOT_WALKED` — Legacy stored spelling of [`MeasurementStatus::NotWalked`]: written to the
+- `TOO_LARGE` — Legacy stored spelling of [`MeasurementStatus::TooLarge`]: the format *is*
 - `UNKNOWN_FORMAT` — Format label used when a probe refused the bytes and nothing named
-- `UNSUPPORTED_PREFIX` — Tag on every value that says "no digest on this axis, use the file
+- `UNSUPPORTED_PREFIX` — The **legacy stored prefix** of "no digest on this axis" — what the
 
 
 <!-- asterism_core/domain__derived_text.md -->
@@ -4071,6 +4075,55 @@ bound, so PNG's probe states one.
 - `RAW_PREFIX` — The prefix on a value that carries bytes rather than a statement
 
 
+<!-- asterism_core/domain__measurement.md -->
+# asterism-core::domain::measurement
+
+`measurement` — what a fingerprint column's *status* can say, now
+that the digest columns hold only digests.
+
+The name is the issue's own vocabulary: the whole defect was that a
+reader could not tell a **measurement** from a note about why there
+is no measurement, and these types are the two halves of that
+sentence made storable — [`Measurement`] is one axis's stored
+triple, [`MeasurementStatus`] the word that says which of the two
+it is holding.
+
+The vocabulary the three hash columns used to carry inline — a
+digest, or a marker string explaining why there is none
+(`unsupported:<mime>`, `unsupported:empty-span`,
+`unhashable:no-bytes`, …) — is split in two. The digest column holds
+a digest or NULL; a status column beside it holds one of the words
+below, non-nullable; and a reason column holds the free-text part
+(the media type, an I/O error) where a status has one.
+
+# Why the marker vocabulary moved out of the value slot
+
+Every reader of the old columns had to know the marker grammar
+before it could tell a measurement from a note about why there is no
+measurement — `is_duplicate_key`, `is_axis_answer`,
+`needs_fingerprint` and `needs_content_walk` all existed to make
+that distinction, two of them restated in SQL. The established shape
+for the same distinction elsewhere (`getxattr(2)`'s `ENOTSUP` /
+`ENODATA` / value) is a nullable payload beside a non-nullable
+status, and the marker-in-the-value design was safe only for as long
+as the column never crossed an application boundary. Issue #17 is
+the record of that decision.
+
+# One vocabulary, three columns
+
+The three axes share one status set for the reason they shared one
+marker set: most of these words say something about the artefact
+rather than about which measurement was attempted. Which subset a
+writer can produce differs — the file axis streams and never walks,
+so it only ever says `pending` / `computed` / `no-bytes` / `failed`
+— but a reader faces one closed set wherever it looks.
+
+## Types
+
+- `Measurement` — One axis's stored triple: the status, the digest when there is one,
+- `MeasurementStatus` — What one fingerprint axis's status column says about the digest
+
+
 <!-- asterism_core/domain__merge_plan.md -->
 # asterism-core::domain::merge_plan
 
@@ -4267,8 +4320,8 @@ answers for, which the probe states itself
 
 That is what it costs to read the *next* file, and it is not the
 whole cost of the format arriving. Every artefact already in the
-library carries `unsupported:<mime>` on both walking axes, and a
-marker is a final answer to "has anybody looked"
+library carries the `unsupported` status on both walking axes, and
+that is a final answer to "has anybody looked"
 ([`is_axis_answer`](crate::domain::content_hash::is_axis_answer)), so
 [`needs_fingerprint`](crate::domain::content_hash::needs_fingerprint)
 passes those rows over for good. Files imported after the probe lands
@@ -4500,7 +4553,7 @@ projection instead of full `Asset` entities.
 - `FoldReport` — Counts from a fold that went through. Every number is a row count,
 - `IndexDoc` — One asset as handed to the retrieval index.
 - `LayerScope` — The `(asset, material, role)` triple a layer lookup is scoped by.
-- `MaterialFingerprint` — The pair of values one fingerprint pass produces for one material.
+- `MaterialFingerprint` — The values one fingerprint pass produces for one material.
 - `MergeOutcome` — What one call to [`AssetRepository::merge_into`] did — or, on a dry
 - `QueryGroupRow` — One query group as listed by
 - `RegisteredStrategy` — One `series_strategy` row: the rule, and what the row says about
@@ -8793,12 +8846,12 @@ a new format is one implementation and one line below, and nothing in
 
 That is what the format costs for the next file read, not for the
 library already on disk. Rows imported before the probe landed hold
-`unsupported:image/jpeg`, and every `unsupported:` value is a final
-answer to "has anybody looked"
+the `unsupported` status with the format in the reason column, and
+that is a final answer to "has anybody looked"
 ([`is_axis_answer`](asterism_core::domain::content_hash::is_axis_answer)),
 so the ordinary fingerprint pass never offers them again: new imports
 would take digests while the rows that were there first keep the
-marker, and one column would hold two meanings with nothing to tell
+status, and one axis would hold two meanings with nothing to tell
 them apart. A format therefore also arrives owing a way back to the
 rows it was refused on, **per axis and per column**, since a probe
 may claim one of them a slice before the other — which is what JPEG

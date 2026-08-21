@@ -12,12 +12,12 @@ a new format is one implementation and one line below, and nothing in
 
 That is what the format costs for the next file read, not for the
 library already on disk. Rows imported before the probe landed hold
-`unsupported:image/jpeg`, and every `unsupported:` value is a final
-answer to "has anybody looked"
+the `unsupported` status with the format in the reason column, and
+that is a final answer to "has anybody looked"
 ([`is_axis_answer`](asterism_core::domain::content_hash::is_axis_answer)),
 so the ordinary fingerprint pass never offers them again: new imports
 would take digests while the rows that were there first keep the
-marker, and one column would hold two meanings with nothing to tell
+status, and one axis would hold two meanings with nothing to tell
 them apart. A format therefore also arrives owing a way back to the
 rows it was refused on, **per axis and per column**, since a probe
 may claim one of them a slice before the other — which is what JPEG

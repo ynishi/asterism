@@ -60,9 +60,9 @@ exactly that collision.
 
 ## Constants
 
-- `EMPTY_SPAN` — Value stored when a probe claimed the format and its reading yielded
-- `NOT_WALKED` — Value written to the content column of every material that existed
-- `TOO_LARGE` — Value stored when the format *is* one a probe walks and the job
+- `EMPTY_SPAN` — Legacy stored spelling of [`MeasurementStatus::EmptySpan`]: a probe claimed
+- `NOT_WALKED` — Legacy stored spelling of [`MeasurementStatus::NotWalked`]: written to the
+- `TOO_LARGE` — Legacy stored spelling of [`MeasurementStatus::TooLarge`]: the format *is*
 - `UNKNOWN_FORMAT` — Format label used when a probe refused the bytes and nothing named
-- `UNSUPPORTED_PREFIX` — Tag on every value that says "no digest on this axis, use the file
+- `UNSUPPORTED_PREFIX` — The **legacy stored prefix** of "no digest on this axis" — what the
 

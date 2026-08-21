@@ -345,7 +345,7 @@
     {
       "path": "asterism_ui::commands::list_duplicate_groups",
       "kind": "function",
-      "docs": "Duplicate report — sets of live assets sharing a fingerprint on\n`axis` (`\"artefact\"` by default, `\"content\"` for the bytes that\ndecide the decoded result), optionally persona-scoped.\n\nBoth counts ride along so the panel never has to present an empty\nreport as a clean bill of health: `unhashed_count` is \"still\nlooking\", `unwalked_count` is \"the content axis has no reading of\nthese files, because the migration that fills the column in could not\nopen their originals\"."
+      "docs": "Duplicate report — sets of live assets sharing a fingerprint on\n`axis` (`\"artefact\"` by default, `\"content\"` for the bytes that\ndecide the decoded result), optionally persona-scoped.\n\nThe counts ride along so the panel never has to present an empty\nreport as a clean bill of health: `unhashed_count` is \"still\nlooking\", `unreadable_count` is \"these originals could not be read\nwhen the pass tried, and the number will not move until the files\ncome back\", `unwalked_count` is \"the content axis has no reading of\nthese files, because the migration that fills the column in could not\nopen their originals\"."
     },
     {
       "path": "asterism_ui::commands::list_events",

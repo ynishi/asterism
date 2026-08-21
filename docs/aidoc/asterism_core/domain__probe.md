@@ -34,8 +34,8 @@ answers for, which the probe states itself
 
 That is what it costs to read the *next* file, and it is not the
 whole cost of the format arriving. Every artefact already in the
-library carries `unsupported:<mime>` on both walking axes, and a
-marker is a final answer to "has anybody looked"
+library carries the `unsupported` status on both walking axes, and
+that is a final answer to "has anybody looked"
 ([`is_axis_answer`](crate::domain::content_hash::is_axis_answer)), so
 [`needs_fingerprint`](crate::domain::content_hash::needs_fingerprint)
 passes those rows over for good. Files imported after the probe lands

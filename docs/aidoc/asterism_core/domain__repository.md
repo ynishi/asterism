@@ -34,7 +34,7 @@ projection instead of full `Asset` entities.
 - `FoldReport` — Counts from a fold that went through. Every number is a row count,
 - `IndexDoc` — One asset as handed to the retrieval index.
 - `LayerScope` — The `(asset, material, role)` triple a layer lookup is scoped by.
-- `MaterialFingerprint` — The pair of values one fingerprint pass produces for one material.
+- `MaterialFingerprint` — The values one fingerprint pass produces for one material.
 - `MergeOutcome` — What one call to [`AssetRepository::merge_into`] did — or, on a dry
 - `QueryGroupRow` — One query group as listed by
 - `RegisteredStrategy` — One `series_strategy` row: the rule, and what the row says about
