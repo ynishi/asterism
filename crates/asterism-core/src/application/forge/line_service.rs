@@ -93,6 +93,17 @@ impl LineService {
             .ok_or_else(|| DomainError::not_found("line", id))
     }
 
+    /// Every line there is.
+    ///
+    /// Whole lines, which is affordable because a line is a
+    /// repository: there are as many as somebody made on purpose.
+    /// Which of them a person may see is not answered here — a line
+    /// carries no owner, so scoping is for whoever knows what a person
+    /// is.
+    pub async fn list(&self) -> Result<Vec<Line>, DomainError> {
+        self.lines.list().await
+    }
+
     /// What is on the line: alive, under what name, at which content.
     ///
     /// Folded from the history on every call. There is no stored copy

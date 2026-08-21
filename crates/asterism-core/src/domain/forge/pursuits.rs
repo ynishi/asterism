@@ -21,6 +21,19 @@
 //! getting a shortcut of its own: one door for endings means a reader
 //! of this trait cannot find a second one.
 //!
+//! # Listing hands back whole pursuits, and that is a bet
+//!
+//! [`Pursuits::of_line`] and [`Pursuits::children`] return every pass
+//! of every pursuit they answer with, which is more than a caller
+//! showing a list needs. There is no lighter shape because the model
+//! has no half-pursuit, and inventing one for a listing would put a
+//! read's convenience inside the model.
+//!
+//! The bet is that a line does not accumulate work faster than
+//! somebody can read about it. If that turns out false, what arrives
+//! is a summary the transport asks for with a measurement behind it —
+//! not a guess made here.
+//!
 //! # Reading gives back the whole pursuit
 //!
 //! Adding a pass checks the head, deciding a close folds every pass,
@@ -32,7 +45,7 @@
 use async_trait::async_trait;
 
 use crate::domain::forge::model::pursuit::{Pursuit, Round};
-use crate::domain::forge::model::value::{NodeId, PursuitId};
+use crate::domain::forge::model::value::{LineId, NodeId, PursuitId};
 // SHARED KERNEL: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
@@ -44,6 +57,21 @@ pub trait Pursuits: Send + Sync {
 
     /// Reads work back whole, every pass included.
     async fn get(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError>;
+
+    /// Every piece of work against a line, open or ended.
+    ///
+    /// Ended work is included because that is most of what the record
+    /// is for: what was tried and abandoned is exactly what a listing
+    /// that only showed live work would hide.
+    async fn of_line(&self, line: &LineId) -> Result<Vec<Pursuit>, DomainError>;
+
+    /// The work filed under a larger piece of work.
+    ///
+    /// A pursuit names its parent when it opens and never afterwards,
+    /// so this walks one level and cannot loop. Nothing stores the
+    /// other direction — which pursuits are under a parent is this
+    /// question, and a kept answer would be a second copy of it.
+    async fn children(&self, parent: &PursuitId) -> Result<Vec<Pursuit>, DomainError>;
 
     /// Adds a pass, on the condition that `on` is still the node the
     /// work ends at.

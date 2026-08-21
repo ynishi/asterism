@@ -65,6 +65,18 @@ pub trait Lines: Send + Sync {
     /// Reads a line back whole, history included.
     async fn get(&self, id: &LineId) -> Result<Option<Line>, DomainError>;
 
+    /// Every line there is.
+    ///
+    /// Whole lines, histories and all, and that is affordable because
+    /// of what a line is: a repository. An instance has the number of
+    /// them somebody made on purpose, not one per thing they own.
+    ///
+    /// Which of them a given person may see is not asked here. A line
+    /// carries no owner — grouping and access are outside the forge —
+    /// so scoping a listing is the job of whoever knows what a person
+    /// is, and this hands over what exists.
+    async fn list(&self) -> Result<Vec<Line>, DomainError>;
+
     /// Records that a line was renamed.
     async fn rename(&self, id: &LineId, name: &Name, act: &Act) -> Result<(), DomainError>;
 

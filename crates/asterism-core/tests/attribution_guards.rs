@@ -403,6 +403,11 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "read — the rules a line can be pointed at, built from the rules \
          this instance carries so that somebody can choose one",
     ),
+    (
+        "line_service::list",
+        "read — every line there is, unscoped, because a line carries \
+         no owner for this layer to scope by",
+    ),
     // ---- pursuit_service: reads (#63)
     (
         "pursuit_service::get",
@@ -412,6 +417,14 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "pursuit_service::collisions",
         "read — what this work writes that the line has moved since, \
          derived from the two logs on every call and stored nowhere",
+    ),
+    (
+        "pursuit_service::of_line",
+        "read — every piece of work against a line, ended work included",
+    ),
+    (
+        "pursuit_service::children",
+        "read — the work filed under a larger piece of work, one level",
     ),
     (
         "pursuit_service::behind",

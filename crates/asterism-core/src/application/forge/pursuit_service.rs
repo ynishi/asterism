@@ -240,6 +240,21 @@ impl PursuitService {
         Ok(collisions(&line, &pursuit)?)
     }
 
+    /// Every piece of work against a line, open or ended.
+    ///
+    /// What was abandoned is in it. A listing that showed only live
+    /// work would hide what this layer is for.
+    pub async fn of_line(&self, line: &LineId) -> Result<Vec<Pursuit>, DomainError> {
+        self.line(line).await?;
+        self.pursuits.of_line(line).await
+    }
+
+    /// The work filed under a larger piece of work.
+    pub async fn children(&self, parent: &PursuitId) -> Result<Vec<Pursuit>, DomainError> {
+        self.get(parent).await?;
+        self.pursuits.children(parent).await
+    }
+
     /// Everything the line has recorded since this work was cut from
     /// it.
     ///
@@ -383,6 +398,10 @@ mod tests {
             Ok(self.line(id))
         }
 
+        async fn list(&self) -> Result<Vec<Line>, DomainError> {
+            Ok(self.lines.lock().unwrap().clone())
+        }
+
         async fn rename(&self, _: &LineId, _: &Name, _: &Act) -> Result<(), DomainError> {
             Ok(())
         }
@@ -406,6 +425,28 @@ mod tests {
 
         async fn get(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {
             Ok(self.pursuit(id))
+        }
+
+        async fn of_line(&self, line: &LineId) -> Result<Vec<Pursuit>, DomainError> {
+            Ok(self
+                .pursuits
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|work| work.of() == *line)
+                .cloned()
+                .collect())
+        }
+
+        async fn children(&self, parent: &PursuitId) -> Result<Vec<Pursuit>, DomainError> {
+            Ok(self
+                .pursuits
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|work| work.parent() == Some(*parent))
+                .cloned()
+                .collect())
         }
 
         async fn push(&self, id: &PursuitId, on: NodeId, round: &Round) -> Result<(), DomainError> {
@@ -740,6 +781,55 @@ mod tests {
         assert!(matches!(refused, Err(DomainError::Conflict(_))));
         assert_eq!(*world.attempts.lock().unwrap(), ATTEMPTS);
         assert!(work.get(&pursuit.id()).await.unwrap().outcome().is_none());
+    }
+
+    /// Work is found by the line it is against and by the work it is
+    /// filed under, and what was abandoned is in both — a listing that
+    /// hid it would hide what the record is for.
+    #[tokio::test]
+    async fn work_is_listed_by_its_line_and_by_its_parent() {
+        let world = World::new();
+        let (lines, work, line) = opened(&world).await;
+        let epic = work
+            .open(&line.id(), None, Intent::default(), &by())
+            .await
+            .unwrap();
+        let under = work
+            .open(&line.id(), Some(epic.id()), Intent::default(), &by())
+            .await
+            .unwrap();
+
+        // One of them is abandoned, and stays in the listing.
+        work.push(
+            &under.id(),
+            &persona(),
+            vec![Op::add(content(), name("tried"))],
+            None,
+            &by(),
+        )
+        .await
+        .unwrap();
+        work.close(&under.id(), Outcome::Abandoned, None, &by())
+            .await
+            .unwrap();
+
+        let against = work.of_line(&line.id()).await.unwrap();
+        assert_eq!(against.len(), 2);
+        assert!(
+            against
+                .iter()
+                .any(|w| w.outcome() == Some(Outcome::Abandoned))
+        );
+
+        let children = work.children(&epic.id()).await.unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id(), under.id());
+        assert!(work.children(&under.id()).await.unwrap().is_empty());
+
+        // And the line it is all against is one of the lines there are.
+        let every = lines.list().await.unwrap();
+        assert_eq!(every.len(), 1);
+        assert_eq!(every[0].id(), line.id());
     }
 
     /// The round trip the whole design exists for: two pieces of work
