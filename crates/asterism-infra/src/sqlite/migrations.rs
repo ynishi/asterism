@@ -6854,6 +6854,90 @@ UPDATE material SET meta_hash = NULL
     OR meta_hash = 'unhashable:no-bytes';
 "#;
 
+/// V93 — `.json` gets the mime `guess_mime` now answers (issue #16):
+/// rows written while a whole `.json` file was `text/plain` move to
+/// `application/json`, so the content-axis probe that declares that
+/// mime can reach them.
+///
+/// The same repair V45 made for fragments, in the other direction:
+/// the classification is fixed at the source
+/// (`asterism_core::domain::material::guess_mime`), and the rows
+/// already written need this. The predicate mirrors that function's
+/// judgement over the tagged locator (V63's shape): a `file`'s path
+/// answers by extension, a `remote`'s target and a `logical`'s name by
+/// the same suffix with a query string stripped, and a `record` never
+/// answers `.json` at all — the record is the artefact, the container's
+/// extension answers for the wrong thing. `LIKE` is ASCII
+/// case-insensitive, which is the lowercasing the sniff applies, and
+/// `%.json` cannot match `.jsonl`, which deliberately stays behind.
+///
+/// The mirror has one seam, and the file arm's second condition is it:
+/// a file **named** `.json` has no extension to `Path::extension`, so
+/// the sniff never called it JSON, while `extension_of_text` — the
+/// reading the other two arms mirror — answers `json` for a target or
+/// name ending in `/.json`. The predicate follows each arm's own
+/// reader, which is what "mirrors the judgement" has to mean when the
+/// judgements differ.
+///
+/// Guarded on `mime = 'text/plain'` — the only value the old arm ever
+/// wrote for these rows — so a mime an importer stated explicitly is
+/// not overridden by a guess. Idempotent by shape: the second run finds
+/// no `text/plain` `.json` rows.
+const V93_JSON_MATERIAL_MIME: &str = r#"
+UPDATE material
+   SET mime = 'application/json'
+ WHERE mime = 'text/plain'
+   AND (
+        (json_extract(locator, '$.kind') = 'file'
+         AND json_extract(locator, '$.path') LIKE '%.json'
+         AND json_extract(locator, '$.path') NOT LIKE '%/.json')
+     OR (json_extract(locator, '$.kind') = 'remote'
+         AND CASE
+               WHEN instr(json_extract(locator, '$.target'), '?') > 0
+               THEN substr(json_extract(locator, '$.target'), 1,
+                           instr(json_extract(locator, '$.target'), '?') - 1)
+               ELSE json_extract(locator, '$.target')
+             END LIKE '%.json')
+     OR (json_extract(locator, '$.kind') = 'logical'
+         AND CASE
+               WHEN instr(json_extract(locator, '$.name'), '?') > 0
+               THEN substr(json_extract(locator, '$.name'), 1,
+                           instr(json_extract(locator, '$.name'), '?') - 1)
+               ELSE json_extract(locator, '$.name')
+             END LIKE '%.json')
+   );
+"#;
+
+/// V94 — hands the rows V93 renamed back to the fingerprint walk: the
+/// way back a format owes the rows it was refused on, which V72 and V76
+/// paid for JPEG's two axes with an `UPDATE` over the marker. Since V92
+/// the refusal is a status beside the column rather than a spelling
+/// inside it, so the same step is spelled on the status: `unsupported`
+/// returns to `pending` — "nobody has looked", which is what is true of
+/// these rows now that a probe exists — and the recorded reason goes
+/// with it: `text/plain` where V93 renamed the old guess, and whatever
+/// mime an importer stated on a row that already declared
+/// `application/json` itself.
+///
+/// Filtered on the mime V93 wrote rather than on the recorded reason,
+/// because the reason names what the row *declared then* and the walk
+/// selects on what it *declares now* — the two disagree on exactly the
+/// rows this step exists for.
+///
+/// The content axis only. The JSON probe does not claim the meta axis —
+/// a JSON document has no container metadata — so a meta row cleared
+/// here would come back holding what it holds now, the reasoning V72
+/// gave for leaving JPEG's meta column alone while that axis had no
+/// reading. The digest column itself needs nothing: V92 already left it
+/// NULL for every non-`computed` row.
+const V94_CLEAR_STALE_JSON_CONTENT_MARKER: &str = r#"
+UPDATE material
+   SET content_region_hash_status = 'pending',
+       content_region_hash_reason = NULL
+ WHERE mime = 'application/json'
+   AND content_region_hash_status = 'unsupported';
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -6949,6 +7033,8 @@ const MIGRATIONS: &[Step] = &[
     Step::App(v90_drop_the_pursuit_stamp),
     Step::Sql(V91_DROP_THE_BASE_EVENT_PIN),
     Step::Sql(V92_MATERIAL_FINGERPRINT_STATUS),
+    Step::Sql(V93_JSON_MATERIAL_MIME),
+    Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -14374,5 +14460,120 @@ mod tests {
             leftovers, 0,
             "no marker spelling survives in a digest column"
         );
+    }
+
+    /// V93 renames the whole-file `.json` rows to the mime `guess_mime`
+    /// answers now, and V94 hands exactly those rows back to the
+    /// fingerprint walk — asserted over the locator shapes the sniff
+    /// distinguishes, one row per judgement.
+    ///
+    /// Two properties carry the weight. The pair of migrations moves a
+    /// row from "answered: unsupported" to "pending" **only** where the
+    /// declared mime changed — `.jsonl`, a record inside a container,
+    /// and a mime an importer stated all keep both their mime and their
+    /// answer — and the meta axis moves on no row at all, because the
+    /// JSON probe does not claim it and a cleared row would only be
+    /// re-refused.
+    #[test]
+    fn v93_renames_whole_json_rows_and_v94_hands_them_back_to_the_walk() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 92).unwrap();
+        let persona = seed_persona(&conn);
+
+        // One row per locator judgement, seeded in the shape a `.json`
+        // row held on the eve of the step: declared `text/plain`,
+        // refused on both walking axes with that mime as the reason,
+        // file axis answered.
+        let seed = |locator: &str, mime: &str| -> Uuid {
+            let asset = seed_asset(&conn, persona);
+            conn.execute(
+                "INSERT INTO material (asset_id, ord, locator, mime, \
+                                       content_hash, content_hash_status, \
+                                       content_region_hash_status, \
+                                       content_region_hash_reason, \
+                                       meta_hash_status, meta_hash_reason, \
+                                       created_at, updated_at) \
+                 VALUES (?1, 0, ?2, ?3, 'sha256:aaaa', 'computed', \
+                         'unsupported', ?3, 'unsupported', ?3, 0, 0)",
+                params![asset, locator, mime],
+            )
+            .unwrap();
+            asset
+        };
+
+        let whole = seed(r#"{"kind":"file","path":"/docs/a.json"}"#, "text/plain");
+        let upper = seed(r#"{"kind":"file","path":"/docs/B.JSON"}"#, "text/plain");
+        let lines = seed(r#"{"kind":"file","path":"/docs/c.jsonl"}"#, "text/plain");
+        let record = seed(
+            r#"{"kind":"record","container":"/docs/d.json","record":"one"}"#,
+            "text/plain",
+        );
+        let queried = seed(
+            r#"{"kind":"remote","scheme":"https","target":"https://x/y.json?sig=1"}"#,
+            "text/plain",
+        );
+        let logical = seed(
+            r#"{"kind":"logical","name":"harvest/f.json"}"#,
+            "text/plain",
+        );
+        let stated = seed(
+            r#"{"kind":"file","path":"/docs/e.json"}"#,
+            "application/octet-stream",
+        );
+        // A file *named* `.json` has no extension to `Path::extension`,
+        // so the sniff never called it JSON — the seam the file arm's
+        // second condition exists for.
+        let hidden = seed(r#"{"kind":"file","path":"/docs/.json"}"#, "text/plain");
+
+        migrate(&mut conn).unwrap();
+
+        let mime_of = |asset: Uuid| -> String {
+            conn.query_row(
+                "SELECT mime FROM material WHERE asset_id = ?1",
+                params![asset],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        // The renamed rows: `guess_mime`'s judgement, including the
+        // lowercasing and the query strip, and the walk owes them again.
+        for asset in [whole, upper, queried, logical] {
+            assert_eq!(mime_of(asset), "application/json");
+            assert_eq!(
+                axis_state_of(&conn, asset, "content_region_hash"),
+                ("pending".to_string(), None, None),
+                "V94 returns the refused content axis to \"nobody has looked\""
+            );
+            assert_eq!(
+                axis_state_of(&conn, asset, "meta_hash"),
+                (
+                    "unsupported".to_string(),
+                    None,
+                    Some("text/plain".to_string())
+                ),
+                "the meta axis is not claimed and does not move"
+            );
+            assert!(
+                status_era_owes(&conn, asset),
+                "a pending content axis re-enters the fingerprint walk"
+            );
+        }
+
+        // The rows the sniff never called `.json`: mime and answer both
+        // stay, and the walk still considers them answered.
+        for (asset, mime) in [
+            (lines, "text/plain"),
+            (record, "text/plain"),
+            (hidden, "text/plain"),
+            (stated, "application/octet-stream"),
+        ] {
+            assert_eq!(mime_of(asset), mime);
+            assert_eq!(
+                axis_state_of(&conn, asset, "content_region_hash"),
+                ("unsupported".to_string(), None, Some(mime.to_string())),
+            );
+            assert!(!status_era_owes(&conn, asset), "{mime} stays answered");
+        }
     }
 }

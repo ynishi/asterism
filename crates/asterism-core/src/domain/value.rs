@@ -621,6 +621,18 @@ pub enum MimeType {
     /// Any `text/*`. Which text it is has never changed a decision, so
     /// the subtype rides along verbatim rather than as its own set.
     Text(Box<str>),
+    /// `application/json` — a whole `.json` file, one JSON document.
+    ///
+    /// The one `application/*` subtype the app acts on, so it stands as
+    /// its own variant rather than riding in [`Other`](Self::Other):
+    /// the content axis needs to route it to a probe
+    /// ([`FormatClaim`](crate::domain::probe::FormatClaim) holds a
+    /// `MimeType` in a `const` slice, which a `Box<str>` cannot join),
+    /// and [`body_text`](Self::body_text) needs to answer for it —
+    /// both of which an `Other` arm would decide by string comparison
+    /// nothing checks. A `.jsonl` is **not** this: it is records in a
+    /// container, not one value per file, and stays `text/plain`.
+    Json,
     /// A parsed value in no family the app acts on (`application/pdf`,
     /// `font/woff2`, …).
     Other(Box<str>),
@@ -728,6 +740,7 @@ impl MimeType {
             "audio/mpeg" => Self::Audio(AudioFormat::Mpeg),
             "audio/wav" => Self::Audio(AudioFormat::Wav),
             "audio/mp4" => Self::Audio(AudioFormat::Mp4),
+            "application/json" => Self::Json,
             other => {
                 // The family still decides behaviour even when the
                 // subtype is unknown, so it is read before giving up.
@@ -754,6 +767,7 @@ impl MimeType {
             Self::Image(f) => f.as_str(),
             Self::Video(f) => f.as_str(),
             Self::Audio(f) => f.as_str(),
+            Self::Json => "application/json",
             Self::Text(raw) | Self::Other(raw) => raw,
         }
     }
@@ -764,7 +778,7 @@ impl MimeType {
             Self::Image(_) => MediaKind::Image,
             Self::Video(_) => MediaKind::Video,
             Self::Audio(_) => MediaKind::Audio,
-            Self::Text(_) | Self::Other(_) => MediaKind::None,
+            Self::Json | Self::Text(_) | Self::Other(_) => MediaKind::None,
         }
     }
 
@@ -780,8 +794,17 @@ impl MimeType {
     /// answers `false`, including formats that merely *contain* text
     /// (PDF, PNG tEXt): extracting those is a decoder's job, and
     /// reading the container's raw bytes as lossy UTF-8 is not it.
+    ///
+    /// [`Json`](Self::Json) answers `true`, and it is not the exception
+    /// it looks like: a JSON document does not merely *contain* text
+    /// the way a PNG carries a `tEXt` chunk — the document **is** its
+    /// text, every byte of it, and reading it whole is exactly the
+    /// reading a decoder would produce. `.json` answered `text/plain`
+    /// until it gained its own mime for the content axis, and falling
+    /// out of search over a routing change would be a regression, not a
+    /// decision.
     pub fn body_text(&self) -> bool {
-        matches!(self, Self::Text(_))
+        matches!(self, Self::Text(_) | Self::Json)
     }
 
     /// Whether the detail player needs a transcoded rendition rather
@@ -1517,6 +1540,26 @@ mod tests {
         assert!(MimeType::parse("text/plain").body_text());
         // Any `text/*`, including subtypes no list names.
         assert!(MimeType::parse("text/markdown").body_text());
+        // And the one non-`text/*` exception, argued at `body_text`: a
+        // JSON document *is* its text — it answered `text/plain` until
+        // it gained its own mime for the content axis, and must not
+        // fall out of search over a routing change.
+        assert!(MimeType::parse("application/json").body_text());
+    }
+
+    #[test]
+    fn json_is_its_own_variant_and_round_trips() {
+        let json = MimeType::parse("application/json");
+        assert_eq!(json, MimeType::Json);
+        assert_eq!(json.as_str(), "application/json");
+        assert_eq!(json.media(), MediaKind::None);
+        assert!(!json.thumbnailable());
+        // One subtype, not a family: every other `application/*` keeps
+        // landing in `Other`, exactly as it did before the variant.
+        assert!(matches!(
+            MimeType::parse("application/pdf"),
+            MimeType::Other(_)
+        ));
     }
 
     #[test]

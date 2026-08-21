@@ -28,6 +28,20 @@ and this project adheres to
 
 ### Added
 
+- **JSON documents share an identity across member order** (#16). A whole
+  `.json` file now declares `application/json` and takes a content-axis digest
+  (`cr1-`) over a stated canonical reading: member order and inter-token
+  whitespace normalised, members sorted by decoded name, and every scalar token
+  copied from the source verbatim — so two files a serialiser reordered are one
+  document, while `1.50` / `1.5`, `-0.0` / `0` and integers above 2^53 stay
+  distinct (the collisions RFC 8785 accepts, declined deliberately: on a
+  duplicate-detection axis a false positive is folded and destroys, a false
+  negative costs a row). A document carrying a duplicate member name is refused
+  rather than silently resolved. Two migrations rename the rows imported under
+  `text/plain` and hand their refused content axis back to the fingerprint walk;
+  `.jsonl` stays a record container, and JSON stays in the body cache and the
+  full-text index.
+
 - **The digital source type can be asserted by hand** (#23). The last route of
   the provenance policy: an artefact this app generated is known synthetic, an
   imported declaration is trusted, and what is neither is unknown — until the

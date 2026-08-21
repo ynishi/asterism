@@ -53,6 +53,7 @@ this crate.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
 - [`probes::jpeg`](probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
+- [`probes::json`](probes__json.md): JSON's reading of the content axis — the first digest on that axis
 - [`probes::png`](probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
 - [`search`](search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.

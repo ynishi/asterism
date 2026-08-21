@@ -65,6 +65,7 @@ use asterism_core::domain::probe::{ArtefactProbe, ProbeGates};
 use asterism_core::domain::value::MimeType;
 
 pub mod jpeg;
+pub mod json;
 pub mod png;
 
 /// Every probe this build carries, in the order they are asked.
@@ -74,7 +75,7 @@ pub mod png;
 /// function returning it is the smallest thing that keeps the list in
 /// one place. Neither probe has state, so the value is a constant.
 fn probes() -> &'static [&'static dyn ArtefactProbe] {
-    const ALL: &[&dyn ArtefactProbe] = &[&png::PngProbe, &jpeg::JpegProbe];
+    const ALL: &[&dyn ArtefactProbe] = &[&png::PngProbe, &jpeg::JpegProbe, &json::JsonProbe];
     ALL
 }
 

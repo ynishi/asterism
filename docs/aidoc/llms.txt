@@ -225,6 +225,7 @@
 - [asterism-infra::paths](asterism_infra/paths.md): Data-profile and on-disk layout conventions.
 - [asterism-infra::probes](asterism_infra/probes.md): The probes this build has, and the one question a caller asks of all
 - [asterism-infra::probes::jpeg](asterism_infra/probes__jpeg.md): JPEG's reading of the content axis: which of its segments are the
+- [asterism-infra::probes::json](asterism_infra/probes__json.md): JSON's reading of the content axis — the first digest on that axis
 - [asterism-infra::probes::png](asterism_infra/probes__png.md): PNG's reading of the two walking axes: which of its chunks are the
 - [asterism-infra::search](asterism_infra/search.md): Retrieval adapter — Tantivy on-disk index + Lindera Japanese
 - [asterism-infra::search::fan_out](asterism_infra/search__fan_out.md): One [`AssetIndexer`] over several.
