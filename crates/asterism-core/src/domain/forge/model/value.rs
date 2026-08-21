@@ -30,8 +30,9 @@ use uuid::Uuid;
 
 use crate::domain::forge::model::error::ForgeError;
 // SHARED VOCABULARY: `AssetId` is a boundary type — the third crate both
-// sides depend on, and neither owns. Grep `SHARED VOCABULARY` for every
-// edge out of this module.
+// sides depend on, and neither owns. The same comment marks the ports'
+// boundary types too, so the grep is wider than this module; what holds
+// the list is `tests/forge_boundary.rs`.
 use crate::domain::value::AssetId;
 
 // SHARED VOCABULARY (candidate): `define_uuid_id!` is not on the boundary
