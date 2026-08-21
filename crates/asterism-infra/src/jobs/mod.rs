@@ -862,9 +862,9 @@ mod tests {
     async fn a_dispatch_output_comes_back_marked() {
         use asterism_core::domain::asset::Asset;
         use asterism_core::domain::attribution::AttributionContext;
-        use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
         use asterism_core::domain::disclosure::PromptDisclosure;
         use asterism_core::domain::material::Material;
+        use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
         use asterism_core::domain::persona::Persona;
         use asterism_core::domain::repository::{
             AssetRepository, MaterialFingerprint, PersonaRepository,
@@ -930,9 +930,9 @@ mod tests {
                 &asset.id,
                 0,
                 &MaterialFingerprint {
-                    file: AxisRecord::bare(AxisStatus::NoBytes),
-                    content: AxisRecord::bare(AxisStatus::NoBytes),
-                    meta: AxisRecord::computed("m1-sha256:0".into()),
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::computed("m1-sha256:0".into()),
                     meta_kv: Some(
                         serde_json::json!({ "Software": "ComfyUI", "workflow": "{}" }).to_string(),
                     ),

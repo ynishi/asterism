@@ -10,11 +10,11 @@ use asterism_core::application_support::duplicate_detection::{
     Detection, DetectionOrigin, DetectionPorts, detect_duplicate,
 };
 use asterism_core::domain::asset::{Asset, ContentFlags};
-use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::constellation::plan_edges;
 use asterism_core::domain::content_hash;
 use asterism_core::domain::derived_text::derive_text;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::provenance;
 use asterism_core::domain::render::render_policy;
 use asterism_core::domain::repository::{
@@ -1901,9 +1901,9 @@ async fn hash_material(
                 asset_id,
                 ord,
                 &MaterialFingerprint {
-                    file: AxisRecord::bare(AxisStatus::NoBytes),
-                    content: AxisRecord::bare(AxisStatus::NoBytes),
-                    meta: AxisRecord::bare(AxisStatus::NoBytes),
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::bare(MeasurementStatus::NoBytes),
                     // Nothing was read, so nobody has looked: `NULL`
                     // rather than the `{}` that would retire the row
                     // from a later pass.
@@ -3546,7 +3546,7 @@ mod tests {
                 .digest()
                 .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
         );
-        assert_eq!(video.content, AxisRecord::unsupported("video/mp4".into()));
+        assert_eq!(video.content, Measurement::unsupported("video/mp4".into()));
 
         // A `.png` that is not one: the signature check refuses, and
         // the status says only what is known.
@@ -3559,14 +3559,17 @@ mod tests {
                 .digest()
                 .is_some_and(|d| d.starts_with(DIGEST_PREFIX))
         );
-        assert_eq!(refused.content, AxisRecord::unsupported("unknown".into()));
+        assert_eq!(refused.content, Measurement::unsupported("unknown".into()));
 
         // A truncated PNG walks to no region, and the row records the
         // status rather than the perfectly real digest of nothing.
         let whole = png(pixels, None);
         let cut = write(&dir, "cut.png", &whole[..whole.len() / 2]);
         let broken = hash_artefact(&cut, Some(&mime("image/png")), MAX_CONTENT_WALK_BYTES).unwrap();
-        assert_eq!(broken.content, AxisRecord::bare(AxisStatus::EmptySpan));
+        assert_eq!(
+            broken.content,
+            Measurement::bare(MeasurementStatus::EmptySpan)
+        );
         assert!(
             broken
                 .file
@@ -3587,7 +3590,10 @@ mod tests {
 
         let gate = (bytes.len() - 1) as u64;
         let gated = hash_artefact(&path, Some(&mime("image/png")), gate).unwrap();
-        assert_eq!(gated.content, AxisRecord::bare(AxisStatus::TooLarge));
+        assert_eq!(
+            gated.content,
+            Measurement::bare(MeasurementStatus::TooLarge)
+        );
 
         // The same file under a ceiling it fits: the file axis agrees
         // with the gated run (so the gate changed one answer, not two)
@@ -3622,9 +3628,9 @@ mod tests {
             "a".repeat(64)
         );
         let fingerprint = MaterialFingerprint {
-            file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
-            content: AxisRecord::computed(content_digest.clone()),
-            meta: AxisRecord::computed(meta_digest.clone()),
+            file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+            content: Measurement::computed(content_digest.clone()),
+            meta: Measurement::computed(meta_digest.clone()),
             meta_kv: Some(r#"{"prompt":"a cat"}"#.to_string()),
             meta_raw: None,
             meta_text: None,
@@ -3693,16 +3699,16 @@ mod tests {
         // row that predates the column, no bytes at all, and a read
         // that failed.
         for status in [
-            AxisRecord::bare(AxisStatus::TooLarge),
-            AxisRecord::bare(AxisStatus::EmptySpan),
-            AxisRecord::bare(AxisStatus::NotWalked),
-            AxisRecord::unsupported("image/jpeg".into()),
-            AxisRecord::unsupported("unknown".into()),
-            AxisRecord::bare(AxisStatus::NoBytes),
-            AxisRecord::failed("No such file or directory".into()),
+            Measurement::bare(MeasurementStatus::TooLarge),
+            Measurement::bare(MeasurementStatus::EmptySpan),
+            Measurement::bare(MeasurementStatus::NotWalked),
+            Measurement::unsupported("image/jpeg".into()),
+            Measurement::unsupported("unknown".into()),
+            Measurement::bare(MeasurementStatus::NoBytes),
+            Measurement::failed("No such file or directory".into()),
         ] {
             let fingerprint = MaterialFingerprint {
-                file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
+                file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
                 content: status.clone(),
                 meta: status.clone(),
                 meta_kv: None,
@@ -3724,9 +3730,9 @@ mod tests {
             "b".repeat(64)
         );
         let measured = MaterialFingerprint {
-            file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
-            content: AxisRecord::computed(region_digest.clone()),
-            meta: AxisRecord::bare(AxisStatus::NotWalked),
+            file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+            content: Measurement::computed(region_digest.clone()),
+            meta: Measurement::bare(MeasurementStatus::NotWalked),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
@@ -3742,9 +3748,9 @@ mod tests {
         // *grouping*, which is a different question from whether a
         // caller may declare it.
         let empty = MaterialFingerprint {
-            file: AxisRecord::computed(asterism_core::domain::content_hash::EMPTY.to_string()),
-            content: AxisRecord::bare(AxisStatus::NotWalked),
-            meta: AxisRecord::bare(AxisStatus::NotWalked),
+            file: Measurement::computed(asterism_core::domain::content_hash::EMPTY.to_string()),
+            content: Measurement::bare(MeasurementStatus::NotWalked),
+            meta: Measurement::bare(MeasurementStatus::NotWalked),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,

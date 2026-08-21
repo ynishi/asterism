@@ -65,8 +65,8 @@
 //! number formatting between two files the container itself calls
 //! identical.
 
-use crate::domain::axis_status::AxisStatus;
 use crate::domain::duplicate_conflict::DuplicateAxis;
+use crate::domain::measurement::MeasurementStatus;
 use crate::error::DomainError;
 
 /// The notation itself — the `sha256:` tag, the incremental hasher, and
@@ -99,7 +99,7 @@ pub use asterism_contract::digest::{ContentHasher, DIGEST_PREFIX, of_bytes};
 /// "we looked and there is nothing to read" stayed distinguishable from
 /// "we have not looked yet". The distinction now lives in the status
 /// column beside each digest
-/// ([`AxisStatus::NoBytes`](crate::domain::axis_status::AxisStatus::NoBytes)),
+/// ([`MeasurementStatus::NoBytes`](crate::domain::measurement::MeasurementStatus::NoBytes)),
 /// and no runtime writer produces this spelling any more. It is kept
 /// because it is written into live databases: the V92 conversion maps
 /// it, and a reader of a pre-V92 dump still meets it.
@@ -350,13 +350,13 @@ pub const META_RESERVED_VALUES: &[&str] = &[META_EMPTY];
 /// Read off the status column first, and off the digest only where the
 /// status says there is one:
 ///
-/// - [`Pending`](AxisStatus::Pending) — nobody has looked. Work.
-/// - [`Failed`](AxisStatus::Failed) — somebody looked and the bytes
+/// - [`Pending`](MeasurementStatus::Pending) — nobody has looked. Work.
+/// - [`Failed`](MeasurementStatus::Failed) — somebody looked and the bytes
 ///   could not be read, which is an answer that can change (the disk
 ///   comes back). Work for the walk, so the retry happens; **not** open
 ///   work for the progress count, which is [`axis_open_work`]'s side of
 ///   the split.
-/// - [`Computed`](AxisStatus::Computed) — an answer if the digest is of
+/// - [`Computed`](MeasurementStatus::Computed) — an answer if the digest is of
 ///   the **current** generation. On the two versioned axes a value
 ///   written under an earlier definition (`cr0-sha256:…`) reads as no
 ///   answer and the row returns to the walk; that is the whole point of
@@ -364,7 +364,7 @@ pub const META_RESERVED_VALUES: &[&str] = &[META_EMPTY];
 ///   the entire library back in front of the walk, which is a decision
 ///   about somebody's disk rather than a consequence of shipping.
 ///   Whoever bumps it owes the same answer the column's arrival owed,
-///   and [`AxisStatus::NotWalked`] records how that one was given. The
+///   and [`MeasurementStatus::NotWalked`] records how that one was given. The
 ///   **artefact** axis's vocabulary is not versioned, so there holding
 ///   a value at all is holding an answer — the same asymmetry the old
 ///   `IS NULL` test spelled.
@@ -379,20 +379,24 @@ pub const META_RESERVED_VALUES: &[&str] = &[META_EMPTY];
 /// read by one question, and a per-axis function would be the same
 /// `match` with a constant swapped — the day a rule changes it would
 /// change in one of them.
-pub fn is_axis_answer(axis: DuplicateAxis, status: AxisStatus, digest: Option<&str>) -> bool {
+pub fn is_axis_answer(
+    axis: DuplicateAxis,
+    status: MeasurementStatus,
+    digest: Option<&str>,
+) -> bool {
     match status {
-        AxisStatus::Pending | AxisStatus::Failed => false,
-        AxisStatus::Computed => match axis {
+        MeasurementStatus::Pending | MeasurementStatus::Failed => false,
+        MeasurementStatus::Computed => match axis {
             DuplicateAxis::Artefact => true,
             DuplicateAxis::Content | DuplicateAxis::Meta => {
                 digest.is_some_and(|value| value.starts_with(digest_prefix(axis)))
             }
         },
-        AxisStatus::Unsupported
-        | AxisStatus::EmptySpan
-        | AxisStatus::TooLarge
-        | AxisStatus::NotWalked
-        | AxisStatus::NoBytes => true,
+        MeasurementStatus::Unsupported
+        | MeasurementStatus::EmptySpan
+        | MeasurementStatus::TooLarge
+        | MeasurementStatus::NotWalked
+        | MeasurementStatus::NoBytes => true,
     }
 }
 
@@ -408,10 +412,14 @@ pub fn is_axis_answer(axis: DuplicateAxis, status: AxisStatus, digest: Option<&s
 /// warning nobody reads — so they are excluded here and surfaced as
 /// their own count, with the reason on the row (issue #17's second
 /// half).
-pub fn axis_open_work(axis: DuplicateAxis, status: AxisStatus, digest: Option<&str>) -> bool {
+pub fn axis_open_work(
+    axis: DuplicateAxis,
+    status: MeasurementStatus,
+    digest: Option<&str>,
+) -> bool {
     match status {
-        AxisStatus::Pending => true,
-        AxisStatus::Computed => !is_axis_answer(axis, status, digest),
+        MeasurementStatus::Pending => true,
+        MeasurementStatus::Computed => !is_axis_answer(axis, status, digest),
         _ => false,
     }
 }
@@ -474,9 +482,9 @@ pub fn axis_open_work(axis: DuplicateAxis, status: AxisStatus, digest: Option<&s
 /// rather than NULL, so that the deferred set stays selectable by
 /// whoever writes that pass.
 pub fn needs_fingerprint(
-    file: (AxisStatus, Option<&str>),
-    content: (AxisStatus, Option<&str>),
-    meta: (AxisStatus, Option<&str>),
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
 ) -> bool {
     !is_axis_answer(DuplicateAxis::Artefact, file.0, file.1)
         || !is_axis_answer(DuplicateAxis::Content, content.0, content.1)
@@ -494,9 +502,9 @@ pub fn needs_fingerprint(
 /// supposed to reach zero. Those rows are
 /// [`fingerprint_unreadable`]'s to count.
 pub fn awaits_fingerprint(
-    file: (AxisStatus, Option<&str>),
-    content: (AxisStatus, Option<&str>),
-    meta: (AxisStatus, Option<&str>),
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
 ) -> bool {
     axis_open_work(DuplicateAxis::Artefact, file.0, file.1)
         || axis_open_work(DuplicateAxis::Content, content.0, content.1)
@@ -513,9 +521,9 @@ pub fn awaits_fingerprint(
 /// with the I/O error in the reason column, rather than folded into the
 /// progress count it would keep from ever reaching zero.
 pub fn fingerprint_unreadable(
-    file: (AxisStatus, Option<&str>),
-    content: (AxisStatus, Option<&str>),
-    meta: (AxisStatus, Option<&str>),
+    file: (MeasurementStatus, Option<&str>),
+    content: (MeasurementStatus, Option<&str>),
+    meta: (MeasurementStatus, Option<&str>),
 ) -> bool {
     needs_fingerprint(file, content, meta) && !awaits_fingerprint(file, content, meta)
 }
@@ -563,7 +571,7 @@ pub fn fingerprint_unreadable(
 /// format with no walker, a file past the size gate, a walk that found
 /// no region. Selecting them would re-read every video in the library
 /// in order to write back the status it already carries.
-/// [`NotWalked`](AxisStatus::NotWalked) is the only one whose cause is
+/// [`NotWalked`](MeasurementStatus::NotWalked) is the only one whose cause is
 /// "the bytes were never spent", which is the only thing spending them
 /// now can change.
 ///
@@ -591,8 +599,8 @@ pub fn fingerprint_unreadable(
 /// `Pending` (nothing written at all) is **not** work here: that row
 /// belongs to [`needs_fingerprint`], and claiming it in both places
 /// would hand one file to two passes that each read it.
-pub fn needs_content_walk(content_status: AxisStatus) -> bool {
-    content_status == AxisStatus::NotWalked
+pub fn needs_content_walk(content_status: MeasurementStatus) -> bool {
+    content_status == MeasurementStatus::NotWalked
 }
 
 /// Hex characters in a SHA-256 digest.
@@ -968,7 +976,7 @@ mod tests {
     /// forever.
     #[test]
     fn a_material_owes_a_pass_until_every_axis_holds_an_answer() {
-        use AxisStatus::{Computed, Failed, Pending};
+        use MeasurementStatus::{Computed, Failed, Pending};
 
         let file = of_bytes(b"star");
         let content = format!("{CONTENT_DIGEST_PREFIX}{}", "b".repeat(64));
@@ -990,11 +998,11 @@ mod tests {
         // no digest.
         assert!(!needs_fingerprint(done_file, done_content, done_meta));
         for answered in [
-            AxisStatus::Unsupported,
-            AxisStatus::EmptySpan,
-            AxisStatus::TooLarge,
-            AxisStatus::NotWalked,
-            AxisStatus::NoBytes,
+            MeasurementStatus::Unsupported,
+            MeasurementStatus::EmptySpan,
+            MeasurementStatus::TooLarge,
+            MeasurementStatus::NotWalked,
+            MeasurementStatus::NoBytes,
         ] {
             let settled = (answered, None);
             assert!(
@@ -1066,7 +1074,7 @@ mod tests {
     /// the walk so the retry survives.
     #[test]
     fn an_unreadable_original_is_counted_apart_from_open_work() {
-        use AxisStatus::{Computed, Failed, Pending};
+        use MeasurementStatus::{Computed, Failed, Pending};
 
         let file = of_bytes(b"star");
         let content = format!("{CONTENT_DIGEST_PREFIX}{}", "b".repeat(64));
@@ -1104,7 +1112,7 @@ mod tests {
         // Fully answered rows are in neither number.
         assert!(!awaits_fingerprint(done_file, done_content, done_meta));
         assert!(!fingerprint_unreadable(done_file, done_content, done_meta));
-        let settled = (AxisStatus::NoBytes, None);
+        let settled = (MeasurementStatus::NoBytes, None);
         assert!(!awaits_fingerprint(settled, settled, settled));
         assert!(!fingerprint_unreadable(settled, settled, settled));
     }
@@ -1120,7 +1128,7 @@ mod tests {
     /// files from the other end.
     #[test]
     fn the_migration_claims_exactly_the_rows_the_ordinary_walk_calls_answered() {
-        use AxisStatus::{Computed, NotWalked, Pending};
+        use MeasurementStatus::{Computed, NotWalked, Pending};
 
         let file = of_bytes(b"star");
         let meta = format!("{META_DIGEST_PREFIX}{}", "d".repeat(64));
@@ -1136,13 +1144,13 @@ mod tests {
         // that are work for the other pass, which is the direction that
         // would give one file to two walks.
         for other in [
-            AxisStatus::Pending,
-            AxisStatus::Computed,
-            AxisStatus::Unsupported,
-            AxisStatus::EmptySpan,
-            AxisStatus::TooLarge,
-            AxisStatus::NoBytes,
-            AxisStatus::Failed,
+            MeasurementStatus::Pending,
+            MeasurementStatus::Computed,
+            MeasurementStatus::Unsupported,
+            MeasurementStatus::EmptySpan,
+            MeasurementStatus::TooLarge,
+            MeasurementStatus::NoBytes,
+            MeasurementStatus::Failed,
         ] {
             assert!(
                 !needs_content_walk(other),

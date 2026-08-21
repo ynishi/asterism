@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::domain::axis_status::AxisStatus;
+use crate::domain::measurement::MeasurementStatus;
 use crate::domain::source_locator::SourceLocator;
 use crate::domain::value::{AudioFormat, ImageFormat, MimeType, VideoFormat};
 use chrono::{DateTime, Utc};
@@ -78,9 +78,9 @@ pub struct Material {
     pub content_hash: Option<String>,
     /// Why [`content_hash`](Self::content_hash) holds what it holds —
     /// the file axis's status column.
-    pub content_hash_status: AxisStatus,
+    pub content_hash_status: MeasurementStatus,
     /// The status's free-text payload, when it carries one: the I/O
-    /// error under [`Failed`](AxisStatus::Failed). `None` otherwise.
+    /// error under [`Failed`](MeasurementStatus::Failed). `None` otherwise.
     pub content_hash_reason: Option<String>,
     /// Fingerprint of only the bytes that decide what the original
     /// decodes to (`crate::domain::content_region`) — a digest and
@@ -105,15 +105,15 @@ pub struct Material {
     ///
     /// A material that predates the column is answered by the migration
     /// that adds it, in two steps:
-    /// [`NotWalked`](AxisStatus::NotWalked) first — an answer, so the
+    /// [`NotWalked`](MeasurementStatus::NotWalked) first — an answer, so the
     /// ordinary walk leaves the row alone — and then the real value,
     /// computed by the step that reads the file. A row still carrying
     /// that status afterwards is one whose original could not be
     /// opened.
-    pub content_region_hash_status: AxisStatus,
+    pub content_region_hash_status: MeasurementStatus,
     /// The status's free-text payload, when it carries one: the
-    /// format's name under [`Unsupported`](AxisStatus::Unsupported),
-    /// the I/O error under [`Failed`](AxisStatus::Failed).
+    /// format's name under [`Unsupported`](MeasurementStatus::Unsupported),
+    /// the I/O error under [`Failed`](MeasurementStatus::Failed).
     pub content_region_hash_reason: Option<String>,
     /// Fingerprint of the metadata the container carries *about* these
     /// bytes (`crate::domain::material_meta`) — a digest and nothing
@@ -135,7 +135,7 @@ pub struct Material {
     pub meta_hash: Option<String>,
     /// Why [`meta_hash`](Self::meta_hash) holds what it holds — the
     /// meta axis's status column.
-    pub meta_hash_status: AxisStatus,
+    pub meta_hash_status: MeasurementStatus,
     /// The status's free-text payload, when it carries one — same
     /// contract as
     /// [`content_region_hash_reason`](Self::content_region_hash_reason).
@@ -199,13 +199,13 @@ impl Material {
             // The `material_hash` job fills all of these in afterwards,
             // from one read.
             content_hash: None,
-            content_hash_status: AxisStatus::Pending,
+            content_hash_status: MeasurementStatus::Pending,
             content_hash_reason: None,
             content_region_hash: None,
-            content_region_hash_status: AxisStatus::Pending,
+            content_region_hash_status: MeasurementStatus::Pending,
             content_region_hash_reason: None,
             meta_hash: None,
-            meta_hash_status: AxisStatus::Pending,
+            meta_hash_status: MeasurementStatus::Pending,
             meta_hash_reason: None,
             meta_kv: None,
             meta_text: None,

@@ -13,13 +13,13 @@ use asterism_core::domain::asset::{
     Asset, AssetCard, AssetQuery, ContentFlags, TrashFilter, UNCLASSIFIED_MODALITY,
 };
 use asterism_core::domain::attribution::{Author, OperatorRef, PersistedAttribution};
-use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::color::{ColorBucket, buckets_of};
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
 use asterism_core::domain::duplicate_conflict::{
     ConflictResolution, DuplicateConflict, FoldExclusion,
 };
 use asterism_core::domain::material::Material;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::merge_plan::MergePlan;
 use asterism_core::domain::repository::{
     AssetRepository, ChapterScanCandidate, DimsCandidate, DimsProbe, DimsScope, DimsWritePolicy,
@@ -162,13 +162,13 @@ pub(crate) struct AxisColumns<'a> {
 /// because a `computed` row with no digest is a row some writer got
 /// wrong, and "got wrong" must read as work rather than vanish.
 fn axis_unanswered_sql(axis: DuplicateAxis, columns: &AxisColumns<'_>) -> String {
-    use asterism_core::domain::axis_status::AxisStatus;
     use asterism_core::domain::content_hash;
+    use asterism_core::domain::measurement::MeasurementStatus;
 
     let status = columns.status;
-    let pending = AxisStatus::Pending.as_str();
-    let failed = AxisStatus::Failed.as_str();
-    let computed = AxisStatus::Computed.as_str();
+    let pending = MeasurementStatus::Pending.as_str();
+    let failed = MeasurementStatus::Failed.as_str();
+    let computed = MeasurementStatus::Computed.as_str();
     match axis {
         // The file axis's vocabulary is not versioned: holding a value
         // is holding an answer, so only the status is asked.
@@ -188,12 +188,12 @@ fn axis_unanswered_sql(axis: DuplicateAxis, columns: &AxisColumns<'_>) -> String
 /// The SQL of [`axis_open_work`](asterism_core::domain::content_hash::axis_open_work)
 /// for one axis: [`axis_unanswered_sql`] minus `failed`.
 fn axis_open_work_sql(axis: DuplicateAxis, columns: &AxisColumns<'_>) -> String {
-    use asterism_core::domain::axis_status::AxisStatus;
     use asterism_core::domain::content_hash;
+    use asterism_core::domain::measurement::MeasurementStatus;
 
     let status = columns.status;
-    let pending = AxisStatus::Pending.as_str();
-    let computed = AxisStatus::Computed.as_str();
+    let pending = MeasurementStatus::Pending.as_str();
+    let computed = MeasurementStatus::Computed.as_str();
     match axis {
         DuplicateAxis::Artefact => format!("{status} = '{pending}'"),
         DuplicateAxis::Content | DuplicateAxis::Meta => {
@@ -285,11 +285,11 @@ pub(crate) fn awaiting_fingerprint_condition(
 /// old migration change what it did. V56 spells its own equality against
 /// the marker spelling its era stored.
 pub(crate) fn unwalked_condition(content_status_column: &str) -> String {
-    use asterism_core::domain::axis_status::AxisStatus;
+    use asterism_core::domain::measurement::MeasurementStatus;
 
     format!(
         "{content_status_column} = '{}'",
-        AxisStatus::NotWalked.as_str()
+        MeasurementStatus::NotWalked.as_str()
     )
 }
 
@@ -1795,13 +1795,13 @@ impl MaterialRow {
             // The status set is closed, and a spelling this build does
             // not name is refused rather than degraded — `role` and
             // `on_duplicate` state the rule.
-            content_hash_status: AxisStatus::parse(&self.content_hash_status)?,
+            content_hash_status: MeasurementStatus::parse(&self.content_hash_status)?,
             content_hash_reason: self.content_hash_reason,
             content_region_hash: self.content_region_hash,
-            content_region_hash_status: AxisStatus::parse(&self.content_region_hash_status)?,
+            content_region_hash_status: MeasurementStatus::parse(&self.content_region_hash_status)?,
             content_region_hash_reason: self.content_region_hash_reason,
             meta_hash: self.meta_hash,
-            meta_hash_status: AxisStatus::parse(&self.meta_hash_status)?,
+            meta_hash_status: MeasurementStatus::parse(&self.meta_hash_status)?,
             meta_hash_reason: self.meta_hash_reason,
             meta_kv: self.meta_kv,
             meta_text: self.meta_text,
@@ -4285,8 +4285,8 @@ impl AssetRepository for SqliteAssetRepository {
         let uuid = *asset_id.as_uuid();
         let ord = i64::from(ord);
         let reason = reason.to_string();
-        let pending = AxisStatus::Pending.as_str();
-        let failed = AxisStatus::Failed.as_str();
+        let pending = MeasurementStatus::Pending.as_str();
+        let failed = MeasurementStatus::Failed.as_str();
         self.isle
             .call(move |conn| {
                 // Per-axis conditional: only the axes the failed read
@@ -4853,9 +4853,9 @@ impl AssetRepository for SqliteAssetRepository {
             })
             .await
             .map_err(infra_err)?;
-        let axis = |(status, digest, reason): (String, Option<String>, Option<String>)| -> Result<AxisRecord, DomainError> {
-            Ok(AxisRecord {
-                status: AxisStatus::parse(&status)?,
+        let axis = |(status, digest, reason): (String, Option<String>, Option<String>)| -> Result<Measurement, DomainError> {
+            Ok(Measurement {
+                status: MeasurementStatus::parse(&status)?,
                 digest,
                 reason,
             })
@@ -6180,15 +6180,15 @@ mod tests {
     /// strings — and renders the stored triple the columns hold now.
     /// The mapping is the same one V92 performs, restated small so a
     /// fixture stays one legible string per axis.
-    fn record_of(value: &str) -> AxisRecord {
+    fn record_of(value: &str) -> Measurement {
         match value {
-            "unhashable:no-bytes" => AxisRecord::bare(AxisStatus::NoBytes),
-            "unsupported:empty-span" => AxisRecord::bare(AxisStatus::EmptySpan),
-            "unsupported:too-large" => AxisRecord::bare(AxisStatus::TooLarge),
-            "unsupported:not-walked" => AxisRecord::bare(AxisStatus::NotWalked),
+            "unhashable:no-bytes" => Measurement::bare(MeasurementStatus::NoBytes),
+            "unsupported:empty-span" => Measurement::bare(MeasurementStatus::EmptySpan),
+            "unsupported:too-large" => Measurement::bare(MeasurementStatus::TooLarge),
+            "unsupported:not-walked" => Measurement::bare(MeasurementStatus::NotWalked),
             v => match v.strip_prefix("unsupported:") {
-                Some(format) => AxisRecord::unsupported(format.to_string()),
-                None => AxisRecord::computed(v.to_string()),
+                Some(format) => Measurement::unsupported(format.to_string()),
+                None => Measurement::computed(v.to_string()),
             },
         }
     }
@@ -8003,7 +8003,7 @@ mod tests {
     /// One axis's column shapes, exercised on every axis by the
     /// differential test below: a status, and what the digest column
     /// holds beside it.
-    fn axis_shapes(axis: DuplicateAxis) -> Vec<(AxisStatus, Option<String>)> {
+    fn axis_shapes(axis: DuplicateAxis) -> Vec<(MeasurementStatus, Option<String>)> {
         use asterism_core::domain::content_hash;
 
         let own = match axis {
@@ -8029,21 +8029,21 @@ mod tests {
             DuplicateAxis::Content | DuplicateAxis::Meta => content_hash::of_bytes(b"star"),
         };
         vec![
-            (AxisStatus::Pending, None),
-            (AxisStatus::Computed, Some(own)),
-            (AxisStatus::Computed, Some(stale)),
-            (AxisStatus::Computed, Some(crossed)),
+            (MeasurementStatus::Pending, None),
+            (MeasurementStatus::Computed, Some(own)),
+            (MeasurementStatus::Computed, Some(stale)),
+            (MeasurementStatus::Computed, Some(crossed)),
             // A `computed` row with no digest is a writer bug; on the
             // versioned axes it has to read as work rather than vanish
             // into the NULL rules (the file axis reads any `computed`
             // as an answer — its vocabulary is not versioned).
-            (AxisStatus::Computed, None),
-            (AxisStatus::Unsupported, None),
-            (AxisStatus::EmptySpan, None),
-            (AxisStatus::TooLarge, None),
-            (AxisStatus::NotWalked, None),
-            (AxisStatus::NoBytes, None),
-            (AxisStatus::Failed, None),
+            (MeasurementStatus::Computed, None),
+            (MeasurementStatus::Unsupported, None),
+            (MeasurementStatus::EmptySpan, None),
+            (MeasurementStatus::TooLarge, None),
+            (MeasurementStatus::NotWalked, None),
+            (MeasurementStatus::NoBytes, None),
+            (MeasurementStatus::Failed, None),
         ]
     }
 
@@ -8069,14 +8069,14 @@ mod tests {
     fn the_sql_fingerprint_filters_match_the_domain_predicates() {
         use asterism_core::domain::content_hash;
 
-        let answered: Vec<(AxisStatus, Option<String>)> = DuplicateAxis::STRONGEST_FIRST
+        let answered: Vec<(MeasurementStatus, Option<String>)> = DuplicateAxis::STRONGEST_FIRST
             .iter()
             .map(|axis| axis_shapes(*axis)[1].clone())
             .collect();
         // Every axis's shapes in every slot, one axis varying at a
         // time, plus the all-pending and all-failed rows the single
         // sweep cannot produce.
-        let mut samples: Vec<Vec<(AxisStatus, Option<String>)>> = Vec::new();
+        let mut samples: Vec<Vec<(MeasurementStatus, Option<String>)>> = Vec::new();
         for (slot, axis) in DuplicateAxis::STRONGEST_FIRST.iter().enumerate() {
             for shape in axis_shapes(*axis) {
                 let mut row = answered.clone();
@@ -8084,12 +8084,12 @@ mod tests {
                 samples.push(row);
             }
         }
-        samples.push(vec![(AxisStatus::Pending, None); 3]);
-        samples.push(vec![(AxisStatus::Failed, None); 3]);
+        samples.push(vec![(MeasurementStatus::Pending, None); 3]);
+        samples.push(vec![(MeasurementStatus::Failed, None); 3]);
         // Failed beside pending: still open work, not unreadable.
         samples.push(vec![
-            (AxisStatus::Failed, None),
-            (AxisStatus::Pending, None),
+            (MeasurementStatus::Failed, None),
+            (MeasurementStatus::Pending, None),
             answered[2].clone(),
         ]);
 
@@ -8365,9 +8365,9 @@ mod tests {
                 &asset.id,
                 0,
                 &MaterialFingerprint {
-                    file: AxisRecord::bare(AxisStatus::NoBytes),
-                    content: AxisRecord::bare(AxisStatus::NoBytes),
-                    meta: AxisRecord::bare(AxisStatus::NoBytes),
+                    file: Measurement::bare(MeasurementStatus::NoBytes),
+                    content: Measurement::bare(MeasurementStatus::NoBytes),
+                    meta: Measurement::bare(MeasurementStatus::NoBytes),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,
@@ -8866,7 +8866,7 @@ mod tests {
                 id,
                 0,
                 &MaterialFingerprint {
-                    file: AxisRecord::computed(digest.clone()),
+                    file: Measurement::computed(digest.clone()),
                     content: record_of(answer),
                     // This test is about the content axis's
                     // vocabulary, so the third axis is held at one
@@ -8874,7 +8874,7 @@ mod tests {
                     // `answer` here would put a `cr1-` digest in the
                     // meta column, where it is not an answer, and the
                     // count below would be measuring that instead.
-                    meta: AxisRecord::bare(AxisStatus::EmptySpan),
+                    meta: Measurement::bare(MeasurementStatus::EmptySpan),
                     meta_kv: None,
                     meta_raw: None,
                     meta_text: None,
@@ -9177,14 +9177,17 @@ mod tests {
 
         let after = repo.find(&asset.id).await.unwrap().unwrap();
         let material = &after.materials[0];
-        assert_eq!(material.content_hash_status, AxisStatus::Computed);
+        assert_eq!(material.content_hash_status, MeasurementStatus::Computed);
         assert_eq!(material.content_hash.as_deref(), Some(digest.as_str()));
         assert_eq!(
             material.content_hash_reason, None,
             "answered axes keep silent"
         );
-        assert_eq!(material.content_region_hash_status, AxisStatus::EmptySpan);
-        assert_eq!(material.meta_hash_status, AxisStatus::Failed);
+        assert_eq!(
+            material.content_region_hash_status,
+            MeasurementStatus::EmptySpan
+        );
+        assert_eq!(material.meta_hash_status, MeasurementStatus::Failed);
         assert_eq!(
             material.meta_hash_reason.as_deref(),
             Some("No such file or directory"),
@@ -9224,7 +9227,7 @@ mod tests {
         let healed = repo.find(&asset.id).await.unwrap().unwrap();
         assert_eq!(
             healed.materials[0].meta_hash_status,
-            AxisStatus::Unsupported
+            MeasurementStatus::Unsupported
         );
         assert_eq!(
             healed.materials[0].meta_hash_reason.as_deref(),
@@ -9272,13 +9275,13 @@ mod tests {
         let canonical = r#"{"prompt":"a cat","workflow":"{}"}"#;
         let raw = "undefined:AAAAC3RFWHRwcm9tcHQ=";
         let fingerprint = MaterialFingerprint {
-            file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
-            content: AxisRecord::computed(format!(
+            file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+            content: Measurement::computed(format!(
                 "{}{}",
                 content_hash::CONTENT_DIGEST_PREFIX,
                 "a".repeat(64)
             )),
-            meta: AxisRecord::computed(asterism_core::domain::material_meta::digest_of(canonical)),
+            meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(canonical)),
             meta_kv: Some(canonical.to_string()),
             meta_raw: Some(raw.to_string()),
             meta_text: None,
@@ -9292,7 +9295,10 @@ mod tests {
             after.materials[0].content_hash.as_deref(),
             fingerprint.file.digest()
         );
-        assert_eq!(after.materials[0].content_hash_status, AxisStatus::Computed);
+        assert_eq!(
+            after.materials[0].content_hash_status,
+            MeasurementStatus::Computed
+        );
         assert_eq!(
             after.materials[0].content_region_hash.as_deref(),
             fingerprint.content.digest(),
@@ -9404,13 +9410,13 @@ mod tests {
             &asset.id,
             0,
             &MaterialFingerprint {
-                file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
-                content: AxisRecord::computed(format!(
+                file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+                content: Measurement::computed(format!(
                     "{}{}",
                     content_hash::CONTENT_DIGEST_PREFIX,
                     "a".repeat(64)
                 )),
-                meta: AxisRecord::computed(asterism_core::domain::material_meta::digest_of(
+                meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(
                     digest_body,
                 )),
                 meta_kv: Some(digest_body.to_string()),
@@ -9440,13 +9446,13 @@ mod tests {
             &asset.id,
             0,
             &MaterialFingerprint {
-                file: AxisRecord::computed(content_hash::of_bytes(b"the whole file")),
-                content: AxisRecord::computed(format!(
+                file: Measurement::computed(content_hash::of_bytes(b"the whole file")),
+                content: Measurement::computed(format!(
                     "{}{}",
                     content_hash::CONTENT_DIGEST_PREFIX,
                     "a".repeat(64)
                 )),
-                meta: AxisRecord::computed(asterism_core::domain::material_meta::digest_of(
+                meta: Measurement::computed(asterism_core::domain::material_meta::digest_of(
                     digest_body,
                 )),
                 meta_kv: Some(digest_body.to_string()),

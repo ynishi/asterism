@@ -522,7 +522,7 @@ pub struct AssetDto {
     pub content_hash: Option<String>,
     /// Why [`content_hash`](Self::content_hash) holds what it holds —
     /// the primary material's file-axis status
-    /// (`asterism_core::domain::axis_status`): `pending`, `computed`,
+    /// (`asterism_core::domain::measurement`): `pending`, `computed`,
     /// `no-bytes` (a record inside a container, a remote locator — no
     /// digest is ever coming) or `failed` (the original could not be
     /// read when the job ran; the walk retries it).

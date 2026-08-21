@@ -24,9 +24,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use asterism_contract::command::{AddAssetCommand, RegisterPersonaCommand};
-use asterism_core::domain::axis_status::AxisStatus;
 use asterism_core::domain::content_hash::META_DIGEST_PREFIX;
 use asterism_core::domain::material::Material;
+use asterism_core::domain::measurement::MeasurementStatus;
 use asterism_core::domain::repository::AssetRepository;
 use asterism_core::domain::source_locator::SourceLocator;
 use asterism_core::domain::value::AssetId;
@@ -188,8 +188,8 @@ async fn a_pngs_text_chunks_land_on_the_image_row_as_its_meta_axis() {
     for _ in 0..120 {
         let annotated_row = assets.find(&ids[0]).await.expect("find").expect("row");
         let bare_row = assets.find(&ids[1]).await.expect("find").expect("row");
-        if primary(&annotated_row.materials).meta_hash_status != AxisStatus::Pending
-            && primary(&bare_row.materials).meta_hash_status != AxisStatus::Pending
+        if primary(&annotated_row.materials).meta_hash_status != MeasurementStatus::Pending
+            && primary(&bare_row.materials).meta_hash_status != MeasurementStatus::Pending
         {
             settled = Some((annotated_row, bare_row));
             break;
@@ -238,7 +238,7 @@ async fn a_pngs_text_chunks_land_on_the_image_row_as_its_meta_axis() {
             bare_material.meta_hash_status,
             bare_material.meta_hash.as_deref()
         ),
-        (AxisStatus::EmptySpan, None),
+        (MeasurementStatus::EmptySpan, None),
         "a PNG with no chunks is walked and found to carry nothing — \
          so the digest above is a reading of the chunks, not of the file"
     );

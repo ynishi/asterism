@@ -416,12 +416,12 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
     // artefact axis, and a status carries no digest, so neither of the
     // others can answer for it.
     let fingerprint = asterism_core::domain::repository::MaterialFingerprint {
-        file: asterism_core::domain::axis_status::AxisRecord::computed(digest.clone()),
-        content: asterism_core::domain::axis_status::AxisRecord::bare(
-            asterism_core::domain::axis_status::AxisStatus::EmptySpan,
+        file: asterism_core::domain::measurement::Measurement::computed(digest.clone()),
+        content: asterism_core::domain::measurement::Measurement::bare(
+            asterism_core::domain::measurement::MeasurementStatus::EmptySpan,
         ),
-        meta: asterism_core::domain::axis_status::AxisRecord::bare(
-            asterism_core::domain::axis_status::AxisStatus::EmptySpan,
+        meta: asterism_core::domain::measurement::Measurement::bare(
+            asterism_core::domain::measurement::MeasurementStatus::EmptySpan,
         ),
         meta_kv: None,
         meta_text: None,

@@ -48,12 +48,12 @@
 //! side, where fragmented files walk to zero samples and produced
 //! exactly that collision.
 
-use crate::domain::axis_status::{AxisRecord, AxisStatus};
+use crate::domain::measurement::{Measurement, MeasurementStatus};
 use crate::domain::value::MimeType;
 
 /// The **legacy stored prefix** of "no digest on this axis" — what the
 /// hash columns carried before V92 moved the distinction into a status
-/// column ([`AxisStatus`]) and the format's name into a reason column.
+/// column ([`MeasurementStatus`]) and the format's name into a reason column.
 ///
 /// No runtime writer produces it any more. It is kept because it is
 /// written into live databases: the V92 conversion maps every value
@@ -61,7 +61,7 @@ use crate::domain::value::MimeType;
 /// spell it in their own SQL.
 pub const UNSUPPORTED_PREFIX: &str = "unsupported:";
 
-/// Legacy stored spelling of [`AxisStatus::EmptySpan`]: a probe claimed
+/// Legacy stored spelling of [`MeasurementStatus::EmptySpan`]: a probe claimed
 /// the format and its reading yielded no region — a PNG with no `IDAT`
 /// chunk, or one whose chunk structure ended before it was complete.
 ///
@@ -72,7 +72,7 @@ pub const UNSUPPORTED_PREFIX: &str = "unsupported:";
 /// V92 conversion and the frozen migrations that wrote it.
 pub const EMPTY_SPAN: &str = "unsupported:empty-span";
 
-/// Legacy stored spelling of [`AxisStatus::TooLarge`]: the format *is*
+/// Legacy stored spelling of [`MeasurementStatus::TooLarge`]: the format *is*
 /// one a probe walks and the job declined to hand it the bytes, because
 /// reading the file whole would have cost more memory than the job is
 /// willing to spend
@@ -87,7 +87,7 @@ pub const EMPTY_SPAN: &str = "unsupported:empty-span";
 /// Kept for the V92 conversion.
 pub const TOO_LARGE: &str = "unsupported:too-large";
 
-/// Legacy stored spelling of [`AxisStatus::NotWalked`]: written to the
+/// Legacy stored spelling of [`MeasurementStatus::NotWalked`]: written to the
 /// content column of every material that existed before the column did
 /// — **the unfinished half of a migration, named row by row.** Kept for
 /// the V92 conversion and the frozen migrations that wrote it; the
@@ -183,13 +183,13 @@ pub enum ContentRegion {
 impl ContentRegion {
     /// What to store for this outcome — the status column's word, the
     /// digest column's value, the reason column's payload
-    /// ([`AxisRecord`]). The marker strings the outcomes used to render
+    /// ([`Measurement`]). The marker strings the outcomes used to render
     /// to are the pre-V92 form; see the constants above.
-    pub fn record(&self) -> AxisRecord {
+    pub fn record(&self) -> Measurement {
         match self {
-            Self::Digest(value) => AxisRecord::computed(value.clone()),
-            Self::Unsupported(format) => AxisRecord::unsupported(format.clone()),
-            Self::EmptySpan => AxisRecord::bare(AxisStatus::EmptySpan),
+            Self::Digest(value) => Measurement::computed(value.clone()),
+            Self::Unsupported(format) => Measurement::unsupported(format.clone()),
+            Self::EmptySpan => Measurement::bare(MeasurementStatus::EmptySpan),
         }
     }
 
@@ -250,19 +250,19 @@ mod tests {
     fn each_outcome_stores_its_own_record_and_only_one_is_a_digest() {
         let value = format!("{}{}", content_hash::CONTENT_DIGEST_PREFIX, "a".repeat(64));
         let digest = ContentRegion::Digest(value.clone());
-        assert_eq!(digest.record(), AxisRecord::computed(value));
+        assert_eq!(digest.record(), Measurement::computed(value));
         assert!(digest.digest().is_some());
 
         let unsupported = ContentRegion::Unsupported("video/mp4".to_string());
         assert_eq!(
             unsupported.record(),
-            AxisRecord::unsupported("video/mp4".to_string())
+            Measurement::unsupported("video/mp4".to_string())
         );
         assert!(unsupported.digest().is_none());
 
         assert_eq!(
             ContentRegion::EmptySpan.record(),
-            AxisRecord::bare(AxisStatus::EmptySpan)
+            Measurement::bare(MeasurementStatus::EmptySpan)
         );
         assert!(ContentRegion::EmptySpan.digest().is_none());
     }

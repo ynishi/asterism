@@ -19,7 +19,6 @@ use asterism_core::application_support::duplicate_detection::{
 };
 use asterism_core::domain::asset::Asset;
 use asterism_core::domain::attribution::AttributionContext;
-use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::content_hash::{EMPTY, UNHASHABLE};
 use asterism_core::domain::duplicate_conflict::{
     ConflictResolution, DuplicateAxis, DuplicateConflict, FoldExclusion,
@@ -27,6 +26,7 @@ use asterism_core::domain::duplicate_conflict::{
 use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
 use asterism_core::domain::job::JobKind;
 use asterism_core::domain::material::Material;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::repository::{
     AssetRepository, EdgeRepository, JobQueue, MaterialFingerprint,
 };
@@ -104,9 +104,9 @@ const DIGEST: &str = "sha256:111111111111111111111111111111111111111111111111111
 /// artefact axis, an answered status on the two walking ones.
 fn artefact_only(digest: &str) -> MaterialFingerprint {
     MaterialFingerprint {
-        file: AxisRecord::computed(digest.to_string()),
-        content: AxisRecord::bare(AxisStatus::EmptySpan),
-        meta: AxisRecord::bare(AxisStatus::EmptySpan),
+        file: Measurement::computed(digest.to_string()),
+        content: Measurement::bare(MeasurementStatus::EmptySpan),
+        meta: Measurement::bare(MeasurementStatus::EmptySpan),
         meta_kv: None,
         meta_raw: None,
         meta_text: None,
@@ -194,7 +194,7 @@ async fn hashed_row(
         kind,
         locator,
         &MaterialFingerprint {
-            file: AxisRecord::computed(digest.to_string()),
+            file: Measurement::computed(digest.to_string()),
             // These fixtures ask an artefact-axis question, so the two
             // walking axes are answered with a status: the row leaves
             // the fingerprint walk the way a real pass would leave it,
@@ -203,8 +203,8 @@ async fn hashed_row(
             // under test. `the_content_axis_fires_on_a_metadata_only_-
             // difference` and `the_meta_axis_fires_on_a_pixels_only_-
             // difference` are the fixtures that put real digests here.
-            content: AxisRecord::bare(AxisStatus::EmptySpan),
-            meta: AxisRecord::bare(AxisStatus::EmptySpan),
+            content: Measurement::bare(MeasurementStatus::EmptySpan),
+            meta: Measurement::bare(MeasurementStatus::EmptySpan),
             meta_kv: None,
             meta_raw: None,
             meta_text: None,
@@ -741,9 +741,9 @@ async fn markers_never_conflict_however_many_rows_share_them() {
                 // writer produces, which is exactly what the reserved
                 // exclusion has to keep refusing.
                 &MaterialFingerprint {
-                    file: AxisRecord::computed(marker.to_string()),
-                    content: AxisRecord::computed(marker.to_string()),
-                    meta: AxisRecord::computed(marker.to_string()),
+                    file: Measurement::computed(marker.to_string()),
+                    content: Measurement::computed(marker.to_string()),
+                    meta: Measurement::computed(marker.to_string()),
                     meta_kv: None,
                     meta_text: None,
                     meta_raw: None,
@@ -1893,7 +1893,7 @@ fn fingerprint_of(png: &[u8]) -> MaterialFingerprint {
     let mime = asterism_core::domain::value::MimeType::parse("image/png");
     let meta = asterism_infra::probes::meta(png, Some(&mime));
     MaterialFingerprint {
-        file: AxisRecord::computed(asterism_core::domain::content_hash::of_bytes(png)),
+        file: Measurement::computed(asterism_core::domain::content_hash::of_bytes(png)),
         content: asterism_infra::probes::content(png, Some(&mime)).record(),
         meta_kv: meta.canonical().map(str::to_string),
         meta: meta.record(),

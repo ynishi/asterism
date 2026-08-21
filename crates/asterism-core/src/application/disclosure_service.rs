@@ -36,8 +36,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::domain::axis_status::AxisStatus;
 use crate::domain::disclosure::{DisclosureRecord, Stamped};
+use crate::domain::measurement::MeasurementStatus;
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
 use crate::domain::edge::EdgeKind;
@@ -176,7 +176,7 @@ impl DisclosureService {
             Some(material)
                 if matches!(
                     material.meta_hash_status,
-                    AxisStatus::Pending | AxisStatus::Failed
+                    MeasurementStatus::Pending | MeasurementStatus::Failed
                 ) =>
             {
                 return Err(DomainError::Conflict(format!(

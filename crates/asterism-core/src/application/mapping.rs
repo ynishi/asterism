@@ -1120,15 +1120,15 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
 mod tests {
     use super::*;
     use crate::domain::attribution::AttributionContext;
-    use crate::domain::axis_status::AxisStatus;
     use crate::domain::content_hash::of_bytes;
     use crate::domain::material::Material;
+    use crate::domain::measurement::MeasurementStatus;
     use crate::domain::value::{SourceKind, SourceRef};
     use asterism_contract::query::ListAssetsQuery;
 
     /// An item asset holding one primary material whose file axis is in
     /// the given state.
-    fn asset_with_file_axis(digest: Option<&str>, status: AxisStatus) -> Asset {
+    fn asset_with_file_axis(digest: Option<&str>, status: MeasurementStatus) -> Asset {
         let source =
             SourceRef::new(SourceKind::new("fs").expect("kind"), "/pics/a.png").expect("source");
         let locator = source.locator.clone();
@@ -1160,10 +1160,10 @@ mod tests {
     fn detail_payload_carries_each_hash_state_as_its_own_answer() {
         let digest = of_bytes(b"the same photograph, byte for byte\n");
         for (stored, status) in [
-            (Some(digest.as_str()), AxisStatus::Computed),
-            (None, AxisStatus::NoBytes),
-            (None, AxisStatus::Failed),
-            (None, AxisStatus::Pending),
+            (Some(digest.as_str()), MeasurementStatus::Computed),
+            (None, MeasurementStatus::NoBytes),
+            (None, MeasurementStatus::Failed),
+            (None, MeasurementStatus::Pending),
         ] {
             let dto = asset_to_dto(&asset_with_file_axis(stored, status));
             assert_eq!(

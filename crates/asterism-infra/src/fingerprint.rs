@@ -11,12 +11,12 @@
 //! Keeping the read in one function is what makes the agreement
 //! structural rather than a thing two copies happen to have.
 
-use asterism_core::domain::axis_status::{AxisRecord, AxisStatus};
 use asterism_core::domain::content_hash::{self, ContentHasher};
 use asterism_core::domain::content_region;
 use asterism_core::domain::embedded_text;
 use asterism_core::domain::material_meta;
 use asterism_core::domain::material_meta_raw::MetaRaw;
+use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::repository::MaterialFingerprint;
 use asterism_core::domain::value::MimeType;
 
@@ -159,7 +159,7 @@ pub(crate) fn hash_artefact(
         && !embedded_text::walks_format(declared_mime)
     {
         return Ok(MaterialFingerprint {
-            file: AxisRecord::computed(stream_digest(&mut file)?),
+            file: Measurement::computed(stream_digest(&mut file)?),
             content: content_region::unsupported_format(declared_mime).record(),
             meta: material_meta::unsupported_format(declared_mime).record(),
             meta_kv: None,
@@ -179,14 +179,14 @@ pub(crate) fn hash_artefact(
     }
     if size > max_walk {
         return Ok(MaterialFingerprint {
-            file: AxisRecord::computed(stream_digest(&mut file)?),
-            content: AxisRecord::bare(AxisStatus::TooLarge),
+            file: Measurement::computed(stream_digest(&mut file)?),
+            content: Measurement::bare(MeasurementStatus::TooLarge),
             // The same statement on this axis and for the same reason:
             // the metadata is there and could be read, and nothing
             // about the file is wrong — the policy declined to spend
             // the memory. A status that said "no walker" would send a
             // reader off to write one that exists.
-            meta: AxisRecord::bare(AxisStatus::TooLarge),
+            meta: Measurement::bare(MeasurementStatus::TooLarge),
             meta_kv: None,
             // And on the bytes, where the sentence is the same one
             // again — this time about a ceiling two orders of magnitude
@@ -205,7 +205,7 @@ pub(crate) fn hash_artefact(
     file.read_to_end(&mut bytes)?;
     let meta = probes::meta(&bytes, declared_mime);
     Ok(MaterialFingerprint {
-        file: AxisRecord::computed(content_hash::of_bytes(&bytes)),
+        file: Measurement::computed(content_hash::of_bytes(&bytes)),
         content: probes::content(&bytes, declared_mime).record(),
         meta_kv: meta.canonical().map(str::to_string),
         meta: meta.record(),
@@ -379,9 +379,9 @@ mod tests {
     /// paste a real character card's 30 KB of base64 into this file.
     type Row = (
         &'static str,
-        AxisRecord,
-        AxisRecord,
-        AxisRecord,
+        Measurement,
+        Measurement,
+        Measurement,
         Option<String>,
     );
 
@@ -490,15 +490,15 @@ mod tests {
         let frozen: Vec<Row> = vec![
             (
                 "a real PNG with tEXt",
-                AxisRecord::computed(
+                Measurement::computed(
                     "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31"
                         .into(),
                 ),
-                AxisRecord::computed(
+                Measurement::computed(
                     "cr1-sha256:10225b4d3a3709c47a985ecbf8ac9db0c4e3654cfbc0608032c8252a0205b7c9"
                         .into(),
                 ),
-                AxisRecord::computed(
+                Measurement::computed(
                     "m1-sha256:eddd8329dd9e9f668395daaf7328db94c8db41190ee1f0f5a50b5907aa5eb7bd"
                         .into(),
                 ),
@@ -516,15 +516,15 @@ mod tests {
                 // literal appearing in two places rather than as a
                 // claim.
                 "a PNG carrying every excluded chunk",
-                AxisRecord::computed(
+                Measurement::computed(
                     "sha256:e79fded6bb0b1b48ee4f079314d70cc5a7927cc6fd44f1e332937e90ee8b5f7a"
                         .into(),
                 ),
-                AxisRecord::computed(
+                Measurement::computed(
                     "cr1-sha256:b60d7dc769d32fee9a8b417381612225545f815d52447588b46a4ae6af799988"
                         .into(),
                 ),
-                AxisRecord::computed(
+                Measurement::computed(
                     "m1-sha256:47557e7fde82911bec6a4a03759dc7a82fd71788e7a2c565f266810f76ee5034"
                         .into(),
                 ),
@@ -576,12 +576,12 @@ mod tests {
                 // was replaced) moved for a reason on the other side of
                 // the walker, described in this test's doc comment.
                 "a JPEG: walked on both axes, and neither found anything",
-                AxisRecord::computed(
+                Measurement::computed(
                     "sha256:a638f3c452ed26e104b099dccbaff8dfeaf0d72e5c95709fb9d207a1713f511d"
                         .into(),
                 ),
-                AxisRecord::bare(AxisStatus::EmptySpan),
-                AxisRecord::bare(AxisStatus::EmptySpan),
+                Measurement::bare(MeasurementStatus::EmptySpan),
+                Measurement::bare(MeasurementStatus::EmptySpan),
                 None,
             ),
             (
@@ -590,12 +590,12 @@ mod tests {
                 // carry the unsupported status, because nothing routes
                 // an unnamed format to a walker.
                 "a PNG whose row claims nothing",
-                AxisRecord::computed(
+                Measurement::computed(
                     "sha256:7ac7081cf5c60dc198a557300c0bdf666e5a798da32af01359824ec813238e31"
                         .into(),
                 ),
-                AxisRecord::unsupported("unknown".into()),
-                AxisRecord::unsupported("unknown".into()),
+                Measurement::unsupported("unknown".into()),
+                Measurement::unsupported("unknown".into()),
                 None,
             ),
         ];
@@ -775,7 +775,7 @@ mod tests {
         // improve on it.
         let jpeg = measure(&jpeg(), Some("image/jpeg"));
         assert_eq!(jpeg.meta_raw, None);
-        assert_eq!(jpeg.meta, AxisRecord::bare(AxisStatus::EmptySpan));
+        assert_eq!(jpeg.meta, Measurement::bare(MeasurementStatus::EmptySpan));
         assert_eq!(jpeg.meta_kv, None);
 
         // No probe, and no claim at all.
@@ -792,7 +792,7 @@ mod tests {
         ]);
         let walked = measure(&bare, Some("image/png"));
         assert_eq!(walked.meta_raw, None);
-        assert_eq!(walked.meta, AxisRecord::bare(AxisStatus::EmptySpan));
+        assert_eq!(walked.meta, Measurement::bare(MeasurementStatus::EmptySpan));
         assert!(
             walked
                 .content
@@ -814,8 +814,8 @@ mod tests {
         let got = hash_artefact(path.to_str().expect("utf-8 path"), Some(&mime), 1024)
             .expect("the fixture is readable");
 
-        assert_eq!(got.content, AxisRecord::bare(AxisStatus::TooLarge));
-        assert_eq!(got.meta, AxisRecord::bare(AxisStatus::TooLarge));
+        assert_eq!(got.content, Measurement::bare(MeasurementStatus::TooLarge));
+        assert_eq!(got.meta, Measurement::bare(MeasurementStatus::TooLarge));
         assert_eq!(
             got.meta_raw.as_deref(),
             Some("unsupported:too-large"),

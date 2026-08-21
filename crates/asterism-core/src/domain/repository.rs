@@ -23,7 +23,6 @@ use chrono::{DateTime, Utc};
 use crate::domain::app_setting::{AppSetting, SettingKey};
 use crate::domain::asset::{Asset, AssetCard, AssetQuery};
 use crate::domain::asset_comment::AssetComment;
-use crate::domain::axis_status::AxisRecord;
 use crate::domain::chapter_mark::ChapterMark;
 use crate::domain::dir::Dir;
 use crate::domain::dispatch::DispatchJob;
@@ -34,6 +33,7 @@ use crate::domain::instance::InstanceIdentity;
 use crate::domain::job::JobKind;
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
 use crate::domain::material_mark::MaterialMark;
+use crate::domain::measurement::Measurement;
 use crate::domain::merge_plan::MergePlan;
 use crate::domain::modality::{ModalityDef, ModalityView};
 use crate::domain::persona::Persona;
@@ -594,14 +594,14 @@ pub struct ChapterScanCandidate {
 pub struct MaterialFingerprint {
     /// File axis: the status, the `sha256:<hex>` digest when there is
     /// one, and the reason when the status carries one
-    /// ([`AxisRecord`](crate::domain::axis_status::AxisRecord)).
-    pub file: AxisRecord,
+    /// ([`Measurement`](crate::domain::measurement::Measurement)).
+    pub file: Measurement,
     /// Content axis: the status, and the `cr1-sha256:<hex>` digest when
     /// there is one (`crate::domain::content_region`).
-    pub content: AxisRecord,
+    pub content: Measurement,
     /// Meta axis: the status, and the `m1-sha256:<hex>` digest when
     /// there is one (`crate::domain::material_meta`).
-    pub meta: AxisRecord,
+    pub meta: Measurement,
     /// The canonical metadata object the meta digest was taken over —
     /// `Some` exactly when [`meta`](Self::meta) is a digest.
     ///
@@ -1304,7 +1304,7 @@ pub trait AssetRepository: Send + Sync {
     /// Narrow write — records that one material's bytes could not be
     /// read: every axis still `pending` (or already `failed`, which
     /// refreshes the error) flips to
-    /// [`Failed`](crate::domain::axis_status::AxisStatus::Failed) with
+    /// [`Failed`](crate::domain::measurement::MeasurementStatus::Failed) with
     /// `reason` (the I/O error) beside it, and every other axis is
     /// left exactly as it was.
     ///
@@ -1901,10 +1901,10 @@ pub trait AssetRepository: Send + Sync {
     /// content group does contain the file group whenever both rows
     /// carry a content digest. **They do not always carry one.** A
     /// format with no walker holds the
-    /// [`Unsupported`](crate::domain::axis_status::AxisStatus::Unsupported)
+    /// [`Unsupported`](crate::domain::measurement::MeasurementStatus::Unsupported)
     /// status, and a material whose original could not be read when the
     /// column was filled in holds
-    /// [`NotWalked`](crate::domain::axis_status::AxisStatus::NotWalked);
+    /// [`NotWalked`](crate::domain::measurement::MeasurementStatus::NotWalked);
     /// the content axis cannot see either, while the file axis groups
     /// both perfectly well. Deriving one axis from the other would
     /// therefore drop findings this port already reports today —
@@ -1964,7 +1964,7 @@ pub trait AssetRepository: Send + Sync {
 
     /// How many materials the content axis has **no reading of** — the
     /// rows still carrying
-    /// [`NotWalked`](crate::domain::axis_status::AxisStatus::NotWalked).
+    /// [`NotWalked`](crate::domain::measurement::MeasurementStatus::NotWalked).
     ///
     /// Without this number a content-axis report is a lie by omission:
     /// a row in that state is in no content-axis group and looks from

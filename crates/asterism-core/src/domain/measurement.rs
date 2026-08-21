@@ -1,5 +1,12 @@
-//! `axis_status` — what a fingerprint column's *status* can say, now
+//! `measurement` — what a fingerprint column's *status* can say, now
 //! that the digest columns hold only digests.
+//!
+//! The name is the issue's own vocabulary: the whole defect was that a
+//! reader could not tell a **measurement** from a note about why there
+//! is no measurement, and these types are the two halves of that
+//! sentence made storable — [`Measurement`] is one axis's stored
+//! triple, [`MeasurementStatus`] the word that says which of the two
+//! it is holding.
 //!
 //! The vocabulary the three hash columns used to carry inline — a
 //! digest, or a marker string explaining why there is none
@@ -48,7 +55,7 @@ use crate::error::DomainError;
 /// name) and [`Failed`](Self::Failed) (the I/O error), and NULL
 /// elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AxisStatus {
+pub enum MeasurementStatus {
     /// Nobody has looked yet. The state a material is inserted in, and
     /// the one the fingerprint walk exists to drain.
     Pending,
@@ -97,17 +104,17 @@ pub enum AxisStatus {
     Failed,
 }
 
-impl AxisStatus {
+impl MeasurementStatus {
     /// Every status, for tests and adapters that need to walk the set.
-    pub const ALL: &[AxisStatus] = &[
-        AxisStatus::Pending,
-        AxisStatus::Computed,
-        AxisStatus::Unsupported,
-        AxisStatus::EmptySpan,
-        AxisStatus::TooLarge,
-        AxisStatus::NotWalked,
-        AxisStatus::NoBytes,
-        AxisStatus::Failed,
+    pub const ALL: &[MeasurementStatus] = &[
+        MeasurementStatus::Pending,
+        MeasurementStatus::Computed,
+        MeasurementStatus::Unsupported,
+        MeasurementStatus::EmptySpan,
+        MeasurementStatus::TooLarge,
+        MeasurementStatus::NotWalked,
+        MeasurementStatus::NoBytes,
+        MeasurementStatus::Failed,
     ];
 
     /// The stored spelling — what the status column holds and what SQL
@@ -151,33 +158,33 @@ impl AxisStatus {
 /// carries per axis — one shape for "what the columns hold", so a
 /// writer cannot store a digest under a status that says there is none.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AxisRecord {
+pub struct Measurement {
     /// The status column's value.
-    pub status: AxisStatus,
+    pub status: MeasurementStatus,
     /// The digest column's value — `Some` exactly when `status` is
-    /// [`Computed`](AxisStatus::Computed), **as a fresh write**. A
+    /// [`Computed`](MeasurementStatus::Computed), **as a fresh write**. A
     /// stored row can hold the pair a version bump leaves behind
     /// (a superseded digest under a non-`computed` status); see the
-    /// type-level doc on [`AxisStatus`].
+    /// type-level doc on [`MeasurementStatus`].
     pub digest: Option<String>,
     /// The reason column's value — the format under
-    /// [`Unsupported`](AxisStatus::Unsupported), the I/O error under
-    /// [`Failed`](AxisStatus::Failed), `None` elsewhere.
+    /// [`Unsupported`](MeasurementStatus::Unsupported), the I/O error under
+    /// [`Failed`](MeasurementStatus::Failed), `None` elsewhere.
     pub reason: Option<String>,
 }
 
-impl AxisRecord {
+impl Measurement {
     /// A digest that was computed.
     pub fn computed(digest: String) -> Self {
         Self {
-            status: AxisStatus::Computed,
+            status: MeasurementStatus::Computed,
             digest: Some(digest),
             reason: None,
         }
     }
 
     /// A status with no digest and no reason.
-    pub const fn bare(status: AxisStatus) -> Self {
+    pub const fn bare(status: MeasurementStatus) -> Self {
         Self {
             status,
             digest: None,
@@ -188,7 +195,7 @@ impl AxisRecord {
     /// A format nothing reads, named as far as it is known.
     pub fn unsupported(format: String) -> Self {
         Self {
-            status: AxisStatus::Unsupported,
+            status: MeasurementStatus::Unsupported,
             digest: None,
             reason: Some(format),
         }
@@ -197,7 +204,7 @@ impl AxisRecord {
     /// A read that failed, carrying what the I/O layer said.
     pub fn failed(reason: String) -> Self {
         Self {
-            status: AxisStatus::Failed,
+            status: MeasurementStatus::Failed,
             digest: None,
             reason: Some(reason),
         }
@@ -216,15 +223,15 @@ mod tests {
 
     #[test]
     fn every_status_round_trips_through_its_stored_spelling() {
-        for status in AxisStatus::ALL.iter().copied() {
-            assert_eq!(AxisStatus::parse(status.as_str()).unwrap(), status);
+        for status in MeasurementStatus::ALL.iter().copied() {
+            assert_eq!(MeasurementStatus::parse(status.as_str()).unwrap(), status);
         }
         // The set is closed: an unknown spelling is refused, not
         // defaulted — a default would silently reclassify a row
         // written by a build this one does not know.
-        assert!(AxisStatus::parse("unsupported:video/mp4").is_err());
-        assert!(AxisStatus::parse("").is_err());
-        assert!(AxisStatus::parse("PENDING").is_err());
+        assert!(MeasurementStatus::parse("unsupported:video/mp4").is_err());
+        assert!(MeasurementStatus::parse("").is_err());
+        assert!(MeasurementStatus::parse("PENDING").is_err());
     }
 
     #[test]
@@ -232,7 +239,7 @@ mod tests {
         // The spellings are interpolated into SQL conditions as quoted
         // literals; one that grew an apostrophe would end the string
         // early. Same contract the digest prefixes hold for GLOB.
-        for status in AxisStatus::ALL.iter().copied() {
+        for status in MeasurementStatus::ALL.iter().copied() {
             assert!(!status.as_str().contains('\''), "{}", status.as_str());
             assert!(!status.as_str().is_empty());
         }
@@ -240,21 +247,21 @@ mod tests {
 
     #[test]
     fn the_constructors_pair_payloads_with_the_statuses_that_carry_them() {
-        let computed = AxisRecord::computed("sha256:abc".into());
-        assert_eq!(computed.status, AxisStatus::Computed);
+        let computed = Measurement::computed("sha256:abc".into());
+        assert_eq!(computed.status, MeasurementStatus::Computed);
         assert_eq!(computed.digest(), Some("sha256:abc"));
         assert_eq!(computed.reason, None);
 
-        let unsupported = AxisRecord::unsupported("video/mp4".into());
-        assert_eq!(unsupported.status, AxisStatus::Unsupported);
+        let unsupported = Measurement::unsupported("video/mp4".into());
+        assert_eq!(unsupported.status, MeasurementStatus::Unsupported);
         assert_eq!(unsupported.digest(), None);
         assert_eq!(unsupported.reason.as_deref(), Some("video/mp4"));
 
-        let failed = AxisRecord::failed("No such file or directory".into());
-        assert_eq!(failed.status, AxisStatus::Failed);
+        let failed = Measurement::failed("No such file or directory".into());
+        assert_eq!(failed.status, MeasurementStatus::Failed);
         assert_eq!(failed.digest(), None);
 
-        let bare = AxisRecord::bare(AxisStatus::EmptySpan);
+        let bare = Measurement::bare(MeasurementStatus::EmptySpan);
         assert_eq!(bare.digest(), None);
         assert_eq!(bare.reason, None);
     }

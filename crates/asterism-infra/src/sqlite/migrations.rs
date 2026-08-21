@@ -3111,24 +3111,24 @@ CREATE INDEX idx_material_content_region_hash
 /// rather than borrowed from the domain, for the reason V56 carries its
 /// own locator test: a landed migration must not change what it did
 /// because a helper moved.
-fn pre_v92_stored_value(record: &asterism_core::domain::axis_status::AxisRecord) -> String {
-    use asterism_core::domain::axis_status::AxisStatus;
+fn pre_v92_stored_value(record: &asterism_core::domain::measurement::Measurement) -> String {
+    use asterism_core::domain::measurement::MeasurementStatus;
 
     match record.status {
-        AxisStatus::Computed => record.digest.clone().unwrap_or_default(),
-        AxisStatus::Unsupported => format!(
+        MeasurementStatus::Computed => record.digest.clone().unwrap_or_default(),
+        MeasurementStatus::Unsupported => format!(
             "unsupported:{}",
             record.reason.as_deref().unwrap_or("unknown")
         ),
-        AxisStatus::EmptySpan => "unsupported:empty-span".to_string(),
-        AxisStatus::TooLarge => "unsupported:too-large".to_string(),
-        AxisStatus::NotWalked => "unsupported:not-walked".to_string(),
-        AxisStatus::NoBytes => "unhashable:no-bytes".to_string(),
+        MeasurementStatus::EmptySpan => "unsupported:empty-span".to_string(),
+        MeasurementStatus::TooLarge => "unsupported:too-large".to_string(),
+        MeasurementStatus::NotWalked => "unsupported:not-walked".to_string(),
+        MeasurementStatus::NoBytes => "unhashable:no-bytes".to_string(),
         // Neither existed in the marker era: `pending` was NULL, and
         // `failed` was nothing at all. `hash_artefact` produces
         // neither, so this arm is a reader bug made loud on the row
         // rather than a digest invented for it.
-        AxisStatus::Pending | AxisStatus::Failed => String::new(),
+        MeasurementStatus::Pending | MeasurementStatus::Failed => String::new(),
     }
 }
 
@@ -9493,7 +9493,7 @@ mod tests {
         assert_eq!(
             marked,
             vec![
-                asterism_core::domain::axis_status::AxisStatus::NotWalked
+                asterism_core::domain::measurement::MeasurementStatus::NotWalked
                     .as_str()
                     .to_string();
                 2
@@ -9600,7 +9600,7 @@ mod tests {
         assert_eq!(
             marked,
             vec![
-                asterism_core::domain::axis_status::AxisStatus::NotWalked
+                asterism_core::domain::measurement::MeasurementStatus::NotWalked
                     .as_str()
                     .to_string();
                 stored.len()
@@ -9726,8 +9726,8 @@ mod tests {
     /// The production skip test over one migrated row — reads the
     /// status columns V92 added beside the digests.
     fn status_era_owes(conn: &Connection, asset: Uuid) -> bool {
-        use asterism_core::domain::axis_status::AxisStatus;
         use asterism_core::domain::content_hash::needs_fingerprint;
+        use asterism_core::domain::measurement::MeasurementStatus;
 
         type Axis = (String, Option<String>);
         let (file, content, meta): (Axis, Axis, Axis) = conn
@@ -9747,9 +9747,18 @@ mod tests {
             )
             .unwrap();
         needs_fingerprint(
-            (AxisStatus::parse(&file.0).unwrap(), file.1.as_deref()),
-            (AxisStatus::parse(&content.0).unwrap(), content.1.as_deref()),
-            (AxisStatus::parse(&meta.0).unwrap(), meta.1.as_deref()),
+            (
+                MeasurementStatus::parse(&file.0).unwrap(),
+                file.1.as_deref(),
+            ),
+            (
+                MeasurementStatus::parse(&content.0).unwrap(),
+                content.1.as_deref(),
+            ),
+            (
+                MeasurementStatus::parse(&meta.0).unwrap(),
+                meta.1.as_deref(),
+            ),
         )
     }
 

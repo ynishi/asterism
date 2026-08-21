@@ -107,9 +107,9 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
-use crate::domain::axis_status::{AxisRecord, AxisStatus};
 use crate::domain::content_hash::META_DIGEST_PREFIX;
 use crate::domain::content_region::UNKNOWN_FORMAT;
+use crate::domain::measurement::{Measurement, MeasurementStatus};
 use crate::domain::value::MimeType;
 
 /// What a reading of an artefact's metadata concluded.
@@ -154,13 +154,13 @@ pub enum MaterialMeta {
 impl MaterialMeta {
     /// What to store for this outcome — the status column's word, the
     /// digest column's value, the reason column's payload
-    /// ([`AxisRecord`]), same shape as
+    /// ([`Measurement`]), same shape as
     /// [`ContentRegion::record`](crate::domain::content_region::ContentRegion::record).
-    pub fn record(&self) -> AxisRecord {
+    pub fn record(&self) -> Measurement {
         match self {
-            Self::Digest { digest, .. } => AxisRecord::computed(digest.clone()),
-            Self::Unsupported(format) => AxisRecord::unsupported(format.clone()),
-            Self::EmptySpan => AxisRecord::bare(AxisStatus::EmptySpan),
+            Self::Digest { digest, .. } => Measurement::computed(digest.clone()),
+            Self::Unsupported(format) => Measurement::unsupported(format.clone()),
+            Self::EmptySpan => Measurement::bare(MeasurementStatus::EmptySpan),
         }
     }
 
@@ -315,7 +315,7 @@ mod tests {
         };
         assert_eq!(
             measured.record(),
-            AxisRecord::computed(digest_of(&canonical))
+            Measurement::computed(digest_of(&canonical))
         );
         assert_eq!(measured.canonical(), Some(canonical.as_str()));
         assert_eq!(measured.digest(), Some(digest_of(&canonical).as_str()));
@@ -323,14 +323,14 @@ mod tests {
         let unsupported = MaterialMeta::Unsupported("video/mp4".to_string());
         assert_eq!(
             unsupported.record(),
-            AxisRecord::unsupported("video/mp4".to_string())
+            Measurement::unsupported("video/mp4".to_string())
         );
         assert!(unsupported.canonical().is_none());
         assert!(unsupported.digest().is_none());
 
         assert_eq!(
             MaterialMeta::EmptySpan.record(),
-            AxisRecord::bare(AxisStatus::EmptySpan)
+            Measurement::bare(MeasurementStatus::EmptySpan)
         );
         assert!(MaterialMeta::EmptySpan.canonical().is_none());
         assert!(MaterialMeta::EmptySpan.digest().is_none());
@@ -352,7 +352,7 @@ mod tests {
         assert_eq!(MaterialMeta::EmptySpan.record().digest, None);
         assert_eq!(
             MaterialMeta::EmptySpan.record().status,
-            AxisStatus::EmptySpan
+            MeasurementStatus::EmptySpan
         );
     }
 
@@ -392,7 +392,7 @@ mod tests {
             );
             assert_eq!(
                 unsupported_format(declared).record().status,
-                AxisStatus::Unsupported
+                MeasurementStatus::Unsupported
             );
         }
     }
