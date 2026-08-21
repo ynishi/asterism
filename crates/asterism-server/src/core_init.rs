@@ -1101,12 +1101,14 @@ pub async fn init_core_with(
     ));
     // Lifecycle verbs of the unit of work (#29). No snapshot service
     // here: the close records a fact and freezes nothing.
-    let legacy_pursuit_service = Arc::new(asterism_core::application::forge::LegacyPursuitService::new(
-        pursuits.clone(),
-        projects.clone(),
-        personas.clone(),
-        assets_arc.clone(),
-    ));
+    let legacy_pursuit_service = Arc::new(
+        asterism_core::application::forge::LegacyPursuitService::new(
+            pursuits.clone(),
+            projects.clone(),
+            personas.clone(),
+            assets_arc.clone(),
+        ),
+    );
     // The context those pursuits file under (#63). No lifecycle of its
     // own: opened, read, and everything that happens to it happens
     // through the pursuits filed under it.

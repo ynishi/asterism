@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use asterism_core::application::DispatchService;
-use asterism_core::application::forge::{ProjectService, LegacyPursuitService};
+use asterism_core::application::forge::{LegacyPursuitService, ProjectService};
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,

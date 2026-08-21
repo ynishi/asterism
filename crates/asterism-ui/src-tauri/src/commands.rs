@@ -1690,7 +1690,10 @@ pub async fn list_pursuits(
     persona_id: String,
     limit: u32,
 ) -> Result<Vec<PursuitDto>, UiError> {
-    Ok(state.legacy_pursuit_service.list(&persona_id, limit).await?)
+    Ok(state
+        .legacy_pursuit_service
+        .list(&persona_id, limit)
+        .await?)
 }
 
 /// A pursuit's lifecycle facts, oldest first.
