@@ -45,7 +45,7 @@
 use crate::domain::forge::model::op::Op;
 use crate::domain::forge::model::strategy::{About, Divergence, Strategy, StrategyError};
 use crate::domain::forge::model::value::{Name, StrategyId};
-use crate::domain::forge::strategies::naming::free;
+use crate::domain::forge::strategies::naming::{claimed_by, free};
 
 /// Keeps this work's version under the contested name and moves the
 /// line's aside.
@@ -73,7 +73,10 @@ impl Strategy for MineFirst {
 
     fn resolve(&self, at: &Divergence<'_>) -> Result<Vec<Op>, StrategyError> {
         let mut ops = Vec::new();
-        let mut claimed: Vec<Name> = Vec::new();
+        // Seeded with what this work is already asking for: a
+        // previous resolution's entries are in the request and not yet
+        // on the line, so the line cannot say their names are taken.
+        let mut claimed: Vec<Name> = claimed_by(at.request());
 
         for entry in at.entries() {
             let Some(row) = at.request().get(&entry) else {

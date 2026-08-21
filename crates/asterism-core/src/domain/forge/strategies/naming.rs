@@ -19,10 +19,40 @@
 //! the name it was answering to, and should be able to use it. The
 //! line cannot say so yet — the removal has not landed — so the rule
 //! says which entries it is taking off, and those stop counting.
+//!
+//! # The line is not the only thing holding names
+//!
+//! Work that has already been resolved once is carrying names the line
+//! has never seen: the entries a previous resolution minted are in the
+//! request and nowhere else until the work closes. A rule that looked
+//! only at the line would hand the same name out twice, and the second
+//! one would be refused at the far end of the work, where the line
+//! finally applies the whole request and finds two live entries
+//! answering to one name.
+//!
+//! So [`claimed_by`] reads the request as well, and what it finds seeds
+//! the names a rule must avoid. This is not reachable by resolving
+//! once; it takes a line that moves twice under work that is still
+//! open.
 
+use crate::domain::forge::model::op::Rows;
 use crate::domain::forge::model::strategy::StrategyError;
 use crate::domain::forge::model::table::EntryStates;
-use crate::domain::forge::model::value::{EntryId, Name};
+use crate::domain::forge::model::value::{EntryId, Existence, Name};
+
+/// Every name this work is already asking for, for entries it is not
+/// taking off the line.
+///
+/// Seeds what a rule has to avoid. The request holds what previous
+/// resolutions minted, which the line has not seen and cannot object
+/// to yet.
+pub(super) fn claimed_by(request: &Rows) -> Vec<Name> {
+    request
+        .values()
+        .filter(|row| row.existence() != Some(Existence::Absent))
+        .filter_map(|row| row.name().cloned())
+        .collect()
+}
 
 /// The wanted name, or the first numbered form of it that nothing
 /// alive on the line answers to.

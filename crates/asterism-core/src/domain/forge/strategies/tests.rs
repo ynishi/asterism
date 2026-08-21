@@ -463,6 +463,42 @@ fn every_automatic_rule_leaves_the_work_able_to_close() {
     }
 }
 
+/// Resolving twice on one piece of work must not hand out one name
+/// twice. The first resolution's entry is in the request and not on
+/// the line, so the line cannot object to its name — and the refusal,
+/// if it came, would come at the far end of the work.
+#[test]
+fn resolving_twice_does_not_hand_out_one_name_twice() {
+    let mut at = standoff(&MainlineFirst);
+    let entry = at.entry;
+
+    let first = react(&at.line, &at.work, &MainlineFirst, ActorId::new(), act(4))
+        .unwrap()
+        .expect("the rule answered");
+    at.work.push(first).unwrap();
+
+    // The line moves the same axis again while the work is still open.
+    landed(&mut at.line, vec![Op::replace(entry, content())], 5);
+    assert!(!collisions(&at.line, &at.work).unwrap().is_empty());
+
+    let second = react(&at.line, &at.work, &MainlineFirst, ActorId::new(), act(6))
+        .unwrap()
+        .expect("the rule answered the second round");
+    at.work.push(second).unwrap();
+
+    // Both resolutions land together, and the line applies the whole
+    // request at once — which is where two entries under one name
+    // would be refused.
+    let closing = close(&at.line, &at.work, Outcome::Satisfied, None, act(7)).unwrap();
+    closing.apply(&mut at.line, &mut at.work).unwrap();
+
+    let states = at.line.states();
+    let mut minted = names(&states);
+    let before = minted.len();
+    minted.dedup();
+    assert_eq!(minted.len(), before, "every live name is used once");
+}
+
 /// Attribution is not decoration here: what a rule wrote has to be
 /// tellable from what a person wrote.
 #[test]
