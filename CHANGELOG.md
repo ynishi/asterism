@@ -88,6 +88,23 @@ and this project adheres to
   because a timestamp here is evidence in a record that never moves and nothing
   orders anything by it — so a wrong one breaks nothing and misleads for good.
 
+  Work can be discussed as well as done. A thread hangs off a pursuit, one pass,
+  one entry as one pass had it, or what landed — the four things worth remarking
+  on — and it is the forge's own rather than the annotation surface the layer
+  below has, which anchors to snapshots and cards and could not learn these four
+  without learning what a pursuit is. The entry anchor names the pass as well as
+  the entry, so a remark about one attempt does not follow that entry into every
+  other pursuit it is ever carried into. Nothing is overwritten: a correction
+  appends a revision and every earlier wording stays readable. Nothing is
+  resolved either — whether a remark is dealt with is a word people use about
+  their work rather than a shape the record has, so a later message says it.
+
+  Lines can be listed, work can be found by the line it is against, and work
+  filed under a larger piece of work can be found by its parent — the last one a
+  plain omission, since a pursuit has named its parent since it was written and
+  nothing could read it back. Ended work is in those listings, because a listing
+  that showed only what is open would hide what was tried and abandoned.
+
   Still domain and application only: no storage, no transport. The service the
   new one replaces has been renamed `LegacyPursuitService`, since what is
   leaving should carry the qualified name.
