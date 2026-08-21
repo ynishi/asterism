@@ -5,7 +5,7 @@
 //! [`model`](crate::domain::forge::model), where a line is the top and
 //! nothing groups lines inside the forge.
 //!
-//! Thin next to [`pursuit_service`](super::pursuit_service), and it
+//! Thin next to [`legacy_pursuit_service`](super::legacy_pursuit_service), and it
 //! stays that way while the merge is unwritten: a project has no
 //! lifecycle of its own. It is opened, it is read, and everything that
 //! happens *to* it happens through the pursuits filed under it.
@@ -85,7 +85,7 @@ impl ProjectService {
     /// Fetches one project with its lines.
     ///
     /// Addressed by id and not scoped to a persona, which is the house
-    /// treatment for id-addressed reads (`PursuitService::view` does
+    /// treatment for id-addressed reads (`LegacyPursuitService::view` does
     /// the same). Worth stating because the write side one file over
     /// goes out of its way to refuse a cross-persona *reference* — the
     /// asymmetry is deliberate: naming another persona's project in

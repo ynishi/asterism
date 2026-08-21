@@ -1641,7 +1641,7 @@ pub async fn open_pursuit(
     command: OpenPursuitCommand,
 ) -> Result<PursuitDto, UiError> {
     Ok(state
-        .pursuit_service
+        .legacy_pursuit_service
         .open(command, &AttributionContext::owner_surface())
         .await?)
 }
@@ -1658,7 +1658,7 @@ pub async fn close_pursuit(
     command: ClosePursuitCommand,
 ) -> Result<PursuitEventDto, UiError> {
     Ok(state
-        .pursuit_service
+        .legacy_pursuit_service
         .close(command, &AttributionContext::owner_surface())
         .await?)
 }
@@ -1671,7 +1671,7 @@ pub async fn reopen_pursuit(
     command: ReopenPursuitCommand,
 ) -> Result<PursuitEventDto, UiError> {
     Ok(state
-        .pursuit_service
+        .legacy_pursuit_service
         .reopen(command, &AttributionContext::owner_surface())
         .await?)
 }
@@ -1679,7 +1679,7 @@ pub async fn reopen_pursuit(
 /// One pursuit with its standing derived from the latest event.
 #[tauri::command]
 pub async fn get_pursuit(state: State<'_, AppState>, id: String) -> Result<PursuitDto, UiError> {
-    Ok(state.pursuit_service.get(&id).await?)
+    Ok(state.legacy_pursuit_service.get(&id).await?)
 }
 
 /// A persona's pursuits, most-recent first, each with its standing —
@@ -1690,7 +1690,7 @@ pub async fn list_pursuits(
     persona_id: String,
     limit: u32,
 ) -> Result<Vec<PursuitDto>, UiError> {
-    Ok(state.pursuit_service.list(&persona_id, limit).await?)
+    Ok(state.legacy_pursuit_service.list(&persona_id, limit).await?)
 }
 
 /// A pursuit's lifecycle facts, oldest first.
@@ -1699,7 +1699,7 @@ pub async fn pursuit_events(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<PursuitEventDto>, UiError> {
-    Ok(state.pursuit_service.events(&id).await?)
+    Ok(state.legacy_pursuit_service.events(&id).await?)
 }
 
 /// One pursuit opened up: the row and its standing, its events, and its
@@ -1709,7 +1709,7 @@ pub async fn pursuit_view(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<PursuitViewDto, UiError> {
-    Ok(state.pursuit_service.view(&id).await?)
+    Ok(state.legacy_pursuit_service.view(&id).await?)
 }
 
 // ---------------------------------------------------------------------------

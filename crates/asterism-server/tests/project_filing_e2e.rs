@@ -174,7 +174,7 @@ async fn a_pursuit_files_under_its_own_personas_project_and_no_others() {
     let foreign = open_project(&core, &theirs.id, "theirs").await;
 
     let filed = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: mine.id.clone(),
@@ -194,7 +194,7 @@ async fn a_pursuit_files_under_its_own_personas_project_and_no_others() {
     // in-memory row: if the INSERT dropped the column, the assertion
     // above would still pass.
     let seen = core
-        .pursuit_service
+        .legacy_pursuit_service
         .view(&filed.id)
         .await
         .expect("view the filed pursuit");
@@ -205,7 +205,7 @@ async fn a_pursuit_files_under_its_own_personas_project_and_no_others() {
     );
 
     let across = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: mine.id.clone(),
@@ -231,7 +231,7 @@ async fn a_pursuit_files_under_its_own_personas_project_and_no_others() {
     }
 
     let absent = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: mine.id.clone(),
@@ -252,7 +252,7 @@ async fn a_pursuit_files_under_its_own_personas_project_and_no_others() {
 
     // Unfiled stays legal, and says so rather than guessing a project.
     let unfiled = core
-        .pursuit_service
+        .legacy_pursuit_service
         .open(
             OpenPursuitCommand {
                 persona_id: mine.id.clone(),

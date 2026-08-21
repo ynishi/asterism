@@ -371,21 +371,21 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "project_service::list",
         "read — a persona's projects, each with its lines",
     ),
-    // ---- pursuit_service: reads (#29)
+    // ---- legacy_pursuit_service: reads (#29)
     (
-        "pursuit_service::get",
+        "legacy_pursuit_service::get",
         "read — one pursuit plus its derived standing",
     ),
     (
-        "pursuit_service::events",
+        "legacy_pursuit_service::events",
         "read — a pursuit's lifecycle facts, oldest first",
     ),
     (
-        "pursuit_service::list",
+        "legacy_pursuit_service::list",
         "read — a persona's pursuits with derived standing",
     ),
     (
-        "pursuit_service::view",
+        "legacy_pursuit_service::view",
         "read — one pursuit with its events and ledger",
     ),
     // ---- provenance_service

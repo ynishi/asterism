@@ -2725,7 +2725,7 @@ async fn list_pursuits(
     Query(q): Query<ListPursuitsQuery>,
 ) -> ApiResult<Vec<PursuitDto>> {
     Ok(Json(
-        ctx.pursuit_service.list(&q.persona_id, q.limit).await?,
+        ctx.legacy_pursuit_service.list(&q.persona_id, q.limit).await?,
     ))
 }
 
@@ -2737,7 +2737,7 @@ async fn open_pursuit(
     Json(command): Json<OpenPursuitCommand>,
 ) -> ApiResult<PursuitDto> {
     let attribution = asserted(None, None, command.operator_ai.as_deref())?;
-    Ok(Json(ctx.pursuit_service.open(command, &attribution).await?))
+    Ok(Json(ctx.legacy_pursuit_service.open(command, &attribution).await?))
 }
 
 /// `POST /asterism/pursuits/close` — record a conclusion. Both
@@ -2751,7 +2751,7 @@ async fn close_pursuit(
 ) -> ApiResult<PursuitEventDto> {
     let attribution = asserted(None, None, command.operator_ai.as_deref())?;
     Ok(Json(
-        ctx.pursuit_service.close(command, &attribution).await?,
+        ctx.legacy_pursuit_service.close(command, &attribution).await?,
     ))
 }
 
@@ -2765,7 +2765,7 @@ async fn record_pursuit_tx(
 ) -> ApiResult<PursuitTxDto> {
     let attribution = asserted(None, None, command.operator_ai.as_deref())?;
     Ok(Json(
-        ctx.pursuit_service.record_tx(command, &attribution).await?,
+        ctx.legacy_pursuit_service.record_tx(command, &attribution).await?,
     ))
 }
 
@@ -2778,7 +2778,7 @@ async fn reopen_pursuit(
 ) -> ApiResult<PursuitEventDto> {
     let attribution = asserted(None, None, command.operator_ai.as_deref())?;
     Ok(Json(
-        ctx.pursuit_service.reopen(command, &attribution).await?,
+        ctx.legacy_pursuit_service.reopen(command, &attribution).await?,
     ))
 }
 
@@ -2788,7 +2788,7 @@ async fn get_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,
 ) -> ApiResult<PursuitDto> {
-    Ok(Json(ctx.pursuit_service.get(&id).await?))
+    Ok(Json(ctx.legacy_pursuit_service.get(&id).await?))
 }
 
 /// `GET /asterism/pursuits/{id}/events` — the lifecycle facts, oldest
@@ -2798,7 +2798,7 @@ async fn pursuit_events(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,
 ) -> ApiResult<Vec<PursuitEventDto>> {
-    Ok(Json(ctx.pursuit_service.events(&id).await?))
+    Ok(Json(ctx.legacy_pursuit_service.events(&id).await?))
 }
 
 /// `GET /asterism/pursuits/{id}/view` — the pursuit opened up: the
@@ -2809,7 +2809,7 @@ async fn pursuit_view(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,
 ) -> ApiResult<PursuitViewDto> {
-    Ok(Json(ctx.pursuit_service.view(&id).await?))
+    Ok(Json(ctx.legacy_pursuit_service.view(&id).await?))
 }
 
 // -----------------------------------------------------------------

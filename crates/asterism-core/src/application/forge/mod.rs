@@ -1,11 +1,30 @@
 //! Forge use cases — the verbs of a line of work.
 //!
-//! [`pursuit_service`] owns the lifecycle (open / close / reopen) and
+//! [`legacy_pursuit_service`] owns the lifecycle (open / close / reopen) and
 //! the reads over it; [`project_service`] owns the filing it hangs
 //! under. They are apart from the rest because they are the only
 //! services here whose writes carry intent rather than content (the
 //! layer itself is described in
 //! [`domain::forge`](crate::domain::forge)).
+//!
+//! # Which model a service here serves
+//!
+//! Two live side by side while one replaces the other, so this is
+//! worth being able to tell at a glance rather than by reading:
+//!
+//! ```text
+//!   legacy_pursuit_service   PursuitEvent / PursuitTx / standing
+//!                            wired to transport, extended by nobody,
+//!                            deleted when its replacement is wired
+//!
+//!   (arriving)               domain::forge::model — a line's history
+//!                            as a chain, work as a log of passes,
+//!                            with no service of its own yet
+//! ```
+//!
+//! The naming is deliberate: what is leaving carries the qualified
+//! name, and the plain one belongs to what stays. A file named for the
+//! current model, serving the old one, is the thing this avoids.
 //!
 //! Nothing in the raw layer is edited by either of them. Closing a
 //! pursuit records that a line of work ended and touches no asset: no
@@ -36,9 +55,9 @@
 //! they are everywhere else, because they belong to neither side. The
 //! rule is about capability, never about what something is.
 
+pub mod legacy_pursuit_service;
 pub mod mapping;
 pub mod project_service;
-pub mod pursuit_service;
 
+pub use legacy_pursuit_service::LegacyPursuitService;
 pub use project_service::ProjectService;
-pub use pursuit_service::PursuitService;

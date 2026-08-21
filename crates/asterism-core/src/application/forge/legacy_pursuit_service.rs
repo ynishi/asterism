@@ -1,8 +1,22 @@
-//! `PursuitService` — the lifecycle verbs of the minted unit of work
+//! `LegacyPursuitService` — the lifecycle verbs of the minted unit of work
 //! (#29): open, close, reopen, and the reads that derive standing.
 //!
-//! **Deprecated.** The model this serves is replaced by
-//! [`model`](crate::domain::forge::model).
+//! **This is on its way out, and the name says so.** The model it
+//! serves — `PursuitEvent`, `PursuitTx`, the standing derived from
+//! them — is superseded by [`model`](crate::domain::forge::model),
+//! where a line's history is a chain of change points and work is a
+//! log of passes. Nothing here is being extended.
+//!
+//! It is still the one wired to transport, so it stays until the
+//! service that replaces it can answer the same surface. That service
+//! is `PursuitService`, which took this one's name: the code that is
+//! leaving carries the awkward one, so that a reader never has to work
+//! out which of two same-named services is current.
+//!
+//! When the replacement is wired, this file and the model under it go
+//! in one deletion. Until then, a change here is a change to something
+//! scheduled for removal, and is worth questioning on those grounds
+//! alone.
 //!
 //! The open creates one (naming intent up front), the one-way
 //! lifecycle facts (close / reopen) are recorded rather than written
@@ -33,7 +47,7 @@ use crate::domain::repository::{AssetRepository, PersonaRepository};
 use crate::error::DomainError;
 
 /// Pursuit lifecycle use-case service.
-pub struct PursuitService {
+pub struct LegacyPursuitService {
     pursuits: Arc<dyn PursuitRepository>,
     /// Filing is checked against the project it names — existence, and
     /// that it belongs to the same persona, which no foreign key can
@@ -45,7 +59,7 @@ pub struct PursuitService {
     assets: Arc<dyn AssetRepository>,
 }
 
-impl PursuitService {
+impl LegacyPursuitService {
     /// Wires the service around its ports.
     pub fn new(
         pursuits: Arc<dyn PursuitRepository>,
