@@ -47,23 +47,7 @@ use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::{ChangePoint, History};
 use crate::domain::forge::model::table::EntryStates;
-use crate::domain::forge::model::value::{ChangePointId, LineId, Name};
-
-/// What a line does when a change collides with one that came before
-/// it.
-///
-/// What diverges is the **entry**, never the chain: the collision is
-/// settled by putting a second entry on the line beside the first, so
-/// both candidates survive and the history stays one chain. Whether
-/// that happens without asking is the setting, and it belongs to the
-/// line because the history does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Strategy {
-    /// Turn a collision into divergence without asking. The default.
-    Auto,
-    /// Never do that on this line.
-    NoAuto,
-}
+use crate::domain::forge::model::value::{ChangePointId, LineId, Name, StrategyId};
 
 /// One repository: an identifier, a history, and how it settles
 /// collisions.
@@ -71,7 +55,7 @@ pub enum Strategy {
 pub struct Line {
     id: LineId,
     name: Name,
-    strategy: Strategy,
+    strategy: StrategyId,
     history: History,
     meta: Meta,
 }
@@ -83,12 +67,17 @@ impl Line {
     /// Opens a line. It begins with its genesis, so it has a head from
     /// the moment it exists and the first pursuit cuts from it like
     /// every later one.
-    pub fn open(name: Name, act: Act) -> Self {
+    ///
+    /// `strategy` names the rule it settles collisions by. There is no
+    /// default to fall back on: which rule is right depends on what
+    /// the line is for, and a line that quietly got somebody else's
+    /// answer would settle collisions in a way nobody chose.
+    pub fn open(name: Name, strategy: StrategyId, act: Act) -> Self {
         Self {
             id: LineId::new(),
             name,
-            strategy: Strategy::Auto,
-            history: History::begin(act.clone()),
+            strategy,
+            history: History::begin(act),
             meta: Meta::opened(act),
         }
     }
@@ -104,9 +93,12 @@ impl Line {
         &self.name
     }
 
-    /// How it settles collisions.
-    pub fn strategy(&self) -> Strategy {
-        self.strategy
+    /// Which rule it settles collisions by.
+    ///
+    /// A name, not a rule: what it resolves to is decided by whoever
+    /// runs the forge, and the model never holds one.
+    pub fn strategy(&self) -> &StrategyId {
+        &self.strategy
     }
 
     /// Its history, which is the only record of what it carries.
@@ -147,8 +139,8 @@ impl Line {
         self.meta.touched(act);
     }
 
-    /// Changes how collisions settle.
-    pub fn set_strategy(&mut self, strategy: Strategy, act: Act) {
+    /// Points the line at a different rule.
+    pub fn set_strategy(&mut self, strategy: StrategyId, act: Act) {
         self.strategy = strategy;
         self.meta.touched(act);
     }
@@ -157,10 +149,10 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // SHARED KERNEL: attribution is a boundary type.
-    use crate::domain::attribution::AttributionContext;
+    use crate::domain::forge::model::act::Actor;
     use crate::domain::forge::model::table::{Row, Table};
-    use crate::domain::forge::model::value::{Content, EntryId, PursuitId};
+    use crate::domain::forge::model::value::ActorId;
+    use crate::domain::forge::model::value::{Content, EntryId, NodeId, PursuitId};
     use chrono::{DateTime, TimeZone, Utc};
     use uuid::Uuid;
 
@@ -169,11 +161,15 @@ mod tests {
     }
 
     fn act(minute: u32) -> Act {
-        Act::new(at(minute), &AttributionContext::owner_surface())
+        Act::new(at(minute), Actor::User(ActorId::new()))
     }
 
     fn root() -> Line {
-        Line::open(Name::new(Line::ROOT).unwrap(), act(0))
+        Line::open(
+            Name::new(Line::ROOT).unwrap(),
+            StrategyId::new("mainline-first").unwrap(),
+            act(0),
+        )
     }
 
     #[test]
@@ -182,7 +178,7 @@ mod tests {
 
         assert_eq!(line.head(), line.history().genesis().id());
         assert!(line.states().is_empty());
-        assert_eq!(line.strategy(), Strategy::Auto);
+        assert_eq!(line.strategy().as_str(), "mainline-first");
     }
 
     #[test]
@@ -193,6 +189,7 @@ mod tests {
         let point = ChangePoint::new(
             line.head(),
             PursuitId::new(),
+            NodeId::new(),
             Table::one(entry, Row::added(content, Name::new("key visual").unwrap())),
             act(1),
         );
@@ -225,6 +222,7 @@ mod tests {
         let point = ChangePoint::new(
             line.head(),
             PursuitId::new(),
+            NodeId::new(),
             Table::one(
                 EntryId::new(),
                 Row::added(
@@ -249,6 +247,7 @@ mod tests {
         let first = ChangePoint::new(
             line.head(),
             PursuitId::new(),
+            NodeId::new(),
             Table::one(
                 EntryId::new(),
                 Row::added(Content::from_uuid(Uuid::now_v7()), taken.clone()),
@@ -260,6 +259,7 @@ mod tests {
         let twin = ChangePoint::new(
             line.head(),
             PursuitId::new(),
+            NodeId::new(),
             Table::one(
                 EntryId::new(),
                 Row::added(Content::from_uuid(Uuid::now_v7()), taken.clone()),
@@ -276,9 +276,9 @@ mod tests {
     fn a_line_turns_automatic_divergence_off() {
         let mut line = root();
 
-        line.set_strategy(Strategy::NoAuto, act(2));
+        line.set_strategy(StrategyId::new("by-hand").unwrap(), act(2));
 
-        assert_eq!(line.strategy(), Strategy::NoAuto);
+        assert_eq!(line.strategy().as_str(), "by-hand");
         assert_eq!(line.meta().updated().at(), at(2));
     }
 }

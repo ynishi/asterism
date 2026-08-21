@@ -103,12 +103,20 @@
 //!
 //! # What this module depends on
 //!
-//! Four things outside it, and no more. Three are **boundary types** —
+//! Three things outside it, and no more. Two are **boundary types** —
 //! the vocabulary a third place owns because both sides need it:
 //! `AssetId`, which [`Content`] wraps so nothing else here has to name
-//! the layer below; attribution, which [`Act`] records; and the shared
-//! error, which only [`error`] names. The fourth is the macro that
-//! spells an id newtype, which shapes nothing.
+//! the layer below, and the shared error, which only [`error`] names.
+//! The third is the macro that spells an id newtype, which shapes
+//! nothing.
+//!
+//! Who did a thing used to be a fourth. It is not any more: the forge
+//! recognises an [`Actor`], which is a handle and a kind, and what that
+//! handle stands for — an authenticated user, an instance — is
+//! answered outside. The forge's actors are not the same set as
+//! anybody else's, since a rule of a line can act and a person cannot
+//! be a rule, and a wider set cannot be spelled in a narrower
+//! vocabulary.
 //!
 //! Every one of those imports is marked `SHARED KERNEL` at its `use`
 //! line, tests included, so grepping that phrase lists every edge out
@@ -131,17 +139,54 @@
 //! Every rule the forge learns is added there, so what this model can
 //! say no to stays readable in one place.
 //!
-//! # What is deliberately not here
+//! # The two logs, and the one place they meet
 //!
-//! **The work log.** Rounds, operations and the fold from operations
-//! to a table are the other half of the model, and a change point
+//! A history says what changed; a work log ([`pursuit`]) says what
+//! somebody proposes. Neither reads the other, and a change point
 //! names the pursuit it came out of without knowing anything else
 //! about it.
 //!
-//! **The act that produces a change point.** Deciding one means
-//! folding a pursuit's operations, normalising them against the head,
-//! and settling collisions — it spans both logs, so it belongs with
-//! the half that is missing rather than here.
+//! Two modules read both at once, and they are the only ones.
+//! [`change`] answers what work *would* do to a line — what would
+//! actually move, and whether anybody moved it first — and answers
+//! nothing else, because what to do about a collision is a decision.
+//! [`closing`] is that decision for the one act that ends work: it
+//! returns the close and, when the work is satisfied, the change point
+//! born with it, in one value that cannot be taken apart.
+//!
+//! That is also where the two constructors went. `Close::new` and
+//! `ChangePoint::new` are closed to this module and, outside tests,
+//! called from [`closing`] alone — so a satisfied close without its
+//! change point is not a value anybody can mint.
+//!
+//! # What is deliberately not here
+//!
+//! **Settling a collision.** Turning one into a divergence writes a
+//! pass into the work log under the line's strategy, and it happens
+//! while the work is open. [`closing`] refuses what was never settled;
+//! it does not settle anything itself.
+//!
+//! **Building any of this back from stored values.** Every constructor
+//! here mints: a line mints its id and its genesis, work mints its id
+//! and its opening node, a pass mints a node id. There is no
+//! `from_persisted` anywhere in this module, which means the read half
+//! of the ports — handing back a whole [`Line`] or a whole pursuit —
+//! has no implementation but a fake that keeps the objects themselves.
+//!
+//! That is a decision rather than an oversight, and it is worth being
+//! read as one. A rehydration constructor has to take every field
+//! including the ids, so it is the one door through which a stored row
+//! can contradict a rule this module holds — and the shape it should
+//! take is decided by what a store actually keeps, which is not
+//! written yet. It arrives with the first adapter, and until then a
+//! port's read half is a contract nothing has had to satisfy.
+//!
+//! **Whether two contents are the same thing.** An add is taken at its
+//! word: an entry arrives because somebody meant to put one there, and
+//! byte-identical content on another entry does not make it fewer than
+//! two entries. The layer that holds the bytes answers sameness, and
+//! the forge sees only its outcome — the same [`Content`] coming back.
+//! The whole of the reasoning is in [`op`].
 //!
 //! **Anything about people.** No owner, no persona, no actor set.
 //! [`Act`] records who did a thing, because a history that cannot say
@@ -170,15 +215,19 @@
 //! [`Name`]: value::Name
 //! [`Name::new`]: value::Name::new
 //! [`Act`]: act::Act
+//! [`Actor`]: act::Actor
 //! [`Meta`]: act::Meta
 //! [`ForgeError`]: error::ForgeError
 
 pub mod act;
 pub mod change;
+pub mod closing;
 pub mod error;
 pub mod history;
 pub mod line;
 pub mod op;
 pub mod pursuit;
+pub mod react;
+pub mod strategy;
 pub mod table;
 pub mod value;

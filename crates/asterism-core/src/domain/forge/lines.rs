@@ -1,28 +1,30 @@
-//! What the forge needs kept, stated in the forge's own words.
+//! Keeping lines, stated in the forge's own words.
 //!
-//! [`Lines`] is the whole of it. Every type it mentions —
-//! [`Line`], [`ChangePoint`], [`Name`], [`Act`] — belongs to the
-//! model, so nothing here has to be translated and there is no
-//! vocabulary to isolate. Whatever implements it is somebody else's
-//! problem, and the forge never names them.
+//! [`Lines`] is one of the two faces the forge asks for. Every type it
+//! mentions — [`Line`], [`Name`], [`Act`] — belongs to the model, so
+//! nothing here has to be translated and there is no vocabulary to
+//! isolate. Whatever implements it is somebody else's problem, and the
+//! forge never names them.
 //!
-//! # Recording a change names the head
+//! # A line moves through one door, and it is not this one
 //!
-//! [`Lines::record`] takes the node the caller believes is the head,
-//! beside the change point it wants to append. It could take only the
-//! change point — the parent is on it — and that would be the shape
-//! that breaks.
+//! There is no `record` here. A change point exists because a pursuit
+//! was satisfied, and the two are written together or not at all — so
+//! the call that moves a line is [`Closings::commit`], where both
+//! halves are in hand. A second way to append here would be a way to
+//! move a line without ending any work, which is the state the model
+//! has no word for.
 //!
-//! The model refuses a change that does not sit on the head
-//! ([`History::record`]), but it judges the line it was *given*, which
-//! is the line as it was when it was read. Between the read and the
-//! write, another change can arrive. Naming the head makes the write
-//! itself conditional, so whoever keeps the line can refuse the second
-//! one — and the rule the model states survives the gap rather than
-//! holding only for as long as nobody else is working.
+//! What remains is what a line is when nothing is being closed:
+//! opening it, reading it, and moving its own description.
 //!
-//! What a caller does with the refusal is read the line again and
-//! rebuild, which is where the collision becomes visible.
+//! # Reading gives back the whole line
+//!
+//! [`Lines::get`] answers with the history included, because the rules
+//! the model holds are about the chain — deciding a close folds it,
+//! and recording checks its head. Handing back less would move those
+//! rules to whoever answers this call, and there would be as many
+//! copies of them as there are implementations.
 //!
 //! # There is nothing that removes
 //!
@@ -33,14 +35,6 @@
 //! move a line's own description, which is a record the history does
 //! not keep.
 //!
-//! # One trait rather than a read half and a write half
-//!
-//! [`Lines::get`] and [`Lines::record`] are one concern: `record` is
-//! conditional on what `get` returned, and splitting them puts the two
-//! halves of that condition in two places for whoever implements them
-//! to reconcile. It splits when there is a reason, and "reads and
-//! writes are different words" is not one.
-//!
 //! # The error is the shared one
 //!
 //! The model refuses in its own vocabulary, but a port is where
@@ -50,17 +44,15 @@
 //! into at a single edge.
 //!
 //! [`Line`]: crate::domain::forge::model::line::Line
-//! [`ChangePoint`]: crate::domain::forge::model::history::ChangePoint
-//! [`History::record`]: crate::domain::forge::model::history::History::record
 //! [`Name`]: crate::domain::forge::model::value::Name
 //! [`Act`]: crate::domain::forge::model::act::Act
+//! [`Closings::commit`]: crate::domain::forge::closings::Closings::commit
 
 use async_trait::async_trait;
 
 use crate::domain::forge::model::act::Act;
-use crate::domain::forge::model::history::ChangePoint;
-use crate::domain::forge::model::line::{Line, Strategy};
-use crate::domain::forge::model::value::{ChangePointId, LineId, Name};
+use crate::domain::forge::model::line::Line;
+use crate::domain::forge::model::value::{LineId, Name, StrategyId};
 // SHARED KERNEL: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
@@ -71,26 +63,7 @@ pub trait Lines: Send + Sync {
     async fn open(&self, line: &Line) -> Result<(), DomainError>;
 
     /// Reads a line back whole, history included.
-    ///
-    /// Whole, because the rules the model holds are about the chain:
-    /// recording checks the head, and the name check folds it. Handing
-    /// back less would move those rules to whoever answers this call,
-    /// and there would be as many copies of them as there are
-    /// implementations.
     async fn get(&self, id: &LineId) -> Result<Option<Line>, DomainError>;
-
-    /// Appends a change point, on the condition that `on` is still the
-    /// head.
-    ///
-    /// Returns [`Conflict`](DomainError::Conflict) when it is not:
-    /// somebody else recorded a change first, and this caller is
-    /// holding a line that has moved.
-    async fn record(
-        &self,
-        id: &LineId,
-        on: ChangePointId,
-        point: &ChangePoint,
-    ) -> Result<(), DomainError>;
 
     /// Records that a line was renamed.
     async fn rename(&self, id: &LineId, name: &Name, act: &Act) -> Result<(), DomainError>;
@@ -99,7 +72,7 @@ pub trait Lines: Send + Sync {
     async fn set_strategy(
         &self,
         id: &LineId,
-        strategy: Strategy,
+        strategy: &StrategyId,
         act: &Act,
     ) -> Result<(), DomainError>;
 }

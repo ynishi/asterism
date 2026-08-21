@@ -26,24 +26,102 @@
 //! Recording who did a thing is what a history owes. Deciding whether
 //! they were permitted to needs to know what a person is, and that
 //! question belongs to the layer that does.
+//!
+//! # An actor is a handle and a kind, and nothing else
+//!
+//! [`Actor`] holds an [`ActorId`] and says whether it was a person or
+//! the server itself. Everything else about them is outside:
+//!
+//! ```text
+//!   node        ActorId + kind                    ← the forge keeps this much
+//!                  │
+//!   outside        ├─ User(id)   ──► an authenticated user   (teams, and its auth)
+//!                  └─ System(id) ──► an instance or server   (above teams again)
+//! ```
+//!
+//! **The link is not burned into the node.** Which user an id stands
+//! for is a row somebody else keeps, and it has to be, because the
+//! binding has not happened yet — the owner of an instance is an
+//! unbound reference until authentication binds it. Recording the
+//! answer now would mean rewriting every node the day it arrives, and
+//! nodes do not move.
+//!
+//! **The kind stays here**, because a history has to be able to say
+//! "the server diverged this" rather than "somebody did", and that is
+//! a fact about its own record. An answer it had to go outside for
+//! would be an answer it could fail to get.
+//!
+//! That is not a hypothetical: a record of a selection has to say who
+//! made it, and "a rule wrote this one" is a different answer from "a
+//! person chose this one". Reading it off the node is what keeps the
+//! two from being told apart by guesswork later.
+//!
+//! **Only what can be identified gets to be an actor.** A persona is a
+//! voice, and an agent is a thing operating on somebody's behalf;
+//! neither can be held to a choice. If it turns out one of them should
+//! be recorded, it arrives as a variant here or as something hanging
+//! off a user — and either way it is somebody the forge could name.
+//!
+//! # What this stopped recording
+//!
+//! An act used to carry the write-side triple the rest of the codebase
+//! uses — who, which agent carried it out, and through which entry
+//! point. It now carries an actor, and **the agent and the entry point
+//! are no longer on a forge node at all**. That is a loss, so it is
+//! worth saying plainly rather than leaving somebody to discover it:
+//! from here on, this layer cannot answer "which tool wrote this
+//! round", and the answer is not recoverable later for anything
+//! written in between.
+//!
+//! It is deliberate. What a history of choices has to answer is *whose
+//! choice this was* — the record of a selection is only worth keeping
+//! if the answer is somebody who can be asked about it — and which
+//! surface the request arrived through is a fact about the request. If
+//! that turns out to be wanted here, it comes back as a second axis on
+//! an actor, and it starts being true from the day it lands.
 
 use chrono::{DateTime, Utc};
 
-// SHARED KERNEL: attribution is a boundary type — both sides record
-// who did a thing, and neither owns the vocabulary for it.
-use crate::domain::attribution::AttributionContext;
+use crate::domain::forge::model::value::ActorId;
+
+/// Whoever did something, as far as the forge is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Actor {
+    /// A person. Which one is answered outside.
+    User(ActorId),
+    /// The server itself — a line's strategy turning a collision into
+    /// a divergence, and anything else a rule wrote rather than a
+    /// person. Which server is answered outside, and it is worth
+    /// asking: one deployment is one today, and hosting several is the
+    /// thing that makes "the system did it" useless on its own.
+    System(ActorId),
+}
+
+impl Actor {
+    /// The forge's handle on them.
+    pub fn id(&self) -> ActorId {
+        match self {
+            Self::User(id) | Self::System(id) => *id,
+        }
+    }
+
+    /// Whether a rule wrote this rather than a person.
+    pub fn is_system(&self) -> bool {
+        matches!(self, Self::System(_))
+    }
+}
 
 /// One thing somebody did, at a time.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Act {
     at: DateTime<Utc>,
-    by: AttributionContext,
+    by: Actor,
 }
 
 impl Act {
     /// Records an act.
-    pub fn new(at: DateTime<Utc>, by: &AttributionContext) -> Self {
-        Self { at, by: by.clone() }
+    pub fn new(at: DateTime<Utc>, by: Actor) -> Self {
+        Self { at, by }
     }
 
     /// When it happened.
@@ -51,9 +129,9 @@ impl Act {
         self.at
     }
 
-    /// Who did it, and through what.
-    pub fn by(&self) -> &AttributionContext {
-        &self.by
+    /// Who did it.
+    pub fn by(&self) -> Actor {
+        self.by
     }
 }
 
@@ -77,7 +155,7 @@ impl Meta {
     /// the same act.
     pub fn opened(act: Act) -> Self {
         Self {
-            created: act.clone(),
+            created: act,
             updated: act,
         }
     }
@@ -109,7 +187,7 @@ mod tests {
     }
 
     fn act(minute: u32) -> Act {
-        Act::new(at(minute), &AttributionContext::owner_surface())
+        Act::new(at(minute), Actor::User(ActorId::new()))
     }
 
     #[test]

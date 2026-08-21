@@ -83,6 +83,24 @@ define_uuid_id!(
     PursuitId
 );
 
+define_uuid_id!(
+    /// Surrogate id for whoever did something — the forge's handle on
+    /// an actor, and the whole of what it knows about one.
+    ///
+    /// It is a handle rather than the identity itself, and the
+    /// distinction is the point. Who a person *is* — which
+    /// authenticated user, on which instance — is answered outside the
+    /// forge, and the answer is not settled yet: the owner of an
+    /// instance is an unbound reference until authentication binds it.
+    /// An id minted here exists before that happens and keeps pointing
+    /// at the same actor afterwards, so nothing already recorded has to
+    /// move when the binding arrives.
+    ///
+    /// See [`Actor`](super::act::Actor) for the two kinds and why the
+    /// kind is the one thing about an actor the forge keeps for itself.
+    ActorId
+);
+
 /// Whether a row puts its entry on the line or takes it off.
 ///
 /// The axis says nothing about bytes. `Absent` is a statement about
@@ -170,6 +188,44 @@ impl Name {
 }
 
 impl std::fmt::Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Which rule a line settles collisions by.
+///
+/// Text rather than a minted id, because it names a piece of code
+/// rather than a row: what a line stores has to still mean something
+/// after a deployment that carries different implementations, and a
+/// slug somebody wrote (`"mainline-first"`) survives that where a
+/// generated id would only say which row of a table that deployment no
+/// longer has.
+///
+/// The forge neither knows the set nor holds the implementations —
+/// see [`Strategy`](super::strategy::Strategy). What it knows is that
+/// a line points at one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StrategyId(String);
+
+impl StrategyId {
+    /// Names a rule. Trimmed, and never blank — a line that points at
+    /// nothing settles nothing.
+    pub fn new(value: impl Into<String>) -> Result<Self, ForgeError> {
+        let value = value.into().trim().to_string();
+        if value.is_empty() {
+            return Err(ForgeError::BlankStrategy);
+        }
+        Ok(Self(value))
+    }
+
+    /// The slug as it reads.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for StrategyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }

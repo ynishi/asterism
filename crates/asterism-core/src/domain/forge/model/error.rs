@@ -21,6 +21,8 @@
 
 use thiserror::Error;
 
+use crate::domain::forge::model::change::Collision;
+use crate::domain::forge::model::strategy::StrategyError;
 use crate::domain::forge::model::value::Name;
 
 // SHARED KERNEL: `DomainError` is a boundary type. This module is the
@@ -34,6 +36,19 @@ pub enum ForgeError {
     /// A name was blank, or became blank once trimmed.
     #[error("a name must not be blank")]
     BlankName,
+
+    /// A strategy was named by a blank string — a line that points at
+    /// nothing settles nothing.
+    #[error("a strategy must be named")]
+    BlankStrategy,
+
+    /// The rule this line settles collisions by wrote nothing, and
+    /// said why.
+    ///
+    /// The work keeps its collision and stays open, which is a state
+    /// somebody can act on by hand.
+    #[error("the line's strategy did not settle this: {0}")]
+    Strategy(#[from] StrategyError),
 
     /// A row stated no axis at all — nothing is being said about the
     /// entry, so it does not belong in a table.
@@ -76,27 +91,93 @@ pub enum ForgeError {
     /// Work was judged against a line it was not cut from.
     #[error("this work was cut from a node this line does not have")]
     UnknownBase,
+
+    /// The rule offered is not the one this line settles by.
+    ///
+    /// Answering with it would settle a line by a rule nobody chose
+    /// for it, which is the setting quietly not mattering.
+    #[error("that is not the rule this line settles collisions by")]
+    WrongStrategy,
+
+    /// This line has no such node.
+    #[error("this line does not have that change point")]
+    UnknownChangePoint,
+
+    /// A rule answered a collision with operations that leave it
+    /// standing.
+    ///
+    /// Checked rather than trusted: a rule is written outside the
+    /// model, and one that returns something is not thereby one that
+    /// answered. Finding out here costs a fold; finding out later
+    /// means a close refusing for a collision somebody was told had
+    /// been handled.
+    #[error("the line's strategy wrote operations that do not settle what it was asked about")]
+    Unsettled,
+
+    /// Work was judged against a line it does not belong to.
+    ///
+    /// Separate from [`UnknownBase`](Self::UnknownBase), which is a
+    /// pursuit of this line holding a node the line does not have.
+    /// This one is the pair being wrong before anything is folded.
+    #[error("this work is against another line")]
+    NotThisLine,
+
+    /// Everything the work would put on the line, the line already
+    /// says.
+    ///
+    /// Usually because somebody else said it first. Nothing is left to
+    /// record, and a change point carrying nothing is a line advancing
+    /// to say nothing — so the work is closed as abandoned instead,
+    /// and what it tried stays readable.
+    #[error(
+        "everything this work would change, the line already says — close it as abandoned, since \
+         a change point carrying nothing is a line moving to say nothing"
+    )]
+    NothingToRecord,
+
+    /// The line moved axes this work also moves, and this work has not
+    /// looked at the change points that moved them.
+    ///
+    /// Carries them so a caller can say which, rather than sending
+    /// anybody back to recompute what the refusal already knew.
+    #[error("{} axes moved on the line since this work was cut and have not been looked at", .0.len())]
+    Collides(Vec<Collision>),
 }
 
 impl From<ForgeError> for DomainError {
     /// Reads a refusal in the shared vocabulary.
     ///
-    /// [`NotOnHead`](ForgeError::NotOnHead) and
-    /// [`NameTaken`](ForgeError::NameTaken) are the state fighting
+    /// [`NotOnHead`](ForgeError::NotOnHead),
+    /// [`NameTaken`](ForgeError::NameTaken) and
+    /// [`Collides`](ForgeError::Collides) are the state fighting
     /// back — the caller was not wrong, the line was somewhere else —
     /// so they read as conflicts. The rest are malformed input.
+    ///
+    /// [`NothingToRecord`](ForgeError::NothingToRecord) is the one
+    /// worth arguing about, and it reads as validation: the line is
+    /// not fighting anybody, it is already saying what the caller
+    /// asked for. Retrying cannot change that, and the caller's move
+    /// is to close the work as abandoned rather than to read again.
     fn from(error: ForgeError) -> Self {
         let message = error.to_string();
         match error {
-            ForgeError::NotOnHead | ForgeError::NameTaken(_) | ForgeError::AlreadyClosed => {
-                DomainError::Conflict(message)
-            }
+            ForgeError::NotOnHead
+            | ForgeError::NameTaken(_)
+            | ForgeError::AlreadyClosed
+            | ForgeError::Collides(_) => DomainError::Conflict(message),
             ForgeError::BlankName
             | ForgeError::EmptyRow
             | ForgeError::RemovalMovesAnotherAxis
             | ForgeError::EmptyTable
             | ForgeError::EmptyRound
-            | ForgeError::UnknownBase => DomainError::Validation(message),
+            | ForgeError::UnknownBase
+            | ForgeError::NotThisLine
+            | ForgeError::BlankStrategy
+            | ForgeError::Strategy(_)
+            | ForgeError::WrongStrategy
+            | ForgeError::UnknownChangePoint
+            | ForgeError::Unsettled
+            | ForgeError::NothingToRecord => DomainError::Validation(message),
         }
     }
 }

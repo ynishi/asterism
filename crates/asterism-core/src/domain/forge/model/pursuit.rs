@@ -11,7 +11,7 @@
 //!
 //! The shape mirrors a line's history deliberately: a root that is not
 //! like the others, a chain that only grows, and everything the thing
-//! currently says derived by folding it. What differs is what the
+//! currently asks for derived by folding it. What differs is what the
 //! nodes carry — a line's node carries a table that has changed it, a
 //! work log's carries operations that have not changed anything yet.
 //!
@@ -21,23 +21,29 @@
 //! says what the passes are for, and it holds nothing that a round
 //! could hold instead.
 //!
-//! A round with no operations is ordinary — it is a round that took a
-//! change point in, which is how work says "I have seen what changed".
-//! What is refused is a round that says neither: a node that carries
-//! no operations and takes nothing in records that nothing happened,
-//! and nothing happening is not an event.
+//! A round that writes nothing is refused. Work is what a person does
+//! to a request, and a node carrying no operations records that
+//! nothing happened.
 //!
 //! # The base does not move
 //!
 //! [`Open`] names the change point the work was cut from, and that is
-//! the only thing the base ever is. Later rounds may take newer change
-//! points in, and doing so does **not** move it.
+//! the only thing the base ever is. Nothing here moves it, and there
+//! is no operation that could.
 //!
-//! The distinction is what makes a collision visible. The base says
-//! where this work started from; a round's `taken_in` says what it has
-//! since seen. If taking something in moved the base, then work could
-//! walk past a change it never looked at, and the step that compares
-//! this work against the line would find nothing to compare.
+//! It is what "since" is measured from. Everything the line recorded
+//! after it is something this work may not account for, and comparing
+//! the two is how that is found out — so a base that crept forward
+//! would shrink the window every time somebody looked at it, and a
+//! change nobody ever reconciled would come out clean.
+//!
+//! # A pass is a write, and nothing else
+//!
+//! There is no node here that records having looked at something.
+//! Work stops colliding with a line by *saying something different*,
+//! not by noting that it read. A note of that kind would be a claim
+//! about the reader — writable without changing anything — and
+//! whatever depended on it could be had for nothing.
 //!
 //! # Closing is terminal
 //!
@@ -79,9 +85,16 @@ pub struct Intent {
 /// How a pursuit ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
-    /// What the work set out to do is done.
+    /// What the work set out to do is done, and the line carries it.
+    ///
+    /// This value is never the whole of the fact. A satisfied close
+    /// and the change point it puts on the line are born together and
+    /// neither exists without the other, so nothing outside the model
+    /// can mint a close at all — the one function that ends work
+    /// returns both or refuses.
     Satisfied,
-    /// It is not, and nobody is going to.
+    /// It is not, and nobody is going to. Nothing is put on the line,
+    /// and everything the work wrote stays readable.
     Abandoned,
 }
 
@@ -136,7 +149,6 @@ impl Open {
 pub struct Round {
     id: NodeId,
     parent: NodeId,
-    taken_in: Option<ChangePointId>,
     ops: Vec<Op>,
     note: Option<String>,
     act: Act,
@@ -145,23 +157,27 @@ pub struct Round {
 impl Round {
     /// Records a pass.
     ///
-    /// Refuses a pass that neither writes anything nor takes anything
-    /// in: a node that says nothing is a record that nothing happened,
-    /// and the work log is a record of what did.
+    /// Refuses one that writes nothing. A pass is what work does, and
+    /// a node carrying no operations is a record that nothing
+    /// happened — the work log is a record of what did.
+    ///
+    /// There is no pass that only looks at something. Looking is not
+    /// an operation, and a node that claimed it would be a claim about
+    /// the reader rather than a fact about the work: it could be
+    /// written without changing anything, and anything a collision
+    /// depended on it for could be had for free.
     pub fn new(
         parent: NodeId,
         ops: Vec<Op>,
-        taken_in: Option<ChangePointId>,
         note: Option<String>,
         act: Act,
     ) -> Result<Self, ForgeError> {
-        if ops.is_empty() && taken_in.is_none() {
+        if ops.is_empty() {
             return Err(ForgeError::EmptyRound);
         }
         Ok(Self {
             id: NodeId::new(),
             parent,
-            taken_in,
             ops,
             note,
             act,
@@ -176,12 +192,6 @@ impl Round {
     /// The node before it.
     pub fn parent(&self) -> NodeId {
         self.parent
-    }
-
-    /// The change point this pass looked at, if it looked at one.
-    /// Evidence of having seen it — never a move of the base.
-    pub fn taken_in(&self) -> Option<ChangePointId> {
-        self.taken_in
     }
 
     /// What this pass wrote, in the order it wrote it.
@@ -212,7 +222,12 @@ pub struct Close {
 
 impl Close {
     /// Ends the work.
-    pub fn new(parent: NodeId, outcome: Outcome, note: Option<String>, act: Act) -> Self {
+    ///
+    /// Visible to the model and no further, for the reason stated on
+    /// [`Outcome::Satisfied`]: a satisfied close and the change point
+    /// it puts on the line are one act, and a constructor anybody
+    /// could reach is a way to write half of it.
+    pub(super) fn new(parent: NodeId, outcome: Outcome, note: Option<String>, act: Act) -> Self {
         Self {
             id: NodeId::new(),
             parent,
@@ -324,11 +339,12 @@ impl WorkLog {
         Ok(())
     }
 
-    /// What this work says, folded across every pass.
+    /// What this work is asking the line to carry, folded across every
+    /// pass.
     ///
-    /// The line is not an input — see
-    /// [`fold`].
-    pub fn says(&self) -> Rows {
+    /// The line is not an input — see [`fold`]. What the request means
+    /// is only decided against a line, and that happens elsewhere.
+    pub fn request(&self) -> Rows {
         let ops: Vec<Op> = self
             .rounds
             .iter()
@@ -361,7 +377,7 @@ impl Pursuit {
             id: PursuitId::new(),
             of,
             parent,
-            log: WorkLog::begin(Open::new(base, intent, act.clone())),
+            log: WorkLog::begin(Open::new(base, intent, act)),
             meta: Meta::opened(act),
         }
     }
@@ -403,9 +419,9 @@ impl Pursuit {
         self.log.close().map(Close::outcome)
     }
 
-    /// What this work says, folded across every pass.
-    pub fn says(&self) -> Rows {
-        self.log.says()
+    /// What this work is asking the line to carry.
+    pub fn request(&self) -> Rows {
+        self.log.request()
     }
 
     /// Records a pass.
@@ -422,9 +438,9 @@ impl Pursuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // SHARED KERNEL: attribution is a boundary type.
-    use crate::domain::attribution::AttributionContext;
+    use crate::domain::forge::model::act::Actor;
     use crate::domain::forge::model::table::Row;
+    use crate::domain::forge::model::value::ActorId;
     use crate::domain::forge::model::value::Content;
     use chrono::{DateTime, TimeZone, Utc};
     use uuid::Uuid;
@@ -434,7 +450,7 @@ mod tests {
     }
 
     fn act(minute: u32) -> Act {
-        Act::new(at(minute), &AttributionContext::owner_surface())
+        Act::new(at(minute), Actor::User(ActorId::new()))
     }
 
     fn content() -> Content {
@@ -456,21 +472,21 @@ mod tests {
     }
 
     fn round(parent: NodeId, ops: Vec<Op>, minute: u32) -> Round {
-        Round::new(parent, ops, None, None, act(minute)).unwrap()
+        Round::new(parent, ops, None, act(minute)).unwrap()
     }
 
     #[test]
     fn fresh_work_has_said_nothing_and_has_not_ended() {
         let pursuit = opened();
 
-        assert!(pursuit.says().is_empty());
+        assert!(pursuit.request().is_empty());
         assert_eq!(pursuit.outcome(), None);
         assert_eq!(pursuit.log().head(), pursuit.log().open().id());
         assert!(pursuit.log().rounds().is_empty());
     }
 
     #[test]
-    fn passes_accumulate_into_what_the_work_says() {
+    fn passes_accumulate_into_what_the_work_request() {
         let mut pursuit = opened();
         let added = Op::add(content(), name("key visual"));
         let entry = added.entry();
@@ -487,50 +503,41 @@ mod tests {
             ))
             .unwrap();
 
-        assert_eq!(pursuit.says()[&entry], Row::added(held, name("key visual")));
+        assert_eq!(
+            pursuit.request()[&entry],
+            Row::added(held, name("key visual"))
+        );
         assert_eq!(pursuit.log().rounds().len(), 2);
     }
 
-    /// A pass that takes a change point in without writing anything is
-    /// work saying it has looked. It is a node like any other.
     #[test]
-    fn a_pass_may_take_something_in_and_write_nothing() {
-        let mut pursuit = opened();
-        let seen = ChangePointId::new();
-
-        let looked =
-            Round::new(pursuit.log().head(), Vec::new(), Some(seen), None, act(1)).unwrap();
-        pursuit.push(looked).unwrap();
-
-        assert_eq!(pursuit.log().rounds()[0].taken_in(), Some(seen));
-        assert!(pursuit.says().is_empty());
-    }
-
-    #[test]
-    fn a_pass_that_neither_writes_nor_looks_is_refused() {
+    fn a_pass_that_writes_nothing_is_refused() {
         let pursuit = opened();
 
-        let refused = Round::new(pursuit.log().head(), Vec::new(), None, None, act(1));
+        let refused = Round::new(pursuit.log().head(), Vec::new(), None, act(1));
 
         assert_eq!(refused.unwrap_err(), ForgeError::EmptyRound);
     }
 
-    /// Taking a newer change point in is evidence, not a move: the
-    /// base is where the work was cut, and stays there.
+    /// The base is where the work was cut, and no pass moves it —
+    /// there is no operation that could, which is the only way to mean
+    /// it.
     #[test]
-    fn taking_something_in_does_not_move_the_base() {
+    fn passes_do_not_move_the_base() {
         let mut pursuit = opened();
         let base = pursuit.base();
 
-        let looked = Round::new(
-            pursuit.log().head(),
-            Vec::new(),
-            Some(ChangePointId::new()),
-            None,
-            act(1),
-        )
-        .unwrap();
-        pursuit.push(looked).unwrap();
+        for minute in 1..4 {
+            let pass = round(
+                pursuit.log().head(),
+                vec![Op::add(
+                    Content::from_uuid(Uuid::now_v7()),
+                    name("key visual"),
+                )],
+                minute,
+            );
+            pursuit.push(pass).unwrap();
+        }
 
         assert_eq!(pursuit.base(), base);
     }
@@ -605,7 +612,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(pursuit.outcome(), Some(Outcome::Abandoned));
-        assert!(pursuit.says().contains_key(&entry));
+        assert!(pursuit.request().contains_key(&entry));
         assert_eq!(
             pursuit.log().close().unwrap().note(),
             Some("the client went another way")

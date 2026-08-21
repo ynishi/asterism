@@ -3,7 +3,7 @@
 //! ```text
 //!   Genesis ──▶ ChangePoint ──▶ ChangePoint ──▶ …
 //!      │             │                        ▲ head
-//!      │             └ parent / from / table / act
+//!      │             └ parent / from / by / table / act
 //!      └ act
 //! ```
 //!
@@ -55,13 +55,26 @@
 //! record stays, the name and content it had stay readable, and
 //! nothing here removes a node — there is no method to, which is the
 //! only way to mean it.
+//!
+//! # A change point cannot be minted from here
+//!
+//! `ChangePoint::new` is visible to the model and to nobody else,
+//! and outside tests exactly one function calls it: the one that
+//! closes work. A change point exists because a pursuit was satisfied,
+//! and the two are born together — a constructor anybody could reach
+//! would be a way to write the second half of that pair on its own.
+//!
+//! What this module still owns is everything about the chain: what a
+//! change point *is*, and that recording one refuses anything but the
+//! head. Who is allowed to make one is a different question, and the
+//! answer is one caller.
 
 use std::collections::BTreeSet;
 
 use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::table::{EntryStates, Table, states};
-use crate::domain::forge::model::value::{ChangePointId, Name, PursuitId};
+use crate::domain::forge::model::value::{ChangePointId, Name, NodeId, PursuitId};
 
 /// The node a line begins at.
 ///
@@ -101,23 +114,44 @@ impl Genesis {
 /// Always has a parent and always came out of some work: a change
 /// point exists because a pursuit was satisfied, and it takes as its
 /// parent whatever the head was at that moment.
+///
+/// It names that work twice, and the two answer different questions.
+/// `from` is which pursuit, which is how the line points back at
+/// everything that was tried. `by` is the node that ended it — the
+/// close this change point was born with. Neither is derivable from
+/// the other without going to the other log, and the pair is what
+/// makes "these two were one act" readable from either side.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangePoint {
     id: ChangePointId,
     parent: ChangePointId,
     from: PursuitId,
+    by: NodeId,
     table: Table,
     act: Act,
 }
 
 impl ChangePoint {
     /// Mints a change point that puts `table` on the line, on top of
-    /// `parent`.
-    pub fn new(parent: ChangePointId, from: PursuitId, table: Table, act: Act) -> Self {
+    /// `parent`, out of the work `from` at the node `by` that ended
+    /// it.
+    ///
+    /// Visible to the model and no further. The close that `by` names
+    /// has to exist for a caller to have its id, and the one caller
+    /// inside the model mints the two together — so a change point
+    /// without a close is not a state this type can be argued into.
+    pub(super) fn new(
+        parent: ChangePointId,
+        from: PursuitId,
+        by: NodeId,
+        table: Table,
+        act: Act,
+    ) -> Self {
         Self {
             id: ChangePointId::new(),
             parent,
             from,
+            by,
             table,
             act,
         }
@@ -136,6 +170,11 @@ impl ChangePoint {
     /// The work this came out of.
     pub fn from(&self) -> PursuitId {
         self.from
+    }
+
+    /// The node that ended that work — the close this was born with.
+    pub fn by(&self) -> NodeId {
+        self.by
     }
 
     /// What it moved.
@@ -259,9 +298,9 @@ fn live_name_twice(states: &EntryStates) -> Option<Name> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // SHARED KERNEL: attribution is a boundary type.
-    use crate::domain::attribution::AttributionContext;
+    use crate::domain::forge::model::act::Actor;
     use crate::domain::forge::model::table::Row;
+    use crate::domain::forge::model::value::ActorId;
     use crate::domain::forge::model::value::{Content, EntryId, Name};
     use chrono::{DateTime, TimeZone, Utc};
     use std::collections::BTreeMap;
@@ -272,7 +311,7 @@ mod tests {
     }
 
     fn act(minute: u32) -> Act {
-        Act::new(at(minute), &AttributionContext::owner_surface())
+        Act::new(at(minute), Actor::User(ActorId::new()))
     }
 
     fn added(entry: EntryId, called: &str) -> Table {
@@ -301,8 +340,8 @@ mod tests {
     #[test]
     fn every_history_begins_at_a_node_of_its_own() {
         let opened = act(0);
-        let one = History::begin(opened.clone());
-        let other = History::begin(opened.clone());
+        let one = History::begin(opened);
+        let other = History::begin(opened);
 
         assert_ne!(one.genesis().id(), other.genesis().id());
         assert_eq!(one.genesis().act(), &opened);
@@ -315,6 +354,7 @@ mod tests {
         let point = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(entry, "key visual"),
             act(1),
         );
@@ -332,6 +372,7 @@ mod tests {
         let first = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(EntryId::new(), "key visual"),
             act(1),
         );
@@ -341,6 +382,7 @@ mod tests {
         let second = ChangePoint::new(
             stale_head,
             PursuitId::new(),
+            NodeId::new(),
             added(EntryId::new(), "alternate"),
             act(2),
         );
@@ -356,6 +398,7 @@ mod tests {
         let first = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(EntryId::new(), "key visual"),
             act(1),
         );
@@ -364,6 +407,7 @@ mod tests {
         let twin = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(EntryId::new(), "key visual"),
             act(2),
         );
@@ -387,6 +431,7 @@ mod tests {
             .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
+                NodeId::new(),
                 added(leaving, "key visual"),
                 act(1),
             ))
@@ -409,6 +454,7 @@ mod tests {
             .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
+                NodeId::new(),
                 swap,
                 act(2),
             ))
@@ -429,6 +475,7 @@ mod tests {
             .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
+                NodeId::new(),
                 added(first, "key visual"),
                 act(1),
             ))
@@ -437,6 +484,7 @@ mod tests {
             .record(ChangePoint::new(
                 history.head(),
                 PursuitId::new(),
+                NodeId::new(),
                 Table::one(first, Row::removed()),
                 act(2),
             ))
@@ -445,6 +493,7 @@ mod tests {
         let second = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(EntryId::new(), "key visual"),
             act(3),
         );
@@ -462,6 +511,7 @@ mod tests {
         let arrival = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             added(entry, "key visual"),
             act(9),
         );
@@ -469,6 +519,7 @@ mod tests {
         let departure = ChangePoint::new(
             history.head(),
             PursuitId::new(),
+            NodeId::new(),
             Table::one(entry, Row::removed()),
             act(8),
         );

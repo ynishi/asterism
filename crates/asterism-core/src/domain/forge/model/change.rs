@@ -1,7 +1,7 @@
 //! Putting work on a line — the one place both logs are read at once.
 //!
 //! ```text
-//!   what the work says  ──normalise──▶  what would change
+//!   what work asks for  ──normalise──▶  what would change
 //!         (rows)              ▲              (write set)
 //!                             │                   │
 //!                    the line's head              │
@@ -35,15 +35,21 @@
 //! # Collision is derived, never stored
 //!
 //! A collision is an axis this work would write that the line has
-//! already moved since the work was cut — **unless this work looked at
-//! the change point that moved it**. Looking is what a pass records by
-//! taking a change point in, and writing the axis afterwards is what
-//! settles the question.
+//! already moved since the work was cut. That is the whole of the
+//! definition — there is no second clause, and nothing about whether
+//! anybody looked.
 //!
-//! That is why the base does not move when work takes something in. If
-//! it did, the window this reads over would shrink every time work
-//! looked, and a change that was never reconciled would come out
-//! clean.
+//! **What clears one is the work saying something different.** Not a
+//! record of having read, which is a claim about the reader and can be
+//! written without changing anything; not a flag, which is a second
+//! thing to keep true. When the work's value for an axis becomes what
+//! the line already says, normalising drops it, and there is nothing
+//! left to collide.
+//!
+//! So resolving is ordinary work: the operations somebody would have
+//! written by hand. If the line moves that axis again afterwards, it
+//! collides again, and is resolved again — one at a time, which is
+//! what resolving against a moving line means.
 //!
 //! Nothing here stores a collision. It is computed from the two logs
 //! whenever it is asked, so it cannot go stale and there is no flag
@@ -60,8 +66,10 @@ use std::collections::BTreeSet;
 
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::{ChangePoint, History};
+use crate::domain::forge::model::line::Line;
 use crate::domain::forge::model::op::Rows;
-use crate::domain::forge::model::table::{EntryStates, Row};
+use crate::domain::forge::model::pursuit::Pursuit;
+use crate::domain::forge::model::table::{EntryStates, Row, states};
 use crate::domain::forge::model::value::{ChangePointId, EntryId, Existence};
 
 /// One thing a row can move.
@@ -141,30 +149,48 @@ pub fn write_set(rows: &Rows) -> WriteSet {
     set
 }
 
-/// The axes this work would move that the line moved first, and that
-/// the work has not looked at.
+/// The axes this work would move that the line moved after the work
+/// was cut from it.
 ///
-/// `base` is the change point the work was cut from. `seen` is every
-/// change point the work has taken in.
+/// ```text
+///   an axis (entry, axis) collides with a change point C
+///   ⟺  the work's request would move it
+///       — that is, (entry, axis) survives normalising against the head
+///   ∧  C is on the line after the node the work was cut from
+///   ∧  C moved that same axis
+/// ```
 ///
-/// Fails with [`UnknownBase`](ForgeError::UnknownBase) if the base is
-/// not a node of this history — work cut from one line cannot be
-/// judged against another, and answering "no collisions" would be the
-/// worst possible way to say so.
-pub fn collisions(
-    write_set: &WriteSet,
-    history: &History,
-    base: ChangePointId,
-    seen: &BTreeSet<ChangePointId>,
-) -> Result<Vec<Collision>, ForgeError> {
+/// That is the whole definition. Nothing in it mentions what anybody
+/// looked at, because there is nothing to mention: the model has no
+/// record of reading, on purpose. What clears a collision is the first
+/// clause failing — the work asking for what the line already carries,
+/// or asking nothing about that axis at all.
+///
+/// **So the only way to stop colliding over an axis is to stop
+/// requesting it.** Asking for the same value a second time changes
+/// nothing, because a fold keeps the last value and not the arguments
+/// for it. That has consequences for what a resolution can be, and
+/// they are worked out in
+/// [`strategies`](crate::domain::forge::strategies).
+///
+/// Derived from the two logs every time it is asked. Nothing is kept,
+/// so nothing can be stale, and there is no flag anybody has to clear.
+/// Every change point that moved a contested axis is reported, not
+/// only the latest: the question is what the line did, not what is
+/// outstanding.
+///
+/// Fails with [`UnknownBase`](ForgeError::UnknownBase) if the work was
+/// cut from a node this history does not have — answering "no
+/// collisions" for a line the work has nothing to do with would be the
+/// worst available way to say so.
+pub fn collisions(line: &Line, work: &Pursuit) -> Result<Vec<Collision>, ForgeError> {
+    let writes = write_set(&normalise(work.request(), &line.states()));
+
     let mut found = Vec::new();
-    for point in since(history, base)? {
-        if seen.contains(&point.id()) {
-            continue;
-        }
+    for point in since(line.history(), work.base())? {
         for (entry, row) in point.table().rows() {
             for axis in moved(row) {
-                if write_set.contains(&(*entry, axis)) {
+                if writes.contains(&(*entry, axis)) {
                     found.push(Collision {
                         entry: *entry,
                         axis,
@@ -177,8 +203,34 @@ pub fn collisions(
     Ok(found)
 }
 
+/// What the line carried at `at`, folded from the chain up to and
+/// including it.
+///
+/// What a rule needs to record where a divergence came from: an entry
+/// forked out of a collision starts as the entry was when the work
+/// began, and that value is nowhere else by then.
+pub fn states_at(history: &History, at: ChangePointId) -> Result<EntryStates, ForgeError> {
+    if history.genesis().id() == at {
+        return Ok(EntryStates::new());
+    }
+    let upto = history
+        .changes()
+        .iter()
+        .position(|point| point.id() == at)
+        .ok_or(ForgeError::UnknownBase)?;
+    Ok(states(
+        history.changes()[..=upto].iter().map(ChangePoint::table),
+    ))
+}
+
 /// Every change recorded after `base`, in the chain's order.
-fn since(history: &History, base: ChangePointId) -> Result<&[ChangePoint], ForgeError> {
+///
+/// Public because it answers a question of its own: what has happened
+/// to a line since work was cut from it. Reading that is how a reader
+/// says what work has yet to look at, and recomputing the walk
+/// elsewhere would be a second answer to a question this already has
+/// one for.
+pub fn since(history: &History, base: ChangePointId) -> Result<&[ChangePoint], ForgeError> {
     if history.genesis().id() == base {
         return Ok(history.changes());
     }
@@ -208,12 +260,15 @@ fn moved(row: &Row) -> Vec<Axis> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // SHARED KERNEL: attribution is a boundary type.
-    use crate::domain::attribution::AttributionContext;
     use crate::domain::forge::model::act::Act;
+    use crate::domain::forge::model::act::Actor;
+    use crate::domain::forge::model::closing::close;
     use crate::domain::forge::model::op::{Op, fold};
+    use crate::domain::forge::model::pursuit::{Intent, Outcome, Round};
     use crate::domain::forge::model::table::Table;
-    use crate::domain::forge::model::value::{Content, Name, PursuitId};
+    use crate::domain::forge::model::value::{
+        ActorId, Content, Name, NodeId, PursuitId, StrategyId,
+    };
     use chrono::{DateTime, TimeZone, Utc};
     use uuid::Uuid;
 
@@ -222,7 +277,7 @@ mod tests {
     }
 
     fn act(minute: u32) -> Act {
-        Act::new(at(minute), &AttributionContext::owner_surface())
+        Act::new(at(minute), Actor::User(ActorId::new()))
     }
 
     fn content() -> Content {
@@ -236,7 +291,13 @@ mod tests {
     /// Records one table on a history and answers with the node it
     /// made.
     fn record(history: &mut History, table: Table, minute: u32) -> ChangePointId {
-        let point = ChangePoint::new(history.head(), PursuitId::new(), table, act(minute));
+        let point = ChangePoint::new(
+            history.head(),
+            PursuitId::new(),
+            NodeId::new(),
+            table,
+            act(minute),
+        );
         let id = point.id();
         history.record(point).unwrap();
         id
@@ -336,20 +397,50 @@ mod tests {
         assert!(left.is_empty());
     }
 
+    // The collision tests build a line and work rather than a bare
+    // history, because a collision is a statement about the pair and
+    // there is no shorter way to say one truthfully.
+
+    fn line() -> Line {
+        Line::open(
+            name(Line::ROOT),
+            StrategyId::new("by-hand").unwrap(),
+            act(0),
+        )
+    }
+
+    fn work_on(line: &Line) -> Pursuit {
+        Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
+    }
+
+    /// Adds a pass carrying `ops`.
+    fn passing(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+        work.push(Round::new(work.log().head(), ops, None, act(minute)).unwrap())
+            .unwrap();
+        work
+    }
+
+    /// Lands `ops` on the line through work of its own, and answers
+    /// with the change point it made.
+    fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) -> ChangePointId {
+        let mut work = passing(work_on(line), ops, minute);
+        let closing = close(line, &work, Outcome::Satisfied, None, act(minute)).unwrap();
+        let moved = closing.point().expect("that work landed").id();
+        closing.apply(line, &mut work).unwrap();
+        moved
+    }
+
     #[test]
     fn an_axis_the_line_moved_since_the_work_was_cut_collides() {
-        let mut history = History::begin(act(0));
+        let mut line = line();
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
-        let base = record(
-            &mut history,
-            Table::of(fold(std::slice::from_ref(&arrival))).unwrap(),
-            1,
-        );
-        let theirs = record(&mut history, Table::one(entry, Row::replaced(content())), 2);
+        landed(&mut line, vec![arrival], 1);
 
-        let mine = normalise(fold(&[Op::replace(entry, content())]), &history.states());
-        let found = collisions(&write_set(&mine), &history, base, &BTreeSet::new()).unwrap();
+        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        let theirs = landed(&mut line, vec![Op::replace(entry, content())], 3);
+
+        let found = collisions(&line, &work).unwrap();
 
         assert_eq!(
             found,
@@ -361,98 +452,131 @@ mod tests {
         );
     }
 
-    /// Looking at what changed and then writing the axis anyway is what
-    /// settling a collision *is*.
+    /// What clears a collision is the work saying something else.
+    /// Nothing it can record about having read clears one, because
+    /// there is nothing it can record about that.
     #[test]
-    fn an_axis_written_after_looking_does_not_collide() {
-        let mut history = History::begin(act(0));
+    fn saying_what_the_line_says_clears_the_collision() {
+        let mut line = line();
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
-        let base = record(
-            &mut history,
-            Table::of(fold(std::slice::from_ref(&arrival))).unwrap(),
-            1,
+        landed(&mut line, vec![arrival], 1);
+
+        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        landed(&mut line, vec![Op::replace(entry, content())], 3);
+        assert_eq!(collisions(&line, &work).unwrap().len(), 1);
+
+        let theirs = line.states()[&entry].content.unwrap();
+        let work = passing(work, vec![Op::replace(entry, theirs)], 4);
+
+        assert!(collisions(&line, &work).unwrap().is_empty());
+    }
+
+    /// And it is cleared against the line as it was, not for good. A
+    /// line that moves the axis again collides again — resolving
+    /// against something that keeps moving is done one at a time.
+    #[test]
+    fn a_later_move_of_the_same_axis_collides_again() {
+        let mut line = line();
+        let arrival = Op::add(content(), name("key visual"));
+        let entry = arrival.entry();
+        landed(&mut line, vec![arrival], 1);
+
+        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        landed(&mut line, vec![Op::replace(entry, content())], 3);
+        let theirs = line.states()[&entry].content.unwrap();
+        let work = passing(work, vec![Op::replace(entry, theirs)], 4);
+        assert!(collisions(&line, &work).unwrap().is_empty());
+
+        let third = landed(&mut line, vec![Op::replace(entry, content())], 5);
+
+        // Every change point that moved the axis is reported, the one
+        // just now included: the definition asks what the line did,
+        // not what is still outstanding.
+        let found = collisions(&line, &work).unwrap();
+        assert!(found.iter().any(|collision| collision.moved_in == third));
+        assert!(
+            found
+                .iter()
+                .all(|collision| collision.entry == entry && collision.axis == Axis::Content)
         );
-        let theirs = record(&mut history, Table::one(entry, Row::replaced(content())), 2);
+    }
 
-        let mine = normalise(fold(&[Op::replace(entry, content())]), &history.states());
-        let found =
-            collisions(&write_set(&mine), &history, base, &BTreeSet::from([theirs])).unwrap();
+    #[test]
+    fn asking_twice_gives_the_same_answer() {
+        let mut line = line();
+        let arrival = Op::add(content(), name("key visual"));
+        let entry = arrival.entry();
+        landed(&mut line, vec![arrival], 1);
+        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        landed(&mut line, vec![Op::replace(entry, content())], 3);
 
-        assert!(found.is_empty());
+        assert_eq!(
+            collisions(&line, &work).unwrap(),
+            collisions(&line, &work).unwrap()
+        );
     }
 
     /// Different axes of one entry are not a disagreement.
     #[test]
     fn work_on_another_axis_does_not_collide() {
-        let mut history = History::begin(act(0));
+        let mut line = line();
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
-        let base = record(
-            &mut history,
-            Table::of(fold(std::slice::from_ref(&arrival))).unwrap(),
-            1,
-        );
-        record(&mut history, Table::one(entry, Row::replaced(content())), 2);
+        landed(&mut line, vec![arrival], 1);
 
-        let mine = normalise(fold(&[Op::rename(entry, name("hero"))]), &history.states());
-        let found = collisions(&write_set(&mine), &history, base, &BTreeSet::new()).unwrap();
+        let work = passing(work_on(&line), vec![Op::rename(entry, name("hero"))], 2);
+        landed(&mut line, vec![Op::replace(entry, content())], 3);
 
-        assert!(found.is_empty());
+        assert!(collisions(&line, &work).unwrap().is_empty());
     }
 
     /// What changed before the work was cut is what the work started
     /// from, and is not something it collided with.
     #[test]
     fn what_changed_before_the_work_was_cut_is_not_a_collision() {
-        let mut history = History::begin(act(0));
+        let mut line = line();
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
-        record(
-            &mut history,
-            Table::of(fold(std::slice::from_ref(&arrival))).unwrap(),
-            1,
-        );
-        let base = record(&mut history, Table::one(entry, Row::replaced(content())), 2);
+        landed(&mut line, vec![arrival], 1);
+        landed(&mut line, vec![Op::replace(entry, content())], 2);
 
-        let mine = normalise(fold(&[Op::replace(entry, content())]), &history.states());
-        let found = collisions(&write_set(&mine), &history, base, &BTreeSet::new()).unwrap();
+        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 3);
 
-        assert!(found.is_empty());
+        assert!(collisions(&line, &work).unwrap().is_empty());
     }
 
-    /// Work cut from an untouched line has the genesis as its base,
-    /// and everything since is fair game.
+    /// What the line carried at a node, for a rule that has to record
+    /// where a divergence came from.
     #[test]
-    fn work_cut_at_the_genesis_sees_every_change_since() {
-        let mut history = History::begin(act(0));
-        let base = history.genesis().id();
+    fn states_at_answers_the_line_as_it_was() {
+        let mut line = line();
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
-        let theirs = record(
-            &mut history,
-            Table::of(fold(std::slice::from_ref(&arrival))).unwrap(),
-            1,
-        );
+        let held = line_content(&line, &arrival);
+        let base = landed(&mut line, vec![arrival], 1);
+        landed(&mut line, vec![Op::replace(entry, content())], 2);
 
-        let mine = normalise(fold(&[Op::rename(entry, name("hero"))]), &history.states());
-        let found = collisions(&write_set(&mine), &history, base, &BTreeSet::new()).unwrap();
+        let was = states_at(line.history(), base).unwrap();
 
-        assert_eq!(found[0].moved_in, theirs);
-        assert_eq!(found[0].axis, Axis::Name);
+        assert_eq!(was[&entry].content, Some(held));
+        assert_ne!(line.states()[&entry].content, Some(held));
     }
 
     #[test]
-    fn work_cut_from_another_line_is_refused_rather_than_cleared() {
-        let history = History::begin(act(0));
+    fn a_node_this_history_does_not_have_is_refused() {
+        let line = line();
 
-        let answered = collisions(
-            &WriteSet::new(),
-            &history,
-            ChangePointId::new(),
-            &BTreeSet::new(),
-        );
+        let refused = states_at(line.history(), ChangePointId::new());
 
-        assert_eq!(answered.unwrap_err(), ForgeError::UnknownBase);
+        assert_eq!(refused.unwrap_err(), ForgeError::UnknownBase);
+    }
+
+    /// The content an arrival carries, without going through a fold.
+    fn line_content(_line: &Line, arrival: &Op) -> Content {
+        match arrival.kind() {
+            crate::domain::forge::model::op::OpKind::Add { content, .. } => *content,
+            _ => unreachable!("that operation is an arrival"),
+        }
     }
 }

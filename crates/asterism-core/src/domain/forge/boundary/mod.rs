@@ -28,25 +28,38 @@
 //! side depending on something neither owns, which is the only
 //! arrangement where both questions can be asked.
 //!
-//! **[`Store`] is the face that asks downward**, and it is the only
-//! one built. The model refers to content it does not own, and before
+//! **[`Store`] is the face that asks downward**, and it was the only
+//! one built for a while. The model refers to content it does not own, and before
 //! that content is put on a line the forge has to know it is real —
 //! that question, and no other, is what crosses today. The rest of
 //! what the forge will eventually ask for (freezing a set, reading a
 //! round) belongs to work that is not modelled yet, and declaring it
 //! now would fix a shape nothing has tested.
 //!
+//! **[`Actors`] is the face that asks sideways.** The forge records
+//! who did a thing as a handle, and what that handle stands for — an
+//! authenticated user, an instance — belongs to the side that knows
+//! what a person is. That question crosses here.
+//!
 //! **The face that answers upward is not here yet.** What the layer
 //! below asks the forge is which work a finished round files under,
-//! and rounds belong to the half of the model that is still to be
-//! written. It arrives beside that, in this module.
+//! and that arrives with the transport that needs it, in this module.
 //!
 //! # What crosses without a contract
 //!
 //! Identity and failure are **shared, not twinned**, and naming them
 //! directly anywhere in the forge is correct rather than a leak:
-//! `AssetId`, `PersonaId`, the attribution triple, `DomainError`.
-//! There is no client for them and there should not be one.
+//! `AssetId`, `PersonaId`, `DomainError`. There is no client for them
+//! and there should not be one.
+//!
+//! The attribution triple used to be on that list and is not any
+//! more. It came off for a reason the others do not share: the forge's
+//! actors are a **wider** set than the triple can spell — a line's own
+//! rule can act, and no person did that — so it is not a word the
+//! forge borrows but a word that cannot say what the forge means. It
+//! crosses through [`Actors`] like any other capability, and the
+//! forge's own word for who did something is
+//! [`Actor`](crate::domain::forge::model::act::Actor).
 //!
 //! The reason is that they are not the other side's words that the
 //! forge borrows — they are words neither side owns. A persona is the
@@ -85,6 +98,8 @@
 //!
 //! [`Content`]: crate::domain::forge::model::value::Content
 
+pub mod actors;
 pub mod store;
 
+pub use actors::Actors;
 pub use store::{Store, StoreClient};
