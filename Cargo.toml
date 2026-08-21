@@ -42,15 +42,59 @@ description   = "Persona/Char/Memory grid UI — local-first Asterism for person
 version       = "0.0.0"
 edition       = "2024"
 
-# The teams plane is excluded from docs/aidoc while it is pre-v0 and
-# publish = false: llms-full.txt has a 512 KiB soft cap that `--strict`
-# promotes to an error, the file sits at ~98% of it on the app crates
-# alone, and each teams slice would breach it again (#89's CI run did,
-# by 1,795 bytes). One list here beats trimming doc comments crate by
-# crate. Remove entries as the plane stabilizes — deliberately, cap in
-# view — or lift the cap in cargo-aidoc first.
+# What docs/aidoc/ describes: the app's own layers. What it leaves out:
+# the teams plane, and the plug-in planes with their adapters.
+#
+# The reason is one number. `llms-full.txt` concatenates every module
+# narrative in the workspace, cargo-aidoc warns over 512 KiB, and
+# `--strict` makes that warning an error — so the cap decides what may
+# be documented, and there is no setting for it. The file was at 95.8%
+# of the cap on the app crates alone (502,338 of 524,288 bytes) and the
+# forge model (#63) went 58,019 bytes over it. Each teams slice had
+# breached it before that (#89's CI run, by 1,795 bytes).
+#
+# The line drawn here is between what somebody reads to change this
+# application — core, infra, contract, server, ui — and what somebody
+# reads to write a plug-in against it. The second is a stable surface
+# with an audience of its own, and it is the half that can be lifted
+# out without the rest of the docs stopping making sense. Bench tooling
+# goes with it: nothing depends on `asterism-benchgen` and nothing in
+# the shipped app runs it.
+#
+# What that costs, stated where it is paid: the excluded crates have no
+# entry under docs/aidoc/ at all, not merely a smaller one, so an agent
+# working on an importer or an exporter has rustdoc and the source and
+# nothing generated. Remove entries as headroom allows — deliberately,
+# cap in view — or lift the cap in cargo-aidoc first, which is the fix
+# that would let this list shrink rather than grow.
 [workspace.metadata.aidoc]
-exclude = ["teams-core", "teams-infra", "teams-contract", "teams-server"]
+exclude = [
+  # Pre-v0, and each slice breaches the cap on its own.
+  "teams-core",
+  "teams-infra",
+  "teams-contract",
+  "teams-server",
+  # The inbound plug-in plane: the SDK a scanner/parser is written
+  # against, and the adapters written against it.
+  "asterism-importer-sdk",
+  "asterism-importer",
+  "asterism-importer-audio",
+  "asterism-importer-cc",
+  "asterism-importer-image",
+  "asterism-importer-persona-journal",
+  "asterism-importer-tape",
+  "asterism-importer-video",
+  # The outbound plug-in plane, and the probe the adapters share.
+  "asterism-dispatch-sdk",
+  "asterism-exporter-common",
+  "asterism-exporter-comfy",
+  "asterism-exporter-file",
+  "asterism-exporter-http",
+  "asterism-media-probe",
+  # Bench corpus tooling: nothing depends on it, and the app never
+  # runs it.
+  "asterism-benchgen",
+]
 
 [workspace.dependencies]
 # --- External integrations (kept commented out until reintroduced) ---
