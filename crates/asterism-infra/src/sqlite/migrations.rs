@@ -6961,9 +6961,24 @@ UPDATE material
 /// Order is children before parents, because every edge in this family
 /// is `ON DELETE RESTRICT` and `DROP TABLE` fires the same check a
 /// delete does. `line_event` restricts `line_entry` and `line_merge`;
-/// `line_merge` restricts `pursuit_event`; `pursuit_tx` and
-/// `pursuit_event` restrict `pursuit`; `line` restricts `project`, and
-/// `pursuit.project_id` restricts it too.
+/// `pursuit_tx` restricts `pursuit` and — through the aim column V85
+/// added — `line_entry` as well, which is what puts it ahead of the
+/// entries rather than beside the other pursuit tables; `line_merge`
+/// restricts `pursuit_event`; `pursuit_event` restricts `pursuit`;
+/// `line` restricts `project`, and `pursuit.project_id` restricts it
+/// too.
+///
+/// `pursuit.parent_id` is a self-FK, and ordering cannot answer it:
+/// `DROP TABLE` performs an implicit `DELETE FROM` whose row order
+/// nothing here chooses, so a parent can go while a child still names
+/// it. The parents are unhooked in a statement of their own first —
+/// the same move the persona purge makes, and for the same reason.
+///
+/// The order is exercised against rows rather than argued for. Empty
+/// tables drop in any order at all, so the test seeds a full family
+/// first, and both of the above were found that way: the aim column
+/// and the self-FK were each missing from the order this step was
+/// first written with.
 ///
 /// Nothing outside the family points in. `dispatch_job.pursuit_id` was
 /// the one edge from the raw layer and [`V90_DROP_THE_PURSUIT_STAMP`]
@@ -6973,10 +6988,11 @@ UPDATE material
 /// one would be a shape nothing has checked.
 const V95_DROP_THE_FIRST_FORGE_MODEL: &str = r#"
 DROP TABLE line_event;
-DROP TABLE line_merge;
-DROP TABLE line_entry;
 DROP TABLE pursuit_tx;
+DROP TABLE line_entry;
+DROP TABLE line_merge;
 DROP TABLE pursuit_event;
+UPDATE pursuit SET parent_id = NULL;
 DROP TABLE pursuit;
 DROP TABLE line;
 DROP TABLE project;
@@ -14189,5 +14205,157 @@ mod tests {
             );
             assert!(!status_era_owes(&conn, asset), "{mime} stays answered");
         }
+    }
+    /// V95 drops the eight tables the forge's first model lived in, and
+    /// frees everything they pinned.
+    ///
+    /// Seeded at 94 with a populated family rather than empty tables,
+    /// because rows are the whole question: every edge here is
+    /// `ON DELETE RESTRICT`, `DROP TABLE` fires the same check a delete
+    /// does, and a wrong order fails the migration rather than showing
+    /// up later. Empty tables would drop in any order at all.
+    ///
+    /// The persona is deleted afterwards with foreign keys on — at 94
+    /// those rows would have refused it, which is what "frees" means
+    /// here (the `v88_drops_the_close_record_and_frees_what_it_pinned`
+    /// precedent).
+    #[test]
+    fn v95_drops_the_first_forge_model_and_frees_what_it_pinned() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 94).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'forge', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+
+        // The project and its line: the only two a production writer
+        // ever reached, and it wrote them together.
+        let project = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO project (id, persona_id, name, created_at) \
+             VALUES (?1, ?2, 'album', 0)",
+            params![project, persona],
+        )
+        .unwrap();
+        let line = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line (id, project_id, name, created_at) \
+             VALUES (?1, ?2, 'main', 0)",
+            params![line, project],
+        )
+        .unwrap();
+
+        // The pursuit family, filed under that project, with the
+        // snapshot edge that pinned `snapshot` and the self-parent edge
+        // that pinned `pursuit`.
+        let parent = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, project_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![parent, persona, project],
+        )
+        .unwrap();
+        let child = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, project_id, parent_id, created_at) \
+             VALUES (?1, ?2, ?3, ?4, 0)",
+            params![child, persona, project, parent],
+        )
+        .unwrap();
+        let event = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_event \
+                 (id, pursuit_id, persona_id, kind, snapshot_id, created_at) \
+             VALUES (?1, ?2, ?3, 'closed_satisfied', ?4, 0)",
+            params![event, child, persona, snapshot],
+        )
+        .unwrap();
+
+        // The line's own three, and the ledger gesture that aimed into
+        // them — the edges that made the delete order long.
+        let entry = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![entry, line, persona],
+        )
+        .unwrap();
+        let merge = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![merge, event, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO line_event \
+                 (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
+             VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
+            params![Uuid::now_v7(), entry, persona, asset, merge],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pursuit_tx \
+                 (id, pursuit_id, persona_id, kind, asset_id, origin, \
+                  target_entry_id, created_at) \
+             VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, 0)",
+            params![Uuid::now_v7(), child, persona, asset, entry],
+        )
+        .unwrap();
+
+        migrate_to(&mut conn, 95).unwrap();
+
+        // Nothing of the family is left — tables, indexes and all.
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE tbl_name IN ('project', 'line', 'line_entry', 'line_merge', \
+                                         'line_event', 'pursuit', 'pursuit_event', \
+                                         'pursuit_tx') \
+                      ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            left.is_empty(),
+            "nothing of the first model is left: {left:?}"
+        );
+
+        // What the family named is untouched. The drop takes the
+        // forge's record of what somebody was doing, never the rows it
+        // was about.
+        for (table, id) in [("asset", asset), ("snapshot", snapshot)] {
+            let found: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{table} is not the forge's to take");
+        }
+
+        // And the persona goes, which at 94 it could not have: six of
+        // those tables held a RESTRICT edge to it.
+        conn.execute("DELETE FROM asset WHERE persona_id = ?1", params![persona])
+            .unwrap();
+        conn.execute(
+            "DELETE FROM snapshot WHERE persona_id = ?1",
+            params![persona],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM persona WHERE id = ?1", params![persona])
+            .expect("the forge rows were the only thing pinning the persona");
     }
 }
