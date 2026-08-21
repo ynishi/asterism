@@ -84,6 +84,20 @@ define_uuid_id!(
 );
 
 define_uuid_id!(
+    /// Surrogate id for a `Thread` — one run of messages about one
+    /// thing.
+    ThreadId
+);
+
+define_uuid_id!(
+    /// Surrogate id for a `Message`.
+    ///
+    /// A reply names one, and corrections are filed against one, so it
+    /// is what a conversation is stitched together by.
+    MessageId
+);
+
+define_uuid_id!(
     /// Surrogate id for whoever did something — the forge's handle on
     /// an actor, and the whole of what it knows about one.
     ///

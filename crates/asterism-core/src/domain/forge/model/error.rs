@@ -37,6 +37,19 @@ pub enum ForgeError {
     #[error("a name must not be blank")]
     BlankName,
 
+    /// A message said nothing.
+    #[error("a message must say something")]
+    BlankBody,
+
+    /// A remark was hung on an entry the pass never touched.
+    #[error("that pass did not touch that entry")]
+    NotInThatRound,
+
+    /// A reply, or a correction, named a message of another
+    /// conversation.
+    #[error("that message belongs to another thread")]
+    NotInThatThread,
+
     /// A strategy was named by a blank string — a line that points at
     /// nothing settles nothing.
     #[error("a strategy must be named")]
@@ -173,6 +186,9 @@ impl From<ForgeError> for DomainError {
             | ForgeError::UnknownBase
             | ForgeError::NotThisLine
             | ForgeError::BlankStrategy
+            | ForgeError::BlankBody
+            | ForgeError::NotInThatRound
+            | ForgeError::NotInThatThread
             | ForgeError::Strategy(_)
             | ForgeError::WrongStrategy
             | ForgeError::UnknownChangePoint

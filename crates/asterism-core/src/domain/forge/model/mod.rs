@@ -161,33 +161,16 @@
 //!
 //! # What is deliberately not here
 //!
+//! **Deciding whether something said about work has been dealt
+//! with.** [`thread`] records what was said and every correction to
+//! it, and has no state for anybody to set: whether a remark is
+//! answered is a word people use about their work rather than a shape
+//! the record has.
+//!
 //! **Settling a collision.** Turning one into a divergence writes a
 //! pass into the work log under the line's strategy, and it happens
 //! while the work is open. [`closing`] refuses what was never settled;
 //! it does not settle anything itself.
-//!
-//! **Anywhere to say something about any of this.** A node carries a
-//! note — why work was opened, what a pass was for, why it ended — and
-//! that is the whole of what this module offers for saying anything.
-//! It is one line of text, written once, by whoever wrote the node.
-//!
-//! What is missing is the discussion: a remark on somebody else's
-//! pass, a question about one entry it touched, a review of what
-//! landed. The primitive for that already exists in
-//! [`thread`](crate::domain::thread) — an anchor and an append-only
-//! run of messages, with edits recorded as revisions rather than
-//! overwrites — and it can hang off a snapshot, a card or a query
-//! group. **It cannot hang off anything in here.** None of the four
-//! things worth remarking on — a pursuit, a pass, one entry a pass
-//! touched, a change point — is an anchor it knows.
-//!
-//! That is an absence rather than a decision, and it is worth saying
-//! which: the anchors are four enum variants and the reason to hold
-//! off is that a remark on a pass is a different thing from a remark
-//! on the entry that pass moved, and getting that distinction wrong is
-//! easier before there is a surface asking for it. What it costs
-//! meanwhile is that everything anybody wants to say about work has to
-//! fit in one note at the moment they write the node.
 //!
 //! **Building any of this back from stored values.** Every constructor
 //! here mints: a line mints its id and its genesis, work mints its id
@@ -253,4 +236,5 @@ pub mod pursuit;
 pub mod react;
 pub mod strategy;
 pub mod table;
+pub mod thread;
 pub mod value;

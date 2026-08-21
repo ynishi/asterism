@@ -112,5 +112,6 @@ pub mod pursuit;
 pub mod pursuits;
 pub mod repository;
 pub mod strategies;
+pub mod threads;
 pub mod tx;
 pub mod value;
