@@ -295,10 +295,17 @@ pub const KNOWN_VIDEO_MIMES: &[&str] = &[
 ///   the same way, since a name is not a path and `/` in it is the
 ///   caller's convention rather than a directory separator.
 ///
-/// Textual source containers (`.jsonl` / `.json` / `.md` / `.txt` /
-/// `.db`) map to `text/plain` for the same reason even when addressed
-/// whole. Unknown extensions return `None` — an unknown fact, refined
-/// later, never a fabricated one.
+/// Textual source containers (`.jsonl` / `.md` / `.txt` / `.db`) map to
+/// `text/plain` for the same reason even when addressed whole. `.json`
+/// is the exception: a whole `.json` file is one JSON document, and the
+/// content axis needs to tell it apart from the rest of the text row to
+/// route it to a probe, so it answers `application/json`
+/// ([`MimeType::Json`]). `.jsonl` deliberately stays behind — it is
+/// records in a container, not one value per file, and a record
+/// addressed inside it is a [`Record`](SourceLocator::Record), which
+/// answers `text/plain` before any extension is read. Unknown
+/// extensions return `None` — an unknown fact, refined later, never a
+/// fabricated one.
 pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
     /// The textual sniff, for the two shapes that are not paths.
     fn extension_of_text(raw: &str) -> Option<&str> {
@@ -333,7 +340,8 @@ pub fn guess_mime(locator: &SourceLocator) -> Option<MimeType> {
         "mp3" => MimeType::Audio(AudioFormat::Mpeg),
         "wav" => MimeType::Audio(AudioFormat::Wav),
         "m4a" => MimeType::Audio(AudioFormat::Mp4),
-        "jsonl" | "json" | "md" | "txt" | "db" => MimeType::text_plain(),
+        "json" => MimeType::Json,
+        "jsonl" | "md" | "txt" | "db" => MimeType::text_plain(),
         _ => return None,
     };
     Some(mime)
@@ -360,6 +368,28 @@ mod tests {
         assert_eq!(
             guess_mime(&loc("clip.MoV")),
             Some(MimeType::Video(VideoFormat::Quicktime))
+        );
+    }
+
+    /// A whole `.json` file is one JSON document and answers its own
+    /// mime, wherever the locator carries the extension. `.jsonl` and a
+    /// record addressed inside a container stay the text row they
+    /// always were — the boundary the content axis routes on.
+    #[test]
+    fn a_whole_json_file_answers_application_json() {
+        assert_eq!(guess_mime(&loc("/docs/a.json")), Some(MimeType::Json));
+        assert_eq!(guess_mime(&loc("/docs/B.JSON")), Some(MimeType::Json));
+        assert_eq!(
+            guess_mime(&loc("https://x.example/y.json?sig=1")),
+            Some(MimeType::Json)
+        );
+        assert_eq!(
+            guess_mime(&loc("/docs/c.jsonl")),
+            Some(MimeType::text_plain())
+        );
+        assert_eq!(
+            guess_mime(&loc("/docs/d.json#one")),
+            Some(MimeType::text_plain())
         );
     }
 
