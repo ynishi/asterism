@@ -362,32 +362,6 @@ fn public_fns(root: &Path, path: &Path) -> Vec<PublicFn> {
 /// inconvenience to be managed: a new entry is a new verb that writes
 /// without saying whose write it is.
 const CONTEXT_EXEMPT: &[(&str, &str)] = &[
-    // ---- project_service: reads (#63)
-    (
-        "project_service::get",
-        "read — one project with the lines its work lands on",
-    ),
-    (
-        "project_service::list",
-        "read — a persona's projects, each with its lines",
-    ),
-    // ---- legacy_pursuit_service: reads (#29)
-    (
-        "legacy_pursuit_service::get",
-        "read — one pursuit plus its derived standing",
-    ),
-    (
-        "legacy_pursuit_service::events",
-        "read — a pursuit's lifecycle facts, oldest first",
-    ),
-    (
-        "legacy_pursuit_service::list",
-        "read — a persona's pursuits with derived standing",
-    ),
-    (
-        "legacy_pursuit_service::view",
-        "read — one pursuit with its events and ledger",
-    ),
     // ---- line_service: reads (#63)
     (
         "line_service::get",
@@ -837,7 +811,7 @@ fn the_application_layer_keeps_no_synchronous_public_verbs() {
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 82;
+const TAURI_MUTATION_COMMANDS: usize = 79;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

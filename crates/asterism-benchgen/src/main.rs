@@ -29,21 +29,17 @@
 //!   enqueued, written up as a result file ([`measure`]).
 //! - `measure-cold` — first-listing cost against a just-restarted
 //!   server, warm repeat alongside it ([`measure`]).
-//! - `measure-pursuit` — the pursuit membership reads over a seeded
-//!   100k-asset profile ([`measure_pursuit`]).
 //!
 //! Every write path is fenced away from the real library: `seed-meta`
-//! refuses a database outside `profiles/bench`, everything that speaks
-//! HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
-//! throwaway temp directory it creates and removes itself. No fence is
-//! optional in the direction that matters — there is no flag that
-//! points any command at the real library.
+//! refuses a database outside `profiles/bench`, and everything that
+//! speaks HTTP refuses the Dogfood port. No fence is optional in the
+//! direction that matters — there is no flag that points any command
+//! at the real library.
 
 mod image_synth;
 mod load_file;
 mod manifest;
 mod measure;
-mod measure_pursuit;
 mod model;
 mod seed_meta;
 
@@ -92,11 +88,6 @@ enum Command {
     /// Measure the first listing after a restart (and a warm repeat).
     /// Restart the bench server first — that is what "cold" means.
     MeasureCold(MeasureColdCliArgs),
-    /// Measure the pursuit membership reads (#29) against a seeded
-    /// 100k-asset profile. Self-contained: seeds a throwaway temp
-    /// profile and measures through the real repository adapters — no
-    /// server, no bench profile, no reset dance.
-    MeasurePursuit(measure_pursuit::MeasurePursuitArgs),
 }
 
 #[derive(Debug, Args)]
@@ -256,7 +247,6 @@ fn main() -> Result<()> {
         Command::LoadFile(args) => runtime()?.block_on(run_load_file(args)),
         Command::MeasureImport(args) => runtime()?.block_on(run_measure_import(args)),
         Command::MeasureCold(args) => runtime()?.block_on(run_measure_cold(args)),
-        Command::MeasurePursuit(args) => runtime()?.block_on(measure_pursuit::run(args)),
     }
 }
 

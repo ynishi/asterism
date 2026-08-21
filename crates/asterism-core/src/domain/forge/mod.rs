@@ -104,14 +104,8 @@
 pub mod boundary;
 pub mod clock;
 pub mod closings;
-pub mod line;
 pub mod lines;
 pub mod model;
-pub mod project;
-pub mod pursuit;
 pub mod pursuits;
-pub mod repository;
 pub mod strategies;
 pub mod threads;
-pub mod tx;
-pub mod value;

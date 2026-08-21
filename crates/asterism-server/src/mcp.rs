@@ -29,9 +29,8 @@
 use std::sync::Arc;
 
 use asterism_contract::command::{
-    AddAssetCommand, ClosePursuitCommand, DeclareAssetMetaCommand, MergeAssetsCommand,
-    OpenProjectCommand, OpenPursuitCommand, PostAssetCommentCommand, PostMaterialMarkCommand,
-    RecordPursuitTxCommand, ReopenPursuitCommand, ResolveDuplicateConflictCommand,
+    AddAssetCommand, DeclareAssetMetaCommand, MergeAssetsCommand, PostAssetCommentCommand,
+    PostMaterialMarkCommand, ResolveDuplicateConflictCommand,
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
@@ -133,34 +132,6 @@ pub struct DispatchGetParams {
     /// Dispatch id (returned by the export that created it, and
     /// stamped on derived assets' provenance).
     pub dispatch_id: String,
-}
-
-/// `pursuit_view` input.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct PursuitViewParams {
-    /// Pursuit id — returned by `pursuit_open`.
-    pub pursuit_id: String,
-}
-
-/// `project_get` input.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct ProjectGetParams {
-    /// Project id — returned by `project_open` and `project_list`, and
-    /// carried on a filed pursuit as `project_id`.
-    pub project_id: String,
-}
-
-/// `project_list` input.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(default)]
-pub struct ProjectListParams {
-    /// Persona whose projects to list.
-    pub persona_id: String,
-    /// Cap on returned rows, clamped to 1..=500. Omitted means 50, and
-    /// 0 is raised to 1 rather than meaning "none".
-    pub limit: Option<u32>,
 }
 
 /// `duplicate_conflicts` input — the same persona / limit pair the
@@ -512,165 +483,6 @@ impl AsterismMcp {
             Err(err) => Ok(domain_error(err)),
         }
     }
-
-    #[tool(
-        description = "Open a project — the shared context pursuits file under, and the owner of the line their satisfied closes land on. A deliberate act: nothing mints one for you, and a pursuit with no project files nowhere and lands nothing. `name` is required, non-blank, and unique among this persona's projects, compared exactly as given once trimmed — uniqueness is checked by reading first rather than held by a constraint, so two simultaneous opens of one name can both land. The line comes with it — one named `main`, minted in the same transaction, because a project with nothing to land on could not be merged into. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this project, omit it and it records nobody."
-    )]
-    async fn project_open(
-        &self,
-        Parameters(command): Parameters<OpenProjectCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self.ctx.project_service.open(command, &attribution).await {
-            Ok(project) => ok_json(&project),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Read one project with its lines. A line is what a satisfied close of a filed pursuit merges into; v1 gives every project exactly one, named `main`. Addressed by id and not scoped to a persona — filing a pursuit under another persona's project is refused, reading one whose id you already hold is not."
-    )]
-    async fn project_get(
-        &self,
-        Parameters(query): Parameters<ProjectGetParams>,
-    ) -> Result<CallToolResult, McpError> {
-        match self.ctx.project_service.get(&query.project_id).await {
-            Ok(project) => ok_json(&project),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "List a persona's projects, most-recent first, each with its lines. `limit` is clamped to 1..=500; omitting it means 50, and 0 is raised to 1 rather than meaning \"no rows\"."
-    )]
-    async fn project_list(
-        &self,
-        Parameters(query): Parameters<ProjectListParams>,
-    ) -> Result<CallToolResult, McpError> {
-        match self
-            .ctx
-            .project_service
-            .list(&query.persona_id, query.limit.unwrap_or(50))
-            .await
-        {
-            Ok(projects) => ok_json(&projects),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Open a pursuit — the unit of work assets are filed under — and name what it is for. `project_id` files it under a project, which is what puts its satisfied close on a line; leave it out and the pursuit lands nothing. This is the only way a pursuit comes into being, and nothing is opened on your behalf. `parent_pursuit_id` spawns a sub-line (same persona, set once, never rewritten). `pursuit_id` creates the pursuit at an id you name instead of a minted one, for the case where a pursuit has to come back under the id it was known by elsewhere. An id already in use is refused rather than adopted. `operator_ai` is your own slug, self-declared: supply it and the row says an agent opened this line of work, omit it and it records nobody."
-    )]
-    async fn pursuit_open(
-        &self,
-        Parameters(command): Parameters<OpenPursuitCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self
-            .ctx
-            .legacy_pursuit_service
-            .open(command, &attribution)
-            .await
-        {
-            Ok(pursuit) => ok_json(&pursuit),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Record that a pursuit concluded. `outcome: \"satisfied\"` and `outcome: \"abandoned\"` both record the ending and apply nothing else; they differ in what they say about how the line of work finished, not in what they write. Neither selects among the pursuit's members — what entered the line of work stays readable from its ledger (`pursuit_view`), which the close leaves untouched. This is an event, not a status write: closing twice leaves two facts and the later one is what standing derives from, and nothing about the assets changes — no trash, no label, no rating. Closed is not a lock either; the ledger still accepts a gesture afterwards."
-    )]
-    async fn pursuit_close(
-        &self,
-        Parameters(command): Parameters<ClosePursuitCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self
-            .ctx
-            .legacy_pursuit_service
-            .close(command, &attribution)
-            .await
-        {
-            Ok(event) => ok_json(&event),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Record that a closed pursuit carried on. Appends a fact and re-derives standing to open; doing it to an already-open pursuit is legal and changes nothing but the log."
-    )]
-    async fn pursuit_reopen(
-        &self,
-        Parameters(command): Parameters<ReopenPursuitCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self
-            .ctx
-            .legacy_pursuit_service
-            .reopen(command, &attribution)
-            .await
-        {
-            Ok(event) => ok_json(&event),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Read one pursuit opened up: the row with its derived standing (`open` / `closed_satisfied` / `closed_abandoned`), the lifecycle events oldest-first, and the membership ledger (`txs`). This is how to check what is already in a line of work before adding to it."
-    )]
-    async fn pursuit_view(
-        &self,
-        Parameters(params): Parameters<PursuitViewParams>,
-    ) -> Result<CallToolResult, McpError> {
-        match self
-            .ctx
-            .legacy_pursuit_service
-            .view(&params.pursuit_id)
-            .await
-        {
-            Ok(view) => ok_json(&view),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
-
-    #[tool(
-        description = "Append one membership gesture to a pursuit's ledger. `kind: \"in\"` records an asset entering the line of work and requires `origin` — `generated` (a tool produced it), `imported` (came from outside), or `existing` (brought in from the library). `kind: \"remove\"` is the mid-work removal — reversible with `kind: \"unremove\"`; the row stays either way and membership derives without it. Append-only: membership derives on read, and illegal gestures (an `in` of a present member, a `remove` of a non-member) are refused rather than recorded."
-    )]
-    async fn pursuit_tx(
-        &self,
-        Parameters(command): Parameters<RecordPursuitTxCommand>,
-    ) -> Result<CallToolResult, McpError> {
-        let attribution =
-            match crate::attribution::asserted(None, None, command.operator_ai.as_deref()) {
-                Ok(attribution) => attribution,
-                Err(err) => return Ok(domain_error(err)),
-            };
-        match self
-            .ctx
-            .legacy_pursuit_service
-            .record_tx(command, &attribution)
-            .await
-        {
-            Ok(tx) => ok_json(&tx),
-            Err(err) => Ok(domain_error(err)),
-        }
-    }
 }
 
 /// Onboarding guide body. Kept in one place so `list_resources` and
@@ -738,15 +550,6 @@ loopback HTTP on the same port.
    are two separate things and leaves both rows alone. A pair is asked
    about once: whichever answer is given, it is not raised again.
 10. `dispatch_get` — one outbound dispatch's persisted state.
-11. `pursuit_open` / `pursuit_view` / `pursuit_close` / `pursuit_reopen`
-    — the line of work an asset is staged into. Membership is yours to
-    state: nothing opens a pursuit on your behalf, and nothing enters
-    one unless you say so. So the order is to open one first, name what
-    it is for, and record what goes in through `pursuit_tx`;
-    `pursuit_view` then answers "what is already in here" (standing,
-    events, ledger) before you add more. Closing is a recorded
-    fact, not a lock — closing twice leaves two facts, and a closed
-    pursuit still accepts gestures.
 
 ## Beyond the tool set
 

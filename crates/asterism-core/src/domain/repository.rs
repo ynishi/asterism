@@ -2990,9 +2990,9 @@ pub trait DispatchRepository: Send + Sync {
 }
 
 // `PursuitRepository` and `ProjectRepository` were declared here, among
-// the raw layer's own. They are the forge's storage contract and moved
-// to `domain::forge::repository` unchanged; the header says what that
-// leaves this file.
+// the raw layer's own, before moving to `domain::forge::repository`.
+// Both went with the forge's first model; what replaces them are the
+// forge's own ports, and they name nothing here.
 
 /// Persistence port for the Query Group evaluation core.
 /// A Query Group stores a *rule*

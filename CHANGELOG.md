@@ -8,6 +8,42 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Removed
+
+- **The forge's first model, tables and all** (#102). The pursuit whose standing
+  derived from a stream of lifecycle events, the ledger of membership gestures
+  beside it, and the line whose entries moved through four verbs written one
+  event at a time are gone — services, ports, adapters, transport and schema.
+  The model settled in #63 keeps a line's history as a chain of change points
+  carrying a table, and work as a log of passes; nothing in the old shape can be
+  read as either, so it goes rather than being carried across.
+
+  **What disappears from the outside.** Eight HTTP routes under
+  `/asterism/pursuits`, eight MCP tools (`pursuit_open` / `pursuit_view` /
+  `pursuit_close` / `pursuit_reopen` / `pursuit_tx` and the three `project_*`
+  reads), seven Tauri commands, and the commands and DTOs they were spelled in —
+  `OpenPursuitCommand`, `ClosePursuitCommand`, `RecordPursuitTxCommand`,
+  `ReopenPursuitCommand`, `OpenProjectCommand`, `PursuitDto`, `PursuitEventDto`,
+  `PursuitViewDto`, `PursuitTxDto`, `ProjectDto`. The replacement has no
+  transport yet: its verbs are reachable from inside the process and nowhere
+  else, which is the honest state to be in until the adapter under them exists.
+  No screen loses anything — the UI never had one for this, and the generated
+  bindings shrink by nine types nothing imported.
+
+  **What disappears from the database.** `project`, `line`, `line_entry`,
+  `line_merge`, `line_event`, `pursuit`, `pursuit_event` and `pursuit_tx` are
+  dropped (V95), children before parents because every edge in the family is
+  `ON DELETE RESTRICT`. Only `project` and `line` ever had a production writer,
+  and what it wrote was a project row with an empty `main` beside it — the entry
+  and event tables were reached by tests alone, so no instance holds a line with
+  anything on it. The persona purge loses six of its eleven ordered deletes and
+  keeps the one it is named for.
+
+  **`tests/forge_boundary.rs` now runs with no exemptions.** Its list of files
+  serving the replaced model was the measure of what was left; it is empty, so
+  the guard reads every line of forge code and the forge names nothing outside
+  itself but the five words of shared vocabulary.
+
 ### Changed
 
 - **The three-state moved out of the digest columns** (#17). The

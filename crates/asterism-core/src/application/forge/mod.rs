@@ -54,13 +54,8 @@
 //! they are everywhere else, because they belong to neither side. The
 //! rule is about capability, never about what something is.
 
-pub mod legacy_pursuit_service;
 pub mod line_service;
-pub mod mapping;
-pub mod project_service;
 pub mod pursuit_service;
 
-pub use legacy_pursuit_service::LegacyPursuitService;
 pub use line_service::LineService;
-pub use project_service::ProjectService;
 pub use pursuit_service::PursuitService;

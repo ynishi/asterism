@@ -6938,6 +6938,50 @@ UPDATE material
    AND content_region_hash_status = 'unsupported';
 "#;
 
+/// V95 — the forge's first model goes, tables and all (#102).
+///
+/// What these eight tables held is the shape the forge was designed
+/// around before #63 settled a different one: a pursuit whose standing
+/// derived from a stream of lifecycle events, a ledger of membership
+/// gestures beside it, and a line whose entries moved through four
+/// verbs written one event at a time. The model that replaced it keeps
+/// a line's history as a chain of change points carrying a table, and
+/// work as a log of passes — neither of which any column here can be
+/// read as.
+///
+/// Dropped rather than migrated, because there is nothing to carry
+/// across. Only `project` and `line` ever had a production writer, and
+/// what it wrote was a project row with an empty `main` beside it:
+/// `line_entry`, `line_merge` and `line_event` were written by tests
+/// alone, so no instance holds a line with anything on it. Translating
+/// an empty line into a genesis nobody asked for would invent a record
+/// rather than keep one — the empty-line stance the V85 note takes
+/// about `pursuit.project_id`, applied to the whole family.
+///
+/// Order is children before parents, because every edge in this family
+/// is `ON DELETE RESTRICT` and `DROP TABLE` fires the same check a
+/// delete does. `line_event` restricts `line_entry` and `line_merge`;
+/// `line_merge` restricts `pursuit_event`; `pursuit_tx` and
+/// `pursuit_event` restrict `pursuit`; `line` restricts `project`, and
+/// `pursuit.project_id` restricts it too.
+///
+/// Nothing outside the family points in. `dispatch_job.pursuit_id` was
+/// the one edge from the raw layer and [`V90_DROP_THE_PURSUIT_STAMP`]
+/// took it; `pursuit_restamp` went with [`V89_DROP_THE_RESTAMP_RECORD`].
+/// The tables the replacement needs are not created here — they arrive
+/// with the adapter that writes them, and an empty table waiting for
+/// one would be a shape nothing has checked.
+const V95_DROP_THE_FIRST_FORGE_MODEL: &str = r#"
+DROP TABLE line_event;
+DROP TABLE line_merge;
+DROP TABLE line_entry;
+DROP TABLE pursuit_tx;
+DROP TABLE pursuit_event;
+DROP TABLE pursuit;
+DROP TABLE line;
+DROP TABLE project;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7035,6 +7079,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V92_MATERIAL_FINGERPRINT_STATUS),
     Step::Sql(V93_JSON_MATERIAL_MIME),
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
+    Step::Sql(V95_DROP_THE_FIRST_FORGE_MODEL),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -10409,24 +10454,19 @@ mod tests {
     /// The closed list of tables that record a channel, and wiring more
     /// services to *receive* an `AttributionContext` does not extend it
     /// (an operation ledger is a separate decision, not a column that
-    /// appears table by table). Two waves so far: `asset` /
-    /// `dispatch_job` (V47-V50), and the pursuit family (V79) — forge
-    /// events are actor-carrying by design (#29: who opened the
-    /// pursuit, who recorded the close, who ordered the restamp), with
-    /// the same NULL-means-unrecorded reading and the same write-side
-    /// channel guard.
+    /// appears table by table). One wave stands: `asset` /
+    /// `dispatch_job` (V47-V50). The forge's first model was the other
+    /// three — the pursuit family (V79), the ledger (V82) and the
+    /// project (V84) — and V95 took all of them; the model that
+    /// replaced it records an actor on every node rather than a
+    /// channel on some tables, and where that lands in the schema is
+    /// the adapter's question to answer.
     ///
     /// Read off the schema rather than a hand-kept list: a new
     /// `attributed_via` would otherwise arrive silently, and every one of
     /// them is a place the attribution rule has to answer for — which channel
     /// wrote it, what a NULL means there, and how auth resolves it
-    /// later. Third wave: the ledger (V82) — a membership gesture is a
-    /// statement somebody makes (#22: "who decided"), so it carries
-    /// the triple. Fourth wave: the project (V84) —
-    /// opening one is a statement; `line_merge` deliberately does
-    /// not carry the triple (who approved is who closed, and the
-    /// close event already says so), and the line tables are
-    /// derivation surfaces, not statements.
+    /// later.
     #[test]
     fn only_settled_tables_carry_a_channel_column() {
         let mut conn = test_conn();
@@ -10447,339 +10487,9 @@ mod tests {
 
         assert_eq!(
             carriers,
-            vec![
-                "asset".to_string(),
-                "dispatch_job".to_string(),
-                "project".to_string(),
-                "pursuit".to_string(),
-                "pursuit_event".to_string(),
-                "pursuit_tx".to_string(),
-            ],
+            vec!["asset".to_string(), "dispatch_job".to_string()],
             "a table gained an attribution channel; that is a design decision, not a migration \
              detail — settle where attribution state lives before changing this list"
-        );
-    }
-
-    /// V84's rules are pairing rules, and they live in the schema: a
-    /// verb's payload columns travel with the verb (two two-way
-    /// CHECKs), a project holds one line per name, and a close event
-    /// carries at most one merge. Asserted at insert level because
-    /// `LineVerb::from_columns` only guards the Rust side — a typo
-    /// inside the SQL CHECK text would otherwise go unseen until the
-    /// write path arrives (the `v78_holds_the_two_rules` precedent:
-    /// the schema is where the property actually lives).
-    #[test]
-    fn v84_pairs_verb_and_payload_and_keeps_lines_and_merges_unique() {
-        let mut conn = test_conn();
-        migrate(&mut conn).unwrap();
-        let persona = seed_persona(&conn);
-
-        let project = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO project (id, persona_id, name, created_at) VALUES (?1, ?2, 'album', 0)",
-            params![project, persona],
-        )
-        .unwrap();
-
-        let line = Uuid::now_v7();
-        let line_named_main = |id: Uuid| {
-            conn.execute(
-                "INSERT INTO line (id, project_id, name, created_at) \
-                 VALUES (?1, ?2, 'main', 0)",
-                params![id, project],
-            )
-        };
-        line_named_main(line).unwrap();
-        assert!(
-            line_named_main(Uuid::now_v7()).is_err(),
-            "one project holds one line per name"
-        );
-
-        let entry = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
-             VALUES (?1, ?2, ?3, 0)",
-            params![entry, line, persona],
-        )
-        .unwrap();
-
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        let close = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
-             VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
-            params![close, pursuit, persona],
-        )
-        .unwrap();
-
-        let merge = Uuid::now_v7();
-        let merge_of_close = |id: Uuid| {
-            conn.execute(
-                "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
-                 VALUES (?1, ?2, ?3, 0)",
-                params![id, close, persona],
-            )
-        };
-        merge_of_close(merge).unwrap();
-        assert!(
-            merge_of_close(Uuid::now_v7()).is_err(),
-            "one close event carries at most one merge"
-        );
-
-        let event = |verb: &str, with_asset: bool, with_name: bool| {
-            conn.execute(
-                "INSERT INTO line_event \
-                     (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
-                params![
-                    Uuid::now_v7(),
-                    entry,
-                    persona,
-                    verb,
-                    with_asset.then(Uuid::now_v7),
-                    with_name.then_some("key visual"),
-                    merge,
-                ],
-            )
-        };
-
-        event("add", true, true).expect("an add carries both payloads");
-        event("replace", true, false).expect("a replace carries the asset alone");
-        event("rename", false, true).expect("a rename carries the name alone");
-        event("delete", false, false).expect("a delete carries nothing");
-
-        assert!(event("add", true, false).is_err(), "a nameless add");
-        assert!(event("add", false, true).is_err(), "an assetless add");
-        assert!(
-            event("replace", false, false).is_err(),
-            "an assetless replace"
-        );
-        assert!(
-            event("replace", true, true).is_err(),
-            "a replace naming things"
-        );
-        assert!(event("rename", false, false).is_err(), "a nameless rename");
-        assert!(
-            event("delete", true, false).is_err(),
-            "a delete carrying an asset"
-        );
-        assert!(
-            event("fold", false, false).is_err(),
-            "the verb set is closed"
-        );
-    }
-
-    /// V85's rules are pairing rules carried by **column-level** CHECKs
-    /// on ALTER-added columns, which is the arrangement the step doc
-    /// says was measured rather than assumed. This is where the
-    /// measurement is pinned: each rule is asserted against a real
-    /// insert, so a CHECK that survived the ALTER without firing — the
-    /// failure mode that would make the whole choice wrong — cannot
-    /// pass unnoticed.
-    ///
-    /// The other half is the ledger a pre-V85 database already holds.
-    /// `pursuit_tx` rows are history and a lost one is a gesture nobody
-    /// can re-perform, so a row is seeded *before* the step runs and
-    /// read back after with every attribution column named — the four
-    /// that a careless widening would drop.
-    ///
-    /// It runs to *latest* rather than stopping at 85, so what it
-    /// asserts is the shape a caller meets today: V91 dropped the pin
-    /// column, its CHECK and its index, and the rules asserted below
-    /// are the three that outlived it. That makes this the test that
-    /// answers for V91 leaving the surviving column-level CHECKs
-    /// standing — `DROP COLUMN` rewrites the table's schema text, and a
-    /// CHECK lost in that rewrite would fire nowhere and say nothing.
-    #[test]
-    fn v85_leaves_the_ledger_alone_and_pairs_the_new_columns() {
-        let mut conn = test_conn();
-        migrate_to(&mut conn, 84).unwrap();
-        let persona = seed_persona(&conn);
-
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        let legacy_tx = Uuid::now_v7();
-        let legacy_asset = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit_tx \
-                 (id, pursuit_id, persona_id, kind, asset_id, origin, note, \
-                  author_kind, author_subject, operator_ai, attributed_via, created_at) \
-             VALUES (?1, ?2, ?3, 'in', ?4, 'generated', 'first light', \
-                     'subject', 'alice', 'claude-code', 'mcp', 7)",
-            params![legacy_tx, pursuit, persona, legacy_asset],
-        )
-        .unwrap();
-
-        migrate(&mut conn).unwrap();
-
-        type LegacyRow = (
-            Uuid,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            i64,
-        );
-        let carried: LegacyRow = conn
-            .query_row(
-                "SELECT asset_id, kind, origin, note, author_kind, author_subject, \
-                        operator_ai, attributed_via, created_at \
-                 FROM pursuit_tx WHERE id = ?1",
-                params![legacy_tx],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            carried,
-            (
-                legacy_asset,
-                "in".to_string(),
-                Some("generated".to_string()),
-                Some("first light".to_string()),
-                Some("subject".to_string()),
-                Some("alice".to_string()),
-                Some("claude-code".to_string()),
-                Some("mcp".to_string()),
-                7
-            ),
-            "the gesture, its origin, and the whole attribution triple are untouched"
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT out_of_scope, target_entry_id IS NULL, \
-                        supersedes_asset_id IS NULL \
-                 FROM pursuit_tx WHERE id = ?1",
-                params![legacy_tx],
-                |r| Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?
-                ))
-            )
-            .unwrap(),
-            (0, 1, 1),
-            "a gesture that predates the columns aimed at nothing and reached outside nothing"
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT project_id IS NULL FROM pursuit WHERE id = ?1",
-                params![pursuit],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            1,
-            "and a pursuit that predates filing is left unfiled rather than given a project"
-        );
-
-        // A project, its line, and one entry to aim at.
-        let project = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO project (id, persona_id, name, created_at) VALUES (?1, ?2, 'album', 0)",
-            params![project, persona],
-        )
-        .unwrap();
-        let line = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line (id, project_id, name, created_at) VALUES (?1, ?2, 'main', 0)",
-            params![line, project],
-        )
-        .unwrap();
-        let entry = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_entry (id, line_id, persona_id, created_at) VALUES (?1, ?2, ?3, 0)",
-            params![entry, line, persona],
-        )
-        .unwrap();
-
-        conn.execute(
-            "UPDATE pursuit SET project_id = ?1 WHERE id = ?2",
-            params![project, pursuit],
-        )
-        .expect("a pursuit files under a project");
-
-        let tx = |kind: &str,
-                  origin: Option<&str>,
-                  target: Option<Uuid>,
-                  out_of_scope: i64,
-                  supersedes: Option<Uuid>| {
-            conn.execute(
-                "INSERT INTO pursuit_tx \
-                     (id, pursuit_id, persona_id, kind, asset_id, origin, \
-                      target_entry_id, out_of_scope, \
-                      supersedes_asset_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
-                params![
-                    Uuid::now_v7(),
-                    pursuit,
-                    persona,
-                    kind,
-                    Uuid::now_v7(),
-                    origin,
-                    target,
-                    out_of_scope,
-                    supersedes,
-                ],
-            )
-        };
-
-        tx("in", Some("existing"), Some(entry), 0, None)
-            .expect("an existing IN may name the entry it aims at");
-        tx("in", Some("generated"), None, 0, None).expect("an untargeted IN stays legal");
-        tx("in", Some("existing"), Some(entry), 1, None)
-            .expect("an IN may declare it reached outside its scope");
-        tx("update", None, None, 0, Some(legacy_asset))
-            .expect("an update may name the member it revises");
-        tx("update", None, None, 0, None)
-            .expect("an update without one is still admitted — P3 closes that direction");
-
-        assert!(
-            tx("in", Some("generated"), Some(entry), 0, None).is_err(),
-            "only an existing-origin IN targets an entry"
-        );
-        assert!(
-            tx("remove", None, Some(entry), 0, None).is_err(),
-            "a remove targets nothing"
-        );
-        assert!(
-            tx("remove", None, None, 1, None).is_err(),
-            "only an IN can reach outside a scope"
-        );
-        assert!(
-            tx("in", Some("generated"), None, 0, Some(legacy_asset)).is_err(),
-            "only an update supersedes"
-        );
-
-        // The target column references rather than merely records, and
-        // a reference nobody checks is a column of loose uuids.
-        // Asserted with an id that resolves to nothing, which is the
-        // one thing the CHECKs above cannot catch.
-        assert!(
-            tx("in", Some("existing"), Some(Uuid::now_v7()), 0, None).is_err(),
-            "a target that names no entry"
         );
     }
 
@@ -12361,102 +12071,6 @@ mod tests {
             orphans, 0,
             "the backfill mints nothing beyond the dispatches"
         );
-    }
-
-    /// V82 transcribes recorded outputs into the ledger — one
-    /// `'in'/'generated'` row per (pursuit, asset), first dispatch
-    /// wins when the same asset appears in two rounds' outputs, NULL
-    /// attribution, the dispatch's clock. The restamp CHECK is checked
-    /// at the end of the chain rather than at V82, which is the only
-    /// thing this test can honestly say about it.
-    #[test]
-    fn v82_transcribes_outputs_into_the_ledger_once_per_membership() {
-        let mut conn = test_conn();
-        migrate_to(&mut conn, 81).unwrap();
-        let persona = seed_persona(&conn);
-        let a = seed_asset(&conn, persona);
-        let b = seed_asset(&conn, persona);
-        let snapshot = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
-             VALUES (?1, ?2, 'cafe', 0)",
-            params![snapshot, persona],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
-             VALUES (?1, ?2, 0)",
-            params![snapshot, a],
-        )
-        .unwrap();
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        // Two rounds of one pursuit; `a` appears in both outputs, `b`
-        // in the second only. An idle dispatch with no outputs rides
-        // along to prove it contributes nothing.
-        for (id, outputs, created) in [
-            (Uuid::now_v7(), format!("[\"{a}\"]"), 1_000_i64),
-            (Uuid::now_v7(), format!("[\"{a}\", \"{b}\"]"), 2_000),
-            (Uuid::now_v7(), "[]".to_string(), 3_000),
-        ] {
-            conn.execute(
-                "INSERT INTO dispatch_job (id, snapshot_id, persona_id, exporter_slug, \
-                                           action, state_slug, output_asset_ids, pursuit_id, \
-                                           created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, 'file', 'export', 'done', ?4, ?5, ?6, ?6)",
-                params![id, snapshot, persona, outputs, pursuit, created],
-            )
-            .unwrap();
-        }
-
-        migrate(&mut conn).unwrap();
-
-        struct LedgerRow {
-            asset_id: Uuid,
-            kind: String,
-            origin: Option<String>,
-            author_kind: Option<String>,
-            created_at: i64,
-        }
-        let rows: Vec<LedgerRow> = {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT asset_id, kind, origin, author_kind, created_at \
-                       FROM pursuit_tx WHERE pursuit_id = ?1 ORDER BY created_at, id",
-                )
-                .unwrap();
-            stmt.query_map(params![pursuit], |r| {
-                Ok(LedgerRow {
-                    asset_id: r.get(0)?,
-                    kind: r.get(1)?,
-                    origin: r.get(2)?,
-                    author_kind: r.get(3)?,
-                    created_at: r.get(4)?,
-                })
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-        };
-        assert_eq!(rows.len(), 2, "one membership per asset, not per output");
-        assert_eq!(
-            (rows[0].asset_id, rows[0].created_at),
-            (a, 1_000),
-            "the first dispatch to produce the asset names the entry's clock"
-        );
-        assert_eq!((rows[1].asset_id, rows[1].created_at), (b, 2_000));
-        for row in &rows {
-            assert_eq!(row.kind, "in");
-            assert_eq!(row.origin.as_deref(), Some("generated"));
-            assert_eq!(
-                row.author_kind, None,
-                "nobody recorded these entries; the migration did"
-            );
-        }
     }
 
     /// V87 rebuilds `dispatch_job` to drop one constraint and nothing
