@@ -28,11 +28,19 @@ and this project adheres to
   the ledger this model replaced could name an asset without holding it.
 
   Taking an entry off the line releases nothing: the change point that put it
-  there is still in the chain and still names it. So the set only grows, and the
-  one thing that shrinks it is dropping the line. `Line::may_drop` holds that
-  rule — dropping is reachable only through the archive, as purging is reachable
-  only through the trash everywhere else here, and a line with work still open
-  against it refuses with the count.
+  there is still in the chain and still names it — and it has to, because
+  undoing a removal is adding that entry back, which needs the content to still
+  be there. So the set only grows, and the one thing that shrinks it is dropping
+  the line. `Line::may_drop` holds that rule — dropping is reachable only
+  through the archive, as purging is reachable only through the trash everywhere
+  else here, and a line with work still open against it refuses with the count.
+
+  What a drop releases is asked as one question, `discard::releases`, rather
+  than added up by the caller. Dropping a line takes the work against it, so the
+  releasable set is the union of both logs' `holds` — and the half a caller
+  would forget is the second one, because work that gave up put nothing on the
+  line and what it named is in its log and nowhere else. Forgetting it looks
+  exactly like success, which is why the union is the shape of the answer.
 
   **Rewriting is deliberately not a verb.** No filter, no rebase, no editing a
   change point after the fact. A filtered change point could not name the work

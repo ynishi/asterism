@@ -149,13 +149,19 @@
 //! names the pursuit it came out of without knowing anything else
 //! about it.
 //!
-//! Two modules read both at once, and they are the only ones.
+//! Three modules read both at once, and they are the only ones.
 //! [`change`] answers what work *would* do to a line — what would
 //! actually move, and whether anybody moved it first — and answers
 //! nothing else, because what to do about a collision is a decision.
 //! [`closing`] is that decision for the one act that ends work: it
 //! returns the close and, when the work is satisfied, the change point
 //! born with it, in one value that cannot be taken apart.
+//!
+//! [`discard`] is there for a different reason than those two. They
+//! answer what work *means* against a line; it answers what is lost
+//! when a line goes — the union of what both records hold, asked as a
+//! union so that a caller cannot add up half of it and call the rest
+//! released.
 //!
 //! That is also where the two constructors went. `Close::new` and
 //! `ChangePoint::new` are closed to this module and, outside tests,
@@ -246,6 +252,7 @@
 pub mod act;
 pub mod change;
 pub mod closing;
+pub mod discard;
 pub mod error;
 pub mod history;
 pub mod line;
