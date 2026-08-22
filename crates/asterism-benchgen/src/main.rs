@@ -46,6 +46,8 @@ mod measure;
 mod measure_pursuit;
 mod model;
 mod seed_meta;
+mod visual_corpus;
+mod visual_scene;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -97,6 +99,10 @@ enum Command {
     /// profile and measures through the real repository adapters — no
     /// server, no bench profile, no reset dance.
     MeasurePursuit(measure_pursuit::MeasurePursuitArgs),
+    /// Materialise the visual-retrieval corpus (#112): bases plus exact
+    /// copies, transform variants, look-alikes, hard negatives, and EN/JA
+    /// captions, with the ground-truth relations in its own manifest.
+    VisualCorpus(VisualCorpusCliArgs),
 }
 
 #[derive(Debug, Args)]
@@ -214,6 +220,20 @@ struct MeasureColdCliArgs {
     allow_any_server: bool,
 }
 
+#[derive(Debug, Args)]
+struct VisualCorpusCliArgs {
+    /// The corpus identity, independent of the bench tier's.
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+    /// How many base scenes to generate; every base carries its variants,
+    /// so the corpus holds roughly six files per base.
+    #[arg(long, default_value_t = 120)]
+    bases: u64,
+    /// Defaults to `~/.asterism-bench-corpus/<seed>-v1/visual`.
+    #[arg(long)]
+    out: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Preset {
     S,
@@ -257,7 +277,21 @@ fn main() -> Result<()> {
         Command::MeasureImport(args) => runtime()?.block_on(run_measure_import(args)),
         Command::MeasureCold(args) => runtime()?.block_on(run_measure_cold(args)),
         Command::MeasurePursuit(args) => runtime()?.block_on(measure_pursuit::run(args)),
+        // Pure CPU work, same as `corpus`.
+        Command::VisualCorpus(args) => run_visual_corpus(args),
     }
+}
+
+fn run_visual_corpus(args: VisualCorpusCliArgs) -> Result<()> {
+    let out = match args.out {
+        Some(dir) => dir,
+        None => default_out_dir(args.seed)?.join("visual"),
+    };
+    visual_corpus::run(visual_corpus::VisualCorpusArgs {
+        seed: args.seed,
+        bases: args.bases,
+        out,
+    })
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime> {
