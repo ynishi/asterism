@@ -1,6 +1,6 @@
 # asterism-core::domain::forge::pursuits
 
-Keeping work logs, stated in the forge's own words.
+Keeping pursuits, stated in the forge's own words.
 
 [`Pursuits`] is the other face the forge asks for, and it is the
 quiet one: opening work and adding passes to it are what happens
@@ -10,7 +10,7 @@ most, and neither touches a line.
 
 [`Pursuits::push`] takes the node the caller believes the work ends
 at, beside the pass it wants to add. The model refuses a pass that
-does not sit on the head, but it judges the work log it was
+does not sit on the head, but it judges the pursuit it was
 *given*, which is the log as it was when it was read. Naming the
 head makes the write itself conditional, so two passes written at
 once cannot both land and the loser is told.
@@ -46,5 +46,5 @@ less would move them to whoever answers this call.
 
 ## Traits
 
-- `Pursuits` — Keeps work logs.
+- `Pursuits` — Keeps pursuits.
 

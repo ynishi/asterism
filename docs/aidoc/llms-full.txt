@@ -32,15 +32,12 @@ Six subcommands — three that build a corpus, three that measure:
   enqueued, written up as a result file ([`measure`]).
 - `measure-cold` — first-listing cost against a just-restarted
   server, warm repeat alongside it ([`measure`]).
-- `measure-pursuit` — the pursuit membership reads over a seeded
-  100k-asset profile ([`measure_pursuit`]).
 
 Every write path is fenced away from the real library: `seed-meta`
-refuses a database outside `profiles/bench`, everything that speaks
-HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
-throwaway temp directory it creates and removes itself. No fence is
-optional in the direction that matters — there is no flag that
-points any command at the real library.
+refuses a database outside `profiles/bench`, and everything that
+speaks HTTP refuses the Dogfood port. No fence is optional in the
+direction that matters — there is no flag that points any command
+at the real library.
 
 
 <!-- asterism_contract/index.md -->
@@ -629,7 +626,7 @@ the private design notes.
 - [`domain::forge::model::table`](domain__forge__model__table.md): What a change point carries, and what folding a sequence of them
 - [`domain::forge::model::thread`](domain__forge__model__thread.md): Saying something about work.
 - [`domain::forge::model::value`](domain__forge__model__value.md): The values the model is made of.
-- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping work logs, stated in the forge's own words.
+- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping pursuits, stated in the forge's own words.
 - [`domain::forge::strategies`](domain__forge__strategies.md): The rules a line can settle collisions by, and the lookup that
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
@@ -1085,9 +1082,9 @@ Work use cases — opening a line of work, writing passes, looking at
 what the line did, and ending it.
 
 ```text
-  open      reads the line's head, writes the work log
-  push      writes the work log. does not read the line
-  resolve   reads the line, writes the work log
+  open      reads the line's head, writes the pursuit
+  push      writes the pursuit. does not read the line
+  resolve   reads the line, writes the pursuit
   close     reads both, writes both — the only one
 
   collisions / behind    read both, write nothing
@@ -3366,8 +3363,8 @@ verdict — which is the failure mode this split exists to prevent.
 # The loop
 
 ```text
-   Line = repository            Pursuit = the work log
-    └ History                    └ WorkLog
+   Line = repository            Pursuit = the pursuit
+    └ History                    └ Open → Round* → Close
        Genesis → ChangePoint*       Open → Round* → Close
               ▲ head                  └ base ── cut from a ChangePoint
               │                              │
@@ -3984,7 +3981,7 @@ say no to stays readable in one place.
 
 # The two logs, and the one place they meet
 
-A history says what changed; a work log ([`pursuit`]) says what
+A history says what changed; a pursuit ([`pursuit`]) says what
 somebody proposes. Neither reads the other, and a change point
 names the pursuit it came out of without knowing anything else
 about it.
@@ -4017,7 +4014,7 @@ answered is a word people use about their work rather than a shape
 the record has.
 
 **Settling a collision.** Turning one into a divergence writes a
-pass into the work log under the line's strategy, and it happens
+pass into the pursuit under the line's strategy, and it happens
 while the work is open. [`closing`] refuses what was never settled;
 it does not settle anything itself.
 
@@ -4033,8 +4030,8 @@ including the ids, so it is where a stored row could contradict a
 rule this module holds; spread across the types, there would be a
 piece of it on each and nothing that reads as the whole. What
 keeps it honest is that it assembles nothing itself — the nodes go
-back one at a time through [`History::record`], `WorkLog::push` and
-`WorkLog::end`, so a stored chain meets the refusals a fresh write
+back one at a time through [`History::record`], `Pursuit::push` and
+`Pursuit::end`, so a stored chain meets the refusals a fresh write
 meets, and a store that kept something the model would not have
 written cannot hand it back as though it had.
 
@@ -4284,7 +4281,7 @@ Ending work — the one act that moves both logs.
 ```
 
 Everywhere else, a decision moves one log. Opening, passing and
-taking something in write only to the work log; renaming a line
+taking something in write only to the pursuit; renaming a line
 writes only to its own description. This is the exception, and it
 is the only one: ending work as satisfied puts a change point on
 the line, and the two are one act rather than two that happen to
@@ -4319,7 +4316,7 @@ value rather than a mutation somebody has to go looking for.
 # This function does not settle anything
 
 A collision is refused here, never resolved. Turning one into a
-divergence writes a pass into the work log, under the line's
+divergence writes a pass into the pursuit, under the line's
 strategy, and it happens while the work is open — by the time
 anybody is closing, the question has been settled or it has not.
 
@@ -4346,14 +4343,29 @@ What goes when a line goes, and what that lets go of.
   Line (Archived)          Pursuit*  (against it, all ended)
     └ holds ──┐              └ holds ──┐
               ▼                        ▼
-           releases(line, work) ──▶ every Content that was held
-                                    by either, and by nothing
-                                    else afterwards
+           releases(line, work) ──▶ every Content this line and
+                                    its work stop holding
 ```
+
+# What it does not say
+
+**That anything is free afterwards.** This answers for one line and
+the work against it, which is all it is given and all it could
+check. Another line naming the same content goes on holding it, and
+a caller reading this as "safe to delete" would be reading a claim
+about one holder as a claim about every holder.
+
+What catches that is the store: the reference is a foreign key, and
+deleting content a second line names is refused there. That refusal
+names a column and no more, which is exactly the shape the persona
+purge was given a message for — so a caller acting on this set has
+the same work to do, and this module is not the place it gets done.
+Answering "is anything else holding it" needs every line, and
+nothing here has them.
 
 # Why this is one answer rather than two
 
-A line holds what its chain named; a work log holds what its
+A line holds what its chain named; a pursuit holds what its
 operations named. Dropping a line takes the work against it —
 a log cut from a history that no longer exists is a record of a
 proposal against nothing, and its base names a node that is gone.
@@ -4370,7 +4382,7 @@ theirs. Those two answer what work *means* against a line. This one
 answers what is lost — a question about the two records as records,
 which is why it takes the work as a slice rather than reaching for
 it: a line does not keep a list of its pursuits, and one that did
-would be a second answer to what the work logs already say.
+would be a second answer to what the pursuits already say.
 
 # It does not drop anything
 
@@ -4701,7 +4713,7 @@ One line of work: what it is trying to do, and every pass at it.
 
 ```text
   Pursuit ── of : →Line ── parent? : →Pursuit
-   └ WorkLog
+   └ Open → Round* → Close
        Open ──▶ Round ──▶ Round ──▶ Close?
          │        │  └ ops
          │        └ parent
@@ -4712,7 +4724,7 @@ The shape mirrors a line's history deliberately: a root that is not
 like the others, a chain that only grows, and everything the thing
 currently asks for derived by folding it. What differs is what the
 nodes carry — a line's node carries a table that has changed it, a
-work log's carries operations that have not changed anything yet.
+pursuit's carries operations that have not changed anything yet.
 
 # A pass is the unit, not the pursuit
 
@@ -4775,7 +4787,6 @@ looking — and a stored answer would be a second copy of it.
 - `Outcome` — How a pursuit ended.
 - `Pursuit` — One line of work against one line.
 - `Round` — One pass at the work.
-- `WorkLog` — The chain of passes.
 
 
 <!-- asterism_core/domain__forge__model__react.md -->
@@ -4822,7 +4833,7 @@ anybody can see it — which is the state a person then acts on.
 
 # Nothing here touches the line
 
-The pass goes on the work log. A line moves when work ends, and
+The pass goes on the pursuit. A line moves when work ends, and
 that is somewhere else.
 
 ## Functions
@@ -4864,8 +4875,8 @@ is stated once.
 # What it does not do
 
 **It does not skip the model's questions.** The nodes are handed
-back one at a time to [`History::record`], [`WorkLog::push`] and
-[`WorkLog::end`] — the same calls a fresh write goes through, and
+back one at a time to [`History::record`], [`Pursuit::push`] and
+[`Pursuit::end`] — the same calls a fresh write goes through, and
 the same refusals. A chain whose parents do not line up, a table
 that would leave two live entries under one name, a pass on a log
 that has ended: each of those is a stored row that cannot become a
@@ -4898,7 +4909,7 @@ wrong is caught by `record` rather than believed.
 
 ## Types
 
-- `Node` — A node of a work log after the one it opened at.
+- `Node` — A node of a pursuit after the one it opened at.
 
 
 <!-- asterism_core/domain__forge__model__strategy.md -->
@@ -5181,7 +5192,7 @@ proposed.
 - `LineId` — Surrogate id for a `Line` — one repository.
 - `MessageId` — Surrogate id for a `Message`.
 - `Name` — A name something can answer to: trimmed, and never blank.
-- `NodeId` — Surrogate id for a node of a work log — where it opened, one
+- `NodeId` — Surrogate id for a node of a pursuit — where it opened, one
 - `PursuitId` — Surrogate id for a `Pursuit` — one line of work.
 - `StrategyId` — Which rule a line settles collisions by.
 - `ThreadId` — Surrogate id for a `Thread` — one run of messages about one
@@ -5190,7 +5201,7 @@ proposed.
 <!-- asterism_core/domain__forge__pursuits.md -->
 # asterism-core::domain::forge::pursuits
 
-Keeping work logs, stated in the forge's own words.
+Keeping pursuits, stated in the forge's own words.
 
 [`Pursuits`] is the other face the forge asks for, and it is the
 quiet one: opening work and adding passes to it are what happens
@@ -5200,7 +5211,7 @@ most, and neither touches a line.
 
 [`Pursuits::push`] takes the node the caller believes the work ends
 at, beside the pass it wants to add. The model refuses a pass that
-does not sit on the head, but it judges the work log it was
+does not sit on the head, but it judges the pursuit it was
 *given*, which is the log as it was when it was read. Naming the
 head makes the write itself conditional, so two passes written at
 once cannot both land and the loser is told.
@@ -5236,7 +5247,7 @@ less would move them to whoever answers this call.
 
 ## Traits
 
-- `Pursuits` — Keeps work logs.
+- `Pursuits` — Keeps pursuits.
 
 
 <!-- asterism_core/domain__forge__strategies.md -->
@@ -10258,12 +10269,12 @@ specification of what it owes.
 ## Functions
 
 - `read_line` — Rebuilds a line from its row, its change points and their rows.
-- `read_work` — Rebuilds work from its row, its nodes and their operations.
+- `read_pursuit` — Rebuilds work from its row, its nodes and their operations.
 - `take_change_point_apart` — One change point's rows, for the single-node write a close makes.
 - `take_close_apart` — One ending, for the append a commit makes.
 - `take_new_line_apart` — The row for a line that has just been opened.
+- `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
 - `take_round_apart` — One pass, for the append a push makes.
-- `take_work_apart` — The work's own row, and one `work_node` row plus its `work_op`s for
 
 ## Types
 
@@ -10271,9 +10282,9 @@ specification of what it owes.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
 - `LineRow` — `line` — the repository, and the two things about it that are not
-- `WorkNodeRow` — `work_node` — a pass or an ending. `seq` is the log's own order,
-- `WorkOpRow` — `work_op` — one operation of one pass, in the order it was written.
-- `WorkRow` — `work` — one line of work. Named for the table rather than the
+- `PursuitNodeRow` — `pursuit_node` — a pass or an ending.
+- `PursuitOpRow` — `pursuit_op` — one operation of one pass, in the order it was written.
+- `PursuitRow` — `pursuit` — one line of work.
 
 
 <!-- asterism_infra/generator_params.md -->
@@ -12133,7 +12144,7 @@ columns.
 
 Nothing here selects a head and checks it against what a caller
 decided. Two nodes on one parent is a fork, `UNIQUE (line_id,
-parent_id)` and `UNIQUE (work_id, parent_id)` refuse one, and the
+parent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the
 refusal arrives as part of the insert — so the validation is the
 write rather than something beside it that could be answered from a
 row somebody else has since moved.
@@ -12141,11 +12152,16 @@ row somebody else has since moved.
 What that costs is telling one constraint violation from another.
 SQLite names the columns rather than the index — `UNIQUE constraint
 failed: change_point.line_id, change_point.parent_id` — so that
-column list is what is matched, exactly rather than by substring:
-`work_node.work_id` is the second ending, and it is a prefix of
-`work_node.work_id, work_node.parent_id`, which is a fork. Reading
-one as the other would tell a caller to re-decide something that
-cannot be re-decided.
+column list is what is matched, and matched exactly.
+
+`contains` is what exactness is guarding against, and the direction
+matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
+of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
+substring test asked about the ending matches the fork — it reads
+"somebody pushed a pass first" as "this work has already ended",
+and tells a caller that re-reading is pointless when re-reading is
+the whole answer. The other direction cannot happen, which is why
+naming it would be naming the wrong risk.
 
 ## Types
 

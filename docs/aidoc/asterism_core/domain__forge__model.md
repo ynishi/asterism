@@ -146,7 +146,7 @@ say no to stays readable in one place.
 
 # The two logs, and the one place they meet
 
-A history says what changed; a work log ([`pursuit`]) says what
+A history says what changed; a pursuit ([`pursuit`]) says what
 somebody proposes. Neither reads the other, and a change point
 names the pursuit it came out of without knowing anything else
 about it.
@@ -179,7 +179,7 @@ answered is a word people use about their work rather than a shape
 the record has.
 
 **Settling a collision.** Turning one into a divergence writes a
-pass into the work log under the line's strategy, and it happens
+pass into the pursuit under the line's strategy, and it happens
 while the work is open. [`closing`] refuses what was never settled;
 it does not settle anything itself.
 
@@ -195,8 +195,8 @@ including the ids, so it is where a stored row could contradict a
 rule this module holds; spread across the types, there would be a
 piece of it on each and nothing that reads as the whole. What
 keeps it honest is that it assembles nothing itself — the nodes go
-back one at a time through [`History::record`], `WorkLog::push` and
-`WorkLog::end`, so a stored chain meets the refusals a fresh write
+back one at a time through [`History::record`], `Pursuit::push` and
+`Pursuit::end`, so a stored chain meets the refusals a fresh write
 meets, and a store that kept something the model would not have
 written cannot hand it back as though it had.
 

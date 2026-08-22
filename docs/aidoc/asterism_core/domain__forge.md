@@ -15,8 +15,8 @@ verdict — which is the failure mode this split exists to prevent.
 # The loop
 
 ```text
-   Line = repository            Pursuit = the work log
-    └ History                    └ WorkLog
+   Line = repository            Pursuit = the pursuit
+    └ History                    └ Open → Round* → Close
        Genesis → ChangePoint*       Open → Round* → Close
               ▲ head                  └ base ── cut from a ChangePoint
               │                              │

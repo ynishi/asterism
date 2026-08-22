@@ -108,19 +108,19 @@
       "docs": "`line` — the repository, and the two things about it that are not\nin its history."
     },
     {
-      "path": "asterism_infra::forge::rows::WorkNodeRow",
+      "path": "asterism_infra::forge::rows::PursuitNodeRow",
       "kind": "struct",
-      "docs": "`work_node` — a pass or an ending. `seq` is the log's own order,\nkept because a work log is read forwards and a parent chain would\nhave to be walked to say the same thing."
+      "docs": "`pursuit_node` — a pass or an ending.\n\nNo column says where in the log a node sits, for the reason\n`change_point` has none: it carries its parent, and that is the\norder. A sequence beside the chain would be a second answer to a\nquestion the chain already answers, and the two disagree the first\ntime a write goes half-way."
     },
     {
-      "path": "asterism_infra::forge::rows::WorkOpRow",
+      "path": "asterism_infra::forge::rows::PursuitOpRow",
       "kind": "struct",
-      "docs": "`work_op` — one operation of one pass, in the order it was written."
+      "docs": "`pursuit_op` — one operation of one pass, in the order it was written."
     },
     {
-      "path": "asterism_infra::forge::rows::WorkRow",
+      "path": "asterism_infra::forge::rows::PursuitRow",
       "kind": "struct",
-      "docs": "`work` — one line of work. Named for the table rather than the\ntype, because `pursuit` was the first model's and the two are not\nthe same thing."
+      "docs": "`pursuit` — one line of work."
     },
     {
       "path": "asterism_infra::forge::rows::read_line",
@@ -128,9 +128,9 @@
       "docs": "Rebuilds a line from its row, its change points and their rows.\n\nThe refusals are the model's, reached through\n[`restore::line`]: a chain that does not line up, or a table that\nwould leave two live entries under one name, fails the read."
     },
     {
-      "path": "asterism_infra::forge::rows::read_work",
+      "path": "asterism_infra::forge::rows::read_pursuit",
       "kind": "function",
-      "docs": "Rebuilds work from its row, its nodes and their operations.\n\nNodes are sorted by `seq` first: the log is read forwards, and\n[`restore::pursuit`] hands them back to `push` and `end` in the\norder they arrive."
+      "docs": "Rebuilds work from its row, its nodes and their operations.\n\nNodes are put in the log's order first, by walking the parent\nlinks from the node the pursuit opened at — the same walk the line\nside does, and the reason neither table keeps a sequence beside the\nchain. [`restore::pursuit`] then hands them back to `push` and\n`end` in the order they arrive."
     },
     {
       "path": "asterism_infra::forge::rows::take_change_point_apart",
@@ -148,14 +148,14 @@
       "docs": "The row for a line that has just been opened.\n\nOne row and no others, because a line that has just been opened has\na genesis and nothing else — the port that calls this says so, and\n[`Line::open`](asterism_core::domain::forge::model::line::Line::open)\nis the only thing that produces what it takes.\n\nA loop over `history().changes()` here would be a second way for a\nchange point to reach the store, running only for a caller that\ndoes not exist. The port refuses that caller instead, which is a\nstatement somebody can read rather than a branch nothing covers."
     },
     {
+      "path": "asterism_infra::forge::rows::take_pursuit_apart",
+      "kind": "function",
+      "docs": "The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for\nevery node after the one it opened at."
+    },
+    {
       "path": "asterism_infra::forge::rows::take_round_apart",
       "kind": "function",
       "docs": "One pass, for the append a push makes."
-    },
-    {
-      "path": "asterism_infra::forge::rows::take_work_apart",
-      "kind": "function",
-      "docs": "The work's own row, and one `work_node` row plus its `work_op`s for\nevery node after the one it opened at."
     },
     {
       "path": "asterism_infra::generator_params",
@@ -840,7 +840,7 @@
     {
       "path": "asterism_infra::sqlite::repo::forge",
       "kind": "module",
-      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (work_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, exactly rather than by substring:\n`work_node.work_id` is the second ending, and it is a prefix of\n`work_node.work_id, work_node.parent_id`, which is a fork. Reading\none as the other would tell a caller to re-decide something that\ncannot be re-decided."
+      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n`contains` is what exactness is guarding against, and the direction\nmatters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*\nof `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a\nsubstring test asked about the ending matches the fork — it reads\n\"somebody pushed a pass first\" as \"this work has already ended\",\nand tells a caller that re-reading is pointless when re-reading is\nthe whole answer. The other direction cannot happen, which is why\nnaming it would be naming the wrong risk."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge::SqliteForge",

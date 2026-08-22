@@ -41,7 +41,7 @@ anybody can see it — which is the state a person then acts on.
 
 # Nothing here touches the line
 
-The pass goes on the work log. A line moves when work ends, and
+The pass goes on the pursuit. A line moves when work ends, and
 that is somewhere else.
 
 ## Functions

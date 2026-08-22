@@ -125,7 +125,7 @@ the private design notes.
 - [`domain::forge::model::table`](domain__forge__model__table.md): What a change point carries, and what folding a sequence of them
 - [`domain::forge::model::thread`](domain__forge__model__thread.md): Saying something about work.
 - [`domain::forge::model::value`](domain__forge__model__value.md): The values the model is made of.
-- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping work logs, stated in the forge's own words.
+- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping pursuits, stated in the forge's own words.
 - [`domain::forge::strategies`](domain__forge__strategies.md): The rules a line can settle collisions by, and the lookup that
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the

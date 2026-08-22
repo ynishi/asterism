@@ -4,7 +4,7 @@ One line of work: what it is trying to do, and every pass at it.
 
 ```text
   Pursuit ── of : →Line ── parent? : →Pursuit
-   └ WorkLog
+   └ Open → Round* → Close
        Open ──▶ Round ──▶ Round ──▶ Close?
          │        │  └ ops
          │        └ parent
@@ -15,7 +15,7 @@ The shape mirrors a line's history deliberately: a root that is not
 like the others, a chain that only grows, and everything the thing
 currently asks for derived by folding it. What differs is what the
 nodes carry — a line's node carries a table that has changed it, a
-work log's carries operations that have not changed anything yet.
+pursuit's carries operations that have not changed anything yet.
 
 # A pass is the unit, not the pursuit
 
@@ -78,5 +78,4 @@ looking — and a stored answer would be a second copy of it.
 - `Outcome` — How a pursuit ended.
 - `Pursuit` — One line of work against one line.
 - `Round` — One pass at the work.
-- `WorkLog` — The chain of passes.
 

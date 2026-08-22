@@ -4,9 +4,9 @@ Work use cases — opening a line of work, writing passes, looking at
 what the line did, and ending it.
 
 ```text
-  open      reads the line's head, writes the work log
-  push      writes the work log. does not read the line
-  resolve   reads the line, writes the work log
+  open      reads the line's head, writes the pursuit
+  push      writes the pursuit. does not read the line
+  resolve   reads the line, writes the pursuit
   close     reads both, writes both — the only one
 
   collisions / behind    read both, write nothing

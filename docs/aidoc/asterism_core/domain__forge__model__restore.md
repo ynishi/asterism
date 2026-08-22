@@ -31,8 +31,8 @@ is stated once.
 # What it does not do
 
 **It does not skip the model's questions.** The nodes are handed
-back one at a time to [`History::record`], [`WorkLog::push`] and
-[`WorkLog::end`] — the same calls a fresh write goes through, and
+back one at a time to [`History::record`], [`Pursuit::push`] and
+[`Pursuit::end`] — the same calls a fresh write goes through, and
 the same refusals. A chain whose parents do not line up, a table
 that would leave two live entries under one name, a pass on a log
 that has ended: each of those is a stored row that cannot become a
@@ -65,5 +65,5 @@ wrong is caught by `record` rather than believed.
 
 ## Types
 
-- `Node` — A node of a work log after the one it opened at.
+- `Node` — A node of a pursuit after the one it opened at.
 

@@ -94,7 +94,7 @@
 - [asterism-core::domain::forge::model::table](asterism_core/domain__forge__model__table.md): What a change point carries, and what folding a sequence of them
 - [asterism-core::domain::forge::model::thread](asterism_core/domain__forge__model__thread.md): Saying something about work.
 - [asterism-core::domain::forge::model::value](asterism_core/domain__forge__model__value.md): The values the model is made of.
-- [asterism-core::domain::forge::pursuits](asterism_core/domain__forge__pursuits.md): Keeping work logs, stated in the forge's own words.
+- [asterism-core::domain::forge::pursuits](asterism_core/domain__forge__pursuits.md): Keeping pursuits, stated in the forge's own words.
 - [asterism-core::domain::forge::strategies](asterism_core/domain__forge__strategies.md): The rules a line can settle collisions by, and the lookup that
 - [asterism-core::domain::forge::threads](asterism_core/domain__forge__threads.md): Keeping what was said about work.
 - [asterism-core::domain::generator_params](asterism_core/domain__generator_params.md): `generator_params` — what an extraction concluded about the
