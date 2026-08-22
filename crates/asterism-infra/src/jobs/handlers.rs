@@ -21,8 +21,8 @@ use asterism_core::domain::render::render_policy;
 use asterism_core::domain::repository::{
     AssetBodyRepository, AssetCommentRepository, AssetRepository, DimsProbe, DimsScope,
     DimsWritePolicy, EdgeRepository, IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository,
-    SeriesRepository, SourceTextReader, TagRepository, TextLocator, ThumbRepository,
-    VisualFeatureRepository,
+    SeriesRepository, SourceTextReader, TagEvidenceRepository, TagRepository, TagVectorRepository,
+    TextLocator, ThumbRepository, VisualFeatureRepository,
 };
 use asterism_core::domain::series::SeriesKey;
 use asterism_core::domain::source_locator::SourceLocator;
@@ -599,13 +599,154 @@ async fn encode_material(
 }
 
 async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
+    // A fresh vector changes two derived answers: the neighbour set
+    // and the tag proposals. Both recompute from the stored vector, so
+    // both chain from the encode rather than from each other.
     env.queue
         .enqueue(
             asterism_core::domain::job::JobKind::VisualEdgeRebuild,
             serde_json::json!({ "asset_id": asset_id.to_string() }),
         )
         .await?;
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::VisualTagSuggest,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
     Ok(())
+}
+
+/// Similarity floor below which a tag is not proposed (#112, P3).
+///
+/// **Provisional** pending the fixture threshold sweep: the first
+/// measured pass put true image-tag matches at means 0.129 (EN) /
+/// 0.123 (JA) against unrelated-query ceilings of 0.050 / 0.073 —
+/// image-text cosine is a different regime from image-image, which is
+/// why this is not [`VISUAL_SCORE_FLOOR`]. The sweep will replace this
+/// with a precision-anchored value and its provenance.
+const TAG_SCORE_FLOOR: f32 = 0.10;
+
+/// Proposes channel tags for one encoded image (#112, P3).
+///
+/// `{ "asset_id": ... }` is chained from a completed encode;
+/// `{ "batch": true }` walks encoded vectors the pass has not stamped.
+/// The pass writes `suggested` evidence only where no row exists (a
+/// person's ruling is structurally out of reach), never links a tag —
+/// acceptance is what writes `asset_tag` — and stamps the vector
+/// whether or not anything cleared the floor, so a scene with no
+/// matching vocabulary is offered exactly once.
+pub async fn visual_tag_suggest(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        let identity = encoder.identity().clone();
+        let page = env
+            .deps
+            .visual_features
+            .unsuggested(&identity, VisualFeatureKind::Semantic, VISUAL_FEATURE_PAGE)
+            .await?;
+        if page.is_empty() {
+            return Ok("tag-suggest backfill: nothing left".into());
+        }
+        let full = page.len() as u32 == VISUAL_FEATURE_PAGE;
+        let mut suggested = 0usize;
+        for asset_id in page {
+            suggested += suggest_tags_for(env, &encoder, &asset_id).await?;
+        }
+        // Every walked row was stamped, so the page always shrinks —
+        // a full page chains the next one unconditionally.
+        if full {
+            env.queue
+                .enqueue(
+                    asterism_core::domain::job::JobKind::VisualTagSuggest,
+                    serde_json::json!({ "batch": true }),
+                )
+                .await?;
+        }
+        return Ok(format!("tag-suggest backfill: suggested={suggested}"));
+    }
+    let asset_id = payload
+        .get("asset_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .map(AssetId::from_uuid)
+        .ok_or_else(|| DomainError::Validation("job payload missing asset_id".into()))?;
+    let count = suggest_tags_for(env, &encoder, &asset_id).await?;
+    Ok(format!("{count} tag(s) suggested"))
+}
+
+/// One asset's proposal pass: cached tag vectors (filled lazily for
+/// names the cache has not seen), cosine against the stored vector,
+/// evidence above the floor, stamp.
+async fn suggest_tags_for(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+    asset_id: &AssetId,
+) -> Result<usize, DomainError> {
+    let identity = encoder.identity().clone();
+    let Some(feature) = env
+        .deps
+        .visual_features
+        .feature_of(asset_id, 0, &identity, VisualFeatureKind::Semantic)
+        .await?
+    else {
+        return Ok(0);
+    };
+    let tags = env.deps.tags.list().await?;
+    let mut cached: std::collections::HashMap<_, _> = env
+        .deps
+        .tag_vectors
+        .vectors(&identity)
+        .await?
+        .into_iter()
+        .collect();
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut suggested = 0usize;
+    for tag in &tags {
+        let vector = match cached.remove(&tag.id) {
+            Some(vector) => vector,
+            None => {
+                // Lazily encode the name the cache has not seen — a
+                // new Tag costs one text encode at its first pass, and
+                // a rename re-encodes because the rename deleted the
+                // row.
+                let enc = encoder.clone();
+                let name = tag.name.clone();
+                let _permit = VISUAL_ENCODE_SLOTS
+                    .acquire()
+                    .await
+                    .expect("semaphore never closed");
+                let vector = tokio::task::spawn_blocking(move || enc.encode_text(&name))
+                    .await
+                    .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))??;
+                env.deps
+                    .tag_vectors
+                    .set_tag_vector(&tag.id, &identity, &vector, now)
+                    .await?;
+                vector
+            }
+        };
+        let score = cosine_normalized(&feature.vector, &vector);
+        if score >= TAG_SCORE_FLOOR
+            && env
+                .deps
+                .tag_evidence
+                .suggest_if_absent(asset_id, &tag.id, &identity.model_id, score, now)
+                .await?
+        {
+            suggested += 1;
+        }
+    }
+    env.deps
+        .visual_features
+        .stamp_tag_suggested(asset_id, 0, &identity, VisualFeatureKind::Semantic, now)
+        .await?;
+    Ok(suggested)
 }
 
 /// Recomputes one asset's visual-similarity edges from stored vectors.

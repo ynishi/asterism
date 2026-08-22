@@ -406,6 +406,19 @@ pub enum JobKind {
     /// score floor is materialised, and a scan that clears nothing
     /// writes an empty set rather than padding.
     VisualEdgeRebuild,
+    /// Proposes channel tags for one encoded image: the asset's stored
+    /// vector against every Tag name's cached text embedding, writing
+    /// scored `suggested` evidence — never a tag link; a person's
+    /// acceptance is what writes `asset_tag`.
+    ///
+    /// Two payload shapes: `{ "asset_id": "<uuid>" }` (chained from a
+    /// completed encode) and `{ "batch": true }` walking encoded
+    /// vectors the pass has not stamped. The pass stamps whether or
+    /// not anything cleared the floor, so a scene with no matching
+    /// vocabulary is offered exactly once, and it inserts only where
+    /// no evidence row exists — a person's ruling is out of its reach
+    /// by construction.
+    VisualTagSuggest,
 }
 
 impl JobKind {
@@ -435,6 +448,7 @@ impl JobKind {
             Self::DisclosureStamp => "disclosure_stamp",
             Self::VisualFeature => "visual_feature",
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
+            Self::VisualTagSuggest => "visual_tag_suggest",
         }
     }
 
@@ -464,6 +478,7 @@ impl JobKind {
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
             "visual_feature" => Ok(Self::VisualFeature),
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
+            "visual_tag_suggest" => Ok(Self::VisualTagSuggest),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

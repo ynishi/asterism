@@ -34,7 +34,7 @@ impl SqliteVisualFeatureRepository {
     }
 }
 
-fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
+pub(crate) fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
     let mut blob = Vec::with_capacity(vector.len() * 4);
     for v in vector {
         blob.extend_from_slice(&v.to_le_bytes());
@@ -42,7 +42,7 @@ fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
     blob
 }
 
-fn blob_to_vector(blob: &[u8]) -> Result<Vec<f32>, DomainError> {
+pub(crate) fn blob_to_vector(blob: &[u8]) -> Result<Vec<f32>, DomainError> {
     if !blob.len().is_multiple_of(4) {
         return Err(DomainError::Validation(format!(
             "stored vector blob length {} is not a multiple of 4",
@@ -275,6 +275,68 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
             })
             .await
             .map_err(infra_err)
+    }
+
+    async fn stamp_tag_suggested(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        at_ms: i64,
+    ) -> Result<(), DomainError> {
+        let asset = *asset_id.as_uuid();
+        let ident = identity.clone();
+        let kind_slug = kind.as_str();
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE visual_feature SET tag_suggested_at = ?1
+                      WHERE asset_id = ?2 AND ord = ?3 AND model_id = ?4
+                        AND feature_kind = ?5",
+                    params![at_ms, asset, ord, ident.model_id, kind_slug],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn unsuggested(
+        &self,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        limit: u32,
+    ) -> Result<Vec<AssetId>, DomainError> {
+        let ident = identity.clone();
+        let kind_slug = kind.as_str();
+        let rows: Vec<Uuid> = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT vf.asset_id FROM visual_feature vf
+                      WHERE vf.model_id = ?1 AND vf.feature_kind = ?2
+                        AND vf.preprocess_ver = ?3 AND vf.status = 'computed'
+                        AND vf.ord = 0 AND vf.tag_suggested_at IS NULL
+                      ORDER BY vf.asset_id
+                      LIMIT ?4",
+                )?;
+                let rows = stmt
+                    .query_map(
+                        params![
+                            ident.model_id,
+                            kind_slug,
+                            ident.preprocess_ver,
+                            limit as i64
+                        ],
+                        |r| r.get::<_, Uuid>(0),
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(rows.into_iter().map(AssetId::from_uuid).collect())
     }
 }
 

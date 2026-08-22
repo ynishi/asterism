@@ -14,7 +14,7 @@
 //! acceptance item 4 of #112, and the reason the port takes a raw RGB
 //! buffer rather than an image type).
 
-use crate::domain::value::AssetId;
+use crate::domain::value::{AssetId, TagId};
 use crate::error::DomainError;
 
 /// The derivation identity of everything one model configuration
@@ -116,6 +116,66 @@ impl VisualFeature {
             extracted_at_ms,
         })
     }
+}
+
+/// Where one tag suggestion stands between the model and the person.
+///
+/// The machine writes only the first state, and only where no row
+/// exists; the other two are a person's ruling and are never
+/// overwritten by a rerun. A rejection is scoped to the model that
+/// earned it — a materially different model may re-suggest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagSuggestionDisposition {
+    /// The model proposed it; nobody has ruled.
+    Suggested,
+    /// A person took it — the tag link in `asset_tag` is the durable
+    /// half, this row is the audit trail.
+    Accepted,
+    /// A person refused it; the row stays so this model cannot ask
+    /// again.
+    Rejected,
+}
+
+impl TagSuggestionDisposition {
+    /// Slug shared by the DB layer and DTOs.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Suggested => "suggested",
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    /// Parses a slug (unknown values yield a validation error).
+    pub fn parse(slug: &str) -> Result<Self, DomainError> {
+        match slug {
+            "suggested" => Ok(Self::Suggested),
+            "accepted" => Ok(Self::Accepted),
+            "rejected" => Ok(Self::Rejected),
+            other => Err(DomainError::Validation(format!(
+                "unknown tag suggestion disposition: {other:?}"
+            ))),
+        }
+    }
+}
+
+/// One scored tag suggestion with its full derivation identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagEvidence {
+    /// Asset the suggestion is about.
+    pub asset_id: AssetId,
+    /// The proposed channel tag.
+    pub tag_id: TagId,
+    /// Which model proposed it.
+    pub model_id: String,
+    /// Cosine similarity that cleared the floor.
+    pub score: f32,
+    /// Where the suggestion stands.
+    pub disposition: TagSuggestionDisposition,
+    /// When the model proposed it (epoch ms).
+    pub suggested_at_ms: i64,
+    /// When a person ruled, if they have.
+    pub resolved_at_ms: Option<i64>,
 }
 
 /// Cosine similarity of two L2-normalized vectors: the dot product.

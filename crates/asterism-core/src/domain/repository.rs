@@ -51,7 +51,9 @@ use crate::domain::value::{
     PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
     ThreadId,
 };
-use crate::domain::visual::{ModelIdentity, VisualFeature, VisualFeatureKind};
+use crate::domain::visual::{
+    ModelIdentity, TagEvidence, TagSuggestionDisposition, VisualFeature, VisualFeatureKind,
+};
 use crate::error::DomainError;
 
 /// Persistence port for [`Persona`].
@@ -2604,6 +2606,100 @@ pub trait VisualFeatureRepository: Send + Sync {
     /// model produced, returning the row count. The storage half of
     /// model replacement; the caller owns deleting the model's edges
     /// and re-running the walk.
+    async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
+
+    /// Stamps that the tag-suggestion pass ran over this vector,
+    /// whether or not anything cleared the floor — "ran and found
+    /// nothing" must not look like "never ran", or the batch walk
+    /// re-offers the row forever.
+    async fn stamp_tag_suggested(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        at_ms: i64,
+    ) -> Result<(), DomainError>;
+
+    /// Encoded vectors the suggestion pass has not stamped — the tag
+    /// backfill's page, for the library encoded before the pass
+    /// existed (or before a batch was seeded).
+    async fn unsuggested(
+        &self,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        limit: u32,
+    ) -> Result<Vec<AssetId>, DomainError>;
+}
+
+/// Persistence port for scored tag suggestions (#112, P3) — the
+/// open-row queue between a model's proposal and a person's ruling,
+/// the `duplicate_conflict` shape.
+#[async_trait]
+pub trait TagEvidenceRepository: Send + Sync {
+    /// Writes a `suggested` row **only where no row exists** for
+    /// `(asset, tag, model)`, returning whether one was written. The
+    /// if-absent is the whole guarantee: a person's `accepted` /
+    /// `rejected` — and an earlier suggestion's score — are out of the
+    /// machine's reach by construction, not by handler discipline.
+    async fn suggest_if_absent(
+        &self,
+        asset_id: &AssetId,
+        tag_id: &TagId,
+        model_id: &str,
+        score: f32,
+        at_ms: i64,
+    ) -> Result<bool, DomainError>;
+
+    /// Every evidence row of one asset under one model, score-descending.
+    async fn of_asset(
+        &self,
+        asset_id: &AssetId,
+        model_id: &str,
+    ) -> Result<Vec<TagEvidence>, DomainError>;
+
+    /// Records a person's ruling on a `suggested` row. Refuses a row
+    /// that does not exist or is already ruled — re-ruling is a
+    /// conflict to surface, not a write to absorb.
+    async fn resolve(
+        &self,
+        asset_id: &AssetId,
+        tag_id: &TagId,
+        model_id: &str,
+        disposition: TagSuggestionDisposition,
+        at_ms: i64,
+    ) -> Result<(), DomainError>;
+
+    /// Deletes every evidence row one model produced (suggested and
+    /// ruled alike), returning the count. Accepted tags survive in
+    /// `asset_tag`, which this port never touches.
+    async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
+}
+
+/// Persistence port for the Tag-name embedding cache (#112, P3).
+///
+/// Filled lazily by the suggestion job; a rename or merge deletes the
+/// affected rows (the name is the encoder's input), which the tag
+/// adapter owns because the two tables share one database and one
+/// transaction.
+#[async_trait]
+pub trait TagVectorRepository: Send + Sync {
+    /// Every cached tag vector under this identity.
+    async fn vectors(
+        &self,
+        identity: &ModelIdentity,
+    ) -> Result<Vec<(TagId, Vec<f32>)>, DomainError>;
+
+    /// Inserts or replaces one tag's vector under this identity.
+    async fn set_tag_vector(
+        &self,
+        tag_id: &TagId,
+        identity: &ModelIdentity,
+        vector: &[f32],
+        at_ms: i64,
+    ) -> Result<(), DomainError>;
+
+    /// Deletes every cached vector one model produced.
     async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
 }
 

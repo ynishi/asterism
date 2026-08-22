@@ -854,6 +854,8 @@ pub async fn init_core_with(
                     disclosure: disclosure_cell.clone(),
                     visual_features: visual_features.clone(),
                     visual_encoder: visual_encoder_cell.clone(),
+                    tag_evidence: sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                    tag_vectors: sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
                 },
                 job_concurrency,
             )

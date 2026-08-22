@@ -206,6 +206,13 @@ pub struct JobDeps {
     /// scan source of `visual_edge_rebuild`. Held by concrete type like
     /// the repositories above.
     pub visual_features: crate::sqlite::repo::SqliteVisualFeatureRepository,
+    /// Scored tag suggestions (#112, P3) — `visual_tag_suggest` writes
+    /// the `suggested` rows; a person's rulings arrive through the
+    /// application service, never through a job.
+    pub tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository,
+    /// The Tag-name embedding cache (#112, P3), filled lazily by
+    /// `visual_tag_suggest`.
+    pub tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository,
     /// The encoder cell — empty is the supported no-model state, the
     /// same shape as [`disclosure`](Self::disclosure): a profile with no
     /// model package placed leaves it unset, the two visual jobs skip
@@ -510,6 +517,16 @@ async fn handle_asterism_job(
             ),
             None => (
                 Ok("visual_edge_rebuild skipped: no model configured".to_string()),
+                true,
+            ),
+        },
+        Ok(JobKind::VisualTagSuggest) => match env.deps.visual_encoder.get() {
+            Some(_) => (
+                handlers::visual_tag_suggest(&env, &job.payload).await,
+                false,
+            ),
+            None => (
+                Ok("visual_tag_suggest skipped: no model configured".to_string()),
                 true,
             ),
         },
@@ -1187,6 +1204,8 @@ mod tests {
             disclosure,
             visual_features: crate::sqlite::repo::SqliteVisualFeatureRepository::new(isle.clone()),
             visual_encoder: Arc::new(std::sync::OnceLock::new()),
+            tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+            tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
         }
     }
 
@@ -1258,8 +1277,12 @@ mod tests {
                 // Inert here — no preview job runs in this test.
                 previews_dir: std::env::temp_dir().join("asterism-jobs-test-previews"),
                 disclosure: Arc::new(std::sync::OnceLock::new()),
-                visual_features: crate::sqlite::repo::SqliteVisualFeatureRepository::new(isle),
+                visual_features: crate::sqlite::repo::SqliteVisualFeatureRepository::new(
+                    isle.clone(),
+                ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle),
             },
             None,
         )
@@ -1597,6 +1620,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1735,6 +1760,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -1923,6 +1950,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2110,6 +2139,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2312,6 +2343,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool.clone()).await.unwrap(),
         };
@@ -2528,6 +2561,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2624,6 +2659,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         };
@@ -2716,6 +2753,8 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
             queue: open_queue(pool).await.unwrap(),
         }
@@ -3560,8 +3599,15 @@ mod tests {
             Ok(v.iter().map(|x| x / norm).collect())
         }
 
-        fn encode_text(&self, _text: &str) -> Result<Vec<f32>, DomainError> {
-            Err(DomainError::Validation("no text tower in the fake".into()))
+        fn encode_text(&self, text: &str) -> Result<Vec<f32>, DomainError> {
+            // A two-word vocabulary is enough to test the mechanics:
+            // "red…" names land on the red axis, everything else on
+            // the blue one.
+            if text.contains("red") {
+                Ok(vec![1.0, 0.0, 0.0, 0.0])
+            } else {
+                Ok(vec![0.0, 0.0, 1.0, 0.0])
+            }
         }
     }
 
@@ -3676,5 +3722,39 @@ mod tests {
         assert_eq!(edges[0].label.as_deref(), Some("fake-model"));
         assert!(edges[0].weight.unwrap() > 0.9);
         let _ = blue;
+
+        // The tag pass proposes only what the pixels support: the red
+        // image earns the red tag, not the blue one, and evidence is
+        // `suggested` — nothing touches `asset_tag`.
+        use asterism_core::domain::repository::{TagEvidenceRepository, TagRepository};
+        use asterism_core::domain::visual::TagSuggestionDisposition;
+        let red_tag = env.deps.tags.find_or_create("red circle").await.unwrap();
+        let _blue_tag = env.deps.tags.find_or_create("blue square").await.unwrap();
+        let out =
+            handlers::visual_tag_suggest(&env, &serde_json::json!({ "asset_id": red.to_string() }))
+                .await
+                .unwrap();
+        assert!(out.contains("1 tag(s) suggested"), "{out}");
+        let evidence = env
+            .deps
+            .tag_evidence
+            .of_asset(&red, "fake-model")
+            .await
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].tag_id, red_tag.id);
+        assert_eq!(evidence[0].disposition, TagSuggestionDisposition::Suggested);
+        assert!(env.deps.tags.tags_of(&red).await.unwrap().is_empty());
+
+        // The pass stamped the vector, so the backfill has nothing for
+        // this asset; the other two are walked and stamped in turn.
+        let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(out.contains("backfill"), "{out}");
+        let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(out.contains("nothing left"), "{out}");
     }
 }

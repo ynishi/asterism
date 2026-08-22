@@ -6972,6 +6972,58 @@ CREATE TABLE visual_feature (
 CREATE INDEX idx_visual_feature_model ON visual_feature (model_id, feature_kind, status);
 "#;
 
+/// Tag evidence and the tag-vector cache (#112, P3).
+///
+/// `tag_evidence` is the open-row queue between a model's suggestion
+/// and a person's ruling, the `duplicate_conflict` shape: the
+/// suggestion job inserts `suggested` rows **only where no row exists**
+/// (the INSERT-if-absent is what keeps a human `accepted` / `rejected`
+/// out of the machine's reach — the guarantee lives in the primary
+/// key, not in handler branching), a person resolves them, and an
+/// accepted suggestion is *also* written to `asset_tag` through the
+/// tag port, which stays the sole source of truth for what an asset is
+/// tagged. Rejections are keyed per `(tag, model)` so a materially
+/// different future model may re-suggest what this one had rejected.
+///
+/// `tag_vector` caches each Tag name's text embedding under the same
+/// derivation identity as `visual_feature`, filled lazily by the
+/// suggestion job; a rename or merge deletes the affected rows (the
+/// name is the input), and `clear_derived` takes a model's rows with
+/// the rest of its output.
+///
+/// `visual_feature.tag_suggested_at` is the walk stamp: the suggestion
+/// pass writes it whether or not anything cleared the floor, so the
+/// batch walk offers each encoded vector exactly once — "ran and
+/// found nothing" must not look like "never ran".
+const V96_TAG_EVIDENCE: &str = r#"
+CREATE TABLE tag_evidence (
+    asset_id     BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    tag_id       BLOB NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    model_id     TEXT NOT NULL,
+    score        REAL NOT NULL,
+    disposition  TEXT NOT NULL DEFAULT 'suggested'
+        CHECK (disposition IN ('suggested', 'accepted', 'rejected')),
+    suggested_at INTEGER NOT NULL,
+    resolved_at  INTEGER,
+    PRIMARY KEY (asset_id, tag_id, model_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_tag_evidence_open
+    ON tag_evidence (asset_id, disposition);
+
+CREATE TABLE tag_vector (
+    tag_id         BLOB NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    model_id       TEXT NOT NULL,
+    preprocess_ver INTEGER NOT NULL,
+    dim            INTEGER NOT NULL,
+    vector         BLOB NOT NULL,
+    encoded_at     INTEGER NOT NULL,
+    PRIMARY KEY (tag_id, model_id)
+) STRICT, WITHOUT ROWID;
+
+ALTER TABLE visual_feature ADD COLUMN tag_suggested_at INTEGER;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7070,6 +7122,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V93_JSON_MATERIAL_MIME),
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
     Step::Sql(V95_VISUAL_FEATURE),
+    Step::Sql(V96_TAG_EVIDENCE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

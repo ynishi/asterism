@@ -263,6 +263,11 @@ impl TagRepository for SqliteTagRepository {
                     "UPDATE tag SET name = ?1 WHERE id = ?2",
                     params![new_name, uuid],
                 )?;
+                // The name is the input of the cached tag embedding
+                // (#112): a renamed tag's vector describes a word that
+                // no longer exists, so it leaves in the same
+                // transaction and the suggestion job re-encodes lazily.
+                tx.execute("DELETE FROM tag_vector WHERE tag_id = ?1", params![uuid])?;
                 let row = tx.query_row(
                     &format!("SELECT {} FROM tag WHERE id = ?1", TagRow::COLUMNS),
                     params![uuid],
