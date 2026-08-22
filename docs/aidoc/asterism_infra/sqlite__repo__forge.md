@@ -29,13 +29,25 @@ SQLite names the columns rather than the index — `UNIQUE constraint
 failed: change_point.line_id, change_point.parent_id` — so that
 column list is what is matched, and matched exactly.
 
+# And the one place a log is read to decide something
+
+A close that loses its parent is decided again in here, from a line
+and a pursuit read inside the transaction that lost. That read is
+not a comparison: nothing is checked against what the caller
+decided, and the answer comes from the model rather than from this
+adapter. What the transaction contributes is that the logs cannot
+move between the read and the write, which is why the second
+attempt is the last one.
+
 `contains` is what exactness is guarding against, and the direction
 matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
 of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 substring test asked about the ending matches the fork — it reads
 "somebody pushed a pass first" as "this work has already ended",
-and tells a caller that re-reading is pointless when re-reading is
-the whole answer. The other direction cannot happen, which is why
+and an ending is final where a fork is decided again. So the close
+that a second decision would have landed is refused instead, and
+the caller is told the work is over when it is only one pass
+further along. The other direction cannot happen, which is why
 naming it would be naming the wrong risk.
 
 ## Types

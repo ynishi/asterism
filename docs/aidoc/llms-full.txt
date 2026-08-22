@@ -562,6 +562,7 @@ the private design notes.
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
 - [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing passes, looking at
+- [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
@@ -1045,12 +1046,24 @@ own description.
 
 ```text
   open / rename / set_strategy      writes the line's description
+  archive / reopen                  writes the line's standing
   get / states / strategies         reads
+  discard                           reads both logs, writes neither
+                                      — it takes them away
 ```
 
 Nothing here writes to a line's history. A line moves when work
 ends, and that is [`PursuitService::close`](super::PursuitService),
 which is also the only place both logs are written at once.
+
+# The one verb that reads the other log
+
+[`LineService::discard`]. What a drop releases is the union of what
+the line holds and what the work against it holds, so the call that
+drops has to ask the pursuits — and it is the only one here that
+does. Every other verb on this service can answer from a line
+alone, which is why the dependency is worth naming rather than
+assuming.
 
 # What this service is allowed to decide
 
@@ -1098,27 +1111,72 @@ one line do not contend until one of them finishes.
 
 # What this service is allowed to decide
 
-Nothing. It loads what the model needs, calls it, writes back what
-came out, and — for the one operation that can lose a race — reads
-again and asks again. Every refusal in here comes from the model or
-from a port.
+Nothing. It loads what the model needs, calls it, and writes back
+what came out. Every refusal in here comes from the model or from a
+port.
 
-# Losing the race is not an error to report
+# Losing the race is not an error to report, and not answered here
 
 Two pieces of work can finish against one line at the same moment,
-and only one of them lands on the head. The other is told, and this
-service reads the line again and decides again rather than handing
-that back to a caller.
+and only one of them lands on the head. What the loser needs is a
+fresh decision against the line that won — not the same answer
+written again, because normalising against a line that has moved
+may leave less to record than there was, or more to collide with.
 
-It matters that this is a fresh decision and not a retry of the old
-one. Reading again means normalising against a line that has moved,
-so what the work still changes may be less than it was, and what it
-now collides with may be more. Handing back the same answer would
-be writing a decision made against a line that no longer exists.
+Deciding that again is the model's, and the moment to do it belongs
+to whoever is holding the write. So this service hands the store
+[`Deciding`] along with what it decided, and the store asks for a
+second answer under its own lock if the first is refused. Reading
+again from here and trying again would be deciding against a line
+that can move between the read and the write, once per attempt, for
+as many attempts as anybody has patience for.
 
 ## Types
 
 - `PursuitService` — Work use-case service.
+
+
+<!-- asterism_core/application__forge__thread_service.md -->
+# asterism-core::application::forge::thread_service
+
+Saying something about work, and correcting it.
+
+```text
+  open      resolves an anchor, writes the thread and its first message
+  say       writes a message
+  amend     writes a correction
+  rename    writes the thread's title
+
+  get / anchored / about    read
+```
+
+Nothing here touches either log. A conversation about a pass does
+not change what the pass said, and a remark on a change point does
+not move the line — which is why this is a third face rather than
+more verbs on the two that write records.
+
+# An anchor is resolved, not accepted
+
+[`Anchor`] is built from the thing itself rather than from its id,
+so that a thread hanging off something nobody wrote is not a value
+anybody can make. A caller with an id has not got the thing, so
+this service reads it: [`Anchored`] names what to look for, and
+every verb that takes one loads the pursuit or the line before a
+thread exists.
+
+That is the whole of what this service decides, and it decides it
+by asking. The refusals are the model's — an entry a pass did not
+touch is [`Anchor::entry`]'s refusal, not one written here.
+
+# What this service is allowed to decide
+
+Nothing else. It resolves, calls the model, and writes back what
+came out.
+
+## Types
+
+- `Anchored` — What a caller says a thread hangs off, in ids.
+- `ThreadService` — Conversation use-case service.
 
 
 <!-- asterism_core/application__mapping.md -->
@@ -3677,8 +3735,13 @@ means once it is written.
 
 A forge node does not move once recorded, so a wrong time is wrong
 for good. And the chain — not the clock — is what orders a history,
-so a wrong time breaks nothing: no fold reads it, no comparison
-depends on it, nothing fails. What it does instead is answer a
+so a wrong time breaks nothing: no fold reads it and nothing fails.
+One thing is ordered by it and it is the exception that shows the
+rule — a conversation, which has no chain to read an order out of
+(see [`thread`](crate::domain::forge::model::thread)). A backwards
+clock swaps two remarks there and refuses nothing; the one order it
+cannot produce, an answer before its question, is put right when the
+conversation is read. What a wrong time does instead is answer a
 question incorrectly, quietly, for as long as the record exists.
 
 That question is not incidental. A record of a selection has to say
@@ -3739,17 +3802,24 @@ nothing to compensate for afterwards — an ending that half-happened
 would leave the two logs disagreeing about whether work is over,
 and no later read could tell which of them was right.
 
-**Conditional on the head.** `on` is the node the line was at when
-the closing was decided. If the line has moved since, the write is
-refused with [`Conflict`](DomainError::Conflict) and nothing is
-kept — the decision was made against a line that no longer exists,
-and writing it anyway would undo whatever arrived in between.
+**On the parent nothing has taken.** A closing names the node it
+sits on, and two nodes on one parent is a fork. The write refuses
+one, which is what "the line moved since this was decided" looks
+like from underneath — somebody else's change point is already
+where this one would go.
 
-That condition is the whole of the concurrency story. Nothing is
-locked while a caller decides, no order is imposed on who gets to
-close first, and a caller that loses reads the line again and
-decides again — where the collision with whoever won becomes
-visible in the ordinary way.
+**Decided again, once, by whoever is holding the write.** A caller
+that loses that race does not hear about it. The store asks
+[`Deciding`] for an ending against the two logs as the write finds
+them, and that attempt is final: the caller decided outside the
+write, where the line could still move, and this one is decided
+inside it, where it cannot.
+
+That is the whole of the concurrency story. Nothing is locked while
+a caller decides, no order is imposed on who gets to close first,
+and losing costs one re-decision rather than a round trip — where
+the collision with whoever won becomes visible in the ordinary way,
+because deciding again is deciding against the line that won.
 
 # How it is achieved is not stated here
 
@@ -3772,6 +3842,7 @@ with the hard one.
 ## Traits
 
 - `Closings` — Keeps what ending work produced.
+- `Deciding` — Ending work, against the two logs as they are handed over.
 
 
 <!-- asterism_core/domain__forge__lines.md -->
@@ -3805,14 +3876,22 @@ and recording checks its head. Handing back less would move those
 rules to whoever answers this call, and there would be as many
 copies of them as there are implementations.
 
-# There is nothing that removes
+# Nothing removes part of a line, and one call removes all of it
 
-No delete, no truncate, no rewrite of a recorded node — the same
-absence the model has, for the same reason: everything that ever
-happened stays reachable, and a path that exists gets called.
-Renaming a line and changing its strategy are here because they
-move a line's own description, which is a record the history does
-not keep.
+No truncate, no rewrite of a recorded node, no delete of anything
+inside a history — the same absence the model has, for the same
+reason: everything that ever happened stays reachable, and a path
+that exists gets called. Renaming a line, changing its strategy and
+archiving it are here because they move a line's own description,
+which is a record the history does not keep.
+
+[`Lines::discard`] is the exception, and it is whole-line or
+nothing. A line that holds bytes somebody else may want back has to
+be lettable-go of somehow, and the model's answer is that the way
+out is the whole way out: archive it, end the work against it, and
+then it goes with everything under it. Half of it going is the
+state that would leave a history unreadable, which is what every
+other absence here is protecting.
 
 # The error is the shared one
 
@@ -4847,13 +4926,14 @@ that is somewhere else.
 Building the model back from what a store kept.
 
 ```text
-  stored rows ──► restore::line / restore::pursuit
+  stored rows ──► restore::line / restore::pursuit / restore::thread
                        │
                        ├─ the ids come from outside, here and
                        │  nowhere else in the model
                        │
                        └─ the nodes go back through record / push /
-                          end — the same refusals a fresh write meets
+                          end / say — the same refusals a fresh
+                          write meets
 ```
 
 # Why this is one module rather than a constructor per type
@@ -4902,10 +4982,12 @@ wrong is caught by `record` rather than believed.
 - `close` — The node work ended at.
 - `genesis` — The node a line began at.
 - `line` — A whole line, from its genesis and the change points on it.
+- `message` — One thing said, as it was kept, with every correction to it.
 - `meta` — The two stamps a store kept for a thing's description.
 - `open` — The node work opened at.
 - `pursuit` — A whole pursuit, from the node it opened at and what followed.
 - `round` — One pass, as it was kept.
+- `thread` — A whole conversation, from what it hangs off and what was said.
 
 ## Types
 
@@ -5135,12 +5217,23 @@ Everywhere else in this model the chain orders things and a
 timestamp is evidence. A discussion has no chain to read an order
 out of — a reply names its parent, but two replies to one message
 are ordered by nothing else — so messages are read in the order
-they were written.
+they were written, and a conversation reads as a transcript rather
+than as a tree.
 
 It is affordable because nothing derives from it. No fold reads a
 thread, no rule consults one, and no refusal depends on the order
 of two remarks. A clock that steps backwards makes a conversation
 read oddly; it cannot make the line wrong.
+
+The relation is asked one question and no more. An answer cannot be
+read back before its question — [`Thread::say`] refuses a reply to
+something the thread does not hold yet — so [`restore`] moves a
+reply the stamps put before its parent to just after it, and leaves
+everything else where the clock had it. That is the difference
+between a conversation that reads oddly and one that cannot be read
+at all.
+
+[`restore`]: super::restore
 
 ## Types
 
@@ -5354,14 +5447,22 @@ Messages and every correction to them. A conversation is read in
 full or it is read misleadingly: a correction the reader does not
 see is a sentence attributed to somebody who withdrew it.
 
-# Nothing removes and nothing overwrites
+# Nothing here removes and nothing overwrites
 
 No delete, and no method that replaces a message. Correcting one
 appends, which is what [`Thread::amend`] does in memory and what
 this keeps. The absence is the same one the two logs have and it is
 there for the same reason.
 
+One thing does take a conversation, and it is not on this face:
+[`Lines::discard`] takes every thread anchored to the line it
+drops — to a pursuit, a pass, an entry as a pass had it, or a
+change point, which is all four anchors there are. The alternative
+is a remark about something that no longer exists. A conversation
+ends when the line it is about is thrown away, and nowhere else.
+
 [`Thread::amend`]: crate::domain::forge::model::thread::Thread::amend
+[`Lines::discard`]: super::lines::Lines::discard
 
 ## Traits
 
@@ -10268,23 +10369,34 @@ specification of what it owes.
 
 ## Functions
 
+- `anchor_columns` — Flattens an anchor into the columns a store keeps it in.
 - `read_line` — Rebuilds a line from its row, its change points and their rows.
 - `read_pursuit` — Rebuilds work from its row, its nodes and their operations.
+- `read_thread` — Rebuilds a conversation from its row, what was said, and every
+- `take_anchor_apart` — The head row of a thread, anchor flattened into its five columns.
 - `take_change_point_apart` — One change point's rows, for the single-node write a close makes.
 - `take_close_apart` — One ending, for the append a commit makes.
+- `take_message_apart` — One thing said, for the append `say` makes.
 - `take_new_line_apart` — The row for a line that has just been opened.
 - `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
+- `take_revision_apart` — One correction, for the append `amend` makes.
+- `take_revisions_apart` — Every correction to one message, oldest first.
 - `take_round_apart` — One pass, for the append a push makes.
+- `take_thread_apart` — A whole conversation, for the write that opens one.
 
 ## Types
 
 - `ActRow` — An act, flattened the way a row carries one: a stamp, a handle, and
+- `AnchorColumns` — What a thread hangs off, as the five columns that carry it.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
 - `LineRow` — `line` — the repository, and the two things about it that are not
 - `PursuitNodeRow` — `pursuit_node` — a pass or an ending.
 - `PursuitOpRow` — `pursuit_op` — one operation of one pass, in the order it was written.
 - `PursuitRow` — `pursuit` — one line of work.
+- `ThreadMessageRow` — `forge_thread_message` — one thing said.
+- `ThreadRevisionRow` — `forge_thread_revision` — a correction to something said.
+- `ThreadRow` — `forge_thread` — one conversation, and what it hangs off.
 
 
 <!-- asterism_infra/generator_params.md -->
@@ -12154,13 +12266,25 @@ SQLite names the columns rather than the index — `UNIQUE constraint
 failed: change_point.line_id, change_point.parent_id` — so that
 column list is what is matched, and matched exactly.
 
+# And the one place a log is read to decide something
+
+A close that loses its parent is decided again in here, from a line
+and a pursuit read inside the transaction that lost. That read is
+not a comparison: nothing is checked against what the caller
+decided, and the answer comes from the model rather than from this
+adapter. What the transaction contributes is that the logs cannot
+move between the read and the write, which is why the second
+attempt is the last one.
+
 `contains` is what exactness is guarding against, and the direction
 matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
 of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 substring test asked about the ending matches the fork — it reads
 "somebody pushed a pass first" as "this work has already ended",
-and tells a caller that re-reading is pointless when re-reading is
-the whole answer. The other direction cannot happen, which is why
+and an ending is final where a fork is decided again. So the close
+that a second decision would have landed is refused instead, and
+the caller is told the work is over when it is only one pass
+further along. The other direction cannot happen, which is why
 naming it would be naming the wrong risk.
 
 ## Types

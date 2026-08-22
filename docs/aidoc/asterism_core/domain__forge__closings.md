@@ -23,17 +23,24 @@ nothing to compensate for afterwards — an ending that half-happened
 would leave the two logs disagreeing about whether work is over,
 and no later read could tell which of them was right.
 
-**Conditional on the head.** `on` is the node the line was at when
-the closing was decided. If the line has moved since, the write is
-refused with [`Conflict`](DomainError::Conflict) and nothing is
-kept — the decision was made against a line that no longer exists,
-and writing it anyway would undo whatever arrived in between.
+**On the parent nothing has taken.** A closing names the node it
+sits on, and two nodes on one parent is a fork. The write refuses
+one, which is what "the line moved since this was decided" looks
+like from underneath — somebody else's change point is already
+where this one would go.
 
-That condition is the whole of the concurrency story. Nothing is
-locked while a caller decides, no order is imposed on who gets to
-close first, and a caller that loses reads the line again and
-decides again — where the collision with whoever won becomes
-visible in the ordinary way.
+**Decided again, once, by whoever is holding the write.** A caller
+that loses that race does not hear about it. The store asks
+[`Deciding`] for an ending against the two logs as the write finds
+them, and that attempt is final: the caller decided outside the
+write, where the line could still move, and this one is decided
+inside it, where it cannot.
+
+That is the whole of the concurrency story. Nothing is locked while
+a caller decides, no order is imposed on who gets to close first,
+and losing costs one re-decision rather than a round trip — where
+the collision with whoever won becomes visible in the ordinary way,
+because deciding again is deciding against the line that won.
 
 # How it is achieved is not stated here
 
@@ -56,4 +63,5 @@ with the hard one.
 ## Traits
 
 - `Closings` — Keeps what ending work produced.
+- `Deciding` — Ending work, against the two logs as they are handed over.
 

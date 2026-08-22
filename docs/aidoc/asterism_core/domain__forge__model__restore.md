@@ -3,13 +3,14 @@
 Building the model back from what a store kept.
 
 ```text
-  stored rows ──► restore::line / restore::pursuit
+  stored rows ──► restore::line / restore::pursuit / restore::thread
                        │
                        ├─ the ids come from outside, here and
                        │  nowhere else in the model
                        │
                        └─ the nodes go back through record / push /
-                          end — the same refusals a fresh write meets
+                          end / say — the same refusals a fresh
+                          write meets
 ```
 
 # Why this is one module rather than a constructor per type
@@ -58,10 +59,12 @@ wrong is caught by `record` rather than believed.
 - `close` — The node work ended at.
 - `genesis` — The node a line began at.
 - `line` — A whole line, from its genesis and the change points on it.
+- `message` — One thing said, as it was kept, with every correction to it.
 - `meta` — The two stamps a store kept for a thing's description.
 - `open` — The node work opened at.
 - `pursuit` — A whole pursuit, from the node it opened at and what followed.
 - `round` — One pass, as it was kept.
+- `thread` — A whole conversation, from what it hangs off and what was said.
 
 ## Types
 
