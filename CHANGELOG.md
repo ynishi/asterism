@@ -45,6 +45,22 @@ and this project adheres to
 
 ### Added
 
+- **Pixels can propose tags, and a person rules** (#112). The tag phase of the
+  visual layer: after an image is encoded, a `visual_tag_suggest` job scores its
+  vector against every channel Tag name's cached text embedding (filled lazily;
+  a rename re-encodes because the name is the encoder's input) and writes scored
+  `suggested` evidence above a measured floor — 0.12, the knee of the fixture
+  precision/recall sweep, recorded with its curve. A suggestion and a person's
+  tag are different kinds of row by construction: the job inserts only where no
+  `(asset, tag, model)` evidence exists, so an accepted or rejected ruling is
+  structurally out of a rerun's reach; acceptance is what links the tag in
+  `asset_tag`, which stays the sole source of truth, and a rejection is scoped
+  to the model that earned it. The detail pane shows the open suggestions as
+  dashed chips with their scores — accept links, reject dismisses for good — the
+  same verbs served over HTTP (`/asterism/assets/{id}/tag-suggestions` +
+  accept/reject), and `/asterism/models/status` says which model, if any, the
+  process bound.
+
 - **Pixels can propose neighbours** (#112). The encoder phase lands end to end
   behind opt-ins. A `visual_similarity` edge kind joins the synthetic population
   with its own owner: the visual rebuild recomputes it from stored feature
