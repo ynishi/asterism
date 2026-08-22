@@ -134,6 +134,29 @@ pub enum EdgeKind {
     /// [of]: crate::domain::repository::EdgeRepository::edges_of
     /// [incident]: crate::domain::repository::EdgeRepository::edges_incident
     IdenticalTo,
+    /// The two images *look* related, according to a versioned model
+    /// observation (#112) — a suggestion derived from pixels, never an
+    /// assertion by a person.
+    ///
+    /// Synthetic and disposable like the windowed kinds, but with a
+    /// different owner: the **visual** rebuild recomputes it from
+    /// stored feature vectors over the whole persona history, not from
+    /// the ±48 h candidate window — reusing that window is exactly the
+    /// stretching #112 rules out. So the kind lives in
+    /// [`visual_synth_kinds`](Self::visual_synth_kinds), which the
+    /// windowed rebuild's delete never touches, and vice versa
+    /// ([`EdgeRepository::replace_visual_edges_of`][replace-visual]).
+    ///
+    /// The edge carries its derivation identity:
+    /// [`ConstellationEdge::label`] holds the `model_id` that produced
+    /// the score, and [`ConstellationEdge::weight`] holds the cosine
+    /// similarity. Replacing the model invalidates its own edges —
+    /// they are deleted with the rest of that model's derived state,
+    /// not rewritten in place — and a score below the floor writes
+    /// nothing rather than padding a result set.
+    ///
+    /// [replace-visual]: crate::domain::repository::EdgeRepository::replace_visual_edges_of
+    VisualSimilarity,
 }
 
 impl EdgeKind {
@@ -147,18 +170,24 @@ impl EdgeKind {
             Self::Reference => "reference",
             Self::DerivedFrom => "derived_from",
             Self::IdenticalTo => "identical_to",
+            Self::VisualSimilarity => "visual_similarity",
         }
     }
 
-    /// Whether the `edge_rebuild` job owns this kind.
+    /// Whether a rebuild job owns this kind.
     ///
     /// Two populations share the `edge` table and they have opposite
     /// lifecycles:
     ///
     /// - **Synth** (this returns `true`) — recomputed from observable
-    ///   signals (timestamps, keywords, personas). They are disposable
-    ///   by design: the job throws the old set away and derives a fresh
-    ///   one whenever an input changes.
+    ///   signals (timestamps, keywords, personas, stored feature
+    ///   vectors). They are disposable by design: the owning job throws
+    ///   the old set away and derives a fresh one whenever an input
+    ///   changes. Two jobs own disjoint subsets — the windowed
+    ///   `edge_rebuild` owns [`windowed_synth_kinds`][w], the visual
+    ///   rebuild owns [`visual_synth_kinds`][v] — and each delete is
+    ///   scoped to its own subset, so one rebuild cannot destroy the
+    ///   other's work.
     /// - **Provenance** ([`Reference`](Self::Reference),
     ///   [`DerivedFrom`](Self::DerivedFrom),
     ///   [`IdenticalTo`](Self::IdenticalTo)) — *asserted* once by
@@ -174,28 +203,63 @@ impl EdgeKind {
     /// dropped it would leave a conflict a user has already ruled on
     /// with no record that it was ever raised.
     ///
-    /// The write path uses this to scope its delete
-    /// ([`EdgeRepository::replace_synth_edges_of`][port]); before that
-    /// scoping existed the rebuild wiped `derived_from` edges as
+    /// The write paths use the subset lists to scope their deletes
+    /// ([`EdgeRepository::replace_synth_edges_of`][port] /
+    /// [`EdgeRepository::replace_visual_edges_of`][port-v]); before
+    /// that scoping existed the rebuild wiped `derived_from` edges as
     /// collateral.
     ///
+    /// [w]: Self::windowed_synth_kinds
+    /// [v]: Self::visual_synth_kinds
     /// [port]: crate::domain::repository::EdgeRepository::replace_synth_edges_of
+    /// [port-v]: crate::domain::repository::EdgeRepository::replace_visual_edges_of
     pub fn is_synth(&self) -> bool {
         match self {
-            Self::TimeProximity | Self::KeywordOverlap | Self::CoPresence | Self::Cadence => true,
+            Self::TimeProximity
+            | Self::KeywordOverlap
+            | Self::CoPresence
+            | Self::Cadence
+            | Self::VisualSimilarity => true,
             Self::Reference | Self::DerivedFrom | Self::IdenticalTo => false,
         }
     }
 
-    /// Every kind the rebuild owns, for adapters that need the set as
-    /// data (a SQL `IN` list, for instance) rather than as a predicate.
+    /// Every disposable kind, for reasoning about the population as a
+    /// whole. **Not** a delete scope: each rebuild deletes only its own
+    /// subset ([`windowed_synth_kinds`](Self::windowed_synth_kinds) /
+    /// [`visual_synth_kinds`](Self::visual_synth_kinds)).
     pub fn synth_kinds() -> &'static [EdgeKind] {
         &[
             Self::TimeProximity,
             Self::KeywordOverlap,
             Self::CoPresence,
             Self::Cadence,
+            Self::VisualSimilarity,
         ]
+    }
+
+    /// The kinds the windowed `edge_rebuild` owns — recomputed from the
+    /// ±48 h / same-bundle candidate window. This is the delete scope
+    /// of [`EdgeRepository::replace_synth_edges_of`][port].
+    ///
+    /// [port]: crate::domain::repository::EdgeRepository::replace_synth_edges_of
+    pub fn windowed_synth_kinds() -> &'static [EdgeKind] {
+        &[
+            Self::TimeProximity,
+            Self::KeywordOverlap,
+            Self::CoPresence,
+            Self::Cadence,
+        ]
+    }
+
+    /// The kinds the visual rebuild owns — recomputed from stored
+    /// feature vectors over the whole persona history. This is the
+    /// delete scope of
+    /// [`EdgeRepository::replace_visual_edges_of`][port].
+    ///
+    /// [port]: crate::domain::repository::EdgeRepository::replace_visual_edges_of
+    pub fn visual_synth_kinds() -> &'static [EdgeKind] {
+        &[Self::VisualSimilarity]
     }
 
     /// Parses a slug (unknown values yield a validation error).
@@ -208,6 +272,7 @@ impl EdgeKind {
             "reference" => Ok(Self::Reference),
             "derived_from" => Ok(Self::DerivedFrom),
             "identical_to" => Ok(Self::IdenticalTo),
+            "visual_similarity" => Ok(Self::VisualSimilarity),
             other => Err(DomainError::Validation(format!(
                 "unknown edge kind: {other:?}"
             ))),
@@ -509,6 +574,28 @@ mod tests {
         // could do, so deleting it loses the only record that a
         // conflict was ever raised.
         assert!(!EdgeKind::IdenticalTo.is_synth());
+        // A model suggestion is recomputable from stored vectors, so it
+        // is disposable — just not by the windowed rebuild.
+        assert!(EdgeKind::VisualSimilarity.is_synth());
+    }
+
+    /// The two rebuilds own disjoint subsets whose union is exactly the
+    /// synth population — a kind in both would be deleted by a job that
+    /// cannot recompute it, a kind in neither would never be cleaned.
+    #[test]
+    fn the_two_rebuild_scopes_partition_the_synth_kinds() {
+        for kind in EdgeKind::windowed_synth_kinds() {
+            assert!(!EdgeKind::visual_synth_kinds().contains(kind));
+        }
+        let union: Vec<EdgeKind> = EdgeKind::windowed_synth_kinds()
+            .iter()
+            .chain(EdgeKind::visual_synth_kinds())
+            .copied()
+            .collect();
+        assert_eq!(union.len(), EdgeKind::synth_kinds().len());
+        for kind in EdgeKind::synth_kinds() {
+            assert!(union.contains(kind), "{kind:?} has no owning rebuild");
+        }
     }
 
     #[test]
@@ -528,6 +615,7 @@ mod tests {
             EdgeKind::Reference,
             EdgeKind::DerivedFrom,
             EdgeKind::IdenticalTo,
+            EdgeKind::VisualSimilarity,
         ] {
             assert_eq!(
                 kind.is_synth(),
@@ -566,6 +654,7 @@ mod tests {
             EdgeKind::Reference,
             EdgeKind::DerivedFrom,
             EdgeKind::IdenticalTo,
+            EdgeKind::VisualSimilarity,
         ];
         let slugs: std::collections::HashSet<&str> = kinds.iter().map(|k| k.as_str()).collect();
         assert_eq!(slugs.len(), kinds.len(), "two kinds share one slug");

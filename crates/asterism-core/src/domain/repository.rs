@@ -51,6 +51,7 @@ use crate::domain::value::{
     PackId, Page, PersonaId, Progress, SessionId, SnapshotId, SourceKind, StrategyId, TagId,
     ThreadId,
 };
+use crate::domain::visual::{ModelIdentity, VisualFeature, VisualFeatureKind};
 use crate::error::DomainError;
 
 /// Persistence port for [`Persona`].
@@ -2471,21 +2472,41 @@ pub trait EdgeRepository: Send + Sync {
         limit: u32,
     ) -> Result<Vec<IncidentEdge>, DomainError>;
 
-    /// Atomically replaces the **synth** edges originating from
-    /// `asset_id` — the unit of work for the `edge_rebuild` job.
+    /// Atomically replaces the **windowed** synth edges originating
+    /// from `asset_id` — the unit of work for the `edge_rebuild` job.
     ///
-    /// Scoped to [`EdgeKind::is_synth`] on purpose. The job recomputes
-    /// time / keyword / co-presence links from scratch every time an
-    /// input changes, so it must be free to throw the old set away; but
-    /// the same asset can also carry *asserted* links
+    /// Scoped to [`EdgeKind::windowed_synth_kinds`] on purpose. The job
+    /// recomputes time / keyword / co-presence links from scratch every
+    /// time an input changes, so it must be free to throw the old set
+    /// away; but the same asset can also carry *asserted* links
     /// ([`EdgeKind::DerivedFrom`] written at reify or at a correlated
-    /// re-ingest) that nothing can recompute. An unscoped delete takes
-    /// both, and the assertion has no second copy to restore from.
+    /// re-ingest) that nothing can recompute, and visual edges the
+    /// other rebuild derived from vectors this job knows nothing about.
+    /// An unscoped delete takes them all, and the assertion has no
+    /// second copy to restore from.
     ///
-    /// Implementations must ignore any non-synth edge in `edges` rather
-    /// than smuggling provenance in through the rebuild path — use
-    /// [`Self::add_edges`] for those.
+    /// Implementations must ignore any edge outside the windowed
+    /// subset in `edges` — visual and asserted alike — rather than
+    /// letting it ride in through the rebuild path; use
+    /// [`Self::add_edges`] for provenance and
+    /// [`Self::replace_visual_edges_of`] for visual suggestions.
     async fn replace_synth_edges_of(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+    ) -> Result<(), DomainError>;
+
+    /// Atomically replaces the **visual** synth edges originating from
+    /// `asset_id` — the unit of work for the visual rebuild (#112).
+    ///
+    /// The mirror of [`Self::replace_synth_edges_of`], scoped to
+    /// [`EdgeKind::visual_synth_kinds`]: the two rebuilds recompute
+    /// from different inputs on different cadences (the candidate
+    /// window versus the whole persona's stored vectors), so each must
+    /// be free to throw away its own set without touching the other's.
+    /// Implementations must ignore any edge outside the visual subset
+    /// rather than letting a windowed or asserted kind ride in.
+    async fn replace_visual_edges_of(
         &self,
         asset_id: &AssetId,
         edges: Vec<ConstellationEdge>,
@@ -2500,6 +2521,87 @@ pub trait EdgeRepository: Send + Sync {
     /// `(from, to, kind)` is a no-op, so a retried ingest does not
     /// produce a second edge.
     async fn add_edges(&self, edges: Vec<ConstellationEdge>) -> Result<(), DomainError>;
+}
+
+/// One row of the extraction backfill walk: a primary material whose
+/// asset has no stored vector (and no failure record) under the model
+/// identity being walked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VisualScanCandidate {
+    /// Asset to extract for.
+    pub asset_id: AssetId,
+    /// Material ordinal. Always `0` in v1 — the walk offers primary
+    /// materials only; the field is carried for key-shape parity with
+    /// [`VisualFeature`].
+    pub ord: u32,
+    /// Where the original's bytes live.
+    pub locator: String,
+    /// Declared media type, when known — the walk offers the row, the
+    /// extractor decides whether it can decode it.
+    pub mime: Option<String>,
+}
+
+/// Persistence port for model-derived visual features (#112).
+///
+/// Every row carries its [`ModelIdentity`], and every method is scoped
+/// by one: two models' vectors coexist without seeing each other, and
+/// [`Self::clear_derived`] removes exactly one model's output. The
+/// discipline mirrors the material-hash walk — a row is offered once,
+/// whatever came back is recorded (a vector, or a reason it cannot
+/// exist), and the walk moves on.
+#[async_trait]
+pub trait VisualFeatureRepository: Send + Sync {
+    /// Inserts or replaces the vector for `(asset, ord)` under the
+    /// feature's identity and kind.
+    async fn set_visual_feature(&self, feature: VisualFeature) -> Result<(), DomainError>;
+
+    /// Records that extraction cannot produce a vector for this row
+    /// (undecodable bytes, unreadable original), so the walk stops
+    /// offering it. The reason is diagnostic text, not vocabulary.
+    async fn mark_unextractable(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        reason: &str,
+    ) -> Result<(), DomainError>;
+
+    /// The stored vector for one asset's material, if extraction has
+    /// produced one under this identity.
+    async fn feature_of(
+        &self,
+        asset_id: &AssetId,
+        ord: u32,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+    ) -> Result<Option<VisualFeature>, DomainError>;
+
+    /// Every stored vector of one persona under this identity — the
+    /// input of the brute-force neighbour scan. Trashed and folded
+    /// assets are excluded; the payload is `(asset, vector)` because
+    /// the scan needs nothing else.
+    async fn vectors_of_persona(
+        &self,
+        persona_id: &PersonaId,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+    ) -> Result<Vec<(AssetId, Vec<f32>)>, DomainError>;
+
+    /// Image-bearing primary materials with neither a vector nor a
+    /// failure record under this identity — the backfill walk's page.
+    async fn unextracted(
+        &self,
+        identity: &ModelIdentity,
+        kind: VisualFeatureKind,
+        limit: u32,
+    ) -> Result<Vec<VisualScanCandidate>, DomainError>;
+
+    /// Deletes every stored feature (vectors and failure records) one
+    /// model produced, returning the row count. The storage half of
+    /// model replacement; the caller owns deleting the model's edges
+    /// and re-running the walk.
+    async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
 }
 
 /// Persistence port for the pre-generated thumbnail cache
