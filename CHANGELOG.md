@@ -8,6 +8,31 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- **The store no longer guesses at a value it cannot read, or accepts a node the
+  log never had** (#102). Two defects with one root, both found by review after
+  the adapter shipped.
+
+  The row readers coerced every enum with a wildcard arm, so an `outcome` the
+  model has no name for came back as `satisfied` — work that gave up reading as
+  work that landed. A `CHECK` keeps such a row out of an ordinary write, which
+  is why it looked harmless; the read half is what answers for a database
+  somebody repaired by hand, and answering by guessing is the one thing it must
+  not do. Every arm is exhaustive now and an unknown value is a read that fails.
+
+  And a close whose change point named a node the line never had was written and
+  never readable again. The unique indexes refuse a parent used twice, not one
+  that was never there, and the port takes the line id and the closing
+  separately — so a closing decided against one line and committed against
+  another goes in, and `restore::chain` refuses the whole history from then on.
+  Both writes now check the parent against the log they are landing on, inside
+  the transaction where the answer cannot go stale. Not a foreign key, because a
+  parent is either the genesis or a change point, the genesis is a column rather
+  than a row, and SQLite has no key pointing at two tables — giving it a row
+  would mean one whose `from_work` and `by_node` are both NULL, which is the
+  shape the model refuses to have as a type and no better as a table.
+
 ### Changed
 
 - **`WorkLog` is gone; a pursuit is its own chain** (#102). It held `open`,

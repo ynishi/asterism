@@ -96,6 +96,23 @@ fn is_unique_violation(error: &rusqlite::Error, columns: &str) -> bool {
             .is_some_and(|named| named == columns)
 }
 
+/// Refuses a stored value this model does not have a name for.
+///
+/// The alternative is a wildcard arm, and the arm has to pick
+/// something: `_ => Outcome::Satisfied` reads a row nobody could write
+/// as one somebody did, and turns work that gave up into work that
+/// landed. A `CHECK` keeps those rows out today, which is exactly why
+/// the coercion looked harmless — but the read half is what answers
+/// for a database somebody repaired by hand, and answering by guessing
+/// is the one thing it must not do.
+fn unknown<T>(column: &str, value: &str) -> rusqlite::Result<T> {
+    Err(rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        format!("a stored `{column}` says `{value}`, which this model has no name for").into(),
+    ))
+}
+
 /// Reads an act out of the four columns that carry one, named by
 /// prefix so the same three lines serve every table that has a stamp.
 fn act_at(row: &Row<'_>, at: &str, by: &str, kind: &str) -> rusqlite::Result<ActRow> {
@@ -109,8 +126,9 @@ fn act_at(row: &Row<'_>, at: &str, by: &str, kind: &str) -> rusqlite::Result<Act
         })?,
         actor: ActorId::from_uuid(row.get::<_, Uuid>(by)?),
         kind: match row.get::<_, String>(kind)?.as_str() {
+            "user" => "user",
             "system" => "system",
-            _ => "user",
+            other => return unknown(kind, other),
         },
     })
 }
@@ -133,8 +151,9 @@ fn line_row(row: &Row<'_>) -> rusqlite::Result<LineRow> {
             )
         })?,
         standing: match row.get::<_, String>("standing")?.as_str() {
+            "open" => Standing::Open,
             "archived" => Standing::Archived,
-            _ => Standing::Open,
+            other => return unknown("standing", other),
         },
         genesis: ChangePointId::from_uuid(row.get("genesis_id")?),
         genesis_act: act_at(row, "genesis_at", "genesis_by", "genesis_kind")?,
@@ -158,12 +177,12 @@ fn change_row_row(row: &Row<'_>) -> rusqlite::Result<ChangeRowRow> {
     Ok(ChangeRowRow {
         point: ChangePointId::from_uuid(row.get("point_id")?),
         entry: EntryId::from_uuid(row.get("entry_id")?),
-        existence: row
-            .get::<_, Option<String>>("existence")?
-            .map(|value| match value.as_str() {
-                "absent" => Existence::Absent,
-                _ => Existence::Present,
-            }),
+        existence: match row.get::<_, Option<String>>("existence")?.as_deref() {
+            None => None,
+            Some("present") => Some(Existence::Present),
+            Some("absent") => Some(Existence::Absent),
+            Some(other) => return unknown("existence", other),
+        },
         content: row
             .get::<_, Option<Uuid>>("content")?
             .map(Content::from_uuid),
@@ -209,35 +228,38 @@ fn pursuit_row(row: &Row<'_>) -> rusqlite::Result<PursuitRow> {
 }
 
 fn pursuit_node_row(row: &Row<'_>) -> rusqlite::Result<PursuitNodeRow> {
-    let kind = row.get::<_, String>("kind")?;
     Ok(PursuitNodeRow {
         pursuit: PursuitId::from_uuid(row.get("pursuit_id")?),
         id: NodeId::from_uuid(row.get("id")?),
         parent: NodeId::from_uuid(row.get("parent_id")?),
         seq: row.get::<_, i64>("seq")? as usize,
-        kind: if kind == "close" { "close" } else { "round" },
+        kind: match row.get::<_, String>("kind")?.as_str() {
+            "round" => "round",
+            "close" => "close",
+            other => return unknown("kind", other),
+        },
         note: row.get("note")?,
         act: act_at(row, "at", "actor_id", "actor_kind")?,
-        outcome: row
-            .get::<_, Option<String>>("outcome")?
-            .map(|value| match value.as_str() {
-                "abandoned" => Outcome::Abandoned,
-                _ => Outcome::Satisfied,
-            }),
+        outcome: match row.get::<_, Option<String>>("outcome")?.as_deref() {
+            None => None,
+            Some("satisfied") => Some(Outcome::Satisfied),
+            Some("abandoned") => Some(Outcome::Abandoned),
+            Some(other) => return unknown("outcome", other),
+        },
     })
 }
 
 fn pursuit_op_row(row: &Row<'_>) -> rusqlite::Result<PursuitOpRow> {
-    let verb = row.get::<_, String>("verb")?;
     Ok(PursuitOpRow {
         node: NodeId::from_uuid(row.get("node_id")?),
         position: row.get::<_, i64>("position")? as usize,
         entry: EntryId::from_uuid(row.get("entry_id")?),
-        verb: match verb.as_str() {
+        verb: match row.get::<_, String>("verb")?.as_str() {
             "add" => "add",
             "replace" => "replace",
             "rename" => "rename",
-            _ => "remove",
+            "remove" => "remove",
+            other => return unknown("verb", other),
         },
         content: row
             .get::<_, Option<Uuid>>("content")?
@@ -410,6 +432,69 @@ fn insert_work_node(
         )?;
     }
     Ok(())
+}
+
+/// Whether this node is one the line has: its genesis, or a change
+/// point already on it.
+///
+/// Not a foreign key, and not for want of trying. A parent is *either*
+/// the genesis or a change point, the genesis is a column on `line`
+/// rather than a row of its own, and SQLite has no key that points at
+/// two tables. Giving the genesis a `change_point` row would buy one —
+/// at the cost of a row whose `from_work` and `by_node` are both NULL,
+/// which is the pair of empty columns the model refuses to have as a
+/// type, and no better as a table.
+///
+/// So it is a query, asked inside the write's own transaction where
+/// the answer cannot go stale. What it costs is one indexed lookup;
+/// what it buys is that a close cannot name a node this line never
+/// had. Without it the row goes in and the line stops being readable —
+/// `restore::chain` walks from the genesis, finds the point
+/// unreachable, and refuses the whole history. A store that accepts
+/// what it can never hand back is worse than one that refuses.
+fn line_has_node(
+    tx: &Transaction<'_>,
+    line: &LineId,
+    node: ChangePointId,
+) -> rusqlite::Result<bool> {
+    let found: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM line WHERE id = ?1 AND genesis_id = ?2",
+        params![line.as_uuid(), node.as_uuid()],
+        |row| row.get(0),
+    )?;
+    if found > 0 {
+        return Ok(true);
+    }
+    let found: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM change_point WHERE line_id = ?1 AND id = ?2",
+        params![line.as_uuid(), node.as_uuid()],
+        |row| row.get(0),
+    )?;
+    Ok(found > 0)
+}
+
+/// Whether this node is one the pursuit has: the node it opened at, or
+/// a node already on it. The line's question, asked of the other log
+/// and for the same reason.
+fn pursuit_has_node(
+    tx: &Transaction<'_>,
+    pursuit: &PursuitId,
+    node: NodeId,
+) -> rusqlite::Result<bool> {
+    let found: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM pursuit WHERE id = ?1 AND open_node = ?2",
+        params![pursuit.as_uuid(), node.as_uuid()],
+        |row| row.get(0),
+    )?;
+    if found > 0 {
+        return Ok(true);
+    }
+    let found: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM pursuit_node WHERE pursuit_id = ?1 AND id = ?2",
+        params![pursuit.as_uuid(), node.as_uuid()],
+        |row| row.get(0),
+    )?;
+    Ok(found > 0)
 }
 
 /// How many nodes a pursuit already has, which is the next one's
@@ -672,22 +757,30 @@ impl Pursuits for SqliteForge {
                 let seq = next_seq(&tx, &id)?;
                 let (node, ops) = rows::take_round_apart(id, &round, seq);
                 debug_assert_eq!(node.parent, on, "the pass names the node it sits on");
+                if !pursuit_has_node(&tx, &id, node.parent)? {
+                    return Ok(Err(PushRefusal::NotThisPursuit));
+                }
                 match insert_work_node(&tx, &node, &ops) {
                     Ok(()) => {
                         tx.commit()?;
                         Ok(Ok(()))
                     }
-                    Err(error) if is_unique_violation(&error, ONE_NODE_PER_PARENT) => Ok(Err(())),
+                    Err(error) if is_unique_violation(&error, ONE_NODE_PER_PARENT) => {
+                        Ok(Err(PushRefusal::Forked))
+                    }
                     Err(error) => Err(error),
                 }
             })
             .await
             .map_err(infra_err)?;
 
-        landed.map_err(|()| {
-            DomainError::Conflict(format!(
+        landed.map_err(|refusal| match refusal {
+            PushRefusal::Forked => DomainError::Conflict(format!(
                 "work {id} has moved: this pass sits on {on}, and something is already there"
-            ))
+            )),
+            PushRefusal::NotThisPursuit => DomainError::Validation(format!(
+                "this pass sits on {on}, which is not a node of work {id}"
+            )),
         })
     }
 }
@@ -713,6 +806,20 @@ impl Closings for SqliteForge {
                 let tx = conn.transaction()?;
                 let seq = next_seq(&tx, &pursuit)?;
                 let ending = rows::take_close_apart(pursuit, &close, seq);
+
+                // Both parents before either write. A node naming
+                // something this log never had is a row the read half
+                // could not turn back into a value, and the unique
+                // indexes do not catch it — they refuse a parent used
+                // twice, not one that was never there.
+                if !pursuit_has_node(&tx, &pursuit, ending.parent)? {
+                    return Ok(Err(Refusal::NotThisPursuit));
+                }
+                if let Some((point, _)) = &landing
+                    && !line_has_node(&tx, &line, point.parent)?
+                {
+                    return Ok(Err(Refusal::NotThisLine));
+                }
 
                 // The ending first, so a second one is refused by
                 // `idx_pursuit_node_one_close` before anything reaches the
@@ -750,6 +857,12 @@ impl Closings for SqliteForge {
             .map_err(infra_err)?;
 
         landed.map_err(|refusal| match refusal {
+            Refusal::NotThisLine => DomainError::Validation(format!(
+                "this close puts a change point on a node line {line} does not have"
+            )),
+            Refusal::NotThisPursuit => DomainError::Validation(format!(
+                "this ending sits on a node work {pursuit} does not have"
+            )),
             Refusal::LineMoved => DomainError::Conflict(format!(
                 "line {line} has moved: this close lands on {on}, and something is already there"
             )),
@@ -763,6 +876,18 @@ impl Closings for SqliteForge {
     }
 }
 
+/// Why a pass was not written.
+///
+/// Apart from [`Refusal`] because the two verbs refuse different
+/// things, and folding them into one enum would give each a variant
+/// the other can never produce.
+enum PushRefusal {
+    /// Somebody wrote a pass on the node this one sits on.
+    Forked,
+    /// The pass sits on a node this pursuit never had.
+    NotThisPursuit,
+}
+
 /// What refused, and what the caller can do about it.
 ///
 /// Three rather than two, because two of them come from one table and
@@ -770,6 +895,13 @@ impl Closings for SqliteForge {
 /// not. Collapsing them would discard the distinction at the only
 /// place it is ever available.
 enum Refusal {
+    /// The closing names a node this line never had. Not a race — the
+    /// caller decided against something else — so reading again finds
+    /// the same thing.
+    NotThisLine,
+    /// The ending sits on a node this pursuit never had, for the same
+    /// reason and with the same answer.
+    NotThisPursuit,
     /// Something already sits on the change point this close aimed at.
     /// Read the line again and decide again.
     LineMoved,

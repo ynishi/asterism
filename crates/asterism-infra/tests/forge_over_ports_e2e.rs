@@ -105,6 +105,7 @@ struct World {
     /// than through a service — a caller holding a stale value is the
     /// case the port exists for, and a service never produces one.
     lines_port: Arc<dyn Lines>,
+    pursuits_port: Arc<dyn Pursuits>,
     closings: Arc<dyn Closings>,
     persona: PersonaId,
     /// Set only over the in-memory store, for the one test that has to
@@ -160,7 +161,7 @@ impl World {
         Self {
             lines: LineService::new(lines.clone(), rules.clone(), actors.clone(), clock.clone()),
             work: PursuitService::new(
-                pursuits,
+                pursuits.clone(),
                 lines.clone(),
                 closings.clone(),
                 rules,
@@ -170,6 +171,7 @@ impl World {
             ),
             clock,
             lines_port: lines,
+            pursuits_port: pursuits,
             closings,
             persona: PersonaId::new(),
             memory,
@@ -1239,6 +1241,171 @@ async fn a_second_ending_and_a_fork_do_not_read_as_each_other() {
         !said.contains("a pass arrived"),
         "and it is not reported as a fork, which is the misreading a \
          substring test makes: {said}"
+    );
+
+    driver.shutdown().await.unwrap();
+}
+
+/// A close whose change point names a node the line never had is
+/// refused, rather than written and never readable again.
+///
+/// The unique indexes do not catch this: they refuse a parent used
+/// twice, not one that was never there. And it is reachable — the
+/// port takes a line id and a closing separately, so a closing decided
+/// against one line and committed against another names a node the
+/// second line has never heard of. The row would go in, and the line
+/// would stop being readable from then on, because `restore::chain`
+/// walks from the genesis and refuses a history it cannot cover.
+///
+/// Over SQLite only: the in-memory store is asked the same question in
+/// its own test below.
+#[tokio::test]
+async fn a_close_naming_a_node_the_line_never_had_is_refused_over_sqlite() {
+    use asterism_core::domain::forge::closings::Closings;
+    use asterism_core::domain::forge::lines::Lines;
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::closing::close as end_work;
+    use asterism_core::domain::forge::model::value::ActorId;
+
+    let (world, driver) = World::over_sqlite().await;
+    world.clock.set(0);
+
+    // Two lines. Work is opened against the first.
+    let mine = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let theirs = world
+        .lines
+        .open(name("other"), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&mine.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("one"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    // Decided against `mine`, so the change point's parent is `mine`'s
+    // genesis — a node `theirs` has never had.
+    let held = world.work.get(&work.id()).await.unwrap();
+    let closing = end_work(
+        &world.lines.get(&mine.id()).await.unwrap(),
+        &held,
+        Outcome::Satisfied,
+        None,
+        Act::new(at(2), Actor::User(ActorId::new())),
+    )
+    .unwrap();
+
+    let refused = Closings::commit(
+        &*world.closings,
+        &theirs.id(),
+        &work.id(),
+        mine.head(),
+        &closing,
+    )
+    .await
+    .expect_err("that node is not on this line");
+    assert!(
+        matches!(refused, DomainError::Validation(_)),
+        "not a race — reading again finds the same thing: {refused:?}"
+    );
+
+    // And the line it was aimed at is still readable, which is the
+    // whole point: nothing was written that the read half cannot turn
+    // back into a value.
+    Lines::get(&*world.lines_port, &theirs.id())
+        .await
+        .expect("the line still reads")
+        .expect("and is still there");
+    assert_eq!(
+        world.work.get(&work.id()).await.unwrap().outcome(),
+        None,
+        "and the refused close left no ending"
+    );
+
+    driver.shutdown().await.unwrap();
+}
+
+/// A stored node kind the model has no name for is refused rather than
+/// guessed at.
+///
+/// The wildcard this replaces read an unknown `outcome` as
+/// `satisfied` — work that gave up coming back as work that landed.
+/// A CHECK keeps such a row out of an ordinary write, which is why the
+/// coercion looked harmless; the read half is what answers for a
+/// database somebody repaired by hand.
+#[tokio::test]
+async fn a_stored_outcome_this_model_has_no_name_for_is_refused() {
+    use asterism_core::domain::forge::pursuits::Pursuits;
+
+    let (world, driver) = World::over_sqlite().await;
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("one"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+    world
+        .work
+        .close(&work.id(), Outcome::Abandoned, None, &who("boro"))
+        .await
+        .unwrap();
+
+    // Reach past the CHECK the way a repair job would, then read.
+    let isle = world.isle.clone().expect("over sqlite");
+    let id = *work.id().as_uuid();
+    isle.call(move |conn| {
+        conn.pragma_update(None, "ignore_check_constraints", "ON")?;
+        let moved = conn.execute(
+            "UPDATE pursuit_node SET outcome = 'finished' \
+              WHERE pursuit_id = ?1 AND kind = 'close'",
+            rusqlite::params![id],
+        )?;
+        conn.pragma_update(None, "ignore_check_constraints", "OFF")?;
+        assert_eq!(moved, 1, "one ending to edit");
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let refused = Pursuits::get(&*world.pursuits_port, &work.id()).await;
+    assert!(
+        refused.is_err(),
+        "a value nobody could have written does not come back as one somebody did: \
+         {refused:?}"
     );
 
     driver.shutdown().await.unwrap();
