@@ -1123,6 +1123,26 @@
       "docs": "What a container's metadata declares about the file's origin.\n\nThe parent-side reading of [`read_evidence`], exposed on its own\nbecause it is what a caller asks about a *parent* — establishing\n[`ParentEvidence::origin`] without materialising the rest. A blob\nwhose keys declare a generator is [`Synthetic`](ParentOrigin);\none that names a camera and no generator is\n[`NotSynthetic`](ParentOrigin); no metadata, an unreadable blob, or\nkeys that say neither is [`Unknown`](ParentOrigin) — and stays so,\nbecause absence is not a declaration."
     },
     {
+      "path": "asterism_core::domain::disclosure::generator_keys",
+      "kind": "module",
+      "docs": "Keys that only a generator writes, one per family.\n\nMatched by presence rather than by value: what identifies a ComfyUI\nexport is *that it carries a `workflow`*, not what the workflow says.\nA container that happens to carry a keyword of the same name from\nsomewhere else is a false positive this accepts — it costs a\n`trainedAlgorithmicMedia` on a file that is not one, which is the\ndirection that would matter, so each entry is a keyword no general\ntool writes rather than a plausible-sounding word.\n\nPublic because family membership is one fact with two readers: the\nevidence rule here, and the parameter extraction registry\n(`asterism-infra`), which routes a row to a family's judgement by\nthe same keys. A second list on that side would be a way for \"what\ncounts as ComfyUI\" to disagree with itself."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::generator_keys::A1111",
+      "kind": "constant",
+      "docs": "AUTOMATIC1111 and its forks write one text blob under this\nkeyword — the prompt, the negative prompt and the sampler\nsettings in one line-oriented value."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::generator_keys::COMFY",
+      "kind": "constant",
+      "docs": "ComfyUI writes both of these: the API-format graph it executed\nand the editor graph it was authored in."
+    },
+    {
+      "path": "asterism_core::domain::disclosure::generator_keys::COMFY_API_GRAPH",
+      "kind": "constant",
+      "docs": "The first of [`COMFY`] under its own name: the API-format graph\nthe run executed. Presence is all the evidence rule reads; the\nextraction registry also reads the *value*, and a bare\n`\"prompt\"` on that side would be the second copy of this fact\nthe module doc above says not to keep."
+    },
+    {
       "path": "asterism_core::domain::disclosure::outcome",
       "kind": "module",
       "docs": "What applying a record to a file actually achieved.\n\nHere rather than beside the writer that produces it, because two\nlayers need to name it and neither may depend on the other: the port\nis declared in `asterism-core` (ports live in the core; adapters\nnever define traits) and the implementation lives in\n`asterism-infra`. This crate is the one both can already see.\n\n# Why a failure lives in the value and not only in the error\n\nApplying a disclosure is two operations against one file, and either\ncan fail without the other being affected. An error return can say\nonly \"the whole thing failed\", so a writer that reports a failed\nmanifest that way discards the packet it had already produced —\nwhich is how an expired certificate came to withhold the half that\nneeds no certificate at all.\n\nSo the two halves report their own outcome, including their own\nfailure, and the error channel is left for the case where nothing\ncould be attempted: the file could not be read, or its container is\none this build does not write into. What a caller does with a\nhalf that failed is the caller's decision — a manifest that did not\nland while the packet did is still a disclosed file, and calling\nthat an export failure is the judgement this type exists to let\nsomebody else make."
@@ -1165,7 +1185,7 @@
     {
       "path": "asterism_core::domain::disclosure::record_for",
       "kind": "function",
-      "docs": "Builds the record for one artefact.\n\n`meta_kv` is the canonical metadata of the material the file came\nfrom; `parents` are its recorded `derived_from` edges, in the order\nthey were read; `asserted` is the person's own source-type statement\nwhen one is recorded ([`asserted_source_type`]); `prompts` decides\nwhether the prompt is disclosed at all ([`PromptDisclosure`])."
+      "docs": "Builds the record for one artefact.\n\n`meta_kv` is the canonical metadata of the material the file came\nfrom; `params` is what the extraction port read out of that same\nmetadata ([`GeneratorParams`], [`GeneratorParams::not_yet`] where\nnothing ran); `parents` are its recorded `derived_from` edges, in\nthe order they were read; `asserted` is the person's own source-type\nstatement when one is recorded ([`asserted_source_type`]); `prompts`\ndecides whether the prompt is disclosed at all\n([`PromptDisclosure`])."
     },
     {
       "path": "asterism_core::domain::disclosure::source_type",
@@ -1911,6 +1931,26 @@
       "path": "asterism_core::domain::forge::value::PursuitTxId",
       "kind": "struct",
       "docs": "Surrogate id for a `PursuitTx` — one entry in a pursuit's\nappend-only membership ledger (#22, model on #63): an asset\nentering, a mid-work removal, or its reversal. Membership is\nderived by \"latest tx per asset wins\" over `(created_at, id)`;\nthe id tie-break makes that answer total and stable when two\ngestures share a millisecond, though within one it is an\nordering, not a causal claim."
+    },
+    {
+      "path": "asterism_core::domain::generator_params",
+      "kind": "module",
+      "docs": "`generator_params` — what an extraction concluded about the\nparameters a generator recorded, and the port the conclusion comes\nthrough.\n\nThe values in question — the checkpoint a run loaded, the seed it\nsampled with — are not stored as fields. They sit inside the\nfree-text metadata values the import path copied verbatim\n([`material_meta`](crate::domain::material_meta)'s rule: strings,\nunparsed), and reading them out is a parser, not a mapping. What is\nextractable is decided **per file, not per generator family**: the\nsame input on the same node class holds a literal in one graph and a\nlink to another node's output in the next. That is why this is a\nport with an outcome vocabulary rather than a lookup table.\n\n# The three layers, and which one this is\n\nThe split is the one [`probe`](crate::domain::probe) argues for —\n\"the parser is the part that grows per format, and it is the part\nthat belongs furthest from here\":\n\n| layer | holds |\n|---|---|\n| this module, in the core | the outcome vocabulary and the trait |\n| `asterism-media-probe` | the pure grammar — the A1111 line tokeniser, a function of a string with no opinion about which keys matter |\n| `asterism-infra` | the judgement and the registry — which input key names a seed, what a two-element array means, which families are recognised at all |\n\n# Not on the artefact probe\n\nThat port is keyed by container mime and selected before any byte is\nread, and a generator family is not a mime — one `image/png` may be\nComfyUI, A1111, InvokeAI or NovelAI, knowable only after the\nmetadata is read. It already refused a third axis once, for raw\nmetadata, on the same reasoning\n([`ArtefactProbe::meta_raw_of`](crate::domain::probe::ArtefactProbe::meta_raw_of)).\nThe input here is the **stored metadata rows** — the canonical\nobject [`read_evidence`](crate::domain::disclosure::read_evidence)\nalready parses — so an extractor re-runs across the whole library\nwithout opening a single file.\n\n# Workflow identity is not here\n\nIt is not extractable from either family — the ComfyUI graph mints\nno run id, and A1111's grammar has no such field — so there is no\n`workflow` member of [`GeneratorParams`] to be perpetually absent.\nIf a workflow identity ever reaches the manifest it is a value the\nuser supplies, on the hand-assertion footing\n[`asserted_source_type`](crate::domain::disclosure::asserted_source_type)\nestablished, not an extraction.\n\n# Extraction does not touch the meta axis\n\nThe digest and its canonical form say one thing — *the container\ncarried this text* — and extraction changes neither that input nor\nthat definition. An extractor reads the stored values; it never\nrewrites them, so every digest stands exactly as it did before the\nextractor existed."
+    },
+    {
+      "path": "asterism_core::domain::generator_params::GeneratorParams",
+      "kind": "struct",
+      "docs": "One extraction's conclusion about every parameter it answers for.\n\nOne field per parameter rather than a map: the parameters are a\nfixed vocabulary this module owns, and a map would let a caller ask\nabout a parameter nobody extracts and receive an invented answer."
+    },
+    {
+      "path": "asterism_core::domain::generator_params::ParamExtraction",
+      "kind": "enum",
+      "docs": "What an extraction concluded about one parameter.\n\nSix states rather than `Option<String>`, for the reason\n[`MaterialMeta`](crate::domain::material_meta::MaterialMeta) gives\nthree: the ways of having no value lead somewhere different, and\ncollapsing them loses the difference for good. The load-bearing\ndistinction is [`Indirect`](Self::Indirect) against\n[`Absent`](Self::Absent) — a value behind a graph link is\nrecoverable later by a walk, and a reading that filed it as absent\nwould leave a future improvement no way to find the rows it should\nrevisit. The same argument the raw-metadata column makes for keeping\nits \"not captured\" state.\n\nAmbiguity refuses rather than guesses: a missing value is a gap, a\nwrong value is a false statement, and only the second is\nunrecoverable once it reaches a signed claim."
+    },
+    {
+      "path": "asterism_core::domain::generator_params::ParamExtractor",
+      "kind": "trait",
+      "docs": "Reads generator parameters out of stored metadata.\n\nThe port the judgement layer implements. Input is the canonical\nmetadata object a probe stored\n([`material_meta`](crate::domain::material_meta)'s form), which is\nwhat makes an implementation a pure function over rows: no I/O, no\nfile, no registry of containers — those all happened when the row\nwas written."
     },
     {
       "path": "asterism_core::domain::group",
