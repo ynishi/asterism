@@ -1,0 +1,31 @@
+{
+  "crate": "asterism-vision",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_vision::package",
+      "kind": "module",
+      "docs": "The model package: the data contract between model *preparation*\nand model *use* (#112).\n\nA package is a directory holding the ONNX towers, the tokenizer,\nand a `manifest.json` naming what they are: the model id, vector\ndimension, preprocessing revision, license, official source, and a\nSHA-256 per file. Preparation (the provider-side tooling) writes\npackages; this module is the app-side reader — no logic crosses the\nboundary in either direction, only these bytes.\n\n[`ModelPackage::open`] verifies every digest before the package is\nusable. Verification is at open time, not per encode: the open\nhappens once per binding (startup, or a model install), and a\npackage that fails it is reported as the corruption it is rather\nthan served."
+    },
+    {
+      "path": "asterism_vision::package::MANIFEST_FILE",
+      "kind": "constant",
+      "docs": "Name of the manifest file inside a package directory."
+    },
+    {
+      "path": "asterism_vision::package::ModelPackage",
+      "kind": "struct",
+      "docs": "An opened, digest-verified package."
+    },
+    {
+      "path": "asterism_vision::package::PackageFile",
+      "kind": "struct",
+      "docs": "One file the package carries, with the digest that pins it."
+    },
+    {
+      "path": "asterism_vision::package::PackageManifest",
+      "kind": "struct",
+      "docs": "`manifest.json` — the identity half of the data contract."
+    }
+  ]
+}

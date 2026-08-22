@@ -96,6 +96,16 @@ x509-parser = { workspace = true }
 # until the provenance writer's own temporary was found to be a
 # deterministic sibling opened with neither.
 tempfile = "3"
+# The model-use encoder (#112), behind the `vision` feature so that a
+# default workspace build never downloads or links onnxruntime — only
+# a binary that intends to bind a model turns it on.
+asterism-vision = { path = "../asterism-vision", features = ["onnx"], optional = true }
+
+[features]
+# ONNX encoder path (#112): the `vision::OrtVisualEncoder` adapter that
+# lets the composition root bind a model package into the job engine's
+# encoder cell.
+vision = ["dep:asterism-vision"]
 
 [dev-dependencies]
 tempfile = "3"

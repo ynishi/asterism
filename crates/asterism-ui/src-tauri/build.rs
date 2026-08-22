@@ -66,8 +66,8 @@ use asterism_contract::dto::{
     MergeAssetsDto, MergeRefusalDto, MergeTotalsDto, MergeWarningDto, MessageDto, MessageRefDto,
     ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
     RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto,
-    SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
-    VideoPreviewDto,
+    SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto,
+    ThreadAnchorDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery, RandomAssetsQuery,
@@ -186,6 +186,8 @@ fn main() {
         AssetIndexPageDto,
         AssetDto,
         TagDto,
+        TagSuggestionDto,
+        VisualModelStatusDto,
         TagCountDto,
         SessionDto,
         SessionPageDto,

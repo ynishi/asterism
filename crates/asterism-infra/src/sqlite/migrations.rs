@@ -6938,6 +6938,92 @@ UPDATE material
    AND content_region_hash_status = 'unsupported';
 "#;
 
+/// The visual-feature projection (#112): one row per encoded material
+/// per model configuration, plus the failure records that retire a row
+/// from the extraction walk.
+///
+/// The key carries the full derivation identity — `model_id`,
+/// `feature_kind`, with `preprocess_ver` beside them — so two models'
+/// vectors coexist without seeing each other and replacing a model
+/// deletes exactly its own rows (`DELETE … WHERE model_id = ?`), never
+/// a value a person asserted. `dim` is stored rather than derived so a
+/// blob whose length disagrees with its declared identity is detectably
+/// corrupt.
+///
+/// Rows exist only once extraction has answered: `computed` carries the
+/// vector, `failed` carries a reason and no vector (undecodable bytes,
+/// unreadable original) — absence *is* the pending state, which is what
+/// lets the walk's `NOT EXISTS` predicate offer a row exactly once.
+const V99_VISUAL_FEATURE: &str = r#"
+CREATE TABLE visual_feature (
+    asset_id       BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    ord            INTEGER NOT NULL,
+    model_id       TEXT NOT NULL,
+    feature_kind   TEXT NOT NULL,
+    preprocess_ver INTEGER NOT NULL,
+    dim            INTEGER,
+    vector         BLOB,
+    status         TEXT NOT NULL CHECK (status IN ('computed', 'failed')),
+    reason         TEXT,
+    extracted_at   INTEGER NOT NULL,
+    PRIMARY KEY (asset_id, ord, model_id, feature_kind)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_visual_feature_model ON visual_feature (model_id, feature_kind, status);
+"#;
+
+/// Tag evidence and the tag-vector cache (#112, P3).
+///
+/// `tag_evidence` is the open-row queue between a model's suggestion
+/// and a person's ruling, the `duplicate_conflict` shape: the
+/// suggestion job inserts `suggested` rows **only where no row exists**
+/// (the INSERT-if-absent is what keeps a human `accepted` / `rejected`
+/// out of the machine's reach — the guarantee lives in the primary
+/// key, not in handler branching), a person resolves them, and an
+/// accepted suggestion is *also* written to `asset_tag` through the
+/// tag port, which stays the sole source of truth for what an asset is
+/// tagged. Rejections are keyed per `(tag, model)` so a materially
+/// different future model may re-suggest what this one had rejected.
+///
+/// `tag_vector` caches each Tag name's text embedding under the same
+/// derivation identity as `visual_feature`, filled lazily by the
+/// suggestion job; a rename or merge deletes the affected rows (the
+/// name is the input), and `clear_derived` takes a model's rows with
+/// the rest of its output.
+///
+/// `visual_feature.tag_suggested_at` is the walk stamp: the suggestion
+/// pass writes it whether or not anything cleared the floor, so the
+/// batch walk offers each encoded vector exactly once — "ran and
+/// found nothing" must not look like "never ran".
+const V100_TAG_EVIDENCE: &str = r#"
+CREATE TABLE tag_evidence (
+    asset_id     BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    tag_id       BLOB NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    model_id     TEXT NOT NULL,
+    score        REAL NOT NULL,
+    disposition  TEXT NOT NULL DEFAULT 'suggested'
+        CHECK (disposition IN ('suggested', 'accepted', 'rejected')),
+    suggested_at INTEGER NOT NULL,
+    resolved_at  INTEGER,
+    PRIMARY KEY (asset_id, tag_id, model_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_tag_evidence_open
+    ON tag_evidence (asset_id, disposition);
+
+CREATE TABLE tag_vector (
+    tag_id         BLOB NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
+    model_id       TEXT NOT NULL,
+    preprocess_ver INTEGER NOT NULL,
+    dim            INTEGER NOT NULL,
+    vector         BLOB NOT NULL,
+    encoded_at     INTEGER NOT NULL,
+    PRIMARY KEY (tag_id, model_id)
+) STRICT, WITHOUT ROWID;
+
+ALTER TABLE visual_feature ADD COLUMN tag_suggested_at INTEGER;
+"#;
+
 /// V95 — the forge's first model goes, tables and all (#102).
 ///
 /// What these eight tables held is the shape the forge was designed
@@ -7439,6 +7525,8 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V96_FORGE_TABLES),
     Step::Sql(V97_FORGE_ACTOR),
     Step::Sql(V98_FORGE_THREADS),
+    Step::Sql(V99_VISUAL_FEATURE),
+    Step::Sql(V100_TAG_EVIDENCE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

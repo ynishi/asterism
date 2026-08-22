@@ -67,6 +67,7 @@
     PromoteTagToGroupResult,
     SnapshotDto,
     TagDto,
+    TagSuggestionDto,
     VideoPreviewDto,
   } from "./bindings";
 
@@ -910,6 +911,75 @@
       return true;
     }
     return false;
+  }
+
+  // -------------------------------------------------------------------
+  // Model-proposed tag suggestions (#112). Loaded per asset; only the
+  // open (`suggested`) rows render — a ruling removes the chip, and
+  // the model never re-proposes a ruled pair.
+  // -------------------------------------------------------------------
+  let tagSuggestions: TagSuggestionDto[] = $state([]);
+  const openTagSuggestions = $derived(
+    tagSuggestions.filter((s) => s.disposition === "suggested"),
+  );
+
+  $effect(() => {
+    const assetId = detail?.asset.id ?? null;
+    untrack(() => {
+      tagSuggestions = [];
+      if (assetId !== null) void loadTagSuggestions(assetId);
+    });
+  });
+
+  async function loadTagSuggestions(assetId: string) {
+    try {
+      const rows = await invoke<TagSuggestionDto[]>("list_tag_suggestions", {
+        assetId,
+      });
+      if (detail?.asset.id === assetId) tagSuggestions = rows;
+    } catch (error) {
+      // A build without the feature answers empty, so an error here is
+      // worth a console line but not a status banner.
+      console.warn("list_tag_suggestions failed", error);
+    }
+  }
+
+  async function acceptTagSuggestion(s: TagSuggestionDto) {
+    if (!detail) return;
+    try {
+      await invoke("accept_tag_suggestion", {
+        assetId: detail.asset.id,
+        tagId: s.tag_id,
+      });
+      tagSuggestions = tagSuggestions.map((row) =>
+        row.tag_id === s.tag_id ? { ...row, disposition: "accepted" } : row,
+      );
+      if (!detail.tags.some((t) => t.id === s.tag_id)) {
+        detail.tags = [...detail.tags, { id: s.tag_id, name: s.name, axis: null }];
+      }
+      detailCacheInvalidate(detail.asset.id);
+      await tagCatalog.loadCounts(activeFilter.activePersona);
+      assetPageCatalog.invalidateDetail(detail.asset.id);
+    } catch (error) {
+      console.warn("accept_tag_suggestion failed", error);
+      onSetStatus(`accept_tag_suggestion error: ${JSON.stringify(error)}`);
+    }
+  }
+
+  async function rejectTagSuggestion(s: TagSuggestionDto) {
+    if (!detail) return;
+    try {
+      await invoke("reject_tag_suggestion", {
+        assetId: detail.asset.id,
+        tagId: s.tag_id,
+      });
+      tagSuggestions = tagSuggestions.map((row) =>
+        row.tag_id === s.tag_id ? { ...row, disposition: "rejected" } : row,
+      );
+    } catch (error) {
+      console.warn("reject_tag_suggestion failed", error);
+      onSetStatus(`reject_tag_suggestion error: ${JSON.stringify(error)}`);
+    }
   }
 
   // -------------------------------------------------------------------
@@ -2013,6 +2083,37 @@
               <button type="submit" class="tag-add-btn" title="Attach tag" aria-label="Attach tag">+</button>
             </form>
 
+            {#if openTagSuggestions.length > 0}
+              <h4>Suggested</h4>
+              <div class="tags">
+                {#each openTagSuggestions as s (s.tag_id)}
+                  <span class="tag-chip-group">
+                    <span
+                      class="label label-tag tag-suggestion-chip"
+                      title={`Proposed by ${s.model_id} at ${s.score.toFixed(2)}`}
+                    >
+                      # {s.name}
+                      <span class="tag-suggestion-score">{s.score.toFixed(2)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      class="tag-chip-action tag-suggestion-accept"
+                      onclick={() => acceptTagSuggestion(s)}
+                      title={`Accept #${s.name}`}
+                      aria-label={`Accept suggested tag ${s.name}`}
+                    >✓</button>
+                    <button
+                      type="button"
+                      class="tag-chip-action tag-chip-detach"
+                      onclick={() => rejectTagSuggestion(s)}
+                      title={`Reject #${s.name} — this model will not propose it again`}
+                      aria-label={`Reject suggested tag ${s.name}`}
+                    >×</button>
+                  </span>
+                {/each}
+              </div>
+            {/if}
+
             {#if groupCatalog.counts.data.length > 0}
               <h4>Groups</h4>
               <div class="tags">
@@ -2472,6 +2573,25 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
+  }
+
+  /* A suggestion is not a tag the asset has: the dashed border keeps
+     the distinction visible at a glance, and the score rides along so
+     ruling on a weak match is an informed act. */
+  .tag-suggestion-chip {
+    border-style: dashed;
+    opacity: 0.85;
+    cursor: default;
+  }
+
+  .tag-suggestion-score {
+    font-size: 0.75em;
+    opacity: 0.65;
+    margin-left: 0.25rem;
+  }
+
+  .tag-suggestion-accept {
+    color: var(--accent, #7bd88f);
   }
 
   /* -----------------------------------------------------------------

@@ -69,9 +69,11 @@ the domain types.
 - `SnapshotDto` — An immutable, content-addressed freeze of an ordered asset set —
 - `TagCountDto` — A tag paired with the number of assets currently attached to it,
 - `TagDto` — A single channel tag.
+- `TagSuggestionDto` — One model-proposed tag suggestion awaiting (or carrying) a ruling
 - `ThreadAnchorDto` — Thread anchor — what a `ThreadDto` hangs off of.
 - `ThreadDto` — Thread container payload.
 - `VideoPreviewDto` — Where a video's preview rendition stands
+- `VisualModelStatusDto` — The visual model a running process has bound, if any (#112).
 
 ## Constants
 

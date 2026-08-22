@@ -15,6 +15,9 @@ use uuid::Uuid;
 
 use crate::sqlite::map::infra_err;
 
+/// Bind-parameter tuple of one edge insert, in column order.
+type EdgeParams = (Uuid, Uuid, Uuid, String, Option<String>, Option<f64>);
+
 /// Primitive row built inside the isle closure.
 struct EdgeRow {
     id: Uuid,
@@ -61,6 +64,67 @@ impl SqliteEdgeRepository {
     /// Wraps a writer `AsyncIsle` handle.
     pub fn new(isle: AsyncIsle) -> Self {
         Self { isle }
+    }
+
+    /// The shared unit of work of the two rebuild ports: atomically
+    /// replace the edges of `owned_kinds` that originate from
+    /// `asset_id`. The `kind IN (…)` clause is what keeps everything
+    /// outside the owning rebuild's subset alive across a pass, and
+    /// edges outside the subset are dropped at the door rather than
+    /// persisted where the next pass would delete them.
+    async fn replace_owned_kinds(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+        owned_kinds: &'static [EdgeKind],
+    ) -> Result<(), DomainError> {
+        let uuid = *asset_id.as_uuid();
+        let rows: Vec<EdgeParams> = edges
+            .iter()
+            .filter(|e| owned_kinds.contains(&e.kind))
+            .map(|e| {
+                (
+                    *e.id.as_uuid(),
+                    *e.from.as_uuid(),
+                    *e.to.as_uuid(),
+                    e.kind.as_str().to_string(),
+                    e.label.clone(),
+                    e.weight.map(|w| w as f64),
+                )
+            })
+            .collect();
+        let kind_slugs: Vec<String> = owned_kinds.iter().map(|k| k.as_str().to_string()).collect();
+        self.isle
+            .call(move |conn| {
+                let placeholders = std::iter::repeat_n("?", kind_slugs.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let delete_sql =
+                    format!("DELETE FROM edge WHERE from_asset = ?1 AND kind IN ({placeholders})");
+                let tx = conn.transaction()?;
+                {
+                    let mut delete_params: Vec<&dyn rusqlite::ToSql> =
+                        Vec::with_capacity(kind_slugs.len() + 1);
+                    delete_params.push(&uuid);
+                    for kind in &kind_slugs {
+                        delete_params.push(kind);
+                    }
+                    tx.execute(&delete_sql, delete_params.as_slice())?;
+                }
+                {
+                    let mut stmt = tx.prepare(
+                        "INSERT OR IGNORE INTO edge (id, from_asset, to_asset, kind, label, weight)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    )?;
+                    for (id, from, to, kind, label, weight) in &rows {
+                        stmt.execute(params![id, from, to, kind, label, weight])?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(infra_err)
     }
 }
 
@@ -171,71 +235,28 @@ impl EdgeRepository for SqliteEdgeRepository {
         asset_id: &AssetId,
         edges: Vec<ConstellationEdge>,
     ) -> Result<(), DomainError> {
-        let uuid = *asset_id.as_uuid();
-        // Provenance handed to the rebuild path is dropped rather than
-        // written: the port says this method owns synth edges only, and
-        // silently persisting an assertion here would make it a rebuild
-        // input — deleted by the very next pass.
-        let rows: Vec<(Uuid, Uuid, Uuid, String, Option<String>, Option<f64>)> = edges
-            .iter()
-            .filter(|e| e.kind.is_synth())
-            .map(|e| {
-                (
-                    *e.id.as_uuid(),
-                    *e.from.as_uuid(),
-                    *e.to.as_uuid(),
-                    e.kind.as_str().to_string(),
-                    e.label.clone(),
-                    e.weight.map(|w| w as f64),
-                )
-            })
-            .collect();
-        let synth_kinds: Vec<String> = EdgeKind::synth_kinds()
-            .iter()
-            .map(|k| k.as_str().to_string())
-            .collect();
-        self.isle
-            .call(move |conn| {
-                // Unit of work for the `edge_rebuild` job: atomically
-                // replace the synth edges that originate from
-                // `asset_id`. The `kind IN (…)` clause is what keeps an
-                // asserted `derived_from` alive across a rebuild.
-                let placeholders = std::iter::repeat_n("?", synth_kinds.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let delete_sql =
-                    format!("DELETE FROM edge WHERE from_asset = ?1 AND kind IN ({placeholders})");
-                let tx = conn.transaction()?;
-                {
-                    let mut delete_params: Vec<&dyn rusqlite::ToSql> =
-                        Vec::with_capacity(synth_kinds.len() + 1);
-                    delete_params.push(&uuid);
-                    for kind in &synth_kinds {
-                        delete_params.push(kind);
-                    }
-                    tx.execute(&delete_sql, delete_params.as_slice())?;
-                }
-                {
-                    let mut stmt = tx.prepare(
-                        "INSERT OR IGNORE INTO edge (id, from_asset, to_asset, kind, label, weight)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )?;
-                    for (id, from, to, kind, label, weight) in &rows {
-                        stmt.execute(params![id, from, to, kind, label, weight])?;
-                    }
-                }
-                tx.commit()?;
-                Ok(())
-            })
+        // The windowed rebuild owns exactly the windowed kinds: an
+        // asserted `derived_from` must survive it, and so must a
+        // `visual_similarity` the visual rebuild derived from vectors
+        // this job knows nothing about.
+        self.replace_owned_kinds(asset_id, edges, EdgeKind::windowed_synth_kinds())
             .await
-            .map_err(infra_err)
+    }
+
+    async fn replace_visual_edges_of(
+        &self,
+        asset_id: &AssetId,
+        edges: Vec<ConstellationEdge>,
+    ) -> Result<(), DomainError> {
+        self.replace_owned_kinds(asset_id, edges, EdgeKind::visual_synth_kinds())
+            .await
     }
 
     async fn add_edges(&self, edges: Vec<ConstellationEdge>) -> Result<(), DomainError> {
         if edges.is_empty() {
             return Ok(());
         }
-        let rows: Vec<(Uuid, Uuid, Uuid, String, Option<String>, Option<f64>)> = edges
+        let rows: Vec<EdgeParams> = edges
             .iter()
             .map(|e| {
                 (
@@ -585,6 +606,84 @@ mod tests {
             .map(|e| e.kind)
             .collect();
         assert!(kinds.contains(&EdgeKind::IdenticalTo), "{kinds:?}");
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The two rebuilds run from different inputs on different
+    /// cadences, so each pass must leave the other's edges — and the
+    /// asserted ones — standing. This is the regression the scope
+    /// split exists for.
+    #[tokio::test]
+    async fn the_two_rebuilds_cannot_destroy_each_others_edges() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteEdgeRepository::new(isle.clone());
+        let (a, b) = seed_two_assets(&isle).await;
+
+        let mut visual = ConstellationEdge::new(b, a, EdgeKind::VisualSimilarity).unwrap();
+        visual.weight = Some(0.83);
+        visual.label = Some("test-model".into());
+        repo.replace_visual_edges_of(&b, vec![visual])
+            .await
+            .unwrap();
+
+        let mut windowed = ConstellationEdge::new(b, a, EdgeKind::TimeProximity).unwrap();
+        windowed.weight = Some(0.7);
+        repo.replace_synth_edges_of(&b, vec![windowed])
+            .await
+            .unwrap();
+
+        // The windowed pass ran after the visual one: the visual edge
+        // must still be there, and vice versa after an empty visual
+        // pass replaces the visual set.
+        let kinds: Vec<EdgeKind> = repo
+            .edges_of(&b, None, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert!(kinds.contains(&EdgeKind::VisualSimilarity), "{kinds:?}");
+        assert!(kinds.contains(&EdgeKind::TimeProximity), "{kinds:?}");
+
+        // An empty visual rebuild (model produced no matches above the
+        // floor) clears the visual set and nothing else.
+        repo.replace_visual_edges_of(&b, vec![]).await.unwrap();
+        let kinds: Vec<EdgeKind> = repo
+            .edges_of(&b, None, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert!(!kinds.contains(&EdgeKind::VisualSimilarity), "{kinds:?}");
+        assert!(kinds.contains(&EdgeKind::TimeProximity), "{kinds:?}");
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_visual_path_refuses_kinds_it_does_not_own() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteEdgeRepository::new(isle.clone());
+        let (a, b) = seed_two_assets(&isle).await;
+
+        let smuggled_windowed = ConstellationEdge::new(b, a, EdgeKind::TimeProximity).unwrap();
+        let smuggled_assertion = ConstellationEdge::new(b, a, EdgeKind::DerivedFrom).unwrap();
+        let mut visual = ConstellationEdge::new(b, a, EdgeKind::VisualSimilarity).unwrap();
+        visual.weight = Some(0.9);
+        repo.replace_visual_edges_of(&b, vec![smuggled_windowed, smuggled_assertion, visual])
+            .await
+            .unwrap();
+
+        let kinds: Vec<EdgeKind> = repo
+            .edges_of(&b, None, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert_eq!(kinds, vec![EdgeKind::VisualSimilarity]);
 
         driver.shutdown().await.unwrap();
     }

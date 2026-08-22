@@ -464,6 +464,68 @@ and this project adheres to
 
 ### Added
 
+- **Pixels can propose tags, and a person rules** (#112). The tag phase of the
+  visual layer: after an image is encoded, a `visual_tag_suggest` job scores its
+  vector against every channel Tag name's cached text embedding (filled lazily;
+  a rename re-encodes because the name is the encoder's input) and writes scored
+  `suggested` evidence above a measured floor — 0.12, the knee of the fixture
+  precision/recall sweep, recorded with its curve. A suggestion and a person's
+  tag are different kinds of row by construction: the job inserts only where no
+  `(asset, tag, model)` evidence exists, so an accepted or rejected ruling is
+  structurally out of a rerun's reach; acceptance is what links the tag in
+  `asset_tag`, which stays the sole source of truth, and a rejection is scoped
+  to the model that earned it. The detail pane shows the open suggestions as
+  dashed chips with their scores — accept links, reject dismisses for good — the
+  same verbs served over HTTP (`/asterism/assets/{id}/tag-suggestions` +
+  accept/reject), and `/asterism/models/status` says which model, if any, the
+  process bound.
+
+- **Pixels can propose neighbours** (#112). The encoder phase lands end to end
+  behind opt-ins. A `visual_similarity` edge kind joins the synthetic population
+  with its own owner: the visual rebuild recomputes it from stored feature
+  vectors over the whole persona history — deliberately not the ±48h candidate
+  window — and each rebuild's delete is scoped to its own subset, so neither the
+  windowed rebuild, the visual one, nor anything a person asserted can be
+  destroyed by the other. Vectors live in a `visual_feature` projection keyed by
+  the model's full derivation identity (model id, feature kind, preprocessing
+  revision beside them), with failure records in the same rows so absence is the
+  pending state and the extraction walk offers each image exactly once per
+  model; replacing a model deletes exactly its own output. Ingest fans out a
+  `visual_feature` job for image assets at fingerprint priority; a completed
+  encode chains the visual edge rebuild, which materialises only a bounded top
+  set above a score floor (provisional until the fixture measurements pin it).
+  `RetrievalIntent::Similar` — declined since the port was cut — is answered by
+  a brute-force cosine scan over the persona's vectors. The encoder itself is
+  `asterism-vision`'s ONNX Runtime path behind an `onnx`/`vision` feature pair
+  (a default build never downloads or links onnxruntime): it loads a
+  digest-verified model _package_ — the data contract with provider-side
+  preparation: two towers, a tokenizer, a manifest with per-file SHA-256,
+  license, and source — owns the SigLIP preprocessing recipe as an explicit
+  revision, refuses revisions it does not implement, and asserts the declared
+  dimension against what the tower actually produces. A `vision`-featured server
+  binds the profile's `models/` package at startup (exactly one, or none —
+  ambiguity is reported, not guessed), seeds the backfill, and a profile with no
+  package behaves exactly as before the feature existed: visual jobs skip,
+  `Similar` declines, nothing else changes.
+
+- **The visual pipeline gains its evaluation fixtures, inside the system**
+  (#112). Grading pHash and the coming encoder needs images whose relationships
+  are known because they were generated, and `PUBLIC_DEVELOPMENT.md` rules
+  personal images out — but that material is consumed by nothing outside the
+  system, so it is deliberately not a corpus: no directory layout, no manifest
+  file, no CLI. A new `asterism-vision` crate — the model-_use_ side of the
+  visual features, which the app will import; model _preparation_ stays a
+  provider-side tool outside the app's dependency graph — starts with a
+  `fixtures` module (behind a `fixtures` feature) that tests and benches call
+  in-process: deterministic scenes whose spec is the ground truth (derived EN/JA
+  tags and captions, white-rimmed shapes on one grid cell each so nothing
+  occludes what a tag asserts), a seeded relation stream (look-alike, semantic
+  sibling, hard negative), transform helpers for the near-duplicate variants,
+  and unrelated noise and queries for the honest-failure case. An earlier shape
+  of this change materialised the same scenes as an external corpus behind a
+  benchgen subcommand; the design review on the issue removed that separation,
+  and this entry is what remains.
+
 - **Generator parameters are extracted from stored metadata behind their own
   port** (#19). The model and seed a run recorded sit inside free-text metadata
   values — a ComfyUI graph, an A1111 parameter line — and reading them out is a

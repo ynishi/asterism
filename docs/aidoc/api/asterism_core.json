@@ -2518,9 +2518,19 @@
       "docs": "Port for reading the full text of an asset's **original source**\n(the file `SourceRef.locator` points at). The DB only stores the\n200-char cover snippet; the session Reader view needs the whole\nmessage body, which stays in the source of truth on disk.\n\nLocator shapes the adapter must understand, and they arrive as\nvariants rather than as spellings it has to take apart:\n- [`File`](crate::domain::source_locator::SourceLocator::File) — a\n  plain text file; the whole (capped) content.\n- [`Record`](crate::domain::source_locator::SourceLocator::Record) —\n  one record inside a container file (for example one JSONL line of\n  a Claude Code session, addressed by its message uuid). The adapter\n  extracts just that record's text.\n- `Remote` / `Logical` — nothing on this disk to open; `None`.\n\nRead-only by invariant: Asterism never writes back to a locator."
     },
     {
+      "path": "asterism_core::domain::repository::TagEvidenceRepository",
+      "kind": "trait",
+      "docs": "Persistence port for scored tag suggestions (#112, P3) — the\nopen-row queue between a model's proposal and a person's ruling,\nthe `duplicate_conflict` shape."
+    },
+    {
       "path": "asterism_core::domain::repository::TagRepository",
       "kind": "trait",
       "docs": "Persistence port for [`Tag`] and its many-to-many link with assets."
+    },
+    {
+      "path": "asterism_core::domain::repository::TagVectorRepository",
+      "kind": "trait",
+      "docs": "Persistence port for the Tag-name embedding cache (#112, P3).\n\nFilled lazily by the suggestion job; a rename or merge deletes the\naffected rows (the name is the encoder's input), which the tag\nadapter owns because the two tables share one database and one\ntransaction."
     },
     {
       "path": "asterism_core::domain::repository::TextLocator",
@@ -2546,6 +2556,16 @@
       "path": "asterism_core::domain::repository::UnhashedMaterial",
       "kind": "struct",
       "docs": "One material still waiting for its fingerprints — the unit the\nbackfill job walks.\n\nCarries the locator because hashing needs the path, and the\n`(asset_id, ord)` key because that is what the result is written\nback against."
+    },
+    {
+      "path": "asterism_core::domain::repository::VisualFeatureRepository",
+      "kind": "trait",
+      "docs": "Persistence port for model-derived visual features (#112).\n\nEvery row carries its [`ModelIdentity`], and every method is scoped\nby one: two models' vectors coexist without seeing each other, and\n[`Self::clear_derived`] removes exactly one model's output. The\ndiscipline mirrors the material-hash walk — a row is offered once,\nwhatever came back is recorded (a vector, or a reason it cannot\nexist), and the walk moves on."
+    },
+    {
+      "path": "asterism_core::domain::repository::VisualScanCandidate",
+      "kind": "struct",
+      "docs": "One row of the extraction backfill walk: a primary material whose\nasset has no stored vector (and no failure record) under the model\nidentity being walked."
     },
     {
       "path": "asterism_core::domain::series",
@@ -2991,6 +3011,46 @@
       "path": "asterism_core::domain::value::dedup_labels",
       "kind": "function",
       "docs": "Drops repeats from a label list, keeping the **first** occurrence of\neach value and the order of what is left.\n\n# Why first-wins rather than sort-and-dedup\n\nThe head of the list is load-bearing. `sort_eval::first_user_label`\nreads the first entry that is not an internal (`persona:` /\n`journal_kind:`) prefix and uses it as the Label sort key — the UI\ncomparator does the same in `card-cmp.ts` (`firstUserLabel`). A\ndedup that reorders would silently re-sort the grid, so the only\nsafe shape is \"keep the first, drop the later copies\". The fold path\nalready states the same rule for the same reason\n(`MergeRule::UnionJson` in `asterism-infra`: \"the keeper's entries in\ntheir own order, then whatever the headstone had and it did not\").\n\n# What a repeat breaks\n\nThe label chips are rendered from a Svelte keyed `{#each}`. Two\nequal labels in one list are two equal keys, which is a runtime\nerror (`each_key_duplicate`) that takes down the whole virtual list,\nnot a cosmetic double chip — reported 2026-07-20 from the running\napp, naming `assistant`. Note what that is evidence of: Svelte\nrefusing a duplicate key, not a stored row anyone has read back. No\nrepeat has turned up in storage since (293 rows in the dogfood\nprofile, none carrying one), so this guards a shape that is inferred\nfrom the error rather than sampled from the data. The UI keys its\nchips defensively for the same reason; this function is what keeps\none from being written.\n\nCheap enough to call on every write path: label lists are a handful\nof entries, and the allocation is one `HashSet` of the same size."
+    },
+    {
+      "path": "asterism_core::domain::visual",
+      "kind": "module",
+      "docs": "Visual-feature vocabulary and the encoder port (#112).\n\nEverything a model produces is **derived state with an identity**:\na vector is meaningless without knowing which model, at which\npreprocessing revision, produced it. [`ModelIdentity`] is that\nidentity, and it travels with every stored vector, every suggestion,\nand every synthetic edge a model produces — so replacing a model\ninvalidates exactly its own output and nothing a person asserted.\n\nThe core knows the *shape* of the work — identities, vectors, the\nencoder port — and none of the machinery. ONNX Runtime, weights,\npreprocessing kernels live behind [`VisualEncoder`] in the model-use\ncrate; this module must never grow a model dependency (that is\nacceptance item 4 of #112, and the reason the port takes a raw RGB\nbuffer rather than an image type)."
+    },
+    {
+      "path": "asterism_core::domain::visual::ModelIdentity",
+      "kind": "struct",
+      "docs": "The derivation identity of everything one model configuration\nproduces.\n\nTwo of the three fields are versioning: `preprocess_ver` moves when\nthe resize / normalization recipe changes even though the weights\ndid not, because a vector encoded under a different recipe is not\ncomparable and must be invalidated with the same certainty as a\nmodel swap. The dimension is carried — not derived — so a stored\nblob whose length disagrees with its declared identity is detectably\ncorrupt rather than silently wrong."
+    },
+    {
+      "path": "asterism_core::domain::visual::TagEvidence",
+      "kind": "struct",
+      "docs": "One scored tag suggestion with its full derivation identity."
+    },
+    {
+      "path": "asterism_core::domain::visual::TagSuggestionDisposition",
+      "kind": "enum",
+      "docs": "Where one tag suggestion stands between the model and the person.\n\nThe machine writes only the first state, and only where no row\nexists; the other two are a person's ruling and are never\noverwritten by a rerun. A rejection is scoped to the model that\nearned it — a materially different model may re-suggest."
+    },
+    {
+      "path": "asterism_core::domain::visual::VisualEncoder",
+      "kind": "trait",
+      "docs": "Encoder port: pixels (or text) in, one normalized vector out.\n\nSynchronous on purpose — encoding is CPU/accelerator-bound compute,\nand the job layer decides how to schedule it. Implementations load a\nmodel *package* (weights + manifest) prepared by the provider-side\ntooling; the core never sees where the bytes came from."
+    },
+    {
+      "path": "asterism_core::domain::visual::VisualFeature",
+      "kind": "struct",
+      "docs": "One stored feature vector and its full derivation identity."
+    },
+    {
+      "path": "asterism_core::domain::visual::VisualFeatureKind",
+      "kind": "enum",
+      "docs": "What kind of feature a stored vector is.\n\nOne kind exists today. The enum exists so that a later image-only\nfeature (a DINOv2-class vector, a learned perceptual code) can share\nthe storage without a migration — the kind is part of the row key."
+    },
+    {
+      "path": "asterism_core::domain::visual::cosine_normalized",
+      "kind": "function",
+      "docs": "Cosine similarity of two L2-normalized vectors: the dot product.\n\nLives in the domain because the score's *meaning* (a suggestion\nstrength that must clear a floor before anything is written) is a\ndomain rule, even though heavy scans run in adapters."
     },
     {
       "path": "asterism_core::error",

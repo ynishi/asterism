@@ -431,6 +431,16 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
     ),
     // ---- asset_service: reads
     ("asset_service::list", "read — one page of the grid"),
+    (
+        "asset_service::tag_suggestions_of",
+        "read — what the bound model proposed, rulings included; the \
+         rulings themselves go through accept/reject, which carry a \
+         context",
+    ),
+    (
+        "asset_service::visual_model_status",
+        "read — which model this process bound, if any",
+    ),
     ("asset_service::list_index", "read — the light index page"),
     (
         "asset_service::hydrate_cards",
@@ -822,7 +832,7 @@ fn the_application_layer_keeps_no_synchronous_public_verbs() {
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 79;
+const TAURI_MUTATION_COMMANDS: usize = 81;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

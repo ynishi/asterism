@@ -160,5 +160,6 @@ the private design notes.
 - [`domain::tag`](domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [`domain::thread`](domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [`domain::value`](domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
+- [`domain::visual`](domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
 - [`error`](error.md): `DomainError` — the innermost error type shared across every layer of
 

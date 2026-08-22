@@ -64,6 +64,7 @@ this crate.
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
 - [`search::tokenizer`](search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
+- [`search::visual_retriever`](search__visual_retriever.md): The retriever that answers `Similar` from stored vectors (#112).
 - [`source_text`](source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
 - [`sqlite`](sqlite.md): SQLite backend — connection lifecycle and schema migration built on
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers.
@@ -94,7 +95,9 @@ this crate.
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [`sqlite::repo::tag`](sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
+- [`sqlite::repo::tag_evidence`](sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
 - [`sqlite::repo::thread`](sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [`sqlite::repo::thumb`](sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
+- [`sqlite::repo::visual`](sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).
 - [`telemetry`](telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
 
