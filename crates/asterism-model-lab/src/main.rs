@@ -32,6 +32,7 @@ use asterism_vision::encoder::Encoder;
 use asterism_vision::fixtures::eval::{EvalConfig, run as run_eval};
 use asterism_vision::fixtures::scene::noise_image;
 use asterism_vision::package::{MANIFEST_FILE, ModelPackage, PackageFile, PackageManifest};
+use asterism_vision::registry::{ENTRY_SCHEMA_V1, RegistryEntry, RegistryFile};
 
 /// One supported model: where its files officially live and what the
 /// manifest should say about them. Compiled in on purpose — a recipe
@@ -248,25 +249,26 @@ fn registry(dir: &Path, qualification: Option<&Path>) -> Result<()> {
         ),
         None => None,
     };
-    let files = |file: &PackageFile, url: &str| {
-        serde_json::json!({
-            "path": file.path,
-            "sha256": file.sha256,
-            "url": url,
-        })
+    // The typed entry the app's fetch flow parses back
+    // (`asterism_vision::registry::RegistryEntry::parse`) — authored
+    // through the same type so the two sides cannot drift.
+    let files = |file: &PackageFile, url: &str| RegistryFile {
+        path: file.path.clone(),
+        sha256: file.sha256.clone(),
+        url: url.to_string(),
     };
-    let entry = serde_json::json!({
-        "schema": "asterism-model-registry-entry-v1",
-        "model_id": manifest.model_id,
-        "dim": manifest.dim,
-        "preprocess_ver": manifest.preprocess_ver,
-        "license": manifest.license,
-        "source_url": manifest.source_url,
-        "image_model": files(&manifest.image_model, recipe.files[0].0),
-        "text_model": files(&manifest.text_model, recipe.files[1].0),
-        "tokenizer": files(&manifest.tokenizer, recipe.files[2].0),
-        "qualification": qualification,
-    });
+    let entry = RegistryEntry {
+        schema: ENTRY_SCHEMA_V1.to_string(),
+        model_id: manifest.model_id.clone(),
+        dim: manifest.dim,
+        preprocess_ver: manifest.preprocess_ver,
+        license: manifest.license.clone(),
+        source_url: manifest.source_url.clone(),
+        image_model: files(&manifest.image_model, recipe.files[0].0),
+        text_model: files(&manifest.text_model, recipe.files[1].0),
+        tokenizer: files(&manifest.tokenizer, recipe.files[2].0),
+        qualification,
+    };
     println!("{}", serde_json::to_string_pretty(&entry)?);
     Ok(())
 }

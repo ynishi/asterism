@@ -419,6 +419,27 @@ pub enum JobKind {
     /// no evidence row exists — a person's ruling is out of its reach
     /// by construction.
     VisualTagSuggest,
+    /// Downloads and installs the model package a registry entry
+    /// (#126) describes: fetch each file, verify it against the
+    /// entry's digests, and place the package under `models/` as a
+    /// replacement — retiring whatever package was there, because the
+    /// binder refuses a directory holding two.
+    ///
+    /// Two payload shapes, exactly one meant: `{ "url": "<entry
+    /// url>" }` fetches the entry first (the instance's registry
+    /// route, or anywhere the provider put it), and
+    /// `{ "entry": { … } }` carries it inline.
+    ///
+    /// Deliberately **not** gated on a bound encoder — installing the
+    /// first model is this job's whole point. The pipeline has no
+    /// retry policy, so the handler resumes instead: a re-run keeps
+    /// every staged file whose digest already verifies and downloads
+    /// only the rest. Installation does not bind: the bind is at
+    /// startup, once (#112), so the completion message says to
+    /// restart — and a swap's derived-state invalidation stays the
+    /// explicit `clear_derived`-plus-restart path, not a side effect
+    /// of this job.
+    ModelFetch,
 }
 
 impl JobKind {
@@ -449,6 +470,7 @@ impl JobKind {
             Self::VisualFeature => "visual_feature",
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
+            Self::ModelFetch => "model_fetch",
         }
     }
 
@@ -479,6 +501,7 @@ impl JobKind {
             "visual_feature" => Ok(Self::VisualFeature),
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),
+            "model_fetch" => Ok(Self::ModelFetch),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),
