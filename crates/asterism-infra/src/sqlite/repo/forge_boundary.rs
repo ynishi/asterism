@@ -3,8 +3,8 @@
 //! Two contracts, and neither is a repository: they are the forge's
 //! side of questions it cannot answer itself.
 //!
-//! - [`SqliteStore`] answers whether a persona holds an asset. One
-//!   question, because the forge has one.
+//! - [`SqliteStore`] answers whether an asset exists. One question,
+//!   because the forge has one.
 //! - [`SqliteActors`] answers what a handle stands for, and mints one
 //!   when it has not seen the subject before.
 //!
@@ -17,7 +17,7 @@
 use asterism_core::domain::attribution::{AttributionContext, Author};
 use asterism_core::domain::forge::boundary::{Actors, Store};
 use asterism_core::domain::forge::model::value::ActorId;
-use asterism_core::domain::value::{AssetId, PersonaId};
+use asterism_core::domain::value::AssetId;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -41,21 +41,21 @@ impl SqliteStore {
 
 #[async_trait]
 impl Store for SqliteStore {
-    /// Whether this persona holds this asset.
+    /// Whether this asset exists.
     ///
     /// A trashed asset counts. Trashing is reversible and the row is
-    /// still theirs; the forge is asking whose an asset is, not
-    /// whether it is in somebody's active view. Reading the trash
+    /// still there; the forge is asking whether the reference is real,
+    /// not whether it is in somebody's active view. Reading the trash
     /// stamp here would put a raw-layer display state into a question
-    /// about ownership, and would make an operation legal or not
+    /// about existence, and would make an operation legal or not
     /// depending on what the owner had tidied away that morning.
-    async fn owns(&self, persona: &PersonaId, asset: &AssetId) -> Result<bool, DomainError> {
-        let (persona, asset) = (*persona.as_uuid(), *asset.as_uuid());
+    async fn exists(&self, asset: &AssetId) -> Result<bool, DomainError> {
+        let asset = *asset.as_uuid();
         self.isle
             .call(move |conn| {
                 let found: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM asset WHERE id = ?1 AND persona_id = ?2",
-                    params![asset, persona],
+                    "SELECT COUNT(*) FROM asset WHERE id = ?1",
+                    params![asset],
                     |row| row.get(0),
                 )?;
                 Ok(found > 0)
@@ -156,6 +156,9 @@ impl Actors for SqliteActors {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
+    // The asset rows below need an owner because the schema says so,
+    // not because the forge asks about one.
+    use asterism_core::domain::value::PersonaId;
 
     async fn seeded() -> (
         AsyncIsle,
@@ -186,30 +189,34 @@ mod tests {
         (isle, driver, persona, asset)
     }
 
+    /// An asset exists or it does not, and whose it is does not come
+    /// into it.
+    ///
+    /// This asked `owns(persona, asset)` until the second surface over
+    /// the forge made the shape visible: a line carries no owner, so
+    /// there was nothing for an answer about ownership to be measured
+    /// against, and the caller supplying the persona meant the check
+    /// could only ever agree with itself.
     #[tokio::test]
-    async fn a_persona_holds_its_own_asset_and_nobody_elses() {
-        let (isle, driver, persona, asset) = seeded().await;
+    async fn an_asset_exists_whoever_it_belongs_to() {
+        let (isle, driver, _persona, asset) = seeded().await;
         let store = SqliteStore::new(isle);
 
-        assert!(store.owns(&persona, &asset).await.unwrap());
+        assert!(store.exists(&asset).await.unwrap());
         assert!(
-            !store.owns(&PersonaId::new(), &asset).await.unwrap(),
-            "somebody else's persona does not hold it"
-        );
-        assert!(
-            !store.owns(&persona, &AssetId::new()).await.unwrap(),
-            "and an id nobody minted is held by nobody"
+            !store.exists(&AssetId::new()).await.unwrap(),
+            "an id nobody minted names nothing"
         );
 
         driver.shutdown().await.unwrap();
     }
 
-    /// Trashing is reversible and the row is still theirs. Reading the
+    /// Trashing is reversible and the row is still there. Reading the
     /// stamp here would make an operation legal or not depending on
     /// what the owner had tidied away that morning.
     #[tokio::test]
-    async fn a_trashed_asset_is_still_held() {
-        let (isle, driver, persona, asset) = seeded().await;
+    async fn a_trashed_asset_still_exists() {
+        let (isle, driver, _persona, asset) = seeded().await;
         let id = *asset.as_uuid();
         isle.call(move |conn| {
             conn.execute("UPDATE asset SET trashed_at = 1 WHERE id = ?1", params![id])
@@ -217,7 +224,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(SqliteStore::new(isle).owns(&persona, &asset).await.unwrap());
+        assert!(SqliteStore::new(isle).exists(&asset).await.unwrap());
         driver.shutdown().await.unwrap();
     }
 

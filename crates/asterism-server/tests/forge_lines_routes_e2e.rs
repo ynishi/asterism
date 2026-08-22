@@ -33,7 +33,7 @@ use asterism_core::domain::forge::model::pursuit::{Intent, Outcome};
 use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::value::{Content, LineId, Name};
 use asterism_core::domain::forge::strategies::MainlineFirst;
-use asterism_core::domain::value::{AssetId, PersonaId};
+use asterism_core::domain::value::AssetId;
 use asterism_server::core_init::{CoreCtx, CoreMode, LogEmitter, init_core_with};
 use asterism_server::state::ServerCtx;
 use axum::Router;
@@ -148,8 +148,7 @@ async fn an_asset(router: &Router) -> (String, String) {
 async fn a_line_lives_its_whole_life_over_http() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (core, router) = harness(tmp.path()).await;
-    let (persona, asset) = an_asset(&router).await;
-    let persona = PersonaId::from_uuid(uuid::Uuid::parse_str(&persona).expect("a uuid"));
+    let (_persona, asset) = an_asset(&router).await;
 
     // Open. The strategy is a slug, and the rules are readable from
     // the route that lists them rather than known to the caller.
@@ -223,7 +222,6 @@ async fn a_line_lives_its_whole_life_over_http() {
     core.pursuit_service
         .push(
             &work.id(),
-            &persona,
             vec![Op::add(content, Name::new("key visual").expect("a name"))],
             None,
             &who("ana"),

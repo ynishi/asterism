@@ -49,8 +49,13 @@
 //!
 //! Identity and failure are **shared, not twinned**, and naming them
 //! directly anywhere in the forge is correct rather than a leak:
-//! `AssetId`, `PersonaId`, `DomainError`. There is no client for them
-//! and there should not be one.
+//! `AssetId` and `DomainError`. There is no client for them and there
+//! should not be one.
+//!
+//! `PersonaId` was on that list while [`store::Store`] asked
+//! whose an asset is. It does not any more — a line carries no owner,
+//! so the forge has nothing to measure an answer about ownership
+//! against — and the word left the forge with the question.
 //!
 //! The attribution triple used to be on that list and is not any
 //! more. It came off for a reason the others do not share: the forge's
@@ -62,15 +67,14 @@
 //! [`Actor`](crate::domain::forge::model::act::Actor).
 //!
 //! The reason is that they are not the other side's words that the
-//! forge borrows — they are words neither side owns. A persona is the
-//! tenancy axis both sides carry on every row; an asset id is what a
-//! reference *is* on both sides of the line; a failure has one shape
-//! or callers cannot handle it. Giving each of them a forge-side twin
-//! would put a conversion in every file of this layer, and buy a
+//! forge borrows — they are words neither side owns. An asset id is
+//! what a reference *is* on both sides of the line; a failure has one
+//! shape or callers cannot handle it. Giving each of them a forge-side
+//! twin would put a conversion in every file of this layer, and buy a
 //! boundary that nothing is crossing.
 //!
 //! So the split is: **identity is shared, capability is contracted.**
-//! What the other side can *do* — answer whether something is held,
+//! What the other side can *do* — answer whether something exists,
 //! freeze a set, file a round — goes through a face and a client, and
 //! every one of those is in this module. What something *is* does not.
 //!
@@ -95,9 +99,12 @@
 //! test is the arrow: a module boundary stops nothing, and
 //! `use crate::domain::asset::Asset` in a model file compiles today.
 //!
-//! It also means the shared vocabulary has a written surface: five
-//! names, each with the reason it belongs to neither side. That is
-//! what the split lifts when it happens.
+//! It also means the shared vocabulary has a written surface: the
+//! names on that list, each with the reason it belongs to neither
+//! side. That is what the split lifts when it happens. How many there
+//! are is not written here — a count in one file and its list in
+//! another is a thing that goes stale silently, and this pair already
+//! did once.
 //!
 //! # What lives here later
 //!

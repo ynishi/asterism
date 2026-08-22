@@ -5,18 +5,37 @@
 //! forge's side of it, and the only thing in the forge that turns a
 //! [`Content`] into the id a contract can carry.
 //!
-//! # Ownership, not existence
+//! # Existence, not ownership
 //!
-//! The question is `owns`, not `exists`, and the difference is the
-//! persona. A reference to something real but belonging to somebody
-//! else is exactly as unusable as a reference to nothing, and a
-//! crossing that forgets whose data it is asking about is the kind of
-//! mistake that does not surface until two tenants are in the same
-//! database. Carrying the persona in the signature means forgetting it
-//! does not compile.
+//! The question is `exists`, and it used to be `owns(persona, asset)`.
+//! That was wrong twice over, and the second HTTP surface built on it
+//! is what made both visible.
 //!
-//! The forge does not decide what ownership means — it asks, and the
-//! side that holds the content answers.
+//! **A line carries no owner.** [`Lines::list`] says so: grouping and
+//! access are outside the forge, and an instance has the lines
+//! somebody made on purpose rather than one per person. So "real but
+//! belonging to somebody else" is not a reason a reference is
+//! unusable *here* — putting one person's asset on a shared line is
+//! the thing a shared line is for.
+//!
+//! **And the check could not refuse a caller who wanted to pass.** A
+//! persona is a column on the asset row and the caller chose both
+//! halves of the pair, so naming the asset's own persona always
+//! succeeded — and nothing here knew whether the caller was that
+//! persona. What it caught was a client that paired the two wrongly.
+//! It read as a guard on whose asset this is, and it was a consistency
+//! check on two values one caller supplied.
+//!
+//! What the forge actually needs to know is whether the reference is
+//! real, because an operation naming content that is not there is a
+//! line lying about the present. That is one id and no persona.
+//!
+//! Whose asset it is stays a real question for a layer that has one to
+//! ask on behalf of — a surface that has authenticated somebody, which
+//! this one has not. When there is such a surface, the check belongs
+//! there, on an identity the caller did not choose.
+//!
+//! [`Lines::list`]: crate::domain::forge::lines::Lines::list
 //!
 //! [`Content`]: crate::domain::forge::model::value::Content
 
@@ -27,7 +46,7 @@ use async_trait::async_trait;
 use crate::domain::forge::model::value::Content;
 // SHARED VOCABULARY: ids and the error are boundary types — the shared
 // vocabulary a contract is allowed to be stated in.
-use crate::domain::value::{AssetId, PersonaId};
+use crate::domain::value::AssetId;
 use crate::error::DomainError;
 
 /// What the layer below answers.
@@ -37,8 +56,8 @@ use crate::error::DomainError;
 /// checked, and every implementation has to satisfy it anyway.
 #[async_trait]
 pub trait Store: Send + Sync {
-    /// Does this id name something this persona holds?
-    async fn owns(&self, persona: &PersonaId, asset: &AssetId) -> Result<bool, DomainError>;
+    /// Does this id name something?
+    async fn exists(&self, asset: &AssetId) -> Result<bool, DomainError>;
 }
 
 /// The forge's side of [`Store`].
@@ -55,14 +74,14 @@ impl StoreClient {
         Self(store)
     }
 
-    /// Is this content real, and this persona's?
+    /// Is this content real?
     ///
     /// The translation is here and nowhere else: a [`Content`] goes
     /// in, an id the contract understands goes out, and the answer
     /// comes back as a plain yes or no that the forge can act on
     /// without learning anything about what it asked.
-    pub async fn holds(&self, persona: &PersonaId, content: &Content) -> Result<bool, DomainError> {
-        self.0.owns(persona, &content.asset()).await
+    pub async fn real(&self, content: &Content) -> Result<bool, DomainError> {
+        self.0.exists(&content.asset()).await
     }
 }
 
@@ -75,7 +94,7 @@ mod tests {
 
     #[async_trait]
     impl Store for Everything {
-        async fn owns(&self, _persona: &PersonaId, _asset: &AssetId) -> Result<bool, DomainError> {
+        async fn exists(&self, _asset: &AssetId) -> Result<bool, DomainError> {
             Ok(true)
         }
     }
@@ -84,7 +103,7 @@ mod tests {
 
     #[async_trait]
     impl Store for Nothing {
-        async fn owns(&self, _persona: &PersonaId, _asset: &AssetId) -> Result<bool, DomainError> {
+        async fn exists(&self, _asset: &AssetId) -> Result<bool, DomainError> {
             Ok(false)
         }
     }
@@ -92,18 +111,17 @@ mod tests {
     #[tokio::test]
     async fn the_client_passes_the_question_through_and_returns_the_answer() {
         let content = Content::from_uuid(Uuid::now_v7());
-        let persona = PersonaId::new();
 
-        let held = StoreClient::new(Arc::new(Everything))
-            .holds(&persona, &content)
+        let real = StoreClient::new(Arc::new(Everything))
+            .real(&content)
             .await
             .unwrap();
         let missing = StoreClient::new(Arc::new(Nothing))
-            .holds(&persona, &content)
+            .real(&content)
             .await
             .unwrap();
 
-        assert!(held);
+        assert!(real);
         assert!(!missing);
     }
 
@@ -116,11 +134,7 @@ mod tests {
 
         #[async_trait]
         impl Store for Expecting {
-            async fn owns(
-                &self,
-                _persona: &PersonaId,
-                asset: &AssetId,
-            ) -> Result<bool, DomainError> {
+            async fn exists(&self, asset: &AssetId) -> Result<bool, DomainError> {
                 Ok(*asset == self.0)
             }
         }
@@ -128,10 +142,7 @@ mod tests {
         let asset = AssetId::new();
         let client = StoreClient::new(Arc::new(Expecting(asset)));
 
-        let same = client
-            .holds(&PersonaId::new(), &Content::of(asset))
-            .await
-            .unwrap();
+        let same = client.real(&Content::of(asset)).await.unwrap();
 
         assert!(same);
     }

@@ -70,12 +70,18 @@
 //! `asterism-core` except the shared vocabulary**, which is
 //! [`DomainError`](crate::error::DomainError),
 //! [`AssetId`](crate::domain::value::AssetId),
-//! [`PersonaId`](crate::domain::value::PersonaId),
 //! `define_uuid_id` (the crate-private macro an id newtype is spelled
 //! with) and
 //! [`AttributionContext`](crate::domain::attribution::AttributionContext).
 //! `tests/forge_boundary.rs` holds that list with a reason beside each
 //! entry and fails on anything else.
+//!
+//! It was five until `PersonaId` came off, and how it came off is the
+//! example worth keeping: nothing removed it from the list on purpose.
+//! [`boundary::Store`] stopped asking whose an asset is — a line
+//! carries no owner, so the answer had nothing to be measured
+//! against — and the word simply stopped appearing. The list shrinks
+//! when the forge needs less, and never because somebody tidied it.
 //!
 //! **The constraint is mutual dependency with the core, and nothing
 //! wider.** Two things follow that are easy to get backwards:

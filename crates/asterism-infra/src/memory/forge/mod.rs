@@ -47,7 +47,7 @@ use asterism_core::domain::forge::model::value::{
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::threads::Threads;
-use asterism_core::domain::value::{AssetId, PersonaId};
+use asterism_core::domain::value::AssetId;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 
@@ -680,15 +680,15 @@ impl Threads for MemoryForge {
 
 /// What the layer below answers, for a store that has no layer below.
 ///
-/// Says yes to everything. The question is whether a persona holds an
-/// asset, and there are no assets here to hold — a caller wanting the
+/// Says yes to everything. The question is whether an asset exists,
+/// and there are no assets here to exist — a caller wanting the
 /// refusal exercised should reach for [`HoldsNothing`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HoldsEverything;
 
 #[async_trait]
 impl Store for HoldsEverything {
-    async fn owns(&self, _persona: &PersonaId, _asset: &AssetId) -> Result<bool, DomainError> {
+    async fn exists(&self, _asset: &AssetId) -> Result<bool, DomainError> {
         Ok(true)
     }
 }
@@ -699,7 +699,7 @@ pub struct HoldsNothing;
 
 #[async_trait]
 impl Store for HoldsNothing {
-    async fn owns(&self, _persona: &PersonaId, _asset: &AssetId) -> Result<bool, DomainError> {
+    async fn exists(&self, _asset: &AssetId) -> Result<bool, DomainError> {
         Ok(false)
     }
 }

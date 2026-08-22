@@ -49,9 +49,9 @@ pub struct ForgeLineDto {
     /// When the line was opened (unix epoch ms).
     pub created_at_ms: i64,
     /// When the line's own description last moved: a rename, a
-    /// strategy change, an archive or a reopen — every verb on this
-    /// surface except opening it, and not a landing, which moves the
-    /// history rather than the description (unix epoch ms).
+    /// strategy change, an archive or a reopen. Not a landing — that
+    /// moves the history, which is a different question (unix epoch
+    /// ms).
     pub updated_at_ms: i64,
 }
 

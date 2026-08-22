@@ -68,20 +68,32 @@ async fn core(tmp: &std::path::Path) -> CoreCtx {
 /// verbs — because the forge holds what it names, and what it names
 /// has to be a row somebody really added.
 async fn an_asset(core: &CoreCtx, tmp: &std::path::Path) -> (PersonaId, Content) {
+    an_asset_of(core, tmp, "ana", "e2e-forge-wiring", "one.md").await
+}
+
+/// The same, for a named person and a named file — two callers means
+/// two personas, which is the whole subject of one test below.
+async fn an_asset_of(
+    core: &CoreCtx,
+    tmp: &std::path::Path,
+    who: &str,
+    pack: &str,
+    file_name: &str,
+) -> (PersonaId, Content) {
     let persona = core
         .persona_service
         .register(
             RegisterPersonaCommand {
-                name: "ana".into(),
-                pack_id: Some("e2e-forge-wiring".into()),
+                name: who.into(),
+                pack_id: Some(pack.into()),
             },
             &AttributionContext::owner_surface(),
         )
         .await
         .expect("a persona");
 
-    let file = tmp.join("one.md");
-    std::fs::write(&file, b"one").expect("a file");
+    let file = tmp.join(file_name);
+    std::fs::write(&file, file_name.as_bytes()).expect("a file");
     let asset = core
         .asset_service
         .add(
@@ -129,7 +141,7 @@ async fn an_asset(core: &CoreCtx, tmp: &std::path::Path) -> (PersonaId, Content)
 async fn the_wired_forge_lands_work_and_reads_it_back() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let core = core(tmp.path()).await;
-    let (persona, held) = an_asset(&core, tmp.path()).await;
+    let (_persona, held) = an_asset(&core, tmp.path()).await;
 
     let line = core
         .line_service
@@ -145,13 +157,12 @@ async fn the_wired_forge_lands_work_and_reads_it_back() {
     core.pursuit_service
         .push(
             &work.id(),
-            &persona,
             vec![Op::add(held, name("one"))],
             None,
             &who("ana"),
         )
         .await
-        .expect("the boundary agrees this persona holds that asset");
+        .expect("the boundary agrees that asset is real");
     core.pursuit_service
         .close(&work.id(), Outcome::Satisfied, None, &who("ana"))
         .await
@@ -212,7 +223,6 @@ async fn purging_the_persona_of_a_held_asset_is_refused_through_the_wiring() {
     core.pursuit_service
         .push(
             &work.id(),
-            &persona,
             vec![Op::add(held, name("one"))],
             None,
             &who("ana"),
@@ -285,7 +295,6 @@ async fn dropping_the_line_releases_the_asset_and_the_purge_then_goes_through() 
     core.pursuit_service
         .push(
             &work.id(),
-            &persona,
             vec![Op::add(held, name("one"))],
             None,
             &who("ana"),
@@ -342,4 +351,66 @@ async fn dropping_the_line_releases_the_asset_and_the_purge_then_goes_through() 
         )
         .await
         .expect("nothing in the forge is holding it any more");
+}
+
+/// One person's work can name another person's asset, and the line
+/// takes it.
+///
+/// This is what the forge asking `exists` rather than `owns` means,
+/// and it is the behaviour a shared line is for: private work rises
+/// into something shared, so the content on a line comes from whoever
+/// had it. A line carries no owner for the alternative to be measured
+/// against.
+///
+/// It used to be refused — `push` took a `PersonaId` and the boundary
+/// asked whether that persona held the content. That could not refuse
+/// a caller who wanted to pass: it chose both halves of the pair, and
+/// naming the asset's own persona always succeeded. What it did
+/// instead was make this — the case the design is for — impossible to
+/// express.
+#[tokio::test(flavor = "multi_thread")]
+async fn work_can_name_an_asset_that_belongs_to_somebody_else() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let core = core(tmp.path()).await;
+    let (_mine, _my_asset) =
+        an_asset_of(&core, tmp.path(), "ana", "e2e-forge-mine", "mine.md").await;
+    let (_theirs, their_asset) =
+        an_asset_of(&core, tmp.path(), "boro", "e2e-forge-theirs", "theirs.md").await;
+
+    let line = core
+        .line_service
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .expect("a line");
+    let work = core
+        .pursuit_service
+        .open(&line.id(), None, Intent::default(), &who("ana"))
+        .await
+        .expect("work against it");
+
+    core.pursuit_service
+        .push(
+            &work.id(),
+            vec![Op::add(their_asset, name("what boro made"))],
+            None,
+            &who("ana"),
+        )
+        .await
+        .expect("whose the asset is is not this layer's question");
+    core.pursuit_service
+        .close(&work.id(), Outcome::Satisfied, None, &who("ana"))
+        .await
+        .expect("and it lands");
+
+    let states = core
+        .line_service
+        .states(&line.id())
+        .await
+        .expect("what is on the line");
+    let (_, state) = states.iter().next().expect("one entry landed");
+    assert_eq!(
+        state.content,
+        Some(their_asset),
+        "the line carries the other person's asset"
+    );
 }

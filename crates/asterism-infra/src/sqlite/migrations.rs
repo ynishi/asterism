@@ -7059,8 +7059,9 @@ DROP TABLE project;
 /// The consequence is that purging a persona whose assets are on a
 /// line is refused, and that is the intended behaviour rather than a
 /// cost of it. What releases an asset is dropping the line that holds
-/// it, which is `discard::releases` in the model and has no verb on
-/// any port yet.
+/// it: `discard::releases` in the model, `Lines::discard` on the port,
+/// and `POST /asterism/forge/lines/{id}/discard` over HTTP, which
+/// answers with the assets that went free.
 const V96_FORGE_TABLES: &str = r#"
 CREATE TABLE line (
     id           BLOB PRIMARY KEY,

@@ -1121,8 +1121,8 @@ pub async fn init_core_with(
     // The forge, over the same connection as everything else. Its
     // ports are one adapter because a close writes to both logs
     // together, and the two faces beside it are the questions it asks
-    // of the layer below: whose an asset is, and what a handle stands
-    // for.
+    // of the layer below: whether an asset exists, and what a handle
+    // stands for.
     let forge = Arc::new(sqlite::repo::SqliteForge::new(isle.clone()));
     let forge_rules = Arc::new(asterism_core::domain::forge::strategies::Builtin::default());
     let forge_actors = Arc::new(sqlite::repo::SqliteActors::new(isle.clone()));

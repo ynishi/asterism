@@ -55,7 +55,6 @@ use crate::domain::forge::model::react::react;
 use crate::domain::forge::model::value::{ActorId, ChangePointId, LineId, PursuitId};
 use crate::domain::forge::pursuits::Pursuits;
 use crate::domain::forge::strategies::Strategies;
-use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
 /// One person's answer to "what does ending this work put on the
@@ -154,15 +153,13 @@ impl PursuitService {
     /// run all day without touching anything anybody else is using.
     ///
     /// What it does check is that the content each operation points at
-    /// is real and this persona's, which is a question for the layer
-    /// that holds the bytes. The persona comes from the caller: the
-    /// forge does not know whose a line is, and asking about content
-    /// without saying whose it is would be asking a question with two
-    /// right answers.
+    /// is real, which is a question for the layer that holds the
+    /// bytes. Whose it is, this does not ask: a line carries no owner,
+    /// so one person's asset on a shared line is the thing a shared
+    /// line is for.
     pub async fn push(
         &self,
         id: &PursuitId,
-        persona: &PersonaId,
         ops: Vec<Op>,
         note: Option<String>,
         by: &AttributionContext,
@@ -175,9 +172,9 @@ impl PursuitService {
                 OpKind::Add { content, .. } | OpKind::Replace { content } => *content,
                 OpKind::Rename { .. } | OpKind::Remove => continue,
             };
-            if !self.store.holds(persona, &content).await? {
+            if !self.store.real(&content).await? {
                 return Err(DomainError::Validation(
-                    "an operation points at content this persona does not hold".into(),
+                    "an operation points at content that does not exist".into(),
                 ));
             }
         }
@@ -611,7 +608,7 @@ mod tests {
 
     #[async_trait]
     impl Store for Arc<World> {
-        async fn owns(&self, _: &PersonaId, _: &AssetId) -> Result<bool, DomainError> {
+        async fn exists(&self, _: &AssetId) -> Result<bool, DomainError> {
             Ok(self.holds)
         }
     }
@@ -663,10 +660,6 @@ mod tests {
         Content::from_uuid(Uuid::now_v7())
     }
 
-    fn persona() -> PersonaId {
-        PersonaId::new()
-    }
-
     async fn opened(world: &Arc<World>) -> (LineService, PursuitService, Line) {
         let (lines, work) = services(world);
         let line = lines
@@ -685,7 +678,6 @@ mod tests {
             .unwrap();
         work.push(
             &pursuit.id(),
-            &persona(),
             vec![Op::add(content(), name(label))],
             None,
             &by(),
@@ -755,7 +747,6 @@ mod tests {
 
         work.push(
             &pursuit.id(),
-            &persona(),
             vec![Op::add(content(), name("cut-01"))],
             None,
             &by(),
@@ -770,7 +761,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_round_naming_content_the_persona_does_not_hold_is_refused() {
+    async fn a_round_naming_content_that_does_not_exist_is_refused() {
         let world = Arc::new(World {
             holds: false,
             ..World::default()
@@ -784,7 +775,6 @@ mod tests {
         let refused = work
             .push(
                 &pursuit.id(),
-                &persona(),
                 vec![Op::add(content(), name("cut-01"))],
                 None,
                 &by(),
@@ -808,7 +798,6 @@ mod tests {
             .unwrap();
         work.push(
             &pursuit.id(),
-            &persona(),
             vec![Op::add(content(), name("cut-01"))],
             None,
             &by(),
@@ -920,7 +909,6 @@ mod tests {
         // One of them is abandoned, and stays in the listing.
         work.push(
             &under.id(),
-            &persona(),
             vec![Op::add(content(), name("tried"))],
             None,
             &by(),
@@ -965,7 +953,6 @@ mod tests {
             .unwrap();
         work.push(
             &mine.id(),
-            &persona(),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             None,
             &by(),
@@ -980,7 +967,6 @@ mod tests {
             .unwrap();
         work.push(
             &theirs.id(),
-            &persona(),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             None,
             &by(),
