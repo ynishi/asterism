@@ -45,6 +45,34 @@ and this project adheres to
 
 ### Added
 
+- **Pixels can propose neighbours** (#112). The encoder phase lands end to end
+  behind opt-ins. A `visual_similarity` edge kind joins the synthetic population
+  with its own owner: the visual rebuild recomputes it from stored feature
+  vectors over the whole persona history — deliberately not the ±48h candidate
+  window — and each rebuild's delete is scoped to its own subset, so neither the
+  windowed rebuild, the visual one, nor anything a person asserted can be
+  destroyed by the other. Vectors live in a `visual_feature` projection keyed by
+  the model's full derivation identity (model id, feature kind, preprocessing
+  revision beside them), with failure records in the same rows so absence is the
+  pending state and the extraction walk offers each image exactly once per
+  model; replacing a model deletes exactly its own output. Ingest fans out a
+  `visual_feature` job for image assets at fingerprint priority; a completed
+  encode chains the visual edge rebuild, which materialises only a bounded top
+  set above a score floor (provisional until the fixture measurements pin it).
+  `RetrievalIntent::Similar` — declined since the port was cut — is answered by
+  a brute-force cosine scan over the persona's vectors. The encoder itself is
+  `asterism-vision`'s ONNX Runtime path behind an `onnx`/`vision` feature pair
+  (a default build never downloads or links onnxruntime): it loads a
+  digest-verified model _package_ — the data contract with provider-side
+  preparation: two towers, a tokenizer, a manifest with per-file SHA-256,
+  license, and source — owns the SigLIP preprocessing recipe as an explicit
+  revision, refuses revisions it does not implement, and asserts the declared
+  dimension against what the tower actually produces. A `vision`-featured server
+  binds the profile's `models/` package at startup (exactly one, or none —
+  ambiguity is reported, not guessed), seeds the backfill, and a profile with no
+  package behaves exactly as before the feature existed: visual jobs skip,
+  `Similar` declines, nothing else changes.
+
 - **The visual pipeline gains its evaluation fixtures, inside the system**
   (#112). Grading pHash and the coming encoder needs images whose relationships
   are known because they were generated, and `PUBLIC_DEVELOPMENT.md` rules
