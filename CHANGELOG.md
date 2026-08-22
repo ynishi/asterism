@@ -44,6 +44,36 @@ and this project adheres to
   would mean one whose `from_work` and `by_node` are both NULL, which is the
   shape the model refuses to have as a type and no better as a table.
 
+### Added
+
+- **A line can be archived, reopened and dropped through a service** (#102). The
+  three verbs existed in the model and nowhere else, so nothing could release a
+  held asset: the forge refused to let an asset it names be deleted, and there
+  was no way to stop naming it. `Lines` gains `set_standing` and `discard`,
+  `LineService` gains `archive`, `reopen` and `discard`, and the refusal now has
+  a way out — archive the line, end the work against it, drop it, and what it
+  was holding comes back as the answer.
+
+  `discard` returns what the drop released rather than dropping and leaving the
+  caller to work it out, because after the write there is no record left to work
+  it out from. It is the union of both logs, which is `discard::releases`
+  finally having a caller: a line holds what its chain named, its work holds
+  what its operations named, and a caller adding those up itself is a caller who
+  can forget the second one.
+
+  The port takes the pursuits the drop covers, and refuses when the work against
+  the line is not that set. What a caller was told a drop frees was computed
+  from a list, and a pursuit opened since that list was read is content the
+  answer left out — silently, and in the direction that leaves bytes held by
+  nothing. Same shape as ending work: the store does not re-derive the decision,
+  it refuses to write when the decision no longer describes what is there.
+
+  Over SQLite the drop defers its foreign keys to the commit. Every key inside
+  the forge is `RESTRICT` and `pursuit.parent_id` points at `pursuit`, so work
+  filed under work is a chain that no single ordering of deletes answers.
+  Deferring keeps the one check that matters: a reference into the line from
+  outside it still fails, and fails the whole drop.
+
 ### Changed
 
 - **A close that loses its parent is decided again inside the write, once**
