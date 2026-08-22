@@ -413,6 +413,7 @@ pub enum PromptDisclosure {
 /// statement when one is recorded ([`asserted_source_type`]); `prompts`
 /// decides whether the prompt is disclosed at all
 /// ([`PromptDisclosure`]).
+#[allow(clippy::too_many_arguments)] // Each argument is a different stored source with a different owner; grouping them would invent a name for "everything the service read" without making any call site clearer.
 pub fn record_for(
     asset_id: &str,
     title: Option<&str>,
