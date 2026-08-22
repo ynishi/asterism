@@ -46,6 +46,37 @@ and this project adheres to
 
 ### Changed
 
+- **A close that loses its parent is decided again inside the write, once**
+  (#102). `PursuitService::close` used to loop five times: read the line,
+  decide, write, and on a conflict read again — with `ATTEMPTS = 5` as the
+  number of times a caller was willing to lose before the whole thing came back
+  as a conflict. Every attempt decided outside the write, so every attempt could
+  lose the same way, and the bound was the only thing standing between a busy
+  line and a caller waiting forever.
+
+  The decision still happens outside the write, where it belongs. What changed
+  is what happens when the write refuses: `Closings::commit` now takes a
+  `Deciding` alongside the closing, and asks it for a second answer against the
+  two logs as the write finds them — under the transaction that already holds
+  the write lock, where nothing can arrive between the read and the write. That
+  attempt is final. There is no loop and no number: either the parent is free,
+  or one re-decision settles it.
+
+  Two refusals reach the second decision and are named as such beside the port:
+  a change point already where this one would go, and a node already where this
+  ending would go — somebody landed on the line, or a pass arrived on the work.
+  Everything else is final, including work that has already ended, which is the
+  one refusal that asking again cannot change. Both stores implement that
+  division rather than each holding half of it.
+
+  The port lost its `on` parameter with the loop. It named the head a caller
+  decided against, and nothing compared it to anything —
+  `UNIQUE (line_id, parent_id)` refuses a taken parent as part of the insert,
+  and the closing already carries the node it names. In SQLite an attempt is a
+  savepoint, so an ending written before the change point that refused comes
+  back out before the second decision is made; the in-memory store gets the same
+  property from holding its lock across both.
+
 - **`WorkLog` is gone; a pursuit is its own chain** (#102). It held `open`,
   `rounds` and `close`, nothing outside a `Pursuit` ever held one, and all six
   of `Pursuit`'s verbs were straight delegations to it — an indirection that
