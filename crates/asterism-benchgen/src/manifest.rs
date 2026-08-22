@@ -220,7 +220,7 @@ impl ManifestBuilder {
     }
 }
 
-pub(crate) fn now_ms() -> i64 {
+fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
