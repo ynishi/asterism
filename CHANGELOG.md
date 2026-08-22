@@ -8,6 +8,34 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- **The forge asks whether content exists, not whose it is — so one person's
+  work can name another person's asset** (#120). `boundary::Store` asked
+  `owns(persona, asset)` and `PursuitService::push` took a `PersonaId` to answer
+  it with. Two things were wrong with that, and building a second surface over
+  the forge is what made both visible.
+
+  A line carries no owner — `Lines::list` says so, grouping and access are
+  outside the forge — so "real but belonging to somebody else" was not a reason
+  a reference was unusable, and refusing it made the case a shared line exists
+  for impossible to express: private work rising into something shared brings
+  the content of whoever had it.
+
+  And the check could not refuse a caller who wanted to pass. The caller chose
+  both halves of the pair, a persona is a column on the asset row, and nothing
+  here knew whether the caller was that persona — so naming the asset's own
+  persona always succeeded. What it caught was a client that paired the two
+  wrongly. It read as a guard on whose asset this is, and it was a consistency
+  check on two values one caller supplied.
+
+  `Store::exists(asset)` is the question the forge actually has, `push` lost the
+  argument, and `PersonaId` left the forge's shared vocabulary with it — the
+  list in `forge_boundary.rs` is one entry shorter because the forge needs less,
+  which is the only reason it ever should be. Whose an asset is stays a real
+  question for a surface that has authenticated somebody; this one has not, and
+  a check on an identity the caller chose was never that.
+
 ### Added
 
 - **A line of work is reachable over HTTP** (#120). The forge's verbs were
