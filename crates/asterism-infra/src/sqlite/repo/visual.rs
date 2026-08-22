@@ -43,16 +43,14 @@ pub(crate) fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
 }
 
 pub(crate) fn blob_to_vector(blob: &[u8]) -> Result<Vec<f32>, DomainError> {
-    if !blob.len().is_multiple_of(4) {
+    let (chunks, remainder) = blob.as_chunks::<4>();
+    if !remainder.is_empty() {
         return Err(DomainError::Validation(format!(
             "stored vector blob length {} is not a multiple of 4",
             blob.len()
         )));
     }
-    Ok(blob
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect())
+    Ok(chunks.iter().map(|c| f32::from_le_bytes(*c)).collect())
 }
 
 #[async_trait]
