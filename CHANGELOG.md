@@ -8,6 +8,40 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **The forge's model can be built back from stored values** (#102).
+  `model::restore` is the one door an id comes in by. Every other constructor in
+  the model mints — a line mints its id and its genesis, work mints its id and
+  its opening node — which is why the read half of the ports had no
+  implementation but a fake for as long as it did: nothing could hold an id
+  somebody else chose. The door is one module rather than a `from_persisted` per
+  type, because spread across the types there would be a piece of it on each and
+  nothing that reads as the whole. What keeps it honest is that it assembles
+  nothing itself: the nodes go back one at a time through `History::record`,
+  `WorkLog::push` and `WorkLog::end`, so a stored chain meets the refusals a
+  fresh write meets. A chain whose parents do not line up, a table that would
+  leave two live entries under one name, a pass after the ending — each is a
+  read that fails rather than a value the model would not have written. The
+  chain needs no sequence column either: a change point carries its parent, so
+  the points arrive in any order and the links are walked.
+
+- **An in-memory forge store, and the scenario run over it** (#102).
+  `asterism_infra::memory::forge` satisfies `Lines`, `Pursuits` and `Closings`
+  over rows under a `Mutex` — decomposing a domain value on the way in and
+  rebuilding it through `restore` on the way out. That is the whole reason it
+  exists: a fake that kept the domain objects answers every call correctly by
+  construction and never asks whether a line can be rebuilt from what was
+  written down, which is the question the read half is for. The row types are
+  named for the tables the SQLite adapter will create, so it can be read as a
+  specification of what that adapter owes.
+
+  `forge_over_ports_e2e` runs `asterism-core`'s `forge_scenario` again through
+  the services and that store, and adds two things the model alone cannot be
+  asked: that a close which loses the race re-reads and lands on the second
+  attempt, and that a stored state the model would have refused does not come
+  back through the read half.
+
 ### Removed
 
 - **The forge's first model, tables and all** (#102). The pursuit whose standing

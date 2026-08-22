@@ -160,6 +160,15 @@ impl Meta {
         }
     }
 
+    /// Rebuilds a description from the two stamps a store kept.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore) for why the whole of that door is
+    /// one module.
+    pub(super) fn restored(created: Act, updated: Act) -> Self {
+        Self { created, updated }
+    }
+
     /// Records that the description moved.
     pub fn touched(&mut self, act: Act) {
         self.updated = act;

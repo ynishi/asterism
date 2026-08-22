@@ -123,6 +123,20 @@ impl Open {
         }
     }
 
+    /// Rebuilds the node work opened at, under the id it was kept
+    /// with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(id: NodeId, base: ChangePointId, intent: Intent, act: Act) -> Self {
+        Self {
+            id,
+            base,
+            intent,
+            act,
+        }
+    }
+
     /// Which node.
     pub fn id(&self) -> NodeId {
         self.id
@@ -184,6 +198,32 @@ impl Round {
         })
     }
 
+    /// Rebuilds a pass under the id it was kept with.
+    ///
+    /// Refuses an empty one for the reason [`new`](Self::new) does: a
+    /// stored node carrying no operations is a record that nothing
+    /// happened, and reading it back would let the log say what it was
+    /// refused permission to say. Visible to the model and no further
+    /// — see [`restore`](super::restore).
+    pub(super) fn restored(
+        id: NodeId,
+        parent: NodeId,
+        ops: Vec<Op>,
+        note: Option<String>,
+        act: Act,
+    ) -> Result<Self, ForgeError> {
+        if ops.is_empty() {
+            return Err(ForgeError::EmptyRound);
+        }
+        Ok(Self {
+            id,
+            parent,
+            ops,
+            note,
+            act,
+        })
+    }
+
     /// Which node.
     pub fn id(&self) -> NodeId {
         self.id
@@ -230,6 +270,26 @@ impl Close {
     pub(super) fn new(parent: NodeId, outcome: Outcome, note: Option<String>, act: Act) -> Self {
         Self {
             id: NodeId::new(),
+            parent,
+            outcome,
+            note,
+            act,
+        }
+    }
+
+    /// Rebuilds an ending under the id it was kept with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(
+        id: NodeId,
+        parent: NodeId,
+        outcome: Outcome,
+        note: Option<String>,
+        act: Act,
+    ) -> Self {
+        Self {
+            id,
             parent,
             outcome,
             note,
@@ -379,6 +439,27 @@ impl Pursuit {
             parent,
             log: WorkLog::begin(Open::new(base, intent, act)),
             meta: Meta::opened(act),
+        }
+    }
+
+    /// Rebuilds work under the id it was kept with, around a log put
+    /// back node by node.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(
+        id: PursuitId,
+        of: LineId,
+        parent: Option<PursuitId>,
+        log: WorkLog,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            id,
+            of,
+            parent,
+            log,
+            meta,
         }
     }
 

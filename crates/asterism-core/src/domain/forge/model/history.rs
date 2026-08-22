@@ -98,6 +98,15 @@ impl Genesis {
         }
     }
 
+    /// Rebuilds the node a line began at, under the id it was kept
+    /// with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(id: ChangePointId, act: Act) -> Self {
+        Self { id, act }
+    }
+
     /// Which node.
     pub fn id(&self) -> ChangePointId {
         self.id
@@ -157,6 +166,31 @@ impl ChangePoint {
         }
     }
 
+    /// Rebuilds a change point under the id it was kept with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore). Nothing here checks the chain: the
+    /// caller puts it back through [`History::record`], which asks the
+    /// same questions of a stored node it asks of a new one.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn restored(
+        id: ChangePointId,
+        parent: ChangePointId,
+        from: PursuitId,
+        by: NodeId,
+        table: Table,
+        act: Act,
+    ) -> Self {
+        Self {
+            id,
+            parent,
+            from,
+            by,
+            table,
+            act,
+        }
+    }
+
     /// Which node.
     pub fn id(&self) -> ChangePointId {
         self.id
@@ -201,6 +235,20 @@ impl History {
     pub fn begin(act: Act) -> Self {
         Self {
             genesis: Genesis::new(act),
+            changes: Vec::new(),
+        }
+    }
+
+    /// Begins a history at a genesis that already exists, with
+    /// nothing recorded on it yet.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore). The chain is put back one
+    /// [`record`](Self::record) at a time, so what a store kept meets
+    /// the same refusals a fresh write does.
+    pub(super) fn restored(genesis: Genesis) -> Self {
+        Self {
+            genesis,
             changes: Vec::new(),
         }
     }

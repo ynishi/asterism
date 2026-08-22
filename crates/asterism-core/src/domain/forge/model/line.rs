@@ -82,6 +82,27 @@ impl Line {
         }
     }
 
+    /// Rebuilds a line under the id it was kept with, around a
+    /// history put back node by node.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(
+        id: LineId,
+        name: Name,
+        strategy: StrategyId,
+        history: History,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            strategy,
+            history,
+            meta,
+        }
+    }
+
     /// Which line.
     pub fn id(&self) -> LineId {
         self.id

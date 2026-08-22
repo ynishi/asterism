@@ -175,20 +175,22 @@
 //! while the work is open. [`closing`] refuses what was never settled;
 //! it does not settle anything itself.
 //!
-//! **Building any of this back from stored values.** Every constructor
-//! here mints: a line mints its id and its genesis, work mints its id
-//! and its opening node, a pass mints a node id. There is no
-//! `from_persisted` anywhere in this module, which means the read half
-//! of the ports — handing back a whole [`Line`] or a whole pursuit —
-//! has no implementation but a fake that keeps the objects themselves.
+//! **A second way to build any of this back from stored values.**
+//! Every constructor here mints: a line mints its id and its genesis,
+//! work mints its id and its opening node, a pass mints a node id. The
+//! one place a value is built holding an id somebody else chose is
+//! [`restore`], and that is the whole of the door.
 //!
-//! That is a decision rather than an oversight, and it is worth being
-//! read as one. A rehydration constructor has to take every field
-//! including the ids, so it is the one door through which a stored row
-//! can contradict a rule this module holds — and the shape it should
-//! take is decided by what a store actually keeps, which is not
-//! written yet. It arrives with the first adapter, and until then a
-//! port's read half is a contract nothing has had to satisfy.
+//! It is one module rather than a `from_persisted` on each type
+//! because of what it is. A rehydration constructor takes every field
+//! including the ids, so it is where a stored row could contradict a
+//! rule this module holds; spread across the types, there would be a
+//! piece of it on each and nothing that reads as the whole. What
+//! keeps it honest is that it assembles nothing itself — the nodes go
+//! back one at a time through [`History::record`], `WorkLog::push` and
+//! `WorkLog::end`, so a stored chain meets the refusals a fresh write
+//! meets, and a store that kept something the model would not have
+//! written cannot hand it back as though it had.
 //!
 //! **Whether two contents are the same thing.** An add is taken at its
 //! word: an entry arrives because somebody meant to put one there, and
@@ -237,6 +239,7 @@ pub mod line;
 pub mod op;
 pub mod pursuit;
 pub mod react;
+pub mod restore;
 pub mod strategy;
 pub mod table;
 pub mod thread;
