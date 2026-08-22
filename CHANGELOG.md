@@ -10,6 +10,41 @@ and this project adheres to
 
 ### Added
 
+- **The forge has a store, and the scenario runs over both** (#102). `V96` adds
+  the six tables the in-memory store was written in — `line`, `change_point`,
+  `change_row`, `work`, `work_node`, `work_op` — and `SqliteForge` satisfies
+  `Lines`, `Pursuits` and `Closings` over them. One adapter rather than one per
+  port, because a close writes a change point, its rows and an ending together
+  and two adapters sharing a transaction only reads as sharing when they are the
+  same object. Taking a domain value apart and putting one back moved to
+  `asterism_infra::forge::rows`, which both stores use, so the SQLite tables can
+  be read as owing what that module already says.
+
+  **The concurrency control is the write's own constraint.** Two nodes on one
+  parent is a fork, which both logs refuse in the model, so
+  `UNIQUE (line_id, parent_id)` and `UNIQUE (work_id, parent_id)` refuse it as
+  part of the insert — nothing reads a head and compares. A second ending needs
+  its own partial index, because it sits on the first, which is a parent nobody
+  has used. Telling one violation from another is done on the exact column list
+  SQLite reports rather than by substring: `work_node.work_id` is a second
+  ending and is a prefix of `work_node.work_id, work_node.parent_id`, which is a
+  fork, and reading one as the other would tell a caller to re-decide something
+  that cannot be re-decided.
+
+  **`content` restricts `asset`, on both logs.** An asset a line or a work log
+  holds cannot be deleted, and purging the persona that owns it is refused at
+  the same edge. Taking the entry off the line does not release it — undoing a
+  removal is adding that entry back, and that needs the content to be there.
+  What releases it is dropping the line, which the model answers with
+  `discard::releases` and no port has a verb for yet.
+
+  `forge_over_ports_e2e` now runs its scenario over both stores from one body.
+  Two disagreements surfaced doing that and both were the in-memory store being
+  wrong: it refused an abandoned close because the line had moved, though an
+  abandoned close puts nothing on the line and the model refuses one for nothing
+  but the wrong line or a second ending; and it compared a head where the index
+  compares a parent. Both now state the rule the schema states.
+
 - **A line has a standing, and says what it holds** (#102). The model had no
   answer to "this line is finished with" and no answer to "what would be lost if
   it went", which left the layer below with no way to protect the bytes a line

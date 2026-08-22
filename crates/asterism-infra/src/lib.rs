@@ -40,6 +40,7 @@
 pub mod disclosure;
 pub mod dispatch;
 pub(crate) mod fingerprint;
+pub mod forge;
 pub mod jobs;
 pub mod memory;
 pub mod observe;

@@ -3,9 +3,9 @@
 //! ```text
 //!   Lines / Pursuits / Closings
 //!            │
-//!            ├─ write ──► rows::take_*_apart ──► Vec<Row> under a Mutex
+//!            ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex
 //!            │
-//!            └─ read  ──► rows::read_* ──► model::restore ──► Line / Pursuit
+//!            └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit
 //! ```
 //!
 //! One `Mutex` over the whole store rather than one per table: the
@@ -30,8 +30,6 @@
 //! real on. There is no index: reads scan, which is fine at the sizes
 //! a test builds and would not be at any other.
 
-pub mod rows;
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -51,7 +49,9 @@ use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 
-use rows::{ChangePointRow, ChangeRowRow, LineRow, WorkNodeRow, WorkOpRow, WorkRow};
+use crate::forge::rows::{
+    self, ChangePointRow, ChangeRowRow, LineRow, WorkNodeRow, WorkOpRow, WorkRow,
+};
 
 /// Everything the store holds, in the shape it holds it.
 #[derive(Debug, Default)]
@@ -143,22 +143,10 @@ impl MemoryForge {
             .or(Some(head.open))
     }
 
-    /// The change point a line currently ends at, read the same way
-    /// and for the same reason.
-    fn line_head(tables: &Tables, id: &LineId) -> Option<ChangePointId> {
-        let head = tables.lines.iter().find(|row| row.id == *id)?;
-        let mut at = head.genesis;
-        let by_parent: HashMap<ChangePointId, ChangePointId> = tables
-            .change_points
-            .iter()
-            .filter(|row| row.line == *id)
-            .map(|row| (row.parent, row.id))
-            .collect();
-        while let Some(next) = by_parent.get(&at) {
-            at = *next;
-        }
-        Some(at)
-    }
+    // There was a `line_head` here, walking the chain to say where a
+    // line ends. Nothing reads it any more: a close is refused by the
+    // parent already being taken, which is the rule the SQLite index
+    // states, and neither store compares a head to decide anything.
 }
 
 #[async_trait]
@@ -318,12 +306,37 @@ impl Closings for MemoryForge {
         closing: &Closing,
     ) -> Result<(), DomainError> {
         self.with(|tables| {
-            let at = Self::line_head(tables, line)
-                .ok_or_else(|| DomainError::not_found("line", line))?;
-            if at != on {
-                return Err(DomainError::Conflict(format!(
-                    "line {line} has moved: this close lands on {on}, and the line ends at {at}"
-                )));
+            if !tables.lines.iter().any(|row| row.id == *line) {
+                return Err(DomainError::not_found("line", line));
+            }
+            // The same rule the SQLite adapter's `UNIQUE (line_id,
+            // parent_id)` states, asked the only way this store can
+            // ask it: a change point whose parent is already taken is
+            // a fork, and a fork is what "somebody landed first" looks
+            // like from here. Nothing compares a head — `on` is the
+            // caller's account of what it decided against, and the
+            // point it built carries the same node.
+            //
+            // Only a landing is asked. An abandoned close puts nothing
+            // on the line, so refusing one because somebody else
+            // landed first would refuse work for giving up in the
+            // wrong millisecond.
+            if let Some(point) = closing.point() {
+                debug_assert_eq!(
+                    point.parent(),
+                    on,
+                    "the closing names the node the caller says it decided against"
+                );
+                if tables
+                    .change_points
+                    .iter()
+                    .any(|row| row.line == *line && row.parent == point.parent())
+                {
+                    return Err(DomainError::Conflict(format!(
+                        "line {line} has moved: something already sits on {}",
+                        point.parent()
+                    )));
+                }
             }
             let seq = tables
                 .work_nodes

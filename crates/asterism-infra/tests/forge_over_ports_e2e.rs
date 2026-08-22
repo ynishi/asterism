@@ -36,6 +36,8 @@ use std::sync::{Arc, Mutex};
 use asterism_core::application::forge::{LineService, PursuitService};
 use asterism_core::domain::attribution::{AttributionContext, Author};
 use asterism_core::domain::forge::clock::Clock;
+use asterism_core::domain::forge::closings::Closings;
+use asterism_core::domain::forge::lines::Lines;
 use asterism_core::domain::forge::model::act::Actor;
 use asterism_core::domain::forge::model::line::Line;
 use asterism_core::domain::forge::model::op::{Op, OpKind};
@@ -43,11 +45,15 @@ use asterism_core::domain::forge::model::pursuit::{Intent, Outcome, Pursuit};
 use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::table::EntryStates;
 use asterism_core::domain::forge::model::value::{Content, EntryId, Name, StrategyId};
+use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::strategies::{Builtin, MainlineFirst};
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::error::DomainError;
 use asterism_infra::memory::forge::{HoldsEverything, MemoryActors, MemoryForge};
+use asterism_infra::sqlite::open_and_migrate_in_memory;
+use asterism_infra::sqlite::repo::SqliteForge;
 use chrono::{DateTime, TimeZone, Utc};
+use rusqlite_isle::{AsyncIsle, AsyncIsleDriver};
 
 /// A clock somebody winds. The scenario reads like the model one —
 /// minute 3 is minute 3 — and every act it produces is checkable
@@ -79,10 +85,6 @@ fn name(text: &str) -> Name {
     Name::new(text).expect("a name")
 }
 
-fn content() -> Content {
-    Content::of(AssetId::new())
-}
-
 fn alive(states: &EntryStates) -> Vec<String> {
     let mut names: Vec<String> = states
         .values()
@@ -93,42 +95,127 @@ fn alive(states: &EntryStates) -> Vec<String> {
     names
 }
 
-/// Everything a caller needs, wired the way `core_init` will wire it.
+/// Everything a caller needs, wired the way `core_init` will wire it,
+/// over whichever store the test was handed.
 struct World {
     lines: LineService,
     work: PursuitService,
     clock: Arc<Wound>,
-    store: MemoryForge,
+    /// The ports again, for the tests that ask one directly rather
+    /// than through a service — a caller holding a stale value is the
+    /// case the port exists for, and a service never produces one.
+    lines_port: Arc<dyn Lines>,
+    closings: Arc<dyn Closings>,
     persona: PersonaId,
+    /// Set only over the in-memory store, for the one test that has to
+    /// write rows nothing would ever write.
+    memory: Option<MemoryForge>,
+    /// Set only over SQLite, where `content` is a foreign key and a
+    /// reference has to name a row that exists.
+    isle: Option<AsyncIsle>,
 }
 
 impl World {
-    fn new() -> Self {
+    fn over_memory() -> Self {
         let store = MemoryForge::new();
+        Self::wire(
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Some(store),
+            None,
+        )
+    }
+
+    /// The same wiring over a migrated database.
+    ///
+    /// The driver goes with the world: dropping it shuts the isle down,
+    /// and a test that let it go would find every later call answering
+    /// on a closed connection.
+    async fn over_sqlite() -> (Self, AsyncIsleDriver) {
+        let (isle, driver) = open_and_migrate_in_memory().await.expect("a database");
+        let store = SqliteForge::new(isle.clone());
+        let world = Self::wire(
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            Arc::new(store.clone()),
+            None,
+            Some(isle.clone()),
+        );
+        world.seed_persona().await;
+        (world, driver)
+    }
+
+    fn wire(
+        lines: Arc<dyn Lines>,
+        pursuits: Arc<dyn Pursuits>,
+        closings: Arc<dyn Closings>,
+        memory: Option<MemoryForge>,
+        isle: Option<AsyncIsle>,
+    ) -> Self {
         let clock = Arc::new(Wound::default());
         let rules = Arc::new(Builtin::default());
         let actors = Arc::new(MemoryActors::new());
 
         Self {
-            lines: LineService::new(
-                Arc::new(store.clone()),
-                rules.clone(),
-                actors.clone(),
-                clock.clone(),
-            ),
+            lines: LineService::new(lines.clone(), rules.clone(), actors.clone(), clock.clone()),
             work: PursuitService::new(
-                Arc::new(store.clone()),
-                Arc::new(store.clone()),
-                Arc::new(store.clone()),
+                pursuits,
+                lines.clone(),
+                closings.clone(),
                 rules,
                 asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(HoldsEverything)),
                 actors,
                 clock.clone(),
             ),
             clock,
-            store,
+            lines_port: lines,
+            closings,
             persona: PersonaId::new(),
+            memory,
+            isle,
         }
+    }
+
+    /// A persona for the assets to hang off, over SQLite only.
+    async fn seed_persona(&self) {
+        let Some(isle) = &self.isle else { return };
+        let id = *self.persona.as_uuid();
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO persona (id, name, accent_color, display_order, archived, \
+                                      created_at, updated_at) \
+                 VALUES (?1, 'p', NULL, 0, 0, 0, 0)",
+                rusqlite::params![id],
+            )
+        })
+        .await
+        .expect("a persona");
+    }
+
+    /// Content that exists.
+    ///
+    /// Over SQLite this writes an asset first, because `change_row`
+    /// and `work_op` carry a foreign key to one — which is the forge
+    /// holding what it names, and the reason a reference here cannot
+    /// be a uuid nobody minted. Over the in-memory store there is
+    /// nothing below to hold, so it is the id and no row.
+    async fn content(&self) -> Content {
+        let asset = AssetId::new();
+        if let Some(isle) = &self.isle {
+            let (id, persona) = (*asset.as_uuid(), *self.persona.as_uuid());
+            isle.call(move |conn| {
+                conn.execute(
+                    "INSERT INTO asset (id, persona_id, source_kind, source_locator, \
+                                        modality, labels, occurred_at, created_at, updated_at) \
+                     VALUES (?1, ?2, 'fs', ?3, 'dialogue', '[]', 0, 0, 0)",
+                    rusqlite::params![id, persona, format!("a-{id}.md")],
+                )
+            })
+            .await
+            .expect("an asset");
+        }
+        Content::of(asset)
     }
 
     /// Opens work, writes one pass, and closes it satisfied — the
@@ -159,9 +246,18 @@ impl World {
 /// The scenario `forge_scenario` runs against the model, run against
 /// the services and a store that keeps rows.
 #[tokio::test]
-async fn a_line_four_people_and_a_store_that_keeps_rows() {
-    let world = World::new();
+async fn a_line_four_people_over_memory() {
+    a_line_four_people(&World::over_memory()).await;
+}
 
+#[tokio::test]
+async fn a_line_four_people_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_line_four_people(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_line_four_people(world: &World) {
     world.clock.set(0);
     let line = world
         .lines
@@ -176,7 +272,7 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
 
     // ---- Ana puts the first thing on the line. --------------------
     let cut = EntryId::new();
-    let ana_content = content();
+    let ana_content = world.content().await;
     world
         .lands(
             &line,
@@ -198,7 +294,7 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
         .unwrap();
 
     world.clock.set(3);
-    let boro_content = content();
+    let boro_content = world.content().await;
     world
         .work
         .push(
@@ -212,7 +308,12 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
         .unwrap();
 
     world
-        .lands(&line, "cyd", vec![Op::replace(cut, content())], 4)
+        .lands(
+            &line,
+            "cyd",
+            vec![Op::replace(cut, world.content().await)],
+            4,
+        )
         .await;
 
     // Boro is now asking for something the line has moved past. Both
@@ -253,7 +354,12 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
 
     // ---- Dai moves the same axis before Boro closes. --------------
     world
-        .lands(&line, "dai", vec![Op::replace(cut, content())], 7)
+        .lands(
+            &line,
+            "dai",
+            vec![Op::replace(cut, world.content().await)],
+            7,
+        )
         .await;
     let dai_content = world.lines.get(&line.id()).await.unwrap().states()[&cut]
         .content
@@ -317,7 +423,7 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
         .await
         .unwrap();
     world.clock.set(11);
-    let tried = content();
+    let tried = world.content().await;
     world
         .work
         .push(
@@ -474,8 +580,18 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
 /// proves is that a close aims at the head as it is when the close is
 /// decided, rather than at the head the work was cut from.
 #[tokio::test]
-async fn two_pursuits_cut_from_one_head_land_one_after_the_other() {
-    let world = World::new();
+async fn two_pursuits_from_one_head_over_memory() {
+    two_pursuits_from_one_head(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn two_pursuits_from_one_head_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    two_pursuits_from_one_head(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn two_pursuits_from_one_head(world: &World) {
     world.clock.set(0);
     let line = world
         .lines
@@ -504,7 +620,7 @@ async fn two_pursuits_cut_from_one_head_land_one_after_the_other() {
             .push(
                 &work.id(),
                 &world.persona,
-                vec![Op::add(content(), name(label))],
+                vec![Op::add(world.content().await, name(label))],
                 None,
                 &who("boro"),
             )
@@ -551,11 +667,20 @@ async fn two_pursuits_cut_from_one_head_land_one_after_the_other() {
 /// because a caller holding a stale line is exactly the case it exists
 /// for.
 #[tokio::test]
-async fn a_close_aimed_at_a_head_the_line_has_left_is_refused() {
-    use asterism_core::domain::forge::closings::Closings;
+async fn a_stale_aim_is_refused_over_memory() {
+    a_stale_aim_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_stale_aim_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_stale_aim_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_stale_aim_is_refused(world: &World) {
     use asterism_core::domain::forge::model::closing::close as end_work;
 
-    let world = World::new();
     world.clock.set(0);
     let line = world
         .lines
@@ -575,26 +700,20 @@ async fn a_close_aimed_at_a_head_the_line_has_left_is_refused() {
         .push(
             &work.id(),
             &world.persona,
-            vec![Op::add(content(), name("mine"))],
+            vec![Op::add(world.content().await, name("mine"))],
             None,
             &who("boro"),
         )
         .await
         .unwrap();
 
-    // Somebody else lands, so the genesis is no longer the head.
-    world
-        .lands(&line, "cyd", vec![Op::add(content(), name("theirs"))], 2)
-        .await;
-
-    // A closing decided against the line as it was, aimed at where it
-    // was. The model builds it happily — it is the store's business
-    // that the line has moved since.
-    let stale = world.lines.get(&line.id()).await.unwrap();
+    // The closing is decided here, against the line as it is now —
+    // which means its change point takes the genesis as its parent.
+    let before = world.lines.get(&line.id()).await.unwrap();
     let work = world.work.get(&work.id()).await.unwrap();
     world.clock.set(3);
     let closing = end_work(
-        &stale,
+        &before,
         &work,
         Outcome::Satisfied,
         None,
@@ -603,9 +722,24 @@ async fn a_close_aimed_at_a_head_the_line_has_left_is_refused() {
             Actor::User(asterism_core::domain::forge::model::value::ActorId::new()),
         ),
     )
-    .expect("nothing collides; it is only aimed at the wrong node");
+    .expect("nothing collides yet");
+    assert_eq!(closing.point().unwrap().parent(), genesis);
 
-    let refused = Closings::commit(&world.store, &line.id(), &work.id(), genesis, &closing).await;
+    // And *then* somebody else lands on the genesis. The closing above
+    // is now aimed at a node the line has left, and it does not know
+    // it — which is the whole case: the caller decided against a line
+    // that has moved since, and only the write can tell it so.
+    world
+        .lands(
+            &line,
+            "cyd",
+            vec![Op::add(world.content().await, name("theirs"))],
+            2,
+        )
+        .await;
+
+    let refused =
+        Closings::commit(&*world.closings, &line.id(), &work.id(), genesis, &closing).await;
     assert!(
         matches!(refused, Err(DomainError::Conflict(_))),
         "a close only lands on the head as it is: {refused:?}"
@@ -644,9 +778,9 @@ async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
     use asterism_core::domain::forge::model::value::{
         ActorId, ChangePointId, Existence, NodeId, PursuitId,
     };
-    use asterism_infra::memory::forge::rows;
+    use asterism_infra::forge::rows;
 
-    let world = World::new();
+    let world = World::over_memory();
     world.clock.set(0);
     let line = world
         .lines
@@ -659,31 +793,36 @@ async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
     // from saying it.
     let taken = name("key visual");
     let point_id = ChangePointId::new();
+    let filling = world.content().await;
     let forged: Vec<rows::ChangeRowRow> = [EntryId::new(), EntryId::new()]
         .into_iter()
         .map(|entry| rows::ChangeRowRow {
             point: point_id,
             entry,
             existence: Some(Existence::Present),
-            content: Some(content()),
+            content: Some(filling),
             name: Some(taken.clone()),
         })
         .collect();
 
-    world.store.force_rows(
-        line.id(),
-        rows::ChangePointRow {
-            id: point_id,
-            line: line.id(),
-            parent: line.head(),
-            from: PursuitId::new(),
-            by: NodeId::new(),
-            act: rows::ActRow::of(&Act::new(at(1), Actor::User(ActorId::new()))),
-        },
-        forged,
-    );
+    world
+        .memory
+        .as_ref()
+        .expect("the forced-rows test runs over memory")
+        .force_rows(
+            line.id(),
+            rows::ChangePointRow {
+                id: point_id,
+                line: line.id(),
+                parent: line.head(),
+                from: PursuitId::new(),
+                by: NodeId::new(),
+                act: rows::ActRow::of(&Act::new(at(1), Actor::User(ActorId::new()))),
+            },
+            forged,
+        );
 
-    let refused = Lines::get(&world.store, &line.id()).await;
+    let refused = Lines::get(&*world.lines_port, &line.id()).await;
     assert!(
         matches!(refused, Err(DomainError::Conflict(_))),
         "the store cannot argue the model out of its own rule: {refused:?}"
@@ -695,7 +834,7 @@ async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
 /// rather than quietly settled by something else.
 #[tokio::test]
 async fn a_line_cannot_be_opened_under_a_rule_this_instance_does_not_carry() {
-    let world = World::new();
+    let world = World::over_memory();
     world.clock.set(0);
 
     let carried: Vec<String> = world
@@ -748,22 +887,22 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
     #[async_trait::async_trait]
     impl Lines for Stale {
         async fn open(&self, line: &Line) -> Result<(), DomainError> {
-            self.real.open(line).await
+            Lines::open(&self.real, line).await
         }
 
         async fn get(&self, id: &LineId) -> Result<Option<Line>, DomainError> {
             if let Some(before) = self.armed.lock().unwrap().take() {
                 return Ok(Some(before));
             }
-            self.real.get(id).await
+            Lines::get(&self.real, id).await
         }
 
         async fn list(&self) -> Result<Vec<Line>, DomainError> {
-            self.real.list().await
+            Lines::list(&self.real).await
         }
 
         async fn rename(&self, id: &LineId, name: &Name, act: &Act) -> Result<(), DomainError> {
-            self.real.rename(id, name, act).await
+            Lines::rename(&self.real, id, name, act).await
         }
 
         async fn set_strategy(
@@ -772,7 +911,7 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
             strategy: &StrategyId,
             act: &Act,
         ) -> Result<(), DomainError> {
-            self.real.set_strategy(id, strategy, act).await
+            Lines::set_strategy(&self.real, id, strategy, act).await
         }
     }
 
@@ -819,7 +958,7 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
             .push(
                 &work.id(),
                 &persona,
-                vec![Op::add(content(), name(label))],
+                vec![Op::add(Content::of(AssetId::new()), name(label))],
                 None,
                 &who("boro"),
             )
@@ -854,4 +993,167 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
     assert_eq!(chain[0].from(), theirs.id());
     assert_eq!(chain[1].from(), mine.id());
     assert_eq!(chain[1].parent(), chain[0].id());
+}
+
+/// Giving up is not refused because somebody else landed first.
+///
+/// An abandoned close puts nothing on the line, so where the line is
+/// has nothing to do with it — the model says as much, refusing an
+/// abandoned close for nothing but the wrong line or a second ending.
+/// A store that checked the head anyway would refuse work for giving
+/// up in the wrong millisecond, and the caller would have no move that
+/// helps: there is nothing to re-decide.
+#[tokio::test]
+async fn an_abandoned_close_survives_a_moved_line_over_memory() {
+    an_abandoned_close_survives_a_moved_line(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn an_abandoned_close_survives_a_moved_line_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    an_abandoned_close_survives_a_moved_line(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn an_abandoned_close_survives_a_moved_line(world: &World) {
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::closing::close as end_work;
+    use asterism_core::domain::forge::model::value::ActorId;
+
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let genesis = line.head();
+
+    world.clock.set(1);
+    let giving_up = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+
+    // Somebody else lands, so the genesis is no longer the head.
+    world
+        .lands(
+            &line,
+            "cyd",
+            vec![Op::add(world.content().await, name("theirs"))],
+            2,
+        )
+        .await;
+
+    let work = world.work.get(&giving_up.id()).await.unwrap();
+    let stale = world.lines.get(&line.id()).await.unwrap();
+    let ending = end_work(
+        &stale,
+        &work,
+        Outcome::Abandoned,
+        None,
+        Act::new(at(3), Actor::User(ActorId::new())),
+    )
+    .expect("giving up is always allowed");
+    assert!(!ending.lands());
+
+    // Aimed at the genesis, which the line left two minutes ago.
+    Closings::commit(&*world.closings, &line.id(), &work.id(), genesis, &ending)
+        .await
+        .expect("nothing about this ending depends on where the line is");
+
+    let after = world.work.get(&work.id()).await.unwrap();
+    assert_eq!(after.outcome(), Some(Outcome::Abandoned));
+    assert_eq!(
+        world
+            .lines
+            .get(&line.id())
+            .await
+            .unwrap()
+            .history()
+            .changes()
+            .len(),
+        1,
+        "and it still put nothing on the line"
+    );
+}
+
+/// The forge holds what it names, and the schema is what says so.
+///
+/// Only asked over SQLite, because it is the only store with a layer
+/// below to hold anything: the in-memory one keeps an id and there is
+/// nothing underneath it to delete. That asymmetry is the honest one —
+/// the guard is a foreign key, and a store with no foreign keys cannot
+/// be asked whether it has this one.
+#[tokio::test]
+async fn an_asset_on_a_line_cannot_be_deleted_and_neither_can_its_persona() {
+    let (world, driver) = World::over_sqlite().await;
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    let held = world.content().await;
+    world
+        .lands(&line, "ana", vec![Op::add(held, name("one"))], 1)
+        .await;
+
+    let isle = world.isle.clone().expect("over sqlite");
+    let asset = *held.as_uuid();
+    let refused = isle
+        .call(move |conn| conn.execute("DELETE FROM asset WHERE id = ?1", rusqlite::params![asset]))
+        .await;
+    assert!(
+        refused.is_err(),
+        "a line naming bytes somebody deleted is a line lying about the present"
+    );
+
+    let persona = *world.persona.as_uuid();
+    let owner = isle
+        .call(move |conn| {
+            conn.execute(
+                "DELETE FROM persona WHERE id = ?1",
+                rusqlite::params![persona],
+            )
+        })
+        .await;
+    assert!(
+        owner.is_err(),
+        "and the cascade that would take the asset stops at the same edge"
+    );
+
+    // The entry going off the line does not release it: the change
+    // point that put it there still names it, and bringing the entry
+    // back is a verb that needs the content to be there.
+    let entry = *line_entries(&world, &line.id())
+        .await
+        .first()
+        .expect("one entry");
+    world.lands(&line, "ana", vec![Op::remove(entry)], 2).await;
+    let still = isle
+        .call(move |conn| conn.execute("DELETE FROM asset WHERE id = ?1", rusqlite::params![asset]))
+        .await;
+    assert!(
+        still.is_err(),
+        "taking an entry off releases nothing; only dropping the line does"
+    );
+
+    driver.shutdown().await.unwrap();
+}
+
+/// Every entry the line has heard of, in a stable order.
+async fn line_entries(
+    world: &World,
+    line: &asterism_core::domain::forge::model::value::LineId,
+) -> Vec<EntryId> {
+    world
+        .lines
+        .states(line)
+        .await
+        .unwrap()
+        .keys()
+        .copied()
+        .collect()
 }
