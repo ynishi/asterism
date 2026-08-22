@@ -10,6 +10,18 @@ and this project adheres to
 
 ### Added
 
+- **The forge's two questions have real answers** (#102). `SqliteStore` answers
+  whether a persona holds an asset — trashed included, because trashing is
+  reversible and the row is still theirs, and reading that stamp here would make
+  an operation legal or not depending on what somebody had tidied away that
+  morning. `SqliteActors` answers what a handle stands for, over a `forge_actor`
+  table (`V97`) minted on first sight. Four kinds: the two an `Author` has, one
+  for a write that named nobody, and one for the instance itself, which is what
+  a line's rule writes as. Keyed on the author and nothing else — an agent
+  acting for somebody does not make a second somebody. Three of the four carry
+  no subject, and SQLite counts NULLs as distinct in a unique index, so the
+  index is over `COALESCE(subject, '')`; a plain one admits a second owner.
+
 - **The forge has a store, and the scenario runs over both** (#102). `V96` adds
   the six tables the in-memory store was written in — `line`, `change_point`,
   `change_row`, `work`, `work_node`, `work_op` — and `SqliteForge` satisfies

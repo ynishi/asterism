@@ -7176,6 +7176,57 @@ CREATE INDEX idx_work_op_entry ON work_op(entry_id);
 CREATE INDEX idx_work_op_content ON work_op(content);
 "#;
 
+/// V97 — what a forge handle stands for (#102).
+///
+/// The forge records who did a thing as a handle and a kind, and asks
+/// what the handle means through `boundary::Actors`. This is the row
+/// that answers.
+///
+/// # Why a row rather than the triple on the node
+///
+/// A node is kept forever, and the identity on the other side is not
+/// settled: the owner of an instance is an unbound reference until
+/// authentication binds it. A node that recorded the answer today
+/// would be recording an absence and would have to be rewritten the
+/// day the answer arrives, and nodes do not get rewritten. One row to
+/// update is the whole point of the indirection.
+///
+/// # What a handle stands for
+///
+/// Four kinds, and they are not the attribution triple's. `owner` and
+/// `subject` are the two an [`Author`](asterism_core::domain::attribution::Author)
+/// has; `unrecorded` is a write that named nobody, which is one actor
+/// rather than a new one each time — "nobody said who" is a single
+/// answer, not a crowd. `server` is the instance itself, which is what
+/// a line's rule writes as.
+///
+/// The server is not the `instance` row's id reused. One deployment is
+/// one server today and several is the setting the port's doc names as
+/// the one where "the system did it" stops being an answer — so the
+/// handle namespace stays the forge's own, and `subject` is where a
+/// second server would be told apart.
+///
+/// # Uniqueness over a nullable column
+///
+/// `owner`, `unrecorded` and today's `server` all carry a NULL
+/// subject, and SQLite counts NULLs as distinct in a UNIQUE index — so
+/// a plain one would admit a second owner. The index is over
+/// `COALESCE(subject, '')` instead, which is what makes "one handle
+/// per thing it stands for" a rule rather than an intention.
+const V97_FORGE_ACTOR: &str = r#"
+CREATE TABLE forge_actor (
+    id         BLOB PRIMARY KEY,
+    stands_for TEXT NOT NULL
+        CHECK (stands_for IN ('owner', 'subject', 'unrecorded', 'server')),
+    subject    TEXT,
+    created_at INTEGER NOT NULL,
+    CHECK ((stands_for = 'subject') = (subject IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_forge_actor_stands_for
+    ON forge_actor(stands_for, COALESCE(subject, ''));
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7275,6 +7326,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
     Step::Sql(V95_DROP_THE_FIRST_FORGE_MODEL),
     Step::Sql(V96_FORGE_TABLES),
+    Step::Sql(V97_FORGE_ACTOR),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
