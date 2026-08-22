@@ -4,10 +4,9 @@ The forge's wire shapes — a line, what is on it, and what a caller
 asks it to do.
 
 A topic module rather than rows in [`command`](crate::command) and
-[`dto`](crate::dto), for the reason [`query_group`](crate::query_group)
-is one: the forge's vocabulary answers to a model of its own, and a
-reader of `LineDto` needs the four or five types beside it more than
-it needs the asset DTO two hundred lines up.
+[`dto`](crate::dto): the forge's vocabulary answers to a model of
+its own, and a reader of [`ForgeLineDto`] needs the types beside it
+more than it needs the asset DTO two hundred lines up.
 
 # The model these are a projection of
 

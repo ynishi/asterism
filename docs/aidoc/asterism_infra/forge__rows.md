@@ -35,7 +35,7 @@ specification of what it owes.
 - `AnchorColumns` — What a thread hangs off, as the five columns that carry it.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
-- `LineRow` — `line` — the repository, and the two things about it that are not
+- `LineRow` — `line` — the repository, and the three things about it that are not
 - `PursuitNodeRow` — `pursuit_node` — a round or an ending.
 - `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was written.
 - `PursuitRow` — `pursuit` — one line of work.

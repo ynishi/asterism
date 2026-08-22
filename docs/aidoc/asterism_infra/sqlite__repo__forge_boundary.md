@@ -19,5 +19,5 @@ the forge asks" readable together.
 ## Types
 
 - `SqliteActors` — Keeps what a forge handle stands for.
-- `SqliteStore` — Answers the forge's one question about the layer below.
+- `SqliteStore` — Answers [`Store`] over the `asset` table.
 

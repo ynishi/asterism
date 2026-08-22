@@ -371,10 +371,9 @@ The forge's wire shapes — a line, what is on it, and what a caller
 asks it to do.
 
 A topic module rather than rows in [`command`](crate::command) and
-[`dto`](crate::dto), for the reason [`query_group`](crate::query_group)
-is one: the forge's vocabulary answers to a model of its own, and a
-reader of `LineDto` needs the four or five types beside it more than
-it needs the asset DTO two hundred lines up.
+[`dto`](crate::dto): the forge's vocabulary answers to a model of
+its own, and a reader of [`ForgeLineDto`] needs the types beside it
+more than it needs the asset DTO two hundred lines up.
 
 # The model these are a projection of
 
@@ -1040,48 +1039,39 @@ trash view's hydration depends on that.
 Forge use cases — the verbs of a line of work.
 
 [`LineService`] owns the repository a history sits on: opening one,
-reading what is alive on it, and moving the two things about a line
-that are not written into its history — its name and the rule it
-settles collisions by. [`PursuitService`] owns work against a line:
+reading what is alive on it, moving the things about a line that
+are not written into its history — its name, the rule it settles
+collisions by, and whether it is finished with — and dropping it. [`PursuitService`] owns work against a line:
 opening it, adding a round, running the line's rule over what the
-work collides with, and ending it. They are apart from the rest
-because they are the only services here whose writes carry intent
-rather than content (the layer itself is described in
+work collides with, and ending it. [`ThreadService`] owns what is
+said about either: a conversation hangs off a pursuit, a round, an
+entry as one round had it, or a change point, and touches neither
+log. The three are apart from the rest because they are the only
+services here whose writes carry intent rather than content (the
+layer itself is described in
 [`domain::forge`](crate::domain::forge)).
 
-Neither has a transport. The first model's did, and it went with it
-on #102; what these two are reachable through today is a caller
-inside the process, and the adapter under them is where that
-changes.
-
-Nothing in the raw layer is edited by either of them. Ending work
+Nothing in the raw layer is edited by any of them. Ending work
 records that it ended and touches no asset: no trash, no label, no
 rating. Integrating the conclusion back into the library is the raw
 layer's own business, and stays on the raw layer's verbs.
 
 # Which way the services may point
 
-A rule with two halves, and the second is the one that gets broken:
+**A service here does not name a service or a port of the raw
+layer.** What it needs from below, it asks through the face that
+answers — [`boundary`](crate::domain::forge::boundary) — so the
+thing it depends on is a contract rather than an implementation.
+Wire the two directly and each needs the other to build, which is
+the state that makes either impossible to move. What the raw layer
+may name is its own side of that boundary, and
+[`domain::forge`](crate::domain::forge) states both directions.
 
-- **A service here does not name a service or a port of the raw
-  layer.** What it needs from below, it asks through the face that
-  answers — [`boundary`](crate::domain::forge::boundary) — so the
-  thing it depends on is a contract rather than an implementation.
-- **Nothing in the raw layer names a service here.** Not a type,
-  not a port, not a function. When the raw layer needs something of
-  the forge, the forge answers a face; the call still happens, and
-  the dependency does not.
-
-Both halves say the same thing: the two sides are wired through
-contracts in both directions, so neither can be compiled with the
-other in front of it. Wire them directly and each needs the other
-to build, which is the state that makes either impossible to move.
-
-**Shared identity is not a crossing.** `AssetId`, the attribution
-triple and `DomainError` are named directly here, as they are
-everywhere else, because they belong to neither side. The rule is
-about capability, never about what something is. `PersonaId` was in
-that list until the forge stopped asking whose an asset is.
+**Shared identity is not a crossing.** `AssetId`, `define_uuid_id`,
+the attribution triple and `DomainError` belong to neither side, so
+naming one is not a crossing wherever it happens. The rule is about
+capability, never about what something is. `PersonaId` was in that
+list until the forge stopped asking whose an asset is.
 
 
 <!-- asterism_core/application__forge__line_service.md -->
@@ -1091,7 +1081,9 @@ Line use cases — opening one, reading what is on it, and moving its
 own description.
 
 ```text
-  open / rename / set_strategy      writes the line's description
+  open                              writes the whole line, genesis
+                                      and history included
+  rename / set_strategy             writes the line's description
   archive / reopen                  writes the line's standing
   get / states / strategies         reads
   discard                           reads both logs, writes neither
@@ -1099,8 +1091,8 @@ own description.
 ```
 
 Nothing here writes to a line's history. A line moves when work
-ends, and that is [`PursuitService::close`](super::PursuitService),
-which is also the only place both logs are written at once.
+ends, and that is
+[`PursuitService::close`](super::PursuitService).
 
 # The one verb that reads the other log
 
@@ -1124,10 +1116,6 @@ this deployment carries. Both are lookups with one answer.
 settles collisions by a rule, and the rules differ in what happens
 to somebody's work — so the list a person picks from is built from
 the rules themselves, and every one of them says what it does.
-
-There is no fallback for a name nothing answers to. A line settled
-by whatever rule happened to be available would be settled by a
-rule nobody chose, and no record would say so.
 
 ## Types
 
@@ -1160,22 +1148,6 @@ one line do not contend until one of them finishes.
 Nothing. It loads what the model needs, calls it, and writes back
 what came out. Every refusal in here comes from the model or from a
 port.
-
-# Losing the race is not an error to report, and not answered here
-
-Two pieces of work can finish against one line at the same moment,
-and only one of them lands on the head. What the loser needs is a
-fresh decision against the line that won — not the same answer
-written again, because normalising against a line that has moved
-may leave less to record than there was, or more to collide with.
-
-Deciding that again is the model's, and the moment to do it belongs
-to whoever is holding the write. So this service hands the store
-[`Deciding`] along with what it decided, and the store asks for a
-second answer under its own lock if the first is refused. Reading
-again from here and trying again would be deciding against a line
-that can move between the read and the write, once per attempt, for
-as many attempts as anybody has patience for.
 
 ## Types
 
@@ -1211,8 +1183,10 @@ every verb that takes one loads the pursuit or the line before a
 thread exists.
 
 That is the whole of what this service decides, and it decides it
-by asking. The refusals are the model's — an entry a round did not
-touch is [`Anchor::entry`]'s refusal, not one written here.
+by asking. What the model refuses stays the model's — an entry a
+round did not touch is [`Anchor::entry`]'s refusal, not one written
+here. What is written here is the other half of a read: no such
+round on this work, no such change point on this line.
 
 # What this service is allowed to decide
 
@@ -3493,15 +3467,15 @@ integrates is a *decision*.
 
 Nothing here stores anything. The ports are [`lines`], [`pursuits`],
 [`closings`] and [`threads`]; what satisfies them lives outside this
-crate — `asterism-infra` has two, one over SQLite and one over rows
-under a lock — and reading one back goes through
-[`model::restore`], the one door a stored value comes in by.
+crate, and reading one back goes through [`model::restore`], the one
+door a stored value comes in by.
 
 # The boundary
 
 - **The forge names the core; what it writes there is correlation,
-  never judgement.** A pursuit refers to content through frozen sets
-  ([`Snapshot`]) and ids, and writes nothing onto a core row at all.
+  never judgement.** A pursuit refers to content by id — one
+  reference, [`Content`](model::value::Content), and no other — and
+  writes nothing onto a core row at all.
   What the forge has to say about an asset — lifecycle events,
   ledger gestures — lives on forge rows that name core ids. An
   intent written onto a core row itself would put the forge's
@@ -3517,10 +3491,10 @@ under a lock — and reading one back goes through
   around.
 
   What the forge does own is its own word for it. A node records an
-  [`Actor`](model::act::Actor) — a handle and a kind — because the
-  forge's actors include a line's own rule, which is not a person
-  and cannot be written as one. Who a handle stands for is asked
-  through [`boundary::Actors`], and answered outside.
+  [`Actor`](model::act::Actor) — a handle and a kind — and who a
+  handle stands for is asked through [`boundary::Actors`] and
+  answered outside. Why a handle rather than the triple is in
+  [`boundary::actors`].
 - **The core does not need the forge.** Importing, deduplicating,
   rating and trashing all work with no pursuit in sight. Sending
   anything out is the raw layer's own business, and the forge has
@@ -3538,12 +3512,12 @@ with) and
 `tests/forge_boundary.rs` holds that list with a reason beside each
 entry and fails on anything else.
 
-It was five until `PersonaId` came off, and how it came off is the
-example worth keeping: nothing removed it from the list on purpose.
-[`boundary::Store`] stopped asking whose an asset is — a line
-carries no owner, so the answer had nothing to be measured
-against — and the word simply stopped appearing. The list shrinks
-when the forge needs less, and never because somebody tidied it.
+`PersonaId` came off that list, and how it came off is the example
+worth keeping: nothing removed it from the list on purpose.
+[`boundary::Store`] stopped asking whose an asset is — the reason
+is in [`boundary::store`] — and the word simply stopped appearing.
+The list shrinks when the forge needs less, and never because
+somebody tidied it.
 
 **The constraint is mutual dependency with the core, and nothing
 wider.** Two things follow that are easy to get backwards:
@@ -3576,9 +3550,9 @@ and records what became of it; it does not export, does not start a
 dispatch, and does not wait for anything to come back. Export lives
 in the raw layer, where what it records is a thing that happened to
 the bytes.
-[`snapshot`](crate::domain::snapshot) is the handle the forge holds
-the core by, and belongs to the core: it is content-addressed,
-deduplicated persona-wide, and carries no story about who froze it.
+[`snapshot`](crate::domain::snapshot) belongs to the core: it is
+content-addressed, deduplicated persona-wide, and carries no story
+about who froze it.
 [`duplicate_conflict`](crate::domain::duplicate_conflict) and
 [`merge_plan`](crate::domain::merge_plan) answer identity ("are these
 the same thing"), which the store asks of itself without being told
@@ -3601,8 +3575,6 @@ was settled on #63, and the first one — a pursuit whose standing
 derived from lifecycle events, a ledger beside it, a line moved one
 verb at a time — was removed whole on #102 rather than migrated.
 
-[`Snapshot`]: crate::domain::snapshot::Snapshot
-
 
 <!-- asterism_core/domain__forge__boundary.md -->
 # asterism-core::domain::forge::boundary
@@ -3621,7 +3593,7 @@ defect this module exists to make visible.
 ```text
            ┌──────────── the contracts ────────────┐
            │  Store        the layer below answers │
-           │  Correlation  the forge answers       │
+           │  Actors       the side that knows who │
            └───────┬───────────────────┬───────────┘
                    │                   │
         ┌──────────┴───────┐   ┌───────┴──────────┐
@@ -3637,22 +3609,22 @@ need the other to compile. Naming a contract instead leaves each
 side depending on something neither owns, which is the only
 arrangement where both questions can be asked.
 
-**[`Store`] is the face that asks downward**, and it was the only
-one built for a while. The model refers to content it does not own, and before
-that content is put on a line the forge has to know it is real —
-that question, and no other, is what crosses today. The rest of
-what the forge will eventually ask for (freezing a set, reading a
-round) belongs to work that is not modelled yet, and declaring it
-now would fix a shape nothing has tested.
+**[`Store`] is the face that asks downward.** The model refers to
+content it does not own, and before that content is put on a line
+the forge has to know it is real. The rest of what the forge will
+eventually ask for (freezing a set, reading a round) waits for the
+work that needs it: declaring a question now would fix a shape
+nothing has tested.
 
 **[`Actors`] is the face that asks sideways.** The forge records
 who did a thing as a handle, and what that handle stands for — an
 authenticated user, an instance — belongs to the side that knows
 what a person is. That question crosses here.
 
-**The face that answers upward is not here yet.** What the layer
-below asks the forge is which work a finished round files under,
-and that arrives with the transport that needs it, in this module.
+**The face that answers upward belongs in this module too.** What
+the layer below asks the forge is which work a finished round files
+under, and that question is declared here, with the transport that
+needs it.
 
 # What crosses without a contract
 
@@ -3661,18 +3633,21 @@ directly anywhere in the forge is correct rather than a leak:
 `AssetId` and `DomainError`. There is no client for them and there
 should not be one.
 
-`PersonaId` was on that list while [`store::Store`] asked
-whose an asset is. It does not any more — a line carries no owner,
-so the forge has nothing to measure an answer about ownership
-against — and the word left the forge with the question.
+`PersonaId` was one of these while [`store::Store`] asked whose an
+asset is. It is not any more — a line carries no owner, so the
+forge has nothing to measure an answer about ownership against —
+and the word left the forge with the question. It also left the
+boundary list that `tests/forge_boundary.rs` enforces, which is a
+wider list than the two words above: the enforced list is every
+name the forge may reach for, and these are the ones a contract may
+be *stated* in.
 
-The attribution triple used to be on that list and is not any
-more. It came off for a reason the others do not share: the forge's
-actors are a **wider** set than the triple can spell — a line's own
-rule can act, and no person did that — so it is not a word the
-forge borrows but a word that cannot say what the forge means. It
-crosses through [`Actors`] like any other capability, and the
-forge's own word for who did something is
+The attribution triple is on the enforced list for a reason the
+others do not share: the forge's actors are a **wider** set than the triple
+can spell — a line's own rule can act, and no person did that — so
+it is not a word the forge records but a word it asks a question
+in. It crosses at [`Actors`] and is turned into a handle there, and
+the forge's own word for who did something is
 [`Actor`](crate::domain::forge::model::act::Actor).
 
 The reason is that they are not the other side's words that the
@@ -3684,8 +3659,8 @@ boundary that nothing is crossing.
 
 So the split is: **identity is shared, capability is contracted.**
 What the other side can *do* — answer whether something exists,
-freeze a set, file a round — goes through a face and a client, and
-every one of those is in this module. What something *is* does not.
+and answer who somebody is — goes through a face, and every face
+there is lives in this module. What something *is* does not.
 
 # Translation happens once, in a client
 
@@ -3694,11 +3669,17 @@ attribution, the error that both sides already use. The forge's
 [`Content`] is not in it, and must not be: putting it there would
 hand the forge's word for a reference to the side that has its own.
 
-So each face gets a client on this side, and the client is the
-translation. [`StoreClient`] takes the forge's [`Content`] and asks
-the contract in the contract's terms. Callers in the forge see only
-the forge's words; the contract sees only its own. Neither of them
-has to know the other exists.
+So a face gets a client on this side when there is something to
+translate, and the client is where the translation happens.
+[`StoreClient`] takes the forge's [`Content`] and asks the contract
+in the contract's terms. Callers in the forge see only the forge's
+words; the contract sees only its own. Neither of them has to know
+the other exists.
+
+[`Actors`] has no client. What it takes is the attribution triple
+and what it hands back is a handle the forge uses as it stands, so
+there is nothing on either end for a client to convert, and callers
+hold the contract directly.
 
 # What holds this
 
@@ -3837,8 +3818,7 @@ Access is per line and outside the forge, so what governs putting
 content on one is who may write to that line. If the forge ever had
 to record an owner rather than an author, it would be an `Actor` on
 the entry — a fourth axis beside existence, content and name,
-resolved through the same contract as every other handle. Nothing
-asks for that today.
+resolved through the same contract as every other handle.
 
 [`Lines::list`]: crate::domain::forge::lines::Lines::list
 
@@ -3858,9 +3838,8 @@ asks for that today.
 
 What time it is.
 
-A port for something every other service in this codebase reads off
-the system clock directly, and the difference is what a timestamp
-means once it is written.
+A port rather than a call to the system clock, and the difference
+is what a timestamp means once it is written.
 
 ```text
   elsewhere      a row's updated_at      convenient, overwritten by the next write
@@ -3916,17 +3895,25 @@ cost everywhere for a claim only this layer makes.
 Ending work — the one call that writes to both logs.
 
 ```text
-  Lines      open / get / rename / set_strategy      one log
-  Pursuits   open / get / push                       one log
-  Closings   commit                                  both, or neither
+  Lines      open / rename / set_strategy / set_standing   one log
+  Pursuits   open / push                                   one log
+  Lines      discard                                       three, or none
+  Closings   commit                                        both, or neither
 ```
 
-Every other call the forge makes writes to one log. This one writes
-to two, because ending work as satisfied puts a change point on the
-line and the two nodes are one act. It exists so that "one act" has
-somewhere to be true outside the model: [`Closing`] already makes
-the pair impossible to hold apart in memory, and this makes it
-impossible to store apart.
+Writing to one log is the ordinary case — the reads (`get`, `list`,
+`of_line`, `children`) write to none, and are left out above. This
+one writes to two, because ending work as satisfied puts a change
+point on the line and the two nodes are one act. It exists so that
+"one act" has somewhere to be true outside the model: [`Closing`]
+already makes the pair impossible to hold apart in memory, and this
+makes it impossible to store apart.
+
+It is not the only write that spans logs.
+[`Lines::discard`](crate::domain::forge::lines::Lines::discard)
+takes a line, the work against it and the conversations under both,
+on the same all-or-nothing terms — but it spans them to remove
+something, where this one spans them to record one.
 
 # What the contract requires
 
@@ -3984,7 +3971,7 @@ with the hard one.
 
 Keeping lines, stated in the forge's own words.
 
-[`Lines`] is one of the two faces the forge asks for. Every type it
+[`Lines`] is one of the four faces the forge asks for. Every type it
 mentions — [`Line`], [`Name`], [`Act`] — belongs to the model, so
 nothing here has to be translated and there is no vocabulary to
 isolate. Whatever implements it is somebody else's problem, and the
@@ -5430,9 +5417,9 @@ proposed.
 
 Keeping pursuits, stated in the forge's own words.
 
-[`Pursuits`] is the other face the forge asks for, and it is the
-quiet one: opening work and adding rounds to it are what happens
-most, and neither touches a line.
+[`Pursuits`] is the quiet one of the four faces the forge asks for:
+opening work and adding rounds to it are what happens most, and
+neither touches a line.
 
 # A round names the node it sits on
 
@@ -5488,7 +5475,7 @@ finds one.
                                          │
                                          ├ mainline-first   the line stays, ours moves aside
                                          ├ mine-first       ours stays, the line's moves aside
-                                         ├ both-diverge     both move aside, the old entry goes
+                                         ├ both-diverge     the old entry goes, both re-added
                                          ├ discard-mine     ours is written down and dropped
                                          └ by-hand          nothing is written
 ```
@@ -5527,7 +5514,8 @@ wall for the same reason.
   mainline-first   E stays theirs           mine → new entry "cut-01 (2)"
   mine-first       E is taken off           mine → new entry "cut-01"
                                             theirs → new entry "cut-01 (2)"
-  both-diverge     E is taken off           both → new entries, both numbered
+  both-diverge     E is taken off           theirs → new entry "cut-01"
+                                            mine → new entry "cut-01 (2)"
   discard-mine     E stays theirs           mine → new entry, then removed
   by-hand          nothing is written       the collision stands
 ```
@@ -5536,8 +5524,8 @@ wall for the same reason.
 removal of the entry that was forked. `mine-first` and
 `both-diverge` write the same three and differ in who gets the
 name — which is the whole of the difference between "this work's
-version is what `cut-01` means now" and "`cut-01` means neither of
-them any more".
+version is what `cut-01` means now" and "`cut-01` goes on meaning
+the line's version, on an entry of its own".
 
 # Beside the model, not inside it
 
@@ -10567,7 +10555,7 @@ specification of what it owes.
 - `AnchorColumns` — What a thread hangs off, as the five columns that carry it.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
-- `LineRow` — `line` — the repository, and the two things about it that are not
+- `LineRow` — `line` — the repository, and the three things about it that are not
 - `PursuitNodeRow` — `pursuit_node` — a round or an ending.
 - `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was written.
 - `PursuitRow` — `pursuit` — one line of work.
@@ -10930,11 +10918,12 @@ wearing a port's name.
 The forge's ports, over rows held in memory.
 
 ```text
-  Lines / Pursuits / Closings
+  Lines / Pursuits / Closings / Threads
            │
            ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex
            │
-           └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit
+           └─ read  ──► forge::rows::read_* ──► restore ──► Line /
+                                                Pursuit / Thread
 ```
 
 One `Mutex` over the whole store rather than one per table: the
@@ -12443,27 +12432,28 @@ backend could sit behind it later. v1 stores edges in the dedicated
 
 SQLite adapter for the forge's ports.
 
-One type for `Lines`, `Pursuits` and `Closings`, where the rest of
-this directory is one per port. The close is why: it writes a change
-point, its rows and an ending together, and two adapters sharing one
-transaction is a shape that only reads as sharing when they are the
-same object.
+One type for `Lines`, `Pursuits`, `Closings` and `Threads`, where
+the rest of this directory is one per port. The close is why: it
+writes a change point, its rows and an ending together, and two
+adapters sharing one transaction is a shape that only reads as
+sharing when they are the same object.
 
 # Where the work is, and where it is not
 
 Taking a domain value apart and putting one back lives in
 [`crate::forge::rows`], which the in-memory store uses too. What is
-here is SQL and nothing else: the same six shapes, written as
+here is SQL and nothing else: the same nine shapes, written as
 columns.
 
 # The head is never read to be compared
 
 Nothing here selects a head and checks it against what a caller
-decided. Two nodes on one parent is a fork, `UNIQUE (line_id,
-parent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the
-refusal arrives as part of the insert — so the validation is the
-write rather than something beside it that could be answered from a
-row somebody else has since moved.
+decided: `UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id,
+parent_id)` refuse a fork as part of the insert. The rule is
+[`Closings`]' — "on the parent nothing has taken" — and what the
+index adds is that the check is the write rather than something
+beside it that could be answered from a row somebody else has
+since moved.
 
 What that costs is telling one constraint violation from another.
 SQLite names the columns rather than the index — `UNIQUE constraint
@@ -12480,20 +12470,12 @@ adapter. What the transaction contributes is that the logs cannot
 move between the read and the write, which is why the second
 attempt is the last one.
 
-`contains` is what exactness is guarding against, and the direction
-matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
-of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
-substring test asked about the ending matches the fork — it reads
-"somebody pushed a round first" as "this work has already ended",
-and an ending is final where a fork is decided again. So the close
-that a second decision would have landed is refused instead, and
-the caller is told the work is over when it is only one round
-further along. The other direction cannot happen, which is why
-naming it would be naming the wrong risk.
+Which column list is which, and what a substring test would read
+out of the wrong one, is on `is_unique_violation`.
 
 ## Types
 
-- `SqliteForge` — SQLite adapter for `Lines`, `Pursuits` and `Closings`.
+- `SqliteForge` — SQLite adapter for `Lines`, `Pursuits`, `Closings` and `Threads`.
 
 
 <!-- asterism_infra/sqlite__repo__forge_boundary.md -->
@@ -12518,7 +12500,7 @@ the forge asks" readable together.
 ## Types
 
 - `SqliteActors` — Keeps what a forge handle stands for.
-- `SqliteStore` — Answers the forge's one question about the layer below.
+- `SqliteStore` — Answers [`Store`] over the `asset` table.
 
 
 <!-- asterism_infra/sqlite__repo__group.md -->

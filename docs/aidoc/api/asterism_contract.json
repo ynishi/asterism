@@ -878,6 +878,11 @@
       "docs": "A single channel tag."
     },
     {
+      "path": "asterism_contract::dto::TagSuggestionDto",
+      "kind": "struct",
+      "docs": "One model-proposed tag suggestion awaiting (or carrying) a ruling\n(#112). Distinct from [`TagDto`] on purpose: a suggestion is\nevidence with a score and a disposition, not a tag an asset has."
+    },
+    {
       "path": "asterism_contract::dto::ThreadAnchorDto",
       "kind": "struct",
       "docs": "Thread anchor — what a `ThreadDto` hangs off of.\n\n`anchor_kind`:\n- `\"app_global\"` — Home-tab Inbox / free-form threads. `anchor_id`\n  is `None`.\n- `\"snapshot\"` — anchored to a Snapshot. `anchor_id` is the\n  Snapshot uuid.\n- `\"query_group\"` — anchored to a query Group. `anchor_id` is the\n  Group uuid.\n- `\"card\"` — anchored to an Asset (per-card conversation lane).\n  `anchor_id` is the Asset uuid."
@@ -893,9 +898,14 @@
       "docs": "Where a video's preview rendition stands\n(`GET /asterism/assets/{id}/video-preview`).\n\nSome formats the embedded webview cannot display (VP9 WebM,\nMatroska — measured); for those the player uses a\ntranscoded H.264 MP4 rendition cached beside the profile database.\nThis DTO is how the pane finds out whether one exists yet."
     },
     {
+      "path": "asterism_contract::dto::VisualModelStatusDto",
+      "kind": "struct",
+      "docs": "The visual model a running process has bound, if any (#112)."
+    },
+    {
       "path": "asterism_contract::forge",
       "kind": "module",
-      "docs": "The forge's wire shapes — a line, what is on it, and what a caller\nasks it to do.\n\nA topic module rather than rows in [`command`](crate::command) and\n[`dto`](crate::dto), for the reason [`query_group`](crate::query_group)\nis one: the forge's vocabulary answers to a model of its own, and a\nreader of `LineDto` needs the four or five types beside it more than\nit needs the asset DTO two hundred lines up.\n\n# The model these are a projection of\n\nA line is a repository with one canonical history: a genesis and a\nchain of change points, each carrying a table keyed by entry and\naxis over three axes — existence, content, name. Nothing here holds\nwhat that history answers. [`ForgeLineDto`] carries the line's own\nfields and the id of its head; what is *on* the line is\n[`ForgeEntryStateDto`], folded on read, and the chain that produced\nit is [`ForgeLineHistoryDto`].\n\nTwo reads exist because both are real questions, and a screen wants\nthe fold. The history grows with the line and is for something\nshowing how a line got where it is."
+      "docs": "The forge's wire shapes — a line, what is on it, and what a caller\nasks it to do.\n\nA topic module rather than rows in [`command`](crate::command) and\n[`dto`](crate::dto): the forge's vocabulary answers to a model of\nits own, and a reader of [`ForgeLineDto`] needs the types beside it\nmore than it needs the asset DTO two hundred lines up.\n\n# The model these are a projection of\n\nA line is a repository with one canonical history: a genesis and a\nchain of change points, each carrying a table keyed by entry and\naxis over three axes — existence, content, name. Nothing here holds\nwhat that history answers. [`ForgeLineDto`] carries the line's own\nfields and the id of its head; what is *on* the line is\n[`ForgeEntryStateDto`], folded on read, and the chain that produced\nit is [`ForgeLineHistoryDto`].\n\nTwo reads exist because both are real questions, and a screen wants\nthe fold. The history grows with the line and is for something\nshowing how a line got where it is."
     },
     {
       "path": "asterism_contract::forge::ForgeChangePointDto",
@@ -905,7 +915,7 @@
     {
       "path": "asterism_contract::forge::ForgeChangeRowDto",
       "kind": "struct",
-      "docs": "What one landing said about one entry.\n\nThree axes, each stated or left alone — this is not a verb. A row\nthat moves only the name leaves `existence` and `content_asset_id`\nabsent, and a reader folding the chain keeps whatever the last\ntable that spoke about that axis said. A row that says nothing at\nall cannot exist: the model refuses to build one."
+      "docs": "What one landing said about one entry.\n\nThree axes, each stated or left alone — this is not a verb. A row\nthat moves only the name leaves `existence` and `content_asset_id`\nabsent, and a reader folding the chain keeps whatever the last\ntable that spoke about that axis said. Two shapes cannot exist,\nbecause the model refuses to build them: a row that says nothing at\nall, and a row that takes an entry off the line while also naming\nor filling it."
     },
     {
       "path": "asterism_contract::forge::ForgeDiscardedDto",

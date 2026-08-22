@@ -45,8 +45,7 @@ Access is per line and outside the forge, so what governs putting
 content on one is who may write to that line. If the forge ever had
 to record an owner rather than an author, it would be an `Actor` on
 the entry — a fourth axis beside existence, content and name,
-resolved through the same contract as every other handle. Nothing
-asks for that today.
+resolved through the same contract as every other handle.
 
 [`Lines::list`]: crate::domain::forge::lines::Lines::list
 
