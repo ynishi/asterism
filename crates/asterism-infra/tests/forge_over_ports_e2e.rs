@@ -464,15 +464,17 @@ async fn a_line_four_people_and_a_store_that_keeps_rows() {
     );
 }
 
-/// A close that loses the race is retried against the line as it now
-/// is, and lands on the second attempt.
+/// Two pieces of work cut from one head land one after the other, and
+/// the second lands on what the first left.
 ///
-/// The model cannot be asked this: `close` takes a line by reference
-/// and answers about that one. Whether anybody re-reads and tries again
-/// is the service's question, and the store is what makes the two
-/// answers differ.
+/// `Head → P1, P2 → close P1 → Head' → close P2 → Head''`, which is
+/// the ordinary shape of two people working at once. Nothing here
+/// races: the second close reads a line that has already moved and
+/// decides against it, so it lands on its first attempt. What that
+/// proves is that a close aims at the head as it is when the close is
+/// decided, rather than at the head the work was cut from.
 #[tokio::test]
-async fn a_close_that_loses_the_race_reads_again_and_lands() {
+async fn two_pursuits_cut_from_one_head_land_one_after_the_other() {
     let world = World::new();
     world.clock.set(0);
     let line = world
@@ -517,18 +519,114 @@ async fn a_close_that_loses_the_race_reads_again_and_lands() {
         .await
         .unwrap();
 
-    // The second was decided against a head that has moved. It reads
-    // again rather than refusing.
+    // The second is decided against a line that has already moved, and
+    // aims at where it is now.
     world.clock.set(4);
     world
         .work
         .close(&second.id(), Outcome::Satisfied, None, &who("cyd"))
         .await
-        .expect("the line moved, and the close was decided again against where it is now");
+        .expect("the second close aims at the head the first one left");
 
     let line = world.lines.get(&line.id()).await.unwrap();
     assert_eq!(alive(&line.states()), vec!["one", "two"]);
-    assert_eq!(line.history().changes().len(), 2, "both landed, in order");
+
+    // The chain, spelled out: genesis → the first close's point → the
+    // second's. Each names the one before it, and the second names the
+    // first rather than the genesis both were cut from.
+    let chain = line.history().changes();
+    assert_eq!(chain.len(), 2, "two closes, two change points");
+    assert_eq!(chain[0].parent(), line.history().genesis().id());
+    assert_eq!(chain[1].parent(), chain[0].id());
+    assert_eq!(chain[0].from(), first.id());
+    assert_eq!(chain[1].from(), second.id());
+    assert_eq!(line.head(), chain[1].id());
+}
+
+/// A close aimed at a change point the line has left is refused, and
+/// writes nothing.
+///
+/// The service always aims at the head it just read, so this asks the
+/// port directly — which is the layer that has to hold the rule,
+/// because a caller holding a stale line is exactly the case it exists
+/// for.
+#[tokio::test]
+async fn a_close_aimed_at_a_head_the_line_has_left_is_refused() {
+    use asterism_core::domain::forge::closings::Closings;
+    use asterism_core::domain::forge::model::closing::close as end_work;
+
+    let world = World::new();
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let genesis = line.head();
+
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(content(), name("mine"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    // Somebody else lands, so the genesis is no longer the head.
+    world
+        .lands(&line, "cyd", vec![Op::add(content(), name("theirs"))], 2)
+        .await;
+
+    // A closing decided against the line as it was, aimed at where it
+    // was. The model builds it happily — it is the store's business
+    // that the line has moved since.
+    let stale = world.lines.get(&line.id()).await.unwrap();
+    let work = world.work.get(&work.id()).await.unwrap();
+    world.clock.set(3);
+    let closing = end_work(
+        &stale,
+        &work,
+        Outcome::Satisfied,
+        None,
+        asterism_core::domain::forge::model::act::Act::new(
+            at(3),
+            Actor::User(asterism_core::domain::forge::model::value::ActorId::new()),
+        ),
+    )
+    .expect("nothing collides; it is only aimed at the wrong node");
+
+    let refused = Closings::commit(&world.store, &line.id(), &work.id(), genesis, &closing).await;
+    assert!(
+        matches!(refused, Err(DomainError::Conflict(_))),
+        "a close only lands on the head as it is: {refused:?}"
+    );
+
+    // And nothing of it was written: the work is still open, and the
+    // line still ends where the other close left it.
+    let after = world.work.get(&work.id()).await.unwrap();
+    assert_eq!(after.outcome(), None, "the refused close left no ending");
+    assert_eq!(
+        world
+            .lines
+            .get(&line.id())
+            .await
+            .unwrap()
+            .history()
+            .changes()
+            .len(),
+        1,
+        "and put nothing on the line"
+    );
 }
 
 /// A store that kept something the model would not have written cannot
@@ -618,4 +716,142 @@ async fn a_line_cannot_be_opened_under_a_rule_this_instance_does_not_carry() {
         )
         .await;
     assert!(refused.is_err(), "{refused:?}");
+}
+
+/// A close whose line moves between the read and the write is decided
+/// again, against the line as it now is.
+///
+/// The test above never reaches this: its second close reads a line
+/// that has already moved, so it aims correctly the first time. The
+/// retry only runs when the line moves *after* the service has read
+/// it, which is what `Stale` arranges — it hands the service a line
+/// from before the move, once, and then tells the truth.
+///
+/// Worth pinning because the loop is the only thing standing between
+/// "somebody landed while you were deciding" and a refusal the caller
+/// would have to understand. Without it the close is correct and
+/// useless.
+#[tokio::test]
+async fn a_close_whose_line_moves_under_it_is_decided_again() {
+    use asterism_core::domain::forge::lines::Lines;
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::value::LineId;
+
+    /// A `Lines` that answers with a line from before the move, the
+    /// first time it is asked after being armed.
+    #[derive(Debug)]
+    struct Stale {
+        real: MemoryForge,
+        armed: Mutex<Option<Line>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Lines for Stale {
+        async fn open(&self, line: &Line) -> Result<(), DomainError> {
+            self.real.open(line).await
+        }
+
+        async fn get(&self, id: &LineId) -> Result<Option<Line>, DomainError> {
+            if let Some(before) = self.armed.lock().unwrap().take() {
+                return Ok(Some(before));
+            }
+            self.real.get(id).await
+        }
+
+        async fn list(&self) -> Result<Vec<Line>, DomainError> {
+            self.real.list().await
+        }
+
+        async fn rename(&self, id: &LineId, name: &Name, act: &Act) -> Result<(), DomainError> {
+            self.real.rename(id, name, act).await
+        }
+
+        async fn set_strategy(
+            &self,
+            id: &LineId,
+            strategy: &StrategyId,
+            act: &Act,
+        ) -> Result<(), DomainError> {
+            self.real.set_strategy(id, strategy, act).await
+        }
+    }
+
+    let store = MemoryForge::new();
+    let stale = Arc::new(Stale {
+        real: store.clone(),
+        armed: Mutex::new(None),
+    });
+    let clock = Arc::new(Wound::default());
+    let rules = Arc::new(Builtin::default());
+    let actors = Arc::new(MemoryActors::new());
+    let persona = PersonaId::new();
+
+    let lines = LineService::new(stale.clone(), rules.clone(), actors.clone(), clock.clone());
+    let work_service = PursuitService::new(
+        Arc::new(store.clone()),
+        stale.clone(),
+        Arc::new(store.clone()),
+        rules,
+        asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(HoldsEverything)),
+        actors,
+        clock.clone(),
+    );
+
+    clock.set(0);
+    let line = lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let before_the_move = lines.get(&line.id()).await.unwrap();
+
+    // Two pieces of work from the genesis, on entries of their own.
+    clock.set(1);
+    let mine = work_service
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    let theirs = work_service
+        .open(&line.id(), None, Intent::default(), &who("cyd"))
+        .await
+        .unwrap();
+    for (work, label) in [(&mine, "mine"), (&theirs, "theirs")] {
+        work_service
+            .push(
+                &work.id(),
+                &persona,
+                vec![Op::add(content(), name(label))],
+                None,
+                &who("boro"),
+            )
+            .await
+            .unwrap();
+    }
+
+    // Theirs lands. The line is now one change point along.
+    clock.set(2);
+    work_service
+        .close(&theirs.id(), Outcome::Satisfied, None, &who("cyd"))
+        .await
+        .unwrap();
+
+    // Now arm the stale answer: the next read of the line hands back
+    // the genesis-only version, so the close is decided against a line
+    // that has moved since — and its first commit is refused.
+    *stale.armed.lock().unwrap() = Some(before_the_move);
+
+    clock.set(3);
+    work_service
+        .close(&mine.id(), Outcome::Satisfied, None, &who("boro"))
+        .await
+        .expect("the first attempt was refused; the second decided against the line as it is");
+
+    // Both are on, in the order they landed, and the retry wrote one
+    // change point rather than two.
+    let line = Lines::get(&store, &line.id()).await.unwrap().unwrap();
+    assert_eq!(alive(&line.states()), vec!["mine", "theirs"]);
+    let chain = line.history().changes();
+    assert_eq!(chain.len(), 2, "one point per close, retry and all");
+    assert_eq!(chain[0].from(), theirs.id());
+    assert_eq!(chain[1].from(), mine.id());
+    assert_eq!(chain[1].parent(), chain[0].id());
 }
