@@ -40,12 +40,14 @@ use asterism_core::domain::forge::closings::{Closings, Deciding};
 use asterism_core::domain::forge::lines::Lines;
 use asterism_core::domain::forge::model::act::{Act, Actor};
 use asterism_core::domain::forge::model::closing::{Closing, close as end_work};
-use asterism_core::domain::forge::model::line::Line;
+use asterism_core::domain::forge::model::line::{Line, Standing};
 use asterism_core::domain::forge::model::op::{Op, OpKind};
 use asterism_core::domain::forge::model::pursuit::{Intent, Outcome, Pursuit};
 use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::table::EntryStates;
-use asterism_core::domain::forge::model::value::{ActorId, Content, EntryId, Name, StrategyId};
+use asterism_core::domain::forge::model::value::{
+    ActorId, Content, EntryId, Name, PursuitId, StrategyId,
+};
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::strategies::{Builtin, MainlineFirst};
 use asterism_core::domain::value::{AssetId, PersonaId};
@@ -129,6 +131,28 @@ impl Deciding for Refuses {
     }
 }
 
+/// Work cut from the line, asking for one entry of its own — so two of
+/// these collide with nothing and both may land.
+async fn cut(world: &World, line: &Line, label: &str) -> Pursuit {
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name(label))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+    work
+}
+
 fn alive(states: &EntryStates) -> Vec<String> {
     let mut names: Vec<String> = states
         .values()
@@ -203,7 +227,13 @@ impl World {
         let actors = Arc::new(MemoryActors::new());
 
         Self {
-            lines: LineService::new(lines.clone(), rules.clone(), actors.clone(), clock.clone()),
+            lines: LineService::new(
+                lines.clone(),
+                pursuits.clone(),
+                rules.clone(),
+                actors.clone(),
+                clock.clone(),
+            ),
             work: PursuitService::new(
                 pursuits.clone(),
                 lines.clone(),
@@ -804,6 +834,317 @@ async fn a_stale_aim_is_decided_again(world: &World) {
     assert_eq!(alive(&held.states()), vec!["mine", "theirs"]);
 }
 
+/// Archiving stops a line moving, reopening lets it move again, and
+/// what says so is a close rather than a field.
+///
+/// A standing that only ever showed up in a read would be a standing
+/// nothing depended on. What is asked here is the behaviour it exists
+/// for: satisfied work cannot land on an archived line, giving up
+/// still can, and the work that was refused lands after the line comes
+/// back — the same pursuit, not a fresh one, because being refused
+/// left it open.
+#[tokio::test]
+async fn an_archived_line_refuses_a_landing_until_it_is_reopened_over_memory() {
+    an_archived_line_refuses_a_landing_until_it_is_reopened(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn an_archived_line_refuses_a_landing_until_it_is_reopened_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    an_archived_line_refuses_a_landing_until_it_is_reopened(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn an_archived_line_refuses_a_landing_until_it_is_reopened(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    world.clock.set(1);
+    let mine = cut(world, &line, "mine").await;
+    let giving_up = cut(world, &line, "theirs").await;
+
+    world.clock.set(2);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+    assert_eq!(
+        world.lines.get(&line.id()).await.unwrap().standing(),
+        Standing::Archived
+    );
+
+    let refused = world
+        .work
+        .close(&mine.id(), Outcome::Satisfied, None, &who("boro"))
+        .await;
+    assert!(
+        refused.is_err(),
+        "nothing lands on a line somebody is finished with: {refused:?}"
+    );
+
+    // Giving up is not landing, so it goes through — and the line does
+    // not move for it.
+    world
+        .work
+        .close(&giving_up.id(), Outcome::Abandoned, None, &who("boro"))
+        .await
+        .expect("work against an archived line can still be abandoned");
+    assert!(
+        world
+            .lines
+            .get(&line.id())
+            .await
+            .unwrap()
+            .history()
+            .changes()
+            .is_empty()
+    );
+
+    world.clock.set(3);
+    world.lines.reopen(&line.id(), &who("ana")).await.unwrap();
+    world
+        .work
+        .close(&mine.id(), Outcome::Satisfied, None, &who("boro"))
+        .await
+        .expect("the refusal left the work open, so it lands now");
+
+    let held = world.lines.get(&line.id()).await.unwrap();
+    assert_eq!(held.standing(), Standing::Open);
+    assert_eq!(alive(&held.states()), vec!["mine"]);
+}
+
+/// A drop takes the line, its history and every pursuit against it,
+/// including work filed under other work.
+///
+/// The nesting is the part worth arranging rather than assuming. Every
+/// foreign key inside the forge is `RESTRICT` and `pursuit.parent_id`
+/// points at `pursuit`, so a chain of work is the shape no single
+/// ordering of deletes answers — over SQLite this passes because the
+/// keys are deferred to the commit, and over the in-memory store
+/// because there are no keys to answer to. Both have to end with
+/// nothing left.
+#[tokio::test]
+async fn a_drop_takes_the_line_and_the_work_filed_under_it_over_memory() {
+    a_drop_takes_the_line_and_the_work_filed_under_it(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_drop_takes_the_line_and_the_work_filed_under_it_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_drop_takes_the_line_and_the_work_filed_under_it(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_drop_takes_the_line_and_the_work_filed_under_it(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    // An epic, work filed under it, and both landed — so the line has
+    // a history, the work has ended, and the parent chain is real.
+    world.clock.set(1);
+    let epic = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    let under = world
+        .work
+        .open(&line.id(), Some(epic.id()), Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    for (work, label) in [(&epic, "epic"), (&under, "under")] {
+        world
+            .work
+            .push(
+                &work.id(),
+                &world.persona,
+                vec![Op::add(world.content().await, name(label))],
+                None,
+                &who("boro"),
+            )
+            .await
+            .unwrap();
+        world.clock.set(2);
+        world
+            .work
+            .close(&work.id(), Outcome::Satisfied, None, &who("boro"))
+            .await
+            .unwrap();
+    }
+
+    world.clock.set(3);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+    let released = world
+        .lines
+        .discard(&line.id(), &who("ana"))
+        .await
+        .expect("archived, ended, and nothing outside points in");
+
+    assert_eq!(
+        released.len(),
+        2,
+        "both entries' content, from the line and the work together"
+    );
+    assert!(
+        world.lines.get(&line.id()).await.is_err(),
+        "the line is gone"
+    );
+    for work in [&epic, &under] {
+        assert!(
+            world.work.get(&work.id()).await.is_err(),
+            "and so is the work against it"
+        );
+    }
+    assert!(
+        world.lines.list().await.unwrap().is_empty(),
+        "nothing is left listing"
+    );
+}
+
+/// A drop refuses when something outside the line points into it, and
+/// the refusal arrives from the commit rather than from a statement.
+///
+/// This is the half the deferred foreign keys do *not* excuse, and the
+/// reason deferring them is safe. Work on one line can be filed under
+/// work on another — nothing forbids it — so dropping the second line
+/// would leave the first pointing at a parent that is gone. Deferring
+/// moves that check to `COMMIT`, where it still fires and still takes
+/// the whole drop with it.
+///
+/// Over SQLite only: the check is a foreign key, and the in-memory
+/// store has none to fire.
+#[tokio::test]
+async fn a_drop_something_outside_points_into_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+
+    world.clock.set(0);
+    let going = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let staying = world
+        .lines
+        .open(name("other"), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    // The parent is on the line being dropped; the child is on the one
+    // that stays.
+    world.clock.set(1);
+    let parent = world
+        .work
+        .open(&going.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    let child = world
+        .work
+        .open(
+            &staying.id(),
+            Some(parent.id()),
+            Intent::default(),
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+    for work in [&parent, &child] {
+        world
+            .work
+            .close(&work.id(), Outcome::Abandoned, None, &who("boro"))
+            .await
+            .unwrap();
+    }
+
+    world.clock.set(2);
+    world.lines.archive(&going.id(), &who("ana")).await.unwrap();
+    let refused = world
+        .lines
+        .discard(&going.id(), &who("ana"))
+        .await
+        .expect_err("the other line's work is filed under this line's");
+    assert!(
+        matches!(refused, DomainError::Validation(_)),
+        "not a race — reading again finds the same reference: {refused:?}"
+    );
+
+    // And the whole drop came back: the line, its work, and the line
+    // that pointed at it are all still readable.
+    world.lines.get(&going.id()).await.expect("the line stayed");
+    world.work.get(&parent.id()).await.expect("and its work");
+    world
+        .work
+        .get(&child.id())
+        .await
+        .expect("and what pointed at it");
+
+    driver.shutdown().await.unwrap();
+}
+
+/// A drop decided against work that has grown since is refused, and
+/// takes nothing.
+///
+/// This is the race the port's `covering` argument exists for: what a
+/// caller was told the drop releases came from a list of pursuits, and
+/// a pursuit opened after that list was read is content the answer
+/// left out. Refusing is the only honest move — writing would free
+/// bytes nobody was told about, silently.
+#[tokio::test]
+async fn a_drop_that_does_not_cover_the_work_is_refused_over_memory() {
+    a_drop_that_does_not_cover_the_work_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_drop_that_does_not_cover_the_work_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_drop_that_does_not_cover_the_work_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_drop_that_does_not_cover_the_work_is_refused(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .close(&work.id(), Outcome::Abandoned, None, &who("boro"))
+        .await
+        .unwrap();
+    world.clock.set(2);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+
+    // Asked directly, naming no work at all — which is what a caller
+    // holding a list read before that pursuit existed would send.
+    let refused = Lines::discard(&*world.lines_port, &line.id(), &[])
+        .await
+        .expect_err("the work against this line is not the work this drop covers");
+    assert!(
+        matches!(refused, DomainError::Conflict(_)),
+        "a list that has moved is a race, not malformed input: {refused:?}"
+    );
+
+    // And nothing went: the line still reads, and so does its work.
+    world.lines.get(&line.id()).await.expect("the line stayed");
+    world
+        .work
+        .get(&work.id())
+        .await
+        .expect("and so did the work");
+}
+
 /// A close whose *work* moved under it is decided again too, and the
 /// pass that arrived is in what lands.
 ///
@@ -1175,6 +1516,19 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
         ) -> Result<(), DomainError> {
             Lines::set_strategy(&self.real, id, strategy, act).await
         }
+
+        async fn set_standing(
+            &self,
+            id: &LineId,
+            standing: Standing,
+            act: &Act,
+        ) -> Result<(), DomainError> {
+            Lines::set_standing(&self.real, id, standing, act).await
+        }
+
+        async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError> {
+            Lines::discard(&self.real, id, covering).await
+        }
     }
 
     let store = MemoryForge::new();
@@ -1187,7 +1541,13 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
     let actors = Arc::new(MemoryActors::new());
     let persona = PersonaId::new();
 
-    let lines = LineService::new(stale.clone(), rules.clone(), actors.clone(), clock.clone());
+    let lines = LineService::new(
+        stale.clone(),
+        Arc::new(store.clone()),
+        rules.clone(),
+        actors.clone(),
+        clock.clone(),
+    );
     let work_service = PursuitService::new(
         Arc::new(store.clone()),
         stale.clone(),

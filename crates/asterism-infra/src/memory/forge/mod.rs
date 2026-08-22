@@ -30,7 +30,7 @@
 //! real on. There is no index: reads scan, which is fine at the sizes
 //! a test builds and would not be at any other.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use asterism_core::domain::attribution::AttributionContext;
@@ -39,10 +39,10 @@ use asterism_core::domain::forge::closings::{Closings, Deciding};
 use asterism_core::domain::forge::lines::Lines;
 use asterism_core::domain::forge::model::act::Act;
 use asterism_core::domain::forge::model::closing::Closing;
-use asterism_core::domain::forge::model::line::Line;
+use asterism_core::domain::forge::model::line::{Line, Standing};
 use asterism_core::domain::forge::model::pursuit::{Pursuit, Round};
 use asterism_core::domain::forge::model::value::{
-    ActorId, LineId, Name, NodeId, PursuitId, StrategyId,
+    ActorId, ChangePointId, LineId, Name, NodeId, PursuitId, StrategyId,
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::value::{AssetId, PersonaId};
@@ -261,6 +261,82 @@ impl Lines for MemoryForge {
                 .ok_or_else(|| DomainError::not_found("line", id))?;
             row.strategy = strategy.clone();
             row.updated = rows::ActRow::of(act);
+            Ok(())
+        })
+    }
+
+    async fn set_standing(
+        &self,
+        id: &LineId,
+        standing: Standing,
+        act: &Act,
+    ) -> Result<(), DomainError> {
+        self.with(|tables| {
+            let row = tables
+                .lines
+                .iter_mut()
+                .find(|row| row.id == *id)
+                .ok_or_else(|| DomainError::not_found("line", id))?;
+            row.standing = standing;
+            row.updated = rows::ActRow::of(act);
+            Ok(())
+        })
+    }
+
+    async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError> {
+        self.with(|tables| {
+            if !tables.lines.iter().any(|row| row.id == *id) {
+                return Err(DomainError::not_found("line", id));
+            }
+
+            // The condition the port states, asked of the rows: the
+            // work against this line has to be the work the caller
+            // decided against. Order is not part of it, and neither is
+            // how the caller found them.
+            let against: BTreeSet<PursuitId> = tables
+                .pursuits
+                .iter()
+                .filter(|row| row.of == *id)
+                .map(|row| row.id)
+                .collect();
+            let named: BTreeSet<PursuitId> = covering.iter().copied().collect();
+            if against != named {
+                return Err(DomainError::Conflict(format!(
+                    "line {id} has {} pieces of work against it, and this drop was decided \
+                     against {}",
+                    against.len(),
+                    named.len()
+                )));
+            }
+
+            // Rows first, then what they hang off, so that a reader
+            // holding the lock could never see a node whose parent
+            // table has already gone. Nothing here is conditional any
+            // more: the answer was settled above and this is the whole
+            // of the write.
+            let nodes: BTreeSet<NodeId> = tables
+                .pursuit_nodes
+                .iter()
+                .filter(|row| named.contains(&row.pursuit))
+                .map(|row| row.id)
+                .collect();
+            tables.pursuit_ops.retain(|row| !nodes.contains(&row.node));
+            tables
+                .pursuit_nodes
+                .retain(|row| !named.contains(&row.pursuit));
+            tables.pursuits.retain(|row| !named.contains(&row.id));
+
+            let points: BTreeSet<ChangePointId> = tables
+                .change_points
+                .iter()
+                .filter(|row| row.line == *id)
+                .map(|row| row.id)
+                .collect();
+            tables
+                .change_rows
+                .retain(|row| !points.contains(&row.point));
+            tables.change_points.retain(|row| row.line != *id);
+            tables.lines.retain(|row| row.id != *id);
             Ok(())
         })
     }

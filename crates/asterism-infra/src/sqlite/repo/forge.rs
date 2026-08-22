@@ -48,6 +48,7 @@
 //! further along. The other direction cannot happen, which is why
 //! naming it would be naming the wrong risk.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use asterism_core::domain::forge::closings::{Closings, Deciding};
@@ -307,6 +308,13 @@ fn outcome_slug(outcome: Outcome) -> &'static str {
     }
 }
 
+fn standing_slug(standing: Standing) -> &'static str {
+    match standing {
+        Standing::Open => "open",
+        Standing::Archived => "archived",
+    }
+}
+
 /// Reads one whole line: its row, its change points, and their rows.
 fn read_line(conn: &Connection, id: &LineId) -> rusqlite::Result<Option<Line>> {
     let uuid = *id.as_uuid();
@@ -560,10 +568,7 @@ impl Lines for SqliteForge {
                         head.id.as_uuid(),
                         head.name.as_str(),
                         head.strategy.as_str(),
-                        match head.standing {
-                            Standing::Open => "open",
-                            Standing::Archived => "archived",
-                        },
+                        standing_slug(head.standing),
                         head.genesis.as_uuid(),
                         datetime_to_ms(&head.genesis_act.at),
                         head.genesis_act.actor.as_uuid(),
@@ -662,6 +667,169 @@ impl Lines for SqliteForge {
         }
         Ok(())
     }
+
+    async fn set_standing(
+        &self,
+        id: &LineId,
+        standing: Standing,
+        act: &Act,
+    ) -> Result<(), DomainError> {
+        let (id, act) = (*id, ActRow::of(act));
+        let moved = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE line SET standing = ?2, updated_at = ?3, updated_by = ?4, \
+                            updated_kind = ?5 \
+                      WHERE id = ?1",
+                    params![
+                        id.as_uuid(),
+                        standing_slug(standing),
+                        datetime_to_ms(&act.at),
+                        act.actor.as_uuid(),
+                        act.kind,
+                    ],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        if moved == 0 {
+            return Err(DomainError::not_found("line", id));
+        }
+        Ok(())
+    }
+
+    async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError> {
+        let id = *id;
+        let covering: Vec<PursuitId> = covering.to_vec();
+
+        let dropped = self
+            .isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+
+                let found: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM line WHERE id = ?1",
+                    params![id.as_uuid()],
+                    |row| row.get(0),
+                )?;
+                if found == 0 {
+                    return Ok(Err(DropRefusal::NoSuchLine));
+                }
+
+                // The condition the port states. Asked inside the
+                // write, where the answer cannot go stale — a pursuit
+                // opened between the caller's read and this one is the
+                // whole case, and it is why the ids come in rather than
+                // being looked up here.
+                let against: Vec<Uuid> = tx
+                    .prepare("SELECT id FROM pursuit WHERE line_id = ?1")?
+                    .query_map(params![id.as_uuid()], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                let against: BTreeSet<Uuid> = against.into_iter().collect();
+                let named: BTreeSet<Uuid> = covering.iter().map(|one| *one.as_uuid()).collect();
+                if against != named {
+                    return Ok(Err(DropRefusal::WorkMoved {
+                        against: against.len(),
+                        named: named.len(),
+                    }));
+                }
+
+                // Every foreign key inside the forge is RESTRICT, and
+                // `pursuit.parent_id` points at `pursuit` — so no order
+                // over these six statements is right for every shape a
+                // line can hold: work filed under work is a chain, and
+                // one `DELETE` cannot walk it parent-last.
+                //
+                // Deferring moves the check to COMMIT, by which point
+                // the rows that would have violated it are gone too.
+                // What survives the deferral is the check that matters:
+                // a reference into this line from outside it — another
+                // line's work filed under this line's — still fails,
+                // and fails the whole drop.
+                tx.pragma_update(None, "defer_foreign_keys", 1)?;
+
+                tx.execute(
+                    "DELETE FROM pursuit_op WHERE node_id IN \
+                         (SELECT n.id FROM pursuit_node n \
+                           JOIN pursuit p ON p.id = n.pursuit_id \
+                          WHERE p.line_id = ?1)",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM pursuit_node WHERE pursuit_id IN \
+                         (SELECT id FROM pursuit WHERE line_id = ?1)",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM pursuit WHERE line_id = ?1",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM change_row WHERE point_id IN \
+                         (SELECT id FROM change_point WHERE line_id = ?1)",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    "DELETE FROM change_point WHERE line_id = ?1",
+                    params![id.as_uuid()],
+                )?;
+                tx.execute("DELETE FROM line WHERE id = ?1", params![id.as_uuid()])?;
+
+                match tx.commit() {
+                    Ok(()) => Ok(Ok(())),
+                    // The deferred check, arriving where every other
+                    // error in this file arrives as a statement
+                    // failing. Nothing was written.
+                    Err(error) if is_foreign_key_violation(&error) => {
+                        Ok(Err(DropRefusal::StillReferenced))
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await
+            .map_err(infra_err)?;
+
+        dropped.map_err(|refusal| match refusal {
+            DropRefusal::NoSuchLine => DomainError::not_found("line", id),
+            DropRefusal::WorkMoved { against, named } => DomainError::Conflict(format!(
+                "line {id} has {against} pieces of work against it, and this drop was decided \
+                 against {named}"
+            )),
+            DropRefusal::StillReferenced => DomainError::Validation(format!(
+                "something outside line {id} points into it — work filed under work on this \
+                 line, from a line that is staying"
+            )),
+        })
+    }
+}
+
+/// Why a line was not dropped.
+enum DropRefusal {
+    /// There is no such line to drop.
+    NoSuchLine,
+    /// The work against the line is not the work the caller decided
+    /// against, so what they were told it releases is not what it
+    /// would release.
+    WorkMoved { against: usize, named: usize },
+    /// A row outside this line names one inside it, and taking the
+    /// line would leave that row pointing at nothing.
+    StillReferenced,
+}
+
+/// Whether this error is a foreign key that was not satisfied.
+///
+/// Its own function rather than a match at the one site, because a
+/// deferred violation arrives from `COMMIT` rather than from the
+/// statement that caused it, and reading that as an ordinary failure
+/// to commit would report a transport problem for a rule.
+fn is_foreign_key_violation(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == rusqlite::ErrorCode::ConstraintViolation
+                && inner.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY
+    )
 }
 
 #[async_trait]

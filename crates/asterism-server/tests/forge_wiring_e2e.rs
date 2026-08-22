@@ -249,3 +249,94 @@ async fn purging_the_persona_of_a_held_asset_is_refused_through_the_wiring() {
     );
     assert!(said.contains("ROOT"), "and which line: {said}");
 }
+
+/// And dropping the line is the way out: what it releases is what the
+/// purge was refused over, and the same purge then goes through.
+///
+/// The refusal above is only half a rule. A guard with no way past it
+/// is a guard that turns one held asset into a persona nobody can ever
+/// delete — so the half worth pinning is that the way past exists, is
+/// reachable through services, and frees exactly what it said it
+/// would.
+///
+/// Three services and the schema, in the order a person would meet
+/// them: archive the line, drop it, purge the persona.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_the_line_releases_the_asset_and_the_purge_then_goes_through() {
+    use asterism_contract::command::{PurgePersonaCommand, TrashPersonaCommand};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let core = core(tmp.path()).await;
+    let (persona, held) = an_asset(&core, tmp.path()).await;
+
+    let line = core
+        .line_service
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let work = core
+        .pursuit_service
+        .open(&line.id(), None, Intent::default(), &who("ana"))
+        .await
+        .unwrap();
+    core.pursuit_service
+        .push(
+            &work.id(),
+            &persona,
+            vec![Op::add(held, name("one"))],
+            None,
+            &who("ana"),
+        )
+        .await
+        .unwrap();
+    core.pursuit_service
+        .close(&work.id(), Outcome::Satisfied, None, &who("ana"))
+        .await
+        .unwrap();
+
+    // An open line is not droppable, and the refusal comes from the
+    // model rather than from anything the store noticed.
+    let too_soon = core.line_service.discard(&line.id(), &who("ana")).await;
+    assert!(
+        too_soon.is_err(),
+        "dropping is reachable only through the archive: {too_soon:?}"
+    );
+
+    core.line_service
+        .archive(&line.id(), &who("ana"))
+        .await
+        .unwrap();
+    let released = core
+        .line_service
+        .discard(&line.id(), &who("ana"))
+        .await
+        .expect("archived, and the work against it has ended");
+    assert!(
+        released.contains(&held),
+        "what the purge was refused over is what the drop released"
+    );
+
+    // The line and its work are gone rather than emptied.
+    assert!(core.line_service.get(&line.id()).await.is_err());
+    assert!(core.pursuit_service.get(&work.id()).await.is_err());
+
+    let wire_id = persona.as_uuid().to_string();
+    core.persona_service
+        .trash(
+            TrashPersonaCommand {
+                persona_id: wire_id.clone(),
+            },
+            &AttributionContext::owner_surface(),
+        )
+        .await
+        .expect("trash comes first, as everywhere else");
+    core.persona_service
+        .purge(
+            PurgePersonaCommand {
+                persona_id: wire_id,
+            },
+            &AttributionContext::owner_surface(),
+        )
+        .await
+        .expect("nothing in the forge is holding it any more");
+}

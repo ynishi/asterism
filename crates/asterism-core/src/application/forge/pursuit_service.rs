@@ -344,6 +344,7 @@ mod tests {
     use crate::application::forge::LineService;
     use crate::domain::forge::boundary::Store;
     use crate::domain::forge::model::closing::Closing;
+    use crate::domain::forge::model::line::Standing;
     use crate::domain::forge::model::strategy::Strategy;
     use crate::domain::forge::model::value::{ActorId, Content, EntryId, Name, NodeId, StrategyId};
     use crate::domain::forge::strategies::{Builtin, MainlineFirst};
@@ -459,6 +460,32 @@ mod tests {
             _: &StrategyId,
             _: &Act,
         ) -> Result<(), DomainError> {
+            Ok(())
+        }
+
+        async fn set_standing(
+            &self,
+            id: &LineId,
+            standing: Standing,
+            act: &Act,
+        ) -> Result<(), DomainError> {
+            let mut held = self
+                .line(id)
+                .ok_or_else(|| DomainError::not_found("line", id))?;
+            match standing {
+                Standing::Archived => held.archive(*act),
+                Standing::Open => held.reopen(*act),
+            }
+            self.put_line(held);
+            Ok(())
+        }
+
+        async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError> {
+            self.lines.lock().unwrap().retain(|line| line.id() != *id);
+            self.pursuits
+                .lock()
+                .unwrap()
+                .retain(|work| !covering.contains(&work.id()));
             Ok(())
         }
     }
@@ -606,6 +633,7 @@ mod tests {
         let rules = Arc::new(Builtin::default());
         (
             LineService::new(
+                Arc::new(world.clone()),
                 Arc::new(world.clone()),
                 rules.clone(),
                 Arc::new(world.clone()),

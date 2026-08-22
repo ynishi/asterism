@@ -1117,6 +1117,7 @@ pub async fn init_core_with(
     let forge_clock = Arc::new(asterism_core::domain::forge::clock::SystemClock);
     let line_service = Arc::new(asterism_core::application::forge::LineService::new(
         forge.clone(),
+        forge.clone(),
         forge_rules.clone(),
         forge_actors.clone(),
         forge_clock.clone(),
