@@ -46,6 +46,43 @@ and this project adheres to
 
 ### Added
 
+- **`Threads` has an implementation: what was said about work is kept** (#102).
+  The model held 489 lines of conversation — four anchors, messages, corrections
+  that append rather than overwrite — and the port in front of it had no
+  implementation at all. No service, no adapter, nothing that could keep a
+  remark. `ThreadService` opens a conversation, says something in one, corrects
+  what was said and renames the thread; `V98` gives it three tables; both stores
+  satisfy the port.
+
+  `restore` gained its third door. A stored thread could not be rebuilt before
+  this — `Message::new` mints an id and `Thread::open` mints one, so nothing
+  could hold the ids a store kept. Messages go back through `Thread::say` one at
+  a time, which is what makes a stored reply meet the refusal a fresh one meets,
+  including the case a store can produce and a caller cannot: a reply kept with
+  an earlier stamp than the message it answers.
+
+  An anchor is resolved rather than accepted. `Anchor` is built from the thing
+  itself so that a thread hanging off something nobody wrote is not a value
+  anybody can make — and a caller has ids, not things. So `Anchored` names what
+  to look for in ids, and the service reads the pursuit or the line before a
+  thread exists. An entry a pass did not touch is refused by the model, reached
+  through the service because the service is what has the pass to ask it of.
+
+  The tables are `forge_thread`, `forge_thread_message` and
+  `forge_thread_revision`, and the prefix is the point: `thread` is taken by the
+  annotation surface on the raw layer, which anchors to snapshots, cards and
+  query groups. Neither could carry the other's anchors without learning what
+  the other layer is made of. The same collision appears in `CoreCtx`, where the
+  new field is `forge_thread_service` beside the existing `thread_service`.
+
+  Dropping a line now takes what was said about its work with it. Every anchor a
+  thread can have — a pursuit, a pass, an entry as a pass had it, a change point
+  — is something a drop deletes, so a thread left behind would be a remark about
+  nothing. Over SQLite two of the four anchors are foreign keys, so a drop that
+  ignored them was refused rather than wrong; the in-memory store had nothing to
+  refuse it and kept the dangling thread. Both are fixed, and the test that says
+  so was written failing over both.
+
 - **A line can be archived, reopened and dropped through a service** (#102). The
   three verbs existed in the model and nowhere else, so nothing could release a
   held asset: the forge refused to let an asset it names be deleted, and there
