@@ -45,6 +45,24 @@ and this project adheres to
 
 ### Added
 
+- **The visual pipeline gains its evaluation fixtures, inside the system**
+  (#112). Grading pHash and the coming encoder needs images whose relationships
+  are known because they were generated, and `PUBLIC_DEVELOPMENT.md` rules
+  personal images out — but that material is consumed by nothing outside the
+  system, so it is deliberately not a corpus: no directory layout, no manifest
+  file, no CLI. A new `asterism-vision` crate — the model-_use_ side of the
+  visual features, which the app will import; model _preparation_ stays a
+  provider-side tool outside the app's dependency graph — starts with a
+  `fixtures` module (behind a `fixtures` feature) that tests and benches call
+  in-process: deterministic scenes whose spec is the ground truth (derived EN/JA
+  tags and captions, white-rimmed shapes on one grid cell each so nothing
+  occludes what a tag asserts), a seeded relation stream (look-alike, semantic
+  sibling, hard negative), transform helpers for the near-duplicate variants,
+  and unrelated noise and queries for the honest-failure case. An earlier shape
+  of this change materialised the same scenes as an external corpus behind a
+  benchgen subcommand; the design review on the issue removed that separation,
+  and this entry is what remains.
+
 - **Generator parameters are extracted from stored metadata behind their own
   port** (#19). The model and seed a run recorded sit inside free-text metadata
   values — a ComfyUI graph, an A1111 parameter line — and reading them out is a
