@@ -31,11 +31,11 @@ row, named by an operation. The forge does not hold a working copy,
 and there is no state to integrate at the end. What the close
 integrates is a *decision*.
 
-Nothing here is stored yet. The ports are [`lines`], [`pursuits`],
+Nothing here stores anything. The ports are [`lines`], [`pursuits`],
 [`closings`] and [`threads`]; what satisfies them lives outside this
-crate, and reading one back goes through
-[`model::restore`] — the one door a stored value
-comes in by.
+crate — `asterism-infra` has two, one over SQLite and one over rows
+under a lock — and reading one back goes through
+[`model::restore`], the one door a stored value comes in by.
 
 # The boundary
 
@@ -65,6 +65,43 @@ comes in by.
   rating and trashing all work with no pursuit in sight. Sending
   anything out is the raw layer's own business, and the forge has
   no part in it.
+
+# What the forge may depend on, and what enforces it
+
+The rule is one sentence: **the forge may not name anything else in
+`asterism-core` except the shared vocabulary**, which is
+[`DomainError`](crate::error::DomainError),
+[`AssetId`](crate::domain::value::AssetId),
+[`PersonaId`](crate::domain::value::PersonaId),
+`define_uuid_id` (the crate-private macro an id newtype is spelled
+with) and
+[`AttributionContext`](crate::domain::attribution::AttributionContext).
+`tests/forge_boundary.rs` holds that list with a reason beside each
+entry and fails on anything else.
+
+**The constraint is mutual dependency with the core, and nothing
+wider.** Two things follow that are easy to get backwards:
+
+- **External crates are ordinary here.** The forge imports `chrono`,
+  `uuid`, `async_trait`, `thiserror` and `std` directly, and the
+  guard does not look at them on purpose — it reads `use crate::`
+  lines, because what it answers for is what the forge names *in
+  this crate*. A leaf crate is the same case: `asterism-contract`
+  imports no Asterism crate at all, so naming it would create no
+  cycle and cost the forge nothing it is protecting.
+- **Where the DTO conversions live is a separate decision, and it
+  is not this one.** They sit in
+  [`application::mapping`](crate::application::mapping) because that
+  module's own claim is that every conversion goes through it — not
+  because putting them here would breach the boundary. It would
+  not.
+
+The direction is what matters: the outside may name the forge, and
+the forge may not name the outside. #101 turns that into a crate
+graph, where the compiler holds it instead of a test. Until then the
+list above is the whole of the contract, and adding to it is a
+decision about what the lifted crate would have to carry rather
+than a note that something compiles.
 
 # What is deliberately not here
 
