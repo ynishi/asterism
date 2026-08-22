@@ -1,3 +1,48 @@
+<!-- asterism_benchgen/index.md -->
+# asterism-benchgen 0.0.0
+
+`asterism-benchgen` — the seeded corpus behind the grid/import benches.
+
+Bench data cannot be a folder of whatever images happened to be on the
+machine: the numbers stop being comparable between runs, and a corpus
+that came out of one generator run carries that run's accidents (one
+persona, one aspect ratio, no group of interesting size). So the corpus
+is defined by a seed and regenerated from it — [`model::SpecStream`] is
+the definition, everything else here is materialisation.
+
+Two tiers, because one corpus cannot serve both benches: 110,000 assets
+at ~1.3 MB each is 165 GB.
+
+- **T-file** (`s` = 5,000 / `m` = 12,000): real PNGs on disk, so the
+  import path (hash + `thumb_gen` jobs) does real decode work.
+- **T-meta** (`l` = 110,000): specs only. Rows are seeded straight into
+  the repository by `seed-meta`; `corpus --preset l` writes just
+  the manifest, so both tiers agree on what corpus `(seed, l)` means.
+
+Presets are prefixes of one stream: S ⊂ M ⊂ L for a given seed.
+
+Six subcommands — three that build a corpus, three that measure:
+
+- `corpus` — materialise the corpus directory (PNGs + manifest).
+- `seed-meta` — T-meta: rows straight into the bench profile's
+  database, thumbnails included ([`seed_meta`]).
+- `load-file` — T-file: the corpus pushed through the running bench
+  server's HTTP API so the import jobs do real work ([`load_file`]).
+- `measure-import` — `load-file` plus the wait for the jobs it
+  enqueued, written up as a result file ([`measure`]).
+- `measure-cold` — first-listing cost against a just-restarted
+  server, warm repeat alongside it ([`measure`]).
+- `measure-pursuit` — the pursuit membership reads over a seeded
+  100k-asset profile ([`measure_pursuit`]).
+
+Every write path is fenced away from the real library: `seed-meta`
+refuses a database outside `profiles/bench`, everything that speaks
+HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
+throwaway temp directory it creates and removes itself. No fence is
+optional in the direction that matters — there is no flag that
+points any command at the real library.
+
+
 <!-- asterism_contract/index.md -->
 # asterism-contract 0.0.0
 
@@ -7337,6 +7382,2605 @@ reports.)
 - `IPTC_EXT_NS` — The IPTC Extension namespace, unchanged since 2008 and still the
 
 
+<!-- asterism_dispatch_sdk/index.md -->
+# asterism-dispatch-sdk 0.0.0
+
+# asterism-dispatch-sdk
+
+Building blocks for Asterism **exporters** (outbound adapters).
+
+An exporter is the OUT-side counterpart of the importer: given a
+Selection of already-ingested [`Asset`][crate-note-asset]s, an
+exporter drives an external backend (ComfyUI HTTP, Gemini API,
+VDSL CLI, algocline `alc.sd.bake()`, …) and returns
+[`Derived`] payloads that the core reifies as new Assets whose
+`parent_ids` point back at the Selection's members via
+`ConstellationEdge { kind: "derived_from" }`.
+
+## Pipeline
+
+```text
+ Selection<AssetId>
+        │
+        ▼
+ DispatchJob { selection_id, exporter_slug, action, params }
+        │
+        ▼
+ ┌── asterism-dispatch-sdk ─────────────────────────┐
+ │  Exporter::dispatch(ctx)  -> Handle              │
+ │  Exporter::poll(&handle)  -> DispatchState       │
+ │  Exporter::harvest(&h)    -> Vec<Derived>        │
+ └────────────────────┬─────────────────────────────┘
+                      ▼
+ Core: reify_derived(job, derived[i]) -> new Asset
+   + ConstellationEdge { kind: "derived_from" }
+```
+
+## Why this shape (and not `Footprint` reuse)
+
+The importer side hands parsers a `Footprint` shape whose
+`FootprintSource { kind, locator, platform }` field encodes
+**external world anchoring** — every importer represents "here is a
+thing we found in the wild". Exporters, by contrast, always run
+against Assets we already own, and the derived output's provenance
+(persona, session, parent_ids, source_kind) is always supplied by
+the core from the [`DispatchContext`]. Reusing `Footprint` would
+either force exporter authors to fill in fake source metadata or
+introduce an escape hatch the core has to remember to overwrite —
+either way the shape argues against itself.
+
+[`Derived`] is therefore intentionally smaller than `Footprint`
+(no source_kind, no persona_id, no session_id) and semantically
+different: it describes "a new artefact I made, hook it up as a
+child of these Assets".
+
+[crate-note-asset]: The full-fat `Asset` entity lives in
+`asterism-core`. Every shared boundary type — `AssetCardDto`
+(what an exporter's [`DispatchContext.inputs`][DispatchContext]
+carries) and [`Derived`] (what an exporter hands back) — lives
+in the leaf `asterism-contract` crate so the SDK sits above
+contract (and only contract), the core sits above contract
+(and only contract), and neither depends on the other.
+
+## SDK as external contract
+
+Beyond the Rust `Exporter` trait, this crate publishes the
+**canonical wire shape** every backend author (Rust adapter,
+Comfy watch-folder plugin, Python receiver, CC-written adapter)
+is supposed to consume. The actual DTOs live in
+`asterism-contract`; the SDK exposes them via re-exports plus
+example-JSON artifacts under [`schema`]. Mirrors the harvest
+importer pattern where `asterism-importer-harvest
+--print-schema` streams the canonical ingest shape.
+
+## What this crate is not
+
+It is the port, so it holds the trait, the types crossing it, and
+the schema artifacts that describe them — and nothing an adapter
+merely finds convenient. Machinery shared *between* adapters, such
+as the `{{...}}` substitution and path grammar a schema-driven
+exporter is configured with, sits one layer out in
+`asterism-exporter-common`, which depends on this crate rather than
+the other way round. Putting it here would make every backend
+author consuming the port read a grammar their adapter may never
+use, and would let a change in one adapter's convenience reach the
+contract every other adapter is written against.
+
+## Modules
+
+- [`attempt`](attempt.md): `AttemptRecord` — what an exporter has to say about a call it made,
+- [`derived`](derived.md): Re-export shim for the shared boundary type
+- [`exporter`](exporter.md): `Exporter` — the trait every outbound adapter implements.
+- [`handle`](handle.md): `Handle` — the exporter's backend-side reference to an in-flight job.
+- [`schema`](schema.md): Schema artifact registry — the SDK-owned half of the "SDK =
+- [`state`](state.md): Lifecycle state of a dispatch as seen by the exporter's
+
+
+<!-- asterism_dispatch_sdk/attempt.md -->
+# asterism-dispatch-sdk::attempt
+
+`AttemptRecord` — what an exporter has to say about a call it made,
+whether or not the call produced a [`Handle`](crate::Handle).
+
+A [`Handle`](crate::Handle) is the record of a job the backend
+accepted, and it is the only thing [`Exporter::dispatch`] can hand
+back. That leaves the refused submit — the case a reader has the most
+questions about — with nowhere to write: which endpoint, with which
+body, and what the backend actually said all go out with the error,
+and what survives on the row is one message string.
+
+This is the second channel. The core hands the exporter an
+[`AttemptRecorder`] on [`DispatchContext.attempt`], the exporter
+records what it sent and what came back as it makes the call, and the
+core persists whatever landed there — on the arm that returned a
+handle and on the arm that returned an error alike.
+
+Kept separate from the return type on purpose. Widening
+[`ExporterError`](crate::ExporterError) would make every error site
+decide what to attach, and returning a `Handle` for a job that does
+not exist would put a reference to nothing where the poll loop
+expects a backend job. Both change what the trait's own words mean;
+a recorder the exporter writes to leaves `dispatch` saying exactly
+what it said before.
+
+[`Exporter::dispatch`]: crate::Exporter::dispatch
+[`DispatchContext.attempt`]: crate::DispatchContext::attempt
+
+## Types
+
+- `AttemptRecord` — One call as the exporter wants it remembered.
+- `DiscardAttempts` — An [`AttemptRecorder`] that keeps nothing.
+
+## Traits
+
+- `AttemptRecorder` — Where an exporter puts an [`AttemptRecord`].
+
+## Constants
+
+- `DISCARD_ATTEMPTS` — Shared [`DiscardAttempts`], so a context built without a row to write
+
+
+<!-- asterism_dispatch_sdk/derived.md -->
+# asterism-dispatch-sdk::derived
+
+Re-export shim for the shared boundary type
+[`asterism_contract::DerivedDto`], plus the character-count
+constants exporter authors want to pre-enforce.
+
+Rationale: the wire shape lives in `asterism-contract` (the
+leaf DTO crate) so both the SDK and the core can talk about
+`Derived` without either depending on the other — the SDK
+stays a pure adapter surface, the core stays free of any
+adapter dep. Exporter authors keep writing `use
+asterism_dispatch_sdk::Derived;` unchanged.
+
+
+<!-- asterism_dispatch_sdk/exporter.md -->
+# asterism-dispatch-sdk::exporter
+
+`Exporter` — the trait every outbound adapter implements.
+
+An exporter is stateless from the SDK's point of view: the core
+passes it a [`DispatchContext`] on every method and stores anything
+the exporter wants to remember about the in-flight job as an opaque
+[`Handle`]. The three methods split the lifecycle so backends with
+very different rhythms (single-shot HTTP, long-poll, watchdog on a
+filesystem drop dir) all fit the same shape:
+
+1. [`Exporter::dispatch`] — send the job to the backend. Returns a
+   `Handle` the core persists so subsequent calls survive restart.
+2. [`Exporter::poll`] — check the backend for progress. Called by
+   the apalis `DispatchRun` job on a re-enqueue loop until the
+   state is terminal.
+3. [`Exporter::harvest`] — once `poll` returns `Done`, ask the
+   exporter to collect the produced artefacts and describe them as
+   [`Derived`]s. The core reifies each Derived into a new `Asset`
+   with `parent_ids` = the Selection's inputs, `session_id` =
+   `DispatchJob.id`, and `source_kind` = `format!("dispatch:{}",
+   exporter_slug)`.
+
+All three take the same [`DispatchContext`], and it carries one
+outbound channel beside the read-only slices:
+[`attempt`](DispatchContext::attempt), where the exporter records
+what a call sent and what came back. That record survives an error
+return, which is what makes a refused submit as readable as an
+accepted one.
+
+## Types
+
+- `DispatchContext` — The Selection-plus-context bundle the core hands the exporter on
+- `ExporterError` — Errors returned by an exporter. Everything not covered by a
+
+## Traits
+
+- `Exporter` — The single trait every outbound adapter implements.
+
+
+<!-- asterism_dispatch_sdk/handle.md -->
+# asterism-dispatch-sdk::handle
+
+`Handle` — the exporter's backend-side reference to an in-flight job.
+
+The exporter returns one of these from [`crate::Exporter::dispatch`]
+and receives it back on every subsequent [`crate::Exporter::poll`]
+and [`crate::Exporter::harvest`] call. The core persists the raw
+bytes verbatim (opaque JSON payload); the exporter is free to
+interpret them however it needs to reach the same backend job on
+process restart.
+
+The `kind` slug lets the exporter fast-fail with a clear error
+("this handle was issued by ComfyExporter, not GeminiExporter")
+when the caller feeds the wrong handle to the wrong adapter — that
+only happens on programmer error, but the failure mode is worth
+naming.
+
+## Types
+
+- `Handle` — Opaque reference to one in-flight backend job.
+
+
+<!-- asterism_dispatch_sdk/schema.md -->
+# asterism-dispatch-sdk::schema
+
+Schema artifact registry — the SDK-owned half of the "SDK =
+external contract" story.
+
+Every entry here is a `(name, example JSON)` pair. The example
+JSON is the canonical wire shape an external backend author
+consumes — LLMs work fine off an example, and the schema files
+live in `schema/` next to this crate for `cat`-friendly access.
+
+Per-exporter parameter schemas are *not* listed here; each
+exporter crate ships its own `params_example_json()` fn and
+`SCHEMA_NAME` const, and `asterism-server` walks the exporter
+registry to enumerate them alongside the SDK-owned ones.
+
+Naming convention: SDK-owned schemas use bare snake_case names
+(`public_asset`, `dispatch_context`, `derived`). Exporter-owned
+schemas use the `exporter:<slug>:params` form so the two
+namespaces cannot collide.
+
+## Functions
+
+- `asset_card_example_json` — Canonical example JSON for [`asterism_contract::dto::AssetCardDto`] —
+- `derived_example_json` — Canonical example JSON for [`crate::Derived`] — the shape
+- `dispatch_context_example_json` — Canonical example JSON for the dispatch envelope (what
+- `find_sdk_schema` — One-shot lookup by name against [`SDK_SCHEMAS`].
+
+## Types
+
+- `SdkSchemaEntry` — One [`SDK_SCHEMAS`] row: the public schema name paired with the
+
+## Constants
+
+- `SDK_SCHEMAS` — Every schema this crate publishes, keyed by public name.
+
+
+<!-- asterism_dispatch_sdk/state.md -->
+# asterism-dispatch-sdk::state
+
+Lifecycle state of a dispatch as seen by the exporter's
+[`crate::Exporter::poll`] response.
+
+The core drives the state machine — the exporter only reports "what
+I see on the backend right now". Terminal states (`Done` / `Failed`
+/ `Cancelled`) stop the poll loop; non-terminal states keep it
+running with a re-enqueue delay derived from the progress hint (if
+any).
+
+## Types
+
+- `DispatchState` — State of one dispatched backend job.
+- `ProgressHint` — Optional soft progress signal returned alongside a
+
+
+<!-- asterism_exporter_comfy/index.md -->
+# asterism-exporter-comfy 0.0.0
+
+# asterism-exporter-comfy
+
+First-slice Asterism `Exporter` — dispatches jobs to a running
+ComfyUI HTTP backend and harvests generated images.
+
+Scope of this crate at first-slice:
+
+- Implements the [`asterism_dispatch_sdk::Exporter`] trait against
+  the ComfyUI HTTP prompt-queue API (`POST /prompt`, `GET
+  /history/{prompt_id}`, output files served under `/view`).
+- Supports the single action `"img2img"`. The Comfy workflow JSON
+  is passed through `params.workflow` verbatim; the exporter's
+  only job is to substitute the input image references and read
+  the produced files back out.
+- Output images land under a caller-configurable dir (`params.output_dir`
+  defaults to `$ASTERISM_HOME/dispatch/<dispatch_id>/`) so the reified
+  `Asset` locator points at a stable on-disk path.
+
+Everything more ambitious (workflow template registry, txt2img /
+upscale actions, streaming previews, WebSocket progress) is
+deferred — the `Exporter` trait leaves room for those without
+touching this crate's surface.
+
+## Params contract
+
+`CreateDispatchCommand.params_json` for this exporter deserialises
+into [`ComfyDispatchParams`]:
+
+```json
+{
+  "endpoint": "http://127.0.0.1:8188",
+  "workflow": { /* ComfyUI prompt graph JSON */ },
+  "output_dir": "/optional/absolute/path",
+  "input_slot": "load_image_node_id",
+  "poll_interval_ms": 2000
+}
+```
+
+- `endpoint` — Comfy base URL (no trailing slash).
+- `workflow` — the exact prompt graph the Comfy UI would submit.
+  The exporter walks it looking for `input_slot` and rewrites that
+  node's `image` field to the Selection's first input.
+- `output_dir` — absolute directory to write the harvested files
+  to. `None` = fall back to `$ASTERISM_HOME/dispatch/<id>/` on the
+  caller side.
+- `input_slot` — the id of the workflow node whose `image` input
+  should be substituted with the Selection's first asset locator.
+- `poll_interval_ms` — how often the runner will poll; the value
+  is echoed back into the progress hint so the UI can display a
+  correct spinner cadence.
+
+
+<!-- asterism_exporter_common/index.md -->
+# asterism-exporter-common 0.0.0
+
+# asterism-exporter-common
+
+What a *schema-driven* exporter needs in order to be configured
+rather than written: a `{{...}}` substitution over the dispatch
+([`template`]) and a path grammar for reading the backend's answer
+([`jsonpath`]). `asterism-exporter-http` wants both, any adapter
+configured the same way will, and a grammar with two spellings is
+worse than either spelling on its own.
+
+## Why not in the SDK
+
+`asterism-dispatch-sdk` is the port. It publishes the `Exporter`
+trait, the types that cross it, and the schema artifacts a backend
+author reads, and an adapter that hard-codes its backend's protocol
+implements that port without ever meeting a template. Shared
+*implementation* between adapters is a different thing from the
+contract adapters are written against, and it belongs one layer
+out: this crate depends on the SDK, the SDK does not know this
+crate exists.
+
+## The traits, and what they are for
+
+A concrete adapter does not reach for [`template::render`] and
+[`jsonpath::many`] directly — it takes [`TemplateAdapter`] and
+[`ResponsePath`] and receives [`CommonExportAdapter`] as the default
+implementation of both. That is one line more at the definition
+site, and it buys the thing the direct call cannot: the grammar
+becomes substitutable per adapter without every adapter's call sites
+changing shape.
+
+That is not hypothetical. A profile that resolves its credential
+from the environment rather than out of the params blob needs a
+placeholder root for it, and the shared engine must not grow one:
+everything it can reach comes out of the params blob, so a `secret`
+root there would be a root that writes a credential down. The HTTP
+adapter's `SecretGrammar` wraps [`CommonExportAdapter`] and
+overrides [`TemplateAdapter::render`] to add exactly that root, and
+the JSON-leaf and header traversals keep working because they are
+default methods written in terms of `render`.
+
+```no_run
+use asterism_exporter_common::{CommonExportAdapter, ResponsePath, TemplateAdapter};
+
+struct MyExporter<A = CommonExportAdapter> {
+    grammar: A,
+}
+
+impl<A: TemplateAdapter + ResponsePath> MyExporter<A> {
+    fn status(&self, response: &serde_json::Value) -> Option<String> {
+        self.grammar
+            .select_first(response, "$.status")
+            .and_then(|v| self.grammar.display_string(v))
+    }
+}
+```
+
+## Modules
+
+- [`jsonpath`](jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
+- [`template`](template.md): `{{...}}` substitution over a dispatch — the other half of what a
+
+
+<!-- asterism_exporter_common/jsonpath.md -->
+# asterism-exporter-common::jsonpath
+
+A JSONPath subset — enough to steer a state machine and pluck out
+items, and deliberately no more.
+
+```text
+$.foo          object field
+$.foo.bar      dot chain
+$.arr[0]       array index
+$.arr[*]       array wildcard
+```
+
+# Why a subset
+
+A schema-driven exporter reads a path out of caller-supplied JSON, so
+the grammar is a public surface that has to be explainable in the
+params example a backend author works from. Filters, slices and
+recursive descent would each need a sentence there and none of them
+has appeared in a real backend's response shape: the documented cases
+are "the status field", "the error message", and "the array of
+outputs".
+
+A wildcard may appear anywhere the walk can widen, not only last.
+Nothing enforces a position because nothing needs to: the walk is a
+breadth-first frontier, so `$.a[*].b[*]` falls out of the same loop
+that handles one level.
+
+# Missing is not an error
+
+Every function here answers with what it found. A path that matches
+nothing yields an empty vector or `None`, and the caller decides
+whether that is a failure — a poll predicate reads it as "not yet",
+while a handle extraction reads it as a backend that did not answer
+the way its profile said it would. Returning a `Result` here would
+push that judgement into a layer that cannot make it.
+
+# Where this lives and why
+
+It left `asterism-exporter-http` when a second exporter needed it.
+One grammar with two spellings is worse than either spelling: a
+profile author reads one paragraph of documentation and cannot tell
+which adapter it describes, and a fix to the wildcard in one copy
+leaves the other wrong in a way no test in either crate can see.
+
+Adapters reach it through [`crate::ResponsePath`] rather than calling
+[`many`] directly, so the selection grammar is substitutable for the
+same reason the substitution grammar is.
+
+## Functions
+
+- `first` — The first value the expression selects, or `None`.
+- `many` — Every value the expression selects, in document order.
+
+
+<!-- asterism_exporter_common/template.md -->
+# asterism-exporter-common::template
+
+`{{...}}` substitution over a dispatch — the other half of what a
+schema-driven exporter needs in order to be configured rather than
+written.
+
+Simple textual replacement, no arithmetic and no conditionals. The
+resolvable roots are the dispatch's own ids, the input assets, the
+params blob itself, the handle once one exists, and the current item
+during a per-item mapping:
+
+```text
+{{selection_id}} {{dispatch_id}} {{persona_id}} {{action}}
+{{input[0].source_locator}}
+{{params.some.nested.key}}
+{{handle.job_id}}
+{{item.url}}
+```
+
+A trailing `?` (`{{item.caption?}}`) resolves a missing path to the
+empty string instead of failing. Without it an unresolved placeholder
+is an error, and that is the right default: a profile that names a
+field the backend does not send has a bug in it, and silently sending
+an empty prompt is a worse way to find out than a rejected dispatch.
+
+# `params` is the caller's namespace
+
+The exporter knows nothing about what is in the params blob beyond
+the fields its own schema names. `{{params.<dot.path>}}` reaches
+anywhere inside it, so a profile author nests per-backend values
+wherever they like and references them from templates.
+
+Two consequences worth stating together, because the first is the
+reason the second matters. Params are persisted unedited and handed
+back on every read of the dispatch — nothing on that path filters or
+redacts. So a value reachable by `{{params.…}}` is readable by
+anything that can list dispatches, and a credential does not belong
+there. An adapter that needs one resolves it outside the blob.
+
+# What is here and what is on the trait
+
+This module is the grammar: what a placeholder may name, and how one
+template string is rendered. Everything built *on top* of that — JSON
+documents, header maps — lives on [`crate::TemplateAdapter`] as default
+methods, so an adapter that changes the grammar changes it in one
+place and the traversals follow.
+
+## Functions
+
+- `render` — Renders one template string.
+- `value_to_display_string` — How a resolved value is spelled when it lands in a string.
+
+## Types
+
+- `TemplateEnv` — What a placeholder can be resolved against.
+
+
+<!-- asterism_exporter_file/index.md -->
+# asterism-exporter-file 0.0.0
+
+# asterism-exporter-file
+
+Generic filesystem exporter. Takes a Selection of already-ingested
+Assets, copies (or symlinks, or just references) each input into a
+caller-supplied output directory, and emits one [`Derived`] per
+written entry.
+
+Position in the workspace:
+
+- Mirrors the `asterism-importer-image` / `-video` / `-audio`
+  position on the OUT side — a concrete, name-shaped exporter
+  registered next to `comfy` in the server's [`ExporterRegistry`].
+- Unlike the importers (subprocess binaries that POST to the
+  server) this crate is a **library** because exporters run
+  in-process inside the apalis `DispatchRun` worker.
+
+## When to use
+
+- Physically duplicate every asset in a Selection into a
+  pre-configured drop folder — e.g. the Comfy `input/` mount, a
+  Photoshop watch folder, a portable archive dir.
+- Materialise a **read-only reference** to each Selection member
+  as a new derived Asset (`mode = "reference"`), so a Selection
+  can be turned into a persistent, linkable subset without moving
+  any bytes.
+
+## Params schema
+
+`CreateDispatchCommand.params_json` deserialises into
+[`FileDispatchParams`]:
+
+```json
+{
+  "output_dir": "/absolute/path",
+  "mode": "copy" | "symlink" | "reference" | "instruction",
+  "filename_template": "{{basename}}",
+  "modality": "image",
+  "labels": ["archive"],
+  "instruction": { "workflow": "wf-1", "prompt": "..." }
+}
+```
+
+- `output_dir` — the directory the exporter writes into. Created
+  recursively when it does not exist.
+- `mode` — how the input is materialised on disk:
+  - `copy` — physical copy (owns the bytes, safe against source
+    deletion).
+  - `symlink` — creates a symlink pointing at the source. Cheaper
+    than copy; breaks if the source moves.
+  - `reference` — nothing is written; the Derived's `locator`
+    points at the original source. Useful for "make a subset
+    Selection into a listable dispatch history" without touching
+    the filesystem.
+  - `instruction` — writes a single dispatch-scoped JSON file to
+    `output_dir` that embeds the caller-supplied `instruction`
+    blob plus the input locator list. Intended for fs-mediated
+    handoff to an external receiver (e.g. a Comfy watch-folder
+    plugin) that runs the workflow and drops results into a
+    directory an Importer is watching. Emits exactly one Derived
+    (`modality = "instruction"` by default) pointing at the
+    written file. `filename_template` defaults to
+    `"{{dispatch_id}}.json"` in this mode.
+- `filename_template` — filename shape under `output_dir`.
+  Supports these placeholders (simple text substitution, no
+  arithmetic):
+  - `{{basename}}` — original filename (base name including
+    extension). Default when the field is omitted.
+  - `{{stem}}` — original filename without extension.
+  - `{{ext}}` — original extension (without the dot).
+  - `{{index}}` — 0-indexed position within the Selection.
+  - `{{selection_id}}` / `{{dispatch_id}}` / `{{persona_id}}` —
+    ids from the dispatch context.
+  - `{{action}}` — the exporter action slug.
+    Collisions (two input assets that would produce the same output
+    path) are broken by appending `-<index>` to the stem before the
+    extension.
+- `modality` — modality slug written on each Derived. Optional; if
+  omitted the exporter passes the input's modality through
+  verbatim so the derived Asset lands in the same grid lane as
+  its source.
+- `labels` — extra labels appended to each Derived (in addition
+  to the exporter/action labels the core prepends).
+
+## Lifecycle
+
+Filesystem writes are synchronous; the exporter does all the work
+inside [`dispatch`](FileExporter::dispatch) and stashes the
+produced [`Derived`] list on the returned [`Handle`]'s payload.
+`poll` always returns [`DispatchState::Done`] immediately;
+`harvest` just deserialises the cached list. This keeps the
+runner's state machine identical to the network-backed exporters
+without introducing a fake "waiting" phase.
+
+
+<!-- asterism_exporter_http/index.md -->
+# asterism-exporter-http 0.0.0
+
+# asterism-exporter-http
+
+Schema-driven exporter for **HTTP job APIs**. Where
+[`asterism_exporter_comfy`] hard-codes the ComfyUI protocol, this
+crate stays backend-agnostic: **the caller supplies the submit / poll
+/ harvest shapes as JSON schema in the dispatch params**. One
+deployable adapter, N backends.
+
+Position in the workspace: mirror of `asterism-importer-sqlite`
+("query + column map = whole importer") on the OUT side. Where the
+SQLite importer's caller writes SQL + a column mapping, this
+exporter's caller writes an HTTP shape + a JSON-path mapping.
+
+## Why there is no second adapter for hosted platforms
+
+There was one, for a while: `asterism-exporter-cloud`, carrying its
+own copy of this schema — the same poll predicates, the same harvest
+item map, the same handle — because a hosted platform needed three
+things this adapter had not grown yet. It was the wrong axis. A
+hosted platform and a self-hosted backend speak the same job API:
+submit, keep a handle, poll, collect. Whether the URL is `https`,
+whether the credential comes from the environment, and how long to
+keep waiting are configuration, not adapter identity, and splitting
+on them bought duplication while leaving this side stuck with the
+weaker credential story it had deferred.
+
+So the three arrived here as optional blocks, and "cloud" became a
+profile:
+
+| block | absent | present |
+|---|---|---|
+| [`auth`](AuthSchema) | the profile carries no credential, or reaches one through its own params | the credential is named by environment variable and never persisted |
+| [`fetch`](FetchSchema) | the backend's own URL is the locator | the bytes are pulled into custody first, and *that path* is the locator |
+| `deadline_seconds` | poll until the backend answers | a job past its deadline fails as expired |
+
+The distinction worth keeping is a different one: a backend reachable
+as an HTTP job API — which a profile covers — versus a backend that
+ships an SDK, which will not be a profile at all.
+
+## Params schema
+
+`CreateDispatchCommand.params_json` deserialises into
+[`HttpDispatchParams`]. All three phases (`submit` / `poll` /
+`harvest`) are configured up front so the runner can drive the state
+machine without re-reading params on every tick.
+
+```json
+{
+  "endpoint": "http://backend.example.com",
+
+  "submit": {
+    "method": "POST",
+    "path": "/generate",
+    "body_template": {
+      "input_url": "{{input[0].source_locator}}",
+      "prompt":    "{{params.extras.prompt}}",
+      "client_id": "{{dispatch_id}}"
+    },
+    "handle_from": "$.job_id"
+  },
+
+  "poll": {
+    "method": "GET",
+    "path":   "/status/{{handle}}",
+    "done_when":   { "path": "$.status", "equals": "done" },
+    "failed_when": { "path": "$.status", "equals": "failed",
+                      "message_path": "$.error" },
+    "progress_message_path": "$.status_message"
+  },
+
+  "harvest": {
+    "method": "GET",
+    "path": "/result/{{handle}}",
+    "items_path": "$.outputs[*]",
+    "map": {
+      "modality":      "image",
+      "source_url":    "{{item.url}}",
+      "cover_hint":    "{{item.caption?}}",
+      "labels_static": ["batch:{{dispatch_id}}"]
+    }
+  },
+
+  "auth": {
+    "secret_ref":     "BACKEND_KEY",
+    "header":         "authorization",
+    "value_template": "Bearer {{secret}}"
+  },
+  "fetch": { "authenticated": false },
+  "deadline_seconds": 86400,
+
+  "extras": {
+    "prompt": "photo studio portrait"
+  }
+}
+```
+
+`extras` is not a field the exporter knows about — the params blob
+is its own template namespace, so a caller nests its per-backend
+values anywhere it likes and reaches them with
+`{{params.<dot.path>}}`. `schema/http_params.example.json` is the
+runnable version of this same shape (it is what `asterism-server
+schema print exporter:http:params` streams), and the tests at the
+bottom of this file are what keep it honest.
+
+Note that `handle_from` decides what `{{handle}}` resolves to.
+With `"$.job_id"` the handle *is* the id string, so the poll path
+interpolates `{{handle}}`; a `handle_from` of `"$"` keeps the whole
+response body and the path would read `{{handle.job_id}}` instead.
+
+### Templates and JSONPath
+
+Both grammars are the shared adapter machinery, documented where
+they are defined: [`asterism_exporter_common::template`] for the
+`{{...}}` roots, the optional-`?` suffix and which of them resolve in
+which phase, and [`asterism_exporter_common::jsonpath`] for the path
+subset. They are not restated here — a grammar with two write-ups
+grows two meanings, and a profile author cannot tell which one their
+adapter implements.
+
+This exporter reaches them through the
+[`TemplateAdapter`] / [`ResponsePath`] traits, and the implementation
+it holds is [`SecretGrammar`] — the shared roots plus `{{secret}}`,
+bound per call from whatever the `auth` block names. A profile
+without that block binds nothing, and `{{secret}}` in one is refused
+rather than rendered away.
+
+## Where a credential may live, and what that costs
+
+Params are persisted unedited: the blob handed to
+`CreateDispatchCommand` is stored whole as `dispatch_job.params_json`
+and handed back out as `DispatchDto.params_json` on every read of the
+dispatch, and nothing on that path filters, redacts, or drops a
+field. A credential reached by `{{params.…}}` is therefore readable
+by anything that can list dispatches — and, since the call is
+recorded (below), it also rides on the assets the job produced.
+
+`auth.secret_ref` is the way out, and it holds an environment
+variable *name*, never a value: the credential is resolved per call,
+rendered into `{{secret}}`, and is in neither the params blob nor
+anything written down. Loading a `.env` file is the binary's job,
+done once at startup — an adapter that went looking for dotenv files
+itself would make "which file did this credential come from"
+invisible to the profile that named it.
+
+## The call is recorded, and it arrives with the artefact
+
+The request as sent and the response as received are kept on the
+dispatch row, in the exporter-owned handle payload the runner already
+persists and hands back — and the harvest copies that record onto
+every [`Derived`] it returns, under `extra.http.call`, together with
+the finished job's response whole. A backend that answers with a
+result URL and little else is the ordinary case: the model can be an
+ambient default, the seed is an input that is usually not echoed, and
+an enhanced prompt is not the prompt that was sent. None of that is
+in the bytes, so the moment of the call is the only moment it exists.
+The response is kept whole because those values are siblings of the
+artefacts array rather than fields of an item.
+
+The recorded copy is scrubbed of the credential the `auth` block
+named, and its headers are redacted. So is the handle itself, on the
+way into the payload: `submit.handle_from` defaults to the whole
+submit response, a backend is free to echo the request it was sent,
+and that payload is handed back out on every read of the dispatch —
+including to a caller that never touches the database. What no scrub
+can reach is a token a profile interpolated out of its own params
+into a URL or a body: the adapter was never told it was a
+credential. That is the same trade the paragraph above describes,
+one surface further along.
+
+## Modules
+
+- [`custody`](custody.md): Where a produced file lands once we hold it.
+- [`secret`](secret.md): The profile grammar this adapter uses: the shared one, plus
+
+
+<!-- asterism_exporter_http/custody.md -->
+# asterism-exporter-http::custody
+
+Where a produced file lands once we hold it.
+
+`<custody_root>/dispatch/<dispatch_id>/<nnn>-<name>`.
+
+Dispatch-addressed rather than content-addressed. The question the
+harvest asks is "which files did this dispatch produce", and this
+layout answers it by listing a directory — no index, no lookup, and
+it still answers after the platform's URL has expired and the
+response that named it is gone. Content addressing answers a
+different question (is this the same file as that one), the core's
+digest axes already answer that one, and a digest can be computed
+over these bytes later without moving them.
+
+Writing is idempotent by path: the index within the harvest and the
+dispatch id are both stable, so a re-collect after a failed fetch
+overwrites the same file rather than producing a second asset beside
+the first.
+
+## Types
+
+- `CustodyPaths` — Resolves custody paths under one root.
+
+
+<!-- asterism_exporter_http/secret.md -->
+# asterism-exporter-http::secret
+
+The profile grammar this adapter uses: the shared one, plus
+`{{secret}}` when the profile names a credential.
+
+The root is bound per call, from the environment variable an `auth`
+block names, and the value is never written into the params blob —
+which matters because that blob is persisted unedited and handed back
+on every read of the dispatch. A profile that instead interpolates a
+token it stored in its own params (`{{params.extras.api_key}}`, the
+pattern this adapter shipped with before it had an `auth` block) is
+still allowed and still works; what it loses is exactly this: nothing
+can scrub a value the adapter was never told was a credential.
+
+A profile with no `auth` block binds no secret. `{{secret}}` is then
+an error rather than an empty string: rendering it away would send an
+unauthenticated request that looks like an authenticated one, and the
+backend's 401 is a worse place to learn it than the dispatch that
+refuses to start.
+
+Only [`TemplateAdapter::render`] is overridden. The JSON-leaf and
+header traversals are the trait's default methods, written in terms
+of `render`, so `{{secret}}` means the same thing in a header, in a
+body field and in a query string without three implementations
+agreeing to.
+
+## Types
+
+- `SecretGrammar` — [`CommonExportAdapter`] plus the `{{secret}}` root.
+
+
+<!-- asterism_importer/index.md -->
+# asterism-importer 0.0.0
+
+Unified CLI for all built-in Asterism import adapters.
+
+One subcommand per source — Claude Code sessions, character cards,
+agent-harvest envelopes, arbitrary SQLite queries, persona-journal
+entries, tapes, and image / video / audio files. Every subcommand
+runs the same importer-SDK pipeline: walk the source, parse it into
+typed footprints, and push them in batches to a running
+`asterism-server` over HTTP (`--server`, default local). All imports
+are persona-scoped (`--persona-id`) and support `--dry-run`, which
+validates and reports without writing anything.
+
+
+<!-- asterism_importer_audio/index.md -->
+# asterism-importer-audio 0.0.0
+
+Audio import adapter — turns a scanned audio file into
+`Footprint::Audio`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::AudioParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The format specifics live in [`parser`]; this crate root only
+re-exports the parser type.
+
+## Modules
+
+- [`parser`](parser.md): Audio `RawItem` → `Footprint::Audio` parser.
+
+
+<!-- asterism_importer_audio/parser.md -->
+# asterism-importer-audio::parser
+
+Audio `RawItem` → `Footprint::Audio` parser.
+
+Metadata via `lofty` (pure-Rust, MIT). Covers MP3 / M4A (AAC in
+MP4) / WAV / FLAC / OGG (Vorbis + Opus) plus WavPack / APE /
+MPC / AIFF. Header-only reads — no decoding.
+
+## Types
+
+- `AudioParser` — Turns a scanned audio file into `Footprint::Audio`.
+
+
+<!-- asterism_importer_cc/index.md -->
+# asterism-importer-cc 0.0.0
+
+Claude Code session import adapter — turns a session's JSONL log
+into `Footprint::ChatMessage`s (plus `Footprint::Image` for pasted
+images).
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::CcSessionParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The JSONL shape, the addressing rules, and their edge cases
+are documented in [`parser`].
+
+## Modules
+
+- [`parser`](parser.md): Claude Code JSONL → `Footprint::ChatMessage` (+ `Footprint::Image`)
+
+
+<!-- asterism_importer_cc/parser.md -->
+# asterism-importer-cc::parser
+
+Claude Code JSONL → `Footprint::ChatMessage` (+ `Footprint::Image`)
+parser.
+
+Each `*.jsonl` file under `~/.claude/projects/<slug>/` is one Claude
+Code session. We emit one `Footprint::ChatMessage` per `user` /
+`assistant` line with extractable text content. Non-text records
+(mode, file-history-snapshot, tool_use / tool_result blocks with no
+text) are skipped.
+
+Images that entered the conversation (asset-model v4 P4): Claude
+Code renders a pasted / referenced image into the message text as a
+`[Image: source: <absolute path>]` marker — pasted screenshots get
+a durable copy under `~/.claude/image-cache/<session>/`, file
+references keep their original path. Each unique marker path emits
+one `Footprint::Image` carrying the **same `external_session_key`**
+as the messages, so the image lands as a member of the same Session
+composite (membership is modality-agnostic). The base64 content
+blocks in the same lines are ignored — they have no durable locator
+of their own and the marker already points at the on-disk truth.
+
+The `FootprintSource.locator` is `<file-path>#<line-uuid>` so
+re-imports collapse to no-ops via the server-side
+`asset.source_kind + source_locator` unique constraint. Image
+footprints use the marker path itself as the locator — the same
+constraint therefore assigns an image pasted into several sessions
+to the first session imported (one asset per original file).
+
+A line that carries no `uuid` is **not** given one made from its
+line number: it has no address, so no `Footprint::ChatMessage` is
+emitted for it and the drop is counted
+([`asterism_importer_sdk::RecordAddresses`], which states the rule
+and reports the count). An image marker on such a line still
+becomes a `Footprint::Image` — its locator is the marker path, an
+address the source really does state, and dropping the whole line
+would take the picture down with the missing id.
+
+## Types
+
+- `CcSessionParser` — Parser for Claude Code session JSONL logs.
+
+
+<!-- asterism_importer_image/index.md -->
+# asterism-importer-image 0.0.0
+
+Image import adapter — parses one image file into one
+`Footprint::Image`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::ImageParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The format specifics live in [`parser`]; this crate root only
+re-exports the parser type.
+
+## Modules
+
+- [`parser`](parser.md): Image `RawItem` → `Footprint::Image` parser.
+
+
+<!-- asterism_importer_image/parser.md -->
+# asterism-importer-image::parser
+
+Image `RawItem` → `Footprint::Image` parser.
+
+Reads EXIF from the payload with `kamadak-exif` (V2 design D-15 —
+Rust-side, never JS-side). Falls back to file mtime when no EXIF is
+present so PNG screenshots and freshly-generated images still land
+with a meaningful `occurred_at`.
+
+# One file, one footprint — including the text inside it
+
+This parser used to read the PNG's `tEXt` chunks and emit one
+`Footprint::Note` per chunk, each addressed `<image>.png#<keyword>`,
+so a ComfyUI export arrived as N + 1 assets. It does not any more:
+**an image file is one record, and the text inside it is that
+record's metadata**. The chunks reach the image's own row on the
+`Meta` axis, and
+nothing on this side has to carry them there — the server's
+`material_hash` job already reads the artefact's bytes and hands
+them to the PNG probe, which writes `material.meta_hash` and
+`material.meta_kv` on the row this parser produced.
+
+So there is no hand-off to build here, and deliberately none to add:
+a metadata set declared by the importer *and* computed from the
+bytes by the server would be two authorities for one value, which is
+the failure `declared_content_hash` is fenced against. The importer
+states where the bytes are; what they contain is read from them.
+
+## Types
+
+- `ImageParser` — Parses one image file into one `Footprint::Image`.
+
+
+<!-- asterism_importer_persona_journal/index.md -->
+# asterism-importer-persona-journal 0.0.0
+
+persona-journal import adapter — turns a persona-journal SQLite row
+into `Footprint::JournalEntry`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::PersonaJournalParser`] implements
+the importer SDK's `SourceParser`, the SDK pipeline walks the source
+and pushes the resulting footprints to a running `asterism-server`
+over HTTP. The row schema it reads and the mapping it applies are
+documented in [`parser`].
+
+## Modules
+
+- [`parser`](parser.md): persona-journal SQLite row -> `Footprint::JournalEntry` parser.
+
+
+<!-- asterism_importer_persona_journal/parser.md -->
+# asterism-importer-persona-journal::parser
+
+persona-journal SQLite row -> `Footprint::JournalEntry` parser.
+
+Each row emitted by the `SqliteScanner` corresponds to one
+persona-journal `entries` row joined with its current `versions`
+body. We route each row to a `JournalEntry` whose `JournalKind` is
+chosen from the `entries.kind` column.
+
+Constellation-edge grouping (persona × kind bucket) is carried on
+`bundle_id` after the session-model refactor — journal is a
+non-Dialog modality, so Session-related fields stay unused.
+
+Legacy note: the original mapping table:
+
+- `"states"`   -> `JournalKind::State`
+- `"emo"`      -> `JournalKind::Emo`
+- `"non_rem"`  -> `JournalKind::NonRem`
+- `"memories"` -> `JournalKind::Memory`
+- anything else round-trips via `JournalKind::Other(kind)`.
+
+Locator shape: `{db_path}#{entry_id}` (produced by `SqliteScanner`).
+Idempotency relies on the server-side
+`asset.source_kind + source_locator` unique constraint.
+
+## Types
+
+- `PersonaJournalParser` — Parser for persona-journal rows.
+
+
+<!-- asterism_importer_sdk/index.md -->
+# asterism-importer-sdk 0.0.0
+
+# asterism-importer-sdk
+
+Building blocks for Asterism importers.
+
+The unified `asterism-import` binary walks an external source,
+parses it into typed [`Footprint`]s, and pushes them to a running
+`asterism-server` through the HTTP API. This crate provides the
+reusable pipeline — subcommands only need to plug in a
+[`SourceScanner`] (usually one of the ones bundled here) and a
+source-specific [`SourceParser`].
+
+## Pipeline
+
+```text
+Scanner  ─→ RawItem  ─→ Parser  ─→ Footprint  ─→ AssetSpec  ─→ AddAssetCommand
+                                                                      │
+                                                                      ▼
+                                                    HTTP POST /asterism/assets/add[-batch]
+```
+
+- [`SourceScanner`] enumerates or watches an external source and
+  emits [`RawItem`]s. Implementations bundled here: [`FsScanner`],
+  [`SqliteScanner`].
+- [`SourceParser`] turns a `RawItem` into zero or more
+  [`Footprint`]s; it is the only source-specific piece an importer
+  author has to write.
+- [`Footprint`] is a typed enum with one variant per well-known
+  modality (`ChatMessage`, `Doc`, `Note`, `Image`); the compiler
+  guides the plugin author to fill in the right fields.
+- [`AssetSpec`] is the flat intermediate the SDK converts each
+  footprint to before batching; plugin authors do not touch it
+  directly (see [`Footprint::into_asset_spec`]).
+- [`ApiClient`] performs the HTTP POSTs (single or batch).
+- [`Progress`] keeps a running success / failure tally.
+- [`run_import`] owns the shared scan / parse / batch / progress
+  loop after the outer CLI has resolved arguments and environment.
+  It also fills in [`AssetSpec::declared_content_hash`] for the
+  records where it is a true statement — the scanner read a whole
+  artefact ([`SourceScanner::payload_is_whole_artefact`]) and the
+  spec still carries that artefact's own address — which lets the
+  server propose an exact-copy duplicate without opening the file.
+
+## Writing a new importer
+
+Four conventions every importer author needs to know. Each has its
+canonical rule co-located with the API item that owns it; this
+section is a jump table.
+
+1. **`source_kind` ownership** — the *importer* decides the slug,
+   not the scanner. Scanners provide a sensible default (`"fs"`,
+   `"sqlite"`) so a one-off tool works out of the box, but a
+   published importer overrides it via
+   [`FsScanner::with_source_kind`] (or the equivalent on other
+   scanners) to a slug that names the importer's source
+   (`"cc"`, `"persona-journal"`, `"apple-notes"`). The slug flows
+   through [`RawItem::source_kind`] into
+   [`FootprintSource::kind`] and eventually into the DB unique
+   index `(source_kind, source_locator)`, so it must be stable
+   across releases of the same importer. See
+   [`scanner::RawItem::source_kind`] for the full rule.
+
+2. **`occurred_at` fallback ladder** — parsers pick the timestamp
+   with the highest fidelity available: (a) a timestamp *inside*
+   the payload (message header, DB column), (b)
+   [`RawItem::occurred_at`] (scanner-derived: file `mtime`, row
+   column), (c) `Utc::now()` as a last resort. Never invert the
+   order — an `mtime` for a JSONL session log is the *file's* last
+   write, not the individual message's. See [`parser::SourceParser`]
+   for the canonical form.
+
+3. **Idempotent `locator` under `Watch` mode** — [`ScanMode::Watch`]
+   re-emits whole files as they change (append-heavy sources like
+   `.jsonl` session logs are the common case). The parser is
+   responsible for producing a **record-level** locator so
+   unchanged records collapse via the server-side unique index and
+   only new records land. The `<file-path>#<record-uuid>` pattern
+   is the canonical shape; see
+   [`footprint::FootprintSource::locator`] for the full patterns
+   and constraints.
+
+4. **Adding a new modality** — new modalities are added as
+   new [`Footprint`] variants, not through a stringly-typed
+   escape hatch. Every modality gets a typed struct so the
+   compiler shows plugin authors the fields it needs, and the
+   [`Footprint::into_asset_spec`] arm centralises truncation /
+   label / modality-slug rules. `JournalKind::Other` /
+   `ChatRole::Other` / `DocFormat::Other` are per-variant escape
+   hatches for sub-kind slugs, not for whole new modalities.
+
+## Import target catalogue
+
+Field-mapping reference for schemas Asterism plans to import
+(Character Card V2/V3, PNG tEXt embed, CharacterHub, RisuAI,
+AgnAI, KoboldAI, SillyTavern chat JSONL / World Info,
+NovelAI Lorebook, ChatGPT export, Claude data export, Letta,
+MemoryPlugin, SillyTavern backup zip). See [`catalogue`] for
+per-target split rules, locator patterns, and unverified fields.
+
+## Modules
+
+- [`bundle`](bundle.md): Deriving the grouping key that ties the footprints of one container
+- [`card`](card.md): # Character-card parser subsystem
+- [`card::envelope`](card__envelope.md): Envelope + context types shared by every character-card parser.
+- [`card::parser`](card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
+- [`card::parser::v2_default`](card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives
+- [`card::png_chunk`](card__png_chunk.md): Character-card PNG `tEXt` chunk decoders.
+- [`card::registry`](card__registry.md): Registry that dispatches a [`CardEnvelope`] to the right
+- [`card::source_parser`](card__source_parser.md): [`SourceParser`] adapter that turns any character-card [`RawItem`]
+- [`card::v2`](card__v2.md): Canonical Character Card V2 parser (see [`crate::catalogue`] section 1).
+- [`card::v3`](card__v3.md): Character Card V3 parser (see [`crate::catalogue`] section 2).
+- [`catalogue`](catalogue.md): # Import target catalogue
+- [`client`](client.md): Thin HTTP client for the asterism-server API.
+- [`footprint`](footprint.md): `Footprint` — the typed, plugin-facing shape a parser hands back.
+- [`harvest`](harvest.md): # Agent-harvest intake subsystem
+- [`harvest::envelope`](harvest__envelope.md): Typed schema for `asterism_agent_harvest` v1 JSON dumps.
+- [`harvest::parser`](harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
+- [`mapper`](mapper.md): Convenience shape for parser output plus the mapping to the wire
+- [`parser`](parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [`progress`](progress.md): Tiny progress reporter — running success / failure counters, plus
+- [`runner`](runner.md): Shared importer execution pipeline.
+- [`scanner`](scanner.md): `SourceScanner` trait and shared item type.
+- [`scanner::fs`](scanner__fs.md): `FsScanner` — filesystem source scanner.
+- [`scanner::sqlite`](scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+
+
+<!-- asterism_importer_sdk/bundle.md -->
+# asterism-importer-sdk::bundle
+
+Deriving the grouping key that ties the footprints of one container
+together.
+
+A parser handed one `RawItem` that really is many records — a
+character card's slots, a harvest envelope's conversations — needs a
+key every one of them can carry so `edge_rebuild` draws a
+`same-bundle` edge across the set. The key has to be **derived from
+the container's locator**: a random one would move on every
+re-import and split a set that arrived twice into two.
+
+# Why this is not in `png_text` any more
+
+It used to be. That module read a PNG's `tEXt` chunks and emitted one
+`Footprint::Note` per chunk, and this function existed to bundle
+those notes back to the image they came out of. The notes are gone —
+the text inside an image is that image's metadata rather than a
+record of its own, and it now travels on the image's row as the
+`Meta` axis. What survived
+is this derivation, and it never had anything to do with PNG text:
+its callers are the card parser and the harvest parser, both of them
+over real containers.
+
+**The namespace bytes are unchanged**, so every id this has ever
+produced still comes back the same — a card imported before the move
+keeps its bundle.
+
+## Functions
+
+- `session_id_for` — Derives the shared grouping key for every footprint decomposed from
+
+
+<!-- asterism_importer_sdk/card.md -->
+# asterism-importer-sdk::card
+
+# Character-card parser subsystem
+
+Trait-based decomposition of character-card family formats
+(SillyTavern V2 / V3, CharacterHub, RisuAI, AgnAI, KoboldAI) into
+per-slot [`crate::Footprint`]s. This is the "one card → many
+footprints" pipeline design axiom from [`crate::catalogue`] in
+executable form.
+
+## Layers
+
+- [`envelope`] — the parsed wire shape: [`CardEnvelope`] holds
+  `{spec, spec_version, data{…}}` and [`CardContext`] carries the
+  caller-supplied ingest metadata (source_kind, locator,
+  session_id, occurred_at, platform).
+- [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks
+  `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the
+  parser; chunk framing is `pngmeta`'s.
+- [`parser`] — the extension trait [`CharacterCardParser`] and the
+  canonical V2 slot logic exposed as free functions
+  ([`parser::v2_default`]) so derivatives can chain rather than
+  re-implement.
+- [`registry`] — [`CardParserRegistry`] dispatches an envelope to
+  the right parser by its `spec` string; pre-loaded with [`V2Parser`]
+  + [`V3Parser`].
+
+## Extension pattern
+
+```ignore
+use asterism_importer_sdk::card::{
+    CardContext, CardEnvelope, CardParserRegistry, CharacterCardParser,
+};
+
+struct ChubParser;
+impl CharacterCardParser for ChubParser {
+    fn spec(&self) -> &'static str { "chara_card_v2" /* chub piggybacks on V2 */ }
+    fn parse_extras(&self, env: &CardEnvelope, ctx: &CardContext<'_>) -> Vec<_> {
+        // Promote data.extensions.chub.alt_expressions[] → Image × N here
+        Vec::new()
+    }
+}
+```
+
+## Session id
+
+Every footprint decomposed from one card shares one `session_id`
+(typically [`crate::bundle::session_id_for`] of the container
+locator), so `edge_rebuild` clusters them via
+`time_proximity = 1.0`.
+
+
+<!-- asterism_importer_sdk/card__envelope.md -->
+# asterism-importer-sdk::card::envelope
+
+Envelope + context types shared by every character-card parser.
+
+## Types
+
+- `CardContext` — Caller-supplied context every parser needs.
+- `CardEnvelope` — Parsed character-card envelope.
+
+
+<!-- asterism_importer_sdk/card__parser.md -->
+# asterism-importer-sdk::card::parser
+
+[`CharacterCardParser`] trait + canonical V2 slot logic.
+
+The trait has six per-slot hooks whose defaults cover the V2 spec.
+Derivatives override individual hooks — see [`crate::card::v3`] for
+the reference example.
+
+The V2 slot logic is also exposed as free functions in
+[`v2_default`] so derivatives can chain (e.g. V3
+[`crate::card::v3::V3Parser`] calls [`v2_default::creator_notes`]
+and appends multilingual variants).
+
+## Traits
+
+- `CharacterCardParser` — Extension trait for character-card decomposition.
+
+
+<!-- asterism_importer_sdk/card__parser__v2_default.md -->
+# asterism-importer-sdk::card::parser::v2_default
+
+Canonical V2 slot logic, exposed as free functions so derivatives
+can chain (call the V2 version, then append their own outputs)
+rather than re-implement.
+
+Every function is deterministic given the same envelope + context
+and produces zero footprints when the corresponding slot is
+absent, empty, or the wrong shape (so importers can call them
+unconditionally without pre-checking).
+
+## Functions
+
+- `book` — V2 default for [`super::CharacterCardParser::parse_book`].
+- `card_tags` — Card-level tag labels (`data.tags[]`) as owned strings. Empty
+- `creator_notes` — V2 default for
+- `extensions_bag` — Extract the extensions bag (`data.extensions`) as a JSON value
+- `greetings` — V2 default for [`super::CharacterCardParser::parse_greetings`].
+- `mes_example` — V2 default for
+- `text_slots` — V2 default for [`super::CharacterCardParser::parse_text_slots`].
+
+## Constants
+
+- `TEXT_SLOT_NAMES` — The six V2 text-slot names, in the order [`text_slots`] emits
+
+
+<!-- asterism_importer_sdk/card__png_chunk.md -->
+# asterism-importer-sdk::card::png_chunk
+
+Character-card PNG `tEXt` chunk decoders.
+
+Two chunk keywords are canonical:
+[`CHARA_KEYWORD`] (V2, base64 UTF-8 JSON) and [`CCV3_KEYWORD`] (V3,
+same encoding). On read prefer `ccv3` when both are present; the
+PNG importer or a character-card CLI uses
+[`envelope_from_chunk`] to lift each chunk value into a
+[`CardEnvelope`].
+
+Chunk framing comes from `pngmeta`: where one chunk ends and the
+next begins has a single right answer, and a card reader is the
+wrong place to re-derive it. What stays here is the card-specific
+half — which keyword wins, and how a chunk value becomes an
+envelope.
+
+A card is the one thing a PNG's `tEXt` chunks are read for here.
+**Not** metadata in general: an ordinary image's chunks are that
+image's own metadata and are hashed off its bytes server-side on the
+`Meta` axis (`asterism-core::domain::material_meta`), with no reader
+on this side at all. A character card is a different claim — the
+chunk carries an envelope whose slots are separately addressable
+records — and [`envelope_from_chunk`] is where that claim is made.
+
+## Functions
+
+- `envelope_from_chunk` — Decode a `chara` or `ccv3` chunk value into a [`CardEnvelope`].
+- `envelope_from_png` — Walk a PNG and lift the character card out of it.
+
+## Constants
+
+- `CCV3_KEYWORD` — PNG `tEXt` chunk keyword carrying a V3 character card.
+- `CHARA_KEYWORD` — PNG `tEXt` chunk keyword carrying a V2 character card.
+
+
+<!-- asterism_importer_sdk/card__registry.md -->
+# asterism-importer-sdk::card::registry
+
+Registry that dispatches a [`CardEnvelope`] to the right
+[`CharacterCardParser`] by its `spec` string.
+
+Pre-loaded defaults, first-registration-wins on collision, an
+optional look-up hook, and a `dispatch` that returns `None` when no
+parser claims the spec (so the caller can decide between skipping
+and falling back to raw V2 defaults).
+
+## Types
+
+- `CardParserRegistry` — Routes envelopes to their parser by exact `spec()` match.
+
+
+<!-- asterism_importer_sdk/card__source_parser.md -->
+# asterism-importer-sdk::card::source_parser
+
+[`SourceParser`] adapter that turns any character-card [`RawItem`]
+(PNG tEXt or standalone JSON) into per-slot [`Footprint`]s.
+
+Composes the pipeline:
+[`RawItem`] → [`envelope_from_png`] / [`CardEnvelope::from_json`] →
+[`CardParserRegistry::dispatch`] → `Vec<Footprint>`.
+
+Importer binaries plug this straight into an [`FsScanner`](crate::FsScanner)
+so they only need to configure the source_kind slug and the batch
+posting loop.
+
+## Types
+
+- `CharaSourceParser` — [`SourceParser`] that decodes character cards from PNG tEXt chunks
+
+
+<!-- asterism_importer_sdk/card__v2.md -->
+# asterism-importer-sdk::card::v2
+
+Canonical Character Card V2 parser (see [`crate::catalogue`] section 1).
+
+All six [`super::parser::CharacterCardParser`] hooks inherit their
+default implementations, which encode the V2 spec verbatim. This
+type is a marker whose sole job is to advertise `spec() =
+"chara_card_v2"` so [`super::CardParserRegistry`] can route to it.
+
+## Types
+
+- `V2Parser` — V2 character-card parser.
+
+
+<!-- asterism_importer_sdk/card__v3.md -->
+# asterism-importer-sdk::card::v3
+
+Character Card V3 parser (see [`crate::catalogue`] section 2).
+
+Extends the V2 default composition with three V3-only slot groups:
+
+- `creator_notes_multilingual{lang}` → one extra
+  [`Doc`] (Markdown) per language (appended to the V2
+  creator_notes doc via
+  [`super::parser::v2_default::creator_notes`]).
+- `group_only_greetings[]` → one [`ChatMessage`]
+  per entry, at high thread positions so they sort after normal
+  alternates without colliding.
+- `assets[]` → one [`Image`] per entry, keyed by
+  `(type, name)` so the grid can group emotions / backgrounds under
+  the card's shared `session_id`.
+
+## Types
+
+- `V3Parser` — V3 character-card parser. Inherits V2 slot logic and adds the V3
+
+
+<!-- asterism_importer_sdk/catalogue.md -->
+# asterism-importer-sdk::catalogue
+
+# Import target catalogue
+
+Field-mapping reference for schemas Asterism plans to import. Every
+target is decomposed into per-record [`crate::Footprint`]s sharing
+one `session_id`, so [`asterism-core`]'s `edge_rebuild` clusters the
+siblings via `time_proximity=1.0` (see
+[`crate::footprint::Note::session_id`] and its neighbours). Targets
+land here as they are surveyed; unverified fields are marked
+**(unverified)** and require a real export sample before an importer
+is written against them.
+
+[`asterism-core`]: https://github.com/ynishi/asterism/tree/main/crates/asterism-core
+
+## Design axioms
+
+1. **One character card ≠ one footprint.** A card is decomposed into
+   many per-slot footprints — name / description / personality →
+   `Note`, first_mes / alternate_greetings → `ChatMessage`, avatar /
+   emotions → `Image`, character_book entries → `Note`. This keeps
+   the grid UI's "dense, browsable, per-record" character intact.
+
+2. **No persona bootstrap from the importer.** Persona identity
+   stays with the existing `Persona` aggregate (created out of
+   band); every footprint attaches to a persona id passed via CLI.
+   Character metadata (name / description / avatar / expressions) is
+   treated as *assets* under that persona, not as a persona seed.
+
+3. **`session_id` groups per-container siblings.** All footprints
+   from one card / one chat / one lorebook / one conversation share
+   one `session_id` (typically the container's locator). The domain
+   then draws `time_proximity=1.0` edges automatically.
+
+4. **Extension namespaces pass through `extra`.** Fields under
+   `extensions.chub.*` / `extensions.risuai.*` / `extensions.agnai.*` /
+   … are stored verbatim in the footprint's `extra` JSON — the SDK
+   does not interpret them; downstream tooling can.
+
+## Locator taxonomy
+
+Common suffixes used across importers. All idempotent, record-level,
+stable across re-imports (see
+[`crate::footprint::FootprintSource::locator`]).
+
+| suffix | meaning | example target |
+|---|---|---|
+| `<file>` | container = one footprint | standalone image, single doc |
+| `<file>#field=<slot>` | one text slot inside a container | V2 `name` / `description` / `personality` |
+| `<file>#greeting=<i>` | array-indexed greeting | `first_mes` / `alternate_greetings[i]` |
+| `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |
+| `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |
+| `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |
+| `<file>!<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |
+| `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |
+| `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |
+
+---
+
+## Character cards
+
+### 1. SillyTavern Character Card V2
+
+**Implemented** — [`crate::card::V2Parser`] covers this section,
+with a live integration test against SillyTavern's default
+character (`default_Seraphina.png`) in
+`tests/seraphina.rs`.
+
+- Spec: [malfoyslastname/character-card-spec-v2](https://github.com/malfoyslastname/character-card-spec-v2/blob/main/spec_v2.md)
+- Container: PNG (tEXt `chara`, see section 3) or standalone `.json`.
+- Envelope: `{spec: "chara_card_v2", spec_version: "2.0", data: {…}}`.
+- `data.*`: `name` / `description` / `personality` / `scenario` /
+  `first_mes` / `mes_example` / `creator_notes` / `system_prompt` /
+  `post_history_instructions` / `alternate_greetings[]` /
+  `character_book` (section 9) / `tags[]` / `creator` /
+  `character_version` / `extensions{}`.
+- Split:
+  - `name` / `description` / `personality` / `scenario` /
+    `system_prompt` / `post_history_instructions` → `Note` × 6
+    (label = slot name)
+  - `first_mes` → `ChatMessage` (`role = Assistant`,
+    `thread_position = 0`)
+  - `alternate_greetings[i]` → `ChatMessage` × N
+    (`thread_position = 1 + i`, `extra.greeting_kind = "alternate"`)
+  - `mes_example` → `Doc(Plain)` (or `<START>`-split → many
+    `ChatMessage` when the parser recognises the delimiter)
+  - `creator_notes` → `Doc(Markdown)`
+  - `character_book.entries[]` → `Note` × N (see section 9)
+  - `tags[]` → labels (not a footprint)
+  - `extensions.*` → verbatim in every footprint's `extra`
+- Locator: `<container>#field=<slot>` / `#greeting=<i>` /
+  `#book_entry=<id>`.
+
+### 2. Character Card V3 (superset of V2)
+
+**Implemented** — [`crate::card::V3Parser`] extends [`crate::card::V2Parser`]
+with `creator_notes_multilingual`, `group_only_greetings`, and
+`assets[]`. Unit-tested via schema-based synthetic envelopes in
+`src/card/v3.rs`.
+
+- Spec: [kwaroran/character-card-spec-v3](https://github.com/kwaroran/character-card-spec-v3/blob/main/SPEC_V3.md)
+- Delta vs V2: `assets[]`, `creator_notes_multilingual{lang}`,
+  `group_only_greetings[]` (required), `nickname`, `source[]`,
+  `creation_date` / `modification_date` (Unix seconds),
+  `character_book.use_regex`, character_book entry `content` may
+  embed `@@`-decorators (`@@depth`, `@@role`,
+  `@@activate_only_after`, …).
+- Container: PNG (tEXt `ccv3`, `chara` fallback) or `.charx` ZIP.
+- `.charx` layout:
+  ```text
+  card.json
+  assets/<type>/<category>/<file>
+      type     ∈ icon | background | emotion | user_icon | x_<custom>
+      category ∈ images | audio | video | l2d | 3d | ai | fonts | code | other
+  ```
+- Additional split (on top of section 1):
+  - `assets[type ∈ icon|background]` → `Image` (`label =
+    "asset:<type>"`, `extra.ext = "png"|"webp"|…`)
+  - `assets[type=emotion]` → `Image` × N (`label = "emotion:<name>"`)
+  - `creator_notes_multilingual{lang}` → `Doc(Markdown)` × N
+    (`extra.lang = "<iso-639-1>"`)
+  - `group_only_greetings[i]` → `ChatMessage` (`label = "group_only"`)
+  - character_book decorators → carried on entry `Note.extra.decorators`
+    (parse deferred to downstream)
+- Locator: `<charx>!card.json#field=<slot>` /
+  `<charx>!assets/<type>/<category>/<file>`; PNG same as V2
+  (section 1) but preferring `#chunk=ccv3`.
+
+### 3. PNG tEXt embed
+
+**Implemented** — chunk decoding lives in
+[`crate::card::png_chunk`] ([`crate::card::envelope_from_chunk`]
+for base64 → envelope, [`crate::card::CHARA_KEYWORD`] /
+[`crate::card::CCV3_KEYWORD`] for the canonical keyword strings).
+
+- Chunks: `chara` (V2 base64 UTF-8 JSON), `ccv3` (V3 base64 UTF-8
+  JSON). tEXt is Latin-1 → base64 → ASCII wrap is spec-mandatory.
+- Read priority: `ccv3` wins, `chara` falls back. Both may coexist
+  on one file (V3 emitters often write both for compatibility).
+- The PNG bitmap itself becomes an `Image` (label = `avatar`);
+  the embed then decomposes per sections 1 / 2.
+- Locator: image = `<png>`; embed container = `<png>#chunk=<name>`;
+  per-record = `<png>#chunk=<name>/field=<slot>`.
+
+### 4. CharacterHub (chub.ai)
+
+- Base: V2 (section 1); chub is a web host, not a spec author.
+- Delta: `data.extensions.chub.*` namespace (observed keys:
+  `alt_expressions`, `related_lorebooks`, `expressions`,
+  `background_image`, `tags`, `stats` — **literal field list
+  unverified**, needs a real card sample to enumerate).
+- Container: PNG (default) or `.json`.
+- Split: identical to V2; `chub.*` fields pass through in `extra`.
+- Locator: identical to V2.
+
+### 5. RisuAI
+
+- Author of V3 spec ([kwaroran/RisuAI](https://github.com/kwaroran/RisuAI)).
+- Containers: `.png` (chara or ccv3), `.json`, `.charx` (ZIP), plus
+  `.risup` (LLM preset — **not** a card) and `.risum` (regex /
+  trigger module — **not** a card, skip on generic import).
+- Delta: `data.extensions.risuai.*` namespace: `emotions`,
+  `additionalAssets`, `customScripts`, `bias`, `viewScreen`,
+  `lowLevelAccess` (**literal shape unverified** — source
+  `src/ts/*` read required).
+- Split: V3 (section 2). Emotions under `assets/emotion/*` → `Image` × N.
+- Locator: V3 (section 2).
+
+### 6. AgnAI
+
+- Schema (verbatim TypeScript): [agnaistic/agnai `common/types/library.ts`](https://github.com/agnaistic/agnai/blob/dev/common/types/library.ts)
+- Container: `.json` (also imports/exports V2 PNG chunks).
+- Delta vs V2: `persona: Persona` object with `kind ∈
+  wpp/sbf/boostyle/text/attributes` replaces flat `personality`;
+  `sprite: FullSprite` (2D avatar composition); `culture`,
+  `insert{depth,prompt}`, `voice`, `imageSettings`, `json:
+  ResponseSchema` are agnai-only.
+- Split:
+  - V2 core (section 1)
+  - `persona.attributes[k]` (when `kind=attributes`) → `Note` × N
+    (`label = "persona:<k>"`)
+  - `sprite` → `Note` (`label = "sprite-composition"`, JSON in
+    `body`); referenced part images → `Image` × N
+  - `avatar` (base64 or URL) → `Image`
+- Locator: `<json>#field=persona.attribute.<k>` /
+  `#field=sprite` / `#greeting=<i>` / `#book_entry=<i>`.
+
+### 7. KoboldAI Lite preset / story save
+
+- Source (no formal spec): [LostRuins/lite.koboldai.net](https://github.com/LostRuins/lite.koboldai.net)
+- Character preset (V1 subset): `name`, `description`,
+  `personality`, `scenario`, `first_message` (aliases: `first_mes` /
+  `greeting` — **which alias is canonical is unverified**, parse
+  tolerantly).
+- Story save embeds `memory` / `authorsnote` / `worldinfo[]` /
+  `actions[]` / `savedsettings`.
+- Split:
+  - Character preset: `Note` × 4 (name → title label) + `ChatMessage`
+    × 1 (first_message)
+  - `memory` / `authorsnote` → `Note` × 2 (labels = `memory`,
+    `authors-note`)
+  - `worldinfo[]` → `Note` × N (see section 9)
+  - `actions[]` → `ChatMessage` × N (`thread_position = index`,
+    `role` via `is_user`) — **the heaviest path in this crate; one
+    story = N chat messages**
+- Locator: `<json>#field=<slot>` / `#wi=<uid>` / `#action=<i>`.
+
+---
+
+## Chat logs
+
+### 8. SillyTavern chat JSONL
+
+- Container: `.jsonl` at
+  `~/SillyTavern/data/default-user/chats/<char>/<YYYY-MM-DD-HHmmss>.jsonl`
+  (host-side layout; group chats live under `.../group chats/`).
+  Append-heavy — use [`crate::ScanMode::Watch`] with per-record
+  locators.
+- Line 1 = header (`user_name`, `character_name`, `create_date`,
+  `chat_metadata`).
+- Line N (N ≥ 2) = message (`name`, `is_user`, `send_date`, `mes`,
+  `swipes[]`, `swipe_id`, `swipes_info[]`, `extra{model, api,
+  token_count}`).
+- **Date parsing quirk**: `send_date` is typically a human-readable
+  English string (e.g. `"June 22, 2024 3:14pm"`), not ISO 8601 or
+  epoch. Some builds emit epoch ms. Parse tolerantly; on failure
+  fall back to [`crate::RawItem::occurred_at`].
+- Split:
+  - Header → drop; use as `session_id` seed + baseline
+    `occurred_at`.
+  - Message → `ChatMessage` (`role` via `is_user` / `is_system` →
+    `User` / `System` / `Assistant`; `extra` carries model / api /
+    token_count).
+  - `swipes[]` alternatives: default = fold into `extra`; per-record
+    option = emit each alt as its own `ChatMessage` with `label =
+    "swipe:<i>"` (aligns with the "dense, browsable" axiom).
+- Locator: `<file>#L<n>` (line-indexed, safe under append). No
+  intrinsic message id in the format.
+
+### 9. SillyTavern World Info / lorebook
+
+- Container: `.json` at
+  `~/SillyTavern/data/default-user/worlds/<name>.json`, or embedded
+  in V2/V3 `data.character_book`.
+- **Asymmetric shape**: standalone = `entries: { "<uid>": {…} }`
+  (dict, keyed by uid); embedded (V2) = `entries: [ {…} ]` (array).
+  Parsers must handle both.
+- Entry field (standalone superset): `uid`, `key[]`,
+  `keysecondary[]`, `comment`, `content`, `constant`, `selective`,
+  `selectiveLogic`, `order`, `position`, `disable`, `probability`,
+  `depth`, `group`, `role` (0=system / 1=user / 2=assistant),
+  `scanDepth`, `caseSensitive`, `matchWholeWords`, `automationId`,
+  `vectorized`, `sticky` / `cooldown` / `delay`, `displayIndex`,
+  `characterFilter`, `excludeRecursion` / `preventRecursion` /
+  `delayUntilRecursion`.
+- Split: each entry → `Note` (`body = content`, `labels = ["lore"]
+  + key[]`, `session_id` = book locator, remaining fields → `extra`).
+  Long `content` (> ~3 paragraphs) may escalate to `Doc(Markdown)`
+    at parser discretion.
+- Locator: standalone = `<file>#entry=<uid>`; embedded =
+  `<container>#book_entry=<uid-or-content-sha1[:8]>` (V2 array shape
+  often lacks `uid`, fall back to a content hash).
+
+### 10. NovelAI Lorebook
+
+- Doc: [NovelAI docs — Lorebook](https://docs.novelai.net/en/text/lorebook/)
+  (no formal JSON schema — field list is doc + community reverse).
+- Container: `.lorebook` or `.json` (identical body).
+- Fields: `lorebookVersion` (**current value unverified**),
+  `entries[]` (`text`, `keys[]`, `contextConfig{suffix, tokenBudget,
+  budgetPriority, trimDirection, insertionType, insertionPosition,
+  maximumTrimType, reservedTokens}`, `searchRange`, `enabled`,
+  `forceActivation`, `keyRelative`, `categories[]`, `displayName`,
+  `id`, `lastUpdatedAt`, `phraseBiasGroups[]`), `categories[]`,
+  `settings{}`, top-level `phraseBiasGroups[]`.
+- **Not V2-compatible** — needs its own parser. Community
+  converters emit V2 `character_book` shape when needed.
+- Split: each entry → `Note` (`body = text`, `labels =
+  ["lorebook", "novelai"] + keys`, `session_id = <file>`, `keys /
+  categories / contextConfig` → `extra`).
+- Locator: `<file>#entry=<entry.id>` (id is stable).
+
+### 11. ChatGPT export
+
+- Path: Settings → Data controls → Export data → emailed zip.
+- Zip contents: `conversations.json`, `chat.html`, `user.json`,
+  `message_feedback.json`, `model_comparisons.json`, (recent —
+  unverified) `shared_conversations.json`,
+  `dalle-generations/<uuid>.png`.
+- `conversations.json` = array of `{id, title, create_time,
+  update_time, mapping: {<node-id>: Node}}` where each `Node =
+  {id, message, parent, children[]}` and each `Message = {id,
+  author.role (user/assistant/system/tool), content.{content_type,
+  parts[]}, create_time, metadata.model_slug, status, recipient}`.
+- Split:
+  - Message → `ChatMessage` (`session_id = <conversation.id>`,
+    `role` via `author.role`, `body = parts.join("\n\n")`,
+    `parent_message_id = node.parent`, `thread_position` = BFS
+    index over `mapping`)
+  - Multimodal `parts[]` dict entries with `asset_pointer` →
+    sibling `Image` (same `session_id`; `extra.asset_pointer =
+    "…"`)
+  - `dalle-generations/*.png` → `Image` (cross-link via
+    `asset_pointer` when resolvable)
+  - `user.json` / feedback / comparisons → not emitted; feedback
+    merges into corresponding message `extra`
+- Locator: `<zip>!conversations.json#tree/<conversation.id>/<message.id>`
+  / `<zip>!dalle-generations/<filename>`.
+
+### 12. Claude data export
+
+- Path: Settings → Privacy → Data controls → Export data.
+- Zip contents: `conversations.json` (often 100 MB+), `users.json`,
+  `projects.json`, `memories.json` (README / index varies).
+- `Conversation`: `{uuid, name, summary, created_at, updated_at,
+  account.uuid, chat_messages[]}`.
+- `chat_messages[]`: `{uuid, sender ∈ "human"|"assistant", text,
+  created_at, updated_at, content (structured — tool_use blocks,
+  **shape unverified**), attachments[], files[]}` (attachments and
+  files are **distinct** arrays).
+- `projects.json`: `{uuid, name, description, prompt_template,
+  docs[], creator}`.
+- `memories.json`: `{conversations_memory[], project_memories[]}`
+  (element shape **unverified**).
+- Split:
+  - `chat_messages[]` → `ChatMessage` (`session_id =
+    conversation.uuid`, role: `sender == "human"` → `User`,
+    `"assistant"` → `Assistant`; `body = text` — or reassemble from
+    `content` when `text` is empty; `thread_position = index`)
+  - Conversation summary → `Doc(Other("claude_conversation"))`
+    (same `session_id`, `title = name`, `excerpt = summary`)
+  - Each project → `Doc(Other("claude_project"))`; `docs[]` inside
+    → `Doc` × N (session_id shared with project uuid)
+  - `memories.json.conversations_memory[]` /
+    `project_memories[]` → `JournalEntry{kind = Memory}` × N
+    (Anthropic's "memory" surface aligns directly with this
+    variant's semantics)
+  - `attachments[]` / `files[]`: images → `Image`; docs → `Doc`;
+    `session_id` shared with parent conversation so
+    `edge_rebuild` links siblings
+  - `users.json` → **not emitted** (persona bootstrap is out of
+    scope; see axiom 2)
+- Locator:
+  `<zip>!conversations.json#tree/<conv.uuid>/<msg.uuid>` /
+  `<zip>!projects.json#project=<uuid>[/docs/<id-or-index>]` /
+  `<zip>!memories.json#conversations_memory/<id-or-content-sha1[:8]>`.
+
+---
+
+## AI-native memory
+
+### 13. Letta (formerly MemGPT)
+
+- Repo: [letta-ai/letta](https://github.com/letta-ai/letta). Schema
+  SoT: `letta/schemas/{memory,agent}.py` + `letta/orm/message.py`.
+- Native storage: SQLAlchemy over SQLite (dev) / Postgres (prod).
+  **No first-party zip export** — practical export paths: (a)
+  Python SDK / CLI per-agent JSON dump, (b) SQLite file copy, (c)
+  `pg_dump`.
+- Core memory: `Memory = {agent_type, git_enabled, blocks[Block],
+  file_blocks[FileBlock], prompt_template}`. `ChatMemory`
+  (BasicBlockMemory) preloads `persona` and `human` blocks with
+  `limit = CORE_MEMORY_BLOCK_CHAR_LIMIT`.
+- Message ORM row: `{id, role, text, content[MessageContent],
+  model, name, tool_calls, tool_call_id, step_id, run_id, otid,
+  tool_returns, group_id, sender_id, conversation_id, is_err,
+  sequence_id, approval_request_id, batch_item_id}`. Linear (no
+  `parent` column).
+- Archival: `{id, timestamp, content, tags[]}` on read;
+  `{text, tags, created_at}` on create.
+- Split:
+  - Block (persona / human / custom) → `Note` (`body = value`,
+    `label = <block.label>`); use
+    `Doc` (`format = Markdown`, `labels = ["handoff"]`) when the semantic is
+    carry-across-agents rather than static persona text
+  - Archival passage → `JournalEntry{kind = Memory}`
+  - Message row → `ChatMessage` (`session_id = conversation_id`,
+    `thread_position = sequence_id`; `parent_message_id = None`
+    because Letta's chat is linear)
+  - Sources / file_blocks → `Doc`
+- Locator: `<export>#agents/<agent_id>/blocks/<label>` /
+  `#agents/<agent_id>/archival/<passage_id>` /
+  `#agents/<agent_id>/messages/<message.id>`. When `id` is absent
+  the message has no address and is dropped — do **not** fall back
+  to `messages/seq/<sequence_id>`. A sequence number describes the
+  export's contents at one moment, so an export that gains a
+  message ahead of it re-addresses everything behind onto its
+  neighbour (see [`crate::parser`]).
+
+### 14. MemoryPlugin
+
+- API: [help.memoryplugin.com/api-reference](https://help.memoryplugin.com/api-reference/introduction);
+  OpenAPI at `https://www.memoryplugin.com/openapi.json`.
+- Native storage: SaaS, server-side, not exposed.
+- Memory shape (OpenAPI verbatim): `{text, score,
+  metadata.bucketId}`. Create input: `{text, bucketId, source}`.
+  **Record `id` / `created_at` are not exposed in the OpenAPI**
+  response schemas — may exist server-side (unverified).
+- Export: no dedicated `/export` endpoint; the browser extension
+  emits a single JSON blob (shape **unverified**, typical:
+  `{memories[], buckets[]}`).
+- Split:
+  - Memory item → `JournalEntry{kind = Memory}` (`body = text`,
+    `session_id = str(bucketId)`, `labels = [source]`)
+  - Bucket → not emitted; used only as `session_id` grouping
+    (bucket name / description → `extra`)
+  - `POST /api/chat-history/inject` payloads → out of scope
+    (write path, not user data)
+- Locator:
+  `<export.json>#memory/hash=<sha256(text || bucketId || source)>`
+  until a real record id is confirmed.
+
+---
+
+## Whole-account backups
+
+### 15. SillyTavern backup zip
+
+- Container: 7z (default from SillyTavern-Launcher) or zip of the
+  whole `data/<user>/` tree. Inner layout:
+  `characters/` (sections 1 / 2 / 3), `chats/` (section 8),
+  `worldinfo/` (section 9), `groups/`, `group chats/`,
+  `backgrounds/`, `user_avatars/`,
+  `themes/`, `presets/`, `settings.json`, `backups/`.
+- Split: each inner file walks its own catalogue entry
+  (`characters/*` → sections 1 / 2 / 3; `chats/*.jsonl` → section 8;
+  `worldinfo/*.json` → section 9). `backgrounds/` / `user_avatars/` /
+  `themes/` / `presets/` / `settings.json` are config assets —
+  skip (importing them would be noise).
+- Locator prefix: `<backup.7z>!<inner-path>`; the inner path then
+  uses the per-format suffix from the target's own section.
+
+---
+
+## Media (container-scanned)
+
+### 17. Video (MP4 / MOV / WebM)
+
+**Implemented** — [`crate::Video`] variant + `asterism-import video`
+subcommand. Two probe layers: `mp4parse` (Mozilla, pure Rust) for
+ISOBMFF containers (MP4 / MOV), then `matroska` (pure Rust) for
+EBML containers (WebM / MKV).
+
+- Extraction: dims (from `tkhd` / Matroska pixel dims), duration_ms
+  (from track duration × timescale / segment info), codec (H.264 /
+  H.265 / AV1 / VP9 / MP4V / …), from the first video track when
+  present.
+- Extensions: `.mp4` / `.mov` / `.webm` / `.m4v` / `.mkv` / `.avi`
+  accepted by default (`.avi` lands container-only — neither probe
+  reads RIFF).
+- Fixtures verified: `minimal.mp4` (Mozilla), `animation.mov`
+  (openpreserve, 320×240 25fps 1s), `bbb_360_10s.webm` (Big Buck
+  Bunny, CC-BY).
+- Modality slug: `"video"`. Codec surfaces as `codec:<slug>` label.
+
+### 18. Audio (MP3 / M4A / WAV / FLAC / OGG)
+
+**Implemented** — [`crate::Audio`] variant + `asterism-import audio`
+subcommand. Metadata via `lofty` (pure Rust,
+header-only). Covers voice memos, VoiceLoid / VoiceVox synthesis
+output, podcasts, music, dictation.
+
+- Extraction: duration_ms, sample_rate, channels, codec (mp3 /
+  aac / pcm / flac / vorbis / opus / speex / …).
+- Extensions: `.mp3` / `.m4a` / `.wav` / `.flac` / `.ogg` /
+  `.opus` / `.oga` / `.aac` / `.aiff` accepted by default.
+- Modality slug: `"audio"`. `voice` / `voice-synth` / `music` /
+  `podcast` etc. flow as free-form labels for grid facet.
+
+---
+
+## Agent-harvest intake
+
+### 16. `asterism_agent_harvest` canonical schema
+
+**Implemented** — see [`crate::harvest`] for the schema types
+([`crate::harvest::HarvestEnvelope`]), the parser
+([`crate::harvest::HarvestSourceParser`]), and the prompt-ready
+example ([`crate::harvest::schema_example_json`]). Exposed through
+the `asterism-import harvest` subcommand.
+
+- Covers: closed cloud services with **no official export** —
+  Character.AI, Kindroid, Replika, Grok, x.com bot chats — plus
+  any future intake whose native format is not worth carving a
+  dedicated Rust parser for.
+- Container: `.json` files in a landing dir. Watch-mode friendly.
+- Envelope: `{spec: "asterism_agent_harvest", spec_version, service,
+  service_user_id?, harvested_at?, characters[]?, conversations[],
+  extra}`.
+- Split: `conversations[].messages[]` → `ChatMessage` × N
+  (`session_id = uuid5(<file>#<conv.id>)`; `role` via
+  `ChatRole::User/Assistant/System/Tool/Other`; `thread_position`
+  = message index; `parent_message_id = message.parent_id`;
+  labels = `["agent-harvest", service, role, "chat:<title>"?]`).
+  `characters[]` is preserved in each message's `extra.character`
+  but not emitted as its own footprint in v1 (character metadata
+  should route through sections 1 / 2 when possible).
+- Intake pipeline:
+  ```text
+  raw service dump  →  Claude Code / Codex writes converter
+  (browser scrape,      (prompted with the schema example above)
+   GDPR export,     →  canonical JSON in ~/.asterism/inbox/harvest/
+   DevTools grab)   →  asterism-importer-harvest picks it up
+                    →  Footprint::ChatMessage × N in DB
+  ```
+- Locator: `<file>#conversation=<conv.id>/message=<msg.id-or-idx>`.
+
+---
+
+## Cross-cutting conventions
+
+- **`session_id` sharing.** Every footprint decomposed from the
+  same container (card, chat, book, conversation, agent) shares
+  one `session_id` string — typically the container's own locator.
+  `edge_rebuild` then draws `time_proximity=1.0` edges across the
+  sibling set (see [`crate::footprint::Note::session_id`],
+  [`crate::footprint::Image::session_id`], and
+  [`crate::footprint::JournalEntry::session_id`]).
+- **Extension namespaces pass through.** Any
+  `data.extensions.<vendor>.*` sub-tree is stored verbatim in the
+  footprint's `extra` JSON; the SDK does not interpret it, so
+  third-party tools can query the raw shape later.
+- **Tolerant date parsing.** Chat exports do not agree on
+  `send_date` / `create_time` / `timestamp` format — ISO 8601,
+  Unix seconds, Unix milliseconds, and English human strings show
+  up side by side. Try each in fidelity order (payload → RawItem
+  `mtime` → `Utc::now()`), per the
+  [`crate::parser::SourceParser`] ladder.
+- **Unverified fields.** Anything marked **(unverified)** above
+  needs a real export sample before an importer commits to a
+  struct field for it. Until confirmed, prefer `extra`-bag
+  passthrough over hard-coded fields — cheap now, cheap to promote
+  later once the shape is nailed down.
+
+---
+
+## Experimental / future intake
+
+Designs not yet implemented. Sketched here so the SDK contract
+shape is nailed down before the first sample arrives — the moment
+a real intake source lands, the variant / adapter can go in
+without redesigning the surrounding schema.
+
+### E1. LoRA / adapter weights (`Footprint::Weights`, planned)
+
+LoRA fine-tunes, ControlNet adapters, DreamBooth checkpoints,
+IPAdapter models — the "distilled identity" surface for a
+persona (my-face LoRA, my-writing-style adapter, this-character's
+voice model, …). Typical files: `.safetensors` / `.gguf` /
+`.pt` / `.onnx`, 10–500 MB per file.
+
+- New variant: `Footprint::Weights` with typed fields
+  `base_model: Option<String>` (e.g. `"sdxl-1.0"` / `"llama-3-8b"`),
+  `format: WeightsFormat` (Safetensors / Gguf / Pt / Onnx / Other),
+  `parameter_count: Option<u64>`, `training_config: Value` (extra
+  bag for LR / rank / trigger words / etc.).
+- Modality slug: `"weights"`. Labels: `["lora"]` / `["adapter"]` /
+  `["dreambooth"]` / `["controlnet"]` for grid facet.
+- Container is one file = one footprint (weights are indivisible).
+- Adapters intake: dedicated `asterism-importer-weights` binary
+  walking `~/Downloads/` / `~/models/` / civitai export dirs, or
+  folded into an existing `fs`-scanner path with extension filter.
+- Cover: LoRA preview image when present (many `.safetensors`
+  have a sibling `.png`) → sibling `Footprint::Image` with same
+  `session_id`.
+
+### E2. RAG embeddings (server-side companion table, planned)
+
+High-dim float embeddings over the corpus (semantic search
+backbone). Typical scale: 384–1536-dim float32 × millions of
+rows — one embedding per existing asset, per embedding model.
+
+**Not a footprint variant.** Embeddings are derived data over
+existing assets, so the natural shape is a **server-side
+companion table** (`asset_embedding` in `asterism-core`) with
+`(asset_id, embedding_model, vector BLOB)` rows and an ANN index
+(HNSW / IVF). One asset gets N rows (one per model). The SDK
+contract stays modality-agnostic; embeddings are an infra layer
+the domain owns.
+
+Exception: if a user wants to *import* a pre-computed embeddings
+dump (research project export, historical FAISS index), it lands
+via `Footprint::Weights { format: WeightsFormat::Other("faiss"), … }`
+and a downstream server-side job re-indexes into the companion
+table.
+
+### E3. Interactive artifacts (Claude Artifacts / ChatGPT Canvas / GitHub Gist)
+
+**Already covered by [`crate::DocFormat`]** — no new variant needed.
+Artifacts map onto `Doc(Html)` / `Doc(Code(lang))` /
+`Doc(Markdown)` depending on payload shape; origin service
+(`"claude-artifact"` / `"chatgpt-canvas"` / `"gist"` /
+`"observable"`) flows via `Doc.labels` for facet. Pending: a
+dedicated harvester Skill (browser automation + share-URL grab)
+that dumps into the section 16 agent-harvest schema for pickup.
+
+### E4. Terminal captures — Persona Tape lands, generic adapter pending
+
+Persona Tape transcripts are covered by `asterism-import tape`: one
+`.txt` terminal session becomes one `Tape` footprint (`Modality::TAPE`) with
+the original file retained as the searchable source. The broader
+terminal adapter (raw `.log`, VHS `.tape`, and asciinema `.cast`,
+including ANSI stripping) is still pending.
+
+### E5. "PersonaVaultApp" completion
+
+With Weights (E1) + Embeddings (E2) landing, one persona's grid
+holds every trace the AI needs to *exist* as that character:
+character card definition, chat history, voice / video / photo
+identity, LoRA / adapter distillation, and a searchable
+embedding backbone. The current 7-variant SDK contract
+(`ChatMessage` / `Doc` / `Note` / `JournalEntry` / `Image` /
+`Video` / `Audio`) covers the observable side; Weights closes
+the model-side gap.
+
+### E6. Screenshot pipeline (universal fallback)
+
+Screenshots are the ultimate "any source works" capture path —
+when a service has no official export (Char.AI, Kindroid,
+Sora, Kling, Grok, private chats, closed apps), the user can
+always screenshot the surface and preserve it. Digital
+Alma-style persona reconstruction ("gachi de Persona-chan no
+footprint") leans heavily on this fallback.
+
+- **Already covered by `asterism-import image`** — no new
+  variant needed. Screenshots are `Footprint::Image` with EXIF
+  / dims / thumb the same as any photo.
+- **Watch-mode integration is the missing UX piece.** Point
+  `asterism-import image --watch --dir ~/Desktop` (macOS
+  default screenshot dir) or `~/Pictures/Screenshots` (Windows) /
+  iCloud Photos Screenshots album at the FS scanner and every
+  `Cmd+Shift+4` shot lands in the grid within seconds. A tiny
+  launchd plist / systemd unit / shortcut wrapper is enough —
+  no code change required.
+- **Screenshot-specific labels.** iOS screenshots carry
+  `mediasubtype = 4` (SPSS) in EXIF; macOS shots write
+  `Software = "Screenshot"`. The image parser can auto-add a
+  `"screenshot"` label from these hints so the grid facet is
+  free.
+- **Follow-up cover_gen jobs** (server side, not SDK): OCR
+  the screenshot for text search + VLM caption for semantic
+  search. Recovers the "what was on this screen" query even
+  when the source service is gone.
+
+### E7. External asset IDs / canonical service references
+
+AI companion services (Kindroid persona id, Character.AI
+character UUID, Suno song id, HeyGen avatar id, HuggingFace
+model handle, civitai LoRA id, …) all expose a canonical
+reference the user wants to preserve alongside the footprint.
+
+- **Already covered by existing fields** — no new variant:
+  - `FootprintSource.locator` = canonical URL / id
+    (`https://beta.character.ai/character/<uuid>` etc.)
+  - `FootprintSource.platform` = origin service slug
+    (`"character.ai"` / `"kindroid"` / `"suno"` / …)
+  - `extra.external_ids` = free-form JSON bag for cross-service
+    joins (`{"character_ai_uuid": "...", "suno_song_id": "..."}`)
+- **Future promotion**: if cross-service dedup / join becomes a
+  hot query, promote to a first-class
+  `FootprintSource.external_id: Option<String>` field.
+
+
+<!-- asterism_importer_sdk/client.md -->
+# asterism-importer-sdk::client
+
+Thin HTTP client for the asterism-server API.
+
+Only wraps the two endpoints an importer actually needs:
+`POST /asterism/assets/add` (single) and
+`POST /asterism/assets/add-batch`.
+
+## Types
+
+- `ApiClient` — HTTP client bound to a running `asterism-server`.
+
+
+<!-- asterism_importer_sdk/footprint.md -->
+# asterism-importer-sdk::footprint
+
+`Footprint` — the typed, plugin-facing shape a parser hands back.
+
+A footprint is *one* thing the user collected: one chat message, one
+image, one doc, one note. This matches the domain intent in
+`asterism-core::domain::asset::Asset` — an aggregate root for a single
+footprint. The SDK exposes a typed enum here so plugin authors do not
+have to guess which fields belong on which modality; the compiler
+shows them the shape of every variant.
+
+# Design notes
+
+- **One `Footprint` = one `Asset` on the server.** A parser that
+  receives one `RawItem` (say, one `.jsonl` file) usually emits many
+  footprints (one per chat message inside the file).
+- **Variants are aligned with `Modality` well-known slugs.** New
+  modalities are added as new variants; the crate's API is still
+  pre-stability, so breaking additions
+  are cheap. Aspirationally-open extension via a `Custom` variant is
+  deferred until an external plugin author actually needs it.
+- **`extra` is a per-variant escape hatch.** Fields promoted to
+  variant fields have a `Some`/typed shape enforced by the compiler;
+  everything else lives in `extra` as raw JSON. When several sources
+  grow the same key in `extra`, promote it.
+- **The mapping to `AssetSpec` lives here, not in each parser.** The
+  SDK owns the cover-hint truncation, the modality slug, the label
+  normalisation — plugin authors only choose the variant and fill in
+  the typed fields.
+
+## Types
+
+- `Audio` — One audio clip (voice memo, VoiceLoid / VoiceVox synthesis
+- `ChatMessage` — One chat / dialogue message (Claude Code turn, Slack message,
+- `ChatRole` — Role a chat participant played on a specific message.
+- `Doc` — One doc / written work product (Markdown note, PDF, spec, code
+- `DocFormat` — Format of a `Doc` footprint.
+- `Footprint` — The typed shape a parser hands back.
+- `FootprintSource` — Reference to the raw source of a footprint.
+- `Image` — One image (photo, screenshot, drawing).
+- `JournalEntry` — One journal-style entry — short self-authored text with a
+- `JournalKind` — Kind of journal-style entry the plugin is emitting.
+- `Note` — One short note (mood, idea, quick capture).
+- `Tape` — One terminal-session transcript / Persona Tape (`.tape`, `.cast`, `.log`).
+- `Video` — One video (recording, screen capture, AI-generated clip).
+
+## Constants
+
+- `COVER_MAX_CHARS` — Maximum cover hint length in Unicode scalar values.
+- `REGISTER_MAX_CHARS` — Maximum register-note preview length in Unicode scalar values.
+
+
+<!-- asterism_importer_sdk/harvest.md -->
+# asterism-importer-sdk::harvest
+
+# Agent-harvest intake subsystem
+
+Canonical JSON schema (`asterism_agent_harvest` v1) for
+ingesting conversations from closed cloud services that ship no
+official export — Character.AI, Kindroid, Replika, Grok, and the
+like. Instead of writing a Rust parser per service, the intake
+flow is:
+
+```text
+(browser scrape / DevTools dump / GDPR export / …)
+        │  raw service-specific JSON
+        ▼
+   Claude Code / Codex agent, prompted with the schema below
+        │  writes a one-off Python converter
+        ▼
+   canonical AgentHarvest JSON file dropped in a landing dir
+        │
+        ▼
+   asterism-importer-harvest binary picks it up and calls
+   HarvestSourceParser → Footprint::ChatMessage × N
+```
+
+The SDK only sees the canonical schema. Per-service converters are
+throwaway Python (or shell, or jq) scripts an LLM writes on demand,
+kept alongside the raw dumps by the user.
+
+## Schema (v1)
+
+A prompt-ready example is emitted by
+[`schema_example_json`] — the `asterism-importer-harvest
+--print-schema` CLI flag pipes it to stdout so a user can paste it
+into Claude Code / Codex with "convert my dump to this shape":
+
+```json
+{
+  "spec": "asterism_agent_harvest",
+  "spec_version": "1.0",
+  "service": "character.ai",
+  "service_user_id": "user-abc123",
+  "harvested_at": "2026-07-18T12:34:56Z",
+  "characters": [
+    {
+      "id": "seraphina-xyz",
+      "name": "Seraphina",
+      "description": "A gentle healer in a forest glade.",
+      "avatar_uri": null,
+      "extra": {}
+    }
+  ],
+  "conversations": [
+    {
+      "id": "conv-abc",
+      "character_id": "seraphina-xyz",
+      "title": "First encounter",
+      "started_at": "2026-01-01T00:00:00Z",
+      "messages": [
+        {
+          "id": "m1",
+          "role": "user",
+          "body": "hello",
+          "timestamp": "2026-01-01T00:00:01Z",
+          "parent_id": null,
+          "extra": {}
+        },
+        {
+          "id": "m2",
+          "role": "assistant",
+          "body": "welcome, traveler",
+          "timestamp": "2026-01-01T00:00:05Z",
+          "parent_id": "m1",
+          "extra": {}
+        }
+      ],
+      "extra": {}
+    }
+  ],
+  "extra": {}
+}
+```
+
+## Mapping to Footprints
+
+- `conversations[].messages[]` → [`crate::ChatMessage`] × N
+  (`session_id = conversation.id`, `role` via
+  [`crate::ChatRole`], `thread_position` = message index,
+  `parent_message_id = message.parent_id`, `body = message.body`,
+  `occurred_at = message.timestamp || conversation.started_at ||
+  envelope.harvested_at || RawItem.occurred_at || Utc::now()`).
+- `conversations[].title` / `.started_at` → not emitted directly;
+  they seed the shared `session_id` grouping so `edge_rebuild`
+  links siblings.
+- `characters[]` → not emitted in v1 (character metadata is left
+  to a dedicated character-card importer such as
+  [`crate::card::CharaSourceParser`] because that route already
+  knows about avatars, personalities, and lorebooks). Extend v2
+  when a service exposes character metadata in a way no other
+  importer covers.
+- `service` / `service_user_id` / `spec_version` / envelope
+  `extra` → merged verbatim into every emitted footprint's `extra`
+  so downstream queries can filter by `service = "character.ai"`
+  etc.
+
+See [`crate::catalogue`] section 16 for the catalogue-level entry.
+
+## Functions
+
+- `schema_example_json` — Return the canonical schema example as a `&'static str` (pretty JSON).
+
+
+<!-- asterism_importer_sdk/harvest__envelope.md -->
+# asterism-importer-sdk::harvest::envelope
+
+Typed schema for `asterism_agent_harvest` v1 JSON dumps.
+
+Every field is either strictly required or has a serde default so a
+minimal well-formed dump only needs `spec`, `spec_version`,
+`service`, and at least one `conversations[].messages[]` entry.
+
+## Types
+
+- `HarvestCharacter` — Optional character metadata (persona-side info the harvester
+- `HarvestConversation` — One conversation. All messages share the conversation's `id` as
+- `HarvestEnvelope` — Top-level envelope for one harvested batch (one file = one dump).
+- `HarvestMessage` — One message inside a conversation. Maps to
+
+## Constants
+
+- `HARVEST_SPEC` — Canonical `spec` string every dump must carry. The parser rejects
+- `HARVEST_SPEC_VERSION` — Current `spec_version`. Bumped on breaking schema changes.
+
+
+<!-- asterism_importer_sdk/harvest__parser.md -->
+# asterism-importer-sdk::harvest::parser
+
+[`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
+dumps and emits [`Footprint::ChatMessage`] × N.
+
+A message is addressed `<dump>#conversation=<id>/message=<id>`,
+both ids as the dump states them. A message with no `id` of its
+own is dropped, not numbered by its place in the array — see
+[`crate::parser`] for the rule and
+[`crate::parser::RecordAddresses`] for the count that goes with it.
+
+## Types
+
+- `HarvestSourceParser` — SourceParser for the `asterism_agent_harvest` canonical schema.
+
+
+<!-- asterism_importer_sdk/mapper.md -->
+# asterism-importer-sdk::mapper
+
+Convenience shape for parser output plus the mapping to the wire
+`AddAssetCommand`.
+
+## Functions
+
+- `spec_to_command` — Turns an `AssetSpec` into the wire command.
+
+## Types
+
+- `AssetSpec` — What a parser hands back to the pipeline.
+
+
+<!-- asterism_importer_sdk/parser.md -->
+# asterism-importer-sdk::parser
+
+`SourceParser` — turn a scanned [`RawItem`] into one or more
+[`Footprint`]s.
+
+Parsers are the only piece an importer author must write; everything
+else in the pipeline (scanning, mapping to `AddAssetCommand`, HTTP,
+progress) is provided by the SDK.
+
+# Contract
+
+Return one `Footprint` per **thing the user collected** (one chat
+message, one image, one doc, one note). Do **not** return one giant
+`Footprint` per raw item when the item contains many collectibles —
+for example, one `.jsonl` file typically becomes many
+`Footprint::ChatMessage`s, not one summary. See
+`crate::footprint::Footprint` for how each variant maps to the
+server-side asset.
+
+# `occurred_at` fallback ladder
+
+Every footprint needs a `DateTime<Utc>`. Parsers resolve it in this
+order, top wins:
+
+1. **A timestamp inside the payload** — a `timestamp` field on the
+   JSON record, a `created_at` column on the SQLite row, an EXIF
+   `DateTimeOriginal`. This is per-*record* and is by far the most
+   accurate.
+2. **[`crate::scanner::RawItem::occurred_at`]** — what the scanner
+   derived from the container (file `mtime`, HTTP `Date` header,
+   row timestamp column when the scanner already lifted it). This
+   is per-*container*, so it is a good fallback for single-record
+   items (one image = one file, one doc = one file) and a
+   **coarse** fallback for multi-record containers (all messages
+   in one `.jsonl` share the same `mtime`, which loses ordering).
+3. **`Utc::now()`** — last resort when neither of the above is
+   available. Signals to the caller that ordering downstream will
+   be unreliable.
+
+Never invert the order. Using the file `mtime` for a chat message
+inside a session log makes every message look like it arrived at
+the moment the file was last flushed, which erases the
+within-session ordering the domain relies on for edge / grid
+placement.
+
+# Partial success on multi-footprint items
+
+One `RawItem` may yield many footprints (JSONL: one file → many
+messages; SQLite: one table → many rows). If some records inside
+the item are malformed, prefer to **skip them and return the good
+ones** rather than returning `ParseError::Malformed` for the whole
+batch — a single bad line should not drop the rest of a session.
+Reserve [`ParseError::Malformed`] for cases where the whole
+`RawItem` is unusable (wrong file type, unreadable header).
+
+Skipping is not silent. Count what was dropped and say so once per
+container at the end of `parse`; [`RecordAddresses`] owns both the
+count and the wording. An importer that drops records without a
+word leaves the operator reading a run that looks complete.
+
+# A record's address is the source's to give
+
+A record inside a container is addressed
+`<container>#<the id the source declared>`. When the source
+declares no id there is no address, and the record does not become
+an asset. Do **not** substitute the record's position — a line
+number, an array index, an ordinal.
+
+A position describes the container's contents at one moment, not
+the record. Insert one line ahead and every address behind the
+insert lands on its neighbour, where the server's
+`(source_kind, source_locator)` lookup finds the neighbour's row
+and discards the arriving payload. Nothing errors; the import
+reports success and the record is gone. The address is also
+unreadable in the other direction — the readers in
+`asterism-infra` match a fragment against the record's own id, and
+no record has the id `L3`, so the body never resolves.
+
+[`RecordAddresses`] is the shared implementation of this rule.
+
+## Types
+
+- `ParseError` — Errors returned by parsers.
+- `RecordAddresses` — One container's worth of the addressing rule above: hands back the
+
+## Traits
+
+- `SourceParser` — Trait every source parser implements.
+
+
+<!-- asterism_importer_sdk/progress.md -->
+# asterism-importer-sdk::progress
+
+Tiny progress reporter — running success / failure counters, plus
+an event stream to stderr.
+
+## Types
+
+- `Progress` — Cheaply cloneable progress handle. All counters live on the same
+
+
+<!-- asterism_importer_sdk/runner.md -->
+# asterism-importer-sdk::runner
+
+Shared importer execution pipeline.
+
+CLI/config parsing stays in the outer binary. This module receives
+resolved values plus a scanner/parser pair and owns the mechanical
+scan → parse → batch → HTTP → progress loop.
+
+# Where a declared digest comes from
+
+[`AssetSpec::declared_content_hash`](crate::AssetSpec::declared_content_hash)
+is filled in here rather than in any parser, because this is the one
+place that can see both halves of the question at once: the scanner
+says whether its payload is a whole artefact
+([`SourceScanner::payload_is_whole_artefact`]), and the spec says
+whether the record still lives at the address the scanner read. Only
+when both hold do the bytes in hand belong to the locator being
+registered, and only then is a digest a true statement about the
+file the server will later open.
+
+A parser could not decide this on its own: it is handed the payload
+and hands back footprints, and whether those footprints kept the
+item's address or split it into records inside the item is visible
+only after the mapping — one Claude Code session file yields
+messages addressed `<file>#<uuid>`, and one PNG yields itself.
+
+## Functions
+
+- `run_import` — (no documentation)
+
+## Types
+
+- `ImportOptions` — (no documentation)
+- `ImportSummary` — (no documentation)
+
+
+<!-- asterism_importer_sdk/scanner.md -->
+# asterism-importer-sdk::scanner
+
+`SourceScanner` trait and shared item type.
+
+Enumerates or watches an external source and produces [`RawItem`]s.
+Bundled implementations live in the sibling modules
+([`fs`], and future `sqlite` / `http`); importer authors typically
+reuse one instead of writing their own.
+
+## Types
+
+- `ItemStream` — Async stream of scanned items (or per-item errors).
+- `RawItem` — A raw scanned item — a payload plus the metadata needed to attribute
+- `ScanError` — Errors returned by scanners.
+- `ScanFuture` — Future returned by [`SourceScanner::scan`] — resolves to the item
+- `ScanMode` — Scan mode passed to [`SourceScanner::scan`].
+
+## Traits
+
+- `SourceScanner` — Trait every source scanner implements.
+
+
+<!-- asterism_importer_sdk/scanner__fs.md -->
+# asterism-importer-sdk::scanner::fs
+
+`FsScanner` — filesystem source scanner.
+
+Walks a directory tree, optionally filtered by glob-ish extension
+set, and emits every matching file as a `RawItem`. In `Watch` mode
+the scanner also stays live and streams filesystem-change events via
+`notify` — new / modified files are re-emitted, deletions are
+ignored (deletions on the source do not automatically delete the
+corresponding asset; that is a policy decision left to the caller).
+
+## Types
+
+- `FsScanner` — Filesystem scanner.
+
+
+<!-- asterism_importer_sdk/scanner__sqlite.md -->
+# asterism-importer-sdk::scanner::sqlite
+
+`SqliteScanner` — SQLite source scanner.
+
+Opens an arbitrary SQLite database read-only, runs a user-supplied
+`SELECT` statement, and emits every row as a `RawItem`. Column
+mapping is spelled out by the caller so the same scanner can drive
+importers over totally unrelated schemas (chat exports, message DBs,
+bespoke tools' scratch tables, and so on).
+
+Async is faked at the edge: `rusqlite` is blocking, so the scan
+actually runs on a dedicated `spawn_blocking` task and pushes rows
+into a bounded mpsc.
+
+This scanner leaves
+[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)
+at its `false` default, and the reason is worth stating rather than
+inheriting: a row's `body` column is a value out of a database, and
+the `<db>#<id>` address it is given has no bytes of its own for
+anybody to read back. A digest declared from here could never be
+checked, which is precisely what the server refuses.
+
+## Types
+
+- `ColumnMap` — Column-to-`RawItem` mapping supplied by the importer.
+- `SqliteScanner` — SQLite scanner.
+
+
+<!-- asterism_importer_tape/index.md -->
+# asterism-importer-tape 0.0.0
+
+Tape import adapter — turns an exported conversation tape file into
+`Footprint::Tape`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::TapeParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. Tape is a non-Dialog modality — the file stem, not the
+contents, drives identity; the details live in [`parser`].
+
+## Modules
+
+- [`parser`](parser.md): Persona Tape parser — one terminal transcript file becomes one document.
+
+
+<!-- asterism_importer_tape/parser.md -->
+# asterism-importer-tape::parser
+
+Persona Tape parser — one terminal transcript file becomes one document.
+
+## Types
+
+- `TapeParser` — (no documentation)
+
+
+<!-- asterism_importer_video/index.md -->
+# asterism-importer-video 0.0.0
+
+Video import adapter — turns a scanned video file into
+`Footprint::Video`.
+
+One of the per-modality adapters behind the unified
+`asterism-importer` CLI: [`parser::VideoParser`] implements the
+importer SDK's `SourceParser`, the SDK pipeline walks the source and
+pushes the resulting footprints to a running `asterism-server` over
+HTTP. The format specifics live in [`parser`]; this crate root only
+re-exports the parser type.
+
+## Modules
+
+- [`parser`](parser.md): Video `RawItem` → `Footprint::Video` parser.
+
+
+<!-- asterism_importer_video/parser.md -->
+# asterism-importer-video::parser
+
+Video `RawItem` → `Footprint::Video` parser.
+
+Two probe layers, tried in order: `mp4parse` for ISOBMFF (MP4 /
+MOV), then `matroska` for EBML (WebM / MKV). Each rejects the
+other's container at the first magic bytes, so the order is cost
+only, not correctness. A container neither probe reads (AVI) still
+lands — as a footprint without dims / duration / codec, which is
+the contract for every probe miss.
+
+## Types
+
+- `VideoParser` — Turns a scanned video file into `Footprint::Video`.
+
+
 <!-- asterism_infra/index.md -->
 # asterism-infra 0.0.0
 
@@ -9815,6 +12459,119 @@ the two transports share one mapping instead of duplicating it.
 - `Telemetry` — Append/read handle for the `action_log` table.
 
 
+<!-- asterism_media_probe/index.md -->
+# asterism-media-probe 0.0.0
+
+Header-only media measurement: what the bytes say about themselves.
+
+Every function here is a pure function of a byte slice, and none of
+them decodes pixels — they read far enough into a container to expose
+what it declares and stop. That is the whole contract, and it is what
+lets the same code run in an importer walking a directory and in a
+server job walking a table.
+
+# Why this is a crate and not a helper in one of its callers
+
+Two paths write the same columns and must not disagree:
+
+- **Ingest.** `asterism-importer-image` / `-video` measure a file as
+  it arrives and put the result on a `Footprint`.
+- **Backfill.** The server measures rows that predate the columns
+  (`asset.width_px` / `height_px` landed in schema V69; every row
+  older than it carries `NULL`).
+
+The importers run as separate processes and talk to the server over
+HTTP, so neither can call the other. Before this crate the only ways
+to give the server a measurement were to write a second
+implementation of it, or to have the server link an importer binary's
+crate. The first puts two definitions of "the dimensions of these
+bytes" in the tree, told apart by nothing once both have written to
+the same column; the second inverts the out-of-process design that
+makes importers replaceable.
+
+# Coded, not displayed
+
+**[`coded_dims`] returns the dimensions of the stored byte stream,
+before any orientation is applied.** A photo shot upright with EXIF
+Orientation 6 is *stored* as a landscape frame plus a rotation flag,
+and that is the pair returned here — the flag is reported separately
+([`ExifFields::orientation`]) and applying it is the caller's
+decision. Video is weaker still: neither container probe reads the
+MP4 display matrix or Matroska's `DisplayWidth` / `DisplayHeight`,
+so an upright phone clip measures 1920×1080 and nothing in the
+returned value says otherwise.
+
+The consequence is worth stating where the measurement is defined
+rather than only where it is consumed: **the product of the pair is
+invariant under that rotation and the sides are not**, which is why
+Asterism's resolution facet is a pixel count rather than a width
+band. A caller that compares widths is comparing storage layout.
+
+# Container structure, beside container headers
+
+[`png`] is the same contract one level down: a pure function of a
+byte slice that reads a container's framing — where each chunk
+begins, what the text chunks say — and stops. It is here for the
+reason the dimension probes are: a second caller appeared. The
+server's fingerprint pass walks a PNG's chunks to decide which bytes
+are the picture and which are notes written about it, and that walk
+used to live in `asterism-core::domain`, where every new format made
+the domain layer wider. **The judgement stayed there and the parsing
+came here** — this module reports what the bytes are and never what
+they are worth, which is why it can be read by a consumer that has no
+opinion about identity at all.
+
+[`jpeg`] is the second one, on the same terms, and the pair is what
+says the terms were terms rather than one module's habits. It is not
+shaped like [`png`]: a JPEG is marker segments up to its scan,
+unframed entropy-coded bytes after it, and whatever a phone appended
+behind its end marker, so the walk yields four kinds of element where
+the PNG walk yields one. What the two share is the
+contract — boundaries out, judgement left to the caller — and that is
+the part worth having twice.
+
+## Modules
+
+- [`a1111`](a1111.md): `a1111` — the line grammar of AUTOMATIC1111's `parameters` text,
+
+
+<!-- asterism_media_probe/a1111.md -->
+# asterism-media-probe::a1111
+
+`a1111` — the line grammar of AUTOMATIC1111's `parameters` text,
+and nothing about what any line means.
+
+The blob this reads is the one value that family writes: the prompt,
+the negative prompt and the sampler settings in one line-oriented
+text. The settings ride the last line as comma-separated `Key:
+value` pairs, and a value that itself contains a comma or a colon is
+double-quoted with backslash escapes — `Lora hashes: "name:
+a1b2c3d4"` is one pair, not two. That quoting rule is the whole
+reason this is a tokeniser rather than two `split` calls.
+
+# A pure function of a string, with no judgement
+
+The same contract as the rest of this crate, one level up from
+bytes: boundaries out, judgement left to the caller. Which keys
+matter — whether `Model` outranks `Model hash`, what an empty
+`Seed` means — is the caller's question, and answering it here
+would put a registry's opinions into a grammar
+([`png`](crate::png)'s module doc on why the judgement stayed
+behind when the parsing moved).
+
+# Refusal is all-or-nothing
+
+A line is a settings line when **every** top-level comma-separated
+part carries a `key: value` split. A prompt that happens to end the
+blob and happens to contain a colon does not half-parse into a
+plausible pair list — one part without a separator refuses the whole
+line, and the caller sees no settings rather than wrong ones.
+
+## Functions
+
+- `settings` — The settings pairs of a `parameters` blob, in the order written.
+
+
 <!-- asterism_server/index.md -->
 # asterism-server 0.0.0
 
@@ -10259,5 +13016,1059 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+
+
+<!-- teams_contract/index.md -->
+# teams-contract 0.0.0
+
+# teams-contract — wire contract for the teams plane
+
+The request/response shapes of the `/teams/*` HTTP surface
+(#83 §5, the #91 slice), through the same schema-bridge flow as
+`asterism-contract`: plain serde structs with
+`#[derive(SchemaBridge)]`, so a TypeScript consumer can be
+generated from the one source of truth when a UI arrives, and the
+shapes stay hand-off-able between the HTTP body and any later MCP
+tool schema.
+
+## Wire representation
+
+Same conventions as `asterism-contract`:
+
+- Ids: UUID hyphenated `String`.
+- Timestamps: unix epoch milliseconds as `i64` (matches the SQLite
+  schema on disk).
+- Opaque JSON (a ledger event's kind-versioned payload): serialised
+  into a `String` — schema-bridge does not render
+  `serde_json::Value`, and the payload is per-kind data the
+  envelope deliberately does not model (#83 §2).
+
+Validation is not here: role words go through
+`teams-core`'s `Role::parse` on the server side, ids through
+`Uuid::parse_str` — this crate only defines the shapes.
+
+## Modules
+
+- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes.
+- [`dto`](dto.md): Response DTOs of the `/teams/*` surface.
+
+
+<!-- teams_contract/command.md -->
+# teams-contract::command
+
+Command DTOs — inputs of the state-changing `/teams/*` routes.
+
+The session token is **not** a field on any of these: it travels in
+the `Authorization: Bearer` header, resolved by the server's gate
+middleware before a handler sees the body (#83 §5 — every route:
+session token → user_id → membership gate).
+
+## Types
+
+- `CreateTeamCommand` — Creates a team (`POST /teams/create`).
+- `GrantOwnerCommand` — Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
+- `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
+- `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
+- `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
+- `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
+- `UploadBlobCommand` — Uploads a blob into the team's store
+
+
+<!-- teams_contract/dto.md -->
+# teams-contract::dto
+
+Response DTOs of the `/teams/*` surface.
+
+Mutation routes answer with the [`LedgerEventDto`] their write
+appended — the same-tx rule (#83 §2) means the event *is* the
+receipt, and a role change carrying old+new in its payload reads on
+its own (#83 §1).
+
+## Types
+
+- `BlobUploadedDto` — The result of `PUT /teams/{team_id}/blobs?digest=…`.
+- `LedgerEventDto` — One entry of a team's append-only stream
+- `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
+- `MarkedBlobsDto` — The team's marked-for-purge set
+- `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
+- `RosterDto` — The team's current membership set
+- `RosterMemberDto` — One membership row as the roster lists it.
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
+- `SubjectRefDto` — One typed reference an event makes.
+- `TeamCreatedDto` — The result of `POST /teams/create`.
+
+
+<!-- teams_core/index.md -->
+# teams-core 0.0.0
+
+# teams-core — domain layer of the Asterism teams plane
+
+First slice of #83: the types and invariants of the hosted Team
+plane, with no IO anywhere in the crate. What a Team *is* — who may
+act on it, what the ledger records, what the store promises — is
+decided here; SQLite, the filesystem, HTTP and auth adapters arrive
+in the follow-up slices (`teams-infra` / `teams-server`).
+
+## Layout
+
+- `domain::identity` — [`User`](domain::identity::User) /
+  [`Membership`](domain::identity::Membership) /
+  [`InstanceOperator`](domain::identity::InstanceOperator) /
+  [`ActorStamp`](domain::identity::ActorStamp), the last-owner rule,
+  and the #83 §1 authority table as decision functions.
+- `domain::ledger` — the append-only
+  [`LedgerEvent`](domain::ledger::LedgerEvent) envelope and the v0
+  kind registry. The payload is opaque to the substrate.
+- `domain::store` — [`TeamBlobLink`](domain::store::TeamBlobLink) /
+  [`Locator`](domain::store::Locator) and the declared-digest
+  verification rule (accept or reject the whole op; no third
+  outcome).
+- `port` — the traits `teams-infra` implements: blob storage,
+  credential verification, and the share port reserved for #63.
+- `error` — [`DomainError`], the crate's `thiserror` enum.
+
+## Dependency rule
+
+This crate depends on `asterism-core` and on no other asterism-*
+crate (#83 §4). What it takes from there is vocabulary — the
+`sha256:`-prefixed digest notation and its parser — reused as-is so
+the teams plane and the local app spell a byte fingerprint one way.
+
+## Modules
+
+- [`domain`](domain.md): Domain types and invariants of the teams plane — everything here is
+- [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
+- [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
+- [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
+- [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
+- [`port::auth`](port__auth.md): `port::auth` — credential verification behind a provider swap
+- [`port::blob`](port__blob.md): `port::blob` — backing storage for the instance's global CAS.
+- [`port::share`](port__share.md): `port::share` — reserved for the share domain.
+
+
+<!-- teams_core/domain.md -->
+# teams-core::domain
+
+Domain types and invariants of the teams plane — everything here is
+IO-free and unit-testable on a machine with no database and no disk.
+
+
+<!-- teams_core/domain__identity.md -->
+# teams-core::domain::identity
+
+`identity` — who exists, who belongs to a team, and who may do what.
+
+Three separations carry this module, all from #83 §1:
+
+- **Membership is not identity.** A [`User`] exists independently of
+  any team; a [`Membership`] is one `(user, team, role)` row and a
+  team's set of them is what every invariant is evaluated over.
+- **The operator is not a member.** [`InstanceOperator`] is the
+  env/CLI bootstrap identity and lives *outside* the membership
+  set — owning a team is an explicit membership row like anyone
+  else's, and when the operator acts inside a team the ledger stamp
+  says so ([`LedgerActor::Operator`]): an operator action is never
+  disguised as a member's.
+- **Authorization reads state, not history.** The decision functions
+  here take the current membership set ([`TeamRoster`]); the ledger
+  records what was decided and is never consulted to decide.
+
+The one absolute invariant is the last-owner rule: every team has
+≥1 owner at all times, so the last owner cannot leave, be removed,
+or self-demote (the GitHub/GitLab/Gitea rule). It is enforced as
+`check_*` methods on [`TeamRoster`] so every write path asks the
+same three lines instead of re-deriving them.
+
+## Functions
+
+- `may_create_team` — The team-create row of the #83 §1 authority table.
+- `verb_allowed` — The #83 §1 authority table for in-team verbs, as one decision
+
+## Types
+
+- `ActorStamp` — What the ledger records about who acted: `{ user_id, display_name
+- `CreationActor` — Who is asking to create a team. Creation happens before any roster
+- `InstanceOperator` — The env/CLI bootstrap identity — a distinct actor kind, **not** a
+- `LedgerActor` — The actor of a ledger event — a member's stamp or the operator's,
+- `Membership` — One `(user, team, role)` row — a user's standing inside one team.
+- `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
+- `Role` — A member's role within one team.
+- `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
+- `TeamRoster` — One team's membership set — the value every membership invariant is
+- `TeamVerb` — The administrative verbs of the #83 §1 authority table — everything
+- `User` — A person known to the instance — the identity teams are built from.
+
+
+<!-- teams_core/domain__ledger.md -->
+# teams-core::domain::ledger
+
+`ledger` — the actor-stamped, append-only event envelope (#83 §2).
+
+Each team has one stream. The substrate knows the envelope and
+nothing inside it: `payload` is a versioned body *per kind* and
+stays opaque here, `subjects` is the typed index trace queries walk
+instead of parsing payloads, and `kind` is a namespaced + versioned
+string so `forge.*` kinds can register after #63 with the envelope
+unchanged.
+
+Two things this module deliberately does **not** do:
+
+- **Generate `seq`.** Monotonicity within a team is a storage
+  guarantee (one SQLite tx, single writer by deployment shape), so
+  [`EventSeq`] is a newtype the domain validates and carries but
+  never mints — a domain-side counter would be a second writable
+  truth, the one forbidden shape.
+- **Source state from events.** State tables are authoritative and
+  every state change appends its event in the same tx (audit-log
+  pattern, not event sourcing — #83 §2 SoT note). Nothing here
+  replays.
+
+## Functions
+
+- `is_v0_kind` — Whether `kind` is one this build of the plane writes. Shape and
+
+## Types
+
+- `EventKind` — A namespaced + versioned event kind — `"teams.membership.added/1"`.
+- `EventSeq` — Storage-assigned position of an event within its team's stream —
+- `LedgerEvent` — One entry in a team's stream — the envelope, with the payload
+- `SubjectRef` — A typed reference an event makes — the index trace queries walk, so
+
+## Constants
+
+- `BLOB_COPY_COMPLETED` — A promotion's blob copy completed — declared digest verified,
+- `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
+- `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
+- `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `MEMBERSHIP_ADDED` — A user became a member.
+- `MEMBERSHIP_REMOVED` — A member left or was removed.
+- `ROLE_CHANGED` — A member's role changed — the payload carries **both** the old and
+- `TEAM_CREATED` — A team came into existence.
+- `TEAM_DELETED` — A team was deleted (owner, or the operator — ledger-stamped).
+- `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
+
+
+<!-- teams_core/domain__store.md -->
+# teams-core::domain::store
+
+`store` — the team-side view of instance-owned blobs, and the
+declared-digest contract (#83 §3).
+
+The store proper is a global CAS the instance owns; what this
+module types is the layer everything consults instead of bytes:
+
+- [`TeamBlobLink`] — the visibility AND dedupe boundary. A digest
+  "exists" for a caller iff a link row sits in a team they belong
+  to; purge scope is a team's links, never the CAS directly.
+- [`Locator`] — a *private* link to content the instance does not
+  hold: a uri, and at most a digest **hint** from the last
+  sighting. The instance guarantees nothing about it.
+- The promotion verification rule — [`verify_declared_digest`],
+  whose two outcomes are the whole point of this module.
+
+# Digest notation is `asterism-core`'s, reused as-is
+
+Every digest here is the `sha256:`-prefixed storage form defined by
+`asterism_core::domain::content_hash` (and the contract crate under
+it). [`parse_digest`] delegates to that parser rather than
+re-spelling the grammar — one notation, one set of shape rules,
+across the local app and the teams plane (#83 §3: "core digest
+reused, `sha256:` prefix kept; strip only at the path-mapping
+edge").
+
+## Functions
+
+- `parse_digest` — Validates a whole-file digest in the shared notation and hands back
+- `verify_declared_digest` — The declared-digest verification rule (#83 §3), with exactly two
+
+## Types
+
+- `DeclaredDigest` — The digest a promotion **declares** — mandatory, computed by the
+- `Locator` — A private-space link: where a user last saw some content, outside
+- `TeamBlobLink` — One `(team, digest)` row — the boundary that makes a blob visible.
+- `VerifiedCopy` — Proof that a promotion's bytes hashed to what was declared — the
+
+
+<!-- teams_core/error.md -->
+# teams-core::error
+
+`DomainError` — the innermost error type of the teams plane.
+
+Same convention as `asterism-core`'s enum of the same name: outer
+layers (`teams-server`'s HTTP / MCP errors, once they exist) convert
+from this, infrastructure failures are collapsed into `Infra`, and
+the domain vocabulary stays clean. The two enums are deliberately
+separate types — the teams plane and the local app do not share an
+error surface, only `asterism-core`'s domain vocabulary (#83 §4).
+
+## Types
+
+- `DomainError` — Errors raised by the teams domain layer.
+
+
+<!-- teams_core/port.md -->
+# teams-core::port
+
+Ports — the traits `teams-infra` implements (dependency inversion,
+same discipline as `asterism-core`'s repository traits). Declared
+here so the domain can be exercised against fakes with no adapter
+compiled.
+
+
+<!-- teams_core/port__auth.md -->
+# teams-core::port::auth
+
+`port::auth` — credential verification behind a provider swap
+(#83 §1).
+
+Credentials live behind this port so the v0 choice (instance-local
+argon2id password adapter, #83 §5) stays an adapter detail and a
+later OIDC adapter is a new implementation, not a domain change.
+Sessions are deliberately **not** here: a session is a short-lived
+infra artifact that resolves to a `user_id` and the ledger never
+sees one — `teams-infra` owns that table and its expiry.
+
+## Traits
+
+- `CredentialVerifier` — Verifies a presented credential and resolves it to a user.
+
+
+<!-- teams_core/port__blob.md -->
+# teams-core::port::blob
+
+`port::blob` — backing storage for the instance's global CAS.
+
+Hand-rolled trait, house style (#83 §3): `object_store` / OpenDAL
+stay adapter details if S3 arrives — they are not the port. The
+five verbs are the day-1 set because GC, orphan audit and backup
+need `delete` + `list` from the start, not only `put` / `get`.
+
+The v0 adapter (`teams-infra`) is a local-filesystem layout with a
+staging dir and a stream-hash → verify → fsync → rename write path;
+none of that shows here, deliberately.
+
+## Traits
+
+- `BlobStore` — Content-addressed blob storage — one physical copy per instance,
+
+
+<!-- teams_core/port__share.md -->
+# teams-core::port::share
+
+`port::share` — reserved for the share domain.
+
+#63 owns the share vocabulary: pursuit/cull/merge semantics,
+promotion copy *timing* (at IN vs at merge), and the minimum
+provenance payload at promotion. This port is filled after #63
+fixes those; it exists now so the crate layering already has the
+seam in the place the design says it goes (#83 §0), and so nothing
+grows share-shaped methods on the other ports in the meantime.
+
+## Traits
+
+- `SharePort` — Reserved — filled after #63. Deliberately empty: an invented verb
+
+
+<!-- teams_infra/index.md -->
+# teams-infra 0.0.0
+
+# teams-infra — adapters for the teams plane
+
+The SQLite layer (#89, second slice of #83): the teams-owned
+database, its migration series, the state tables over the
+`teams-core` domain types, and the per-team append-only ledger.
+Auth v0 (#91, third slice) adds the instance-local password adapter
+and the DB-backed session store. The local blob adapter (#93,
+fourth slice) is the CAS backing behind `teams-core`'s blob port —
+staging → verify → fsync → rename. The #95 slice adds the purge
+two-step's mark state ([`sqlite`] V3 + the repository's
+mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
+([`backup`]).
+
+## Layout
+
+- [`paths`] — where the teams database and the blob store live: the
+  profile conventions of `asterism-infra`, mirrored for the teams
+  plane (own env pair, own home root, own marker), so the two
+  planes never open each other's files.
+- [`sqlite`] — connection lifecycle (WAL, through the workspace's
+  `rusqlite-isle` line), the fresh `PRAGMA user_version` migration
+  series starting at V1, and the repository.
+- [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
+  behind `teams-core`'s auth port, opaque sessions with expiry and
+  a cleanup path.
+- [`blob`] — the local CAS adapter behind `teams-core`'s blob port:
+  `blobs/sha256/<2ch>/<64hex>` plus a staging dir, the
+  declared-digest write path, and the startup sweep (#83 §3).
+- [`gc`] — the zero-link sweep (#83 §3 registry-GC shape): bytes no
+  team links are deleted, under the guard that keeps the sweep and
+  a racing upload from interleaving.
+- [`backup`] — quiesce → `VACUUM INTO` → DB-first/blobs-after
+  archive (#83 §4).
+
+## The one write rule
+
+Every public state-changing operation on
+[`SqliteTeamsRepository`](sqlite::repo::SqliteTeamsRepository) opens
+one transaction, applies the state change **and** appends the
+corresponding ledger event, and commits or rolls back the two
+together (#83 §2 audit-log pattern). No public method writes state
+without appending, and none appends without a state change — the
+single documented exception is the locator, whose operations are
+private-space and by design never land in any team's ledger.
+
+## Dependency rule
+
+This crate depends on `teams-core` and never on `asterism-infra` /
+`-contract` / `-server` (#83 §4): those are the local app's
+plumbing, and the teams plane owns its own.
+
+## Modules
+
+- [`auth`](auth.md): Auth adapters for the teams plane (#83 §5).
+- [`auth::password`](auth__password.md): `auth::password` — the v0 instance-local credential adapter
+- [`backup`](backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
+- [`blob`](blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+- [`gc`](gc.md): `gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
+- [`paths`](paths.md): Data-profile and on-disk layout conventions for the teams plane.
+- [`sqlite`](sqlite.md): SQLite backend for the teams plane — connection lifecycle and schema
+- [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
+- [`sqlite::migrations`](sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [`sqlite::repo`](sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
+
+
+<!-- teams_infra/auth.md -->
+# teams-infra::auth
+
+Auth adapters for the teams plane (#83 §5).
+
+v0 is the instance-local password adapter ([`password`]): argon2id
+hashing behind `teams-core`'s
+[`CredentialVerifier`](teams_core::port::auth::CredentialVerifier)
+port, plus the DB-backed opaque session store — the session lives
+here and not in the domain on purpose (#83 §1: a session is a
+short-lived infra artifact that resolves to a `user_id`, and the
+ledger never sees one). OIDC is a later adapter behind the same
+port; 2FA is deferred by design.
+
+
+<!-- teams_infra/auth__password.md -->
+# teams-infra::auth::password
+
+`auth::password` — the v0 instance-local credential adapter
+(#83 §5).
+
+Three decisions carry this module:
+
+- **Hashing is argon2id through RustCrypto's `argon2`** (OWASP's
+  current first choice), default parameters, PHC-string storage —
+  never a hand-rolled construction. Verification runs *inside* the
+  SQLite isle closure: the isle's dedicated thread keeps the key
+  derivation off the async executor without a second thread pool,
+  at the cost of serialising logins behind one another and behind
+  other DB work — an accepted trade at this plane's team-scale,
+  single-server topology (#83 §4).
+- **Sessions are DB-backed opaque tokens** (#83 §1: a session is a
+  short-lived infra artifact the ledger never sees). The client
+  holds 32 CSPRNG bytes hex-encoded; the table holds the SHA-256 of
+  that, so a leaked database never contains a usable bearer token.
+  Expiry is enforced twice: [`PasswordAuth::resolve_session`]
+  rejects **and deletes** an expired row on touch, and
+  [`PasswordAuth::cleanup_expired`] sweeps in bulk (the server runs
+  it on every login, so the table cannot accumulate dead rows
+  faster than logins happen).
+- **No default credentials exist** ([`reject_default_credential`]):
+  the bootstrap admin (#83 §5, the §1 InstanceOperator) is created
+  only from operator-supplied values, and a blank, too-short,
+  login-equal, or well-known placeholder password is *refused* at
+  creation time rather than warned about.
+
+The port implementation ([`CredentialVerifier`]) keeps the port's
+one-arm contract: a wrong password and an unknown login are the
+same `Ok(None)`, and the unknown-login path verifies against a
+process-local dummy hash so the two answers cost the same work
+(username-enumeration resistance on the timing side too).
+
+## Functions
+
+- `reject_default_credential` — Refuses the credentials the "no fixed defaults" rule (#83 §5)
+
+## Types
+
+- `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
+- `PasswordAuth` — The v0 password + session adapter over the teams database.
+
+
+<!-- teams_infra/backup.md -->
+# teams-infra::backup
+
+`backup` — the all-in-one instance backup (#83 §4, the #95 slice):
+quiesce → `VACUUM INTO` snapshot → DB-first archive.
+
+## The three steps, and why in this order
+
+1. **Quiesce + snapshot.** The whole `VACUUM INTO` runs inside one
+   `AsyncIsle` call — the isle *is* the single writer of the
+   deployment shape (#83 §4), so holding its one connection for the
+   duration is the app-level consistency point: no repository write
+   can interleave with the snapshot. The snapshot is never a copy
+   of the live file — copying a live SQLite file is a documented
+   corruption path (WAL content is not in the main file), while
+   `VACUUM INTO` writes a complete, transactionally consistent
+   database.
+2. **DB first, blobs after.** The archive receives the snapshot
+   before a single blob is read. The asymmetry is #83 §3's, applied
+   to backup (§4): every link in the snapshot points at bytes that
+   were durable *before* that link committed and are read *after*
+   the snapshot — so the worst inconsistency a backup can hold is
+   an orphan blob (uploaded after the snapshot; harmless, the
+   restored instance's sweep collects it), never a dangling DB
+   reference. The one caveat is a **reclaim + sweep landing between
+   the two steps** — it can remove bytes the snapshot still links —
+   which is why backup wants a quiet instance (the CLI holds the
+   writer for step 1, and the single-process shape means a stopped
+   or idle server for the rest).
+3. **One archive.** A plain uncompressed tar (the workspace
+   manifest's `tar` line says why no compression): `db/teams.db`
+   first, then `blobs/sha256/<shard>/<hex>` for every blob. Tar
+   preserves entry order, so "DB first" is not only what the code
+   does — it is readable in the artefact, and the tests assert it
+   there. `staging/` is never archived: its contents are garbage by
+   definition (#93's startup sweep deletes them).
+
+## Where the snapshot lands
+
+In a fresh local temp directory, never at the destination: the
+destination may be a mounted/rclone network target, and a live
+SQLite file must never sit on network storage (#83 §4 hard rule —
+network storage is a backup *destination* only). Only the finished
+archive is written to the destination path.
+
+## Restore
+
+Documentation, not a command (#95): unpack the archive, place
+`db/teams.db` where the server's `--db` points and `blobs/` where
+`--blobs` points, start the server. The restore e2e in
+`teams-server` proves the unpacked pair serves an existing link
+end-to-end. The full text ships on `teams-server backup --help`.
+
+## Functions
+
+- `create_backup` — Runs the whole backup: quiesce + `VACUUM INTO` through `isle`, then
+
+## Types
+
+- `BackupReport` — What a completed backup wrote — enough for the CLI to report and
+
+## Constants
+
+- `ARCHIVE_BLOBS_PREFIX` — The blob tree's prefix inside the archive; entries continue with
+- `ARCHIVE_DB_ENTRY` — The snapshot's entry name inside the archive — first entry, always.
+
+
+<!-- teams_infra/blob.md -->
+# teams-infra::blob
+
+`blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+instance's global CAS (#83 §3, the #93 slice).
+
+## Layout
+
+```text
+<root>/sha256/<2ch>/<64hex>   one file per digest — the CAS proper
+<root>/staging/               in-flight writes, unique names
+```
+
+The path under `sha256/` is the digest's canonical form with the
+`sha256:` prefix stripped — this module is the path-mapping edge #83
+§3 names as the only place the prefix comes off. Everywhere else
+(the port, the link table, the wire) the digest keeps its prefix.
+
+## Write path
+
+Stream into a uniquely named staging file while hashing → verify
+the computed digest against the **declared** one (the domain's
+[`verify_declared_digest`], so the mismatch arm is the same
+rejection everywhere) → `fsync` the file → rename into the final
+path → `fsync` the parent directories. This hardens the `.part`
+precedent from `asterism-infra`'s preview jobs: same
+temp-then-rename shape, plus the fsyncs and the digest gate, because
+here the rename is what makes bytes *exist* for the link layer and
+a half-written blob must never be reachable under its digest.
+
+A mismatch deletes the staging file and reports the computed digest
+(carried by [`DomainError::DigestMismatch`]); nothing lands. An
+abandoned write (crash, dropped connection) leaves only a staging
+temp, which the startup sweep removes — [`open`] runs it, and it is
+the only mechanical cleanup this layer owes (#83 §3 lifecycle).
+
+## Concurrent same-digest writes
+
+Each writer streams into its own staging file and finishes with an
+atomic `rename` onto the same final path. `rename` replaces: the
+last writer's inode wins, every earlier writer's file is dropped by
+the filesystem, and since every renamed file has already been
+verified to hash to the digest it is named by, the replacement swaps
+bytes for identical bytes — a value-level no-op. Both callers
+succeed and one physical copy remains. There is deliberately **no
+exists-check shortcut** before or during the write: skipping the
+work when the blob is already present would make a duplicate upload
+observably cheaper, which is the Harnik-2010 side channel the
+upload contract closes by always accepting the full body.
+
+[`open`]: LocalFileStorageAdapter::open
+[`verify_declared_digest`]: teams_core::domain::store::verify_declared_digest
+
+## Types
+
+- `LocalFileStorageAdapter` — Local-filesystem CAS adapter — one physical copy per instance,
+- `StagingWrite` — One in-flight streaming write: the staging file, the running hash,
+
+
+<!-- teams_infra/gc.md -->
+# teams-infra::gc
+
+`gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
+slice): blob bytes that no team links anymore are deleted, after a
+reclaim and on demand (`teams-server gc`).
+
+## What the sweep protects
+
+A blob's bytes survive while **any** link row references its digest
+— marked-for-purge links included, because a marked link is
+restorable during its grace window and restoring a link whose bytes
+were swept would be a dangling reference by another name. The
+sweep's question is therefore
+[`SqliteTeamsRepository::digest_linked_anywhere`], deliberately not
+the read surface's visibility predicate.
+
+## The racing same-digest upload, and why the answer is a lock
+
+The #93 adapter's write path makes bytes durable (staging → rename)
+**before** the link row commits (#83 §3 ordering). That order is
+what makes a dangling link impossible for uploads — and it is
+exactly what a concurrent sweep could break: between the upload's
+rename and its link commit, the digest has bytes and zero links,
+and a sweep deciding in that window would delete bytes whose link
+is about to commit — a dangling link, manufactured by the sweeper.
+
+Re-checking links after removing the file cannot close this: the
+hazardous interleaving (upload renames → sweep checks links, sees
+zero → sweep deletes → upload's link commits) has the re-check land
+*before* the link exists, however many times it re-checks. What
+closes it is excluding the interleaving: [`GcGuard`] is a
+`tokio::sync::RwLock` — every upload holds it **shared** across its
+rename→link-commit span (uploads never block each other), and the
+sweep holds it **exclusive** across its check-and-delete, so no
+upload is ever mid-span while the sweep decides. This leans on the
+single-process deployment shape #93 fixed (one server process owns
+DB and blob dir); a second process bypasses the guard, which is why
+the `gc` CLI documents "stopped server or same process" and why
+cross-process coordination stays out of scope (#95 out-of-scope
+list).
+
+## Functions
+
+- `sweep_zero_link_blobs` — Deletes every CAS blob that no team links (marked links count as
+
+## Types
+
+- `GcGuard` — The lock that keeps the zero-link sweep and the upload write path
+
+
+<!-- teams_infra/paths.md -->
+# teams-infra::paths
+
+Data-profile and on-disk layout conventions for the teams plane.
+
+This mirrors `asterism-infra`'s profile mechanism — the same
+selection table, the same marker guard — with every name swapped so
+the two planes cannot open each other's data by accident:
+
+| | local app | teams plane |
+|---|---|---|
+| profile env | `ASTERISM_PROFILE` | `ASTERISM_TEAMS_PROFILE` |
+| home env | `ASTERISM_HOME` | `ASTERISM_TEAMS_HOME` |
+| named home | `~/.asterism/profiles/<p>` | `~/.asterism-teams/profiles/<p>` |
+| marker | `.asterism-profile` | `.asterism-teams-profile` |
+| database | `asterism.db` | `teams.db` |
+
+Mirrored rather than imported because importing would mean a
+`teams-* → asterism-infra` edge, which #83 §4 forbids in any form.
+
+The selection table is the one `asterism-infra` settled on:
+
+| `$ASTERISM_TEAMS_HOME` | `$ASTERISM_TEAMS_PROFILE` | result |
+|---|---|---|
+| unset | unset | the build's default — `dev` in debug, `dogfood` in release |
+| unset | `dev` / `dogfood` / `bench` | that profile, under `~/.asterism-teams/profiles/` |
+| unset | `custom` | error: `custom` is a home, and none was given |
+| set | unset | error: name the profile too |
+| set | `dev` / `dogfood` / `bench` | that profile, at the explicit path |
+| set | `custom` | `custom` at the explicit path, unguarded |
+
+Named homes contain a marker; opening a home whose marker disagrees
+with the requested profile is rejected before SQLite is touched.
+The marker is published the way the sibling publishes its own —
+contents written to a temporary file, synced, then hard-linked
+under the marker's name (`create_new` fallback only where the
+filesystem has no hard links): the name appears already complete or
+not at all, so no observable state ever holds an empty marker. A
+crash between creating the name and writing its contents would
+otherwise wedge the home permanently — an empty marker rejects
+every later open with `marker says ""`, and nothing here repairs
+one — which is why the mechanism is mirrored rather than simplified
+for this plane's quieter topology. `hard_link` rather than `rename`
+for the sibling's reason too: rename replaces, and two profiles
+racing for one fresh home must never both claim it.
+
+## Functions
+
+- `active_profile` — Returns the active teams-plane data profile without creating
+- `default_blob_root` — Returns the default blob store root (`<teams_home>/blobs`), under
+- `default_db_path` — Returns the default teams SQLite database path
+- `teams_home` — Returns (creating on demand) the teams-plane home directory for the
+
+## Types
+
+- `DataProfile` — Isolated local dataset selected for the current process — same four
+
+
+<!-- teams_infra/sqlite.md -->
+# teams-infra::sqlite
+
+SQLite backend for the teams plane — connection lifecycle and schema
+migration built on `rusqlite-isle`, mirroring `asterism-infra`'s
+conventions over the teams-owned database.
+
+## Layout
+
+- [`migrations`] — `PRAGMA user_version`-based append-only
+  migrations, a fresh series starting at V1 (this database shares
+  nothing with the app database — #83 §4).
+- [`repo`] — the repository over the state tables and the ledger.
+- [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
+  points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
+  pragmas set and the schema migrated.
+- [`open_existing_at_latest`] — the maintenance verbs' entry point
+  (#95): pragmas only, **no migration**, refused unless the schema
+  is already current.
+
+## Pragma choices
+
+Same set as the app database, for the same reasons:
+
+- `journal_mode = WAL` — the 1-writer / N-readers setup #83 §4
+  names as the workload fit (append-only ledger, short tx).
+- `synchronous = NORMAL` — the usual tradeoff paired with WAL.
+- `foreign_keys = ON` — SQLite defaults to `OFF` per connection, so
+  it is reissued inside every init closure.
+- `busy_timeout = 5000` — one process by deployment shape, but a
+  backup command will eventually share the file, and waiting beats
+  an immediate `SQLITE_BUSY`.
+
+One non-pragma setting rides along: transactions default to `BEGIN
+IMMEDIATE`. Every repository write opens a transaction that will
+write, and a DEFERRED transaction that upgrades from read to write
+bypasses the busy handler on the upgrade (the same trap
+`asterism-infra` documents from its 2026-07/08 flakes) — taking the
+write lock at `BEGIN` keeps every wait on the busy-handler path.
+
+## Functions
+
+- `open_and_migrate` — Opens the teams database, applying any pending migrations before
+- `open_and_migrate_in_memory` — Opens an in-memory teams database with migrations applied (used by
+- `open_existing_at_latest` — Opens the teams database **without migrating**, refusing unless its
+- `schema_version` — Reads the current schema version from an already-open isle.
+
+
+<!-- teams_infra/sqlite__map.md -->
+# teams-infra::sqlite::map
+
+Row ↔ domain conversion helpers for the teams tables.
+
+The reading convention is `asterism-infra`'s: inside an isle closure
+only `rusqlite` primitives are handled, and promoting rows into
+domain types (including validation) happens **outside** the closure.
+Writes are the deliberate exception, documented in
+[`repo`](crate::sqlite::repo): the same-tx rule requires the domain
+invariants to be evaluated *inside* the transaction, on the state it
+is about to change.
+
+## Functions
+
+- `actor_from_json` — Parses the `actor` TEXT column back into a [`LedgerActor`].
+- `actor_to_json` — Serialises a [`LedgerActor`] into the `actor` TEXT column — the
+- `infra_err` — Wraps an infrastructure error (typically `IsleError`) into
+- `subject_from_ref` — Rebuilds a [`SubjectRef`] from its `(ref_type, ref_value)` columns —
+- `subject_to_ref` — Splits a [`SubjectRef`] into the `(ref_type, ref_value)` pair the
+
+
+<!-- teams_infra/sqlite__migrations.md -->
+# teams-infra::sqlite::migrations
+
+Teams-database schema migrations — `PRAGMA user_version` scheme.
+
+A fresh series starting at V1: this database shares nothing with the
+app database, not even a version counter (#83 §4). The mechanism is
+`asterism-infra`'s: `MIGRATIONS[i]` upgrades from version `i` to
+`i + 1`, [`migrate`] applies every pending batch inside its own
+transaction and bumps `user_version` on success. **Never rewrite a
+past batch** — schema changes go at the end.
+
+## Schema decisions
+
+- **Ids are 16-byte BLOBs (UUID v7)**, timestamps are `INTEGER`
+  epoch ms, tables are `STRICT` — the workspace conventions.
+- **State tables are the SoT, the ledger is the record** (#83 §2
+  audit-log pattern). `team` / `membership` / `team_blob_link` /
+  `locator` are authoritative; `ledger_event` is what happened.
+- **`ledger_event` is append-only in the schema, not only in the
+  API**: no `updated_at`, no soft-delete column anywhere near it,
+  and `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort — the
+  repository exposes no update/delete path, and the schema backs
+  that up against raw SQL too.
+- **`ledger_event` carries no foreign key to `team`.** The record
+  outlives the state on purpose: deleting a team removes its rows
+  (memberships and links cascade) while the same transaction
+  appends `teams.team.deleted/1` — a stream that must survive the
+  row it chronicles cannot reference it.
+- **Subjects land in `ledger_subject`, keyed `(ref_type,
+  ref_value)`** with an index in that order, so trace queries walk
+  the index and never parse payload JSON (#83 §2). The table is the
+  only store of an event's subjects — rebuilding the envelope joins
+  it, so there is no second copy to drift.
+- **`seq` is assigned by storage inside the write transaction**
+  (`MAX(seq) + 1` per team): monotonic by the primary key, gapless
+  under the single-writer deployment shape because no two
+  transactions compute it concurrently.
+- **`role` is TEXT with no CHECK constraint**: the word list is the
+  domain's ([`teams_core::domain::identity::Role::parse`]), so a
+  later tier is a new word and a new match arm, not a schema
+  migration (#83 §1). The repository passes every stored value back
+  through the domain parser on read.
+
+## Functions
+
+- `migrate` — Applies every pending migration up to the latest version.
+
+## Constants
+
+- `LATEST_VERSION` — Latest schema version (`MIGRATIONS.len()`).
+
+
+<!-- teams_infra/sqlite__repo.md -->
+# teams-infra::sqlite::repo
+
+The teams repository — state tables and the per-team ledger behind
+one write rule.
+
+## The same-tx rule is the only write API shape (#83 §2)
+
+Every public state-changing method here opens one transaction,
+applies the state change **and** appends the corresponding ledger
+event, and commits or rolls back the two together. There is no
+public method that writes state without appending, and none that
+appends without a state change. The one documented exception is
+[`SqliteTeamsRepository::record_locator`]: locators are
+private-space, and private-space operations never land in any
+team's ledger (#83 §2 — the ledger's scope is the team boundary),
+which is also why the v0 kind registry has no locator kind.
+
+## Where the domain runs
+
+Invariants are evaluated by the domain, on current state, *inside*
+the transaction that would record the change: the last-owner rule
+is [`TeamRoster`]'s answer over the membership rows as they read
+under the write lock, and role TEXT goes through [`Role::parse`] in
+both directions. This is the deliberate exception to the
+read-side convention (promotion outside the closure —
+[`map`](crate::sqlite::map)): a check made outside the transaction
+would be a check against state the transaction no longer holds.
+
+Domain refusals inside a closure travel as the inner `Result` of a
+nested pair — the outer error is SQLite's, the inner is the
+domain's, and the transaction rolls back on either.
+
+## What `seq` means here
+
+Storage assigns it: `MAX(seq) + 1` per team, computed inside the
+write transaction. The primary key makes it monotonic; the
+single-writer deployment shape (#83 §4 — one server, one
+connection, `BEGIN IMMEDIATE`) makes it gapless, because a
+rolled-back transaction never leaves a hole behind — the next
+append recomputes over what actually committed. The domain's
+[`EventSeq`] validates what storage hands back and mints nothing.
+
+## Types
+
+- `SqliteTeamsRepository` — SQLite repository for the teams plane — teams, memberships, blob
+
+
+<!-- teams_server/index.md -->
+# teams-server 0.0.0
+
+# teams-server — the hosted Team plane's server library
+
+Third slice of #83 (#91): auth v0 and the team/membership HTTP API.
+The binary (`main.rs`) owns the CLI; this library owns what the
+route tests drive in-process:
+
+- [`http`] — the axum `/teams/*` router: the session → user →
+  membership gate, the authority checks over `teams-core`'s
+  decision functions, and the domain-refusal → 4xx mapping.
+- [`rate_limit`] — the one limiter every auth endpoint sits behind
+  (#83 §5: from v0, not retrofitted).
+- [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
+  read: repository, credential store, registration policy.
+
+The blob routes are #93's, the purge routes and the `gc` / `backup`
+CLI verbs #95's; the MCP surface is a later slice — the module docs
+say which issue owns each.
+
+## Modules
+
+- [`http`](http.md): HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+- [`rate_limit`](rate_limit.md): The auth rate limiter — hand-rolled, per-key, sliding-window.
+- [`state`](state.md): Shared server context — what every handler and gate reads.
+
+
+<!-- teams_server/http.md -->
+# teams-server::http
+
+HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+slice).
+
+## Route table
+
+| Method | Path | Authority |
+|---|---|---|
+| POST | `/teams/auth/login` | none (rate-limited) |
+| POST | `/teams/auth/logout` | bearer token (rate-limited) |
+| POST | `/teams/create` | any authenticated user; operator-only under closed registration |
+| POST | `/teams/{team_id}/delete` | owner, or the operator (operator-stamped) |
+| GET | `/teams/{team_id}/roster` | member, or the operator |
+| GET | `/teams/{team_id}/events` | member, or the operator |
+| POST | `/teams/{team_id}/members/invite` | owner |
+| POST | `/teams/{team_id}/members/remove` | owner |
+| POST | `/teams/{team_id}/owners/grant` | owner |
+| POST | `/teams/{team_id}/owners/revoke` | owner |
+| PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; the operator has no implicit upload) |
+| GET | `/teams/{team_id}/blobs/{digest}` | member, or the operator — every failure is the same `404`, see below |
+| POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or the operator (operator-stamped — #95, the §1 delete row's reclaim sibling) |
+| POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
+| POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
+| GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
+
+## The gate (#83 §5: every route, no exceptions)
+
+Two middleware layers, in request order:
+
+1. [`auth_gate`] — `Authorization: Bearer` token →
+   [`PasswordAuth::resolve_session`] → [`AccountRecord`], inserted
+   as an extension. Missing, malformed, unknown and **expired**
+   tokens are all the same `401` (an expired row is deleted on
+   touch).
+2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
+   segment → team existence (`404`) → the caller's current role in
+   *this* team, read from state, never from the ledger (#83 §1).
+   A caller with neither a membership row nor the operator flag is
+   `403` before any handler runs.
+
+The handler then asks `teams-core`'s decision functions
+([`verb_allowed`] / [`may_create_team`]) with the capacity the gate
+established. When both capacities could act, the membership row
+wins and the ledger stamp is the member's — the operator variant
+is reserved for the operator acting *from outside* the membership
+set, which is exactly when §1 demands the stamp say so.
+
+## The blob read is the one deliberate exception to [`team_gate`]
+
+`GET /teams/{team_id}/blobs/{digest}` sits behind [`auth_gate`]
+only, and answers **one indistinguishable `404`** for every miss:
+unknown team, caller neither a member nor the operator, digest
+never uploaded, digest linked only in a team the caller cannot
+read — and, since #95, a link **marked for purge**, whose grace
+window hides it behind the very same answer. The gate's
+usual 403/404 split would confirm which part of the probe was
+right; on the byte-serving surface that is exactly the existence
+oracle the link boundary exists to close (#83 §3 — a digest
+"exists" for a caller iff a link row sits in a team they belong
+to), the same conflation `asterism-server`'s asset-file route
+documents. Uploads stay behind the full gate: mutations answer
+403 to outsiders on every other route, and a 403 on `PUT` reveals
+nothing about any digest.
+
+## Error mapping
+
+Same body shape as `asterism-server` (`{"kind", "message"}`).
+Domain refusals surface as client errors, never `500`:
+`Validation` → 400, [`DomainError::LastOwner`] and
+`DigestMismatch` → 409 (the mismatch body carries declared and
+computed, both), `Infra` → 500; the gate adds 401/403/404 and the
+limiter 429.
+
+## Functions
+
+- `router` — Builds the router; the caller binds a listener and calls
+
+
+<!-- teams_server/rate_limit.md -->
+# teams-server::rate_limit
+
+The auth rate limiter — hand-rolled, per-key, sliding-window.
+
+## Why hand-rolled
+
+#83 §5 requires one limiter over ALL auth endpoints from v0. The
+workspace has no per-key rate-limiting dependency: `tower`'s own
+limit layers are global concurrency/rate caps with no notion of a
+client key, and the crates that do keyed limiting (`tower_governor`
+and friends) would arrive for exactly one middleware on two routes.
+A sliding-window log over a `Mutex<HashMap>` is ~40 lines, has no
+background task, and its failure mode (a mutex) is simpler than a
+dependency's upgrade treadmill — so the decision, recorded here, is
+to hand-roll until a second consumer wants something richer.
+
+## Key choice
+
+Per client IP when the connection carries one
+(`into_make_service_with_connect_info` in `main.rs`); a fixed
+`"local"` key otherwise (in-process tests drive the router without
+a socket). Keying by IP rather than by login means a spray across
+many logins from one address is still one bucket, and a distributed
+attacker burns addresses, not accounts.
+
+## Types
+
+- `RateLimiter` — A per-key sliding-window counter: at most `max` accepted hits per
+
+
+<!-- teams_server/state.md -->
+# teams-server::state
+
+Shared server context — what every handler and gate reads.
+
+Assembled once (by `main.rs` over the profile database, by the
+route tests over an in-memory one) and passed as axum state. Both
+halves — repository and credential store — wrap clones of the same
+`AsyncIsle`, so state, ledger, credentials and sessions live in one
+SQLite file behind one writer.
+
+## Functions
+
+- `now_ms` — Milliseconds since the Unix epoch, now — the single clock every
+
+## Types
+
+- `TeamsCtx` — Bundle the HTTP layer shares via axum state.
+
+## Constants
+
+- `AUTH_RATE_LIMIT_MAX` — Auth rate limit: attempts allowed per key per window (#83 §5 — one
+- `AUTH_RATE_LIMIT_WINDOW` — Auth rate limit window.
+- `DEFAULT_PURGE_GRACE_MS` — The purge grace window's safe default: **7 days**, the
+- `DEFAULT_SESSION_TTL_MS` — How long a session lives from login (24 hours). Sessions are
 
 

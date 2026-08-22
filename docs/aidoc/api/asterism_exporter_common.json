@@ -1,0 +1,56 @@
+{
+  "crate": "asterism-exporter-common",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_exporter_common::CommonExportAdapter",
+      "kind": "struct",
+      "docs": "The implementation both adapters get unless they say otherwise:\n[`template`] for substitution, [`jsonpath`] for selection.\n\nA unit struct. It carries no configuration because the grammars\ncarry none — they are documented in the params example a profile\nauthor reads, and a knob here would be a knob that example cannot\nshow."
+    },
+    {
+      "path": "asterism_exporter_common::ResponsePath",
+      "kind": "trait",
+      "docs": "The path half of a profile's grammar — how an adapter reads the\nbackend's answer.\n\nMissing is not an error here. A path that matches nothing yields an\nempty vector, and the caller decides what that means: a poll\npredicate reads it as \"not yet\", a handle extraction reads it as a\nbackend that did not answer the way its profile said it would."
+    },
+    {
+      "path": "asterism_exporter_common::TemplateAdapter",
+      "kind": "trait",
+      "docs": "The `{{...}}` half of a profile's grammar.\n\nOnly [`TemplateAdapter::render`] is required. The rest are traversals\nexpressed in terms of it, so an implementation that changes what a\nplaceholder resolves to inherits consistent behaviour on JSON bodies\nand header maps instead of having to restate it — and, more to the\npoint, cannot accidentally give a placeholder one meaning in a body\nand another in a header."
+    },
+    {
+      "path": "asterism_exporter_common::jsonpath",
+      "kind": "module",
+      "docs": "A JSONPath subset — enough to steer a state machine and pluck out\nitems, and deliberately no more.\n\n```text\n$.foo          object field\n$.foo.bar      dot chain\n$.arr[0]       array index\n$.arr[*]       array wildcard\n```\n\n# Why a subset\n\nA schema-driven exporter reads a path out of caller-supplied JSON, so\nthe grammar is a public surface that has to be explainable in the\nparams example a backend author works from. Filters, slices and\nrecursive descent would each need a sentence there and none of them\nhas appeared in a real backend's response shape: the documented cases\nare \"the status field\", \"the error message\", and \"the array of\noutputs\".\n\nA wildcard may appear anywhere the walk can widen, not only last.\nNothing enforces a position because nothing needs to: the walk is a\nbreadth-first frontier, so `$.a[*].b[*]` falls out of the same loop\nthat handles one level.\n\n# Missing is not an error\n\nEvery function here answers with what it found. A path that matches\nnothing yields an empty vector or `None`, and the caller decides\nwhether that is a failure — a poll predicate reads it as \"not yet\",\nwhile a handle extraction reads it as a backend that did not answer\nthe way its profile said it would. Returning a `Result` here would\npush that judgement into a layer that cannot make it.\n\n# Where this lives and why\n\nIt left `asterism-exporter-http` when a second exporter needed it.\nOne grammar with two spellings is worse than either spelling: a\nprofile author reads one paragraph of documentation and cannot tell\nwhich adapter it describes, and a fix to the wildcard in one copy\nleaves the other wrong in a way no test in either crate can see.\n\nAdapters reach it through [`crate::ResponsePath`] rather than calling\n[`many`] directly, so the selection grammar is substitutable for the\nsame reason the substitution grammar is."
+    },
+    {
+      "path": "asterism_exporter_common::jsonpath::first",
+      "kind": "function",
+      "docs": "The first value the expression selects, or `None`."
+    },
+    {
+      "path": "asterism_exporter_common::jsonpath::many",
+      "kind": "function",
+      "docs": "Every value the expression selects, in document order."
+    },
+    {
+      "path": "asterism_exporter_common::template",
+      "kind": "module",
+      "docs": "`{{...}}` substitution over a dispatch — the other half of what a\nschema-driven exporter needs in order to be configured rather than\nwritten.\n\nSimple textual replacement, no arithmetic and no conditionals. The\nresolvable roots are the dispatch's own ids, the input assets, the\nparams blob itself, the handle once one exists, and the current item\nduring a per-item mapping:\n\n```text\n{{selection_id}} {{dispatch_id}} {{persona_id}} {{action}}\n{{input[0].source_locator}}\n{{params.some.nested.key}}\n{{handle.job_id}}\n{{item.url}}\n```\n\nA trailing `?` (`{{item.caption?}}`) resolves a missing path to the\nempty string instead of failing. Without it an unresolved placeholder\nis an error, and that is the right default: a profile that names a\nfield the backend does not send has a bug in it, and silently sending\nan empty prompt is a worse way to find out than a rejected dispatch.\n\n# `params` is the caller's namespace\n\nThe exporter knows nothing about what is in the params blob beyond\nthe fields its own schema names. `{{params.<dot.path>}}` reaches\nanywhere inside it, so a profile author nests per-backend values\nwherever they like and references them from templates.\n\nTwo consequences worth stating together, because the first is the\nreason the second matters. Params are persisted unedited and handed\nback on every read of the dispatch — nothing on that path filters or\nredacts. So a value reachable by `{{params.…}}` is readable by\nanything that can list dispatches, and a credential does not belong\nthere. An adapter that needs one resolves it outside the blob.\n\n# What is here and what is on the trait\n\nThis module is the grammar: what a placeholder may name, and how one\ntemplate string is rendered. Everything built *on top* of that — JSON\ndocuments, header maps — lives on [`crate::TemplateAdapter`] as default\nmethods, so an adapter that changes the grammar changes it in one\nplace and the traversals follow."
+    },
+    {
+      "path": "asterism_exporter_common::template::TemplateEnv",
+      "kind": "struct",
+      "docs": "What a placeholder can be resolved against.\n\nBuilt per phase: `dispatch` has no handle yet, `poll` and `harvest`\ndo, and the per-item mapping inside a harvest adds the item. The\nphase distinction is carried in the type rather than by convention,\nso a `{{handle.…}}` in a dispatch template resolves to nothing and\nis reported as an unresolved placeholder instead of reaching for a\nvalue that does not exist yet."
+    },
+    {
+      "path": "asterism_exporter_common::template::render",
+      "kind": "function",
+      "docs": "Renders one template string."
+    },
+    {
+      "path": "asterism_exporter_common::template::value_to_display_string",
+      "kind": "function",
+      "docs": "How a resolved value is spelled when it lands in a string.\n\nNull resolves to nothing at all — which an optional placeholder turns\ninto an empty string and a required one reports as unresolved. That\ndistinction is deliberate: a backend that sends `\"caption\": null` is\nsaying the same thing as one that omits the field, and a template\nshould not have to know which shape it is talking to."
+    }
+  ]
+}

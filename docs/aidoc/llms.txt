@@ -1,6 +1,10 @@
 # asterism
 
-> # asterism-contract — Command / Query / Response DTOs
+> `asterism-benchgen` — the seeded corpus behind the grid/import benches.
+
+## asterism-benchgen 0.0.0
+
+- [asterism-benchgen overview](asterism_benchgen/index.md): `asterism-benchgen` — the seeded corpus behind the grid/import benches.
 
 ## asterism-contract 0.0.0
 
@@ -133,6 +137,97 @@
 - [asterism-disclosure-format::manifest](asterism_disclosure_format/manifest.md): The C2PA manifest *definition* — what would be signed, built as a
 - [asterism-disclosure-format::xmp](asterism_disclosure_format/xmp.md): The XMP packet — the half of the disclosure that needs no
 
+## asterism-dispatch-sdk 0.0.0
+
+- [asterism-dispatch-sdk overview](asterism_dispatch_sdk/index.md): # asterism-dispatch-sdk
+- [asterism-dispatch-sdk::attempt](asterism_dispatch_sdk/attempt.md): `AttemptRecord` — what an exporter has to say about a call it made,
+- [asterism-dispatch-sdk::derived](asterism_dispatch_sdk/derived.md): Re-export shim for the shared boundary type
+- [asterism-dispatch-sdk::exporter](asterism_dispatch_sdk/exporter.md): `Exporter` — the trait every outbound adapter implements.
+- [asterism-dispatch-sdk::handle](asterism_dispatch_sdk/handle.md): `Handle` — the exporter's backend-side reference to an in-flight job.
+- [asterism-dispatch-sdk::schema](asterism_dispatch_sdk/schema.md): Schema artifact registry — the SDK-owned half of the "SDK =
+- [asterism-dispatch-sdk::state](asterism_dispatch_sdk/state.md): Lifecycle state of a dispatch as seen by the exporter's
+
+## asterism-exporter-comfy 0.0.0
+
+- [asterism-exporter-comfy overview](asterism_exporter_comfy/index.md): # asterism-exporter-comfy
+
+## asterism-exporter-common 0.0.0
+
+- [asterism-exporter-common overview](asterism_exporter_common/index.md): # asterism-exporter-common
+- [asterism-exporter-common::jsonpath](asterism_exporter_common/jsonpath.md): A JSONPath subset — enough to steer a state machine and pluck out
+- [asterism-exporter-common::template](asterism_exporter_common/template.md): `{{...}}` substitution over a dispatch — the other half of what a
+
+## asterism-exporter-file 0.0.0
+
+- [asterism-exporter-file overview](asterism_exporter_file/index.md): # asterism-exporter-file
+
+## asterism-exporter-http 0.0.0
+
+- [asterism-exporter-http overview](asterism_exporter_http/index.md): # asterism-exporter-http
+- [asterism-exporter-http::custody](asterism_exporter_http/custody.md): Where a produced file lands once we hold it.
+- [asterism-exporter-http::secret](asterism_exporter_http/secret.md): The profile grammar this adapter uses: the shared one, plus
+
+## asterism-importer 0.0.0
+
+- [asterism-importer overview](asterism_importer/index.md): Unified CLI for all built-in Asterism import adapters.
+
+## asterism-importer-audio 0.0.0
+
+- [asterism-importer-audio overview](asterism_importer_audio/index.md): Audio import adapter — turns a scanned audio file into
+- [asterism-importer-audio::parser](asterism_importer_audio/parser.md): Audio `RawItem` → `Footprint::Audio` parser.
+
+## asterism-importer-cc 0.0.0
+
+- [asterism-importer-cc overview](asterism_importer_cc/index.md): Claude Code session import adapter — turns a session's JSONL log
+- [asterism-importer-cc::parser](asterism_importer_cc/parser.md): Claude Code JSONL → `Footprint::ChatMessage` (+ `Footprint::Image`)
+
+## asterism-importer-image 0.0.0
+
+- [asterism-importer-image overview](asterism_importer_image/index.md): Image import adapter — parses one image file into one
+- [asterism-importer-image::parser](asterism_importer_image/parser.md): Image `RawItem` → `Footprint::Image` parser.
+
+## asterism-importer-persona-journal 0.0.0
+
+- [asterism-importer-persona-journal overview](asterism_importer_persona_journal/index.md): persona-journal import adapter — turns a persona-journal SQLite row
+- [asterism-importer-persona-journal::parser](asterism_importer_persona_journal/parser.md): persona-journal SQLite row -> `Footprint::JournalEntry` parser.
+
+## asterism-importer-sdk 0.0.0
+
+- [asterism-importer-sdk overview](asterism_importer_sdk/index.md): # asterism-importer-sdk
+- [asterism-importer-sdk::bundle](asterism_importer_sdk/bundle.md): Deriving the grouping key that ties the footprints of one container
+- [asterism-importer-sdk::card](asterism_importer_sdk/card.md): # Character-card parser subsystem
+- [asterism-importer-sdk::card::envelope](asterism_importer_sdk/card__envelope.md): Envelope + context types shared by every character-card parser.
+- [asterism-importer-sdk::card::parser](asterism_importer_sdk/card__parser.md): [`CharacterCardParser`] trait + canonical V2 slot logic.
+- [asterism-importer-sdk::card::parser::v2_default](asterism_importer_sdk/card__parser__v2_default.md): Canonical V2 slot logic, exposed as free functions so derivatives
+- [asterism-importer-sdk::card::png_chunk](asterism_importer_sdk/card__png_chunk.md): Character-card PNG `tEXt` chunk decoders.
+- [asterism-importer-sdk::card::registry](asterism_importer_sdk/card__registry.md): Registry that dispatches a [`CardEnvelope`] to the right
+- [asterism-importer-sdk::card::source_parser](asterism_importer_sdk/card__source_parser.md): [`SourceParser`] adapter that turns any character-card [`RawItem`]
+- [asterism-importer-sdk::card::v2](asterism_importer_sdk/card__v2.md): Canonical Character Card V2 parser (see [`crate::catalogue`] section 1).
+- [asterism-importer-sdk::card::v3](asterism_importer_sdk/card__v3.md): Character Card V3 parser (see [`crate::catalogue`] section 2).
+- [asterism-importer-sdk::catalogue](asterism_importer_sdk/catalogue.md): # Import target catalogue
+- [asterism-importer-sdk::client](asterism_importer_sdk/client.md): Thin HTTP client for the asterism-server API.
+- [asterism-importer-sdk::footprint](asterism_importer_sdk/footprint.md): `Footprint` — the typed, plugin-facing shape a parser hands back.
+- [asterism-importer-sdk::harvest](asterism_importer_sdk/harvest.md): # Agent-harvest intake subsystem
+- [asterism-importer-sdk::harvest::envelope](asterism_importer_sdk/harvest__envelope.md): Typed schema for `asterism_agent_harvest` v1 JSON dumps.
+- [asterism-importer-sdk::harvest::parser](asterism_importer_sdk/harvest__parser.md): [`SourceParser`] impl that decodes `asterism_agent_harvest` JSON
+- [asterism-importer-sdk::mapper](asterism_importer_sdk/mapper.md): Convenience shape for parser output plus the mapping to the wire
+- [asterism-importer-sdk::parser](asterism_importer_sdk/parser.md): `SourceParser` — turn a scanned [`RawItem`] into one or more
+- [asterism-importer-sdk::progress](asterism_importer_sdk/progress.md): Tiny progress reporter — running success / failure counters, plus
+- [asterism-importer-sdk::runner](asterism_importer_sdk/runner.md): Shared importer execution pipeline.
+- [asterism-importer-sdk::scanner](asterism_importer_sdk/scanner.md): `SourceScanner` trait and shared item type.
+- [asterism-importer-sdk::scanner::fs](asterism_importer_sdk/scanner__fs.md): `FsScanner` — filesystem source scanner.
+- [asterism-importer-sdk::scanner::sqlite](asterism_importer_sdk/scanner__sqlite.md): `SqliteScanner` — SQLite source scanner.
+
+## asterism-importer-tape 0.0.0
+
+- [asterism-importer-tape overview](asterism_importer_tape/index.md): Tape import adapter — turns an exported conversation tape file into
+- [asterism-importer-tape::parser](asterism_importer_tape/parser.md): Persona Tape parser — one terminal transcript file becomes one document.
+
+## asterism-importer-video 0.0.0
+
+- [asterism-importer-video overview](asterism_importer_video/index.md): Video import adapter — turns a scanned video file into
+- [asterism-importer-video::parser](asterism_importer_video/parser.md): Video `RawItem` → `Footprint::Video` parser.
+
 ## asterism-infra 0.0.0
 
 - [asterism-infra overview](asterism_infra/index.md): # asterism-infra — outbound adapters (SQLite, filesystem, job engine)
@@ -195,6 +290,11 @@
 - [asterism-infra::sqlite::repo::thumb](asterism_infra/sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
 - [asterism-infra::telemetry](asterism_infra/telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
 
+## asterism-media-probe 0.0.0
+
+- [asterism-media-probe overview](asterism_media_probe/index.md): Header-only media measurement: what the bytes say about themselves.
+- [asterism-media-probe::a1111](asterism_media_probe/a1111.md): `a1111` — the line grammar of AUTOMATIC1111's `parameters` text,
+
 ## asterism-server 0.0.0
 
 - [asterism-server overview](asterism_server/index.md): # asterism-server — library surface.
@@ -211,4 +311,44 @@
 - [asterism-ui::commands](asterism_ui/commands.md): Tauri command handlers — a thin translation layer. They pass DTOs
 - [asterism-ui::error](asterism_ui/error.md): `UiError` — error type crossed by Tauri command handlers.
 - [asterism-ui::state](asterism_ui/state.md): `AppState` — service DI + backend initialisation.
+
+## teams-contract 0.0.0
+
+- [teams-contract overview](teams_contract/index.md): # teams-contract — wire contract for the teams plane
+- [teams-contract::command](teams_contract/command.md): Command DTOs — inputs of the state-changing `/teams/*` routes.
+- [teams-contract::dto](teams_contract/dto.md): Response DTOs of the `/teams/*` surface.
+
+## teams-core 0.0.0
+
+- [teams-core overview](teams_core/index.md): # teams-core — domain layer of the Asterism teams plane
+- [teams-core::domain](teams_core/domain.md): Domain types and invariants of the teams plane — everything here is
+- [teams-core::domain::identity](teams_core/domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
+- [teams-core::domain::ledger](teams_core/domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [teams-core::domain::store](teams_core/domain__store.md): `store` — the team-side view of instance-owned blobs, and the
+- [teams-core::error](teams_core/error.md): `DomainError` — the innermost error type of the teams plane.
+- [teams-core::port](teams_core/port.md): Ports — the traits `teams-infra` implements (dependency inversion,
+- [teams-core::port::auth](teams_core/port__auth.md): `port::auth` — credential verification behind a provider swap
+- [teams-core::port::blob](teams_core/port__blob.md): `port::blob` — backing storage for the instance's global CAS.
+- [teams-core::port::share](teams_core/port__share.md): `port::share` — reserved for the share domain.
+
+## teams-infra 0.0.0
+
+- [teams-infra overview](teams_infra/index.md): # teams-infra — adapters for the teams plane
+- [teams-infra::auth](teams_infra/auth.md): Auth adapters for the teams plane (#83 §5).
+- [teams-infra::auth::password](teams_infra/auth__password.md): `auth::password` — the v0 instance-local credential adapter
+- [teams-infra::backup](teams_infra/backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
+- [teams-infra::blob](teams_infra/blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+- [teams-infra::gc](teams_infra/gc.md): `gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
+- [teams-infra::paths](teams_infra/paths.md): Data-profile and on-disk layout conventions for the teams plane.
+- [teams-infra::sqlite](teams_infra/sqlite.md): SQLite backend for the teams plane — connection lifecycle and schema
+- [teams-infra::sqlite::map](teams_infra/sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
+- [teams-infra::sqlite::migrations](teams_infra/sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [teams-infra::sqlite::repo](teams_infra/sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
+
+## teams-server 0.0.0
+
+- [teams-server overview](teams_server/index.md): # teams-server — the hosted Team plane's server library
+- [teams-server::http](teams_server/http.md): HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+- [teams-server::rate_limit](teams_server/rate_limit.md): The auth rate limiter — hand-rolled, per-key, sliding-window.
+- [teams-server::state](teams_server/state.md): Shared server context — what every handler and gate reads.
 
