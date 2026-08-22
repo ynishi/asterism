@@ -10,6 +10,25 @@ and this project adheres to
 
 ### Fixed
 
+- **A round written by a rule is asked whether its content exists, the same as a
+  round written by a person** (#121). `PursuitService::push` asked the boundary
+  about every operation before writing; `resolve` handed what the rule produced
+  straight to the pursuit log, so a rule's operations went in with the boundary
+  never asked.
+
+  Nothing had gone wrong, and only by accident of who writes the rules: the five
+  that ship reuse content the divergence already named. The trait is open,
+  though, and a deployment carrying a rule that minted a reference would have
+  written it unverified — refused by the SQLite foreign key as an infra error
+  rather than as something a caller can act on, and refused by nothing at all in
+  memory.
+
+  `resolve` can now answer with a refusal where it previously wrote. It is the
+  refusal `push` already gave, worded the same way, and it leaves the round
+  unwritten with the collision still standing. The two verbs share the check
+  rather than the write: a rule's round is recorded as the server's, and routing
+  one verb through the other would have stamped it with the caller instead.
+
 - **The forge asks whether content exists, not whose it is — so one person's
   work can name another person's asset** (#120). `boundary::Store` asked
   `owns(persona, asset)` and `PursuitService::push` took a `PersonaId` to answer
