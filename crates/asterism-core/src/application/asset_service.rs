@@ -4898,7 +4898,7 @@ impl AssetService {
     /// status the UI's model panel reads. All-`None` covers every
     /// no-model shape (feature off, no package, failed bind) because
     /// they are indistinguishable to a caller and act identically.
-    pub fn visual_model_status(&self) -> asterism_contract::dto::VisualModelStatusDto {
+    pub async fn visual_model_status(&self) -> asterism_contract::dto::VisualModelStatusDto {
         match self.visual_encoder.get() {
             Some(encoder) => {
                 let identity = encoder.identity();
@@ -4960,6 +4960,7 @@ impl AssetService {
         &self,
         asset_id: &str,
         tag_id: &str,
+        _attribution: &AttributionContext,
     ) -> Result<(), DomainError> {
         let asset_id = parse_asset_id(asset_id)?;
         let tag_id = crate::application::mapping::parse_tag_id(tag_id)?;
@@ -4993,6 +4994,7 @@ impl AssetService {
         &self,
         asset_id: &str,
         tag_id: &str,
+        _attribution: &AttributionContext,
     ) -> Result<(), DomainError> {
         let asset_id = parse_asset_id(asset_id)?;
         let tag_id = crate::application::mapping::parse_tag_id(tag_id)?;

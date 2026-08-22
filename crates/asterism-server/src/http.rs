@@ -2721,7 +2721,7 @@ async fn accept_tag_suggestion(
     Path((id, tag_id)): Path<(String, String)>,
 ) -> ApiResult<serde_json::Value> {
     ctx.asset_service
-        .accept_tag_suggestion(&id, &tag_id)
+        .accept_tag_suggestion(&id, &tag_id, &asserted(None, None, None)?)
         .await?;
     Ok(Json(serde_json::json!({ "accepted": true })))
 }
@@ -2734,7 +2734,7 @@ async fn reject_tag_suggestion(
     Path((id, tag_id)): Path<(String, String)>,
 ) -> ApiResult<serde_json::Value> {
     ctx.asset_service
-        .reject_tag_suggestion(&id, &tag_id)
+        .reject_tag_suggestion(&id, &tag_id, &asserted(None, None, None)?)
         .await?;
     Ok(Json(serde_json::json!({ "rejected": true })))
 }
@@ -2742,7 +2742,7 @@ async fn reject_tag_suggestion(
 /// `GET /asterism/models/status` — which visual model this process
 /// bound, if any (#112). All-null when the process runs without one.
 async fn visual_model_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<VisualModelStatusDto> {
-    Ok(Json(ctx.asset_service.visual_model_status()))
+    Ok(Json(ctx.asset_service.visual_model_status().await))
 }
 
 /// `POST /asterism/assets/{id}/comments` — appends one comment.

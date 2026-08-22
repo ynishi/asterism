@@ -1160,7 +1160,7 @@ pub async fn accept_tag_suggestion(
 ) -> Result<(), UiError> {
     state
         .asset_service
-        .accept_tag_suggestion(&asset_id, &tag_id)
+        .accept_tag_suggestion(&asset_id, &tag_id, &AttributionContext::owner_surface())
         .await?;
     Ok(())
 }
@@ -1175,7 +1175,7 @@ pub async fn reject_tag_suggestion(
 ) -> Result<(), UiError> {
     state
         .asset_service
-        .reject_tag_suggestion(&asset_id, &tag_id)
+        .reject_tag_suggestion(&asset_id, &tag_id, &AttributionContext::owner_surface())
         .await?;
     Ok(())
 }
@@ -1185,7 +1185,7 @@ pub async fn reject_tag_suggestion(
 pub async fn visual_model_status(
     state: State<'_, AppState>,
 ) -> Result<asterism_contract::dto::VisualModelStatusDto, UiError> {
-    Ok(state.asset_service.visual_model_status())
+    Ok(state.asset_service.visual_model_status().await)
 }
 
 /// Removes a tag from an asset. Idempotent — a missing link is a
