@@ -561,7 +561,7 @@ the private design notes.
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
-- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing passes, looking at
+- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -620,7 +620,7 @@ the private design notes.
 - [`domain::forge::model::history`](domain__forge__model__history.md): A line's history: what it carries, and how it got there.
 - [`domain::forge::model::line`](domain__forge__model__line.md): The line — the forge's top entity.
 - [`domain::forge::model::op`](domain__forge__model__op.md): What work writes, and what it folds into.
-- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every pass at it.
+- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every round at it.
 - [`domain::forge::model::react`](domain__forge__model__react.md): Letting a line's rule answer a collision.
 - [`domain::forge::model::restore`](domain__forge__model__restore.md): Building the model back from what a store kept.
 - [`domain::forge::model::strategy`](domain__forge__model__strategy.md): How a line settles a collision — the contract, and not the rule.
@@ -998,7 +998,7 @@ Forge use cases — the verbs of a line of work.
 reading what is alive on it, and moving the two things about a line
 that are not written into its history — its name and the rule it
 settles collisions by. [`PursuitService`] owns work against a line:
-opening it, adding a pass, running the line's rule over what the
+opening it, adding a round, running the line's rule over what the
 work collides with, and ending it. They are apart from the rest
 because they are the only services here whose writes carry intent
 rather than content (the layer itself is described in
@@ -1091,7 +1091,7 @@ rule nobody chose, and no record would say so.
 <!-- asterism_core/application__forge__pursuit_service.md -->
 # asterism-core::application::forge::pursuit_service
 
-Work use cases — opening a line of work, writing passes, looking at
+Work use cases — opening a line of work, writing rounds, looking at
 what the line did, and ending it.
 
 ```text
@@ -1106,7 +1106,7 @@ what the line did, and ending it.
 Four verbs and two questions, and only one of them touches a line's
 history. That asymmetry is the point of the design rather than an
 accident of it: the operation that happens most often, writing a
-pass, never reads the line at all, so two people working against
+round, never reads the line at all, so two people working against
 one line do not contend until one of them finishes.
 
 # What this service is allowed to decide
@@ -1150,8 +1150,8 @@ Saying something about work, and correcting it.
   get / anchored / about    read
 ```
 
-Nothing here touches either log. A conversation about a pass does
-not change what the pass said, and a remark on a change point does
+Nothing here touches either log. A conversation about a round does
+not change what the round said, and a remark on a change point does
 not move the line — which is why this is a third face rather than
 more verbs on the two that write records.
 
@@ -1165,7 +1165,7 @@ every verb that takes one loads the pursuit or the line before a
 thread exists.
 
 That is the whole of what this service decides, and it decides it
-by asking. The refusals are the model's — an entry a pass did not
+by asking. The refusals are the model's — an entry a round did not
 touch is [`Anchor::entry`]'s refusal, not one written here.
 
 # What this service is allowed to decide
@@ -3431,7 +3431,7 @@ verdict — which is the failure mode this split exists to prevent.
 
 [`model`] is where that is written down, and it is the whole of what
 the forge holds: a line's history as a chain of change points, work
-as a log of passes, and the one act that moves both. What work takes
+as a log of rounds, and the one act that moves both. What work takes
 up is an asset the owner already manages — an ordinary raw-layer
 row, named by an operation. The forge does not hold a working copy,
 and there is no state to integrate at the end. What the close
@@ -4093,13 +4093,13 @@ answered is a word people use about their work rather than a shape
 the record has.
 
 **Settling a collision.** Turning one into a divergence writes a
-pass into the pursuit under the line's strategy, and it happens
+round into the pursuit under the line's strategy, and it happens
 while the work is open. [`closing`] refuses what was never settled;
 it does not settle anything itself.
 
 **A second way to build any of this back from stored values.**
 Every constructor here mints: a line mints its id and its genesis,
-work mints its id and its opening node, a pass mints a node id. The
+work mints its id and its opening node, a round mints a node id. The
 one place a value is built holding an id somebody else chose is
 [`restore`], and that is the whole of the door.
 
@@ -4359,8 +4359,8 @@ Ending work — the one act that moves both logs.
                        Closing::Landed { close, point }
 ```
 
-Everywhere else, a decision moves one log. Opening, passing and
-taking something in write only to the pursuit; renaming a line
+Everywhere else, a decision moves one log. Opening, adding a round
+and taking something in write only to the pursuit; renaming a line
 writes only to its own description. This is the exception, and it
 is the only one: ending work as satisfied puts a change point on
 the line, and the two are one act rather than two that happen to
@@ -4395,7 +4395,7 @@ value rather than a mutation somebody has to go looking for.
 # This function does not settle anything
 
 A collision is refused here, never resolved. Turning one into a
-divergence writes a pass into the pursuit, under the line's
+divergence writes a round into the pursuit, under the line's
 strategy, and it happens while the work is open — by the time
 anybody is closing, the question has been settled or it has not.
 
@@ -4788,7 +4788,7 @@ says nothing about its existence, and should not.
 <!-- asterism_core/domain__forge__model__pursuit.md -->
 # asterism-core::domain::forge::model::pursuit
 
-One line of work: what it is trying to do, and every pass at it.
+One line of work: what it is trying to do, and every round at it.
 
 ```text
   Pursuit ── of : →Line ── parent? : →Pursuit
@@ -4805,10 +4805,10 @@ currently asks for derived by folding it. What differs is what the
 nodes carry — a line's node carries a table that has changed it, a
 pursuit's carries operations that have not changed anything yet.
 
-# A pass is the unit, not the pursuit
+# A round is the unit, not the pursuit
 
 [`Round`] is where work happens. A pursuit is the container that
-says what the passes are for, and it holds nothing that a round
+says what the rounds are for, and it holds nothing that a round
 could hold instead.
 
 A round that writes nothing is refused. Work is what a person does
@@ -4827,7 +4827,7 @@ the two is how that is found out — so a base that crept forward
 would shrink the window every time somebody looked at it, and a
 change nobody ever reconciled would come out clean.
 
-# A pass is a write, and nothing else
+# A round is a write, and nothing else
 
 There is no node here that records having looked at something.
 Work stops colliding with a line by *saying something different*,
@@ -4841,7 +4841,7 @@ whatever depended on it could be had for nothing.
 pushed after it. Satisfied means the intent was met — the act that
 turns that into a change point spans both logs and is not here.
 Abandoned means it was not, and that is a record rather than a
-deletion: the pass that was dropped stays readable, which is the
+deletion: the round that was dropped stays readable, which is the
 only way "we tried this and stopped" survives.
 
 Reopening is not a verb. Picking work back up is a new pursuit
@@ -4865,7 +4865,7 @@ looking — and a stored answer would be a second copy of it.
 - `Open` — The node work begins at.
 - `Outcome` — How a pursuit ended.
 - `Pursuit` — One line of work against one line.
-- `Round` — One pass at the work.
+- `Round` — One round at the work.
 
 
 <!-- asterism_core/domain__forge__model__react.md -->
@@ -4876,7 +4876,7 @@ Letting a line's rule answer a collision.
 ```text
   collisions(L, W)
        ├─ none ─────────────────────────────────► nothing to do
-       └─ some ──► Strategy::resolve ──► ops ──► a pass, written by the server
+       └─ some ──► Strategy::resolve ──► ops ──► a round, written by the server
                          │                 │
                          │                 └─ checked: do these actually settle it?
                          └─ none ──────────────► the collision stands, for a person
@@ -4884,7 +4884,7 @@ Letting a line's rule answer a collision.
 
 **A rule does nothing a person could not have done.** It writes the
 operations somebody resolving by hand would have written, in the
-same four verbs, into an ordinary pass. There is no vocabulary for
+same four verbs, into an ordinary round. There is no vocabulary for
 resolving, no transformation applied on the way onto a line, and no
 record of resolution separate from the operations themselves. What
 it does is save somebody the typing.
@@ -4907,12 +4907,12 @@ had been handled.
 # A rule that writes nothing is not a failure
 
 Some lines are meant to be sorted out by hand. Their rule returns
-nothing, no pass is written, and the collision stays exactly where
+nothing, no round is written, and the collision stays exactly where
 anybody can see it — which is the state a person then acts on.
 
 # Nothing here touches the line
 
-The pass goes on the pursuit. A line moves when work ends, and
+The round goes on the pursuit. A line moves when work ends, and
 that is somewhere else.
 
 ## Functions
@@ -4939,7 +4939,7 @@ Building the model back from what a store kept.
 # Why this is one module rather than a constructor per type
 
 Every other constructor in [`model`](super) mints. A line mints its
-id and its genesis, work mints its id and its opening node, a pass
+id and its genesis, work mints its id and its opening node, a round
 mints a node id — which means that until this module existed, no
 value here could be built holding an id somebody else chose. That
 was the property, and it is the reason the read half of the ports
@@ -4958,7 +4958,7 @@ is stated once.
 back one at a time to [`History::record`], [`Pursuit::push`] and
 [`Pursuit::end`] — the same calls a fresh write goes through, and
 the same refusals. A chain whose parents do not line up, a table
-that would leave two live entries under one name, a pass on a log
+that would leave two live entries under one name, a round on a log
 that has ended: each of those is a stored row that cannot become a
 value here, and the read fails rather than handing back something
 the model would not have written.
@@ -4986,7 +4986,7 @@ wrong is caught by `record` rather than believed.
 - `meta` — The two stamps a store kept for a thing's description.
 - `open` — The node work opened at.
 - `pursuit` — A whole pursuit, from the node it opened at and what followed.
-- `round` — One pass, as it was kept.
+- `round` — One round, as it was kept.
 - `thread` — A whole conversation, from what it hangs off and what was said.
 
 ## Types
@@ -5000,7 +5000,7 @@ wrong is caught by `record` rather than believed.
 How a line settles a collision — the contract, and not the rule.
 
 ```text
-  collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a pass carries them
+  collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a round carries them
                       │                                     and the collision is gone
                       └──────────────► Err              ──► no op is written at all
 ```
@@ -5022,7 +5022,7 @@ module holds the contract and no rule that satisfies it.
 
 What the model does require is one sentence: a strategy decides an
 id and a name, and returns them as operations complete enough to go
-straight into a pass. There is no half-written entry, no entry that
+straight into a round. There is no half-written entry, no entry that
 gets a name later, and no path that writes some operations and then
 fails — a refusal writes nothing, and the work stays open carrying
 its collision.
@@ -5165,13 +5165,13 @@ Saying something about work.
 
 A node carries a note, and a note is one line written once by
 whoever wrote the node. This is the rest: a remark on somebody
-else's pass, a question about one entry it touched, a review of
+else's round, a question about one entry it touched, a review of
 what landed.
 
 # Four anchors, because four things are worth remarking on
 
-A pursuit as a whole — what this work is for. A pass — the judgement
-somebody made in it. One entry a pass touched — this particular
+A pursuit as a whole — what this work is for. A round — the judgement
+somebody made in it. One entry a round touched — this particular
 thing, in this particular attempt. And a change point — a review
 after the fact.
 
@@ -5179,7 +5179,7 @@ after the fact.
 on an entry alone would make it follow that entry into every other
 pursuit it is ever carried into, which is how a note about one
 attempt becomes a note about the thing itself. Anchoring at
-`(round, entry)` says *this entry, as this pass had it*, and that
+`(round, entry)` says *this entry, as this round had it*, and that
 does not travel. A change point can be anchored to on its own,
 because there is nowhere for a remark on it to travel to.
 
@@ -5297,16 +5297,16 @@ proposed.
 Keeping pursuits, stated in the forge's own words.
 
 [`Pursuits`] is the other face the forge asks for, and it is the
-quiet one: opening work and adding passes to it are what happens
+quiet one: opening work and adding rounds to it are what happens
 most, and neither touches a line.
 
-# A pass names the node it sits on
+# A round names the node it sits on
 
 [`Pursuits::push`] takes the node the caller believes the work ends
-at, beside the pass it wants to add. The model refuses a pass that
+at, beside the round it wants to add. The model refuses a round that
 does not sit on the head, but it judges the pursuit it was
 *given*, which is the log as it was when it was read. Naming the
-head makes the write itself conditional, so two passes written at
+head makes the write itself conditional, so two rounds written at
 once cannot both land and the loser is told.
 
 # It cannot end work
@@ -5319,7 +5319,7 @@ of this trait cannot find a second one.
 
 # Listing hands back whole pursuits, and that is a bet
 
-[`Pursuits::of_line`] and [`Pursuits::children`] return every pass
+[`Pursuits::of_line`] and [`Pursuits::children`] return every round
 of every pursuit they answer with, which is more than a caller
 showing a list needs. There is no lighter shape because the model
 has no half-pursuit, and inventing one for a listing would put a
@@ -5332,7 +5332,7 @@ not a guess made here.
 
 # Reading gives back the whole pursuit
 
-Adding a pass checks the head, deciding a close folds every pass,
+Adding a round checks the head, deciding a close folds every round,
 and both are rules the model holds about the chain. Handing back
 less would move them to whoever answers this call.
 
@@ -5456,7 +5456,7 @@ there for the same reason.
 
 One thing does take a conversation, and it is not on this face:
 [`Lines::discard`] takes every thread anchored to the line it
-drops — to a pursuit, a pass, an entry as a pass had it, or a
+drops — to a pursuit, a round, an entry as a round had it, or a
 change point, which is all four anchors there are. The alternative
 is a remark about something that no longer exists. A conversation
 ends when the line it is about is thrown away, and nowhere else.
@@ -10381,7 +10381,7 @@ specification of what it owes.
 - `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
 - `take_revision_apart` — One correction, for the append `amend` makes.
 - `take_revisions_apart` — Every correction to one message, oldest first.
-- `take_round_apart` — One pass, for the append a push makes.
+- `take_round_apart` — One round, for the append a push makes.
 - `take_thread_apart` — A whole conversation, for the write that opens one.
 
 ## Types
@@ -10391,8 +10391,8 @@ specification of what it owes.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
 - `LineRow` — `line` — the repository, and the two things about it that are not
-- `PursuitNodeRow` — `pursuit_node` — a pass or an ending.
-- `PursuitOpRow` — `pursuit_op` — one operation of one pass, in the order it was written.
+- `PursuitNodeRow` — `pursuit_node` — a round or an ending.
+- `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was written.
 - `PursuitRow` — `pursuit` — one line of work.
 - `ThreadMessageRow` — `forge_thread_message` — one thing said.
 - `ThreadRevisionRow` — `forge_thread_revision` — a correction to something said.
@@ -12280,10 +12280,10 @@ attempt is the last one.
 matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
 of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 substring test asked about the ending matches the fork — it reads
-"somebody pushed a pass first" as "this work has already ended",
+"somebody pushed a round first" as "this work has already ended",
 and an ending is final where a fork is decided again. So the close
 that a second decision would have landed is refused instead, and
-the caller is told the work is over when it is only one pass
+the caller is told the work is over when it is only one round
 further along. The other direction cannot happen, which is why
 naming it would be naming the wrong risk.
 

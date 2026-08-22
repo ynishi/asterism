@@ -26,7 +26,7 @@ specification of what it owes.
 - `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
 - `take_revision_apart` — One correction, for the append `amend` makes.
 - `take_revisions_apart` — Every correction to one message, oldest first.
-- `take_round_apart` — One pass, for the append a push makes.
+- `take_round_apart` — One round, for the append a push makes.
 - `take_thread_apart` — A whole conversation, for the write that opens one.
 
 ## Types
@@ -36,8 +36,8 @@ specification of what it owes.
 - `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
 - `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
 - `LineRow` — `line` — the repository, and the two things about it that are not
-- `PursuitNodeRow` — `pursuit_node` — a pass or an ending.
-- `PursuitOpRow` — `pursuit_op` — one operation of one pass, in the order it was written.
+- `PursuitNodeRow` — `pursuit_node` — a round or an ending.
+- `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was written.
 - `PursuitRow` — `pursuit` — one line of work.
 - `ThreadMessageRow` — `forge_thread_message` — one thing said.
 - `ThreadRevisionRow` — `forge_thread_revision` — a correction to something said.

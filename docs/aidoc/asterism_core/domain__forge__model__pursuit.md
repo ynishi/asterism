@@ -1,6 +1,6 @@
 # asterism-core::domain::forge::model::pursuit
 
-One line of work: what it is trying to do, and every pass at it.
+One line of work: what it is trying to do, and every round at it.
 
 ```text
   Pursuit ── of : →Line ── parent? : →Pursuit
@@ -17,10 +17,10 @@ currently asks for derived by folding it. What differs is what the
 nodes carry — a line's node carries a table that has changed it, a
 pursuit's carries operations that have not changed anything yet.
 
-# A pass is the unit, not the pursuit
+# A round is the unit, not the pursuit
 
 [`Round`] is where work happens. A pursuit is the container that
-says what the passes are for, and it holds nothing that a round
+says what the rounds are for, and it holds nothing that a round
 could hold instead.
 
 A round that writes nothing is refused. Work is what a person does
@@ -39,7 +39,7 @@ the two is how that is found out — so a base that crept forward
 would shrink the window every time somebody looked at it, and a
 change nobody ever reconciled would come out clean.
 
-# A pass is a write, and nothing else
+# A round is a write, and nothing else
 
 There is no node here that records having looked at something.
 Work stops colliding with a line by *saying something different*,
@@ -53,7 +53,7 @@ whatever depended on it could be had for nothing.
 pushed after it. Satisfied means the intent was met — the act that
 turns that into a change point spans both logs and is not here.
 Abandoned means it was not, and that is a record rather than a
-deletion: the pass that was dropped stays readable, which is the
+deletion: the round that was dropped stays readable, which is the
 only way "we tried this and stopped" survives.
 
 Reopening is not a verb. Picking work back up is a new pursuit
@@ -77,5 +77,5 @@ looking — and a stored answer would be a second copy of it.
 - `Open` — The node work begins at.
 - `Outcome` — How a pursuit ended.
 - `Pursuit` — One line of work against one line.
-- `Round` — One pass at the work.
+- `Round` — One round at the work.
 

@@ -1,6 +1,6 @@
 # asterism-core::application::forge::pursuit_service
 
-Work use cases — opening a line of work, writing passes, looking at
+Work use cases — opening a line of work, writing rounds, looking at
 what the line did, and ending it.
 
 ```text
@@ -15,7 +15,7 @@ what the line did, and ending it.
 Four verbs and two questions, and only one of them touches a line's
 history. That asymmetry is the point of the design rather than an
 accident of it: the operation that happens most often, writing a
-pass, never reads the line at all, so two people working against
+round, never reads the line at all, so two people working against
 one line do not contend until one of them finishes.
 
 # What this service is allowed to decide

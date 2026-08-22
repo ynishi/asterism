@@ -11,8 +11,8 @@ Saying something about work, and correcting it.
   get / anchored / about    read
 ```
 
-Nothing here touches either log. A conversation about a pass does
-not change what the pass said, and a remark on a change point does
+Nothing here touches either log. A conversation about a round does
+not change what the round said, and a remark on a change point does
 not move the line — which is why this is a third face rather than
 more verbs on the two that write records.
 
@@ -26,7 +26,7 @@ every verb that takes one loads the pursuit or the line before a
 thread exists.
 
 That is the whole of what this service decides, and it decides it
-by asking. The refusals are the model's — an entry a pass did not
+by asking. The refusals are the model's — an entry a round did not
 touch is [`Anchor::entry`]'s refusal, not one written here.
 
 # What this service is allowed to decide

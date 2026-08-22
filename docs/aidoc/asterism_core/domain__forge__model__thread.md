@@ -12,13 +12,13 @@ Saying something about work.
 
 A node carries a note, and a note is one line written once by
 whoever wrote the node. This is the rest: a remark on somebody
-else's pass, a question about one entry it touched, a review of
+else's round, a question about one entry it touched, a review of
 what landed.
 
 # Four anchors, because four things are worth remarking on
 
-A pursuit as a whole — what this work is for. A pass — the judgement
-somebody made in it. One entry a pass touched — this particular
+A pursuit as a whole — what this work is for. A round — the judgement
+somebody made in it. One entry a round touched — this particular
 thing, in this particular attempt. And a change point — a review
 after the fact.
 
@@ -26,7 +26,7 @@ after the fact.
 on an entry alone would make it follow that entry into every other
 pursuit it is ever carried into, which is how a note about one
 attempt becomes a note about the thing itself. Anchoring at
-`(round, entry)` says *this entry, as this pass had it*, and that
+`(round, entry)` says *this entry, as this round had it*, and that
 does not travel. A change point can be anchored to on its own,
 because there is nowhere for a remark on it to travel to.
 

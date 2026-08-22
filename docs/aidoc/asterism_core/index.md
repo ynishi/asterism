@@ -60,7 +60,7 @@ the private design notes.
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
-- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing passes, looking at
+- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
 - [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
@@ -119,7 +119,7 @@ the private design notes.
 - [`domain::forge::model::history`](domain__forge__model__history.md): A line's history: what it carries, and how it got there.
 - [`domain::forge::model::line`](domain__forge__model__line.md): The line — the forge's top entity.
 - [`domain::forge::model::op`](domain__forge__model__op.md): What work writes, and what it folds into.
-- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every pass at it.
+- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every round at it.
 - [`domain::forge::model::react`](domain__forge__model__react.md): Letting a line's rule answer a collision.
 - [`domain::forge::model::restore`](domain__forge__model__restore.md): Building the model back from what a store kept.
 - [`domain::forge::model::strategy`](domain__forge__model__strategy.md): How a line settles a collision — the contract, and not the rule.

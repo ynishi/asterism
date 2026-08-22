@@ -115,12 +115,12 @@
     {
       "path": "asterism_infra::forge::rows::PursuitNodeRow",
       "kind": "struct",
-      "docs": "`pursuit_node` — a pass or an ending.\n\nNo column says where in the log a node sits, for the reason\n`change_point` has none: it carries its parent, and that is the\norder. A sequence beside the chain would be a second answer to a\nquestion the chain already answers, and the two disagree the first\ntime a write goes half-way."
+      "docs": "`pursuit_node` — a round or an ending.\n\nNo column says where in the log a node sits, for the reason\n`change_point` has none: it carries its parent, and that is the\norder. A sequence beside the chain would be a second answer to a\nquestion the chain already answers, and the two disagree the first\ntime a write goes half-way."
     },
     {
       "path": "asterism_infra::forge::rows::PursuitOpRow",
       "kind": "struct",
-      "docs": "`pursuit_op` — one operation of one pass, in the order it was written."
+      "docs": "`pursuit_op` — one operation of one round, in the order it was written."
     },
     {
       "path": "asterism_infra::forge::rows::PursuitRow",
@@ -140,7 +140,7 @@
     {
       "path": "asterism_infra::forge::rows::ThreadRow",
       "kind": "struct",
-      "docs": "`forge_thread` — one conversation, and what it hangs off.\n\nThe anchor is a kind and four nullable columns rather than one id,\nbecause what it points at is one of four things and no key points\nat a column whose meaning depends on another. Two of the four are\nrows and carry real references; a pass is a node of a pursuit and\nan entry is not a row at all, so those two stay bare — the same\nbareness every other node reference in the forge has, for the same\nreason."
+      "docs": "`forge_thread` — one conversation, and what it hangs off.\n\nThe anchor is a kind and four nullable columns rather than one id,\nbecause what it points at is one of four things and no key points\nat a column whose meaning depends on another. Two of the four are\nrows and carry real references; a round is a node of a pursuit and\nan entry is not a row at all, so those two stay bare — the same\nbareness every other node reference in the forge has, for the same\nreason."
     },
     {
       "path": "asterism_infra::forge::rows::anchor_columns",
@@ -205,7 +205,7 @@
     {
       "path": "asterism_infra::forge::rows::take_round_apart",
       "kind": "function",
-      "docs": "One pass, for the append a push makes."
+      "docs": "One round, for the append a push makes."
     },
     {
       "path": "asterism_infra::forge::rows::take_thread_apart",
@@ -895,7 +895,7 @@
     {
       "path": "asterism_infra::sqlite::repo::forge",
       "kind": "module",
-      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n# And the one place a log is read to decide something\n\nA close that loses its parent is decided again in here, from a line\nand a pursuit read inside the transaction that lost. That read is\nnot a comparison: nothing is checked against what the caller\ndecided, and the answer comes from the model rather than from this\nadapter. What the transaction contributes is that the logs cannot\nmove between the read and the write, which is why the second\nattempt is the last one.\n\n`contains` is what exactness is guarding against, and the direction\nmatters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*\nof `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a\nsubstring test asked about the ending matches the fork — it reads\n\"somebody pushed a pass first\" as \"this work has already ended\",\nand an ending is final where a fork is decided again. So the close\nthat a second decision would have landed is refused instead, and\nthe caller is told the work is over when it is only one pass\nfurther along. The other direction cannot happen, which is why\nnaming it would be naming the wrong risk."
+      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n# And the one place a log is read to decide something\n\nA close that loses its parent is decided again in here, from a line\nand a pursuit read inside the transaction that lost. That read is\nnot a comparison: nothing is checked against what the caller\ndecided, and the answer comes from the model rather than from this\nadapter. What the transaction contributes is that the logs cannot\nmove between the read and the write, which is why the second\nattempt is the last one.\n\n`contains` is what exactness is guarding against, and the direction\nmatters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*\nof `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a\nsubstring test asked about the ending matches the fork — it reads\n\"somebody pushed a round first\" as \"this work has already ended\",\nand an ending is final where a fork is decided again. So the close\nthat a second decision would have landed is refused instead, and\nthe caller is told the work is over when it is only one round\nfurther along. The other direction cannot happen, which is why\nnaming it would be naming the wrong risk."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge::SqliteForge",
