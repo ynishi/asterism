@@ -401,6 +401,23 @@ and this project adheres to
 
 ### Added
 
+- **A model earns its place before the app trusts it** (#112). The provider-side
+  half of the model split arrives as `asterism-model-lab`, a separate binary in
+  the `asterism-import` category — the actor is the provider, and nothing in the
+  app's dependency graph reaches back to it. Four verbs: `prepare` downloads a
+  known model's towers from their official source (a compiled-in recipe table,
+  because a recipe is a provider decision that belongs in code review) and
+  writes the digest-pinned manifest; `verify` opens, loads and smokes the
+  package exactly the way the app will, because it links the same use-side
+  library; `qualify` measures it against the fixture set; `registry` authors the
+  entry a future in-app fetch flow consumes. The measurement itself moved out of
+  the test harness into a shared `fixtures::eval` module so the floor the tool
+  suggests and the ordering CI asserts cannot drift — and its two floor
+  heuristics, codified from the hand-made calls, reproduce them against the real
+  model: suggested edge floor 0.9205 against the adopted 0.92, suggested tag
+  floor 0.12 exactly. `convert` and `train` stay charter, stated and
+  unimplemented.
+
 - **Pixels can propose tags, and a person rules** (#112). The tag phase of the
   visual layer: after an image is encoded, a `visual_tag_suggest` job scores its
   vector against every channel Tag name's cached text embedding (filled lazily;

@@ -300,6 +300,10 @@
 - [asterism-media-probe overview](asterism_media_probe/index.md): Header-only media measurement: what the bytes say about themselves.
 - [asterism-media-probe::a1111](asterism_media_probe/a1111.md): `a1111` — the line grammar of AUTOMATIC1111's `parameters` text,
 
+## asterism-model-lab 0.0.0
+
+- [asterism-model-lab overview](asterism_model_lab/index.md): # asterism-model-lab — provider-side model preparation (#112)
+
 ## asterism-server 0.0.0
 
 - [asterism-server overview](asterism_server/index.md): # asterism-server — library surface.
