@@ -68,10 +68,12 @@
 //! under a parent, and what they changed, is a question answered by
 //! looking — and a stored answer would be a second copy of it.
 
+use std::collections::BTreeSet;
+
 use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
-use crate::domain::forge::model::op::{Op, Rows, fold};
-use crate::domain::forge::model::value::{ChangePointId, LineId, Name, NodeId, PursuitId};
+use crate::domain::forge::model::op::{Op, OpKind, Rows, fold};
+use crate::domain::forge::model::value::{ChangePointId, Content, LineId, Name, NodeId, PursuitId};
 
 /// Why a pursuit was opened, in the words of whoever opened it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -399,6 +401,25 @@ impl WorkLog {
         Ok(())
     }
 
+    /// Every content this log has ever named.
+    ///
+    /// The line's [`holds`](crate::domain::forge::model::line::Line::holds)
+    /// with the same meaning and the same reason: an operation naming
+    /// content that somebody deleted is an operation that cannot be
+    /// read, folded, or landed. Work that gave up still holds what it
+    /// named — what it tried is the record, and a record pointing at
+    /// nothing is not one.
+    pub fn holds(&self) -> BTreeSet<Content> {
+        self.rounds
+            .iter()
+            .flat_map(|round| round.ops())
+            .filter_map(|op| match op.kind() {
+                OpKind::Add { content, .. } | OpKind::Replace { content } => Some(*content),
+                OpKind::Rename { .. } | OpKind::Remove => None,
+            })
+            .collect()
+    }
+
     /// What this work is asking the line to carry, folded across every
     /// pass.
     ///
@@ -500,6 +521,12 @@ impl Pursuit {
         self.log.close().map(Close::outcome)
     }
 
+    /// Every content this work's log has ever named — see
+    /// [`WorkLog::holds`].
+    pub fn holds(&self) -> BTreeSet<Content> {
+        self.log.holds()
+    }
+
     /// What this work is asking the line to carry.
     pub fn request(&self) -> Rows {
         self.log.request()
@@ -522,7 +549,7 @@ mod tests {
     use crate::domain::forge::model::act::Actor;
     use crate::domain::forge::model::table::Row;
     use crate::domain::forge::model::value::ActorId;
-    use crate::domain::forge::model::value::Content;
+    use crate::domain::forge::model::value::{Content, EntryId};
     use chrono::{DateTime, TimeZone, Utc};
     use uuid::Uuid;
 
@@ -722,5 +749,65 @@ mod tests {
             pursuit.log().open().intent().title.as_ref(),
             Some(&name("the album cover"))
         );
+    }
+
+    /// A work log holds what it named, for the same reason a line
+    /// does: an operation pointing at bytes somebody deleted is one
+    /// nothing can fold, land, or read back.
+    #[test]
+    fn a_work_log_holds_what_its_operations_named_including_the_one_it_took_off() {
+        let mut work = opened();
+        let added = content();
+        let replaced = content();
+        let entry = EntryId::new();
+
+        work.push(
+            Round::new(
+                work.log().head(),
+                vec![
+                    Op::add_to(entry, added, name("one")),
+                    Op::replace(entry, replaced),
+                    Op::rename(entry, name("two")),
+                    Op::remove(entry),
+                ],
+                None,
+                act(1),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let held = work.holds();
+        assert!(held.contains(&added), "what it first asked for");
+        assert!(held.contains(&replaced), "and what it moved to");
+        assert_eq!(held.len(), 2, "a rename and a removal name no content");
+    }
+
+    /// Giving up releases nothing. What was tried is the record, and a
+    /// record pointing at nothing is not one.
+    #[test]
+    fn abandoned_work_still_holds_what_it_named() {
+        let mut work = opened();
+        let tried = content();
+        work.push(
+            Round::new(
+                work.log().head(),
+                vec![Op::add(tried, name("tried"))],
+                None,
+                act(1),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        work.end(Close::new(
+            work.log().head(),
+            Outcome::Abandoned,
+            None,
+            act(2),
+        ))
+        .unwrap();
+
+        assert_eq!(work.outcome(), Some(Outcome::Abandoned));
+        assert!(work.holds().contains(&tried));
     }
 }

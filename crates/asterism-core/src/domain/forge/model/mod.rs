@@ -199,6 +199,18 @@
 //! the forge sees only its outcome — the same [`Content`] coming back.
 //! The whole of the reasoning is in [`op`].
 //!
+//! **A way to release what a line holds without dropping the line.**
+//! Every content a change point named is held for as long as the line
+//! exists, and taking the entry off does not release it — the change
+//! point that put it there is still in the chain. There is no filter,
+//! no rebase, no editing a point after the fact, and that is a
+//! decision rather than a gap: a filtered change point could not name
+//! the work it came out of, because that work asked for something
+//! else. What a filter is for is reachable already — open a new line
+//! and put on it what should have been there, which is a new history
+//! rather than an edited one — and the old line is then archived and
+//! dropped. See [`line`] for the standing those two words name.
+//!
 //! **Anything about people.** No owner, no persona, no actor set.
 //! [`Act`] records who did a thing, because a history that cannot say
 //! that is not a history; whether they were allowed to is a question
@@ -210,6 +222,7 @@
 //! model is stated here, beside the types that hold it.
 //!
 //! [`Line`]: line::Line
+//! [`Standing`]: line::Standing
 //! [`Line::ROOT`]: line::Line::ROOT
 //! [`History`]: history::History
 //! [`History::begin`]: history::History::begin

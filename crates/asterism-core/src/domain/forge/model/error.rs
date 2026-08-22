@@ -158,6 +158,32 @@ pub enum ForgeError {
         .0.len()
     )]
     Collides(Vec<Collision>),
+
+    /// The line has been archived, and an archived line does not move.
+    ///
+    /// It is still readable, still holds everything it ever held, and
+    /// can be reopened. What it will not do is take a change point —
+    /// which is the whole of what archiving means, because a line that
+    /// still moved would be a line that was archived in name only.
+    #[error("this line is archived; reopen it before putting anything on it")]
+    Archived,
+
+    /// Something asked to drop a line that is still open.
+    ///
+    /// Dropping is reachable only through the archive, as purging is
+    /// reachable only through the trash everywhere else in this
+    /// codebase. The two steps are what make an irreversible one
+    /// deliberate.
+    #[error("a line is dropped from the archive; archive it first")]
+    NotArchived,
+
+    /// Something asked to drop a line that work is still open against.
+    ///
+    /// Dropping takes the history that work was cut from, so what is
+    /// left is a log against nothing. Ending the work first is not a
+    /// formality — it is the record of what happened to it.
+    #[error("{0} pieces of work are still open against this line")]
+    WorkStillOpen(usize),
 }
 
 impl From<ForgeError> for DomainError {
@@ -174,6 +200,15 @@ impl From<ForgeError> for DomainError {
     /// not fighting anybody, it is already saying what the caller
     /// asked for. Retrying cannot change that, and the caller's move
     /// is to close the work as abandoned rather than to read again.
+    ///
+    /// The three standing refusals read the same way and for the same
+    /// reason. [`Archived`](ForgeError::Archived) is not a race — the
+    /// line is not somewhere else, it is finished with, and reading
+    /// again will find it finished with again.
+    /// [`NotArchived`](ForgeError::NotArchived) and
+    /// [`WorkStillOpen`](ForgeError::WorkStillOpen) are the two steps
+    /// of dropping asked out of order. Each names what the caller has
+    /// to do next, and none of them is waiting.
     fn from(error: ForgeError) -> Self {
         let message = error.to_string();
         match error {
@@ -196,7 +231,10 @@ impl From<ForgeError> for DomainError {
             | ForgeError::WrongStrategy
             | ForgeError::UnknownChangePoint
             | ForgeError::Unsettled
-            | ForgeError::NothingToRecord => DomainError::Validation(message),
+            | ForgeError::NothingToRecord
+            | ForgeError::Archived
+            | ForgeError::NotArchived
+            | ForgeError::WorkStillOpen(_) => DomainError::Validation(message),
         }
     }
 }

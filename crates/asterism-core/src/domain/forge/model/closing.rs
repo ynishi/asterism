@@ -63,7 +63,7 @@ use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::change::{collisions, normalise, write_set};
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::ChangePoint;
-use crate::domain::forge::model::line::Line;
+use crate::domain::forge::model::line::{Line, Standing};
 use crate::domain::forge::model::pursuit::{Close, Outcome, Pursuit};
 use crate::domain::forge::model::table::Table;
 
@@ -133,6 +133,10 @@ impl Closing {
 /// - [`NotThisLine`](ForgeError::NotThisLine) — the pursuit is against
 ///   another line. Answering anything else would be judging work
 ///   against a history that has nothing to do with it.
+/// - [`Archived`](ForgeError::Archived) — the line is finished with,
+///   and a satisfied close is the one thing that moves it. Refused
+///   before anything is folded, because the answer does not depend on
+///   what the work asked for.
 /// - [`AlreadyClosed`](ForgeError::AlreadyClosed) — work ends once.
 /// - [`UnknownBase`](ForgeError::UnknownBase) — the node the work was
 ///   cut from is not in this history.
@@ -164,6 +168,15 @@ pub fn close(
             close: Close::new(at, Outcome::Abandoned, note, act),
             point: None,
         });
+    }
+
+    // Asked before the fold, because it does not depend on it: an
+    // archived line takes no change point, and a satisfied close is a
+    // change point. Work against one that is finished with can still
+    // give up — that is the branch above, and it is the reason this
+    // sits after it rather than beside `NotThisLine`.
+    if line.standing() == Standing::Archived {
+        return Err(ForgeError::Archived);
     }
 
     // What is left after the line's own answer is subtracted. An axis
@@ -518,5 +531,23 @@ mod tests {
 
         assert_eq!(refused, Err(ForgeError::NotOnHead));
         assert!(pursuit.outcome().is_none());
+    }
+
+    /// An archived line takes no change point, so the one close that
+    /// would put one there is refused — and the one that would not is
+    /// still allowed, because giving up is not a thing the line has an
+    /// opinion about.
+    #[test]
+    fn an_archived_line_refuses_a_satisfied_close_and_allows_an_abandoned_one() {
+        let mut line = line();
+        let work = passing(work_on(&line), vec![Op::add(content(), name("one"))], 1);
+        line.archive(act(2));
+
+        let refused = close(&line, &work, Outcome::Satisfied, None, act(3));
+        assert!(matches!(refused, Err(ForgeError::Archived)), "{refused:?}");
+
+        let giving_up = close(&line, &work, Outcome::Abandoned, None, act(4))
+            .expect("work against a finished line can still say it gave up");
+        assert!(!giving_up.lands());
     }
 }

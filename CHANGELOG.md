@@ -10,6 +10,36 @@ and this project adheres to
 
 ### Added
 
+- **A line has a standing, and says what it holds** (#102). The model had no
+  answer to "this line is finished with" and no answer to "what would be lost if
+  it went", which left the layer below with no way to protect the bytes a line
+  points at. `Standing` is `Open` or `Archived` — beside the name and the
+  strategy rather than in the chain, for the reason a rename is not a change
+  point — and an archived line refuses `record`, so nothing lands on one and no
+  satisfied close reaches one. Giving up still works: work against a finished
+  line can close abandoned, because that puts nothing on it.
+
+  `Line::holds` is every content any change point on the line has ever named,
+  and `Pursuit::holds` is the same for a work log. **This is what the layer
+  holding the bytes may not let go of.** A line says what is on it _now_ —
+  alive, under this name, at this content — so a line pointing at bytes somebody
+  deleted is a line lying about the present. That is different from a log of
+  past events, which stays true whatever happens to what it names, and it is why
+  the ledger this model replaced could name an asset without holding it.
+
+  Taking an entry off the line releases nothing: the change point that put it
+  there is still in the chain and still names it. So the set only grows, and the
+  one thing that shrinks it is dropping the line. `Line::may_drop` holds that
+  rule — dropping is reachable only through the archive, as purging is reachable
+  only through the trash everywhere else here, and a line with work still open
+  against it refuses with the count.
+
+  **Rewriting is deliberately not a verb.** No filter, no rebase, no editing a
+  change point after the fact. A filtered change point could not name the work
+  it came out of, because that work asked for something else; what a filter is
+  for is reachable already — open a new line and put on it what should have been
+  there — and the old line is then archived and dropped.
+
 - **The forge's model can be built back from stored values** (#102).
   `model::restore` is the one door an id comes in by. Every other constructor in
   the model mints — a line mints its id and its genesis, work mints its id and

@@ -55,7 +55,7 @@ use std::collections::HashMap;
 use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::{ChangePoint, Genesis, History};
-use crate::domain::forge::model::line::Line;
+use crate::domain::forge::model::line::{Line, Standing};
 use crate::domain::forge::model::op::Op;
 use crate::domain::forge::model::pursuit::{Close, Intent, Open, Outcome, Pursuit, Round, WorkLog};
 use crate::domain::forge::model::table::Table;
@@ -105,19 +105,26 @@ pub fn change_point(
 ///   a change point would leave two live entries under one name. The
 ///   line could not have been written that way and is not read back
 ///   that way either.
+#[allow(clippy::too_many_arguments)]
 pub fn line(
     id: LineId,
     name: Name,
     strategy: StrategyId,
+    standing: Standing,
     meta: Meta,
     genesis: Genesis,
     points: Vec<ChangePoint>,
 ) -> Result<Line, ForgeError> {
+    // The chain goes back through `History::record` rather than
+    // `Line::record`, which is the one place the two differ on
+    // purpose: `Line::record` refuses an archived line, and an
+    // archived line's history is exactly what this is putting back.
+    // Reading is not moving.
     let mut history = History::restored(genesis);
     for point in chain(history.head(), points)? {
         history.record(point)?;
     }
-    Ok(Line::restored(id, name, strategy, history, meta))
+    Ok(Line::restored(id, name, strategy, standing, history, meta))
 }
 
 /// The node work opened at.
@@ -293,6 +300,7 @@ mod tests {
             kept.id(),
             kept.name().clone(),
             kept.strategy().clone(),
+            kept.standing(),
             meta(*kept.meta().created(), *kept.meta().updated()),
             genesis(
                 kept.history().genesis().id(),
@@ -319,6 +327,7 @@ mod tests {
             original.id(),
             original.name().clone(),
             original.strategy().clone(),
+            original.standing(),
             meta(*original.meta().created(), *original.meta().updated()),
             genesis(
                 original.history().genesis().id(),
@@ -342,6 +351,7 @@ mod tests {
             original.id(),
             original.name().clone(),
             original.strategy().clone(),
+            original.standing(),
             meta(*original.meta().created(), *original.meta().updated()),
             genesis(
                 original.history().genesis().id(),
@@ -378,6 +388,7 @@ mod tests {
             line_a.id(),
             line_a.name().clone(),
             line_a.strategy().clone(),
+            line_a.standing(),
             meta(*line_a.meta().created(), *line_a.meta().updated()),
             genesis(genesis_id, *line_a.history().genesis().act()),
             vec![forged],

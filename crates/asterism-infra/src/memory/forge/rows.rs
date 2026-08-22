@@ -12,7 +12,7 @@
 
 use asterism_core::domain::forge::model::act::{Act, Actor};
 use asterism_core::domain::forge::model::history::ChangePoint;
-use asterism_core::domain::forge::model::line::Line;
+use asterism_core::domain::forge::model::line::{Line, Standing};
 use asterism_core::domain::forge::model::op::{Op, OpKind};
 use asterism_core::domain::forge::model::pursuit::{Close, Outcome, Pursuit, Round};
 use asterism_core::domain::forge::model::restore;
@@ -78,6 +78,10 @@ pub struct LineRow {
     pub name: Name,
     /// The rule it settles collisions by. Moves the same way.
     pub strategy: StrategyId,
+    /// Whether it is still being worked on. Beside the name and the
+    /// strategy because it is a statement about the line, not about
+    /// anything the line carries.
+    pub standing: Standing,
     /// The node it begins at. Inline rather than a row of its own: a
     /// history has exactly one and can never be without it.
     pub genesis: ChangePointId,
@@ -214,6 +218,7 @@ pub fn take_new_line_apart(line: &Line) -> LineRow {
         id: line.id(),
         name: line.name().clone(),
         strategy: line.strategy().clone(),
+        standing: line.standing(),
         genesis: line.history().genesis().id(),
         genesis_act: ActRow::of(line.history().genesis().act()),
         created: ActRow::of(line.meta().created()),
@@ -371,6 +376,7 @@ pub fn read_line(
         head.id,
         head.name.clone(),
         head.strategy.clone(),
+        head.standing,
         restore::meta(head.created.read()?, head.updated.read()?),
         restore::genesis(head.genesis, head.genesis_act.read()?),
         built,
@@ -470,4 +476,54 @@ fn read_op(row: &WorkOpRow) -> Result<Op, DomainError> {
             )));
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use asterism_core::domain::forge::model::act::Actor;
+    use asterism_core::domain::forge::model::value::{ActorId, StrategyId};
+    use chrono::TimeZone;
+
+    fn act(minute: u32) -> Act {
+        Act::new(
+            Utc.with_ymd_and_hms(2026, 8, 22, 10, minute, 0).unwrap(),
+            Actor::User(ActorId::new()),
+        )
+    }
+
+    fn a_line() -> Line {
+        Line::open(
+            Name::new(Line::ROOT).unwrap(),
+            StrategyId::new("by-hand").unwrap(),
+            act(0),
+        )
+    }
+
+    /// The standing is the one thing about a line that no history
+    /// records, so a column that dropped it would take an archived
+    /// line and hand back an open one — the store quietly undoing a
+    /// decision. Pinned here because nothing else reaches it: no
+    /// service archives a line yet, and this is the whole of the round
+    /// trip that carries it.
+    #[test]
+    fn an_archived_line_comes_back_archived() {
+        let mut line = a_line();
+        line.archive(act(1));
+
+        let head = take_new_line_apart(&line);
+        assert_eq!(head.standing, Standing::Archived, "it went into the row");
+
+        let read_back = read_line(&head, &[], &[]).expect("a line a store kept is a line");
+        assert_eq!(read_back, line);
+        assert_eq!(read_back.standing(), Standing::Archived);
+    }
+
+    #[test]
+    fn an_open_line_comes_back_open() {
+        let line = a_line();
+        let read_back = read_line(&take_new_line_apart(&line), &[], &[]).unwrap();
+        assert_eq!(read_back, line);
+        assert_eq!(read_back.standing(), Standing::Open);
+    }
 }
