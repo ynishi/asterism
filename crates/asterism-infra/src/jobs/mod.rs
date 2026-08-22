@@ -3589,7 +3589,7 @@ mod tests {
             _height: u32,
         ) -> Result<Vec<f32>, DomainError> {
             let (mut r, mut g, mut b) = (0f64, 0f64, 0f64);
-            for px in rgb.chunks_exact(3) {
+            for px in rgb.as_chunks::<3>().0 {
                 r += px[0] as f64;
                 g += px[1] as f64;
                 b += px[2] as f64;
