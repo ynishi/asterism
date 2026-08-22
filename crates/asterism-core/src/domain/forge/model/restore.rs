@@ -1,13 +1,14 @@
 //! Building the model back from what a store kept.
 //!
 //! ```text
-//!   stored rows ──► restore::line / restore::pursuit
+//!   stored rows ──► restore::line / restore::pursuit / restore::thread
 //!                        │
 //!                        ├─ the ids come from outside, here and
 //!                        │  nowhere else in the model
 //!                        │
 //!                        └─ the nodes go back through record / push /
-//!                           end — the same refusals a fresh write meets
+//!                           end / say — the same refusals a fresh
+//!                           write meets
 //! ```
 //!
 //! # Why this is one module rather than a constructor per type
@@ -59,8 +60,9 @@ use crate::domain::forge::model::line::{Line, Standing};
 use crate::domain::forge::model::op::Op;
 use crate::domain::forge::model::pursuit::{Close, Intent, Open, Outcome, Pursuit, Round};
 use crate::domain::forge::model::table::Table;
+use crate::domain::forge::model::thread::{Anchor, Body, Message, Revision, Thread};
 use crate::domain::forge::model::value::{
-    ChangePointId, LineId, Name, NodeId, PursuitId, StrategyId,
+    ChangePointId, LineId, MessageId, Name, NodeId, PursuitId, StrategyId, ThreadId,
 };
 
 /// The two stamps a store kept for a thing's description.
@@ -196,6 +198,53 @@ pub fn pursuit(
         }
     }
     Ok(work)
+}
+
+/// One thing said, as it was kept, with every correction to it.
+pub fn message(
+    id: MessageId,
+    parent: Option<MessageId>,
+    body: Body,
+    act: Act,
+    revisions: Vec<Revision>,
+) -> Message {
+    Message::restored(id, parent, body, act, revisions)
+}
+
+/// A whole conversation, from what it hangs off and what was said.
+///
+/// `messages` are in the order they were written, which for a thread
+/// is the order a store kept them in and not an order anything
+/// derives: a reply names its parent, but two replies to one message
+/// are ordered by nothing else. See the module docs on
+/// [`thread`](super::thread) for why that is affordable here and
+/// nowhere else in this model.
+///
+/// # Refusals
+///
+/// - [`NotInThatThread`](ForgeError::NotInThatThread) — a message
+///   replies to one this thread does not hold. Handed back through
+///   [`Thread::say`], so a stored reply meets the refusal a fresh one
+///   meets — including the case a store could produce and a caller
+///   could not: a reply that arrived *before* the message it answers.
+/// - [`EmptyThread`](ForgeError::EmptyThread) — nothing was said. A
+///   thread with no messages is somebody having opened a conversation
+///   and said nothing, which [`Thread::open`] refuses to make and this
+///   refuses to read back.
+pub fn thread(
+    id: ThreadId,
+    anchor: Anchor,
+    title: Option<Name>,
+    messages: Vec<Message>,
+) -> Result<Thread, ForgeError> {
+    if messages.is_empty() {
+        return Err(ForgeError::EmptyThread);
+    }
+    let mut held = Thread::restored(id, anchor, title);
+    for message in messages {
+        held.say(message)?;
+    }
+    Ok(held)
 }
 
 /// Puts change points in the chain's order, starting from `head`.
@@ -496,6 +545,87 @@ mod tests {
         let refused = round(NodeId::new(), NodeId::new(), Vec::new(), None, act(1));
         assert!(
             matches!(refused, Err(ForgeError::EmptyRound)),
+            "{refused:?}"
+        );
+    }
+
+    fn body(said: &str) -> Body {
+        Body::new(said).expect("something was said")
+    }
+
+    /// A conversation comes back whole: what was said, what it replied
+    /// to, and every correction — with the ids the store kept.
+    #[test]
+    fn a_stored_thread_comes_back_with_its_ids_and_its_corrections() {
+        let anchor = Anchor::Pursuit(PursuitId::new());
+        let (first, second) = (MessageId::new(), MessageId::new());
+        let held = ThreadId::new();
+
+        let thread = thread(
+            held,
+            anchor,
+            Some(name("about the second pass")),
+            vec![
+                message(
+                    first,
+                    None,
+                    body("this reads oddly"),
+                    act(1),
+                    vec![Revision::new(body("this reads oddly to me"), act(2))],
+                ),
+                message(second, Some(first), body("agreed"), act(3), Vec::new()),
+            ],
+        )
+        .expect("a store kept a conversation somebody had");
+
+        assert_eq!(thread.id(), held);
+        assert_eq!(thread.anchor(), anchor);
+        assert_eq!(thread.messages().len(), 2);
+        assert_eq!(thread.messages()[0].id(), first);
+        assert_eq!(thread.messages()[1].parent(), Some(first));
+
+        // The body now is the correction; what was said first is still
+        // there, which is the whole reason amending appends.
+        assert_eq!(
+            thread.messages()[0].body().as_str(),
+            "this reads oddly to me"
+        );
+        assert_eq!(thread.messages()[0].said().as_str(), "this reads oddly");
+    }
+
+    /// A reply the store handed over before the message it answers is
+    /// refused, rather than read back as a thread whose parents point
+    /// forwards.
+    #[test]
+    fn a_stored_reply_that_arrives_before_its_parent_is_refused() {
+        let (first, second) = (MessageId::new(), MessageId::new());
+        let refused = thread(
+            ThreadId::new(),
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            vec![
+                message(second, Some(first), body("agreed"), act(3), Vec::new()),
+                message(first, None, body("this reads oddly"), act(1), Vec::new()),
+            ],
+        );
+        assert!(
+            matches!(refused, Err(ForgeError::NotInThatThread)),
+            "{refused:?}"
+        );
+    }
+
+    /// And a conversation nothing was said in does not come back as an
+    /// empty one.
+    #[test]
+    fn a_stored_thread_with_nothing_in_it_is_refused() {
+        let refused = thread(
+            ThreadId::new(),
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            Vec::new(),
+        );
+        assert!(
+            matches!(refused, Err(ForgeError::EmptyThread)),
             "{refused:?}"
         );
     }

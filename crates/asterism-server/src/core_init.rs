@@ -501,6 +501,17 @@ pub struct CoreCtx {
     /// startup — and reached from nowhere else until the surface they
     /// belong on is decided.
     pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
+    /// What was said about work: a remark on a pass, a question about
+    /// one entry it touched, a review of what landed.
+    ///
+    /// Named apart from [`thread_service`](Self::thread_service),
+    /// which is the raw layer's annotation surface and a different
+    /// primitive: that one anchors to snapshots, cards and query
+    /// groups, and this one to a pursuit, a pass, an entry as a pass
+    /// had it, or a change point. Neither could carry the other's
+    /// anchors without learning what the other layer is made of, which
+    /// is why there are two — in the services, and in the tables.
+    pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -1122,6 +1133,13 @@ pub async fn init_core_with(
         forge_actors.clone(),
         forge_clock.clone(),
     ));
+    let forge_thread_service = Arc::new(asterism_core::application::forge::ThreadService::new(
+        forge.clone(),
+        forge.clone(),
+        forge.clone(),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
     let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
         forge.clone(),
         forge.clone(),
@@ -1268,6 +1286,7 @@ pub async fn init_core_with(
         dispatch_service,
         line_service,
         pursuit_service,
+        forge_thread_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

@@ -7230,6 +7230,115 @@ CREATE UNIQUE INDEX idx_forge_actor_stands_for
     ON forge_actor(stands_for, COALESCE(subject, ''));
 "#;
 
+/// V98 — what was said about work (#102).
+///
+/// Three tables for the forge's own conversations: the thread, what
+/// was said in it, and every correction to what was said.
+///
+/// # Why `forge_` and not `thread`
+///
+/// Because `thread` is taken, by the annotation surface downstairs
+/// that anchors to snapshots, cards and query groups. That is not this
+/// one and could not be: the four things worth remarking on here are a
+/// pursuit, a pass, an entry as a pass had it, and a change point, and
+/// the layer below would have to learn what a pursuit is to carry
+/// them. The collision is the schema saying what the model already
+/// says — two primitives, named apart rather than merged.
+///
+/// # The anchor is four columns and a kind, not a polymorphic id
+///
+/// A thread hangs off one of four things — a pursuit, a pass, one
+/// entry as a pass had it, or a change point — and SQLite has no key
+/// that points at a column whose meaning depends on another. Naming
+/// each target its own nullable column buys the foreign keys back:
+/// `anchor_pursuit` and `anchor_change_point` are real references, and
+/// a `CHECK` says which of them a given `anchor_kind` requires. The
+/// node and entry halves stay bare, for the reason every other node
+/// reference in the forge is bare — a pass is a `pursuit_node` row and
+/// an entry is not a row at all.
+///
+/// The entry anchor carries the pass as well as the entry, because
+/// what it means is *this entry, as this pass had it*. An entry alone
+/// would follow the entry into every other pursuit it is carried into,
+/// which is how a remark about one attempt becomes a remark about the
+/// thing itself.
+///
+/// **The pass does not carry the work it is in, and neither does this.**
+/// A node id identifies one node of one pursuit, so the anchor is the
+/// node — which is why `anchor_pursuit` is set on the `pursuit` kind
+/// and on no other. The service that opens a thread is handed the
+/// work as well, because finding a pass by id means reading the
+/// pursuit that has it; what it hands the model afterwards is the pass.
+///
+/// # Nothing removes and nothing overwrites
+///
+/// No `deleted_at`, and no update path for a body. Correcting a
+/// message writes a `thread_revision` and the body now is the last
+/// one, which is what `Message::amend` does in memory. The absence is
+/// the two logs' absence, for the same reason.
+///
+/// # Order is the clock here, and only here
+///
+/// `said_at` orders messages, and `position` orders the corrections to
+/// one message. Everywhere else in the forge the chain is the order
+/// and a timestamp is evidence; a conversation has no chain to read an
+/// order out of, and nothing derives from the order it has, so a clock
+/// that steps backwards makes a conversation read oddly and cannot
+/// make the line wrong.
+const V98_FORGE_THREADS: &str = r#"
+CREATE TABLE forge_thread (
+    id                  BLOB PRIMARY KEY,
+    anchor_kind         TEXT NOT NULL
+        CHECK (anchor_kind IN ('pursuit', 'round', 'entry', 'change_point')),
+    anchor_pursuit      BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    anchor_node         BLOB,
+    anchor_entry        BLOB,
+    anchor_change_point BLOB REFERENCES change_point(id) ON DELETE RESTRICT,
+    title               TEXT,
+    created_at          INTEGER NOT NULL,
+    created_by          BLOB NOT NULL,
+    created_kind        TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at          INTEGER NOT NULL,
+    updated_by          BLOB NOT NULL,
+    updated_kind        TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system')),
+    CHECK ((anchor_kind = 'pursuit') = (anchor_pursuit IS NOT NULL)),
+    CHECK ((anchor_kind IN ('round', 'entry')) = (anchor_node IS NOT NULL)),
+    CHECK ((anchor_kind = 'entry') = (anchor_entry IS NOT NULL)),
+    CHECK ((anchor_kind = 'change_point') = (anchor_change_point IS NOT NULL))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_anchor_pursuit ON forge_thread(anchor_pursuit);
+CREATE INDEX idx_forge_thread_anchor_node ON forge_thread(anchor_node);
+CREATE INDEX idx_forge_thread_anchor_change_point ON forge_thread(anchor_change_point);
+
+CREATE TABLE forge_thread_message (
+    id        BLOB PRIMARY KEY,
+    thread_id BLOB NOT NULL REFERENCES forge_thread(id) ON DELETE RESTRICT,
+    parent_id BLOB REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    body      TEXT NOT NULL,
+    said_at   INTEGER NOT NULL,
+    said_by   BLOB NOT NULL,
+    said_kind TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_message_thread
+    ON forge_thread_message(thread_id, said_at);
+
+CREATE TABLE forge_thread_revision (
+    message_id BLOB NOT NULL REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    position   INTEGER NOT NULL,
+    body       TEXT NOT NULL,
+    said_at    INTEGER NOT NULL,
+    said_by    BLOB NOT NULL,
+    said_kind  TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system')),
+    PRIMARY KEY (message_id, position)
+) STRICT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7330,6 +7439,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V95_DROP_THE_FIRST_FORGE_MODEL),
     Step::Sql(V96_FORGE_TABLES),
     Step::Sql(V97_FORGE_ACTOR),
+    Step::Sql(V98_FORGE_THREADS),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

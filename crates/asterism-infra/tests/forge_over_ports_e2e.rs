@@ -33,7 +33,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use asterism_core::application::forge::{LineService, PursuitService};
+use asterism_core::application::forge::{Anchored, LineService, PursuitService, ThreadService};
 use asterism_core::domain::attribution::{AttributionContext, Author};
 use asterism_core::domain::forge::clock::Clock;
 use asterism_core::domain::forge::closings::{Closings, Deciding};
@@ -45,11 +45,13 @@ use asterism_core::domain::forge::model::op::{Op, OpKind};
 use asterism_core::domain::forge::model::pursuit::{Intent, Outcome, Pursuit};
 use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::table::EntryStates;
+use asterism_core::domain::forge::model::thread::{Body, Message};
 use asterism_core::domain::forge::model::value::{
-    ActorId, Content, EntryId, Name, PursuitId, StrategyId,
+    ActorId, Content, EntryId, Name, NodeId, PursuitId, StrategyId,
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::strategies::{Builtin, MainlineFirst};
+use asterism_core::domain::forge::threads::Threads;
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::error::DomainError;
 use asterism_infra::memory::forge::{HoldsEverything, MemoryActors, MemoryForge};
@@ -86,6 +88,10 @@ fn who(name: &str) -> AttributionContext {
 
 fn name(text: &str) -> Name {
     Name::new(text).expect("a name")
+}
+
+fn body(said: &str) -> Body {
+    Body::new(said).expect("something was said")
 }
 
 /// The decision a caller would make again, for the tests that ask the
@@ -168,6 +174,8 @@ fn alive(states: &EntryStates) -> Vec<String> {
 struct World {
     lines: LineService,
     work: PursuitService,
+    /// What was said about any of it.
+    said: ThreadService,
     clock: Arc<Wound>,
     /// The ports again, for the tests that ask one directly rather
     /// than through a service — a caller holding a stale value is the
@@ -175,6 +183,7 @@ struct World {
     lines_port: Arc<dyn Lines>,
     pursuits_port: Arc<dyn Pursuits>,
     closings: Arc<dyn Closings>,
+    threads_port: Arc<dyn Threads>,
     persona: PersonaId,
     /// Set only over the in-memory store, for the one test that has to
     /// write rows nothing would ever write.
@@ -188,6 +197,7 @@ impl World {
     fn over_memory() -> Self {
         let store = MemoryForge::new();
         Self::wire(
+            Arc::new(store.clone()),
             Arc::new(store.clone()),
             Arc::new(store.clone()),
             Arc::new(store.clone()),
@@ -208,6 +218,7 @@ impl World {
             Arc::new(store.clone()),
             Arc::new(store.clone()),
             Arc::new(store.clone()),
+            Arc::new(store.clone()),
             None,
             Some(isle.clone()),
         );
@@ -219,12 +230,16 @@ impl World {
         lines: Arc<dyn Lines>,
         pursuits: Arc<dyn Pursuits>,
         closings: Arc<dyn Closings>,
+        threads: Arc<dyn Threads>,
         memory: Option<MemoryForge>,
         isle: Option<AsyncIsle>,
     ) -> Self {
         let clock = Arc::new(Wound::default());
         let rules = Arc::new(Builtin::default());
         let actors = Arc::new(MemoryActors::new());
+        // The same handles for both services, so a write from one and
+        // a remark on it from the other resolve to one actor.
+        let actors_again = actors.clone();
 
         Self {
             lines: LineService::new(
@@ -243,10 +258,18 @@ impl World {
                 actors,
                 clock.clone(),
             ),
+            said: ThreadService::new(
+                threads.clone(),
+                pursuits.clone(),
+                lines.clone(),
+                actors_again,
+                clock.clone(),
+            ),
             clock,
             lines_port: lines,
             pursuits_port: pursuits,
             closings,
+            threads_port: threads,
             persona: PersonaId::new(),
             memory,
             isle,
@@ -834,6 +857,270 @@ async fn a_stale_aim_is_decided_again(world: &World) {
     assert_eq!(alive(&held.states()), vec!["mine", "theirs"]);
 }
 
+/// A conversation about a pass is written, corrected, and read back
+/// with both what it says now and what it said first.
+///
+/// The round trip the store owes: ids the caller chose, the order the
+/// messages were said in, a reply pointing at its parent, and every
+/// correction in the order it was made. A store that kept only the
+/// current body would pass a test that read `body()` and lose the
+/// record this whole primitive exists to keep.
+#[tokio::test]
+async fn a_conversation_is_kept_whole_and_read_back_whole_over_memory() {
+    a_conversation_is_kept_whole_and_read_back_whole(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_conversation_is_kept_whole_and_read_back_whole_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_conversation_is_kept_whole_and_read_back_whole(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_conversation_is_kept_whole_and_read_back_whole(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = cut(world, &line, "mine").await;
+    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+
+    world.clock.set(2);
+    let thread = world
+        .said
+        .open(
+            Anchored::Round(work.id(), pass),
+            Some(name("about this pass")),
+            body("this reads oddly"),
+            &who("cyd"),
+        )
+        .await
+        .expect("a pass somebody wrote is a thing to remark on");
+
+    world.clock.set(3);
+    let first = thread.messages()[0].id();
+    let reply = world
+        .said
+        .say(&thread.id(), Some(first), body("agreed"), &who("boro"))
+        .await
+        .unwrap();
+
+    world.clock.set(4);
+    world
+        .said
+        .amend(
+            &thread.id(),
+            &first,
+            body("this reads oddly to me"),
+            &who("cyd"),
+        )
+        .await
+        .unwrap();
+
+    let read = world.said.get(&thread.id()).await.expect("it is kept");
+    assert_eq!(read.id(), thread.id());
+    assert_eq!(read.title().map(Name::as_str), Some("about this pass"));
+    assert_eq!(read.messages().len(), 2);
+
+    // Order is the clock here, which is this record and no other.
+    assert_eq!(read.messages()[0].id(), first);
+    assert_eq!(read.messages()[1].id(), reply.id());
+    assert_eq!(read.messages()[1].parent(), Some(first));
+
+    // The correction is what it says now; what it said first is still
+    // there, which is the whole reason amending appends.
+    assert_eq!(read.messages()[0].body().as_str(), "this reads oddly to me");
+    assert_eq!(read.messages()[0].said().as_str(), "this reads oddly");
+    assert_eq!(read.messages()[0].revisions().len(), 1);
+    assert_eq!(read.messages()[0].revisions()[0].act().at(), at(4));
+
+    // And it is findable by what it hangs off, which is how anybody
+    // looking at the pass would reach it.
+    let anchored = world
+        .said
+        .about(Anchored::Round(work.id(), pass))
+        .await
+        .unwrap();
+    assert_eq!(anchored.len(), 1);
+    assert_eq!(anchored[0].id(), thread.id());
+
+    // The pursuit as a whole is a different anchor, and nothing about
+    // the pass answers to it.
+    assert!(
+        world
+            .said
+            .about(Anchored::Pursuit(work.id()))
+            .await
+            .unwrap()
+            .is_empty(),
+        "a remark on one pass is not a remark on the work"
+    );
+}
+
+/// A thread hangs off something that was written, and the service is
+/// where that is answered.
+///
+/// `Anchor` is built from the thing rather than from its id so that a
+/// thread about something nobody wrote is not a value anybody can
+/// make. A caller has ids, so the reading has to happen somewhere —
+/// here, before anything is kept.
+#[tokio::test]
+async fn a_conversation_about_something_nobody_wrote_is_refused_over_memory() {
+    a_conversation_about_something_nobody_wrote_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_conversation_about_something_nobody_wrote_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_conversation_about_something_nobody_wrote_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_conversation_about_something_nobody_wrote_is_refused(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = cut(world, &line, "mine").await;
+    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+
+    // Work nobody opened.
+    let refused = world
+        .said
+        .open(
+            Anchored::Pursuit(PursuitId::new()),
+            None,
+            body("about what?"),
+            &who("cyd"),
+        )
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+
+    // A pass this work does not have.
+    let refused = world
+        .said
+        .open(
+            Anchored::Round(work.id(), NodeId::new()),
+            None,
+            body("about what?"),
+            &who("cyd"),
+        )
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+
+    // And an entry the pass did not touch — the model's own refusal,
+    // reached through the service because the service is what has the
+    // pass to ask it of.
+    let refused = world
+        .said
+        .open(
+            Anchored::Entry(work.id(), pass, EntryId::new()),
+            None,
+            body("about what?"),
+            &who("cyd"),
+        )
+        .await;
+    assert!(
+        refused.is_err(),
+        "a remark about what a pass did to something has to be about \
+         something it did: {refused:?}"
+    );
+
+    assert!(
+        world
+            .said
+            .about(Anchored::Round(work.id(), pass))
+            .await
+            .unwrap()
+            .is_empty(),
+        "and none of the three was kept"
+    );
+}
+
+/// A reply reaching out of its own conversation is refused by the
+/// store, not only by the model.
+///
+/// The service asks the model against the thread as it read it. That
+/// is the same read every caller does and the same window every caller
+/// has: the port asks again, against the thread it is writing to.
+#[tokio::test]
+async fn a_reply_to_another_conversation_is_refused_over_memory() {
+    a_reply_to_another_conversation_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_reply_to_another_conversation_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_reply_to_another_conversation_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_reply_to_another_conversation_is_refused(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = cut(world, &line, "mine").await;
+
+    world.clock.set(2);
+    let mine = world
+        .said
+        .open(
+            Anchored::Pursuit(work.id()),
+            None,
+            body("what is this for?"),
+            &who("cyd"),
+        )
+        .await
+        .unwrap();
+    let theirs = world
+        .said
+        .open(
+            Anchored::Pursuit(work.id()),
+            None,
+            body("separate question"),
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    // Asked of the port directly, because the service refuses it a
+    // step earlier and this is the layer that has to hold the rule.
+    let stray = Message::new(
+        Some(theirs.messages()[0].id()),
+        body("answering over there"),
+        Act::new(at(3), Actor::User(ActorId::new())),
+    );
+    let refused = Threads::say(&*world.threads_port, &mine.id(), &stray).await;
+    assert!(
+        matches!(refused, Err(DomainError::Conflict(_))),
+        "a reply belongs to one conversation: {refused:?}"
+    );
+    assert_eq!(
+        world.said.get(&mine.id()).await.unwrap().messages().len(),
+        1,
+        "and it was not kept"
+    );
+
+    // Two conversations about one thing stay two, because merging them
+    // would be deciding they were about the same thing.
+    let both = world
+        .said
+        .about(Anchored::Pursuit(work.id()))
+        .await
+        .unwrap();
+    assert_eq!(both.len(), 2);
+}
+
 /// Archiving stops a line moving, reopening lets it move again, and
 /// what says so is a close rather than a field.
 ///
@@ -1083,6 +1370,96 @@ async fn a_drop_something_outside_points_into_is_refused_over_sqlite() {
         .expect("and what pointed at it");
 
     driver.shutdown().await.unwrap();
+}
+
+/// Dropping a line takes what was said about its work with it.
+///
+/// A conversation is anchored to a pursuit, a pass, an entry as a pass
+/// had it, or a change point — every one of which goes when the line
+/// does. Leaving the thread behind would keep a remark about something
+/// that is not there, which is the state `restore` refuses to read
+/// back and the schema refuses to hold: the pursuit and change-point
+/// anchors are foreign keys, so a drop that ignored them would be
+/// refused rather than wrong.
+#[tokio::test]
+async fn dropping_a_line_takes_what_was_said_about_it_over_memory() {
+    dropping_a_line_takes_what_was_said_about_it(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn dropping_a_line_takes_what_was_said_about_it_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    dropping_a_line_takes_what_was_said_about_it(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn dropping_a_line_takes_what_was_said_about_it(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = cut(world, &line, "mine").await;
+    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+
+    // One of each anchor that a line can take with it: the work, a
+    // pass of it, and what landed.
+    world.clock.set(2);
+    let about_work = world
+        .said
+        .open(
+            Anchored::Pursuit(work.id()),
+            None,
+            body("what is this for?"),
+            &who("cyd"),
+        )
+        .await
+        .unwrap();
+    let about_pass = world
+        .said
+        .open(
+            Anchored::Round(work.id(), pass),
+            None,
+            body("this reads oddly"),
+            &who("cyd"),
+        )
+        .await
+        .unwrap();
+
+    world.clock.set(3);
+    world
+        .work
+        .close(&work.id(), Outcome::Satisfied, None, &who("boro"))
+        .await
+        .unwrap();
+    let landed = world.lines.get(&line.id()).await.unwrap().head();
+    let about_landing = world
+        .said
+        .open(
+            Anchored::Change(line.id(), landed),
+            None,
+            body("good, this is what we wanted"),
+            &who("ana"),
+        )
+        .await
+        .unwrap();
+
+    world.clock.set(4);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+    world
+        .lines
+        .discard(&line.id(), &who("ana"))
+        .await
+        .expect("what was said about the work goes with the work");
+
+    for thread in [&about_work, &about_pass, &about_landing] {
+        assert!(
+            world.said.get(&thread.id()).await.is_err(),
+            "the conversation went with the line it was about"
+        );
+    }
 }
 
 /// A drop decided against work that has grown since is refused, and

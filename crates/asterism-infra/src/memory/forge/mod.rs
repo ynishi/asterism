@@ -41,16 +41,19 @@ use asterism_core::domain::forge::model::act::Act;
 use asterism_core::domain::forge::model::closing::Closing;
 use asterism_core::domain::forge::model::line::{Line, Standing};
 use asterism_core::domain::forge::model::pursuit::{Pursuit, Round};
+use asterism_core::domain::forge::model::thread::{Anchor, Message, Revision, Thread};
 use asterism_core::domain::forge::model::value::{
-    ActorId, ChangePointId, LineId, Name, NodeId, PursuitId, StrategyId,
+    ActorId, ChangePointId, LineId, MessageId, Name, NodeId, PursuitId, StrategyId, ThreadId,
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
+use asterism_core::domain::forge::threads::Threads;
 use asterism_core::domain::value::{AssetId, PersonaId};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 
 use crate::forge::rows::{
     self, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
+    ThreadMessageRow, ThreadRevisionRow, ThreadRow,
 };
 
 /// Everything the store holds, in the shape it holds it.
@@ -62,6 +65,9 @@ struct Tables {
     pursuits: Vec<PursuitRow>,
     pursuit_nodes: Vec<PursuitNodeRow>,
     pursuit_ops: Vec<PursuitOpRow>,
+    threads: Vec<ThreadRow>,
+    thread_messages: Vec<ThreadMessageRow>,
+    thread_revisions: Vec<ThreadRevisionRow>,
 }
 
 /// An in-memory forge store. Clone it to hand the same tables to every
@@ -148,6 +154,47 @@ impl MemoryForge {
                 .any(|row| row.line == *line && row.parent == point.parent())
         });
         forked || landed
+    }
+
+    /// Whether this conversation is about something on this line.
+    ///
+    /// Three of the four anchors reach a line by a different road, and
+    /// the fourth — an entry as a pass had it — arrives by the pass's,
+    /// because it is a node id in the same field. The SQLite side asks
+    /// the same three questions as one subquery.
+    fn anchored_in(tables: &Tables, thread: &ThreadRow, line: &LineId) -> bool {
+        let of_this_line = |work: &PursuitId| {
+            tables
+                .pursuits
+                .iter()
+                .any(|row| row.id == *work && row.of == *line)
+        };
+
+        if thread.pursuit.is_some_and(|work| of_this_line(&work)) {
+            return true;
+        }
+        if let Some(node) = thread.node
+            && tables
+                .pursuit_nodes
+                .iter()
+                .any(|row| row.id == node && of_this_line(&row.pursuit))
+        {
+            return true;
+        }
+        thread.point.is_some_and(|point| {
+            tables
+                .change_points
+                .iter()
+                .any(|row| row.id == point && row.line == *line)
+        })
+    }
+
+    /// Rebuilds one conversation from the rows under `id`.
+    fn thread_at(tables: &Tables, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
+        let Some(head) = tables.threads.iter().find(|row| row.id == *id) else {
+            return Ok(None);
+        };
+        rows::read_thread(head, &tables.thread_messages, &tables.thread_revisions).map(Some)
     }
 
     /// Rebuilds one piece of work from the rows under `id`.
@@ -309,6 +356,32 @@ impl Lines for MemoryForge {
                 )));
             }
 
+            // What was said about any of it goes too, and it goes
+            // first: a remark hangs off a pursuit, a pass, an entry as
+            // a pass had it, or a change point, and all four are about
+            // to stop existing. This store has no key to refuse a
+            // thread left behind, which is exactly why it has to be
+            // the one that remembers — the SQLite side would be told.
+            let threads: BTreeSet<ThreadId> = tables
+                .threads
+                .iter()
+                .filter(|row| Self::anchored_in(tables, row, id))
+                .map(|row| row.id)
+                .collect();
+            let said: BTreeSet<MessageId> = tables
+                .thread_messages
+                .iter()
+                .filter(|row| threads.contains(&row.thread))
+                .map(|row| row.id)
+                .collect();
+            tables
+                .thread_revisions
+                .retain(|row| !said.contains(&row.message));
+            tables
+                .thread_messages
+                .retain(|row| !threads.contains(&row.thread));
+            tables.threads.retain(|row| !threads.contains(&row.id));
+
             // Rows first, then what they hang off, so that a reader
             // holding the lock could never see a node whose parent
             // table has already gone. Nothing here is conditional any
@@ -455,6 +528,127 @@ impl Closings for MemoryForge {
                 tables.change_points.push(point);
                 tables.change_rows.extend(change_rows);
             }
+            Ok(())
+        })
+    }
+}
+
+#[async_trait]
+impl Threads for MemoryForge {
+    async fn open(&self, thread: &Thread) -> Result<(), DomainError> {
+        let (head, messages, revisions) = rows::take_thread_apart(thread);
+        self.with(|tables| {
+            if tables.threads.iter().any(|row| row.id == head.id) {
+                return Err(DomainError::Conflict(format!(
+                    "thread {} is already open",
+                    head.id
+                )));
+            }
+            tables.threads.push(head);
+            tables.thread_messages.extend(messages);
+            tables.thread_revisions.extend(revisions);
+            Ok(())
+        })
+    }
+
+    async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
+        self.with(|tables| Self::thread_at(tables, id))
+    }
+
+    async fn anchored(&self, anchor: Anchor) -> Result<Vec<Thread>, DomainError> {
+        // Compared as columns rather than as values, because that is
+        // what the SQLite side can index and this store exists to say
+        // what that side owes.
+        let (kind, pursuit, node, entry, point) = rows::anchor_columns(anchor);
+        self.with(|tables| {
+            tables
+                .threads
+                .iter()
+                .filter(|row| {
+                    row.kind == kind
+                        && row.pursuit == pursuit
+                        && row.node == node
+                        && row.entry == entry
+                        && row.point == point
+                })
+                .map(|row| {
+                    rows::read_thread(row, &tables.thread_messages, &tables.thread_revisions)
+                })
+                .collect()
+        })
+    }
+
+    async fn say(&self, thread: &ThreadId, message: &Message) -> Result<(), DomainError> {
+        let row = rows::take_message_apart(*thread, message);
+        self.with(|tables| {
+            if !tables.threads.iter().any(|held| held.id == *thread) {
+                return Err(DomainError::not_found("thread", thread));
+            }
+            // The model's refusal, asked of the rows: a reply reaching
+            // out of its own conversation would make "the thread this
+            // belongs to" a question with two answers. The model asked
+            // it of the thread as the caller read it; this asks it of
+            // the thread as it is being written to.
+            if let Some(parent) = row.parent
+                && !tables
+                    .thread_messages
+                    .iter()
+                    .any(|held| held.thread == *thread && held.id == parent)
+            {
+                return Err(DomainError::Conflict(format!(
+                    "message {parent} is not in thread {thread}"
+                )));
+            }
+            tables.thread_messages.push(row);
+            Ok(())
+        })
+    }
+
+    async fn amend(
+        &self,
+        thread: &ThreadId,
+        message: &MessageId,
+        revision: &Revision,
+    ) -> Result<(), DomainError> {
+        self.with(|tables| {
+            if !tables
+                .thread_messages
+                .iter()
+                .any(|held| held.thread == *thread && held.id == *message)
+            {
+                return Err(DomainError::Conflict(format!(
+                    "message {message} is not in thread {thread}"
+                )));
+            }
+            // Its place among that message's corrections, which is the
+            // count of the ones already there — appended, never
+            // renumbered.
+            let position = tables
+                .thread_revisions
+                .iter()
+                .filter(|held| held.message == *message)
+                .count();
+            tables
+                .thread_revisions
+                .push(rows::take_revision_apart(*message, position, revision));
+            Ok(())
+        })
+    }
+
+    async fn rename(
+        &self,
+        id: &ThreadId,
+        title: Option<&Name>,
+        act: &Act,
+    ) -> Result<(), DomainError> {
+        self.with(|tables| {
+            let row = tables
+                .threads
+                .iter_mut()
+                .find(|row| row.id == *id)
+                .ok_or_else(|| DomainError::not_found("thread", id))?;
+            row.title = title.cloned();
+            row.updated = rows::ActRow::of(act);
             Ok(())
         })
     }

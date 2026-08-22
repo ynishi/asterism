@@ -97,6 +97,15 @@ pub enum ForgeError {
     #[error("a pass writes something — otherwise nothing happened")]
     EmptyRound,
 
+    /// A conversation had nothing said in it.
+    ///
+    /// Unreachable from the model's own verbs, which is why it is a
+    /// refusal rather than an invariant: `Thread::open` takes the
+    /// first message and nothing removes one. It is what a stored
+    /// thread with no rows reads back as.
+    #[error("a conversation is what was said in it, and nothing was said in this one")]
+    EmptyThread,
+
     /// Work that has ended was written to.
     #[error("this work has ended — pick it up as new work rather than adding to a record")]
     AlreadyClosed,
@@ -221,6 +230,7 @@ impl From<ForgeError> for DomainError {
             | ForgeError::RemovalMovesAnotherAxis
             | ForgeError::EmptyTable
             | ForgeError::EmptyRound
+            | ForgeError::EmptyThread
             | ForgeError::UnknownBase
             | ForgeError::NotThisLine
             | ForgeError::BlankStrategy

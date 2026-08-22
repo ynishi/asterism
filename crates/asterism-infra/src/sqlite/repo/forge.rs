@@ -57,11 +57,13 @@ use asterism_core::domain::forge::model::act::Act;
 use asterism_core::domain::forge::model::closing::Closing;
 use asterism_core::domain::forge::model::line::{Line, Standing};
 use asterism_core::domain::forge::model::pursuit::{Outcome, Pursuit, Round};
+use asterism_core::domain::forge::model::thread::{Anchor, Message, Revision, Thread};
 use asterism_core::domain::forge::model::value::{
-    ActorId, ChangePointId, Content, EntryId, Existence, LineId, Name, NodeId, PursuitId,
-    StrategyId,
+    ActorId, ChangePointId, Content, EntryId, Existence, LineId, MessageId, Name, NodeId,
+    PursuitId, StrategyId, ThreadId,
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
+use asterism_core::domain::forge::threads::Threads;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::{Connection, Row, params};
@@ -70,6 +72,7 @@ use uuid::Uuid;
 
 use crate::forge::rows::{
     self, ActRow, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
+    ThreadMessageRow, ThreadRevisionRow, ThreadRow,
 };
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
@@ -85,6 +88,21 @@ impl SqliteForge {
         Self { isle }
     }
 }
+
+/// Every conversation about anything on one line, as a subquery
+/// taking the line's id as `?1`.
+///
+/// Three of the four anchors reach a line by a different road, and the
+/// fourth — an entry as a pass had it — arrives by the pass's, since
+/// it is a node id in the same column. Written once because a drop
+/// deletes from three tables through it and three copies of a
+/// three-branch predicate is three chances to fix two of them.
+const THREADS_OF_A_LINE: &str = "SELECT id FROM forge_thread \
+     WHERE anchor_pursuit IN (SELECT id FROM pursuit WHERE line_id = ?1) \
+        OR anchor_node IN (SELECT n.id FROM pursuit_node n \
+                             JOIN pursuit p ON p.id = n.pursuit_id \
+                            WHERE p.line_id = ?1) \
+        OR anchor_change_point IN (SELECT id FROM change_point WHERE line_id = ?1)";
 
 /// A line's history does not fork.
 const ONE_POINT_PER_PARENT: &str = "change_point.line_id, change_point.parent_id";
@@ -241,6 +259,66 @@ fn pursuit_row(row: &Row<'_>) -> rusqlite::Result<PursuitRow> {
             })?,
         note: row.get("note")?,
         open_act: act_at(row, "open_at", "open_by", "open_kind")?,
+    })
+}
+
+fn thread_row(row: &Row<'_>) -> rusqlite::Result<ThreadRow> {
+    Ok(ThreadRow {
+        id: ThreadId::from_uuid(row.get("id")?),
+        kind: match row.get::<_, String>("anchor_kind")?.as_str() {
+            "pursuit" => "pursuit",
+            "round" => "round",
+            "entry" => "entry",
+            "change_point" => "change_point",
+            other => return unknown("anchor_kind", other),
+        },
+        pursuit: row
+            .get::<_, Option<Uuid>>("anchor_pursuit")?
+            .map(PursuitId::from_uuid),
+        node: row
+            .get::<_, Option<Uuid>>("anchor_node")?
+            .map(NodeId::from_uuid),
+        entry: row
+            .get::<_, Option<Uuid>>("anchor_entry")?
+            .map(EntryId::from_uuid),
+        point: row
+            .get::<_, Option<Uuid>>("anchor_change_point")?
+            .map(ChangePointId::from_uuid),
+        title: row
+            .get::<_, Option<String>>("title")?
+            .map(|said| {
+                Name::new(said).map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        "a stored thread title is blank".into(),
+                    )
+                })
+            })
+            .transpose()?,
+        created: act_at(row, "created_at", "created_by", "created_kind")?,
+        updated: act_at(row, "updated_at", "updated_by", "updated_kind")?,
+    })
+}
+
+fn thread_message_row(row: &Row<'_>) -> rusqlite::Result<ThreadMessageRow> {
+    Ok(ThreadMessageRow {
+        id: MessageId::from_uuid(row.get("id")?),
+        thread: ThreadId::from_uuid(row.get("thread_id")?),
+        parent: row
+            .get::<_, Option<Uuid>>("parent_id")?
+            .map(MessageId::from_uuid),
+        body: row.get("body")?,
+        act: act_at(row, "said_at", "said_by", "said_kind")?,
+    })
+}
+
+fn thread_revision_row(row: &Row<'_>) -> rusqlite::Result<ThreadRevisionRow> {
+    Ok(ThreadRevisionRow {
+        message: MessageId::from_uuid(row.get("message_id")?),
+        position: row.get::<_, i64>("position")? as usize,
+        body: row.get("body")?,
+        act: act_at(row, "said_at", "said_by", "said_kind")?,
     })
 }
 
@@ -749,6 +827,33 @@ impl Lines for SqliteForge {
                 // and fails the whole drop.
                 tx.pragma_update(None, "defer_foreign_keys", 1)?;
 
+                // What was said about any of it goes too. A remark
+                // hangs off a pursuit, a pass, an entry as a pass had
+                // it, or a change point, and every one of those is
+                // about to stop existing — so a thread left behind
+                // would be a remark about nothing, which the read half
+                // refuses and two of the four columns are keys
+                // against.
+                tx.execute(
+                    &format!(
+                        "DELETE FROM forge_thread_revision WHERE message_id IN \
+                             (SELECT id FROM forge_thread_message \
+                               WHERE thread_id IN ({THREADS_OF_A_LINE}))"
+                    ),
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    &format!(
+                        "DELETE FROM forge_thread_message \
+                          WHERE thread_id IN ({THREADS_OF_A_LINE})"
+                    ),
+                    params![id.as_uuid()],
+                )?;
+                tx.execute(
+                    &format!("DELETE FROM forge_thread WHERE id IN ({THREADS_OF_A_LINE})"),
+                    params![id.as_uuid()],
+                )?;
+
                 tx.execute(
                     "DELETE FROM pursuit_op WHERE node_id IN \
                          (SELECT n.id FROM pursuit_node n \
@@ -797,14 +902,299 @@ impl Lines for SqliteForge {
                  against {named}"
             )),
             DropRefusal::StillReferenced => DomainError::Validation(format!(
-                "something outside line {id} points into it — work filed under work on this \
-                 line, from a line that is staying"
+                "something outside line {id} points into it and is staying — work on another \
+                 line filed under work on this one, or a row this drop does not know to take"
             )),
         })
     }
 }
 
 /// Why a line was not dropped.
+/// Writes a thread's head row.
+fn insert_thread(conn: &Connection, head: &ThreadRow) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO forge_thread \
+             (id, anchor_kind, anchor_pursuit, anchor_node, anchor_entry, \
+              anchor_change_point, title, created_at, created_by, created_kind, \
+              updated_at, updated_by, updated_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            head.id.as_uuid(),
+            head.kind,
+            head.pursuit.map(|id| *id.as_uuid()),
+            head.node.map(|id| *id.as_uuid()),
+            head.entry.map(|id| *id.as_uuid()),
+            head.point.map(|id| *id.as_uuid()),
+            head.title.as_ref().map(Name::as_str),
+            datetime_to_ms(&head.created.at),
+            head.created.actor.as_uuid(),
+            head.created.kind,
+            datetime_to_ms(&head.updated.at),
+            head.updated.actor.as_uuid(),
+            head.updated.kind,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Writes one thing said.
+fn insert_message(conn: &Connection, row: &ThreadMessageRow) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO forge_thread_message \
+             (id, thread_id, parent_id, body, said_at, said_by, said_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            row.id.as_uuid(),
+            row.thread.as_uuid(),
+            row.parent.map(|id| *id.as_uuid()),
+            row.body,
+            datetime_to_ms(&row.act.at),
+            row.act.actor.as_uuid(),
+            row.act.kind,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Writes one correction.
+fn insert_revision(conn: &Connection, row: &ThreadRevisionRow) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO forge_thread_revision \
+             (message_id, position, body, said_at, said_by, said_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            row.message.as_uuid(),
+            row.position as i64,
+            row.body,
+            datetime_to_ms(&row.act.at),
+            row.act.actor.as_uuid(),
+            row.act.kind,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Reads one whole conversation: its row, what was said, and every
+/// correction.
+fn build_thread(conn: &Connection, head: &ThreadRow) -> rusqlite::Result<Thread> {
+    let uuid = *head.id.as_uuid();
+    let messages: Vec<ThreadMessageRow> = conn
+        .prepare("SELECT * FROM forge_thread_message WHERE thread_id = ?1")?
+        .query_map(params![uuid], thread_message_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    let revisions: Vec<ThreadRevisionRow> = conn
+        .prepare(
+            "SELECT r.* FROM forge_thread_revision r \
+             JOIN forge_thread_message m ON m.id = r.message_id \
+             WHERE m.thread_id = ?1",
+        )?
+        .query_map(params![uuid], thread_revision_row)?
+        .collect::<rusqlite::Result<_>>()?;
+
+    rows::read_thread(head, &messages, &revisions).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Blob,
+            format!("a stored conversation cannot be read back: {error}").into(),
+        )
+    })
+}
+
+#[async_trait]
+impl Threads for SqliteForge {
+    async fn open(&self, thread: &Thread) -> Result<(), DomainError> {
+        let (head, messages, revisions) = rows::take_thread_apart(thread);
+        self.isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                insert_thread(&tx, &head)?;
+                // In the order they were said, so a reply's parent is
+                // already a row by the time the reply names it.
+                for message in &messages {
+                    insert_message(&tx, message)?;
+                }
+                for revision in &revisions {
+                    insert_revision(&tx, revision)?;
+                }
+                tx.commit()
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError> {
+        let id = *id;
+        self.isle
+            .call(move |conn| {
+                let head = conn
+                    .query_row(
+                        "SELECT * FROM forge_thread WHERE id = ?1",
+                        params![id.as_uuid()],
+                        thread_row,
+                    )
+                    .map(Some)
+                    .or_else(|error| match error {
+                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                        other => Err(other),
+                    })?;
+                let Some(head) = head else {
+                    return Ok(None);
+                };
+                build_thread(conn, &head).map(Some)
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn anchored(&self, anchor: Anchor) -> Result<Vec<Thread>, DomainError> {
+        // The five columns the anchor flattens to, matched as a whole.
+        // `IS` rather than `=` because four of them are NULL on any
+        // given kind, and `= NULL` is never true.
+        let (kind, pursuit, node, entry, point) = rows::anchor_columns(anchor);
+        self.isle
+            .call(move |conn| {
+                let heads: Vec<ThreadRow> = conn
+                    .prepare(
+                        "SELECT * FROM forge_thread \
+                          WHERE anchor_kind = ?1 \
+                            AND anchor_pursuit IS ?2 \
+                            AND anchor_node IS ?3 \
+                            AND anchor_entry IS ?4 \
+                            AND anchor_change_point IS ?5",
+                    )?
+                    .query_map(
+                        params![
+                            kind,
+                            pursuit.map(|id| *id.as_uuid()),
+                            node.map(|id| *id.as_uuid()),
+                            entry.map(|id| *id.as_uuid()),
+                            point.map(|id| *id.as_uuid()),
+                        ],
+                        thread_row,
+                    )?
+                    .collect::<rusqlite::Result<_>>()?;
+                heads
+                    .iter()
+                    .map(|head| build_thread(conn, head))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn say(&self, thread: &ThreadId, message: &Message) -> Result<(), DomainError> {
+        let thread = *thread;
+        let row = rows::take_message_apart(thread, message);
+        let said = self
+            .isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                // The model's refusal, asked of the rows. The foreign
+                // key says the parent is a message; it does not say the
+                // parent is a message of *this* conversation, and a
+                // reply reaching out of its own would make "the thread
+                // this belongs to" a question with two answers.
+                if let Some(parent) = row.parent {
+                    let held: i64 = tx.query_row(
+                        "SELECT COUNT(*) FROM forge_thread_message \
+                          WHERE id = ?1 AND thread_id = ?2",
+                        params![parent.as_uuid(), thread.as_uuid()],
+                        |found| found.get(0),
+                    )?;
+                    if held == 0 {
+                        return Ok(Err(parent));
+                    }
+                }
+                insert_message(&tx, &row)?;
+                tx.commit()?;
+                Ok(Ok(()))
+            })
+            .await
+            .map_err(infra_err)?;
+
+        said.map_err(|parent| {
+            DomainError::Conflict(format!("message {parent} is not in thread {thread}"))
+        })
+    }
+
+    async fn amend(
+        &self,
+        thread: &ThreadId,
+        message: &MessageId,
+        revision: &Revision,
+    ) -> Result<(), DomainError> {
+        let (thread, message) = (*thread, *message);
+        let revision = revision.clone();
+        let amended = self
+            .isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                let held: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM forge_thread_message \
+                      WHERE id = ?1 AND thread_id = ?2",
+                    params![message.as_uuid(), thread.as_uuid()],
+                    |found| found.get(0),
+                )?;
+                if held == 0 {
+                    return Ok(Err(()));
+                }
+                // Its place among that message's corrections. Read
+                // inside the write, so two corrections arriving at once
+                // cannot be given one position — the primary key
+                // refuses the second either way, and this is what makes
+                // the refusal rare rather than what makes it correct.
+                let position: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM forge_thread_revision WHERE message_id = ?1",
+                    params![message.as_uuid()],
+                    |found| found.get(0),
+                )?;
+                insert_revision(
+                    &tx,
+                    &rows::take_revision_apart(message, position as usize, &revision),
+                )?;
+                tx.commit()?;
+                Ok(Ok(()))
+            })
+            .await
+            .map_err(infra_err)?;
+
+        amended.map_err(|()| {
+            DomainError::Conflict(format!("message {message} is not in thread {thread}"))
+        })
+    }
+
+    async fn rename(
+        &self,
+        id: &ThreadId,
+        title: Option<&Name>,
+        act: &Act,
+    ) -> Result<(), DomainError> {
+        let (id, title, act) = (*id, title.cloned(), ActRow::of(act));
+        let moved = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE forge_thread SET title = ?2, updated_at = ?3, updated_by = ?4, \
+                            updated_kind = ?5 \
+                      WHERE id = ?1",
+                    params![
+                        id.as_uuid(),
+                        title.as_ref().map(Name::as_str),
+                        datetime_to_ms(&act.at),
+                        act.actor.as_uuid(),
+                        act.kind,
+                    ],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        if moved == 0 {
+            return Err(DomainError::not_found("thread", id));
+        }
+        Ok(())
+    }
+}
+
 enum DropRefusal {
     /// There is no such line to drop.
     NoSuchLine,

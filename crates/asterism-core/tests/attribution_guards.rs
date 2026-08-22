@@ -382,6 +382,17 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "read — every line there is, unscoped, because a line carries \
          no owner for this layer to scope by",
     ),
+    // ---- thread_service: reads (#102)
+    (
+        "thread_service::get",
+        "read — one conversation whole, every correction to every \
+         message included",
+    ),
+    (
+        "thread_service::about",
+        "read — every conversation hanging off one thing, which is \
+         more than one because two people can start separate ones",
+    ),
     // ---- pursuit_service: reads (#63)
     (
         "pursuit_service::get",

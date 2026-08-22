@@ -17,9 +17,10 @@ use asterism_core::domain::forge::model::op::{Op, OpKind};
 use asterism_core::domain::forge::model::pursuit::{Close, Outcome, Pursuit, Round};
 use asterism_core::domain::forge::model::restore;
 use asterism_core::domain::forge::model::table::Row;
+use asterism_core::domain::forge::model::thread::{Anchor, Body, Message, Revision, Thread};
 use asterism_core::domain::forge::model::value::{
-    ActorId, ChangePointId, Content, EntryId, Existence, LineId, Name, NodeId, PursuitId,
-    StrategyId,
+    ActorId, ChangePointId, Content, EntryId, Existence, LineId, MessageId, Name, NodeId,
+    PursuitId, StrategyId, ThreadId,
 };
 use asterism_core::error::DomainError;
 use chrono::{DateTime, Utc};
@@ -199,6 +200,74 @@ pub struct PursuitOpRow {
     pub name: Option<Name>,
 }
 
+/// `forge_thread` — one conversation, and what it hangs off.
+///
+/// The anchor is a kind and four nullable columns rather than one id,
+/// because what it points at is one of four things and no key points
+/// at a column whose meaning depends on another. Two of the four are
+/// rows and carry real references; a pass is a node of a pursuit and
+/// an entry is not a row at all, so those two stay bare — the same
+/// bareness every other node reference in the forge has, for the same
+/// reason.
+#[derive(Debug, Clone)]
+pub struct ThreadRow {
+    /// Which thread.
+    pub id: ThreadId,
+    /// `pursuit` / `round` / `entry` / `change_point`.
+    pub kind: &'static str,
+    /// Set on the three anchors that name work.
+    pub pursuit: Option<PursuitId>,
+    /// Set on `round` and `entry`.
+    pub node: Option<NodeId>,
+    /// Set on `entry` alone.
+    pub entry: Option<EntryId>,
+    /// Set on `change_point` alone.
+    pub point: Option<ChangePointId>,
+    /// What somebody called the conversation, if anybody did.
+    pub title: Option<Name>,
+    /// When it was opened and when it was last touched.
+    pub created: ActRow,
+    /// The second of those.
+    pub updated: ActRow,
+}
+
+/// `forge_thread_message` — one thing said.
+///
+/// `said_at` is the order, which is this record and no other: a reply
+/// names its parent, and two replies to one message are ordered by
+/// nothing else. Everywhere else in the forge a chain is the order and
+/// a stamp is evidence.
+#[derive(Debug, Clone)]
+pub struct ThreadMessageRow {
+    /// Which message.
+    pub id: MessageId,
+    /// The conversation it was said in.
+    pub thread: ThreadId,
+    /// What it replies to, if it replies to anything.
+    pub parent: Option<MessageId>,
+    /// What it said when it was said. Corrections are their own rows.
+    pub body: String,
+    /// When it was said, and by whom.
+    pub act: ActRow,
+}
+
+/// `forge_thread_revision` — a correction to something said.
+///
+/// The body now is the last of these, and every earlier one stays
+/// readable. `position` orders them, because a correction names no
+/// parent and there is no chain to read an order out of.
+#[derive(Debug, Clone)]
+pub struct ThreadRevisionRow {
+    /// The message it corrects.
+    pub message: MessageId,
+    /// Its place among that message's corrections, oldest first.
+    pub position: usize,
+    /// What the message says from here on.
+    pub body: String,
+    /// When it was corrected, and by whom.
+    pub act: ActRow,
+}
+
 // ---------------------------------------------------------------
 // Taking a domain value apart.
 // ---------------------------------------------------------------
@@ -333,6 +402,116 @@ pub fn take_close_apart(pursuit: PursuitId, close: &Close) -> PursuitNodeRow {
         note: close.note().map(str::to_owned),
         act: ActRow::of(close.act()),
         outcome: Some(close.outcome()),
+    }
+}
+
+/// A whole conversation, for the write that opens one.
+///
+/// The stamps both come from the first message: a thread is opened by
+/// saying something, so the moment it was opened is the moment that
+/// was said, and there is no second act to take them from.
+pub fn take_thread_apart(
+    thread: &Thread,
+) -> (ThreadRow, Vec<ThreadMessageRow>, Vec<ThreadRevisionRow>) {
+    let opened = ActRow::of(
+        thread
+            .messages()
+            .first()
+            .expect("a thread holds the message it was opened with")
+            .act(),
+    );
+    let head = take_anchor_apart(thread.id(), thread.anchor(), thread.title(), opened);
+
+    let mut messages = Vec::with_capacity(thread.messages().len());
+    let mut revisions = Vec::new();
+    for message in thread.messages() {
+        messages.push(take_message_apart(thread.id(), message));
+        revisions.extend(take_revisions_apart(message));
+    }
+    (head, messages, revisions)
+}
+
+/// What a thread hangs off, as the five columns that carry it.
+///
+/// Apart from the row it goes into, because asking *which threads hang
+/// off this* is the same flattening with nothing to put it in: a query
+/// has an anchor and no thread, no title and no act. Sharing this is
+/// what keeps the answer to that question and the row it is matched
+/// against from drifting apart.
+pub type AnchorColumns = (
+    &'static str,
+    Option<PursuitId>,
+    Option<NodeId>,
+    Option<EntryId>,
+    Option<ChangePointId>,
+);
+
+/// Flattens an anchor into the columns a store keeps it in.
+pub fn anchor_columns(anchor: Anchor) -> AnchorColumns {
+    match anchor {
+        Anchor::Pursuit(work) => ("pursuit", Some(work), None, None, None),
+        Anchor::Round(node) => ("round", None, Some(node), None, None),
+        Anchor::Entry { round, entry } => ("entry", None, Some(round), Some(entry), None),
+        Anchor::Change(point) => ("change_point", None, None, None, Some(point)),
+    }
+}
+
+/// The head row of a thread, anchor flattened into its five columns.
+pub fn take_anchor_apart(
+    id: ThreadId,
+    anchor: Anchor,
+    title: Option<&Name>,
+    act: ActRow,
+) -> ThreadRow {
+    let (kind, pursuit, node, entry, point) = anchor_columns(anchor);
+    ThreadRow {
+        id,
+        kind,
+        pursuit,
+        node,
+        entry,
+        point,
+        title: title.cloned(),
+        created: act,
+        updated: act,
+    }
+}
+
+/// One thing said, for the append `say` makes.
+pub fn take_message_apart(thread: ThreadId, message: &Message) -> ThreadMessageRow {
+    ThreadMessageRow {
+        id: message.id(),
+        thread,
+        parent: message.parent(),
+        // What it said when it was said. The body now is the last
+        // revision, and taking that here would write the correction
+        // twice and lose what was corrected.
+        body: message.said().as_str().to_owned(),
+        act: ActRow::of(message.act()),
+    }
+}
+
+/// Every correction to one message, oldest first.
+pub fn take_revisions_apart(message: &Message) -> Vec<ThreadRevisionRow> {
+    message
+        .revisions()
+        .iter()
+        .enumerate()
+        .map(|(position, revision)| take_revision_apart(message.id(), position, revision))
+        .collect()
+}
+
+/// One correction, for the append `amend` makes.
+pub fn take_revision_apart(
+    message: MessageId,
+    position: usize,
+    revision: &Revision,
+) -> ThreadRevisionRow {
+    ThreadRevisionRow {
+        message,
+        position,
+        body: revision.body().as_str().to_owned(),
+        act: ActRow::of(revision.act()),
     }
 }
 
@@ -519,6 +698,95 @@ fn read_op(row: &PursuitOpRow) -> Result<Op, DomainError> {
     })
 }
 
+/// Rebuilds a conversation from its row, what was said, and every
+/// correction.
+///
+/// Messages are put in the order they were said, which for a thread is
+/// a stamp and not a chain. [`restore::thread`] then hands them back
+/// to `say` one at a time, so a reply naming a message this thread
+/// does not hold is a read that fails — including the case a store can
+/// produce and a caller cannot, where a reply was kept with an earlier
+/// stamp than the message it answers.
+pub fn read_thread(
+    head: &ThreadRow,
+    messages: &[ThreadMessageRow],
+    revisions: &[ThreadRevisionRow],
+) -> Result<Thread, DomainError> {
+    let mut said: Vec<&ThreadMessageRow> = messages
+        .iter()
+        .filter(|row| row.thread == head.id)
+        .collect();
+    said.sort_by_key(|row| row.act.at);
+
+    let mut built = Vec::with_capacity(said.len());
+    for row in said {
+        let mut corrections: Vec<&ThreadRevisionRow> = revisions
+            .iter()
+            .filter(|revision| revision.message == row.id)
+            .collect();
+        corrections.sort_by_key(|revision| revision.position);
+
+        let mut made = Vec::with_capacity(corrections.len());
+        for correction in corrections {
+            made.push(Revision::new(
+                read_body(&correction.body)?,
+                correction.act.read()?,
+            ));
+        }
+        built.push(restore::message(
+            row.id,
+            row.parent,
+            read_body(&row.body)?,
+            row.act.read()?,
+            made,
+        ));
+    }
+
+    Ok(restore::thread(
+        head.id,
+        read_anchor(head)?,
+        head.title.clone(),
+        built,
+    )?)
+}
+
+/// The anchor a thread's five columns describe.
+fn read_anchor(head: &ThreadRow) -> Result<Anchor, DomainError> {
+    /// What a stored anchor promised and did not carry.
+    fn missing(kind: &str, column: &str) -> DomainError {
+        DomainError::Validation(format!(
+            "a stored thread anchored to a {kind} does not say which: `{column}` is empty"
+        ))
+    }
+
+    match head.kind {
+        "pursuit" => Ok(Anchor::Pursuit(
+            head.pursuit
+                .ok_or_else(|| missing("pursuit", "anchor_pursuit"))?,
+        )),
+        "round" => Ok(Anchor::Round(
+            head.node.ok_or_else(|| missing("pass", "anchor_node"))?,
+        )),
+        "entry" => Ok(Anchor::Entry {
+            round: head.node.ok_or_else(|| missing("entry", "anchor_node"))?,
+            entry: head.entry.ok_or_else(|| missing("entry", "anchor_entry"))?,
+        }),
+        "change_point" => {
+            Ok(Anchor::Change(head.point.ok_or_else(|| {
+                missing("change point", "anchor_change_point")
+            })?))
+        }
+        other => Err(DomainError::Validation(format!(
+            "a stored thread hangs off a kind of thing this model does not have: {other}"
+        ))),
+    }
+}
+
+/// What was said, refused if a store kept nothing.
+fn read_body(said: &str) -> Result<Body, DomainError> {
+    Ok(Body::new(said)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,5 +834,48 @@ mod tests {
         let read_back = read_line(&take_new_line_apart(&line), &[], &[]).unwrap();
         assert_eq!(read_back, line);
         assert_eq!(read_back.standing(), Standing::Open);
+    }
+
+    /// A message's row carries what was said, not what it says now.
+    ///
+    /// The two differ only once a correction exists, and no port call
+    /// hands over a message that already has one: `open` takes a
+    /// thread that was just opened and `say` a message that was just
+    /// said. So this is asked here, of the translation itself, rather
+    /// than through a store that cannot reach the case — writing the
+    /// body would put the correction in the message row *and* in a
+    /// revision row, and what was corrected would be the thing that
+    /// went missing.
+    #[test]
+    fn a_message_row_carries_what_was_said_and_the_revisions_carry_the_rest() {
+        let thread = ThreadId::new();
+        let mut message = Message::new(None, Body::new("this reads oddly").unwrap(), act(1));
+        message.amend(Revision::new(
+            Body::new("this reads oddly to me").unwrap(),
+            act(2),
+        ));
+
+        let row = take_message_apart(thread, &message);
+        assert_eq!(row.body, "this reads oddly", "the row keeps what was said");
+        assert_eq!(row.thread, thread);
+
+        let revisions = take_revisions_apart(&message);
+        assert_eq!(revisions.len(), 1);
+        assert_eq!(revisions[0].body, "this reads oddly to me");
+        assert_eq!(revisions[0].position, 0);
+
+        // And the pair reads back as the message it came from.
+        let head = take_anchor_apart(
+            thread,
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            ActRow::of(&act(1)),
+        );
+        let read_back = read_thread(&head, &[row], &revisions).expect("a kept conversation");
+        assert_eq!(read_back.messages()[0].said().as_str(), "this reads oddly");
+        assert_eq!(
+            read_back.messages()[0].body().as_str(),
+            "this reads oddly to me"
+        );
     }
 }

@@ -206,6 +206,30 @@ impl Message {
         }
     }
 
+    /// One message, as a store kept it — corrections and all.
+    ///
+    /// The corrections come in already made rather than through
+    /// [`amend`](Self::amend), because appending them one at a time
+    /// would be the same loop with nothing to check: a revision names
+    /// no parent and answers to no rule, so there is no refusal for a
+    /// stored one to meet. What orders them is the order they are
+    /// given in, which is the order they were written.
+    pub(super) fn restored(
+        id: MessageId,
+        parent: Option<MessageId>,
+        body: Body,
+        act: Act,
+        revisions: Vec<Revision>,
+    ) -> Self {
+        Self {
+            id,
+            parent,
+            body,
+            act,
+            revisions,
+        }
+    }
+
     /// Which message.
     pub fn id(&self) -> MessageId {
         self.id
@@ -266,6 +290,26 @@ impl Thread {
             anchor,
             title,
             messages: vec![first],
+        }
+    }
+
+    /// An empty thread carrying an id somebody else chose, for
+    /// [`restore`](super::restore) to say things into.
+    ///
+    /// Empty is a state [`open`](Self::open) refuses and this one
+    /// permits for exactly as long as it takes `restore` to put the
+    /// messages back through [`say`](Self::say) — which is what checks
+    /// them, and what a store cannot be trusted to have done. A stored
+    /// thread with no messages therefore comes back as a thread with
+    /// no messages rather than as an error, and the module that reads
+    /// rows is where that is refused: the model's job here is that
+    /// what did come back met the rules.
+    pub(super) fn restored(id: ThreadId, anchor: Anchor, title: Option<Name>) -> Self {
+        Self {
+            id,
+            anchor,
+            title,
+            messages: Vec::new(),
         }
     }
 

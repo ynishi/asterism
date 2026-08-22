@@ -45,6 +45,8 @@
 
 pub mod line_service;
 pub mod pursuit_service;
+pub mod thread_service;
 
 pub use line_service::LineService;
 pub use pursuit_service::PursuitService;
+pub use thread_service::{Anchored, ThreadService};
