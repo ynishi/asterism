@@ -32,9 +32,16 @@ and this project adheres to
   `Store::exists(asset)` is the question the forge actually has, `push` lost the
   argument, and `PersonaId` left the forge's shared vocabulary with it — the
   list in `forge_boundary.rs` is one entry shorter because the forge needs less,
-  which is the only reason it ever should be. Whose an asset is stays a real
-  question for a surface that has authenticated somebody; this one has not, and
-  a check on an identity the caller chose was never that.
+  which is the only reason it ever should be.
+
+  Nothing is deferred by this. "Who" is a question the forge already asks, once,
+  through `boundary::Actors`: a write carries an `Actor`, the handle is resolved
+  by the side that knows what a user is, and it is a handle precisely so that it
+  exists before authentication binds it and keeps pointing at the same actor
+  afterwards. A persona was never the forge's word for who. Access is per line
+  and outside the forge, so what governs putting content on one is who may write
+  to that line — and if an owner ever had to be recorded rather than an author,
+  it would be an `Actor` on the entry, resolved through the same contract.
 
 ### Added
 
