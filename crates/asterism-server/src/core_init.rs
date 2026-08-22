@@ -656,6 +656,11 @@ pub async fn init_core_with(
     let dirs = sqlite::repo::SqliteDirRepository::new(isle.clone());
     let edges = sqlite::repo::SqliteEdgeRepository::new(isle.clone());
     let thumbs = sqlite::repo::SqliteThumbRepository::new(isle.clone());
+    let visual_features = sqlite::repo::SqliteVisualFeatureRepository::new(isle.clone());
+    // Empty until a model package is installed and bound (#112, later
+    // phase); the two visual jobs skip while it is unset.
+    let visual_encoder_cell: Arc<OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>> =
+        Arc::new(OnceLock::new());
     let modalities = sqlite::repo::SqliteModalityRepository::new(isle.clone());
     let app_settings = Arc::new(sqlite::repo::SqliteAppSettingRepository::new(isle.clone()));
     let app_setting_service = Arc::new(AppSettingService::new(app_settings));
@@ -864,6 +869,10 @@ pub async fn init_core_with(
                     chapter_marks: (*chapter_marks).clone(),
                     previews_dir: previews_dir.clone(),
                     disclosure: disclosure_cell.clone(),
+                    visual_features: visual_features.clone(),
+                    visual_encoder: visual_encoder_cell.clone(),
+                    tag_evidence: sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
+                    tag_vectors: sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
                 },
                 job_concurrency,
             )
@@ -879,6 +888,25 @@ pub async fn init_core_with(
     // Fill the handler-side cell now that the queue-backed invalidator
     // exists. `set` cannot fail here (nothing else writes the cell).
     let _ = invalidator_cell.set(query_group_invalidator.clone());
+    // Bind a model package when the profile carries exactly one (#112).
+    // Compiled out unless the `vision` feature is on; without it the
+    // cell stays unset, `Similar` declines, and the visual jobs skip.
+    // A failed bind is reported and the app runs without the feature —
+    // a corrupt package must not stop the library from opening.
+    #[cfg(feature = "vision")]
+    match bind_visual_model(&visual_encoder_cell, job_queue_arc.clone()).await {
+        Ok(Some(model_id)) => {
+            tracing::info!(event = "diag.vision.bound", model_id = %model_id, "visual model bound");
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(
+                event = "diag.vision.bind_failed",
+                error = %err,
+                "model package present but not bound; visual features stay off"
+            );
+        }
+    }
     // Session resolver (P3): `AssetService::add` routes
     // `AddAssetCommand::external_session_key` through this service so
     // re-imports of the same JSONL / harvest bundle converge onto the
@@ -897,15 +925,25 @@ pub async fn init_core_with(
         dispatches.clone(),
         source_texts.clone(),
         job_queue_arc.clone(),
-        // Read side is Tantivy alone (it is what ranks); write side
-        // is the fan-out, so a trashed asset leaves both indexes.
-        search_index.clone(),
+        // Read side: Tantivy ranks text, and the visual composite
+        // answers `Similar` from stored vectors when a model is bound
+        // (#112) — unbound it declines exactly as Tantivy alone did.
+        // Write side is the fan-out, so a trashed asset leaves both
+        // indexes.
+        Arc::new(asterism_infra::search::VisualAwareRetriever::new(
+            search_index.clone(),
+            visual_features.clone(),
+            assets.clone(),
+            visual_encoder_cell.clone(),
+        )),
         indexer.clone(),
         Arc::new(asset_bodies.clone()),
         query_groups.clone(),
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
+        Arc::new(sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone())),
+        visual_encoder_cell.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
@@ -1324,6 +1362,65 @@ pub async fn init_core_with(
             dispatch_runner: dispatch_runner_service,
         },
     })
+}
+
+/// Binds the profile's model package into the encoder cell (#112).
+///
+/// v1 policy: the profile-local `models/` directory either carries
+/// exactly one package — which is opened (digest-verified), loaded,
+/// and bound — or nothing is bound: zero packages is the feature
+/// staying off, and more than one is an ambiguity a person resolves
+/// by removing one, reported rather than guessed at. The cell is a
+/// `OnceLock`, so a bind lasts the process: replacing a model is
+/// `clear_derived` plus a restart, the explicit bounded rebuild the
+/// issue requires, not a hot swap.
+///
+/// A successful bind seeds the batch backfill (guarded by
+/// `has_pending_batch`) so the library that predates the model gets
+/// encoded without a driver.
+#[cfg(feature = "vision")]
+async fn bind_visual_model(
+    cell: &Arc<OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>>,
+    queue: Arc<dyn asterism_core::domain::repository::JobQueue>,
+) -> anyhow::Result<Option<String>> {
+    use asterism_core::domain::job::JobKind;
+
+    let models_dir = asterism_infra::paths::models_dir()?;
+    let mut packages = Vec::new();
+    for entry in std::fs::read_dir(&models_dir)? {
+        let path = entry?.path();
+        if path.is_dir() && path.join("manifest.json").exists() {
+            packages.push(path);
+        }
+    }
+    let [dir] = packages.as_slice() else {
+        if packages.len() > 1 {
+            tracing::warn!(
+                event = "diag.vision.ambiguous",
+                count = packages.len(),
+                dir = %models_dir.display(),
+                "more than one model package present; none bound — remove all but one"
+            );
+        }
+        return Ok(None);
+    };
+    // Digest verification reads every weight byte; off the async
+    // runtime like every other blocking open.
+    let dir = dir.clone();
+    let adapter = tokio::task::spawn_blocking(move || {
+        asterism_infra::vision::OrtVisualEncoder::open_dir(&dir)
+    })
+    .await??;
+    let model_id = asterism_core::domain::visual::VisualEncoder::identity(&adapter)
+        .model_id
+        .clone();
+    let _ = cell.set(Arc::new(adapter));
+    if !queue.has_pending_batch(JobKind::VisualFeature).await? {
+        queue
+            .enqueue(JobKind::VisualFeature, serde_json::json!({ "batch": true }))
+            .await?;
+    }
+    Ok(Some(model_id))
 }
 
 #[cfg(test)]

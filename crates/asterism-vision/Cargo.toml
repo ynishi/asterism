@@ -1,0 +1,42 @@
+[package]
+name = "asterism-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Model-use side of Asterism's visual features: fixtures now, pHash and the encoder as they land"
+publish = false
+
+[features]
+# The fixture generator is evaluation material, not product surface: the
+# app links this crate without it, and tests / benches / the provider
+# tooling opt in.
+fixtures = []
+# The ONNX Runtime encoder. Off by default so a workspace build never
+# downloads or links onnxruntime; the app's composition root turns it
+# on through asterism-infra's `vision` feature, and the model-gated
+# eval runs with `--features fixtures,onnx`.
+onnx = ["dep:ort", "dep:tokenizers"]
+
+[dependencies]
+anyhow = { workspace = true }
+image = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+# The de-facto Rust ONNX Runtime binding; the rc line is the released
+# one (2.0.0 final has not shipped), pinned to an exact rc because rc
+# releases may break API between each other.
+ort = { version = "=2.0.0-rc.13", optional = true }
+# Reads the package's tokenizer.json (the Gemma tokenizer SigLIP 2
+# ships); no training features wanted.
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+    "onig",
+] }
+
+[dev-dependencies]
+tempfile = "3"

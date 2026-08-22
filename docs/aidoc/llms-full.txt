@@ -351,9 +351,11 @@ the domain types.
 - `SnapshotDto` — An immutable, content-addressed freeze of an ordered asset set —
 - `TagCountDto` — A tag paired with the number of assets currently attached to it,
 - `TagDto` — A single channel tag.
+- `TagSuggestionDto` — One model-proposed tag suggestion awaiting (or carrying) a ruling
 - `ThreadAnchorDto` — Thread anchor — what a `ThreadDto` hangs off of.
 - `ThreadDto` — Thread container payload.
 - `VideoPreviewDto` — Where a video's preview rendition stands
+- `VisualModelStatusDto` — The visual model a running process has bound, if any (#112).
 
 ## Constants
 
@@ -661,6 +663,7 @@ the private design notes.
 - [`domain::tag`](domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [`domain::thread`](domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [`domain::value`](domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
+- [`domain::visual`](domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
 - [`error`](error.md): `DomainError` — the innermost error type shared across every layer of
 
 
@@ -6484,6 +6487,7 @@ projection instead of full `Asset` entities.
 - `TextLocator` — A locator established to point at text.
 - `UnderivedSeries` — One `(material, rule)` pair nothing has answered yet — the unit the
 - `UnhashedMaterial` — One material still waiting for its fingerprints — the unit the
+- `VisualScanCandidate` — One row of the extraction backfill walk: a primary material whose
 
 ## Traits
 
@@ -6512,9 +6516,12 @@ projection instead of full `Asset` entities.
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
 - `SourceTextReader` — Port for reading the full text of an asset's **original source**
+- `TagEvidenceRepository` — Persistence port for scored tag suggestions (#112, P3) — the
 - `TagRepository` — Persistence port for [`Tag`] and its many-to-many link with assets.
+- `TagVectorRepository` — Persistence port for the Tag-name embedding cache (#112, P3).
 - `ThreadRepository` — Persistence port for [`Thread`] and its [`Message`] children —
 - `ThumbRepository` — Persistence port for the pre-generated thumbnail cache
+- `VisualFeatureRepository` — Persistence port for model-derived visual features (#112).
 
 ## Constants
 
@@ -7178,6 +7185,42 @@ Design notes:
 - `VideoFormat` — The `video/*` formats, plus anything else that arrived as `video/*`.
 - `Viewer` — Subject requesting a view of an asset (used to enforce visibility).
 - `Visibility` — Visibility of an asset.
+
+
+<!-- asterism_core/domain__visual.md -->
+# asterism-core::domain::visual
+
+Visual-feature vocabulary and the encoder port (#112).
+
+Everything a model produces is **derived state with an identity**:
+a vector is meaningless without knowing which model, at which
+preprocessing revision, produced it. [`ModelIdentity`] is that
+identity, and it travels with every stored vector, every suggestion,
+and every synthetic edge a model produces — so replacing a model
+invalidates exactly its own output and nothing a person asserted.
+
+The core knows the *shape* of the work — identities, vectors, the
+encoder port — and none of the machinery. ONNX Runtime, weights,
+preprocessing kernels live behind [`VisualEncoder`] in the model-use
+crate; this module must never grow a model dependency (that is
+acceptance item 4 of #112, and the reason the port takes a raw RGB
+buffer rather than an image type).
+
+## Functions
+
+- `cosine_normalized` — Cosine similarity of two L2-normalized vectors: the dot product.
+
+## Types
+
+- `ModelIdentity` — The derivation identity of everything one model configuration
+- `TagEvidence` — One scored tag suggestion with its full derivation identity.
+- `TagSuggestionDisposition` — Where one tag suggestion stands between the model and the person.
+- `VisualFeature` — One stored feature vector and its full derivation identity.
+- `VisualFeatureKind` — What kind of feature a stored vector is.
+
+## Traits
+
+- `VisualEncoder` — Encoder port: pixels (or text) in, one normalized vector out.
 
 
 <!-- asterism_core/error.md -->
@@ -10160,6 +10203,7 @@ this crate.
 - [`search::fan_out`](search__fan_out.md): One [`AssetIndexer`] over several.
 - [`search::tantivy_index`](search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
 - [`search::tokenizer`](search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
+- [`search::visual_retriever`](search__visual_retriever.md): The retriever that answers `Similar` from stored vectors (#112).
 - [`source_text`](source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
 - [`sqlite`](sqlite.md): SQLite backend — connection lifecycle and schema migration built on
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers.
@@ -10190,8 +10234,10 @@ this crate.
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [`sqlite::repo::tag`](sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
+- [`sqlite::repo::tag_evidence`](sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
 - [`sqlite::repo::thread`](sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [`sqlite::repo::thumb`](sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
+- [`sqlite::repo::visual`](sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).
 - [`telemetry`](telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
 
 
@@ -10582,6 +10628,9 @@ for later modalities.
 - `session_rebuild` — Session reconciliation stub — the precomputed rkyv snapshot was
 - `thumb_gen` — Generates a resized JPEG thumbnail for a visual asset at a
 - `trash_purge` — Retention sweep — purges assets and Groups whose trash stamp has
+- `visual_edge_rebuild` — Recomputes one asset's visual-similarity edges from stored vectors.
+- `visual_feature` — Encodes one image's pixels into the stored feature vector.
+- `visual_tag_suggest` — Proposes channel tags for one encoded image (#112, P3).
 
 
 <!-- asterism_infra/jobs__preview_ffmpeg.md -->
@@ -10926,6 +10975,7 @@ command pointing a development build at durable dogfood data.
 - `active_profile` — Returns the active data profile without creating directories.
 - `asterism_home` — Returns (creating on demand) the isolated Asterism home directory.
 - `default_db_path` — Returns the default SQLite database path (`<asterism_home>/asterism.db`).
+- `models_dir` — Returns (creating on demand) the profile-local model-package root
 - `tantivy_index_dir` — Returns (creating on demand) the profile-local Tantivy index directory.
 
 ## Types
@@ -11857,6 +11907,29 @@ that fall through unchanged.
 - `TOKENIZER_NAME` — Tokenizer name registered on the index. Referenced by
 
 
+<!-- asterism_infra/search__visual_retriever.md -->
+# asterism-infra::search::visual_retriever
+
+The retriever that answers `Similar` from stored vectors (#112).
+
+A composite over the text retriever: `Text` delegates unchanged,
+`Similar` becomes a brute-force cosine scan over the persona's
+stored feature vectors under the bound model. Brute force on
+purpose — at personal-library scale the whole scan is a few
+megabytes of f32, and an ANN structure earns its complexity only
+when the P2-5 measurements say the scan misses a latency target.
+
+Degradation is layered the way the rest of the feature degrades:
+no bound encoder means `Similar` declines exactly as the text-only
+build declines it; a bound encoder with no stored vector for the
+query asset returns the empty set — "not encoded yet" is an honest
+nothing, not an error.
+
+## Types
+
+- `VisualAwareRetriever` — Composite retriever: text unchanged, `Similar` from stored vectors.
+
+
 <!-- asterism_infra/source_text.md -->
 # asterism-infra::source_text
 
@@ -12537,6 +12610,26 @@ SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
 - `SqliteTagRepository` — SQLite adapter for `TagRepository` (uses a writer isle).
 
 
+<!-- asterism_infra/sqlite__repo__tag_evidence.md -->
+# asterism-infra::sqlite::repo::tag_evidence
+
+SQLite adapters for `TagEvidenceRepository` and
+`TagVectorRepository` (#112, P3).
+
+The evidence adapter's one load-bearing statement is the
+`INSERT OR IGNORE` in [`suggest_if_absent`]: the primary key
+`(asset, tag, model)` is what keeps a rerun of the suggestion job
+from touching a person's ruling or an earlier score — the guarantee
+is structural, not a handler branch.
+
+[`suggest_if_absent`]: SqliteTagEvidenceRepository::suggest_if_absent
+
+## Types
+
+- `SqliteTagEvidenceRepository` — SQLite adapter for `TagEvidenceRepository` (uses a writer isle).
+- `SqliteTagVectorRepository` — SQLite adapter for `TagVectorRepository` (uses a writer isle).
+
+
 <!-- asterism_infra/sqlite__repo__thread.md -->
 # asterism-infra::sqlite::repo::thread
 
@@ -12570,6 +12663,25 @@ changed.
 ## Types
 
 - `SqliteThumbRepository` — SQLite adapter for the thumbnail cache (uses a writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__visual.md -->
+# asterism-infra::sqlite::repo::visual
+
+SQLite adapter for the `VisualFeatureRepository` port (#112).
+
+Vectors are stored as little-endian `f32` blobs beside their full
+derivation identity; a row exists only once extraction has answered
+(`computed` with a vector, `failed` with a reason), so the walk's
+`NOT EXISTS` predicate offers each image material exactly once per
+model. `preprocess_ver` sits outside the primary key on purpose: a
+recipe bump *overwrites* the same model's row rather than growing a
+second generation, and reads filter on it so a stale-recipe vector
+is never served as current.
+
+## Types
+
+- `SqliteVisualFeatureRepository` — SQLite adapter for `VisualFeatureRepository` (uses a writer isle).
 
 
 <!-- asterism_infra/telemetry.md -->
@@ -12987,6 +13099,7 @@ here without choosing.
 
 ## Functions
 
+- `accept_tag_suggestion` — Accepts one tag suggestion (#112): the ruling lands on the
 - `active_profile` — Returns the active local data profile for persistent UI chrome.
 - `add_asset` — Ingests an asset (entry point for the asset-add pipeline).
 - `add_asset_batch` — Ingests a batch of assets (bulk form of `add_asset`).
@@ -13068,6 +13181,7 @@ here without choosing.
 - `list_settings` — Every known application setting, resolved through code default →
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
+- `list_tag_suggestions` — Lists what the bound visual model proposed for one asset (#112),
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
@@ -13093,6 +13207,7 @@ here without choosing.
 - `redispatch` — Re-runs a finished dispatch with the same frozen input (P2).
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
+- `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `rename_dir` — Renames a Dir.
 - `rename_group` — Renames a Group.
@@ -13120,6 +13235,7 @@ here without choosing.
 - `update_asset_meta_batch` — Partially updates metadata for multiple assets in one call.
 - `update_modality` — Partially updates a modality master row (each omitted field is left
 - `update_query_group_query` — "Update query": validates + persists a replacement rule (rejecting
+- `visual_model_status` — Which visual model this process bound, if any (#112).
 
 
 <!-- asterism_ui/error.md -->
@@ -13156,6 +13272,61 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+
+
+<!-- asterism_vision/index.md -->
+# asterism-vision 0.0.0
+
+# asterism-vision — model *use* for visual features (#112)
+
+This crate is the use side of the visual-feature split: what ships in
+the app. Model *preparation* — qualification, conversion, packaging,
+and one day training — is a provider-side tool outside the app's
+dependency graph; the two meet only at the model-package data
+contract (weights plus a manifest naming `model_id`, digest,
+dimensions, preprocessing version, and license).
+
+The implementation arrives in phases. Phase 1 lands the perceptual
+hash; Phase 2 the ONNX-encoder path (load, identity check, clean
+degradation when no model is placed, derived-state invalidation on
+replacement). What exists today is the evaluation half those phases
+are graded against: [`fixtures`] generates deterministic scenes with
+derived ground truth, in memory, at test time — deliberately not a
+corpus, because nothing outside the system consumes it.
+
+## Modules
+
+- [`package`](package.md): The model package: the data contract between model *preparation*
+
+
+<!-- asterism_vision/package.md -->
+# asterism-vision::package
+
+The model package: the data contract between model *preparation*
+and model *use* (#112).
+
+A package is a directory holding the ONNX towers, the tokenizer,
+and a `manifest.json` naming what they are: the model id, vector
+dimension, preprocessing revision, license, official source, and a
+SHA-256 per file. Preparation (the provider-side tooling) writes
+packages; this module is the app-side reader — no logic crosses the
+boundary in either direction, only these bytes.
+
+[`ModelPackage::open`] verifies every digest before the package is
+usable. Verification is at open time, not per encode: the open
+happens once per binding (startup, or a model install), and a
+package that fails it is reported as the corruption it is rather
+than served.
+
+## Types
+
+- `ModelPackage` — An opened, digest-verified package.
+- `PackageFile` — One file the package carries, with the digest that pins it.
+- `PackageManifest` — `manifest.json` — the identity half of the data contract.
+
+## Constants
+
+- `MANIFEST_FILE` — Name of the manifest file inside a package directory.
 
 
 <!-- teams_contract/index.md -->

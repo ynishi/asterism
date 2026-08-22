@@ -187,3 +187,4 @@ pub mod source_locator;
 pub mod tag;
 pub mod thread;
 pub mod value;
+pub mod visual;

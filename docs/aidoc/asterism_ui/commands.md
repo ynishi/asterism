@@ -14,6 +14,7 @@ here without choosing.
 
 ## Functions
 
+- `accept_tag_suggestion` — Accepts one tag suggestion (#112): the ruling lands on the
 - `active_profile` — Returns the active local data profile for persistent UI chrome.
 - `add_asset` — Ingests an asset (entry point for the asset-add pipeline).
 - `add_asset_batch` — Ingests a batch of assets (bulk form of `add_asset`).
@@ -95,6 +96,7 @@ here without choosing.
 - `list_settings` — Every known application setting, resolved through code default →
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
+- `list_tag_suggestions` — Lists what the bound visual model proposed for one asset (#112),
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
@@ -120,6 +122,7 @@ here without choosing.
 - `redispatch` — Re-runs a finished dispatch with the same frozen input (P2).
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
+- `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `rename_dir` — Renames a Dir.
 - `rename_group` — Renames a Group.
@@ -147,4 +150,5 @@ here without choosing.
 - `update_asset_meta_batch` — Partially updates metadata for multiple assets in one call.
 - `update_modality` — Partially updates a modality master row (each omitted field is left
 - `update_query_group_query` — "Update query": validates + persists a replacement rule (rejecting
+- `visual_model_status` — Which visual model this process bound, if any (#112).
 

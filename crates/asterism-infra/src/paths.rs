@@ -440,6 +440,22 @@ pub fn tantivy_index_dir() -> Result<PathBuf, DomainError> {
     Ok(dir)
 }
 
+/// Returns (creating on demand) the profile-local model-package root
+/// (#112): one subdirectory per installed package
+/// (`<asterism_home>/models/<model_id>/`).
+///
+/// Profile-local like the Tantivy index and the preview renditions,
+/// not shared across profiles: `$ASTERISM_HOME` must sandbox
+/// everything a profile touches, or a bench run reads the weights the
+/// user's real library trusts. Sharing bytes between profiles is a
+/// symlink the person makes, not a path this function invents.
+pub fn models_dir() -> Result<PathBuf, DomainError> {
+    let dir = asterism_home()?.join("models");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| DomainError::Infra(anyhow::anyhow!("cannot create models dir: {e}")))?;
+    Ok(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

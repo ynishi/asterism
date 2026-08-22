@@ -247,6 +247,14 @@ pub struct AssetService {
     /// `preview_gen` job writes; the naming contract between the two
     /// is `domain::render::video_preview_path` and siblings.
     previews_dir: std::path::PathBuf,
+    /// Scored tag suggestions (#112) — the person-facing half: listing
+    /// what the model proposed and recording rulings. The suggestion
+    /// job writes through its own handle; this one never inserts.
+    tag_evidence: Arc<dyn crate::domain::repository::TagEvidenceRepository>,
+    /// The bound encoder cell (#112) — read here only for its
+    /// identity: which model's suggestions to show and rule on. An
+    /// unset cell means no suggestions exist to list.
+    visual_encoder: Arc<std::sync::OnceLock<Arc<dyn crate::domain::visual::VisualEncoder>>>,
 }
 
 impl AssetService {
@@ -271,6 +279,8 @@ impl AssetService {
         query_group_invalidator: crate::application::query_group_invalidation::QueryGroupInvalidator,
         sessions: Arc<crate::application::SessionService>,
         previews_dir: std::path::PathBuf,
+        tag_evidence: Arc<dyn crate::domain::repository::TagEvidenceRepository>,
+        visual_encoder: Arc<std::sync::OnceLock<Arc<dyn crate::domain::visual::VisualEncoder>>>,
     ) -> Self {
         Self {
             assets,
@@ -291,6 +301,8 @@ impl AssetService {
             query_group_invalidator,
             sessions,
             previews_dir,
+            tag_evidence,
+            visual_encoder,
         }
     }
 
@@ -1476,6 +1488,22 @@ impl AssetService {
             .jobs
             .enqueue_with_priority(JobKind::MaterialHash, payload.clone(), -10)
             .await;
+        // The visual feature (#112) reads and decodes the original, so
+        // it sits below the default priority for the reason the
+        // fingerprint does. Enqueued only for image-bearing assets —
+        // the one family the encoder can answer for — and the handler
+        // settles cheaply when no model is configured, so an ingest
+        // that predates a model install costs one skipped row.
+        if asset
+            .materials
+            .iter()
+            .any(|m| matches!(m.mime, Some(MimeType::Image(_))))
+        {
+            let _ = self
+                .jobs
+                .enqueue_with_priority(JobKind::VisualFeature, payload.clone(), -10)
+                .await;
+        }
         // Chapters are a container's own statement about how its content
         // is divided, so the job is enqueued only for the families that
         // have a playback timeline to divide — the same shape as the
@@ -4864,6 +4892,127 @@ impl AssetService {
             self.notify_persona_touched(p);
         }
         Ok(crate::application::mapping::tag_to_dto(&tag))
+    }
+
+    /// The visual model this process has bound, if any (#112) — the
+    /// status the UI's model panel reads. All-`None` covers every
+    /// no-model shape (feature off, no package, failed bind) because
+    /// they are indistinguishable to a caller and act identically.
+    pub async fn visual_model_status(&self) -> asterism_contract::dto::VisualModelStatusDto {
+        match self.visual_encoder.get() {
+            Some(encoder) => {
+                let identity = encoder.identity();
+                asterism_contract::dto::VisualModelStatusDto {
+                    model_id: Some(identity.model_id.clone()),
+                    dim: Some(identity.dim),
+                    preprocess_ver: Some(identity.preprocess_ver),
+                }
+            }
+            None => asterism_contract::dto::VisualModelStatusDto {
+                model_id: None,
+                dim: None,
+                preprocess_ver: None,
+            },
+        }
+    }
+
+    /// Lists what the bound model proposed for one asset (#112),
+    /// score-descending, rulings included. With no model bound there
+    /// is nothing to list — an empty answer, not an error, because a
+    /// pane that shows suggestions must render the same on a build
+    /// without the feature.
+    pub async fn tag_suggestions_of(
+        &self,
+        asset_id: &str,
+    ) -> Result<Vec<asterism_contract::dto::TagSuggestionDto>, DomainError> {
+        let asset_id = parse_asset_id(asset_id)?;
+        let Some(encoder) = self.visual_encoder.get() else {
+            return Ok(Vec::new());
+        };
+        let model_id = &encoder.identity().model_id;
+        let evidence = self.tag_evidence.of_asset(&asset_id, model_id).await?;
+        // One name lookup for the batch; a suggestion whose tag was
+        // deleted has already left through the FK cascade.
+        let tags = self.tags.list().await?;
+        Ok(evidence
+            .into_iter()
+            .filter_map(|row| {
+                let tag = tags.iter().find(|t| t.id == row.tag_id)?;
+                Some(asterism_contract::dto::TagSuggestionDto {
+                    tag_id: row.tag_id.to_string(),
+                    name: tag.name.clone(),
+                    model_id: row.model_id,
+                    score: row.score,
+                    disposition: row.disposition.as_str().to_string(),
+                    suggested_at_ms: row.suggested_at_ms,
+                    resolved_at_ms: row.resolved_at_ms,
+                })
+            })
+            .collect())
+    }
+
+    /// Accepts one suggestion (#112): the ruling lands on the evidence
+    /// row and the tag is linked in `asset_tag` — from this moment it
+    /// is a tag the person put there, indistinguishable from any
+    /// other, which is the design. Refuses when no suggestion is open
+    /// or no model is bound.
+    pub async fn accept_tag_suggestion(
+        &self,
+        asset_id: &str,
+        tag_id: &str,
+        _attribution: &AttributionContext,
+    ) -> Result<(), DomainError> {
+        let asset_id = parse_asset_id(asset_id)?;
+        let tag_id = crate::application::mapping::parse_tag_id(tag_id)?;
+        let Some(encoder) = self.visual_encoder.get() else {
+            return Err(DomainError::Validation(
+                "no model is bound; there are no suggestions to rule on".into(),
+            ));
+        };
+        let model_id = encoder.identity().model_id.clone();
+        self.tag_evidence
+            .resolve(
+                &asset_id,
+                &tag_id,
+                &model_id,
+                crate::domain::visual::TagSuggestionDisposition::Accepted,
+                chrono::Utc::now().timestamp_millis(),
+            )
+            .await?;
+        let persona = self.assets.find(&asset_id).await?.map(|a| a.persona_id);
+        self.tags.link(&asset_id, &tag_id).await?;
+        if let Some(p) = persona {
+            self.notify_persona_touched(p);
+        }
+        Ok(())
+    }
+
+    /// Rejects one suggestion (#112): the ruling lands on the evidence
+    /// row and this model never proposes the pair again. Nothing else
+    /// changes — `asset_tag` was never written.
+    pub async fn reject_tag_suggestion(
+        &self,
+        asset_id: &str,
+        tag_id: &str,
+        _attribution: &AttributionContext,
+    ) -> Result<(), DomainError> {
+        let asset_id = parse_asset_id(asset_id)?;
+        let tag_id = crate::application::mapping::parse_tag_id(tag_id)?;
+        let Some(encoder) = self.visual_encoder.get() else {
+            return Err(DomainError::Validation(
+                "no model is bound; there are no suggestions to rule on".into(),
+            ));
+        };
+        let model_id = encoder.identity().model_id.clone();
+        self.tag_evidence
+            .resolve(
+                &asset_id,
+                &tag_id,
+                &model_id,
+                crate::domain::visual::TagSuggestionDisposition::Rejected,
+                chrono::Utc::now().timestamp_millis(),
+            )
+            .await
     }
 
     /// Removes a tag from an asset. Idempotent — missing links are a

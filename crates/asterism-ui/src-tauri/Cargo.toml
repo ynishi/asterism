@@ -73,6 +73,11 @@ tracing = { workspace = true }
 # real data — never pulls it in. `just ui-e2e` passes `--features wdio`.
 [features]
 wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
+# The ONNX encoder path (#112). The app process is the one that runs
+# job workers, so this is the binary the feature matters on — the
+# standalone server's serve mode only enqueues. Same default-off
+# reasoning as the server's flag.
+vision = ["asterism-server/vision"]
 
 [dependencies.tauri-plugin-wdio]
 version  = "1"

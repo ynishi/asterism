@@ -45,6 +45,7 @@ projection instead of full `Asset` entities.
 - `TextLocator` — A locator established to point at text.
 - `UnderivedSeries` — One `(material, rule)` pair nothing has answered yet — the unit the
 - `UnhashedMaterial` — One material still waiting for its fingerprints — the unit the
+- `VisualScanCandidate` — One row of the extraction backfill walk: a primary material whose
 
 ## Traits
 
@@ -73,9 +74,12 @@ projection instead of full `Asset` entities.
 - `SessionRepository` — Persistence port for the [`Session`] entity — the Dialog-modality
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
 - `SourceTextReader` — Port for reading the full text of an asset's **original source**
+- `TagEvidenceRepository` — Persistence port for scored tag suggestions (#112, P3) — the
 - `TagRepository` — Persistence port for [`Tag`] and its many-to-many link with assets.
+- `TagVectorRepository` — Persistence port for the Tag-name embedding cache (#112, P3).
 - `ThreadRepository` — Persistence port for [`Thread`] and its [`Message`] children —
 - `ThumbRepository` — Persistence port for the pre-generated thumbnail cache
+- `VisualFeatureRepository` — Persistence port for model-derived visual features (#112).
 
 ## Constants
 

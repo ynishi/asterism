@@ -49,7 +49,8 @@ use asterism_contract::dto::{
     MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
     ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
     RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
-    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto, VideoPreviewDto,
+    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadDto,
+    VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -251,6 +252,23 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         )
         .route("/asterism/comments/edit", post(edit_asset_comment))
         .route("/asterism/comments/delete", post(delete_asset_comment))
+        // Model-proposed tag suggestions (#112): a listing a person
+        // rules on. Accept/reject are verbs on the pair, path-scoped
+        // like the comment routes so the URL is authoritative.
+        .route(
+            "/asterism/assets/{id}/tag-suggestions",
+            get(list_tag_suggestions),
+        )
+        .route(
+            "/asterism/assets/{id}/tag-suggestions/{tag_id}/accept",
+            post(accept_tag_suggestion),
+        )
+        .route(
+            "/asterism/assets/{id}/tag-suggestions/{tag_id}/reject",
+            post(reject_tag_suggestion),
+        )
+        // Which visual model this process bound, if any (#112).
+        .route("/asterism/models/status", get(visual_model_status))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
         // on the asset row.
@@ -2683,6 +2701,48 @@ async fn list_asset_comments(
     Path(id): Path<String>,
 ) -> ApiResult<Vec<AssetCommentDto>> {
     Ok(Json(ctx.asset_comment_service.list(&id).await?))
+}
+
+/// `GET /asterism/assets/{id}/tag-suggestions` — what the bound model
+/// proposed for this asset (#112), score-descending, rulings included.
+/// Empty on a build or profile without a model.
+async fn list_tag_suggestions(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<TagSuggestionDto>> {
+    Ok(Json(ctx.asset_service.tag_suggestions_of(&id).await?))
+}
+
+/// `POST /asterism/assets/{id}/tag-suggestions/{tag_id}/accept` — a
+/// person takes the suggestion: the ruling lands on the evidence row
+/// and the tag is linked in `asset_tag`.
+async fn accept_tag_suggestion(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, tag_id)): Path<(String, String)>,
+) -> ApiResult<serde_json::Value> {
+    ctx.asset_service
+        .accept_tag_suggestion(&id, &tag_id, &asserted(None, None, None)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "accepted": true })))
+}
+
+/// `POST /asterism/assets/{id}/tag-suggestions/{tag_id}/reject` — a
+/// person refuses the suggestion; this model never proposes the pair
+/// again.
+async fn reject_tag_suggestion(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, tag_id)): Path<(String, String)>,
+) -> ApiResult<serde_json::Value> {
+    ctx.asset_service
+        .reject_tag_suggestion(&id, &tag_id, &asserted(None, None, None)?)
+        .await?;
+    Ok(Json(serde_json::json!({ "rejected": true })))
+}
+
+/// `GET /asterism/models/status` — which visual model this process
+/// bound, if any (#112). All-null when the process runs without one.
+async fn visual_model_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<VisualModelStatusDto> {
+    Ok(Json(ctx.asset_service.visual_model_status().await))
 }
 
 /// `POST /asterism/assets/{id}/comments` — appends one comment.
