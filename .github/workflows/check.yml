@@ -317,8 +317,14 @@ jobs:
       # a deletion shaped exactly like an ordinary regeneration in the
       # diff. 0.3.0 refuses that write and reports the mismatch as
       # "not checked" (exit 3) instead of as drift.
+      #
+      # The floor rose to 0.4.0 when the `exclude` list left the
+      # workspace manifest: that release removed the 512 KiB
+      # `llms-full.txt` lint the list existed to stay under, and an
+      # older tool would fail `--strict` on the full inventory this
+      # workspace now documents.
       - name: Install cargo-aidoc
-        run: cargo install cargo-aidoc --version '^0.3.0'
+        run: cargo install cargo-aidoc --version '^0.4.0'
 
       - name: Install the nightly cargo-aidoc reads
         run: |
