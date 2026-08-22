@@ -1,7 +1,7 @@
 //! How a line settles a collision — the contract, and not the rule.
 //!
 //! ```text
-//!   collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a pass carries them
+//!   collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a round carries them
 //!                       │                                     and the collision is gone
 //!                       └──────────────► Err              ──► no op is written at all
 //! ```
@@ -23,7 +23,7 @@
 //!
 //! What the model does require is one sentence: a strategy decides an
 //! id and a name, and returns them as operations complete enough to go
-//! straight into a pass. There is no half-written entry, no entry that
+//! straight into a round. There is no half-written entry, no entry that
 //! gets a name later, and no path that writes some operations and then
 //! fails — a refusal writes nothing, and the work stays open carrying
 //! its collision.

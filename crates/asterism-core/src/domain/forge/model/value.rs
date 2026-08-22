@@ -67,8 +67,8 @@ define_uuid_id!(
 );
 
 define_uuid_id!(
-    /// Surrogate id for a node of a work log — where it opened, one
-    /// pass at it, or where it ended.
+    /// Surrogate id for a node of a pursuit — where it opened, one
+    /// round at it, or where it ended.
     ///
     /// As with a history, the chain is what orders them, so the id
     /// answers "which node" and never "which came first".
@@ -80,7 +80,7 @@ define_uuid_id!(
     ///
     /// Declared here because a change point names the work it came out
     /// of, and that is all this module needs to know about one. The
-    /// work log itself is not in this module.
+    /// pursuit itself is not in this module.
     PursuitId
 );
 

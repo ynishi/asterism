@@ -6954,7 +6954,7 @@ UPDATE material
 /// vector, `failed` carries a reason and no vector (undecodable bytes,
 /// unreadable original) — absence *is* the pending state, which is what
 /// lets the walk's `NOT EXISTS` predicate offer a row exactly once.
-const V95_VISUAL_FEATURE: &str = r#"
+const V99_VISUAL_FEATURE: &str = r#"
 CREATE TABLE visual_feature (
     asset_id       BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
     ord            INTEGER NOT NULL,
@@ -6995,7 +6995,7 @@ CREATE INDEX idx_visual_feature_model ON visual_feature (model_id, feature_kind,
 /// pass writes it whether or not anything cleared the floor, so the
 /// batch walk offers each encoded vector exactly once — "ran and
 /// found nothing" must not look like "never ran".
-const V96_TAG_EVIDENCE: &str = r#"
+const V100_TAG_EVIDENCE: &str = r#"
 CREATE TABLE tag_evidence (
     asset_id     BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
     tag_id       BLOB NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
@@ -7022,6 +7022,412 @@ CREATE TABLE tag_vector (
 ) STRICT, WITHOUT ROWID;
 
 ALTER TABLE visual_feature ADD COLUMN tag_suggested_at INTEGER;
+"#;
+
+/// V95 — the forge's first model goes, tables and all (#102).
+///
+/// What these eight tables held is the shape the forge was designed
+/// around before #63 settled a different one: a pursuit whose standing
+/// derived from a stream of lifecycle events, a ledger of membership
+/// gestures beside it, and a line whose entries moved through four
+/// verbs written one event at a time. The model that replaced it keeps
+/// a line's history as a chain of change points carrying a table, and
+/// work as a log of passes — neither of which any column here can be
+/// read as.
+///
+/// Dropped rather than migrated, because there is nothing to carry
+/// across. Only `project` and `line` ever had a production writer, and
+/// what it wrote was a project row with an empty `main` beside it:
+/// `line_entry`, `line_merge` and `line_event` were written by tests
+/// alone, so no instance holds a line with anything on it. Translating
+/// an empty line into a genesis nobody asked for would invent a record
+/// rather than keep one — the empty-line stance the V85 note takes
+/// about `pursuit.project_id`, applied to the whole family.
+///
+/// Order is children before parents, because every edge in this family
+/// is `ON DELETE RESTRICT` and `DROP TABLE` fires the same check a
+/// delete does. `line_event` restricts `line_entry` and `line_merge`;
+/// `pursuit_tx` restricts `pursuit` and — through the aim column V85
+/// added — `line_entry` as well, which is what puts it ahead of the
+/// entries rather than beside the other pursuit tables; `line_merge`
+/// restricts `pursuit_event`; `pursuit_event` restricts `pursuit`;
+/// `line` restricts `project`, and `pursuit.project_id` restricts it
+/// too.
+///
+/// `pursuit.parent_id` is a self-FK, and ordering cannot answer it:
+/// `DROP TABLE` performs an implicit `DELETE FROM` whose row order
+/// nothing here chooses, so a parent can go while a child still names
+/// it. The parents are unhooked in a statement of their own first —
+/// the same move the persona purge makes, and for the same reason.
+///
+/// The order is exercised against rows rather than argued for. Empty
+/// tables drop in any order at all, so the test seeds a full family
+/// first, and both of the above were found that way: the aim column
+/// and the self-FK were each missing from the order this step was
+/// first written with.
+///
+/// Nothing outside the family points in. `dispatch_job.pursuit_id` was
+/// the one edge from the raw layer and [`V90_DROP_THE_PURSUIT_STAMP`]
+/// took it; `pursuit_restamp` went with [`V89_DROP_THE_RESTAMP_RECORD`].
+/// The tables the replacement needs are not created here — they arrive
+/// with the adapter that writes them, and an empty table waiting for
+/// one would be a shape nothing has checked.
+const V95_DROP_THE_FIRST_FORGE_MODEL: &str = r#"
+DROP TABLE line_event;
+DROP TABLE pursuit_tx;
+DROP TABLE line_entry;
+DROP TABLE line_merge;
+DROP TABLE pursuit_event;
+UPDATE pursuit SET parent_id = NULL;
+DROP TABLE pursuit;
+DROP TABLE line;
+DROP TABLE project;
+"#;
+
+/// V96 — the tables the forge's second model needs (#102).
+///
+/// Six, and they are the row types `asterism_infra::forge::rows` is
+/// written in: the in-memory store keeps the same shapes under a lock,
+/// and the scenario it passes is the one this schema has to pass too.
+/// What is here owes what is there.
+///
+/// The tables carry the model's own words. `pursuit` is what the model
+/// calls one line of work, and the first model's table of that name
+/// went with it in `V95` — so there is nothing to tell apart, and a
+/// second vocabulary for one thing would be a reader's problem with no
+/// reader's benefit.
+///
+/// # What no column holds
+///
+/// **Anything the history answers.** Liveness, current name and
+/// current content are folded out of the chain on read, so none of
+/// them has a column — a cached copy would be a second source for a
+/// question that already has one, and the two disagree the first time
+/// a write goes half-way. There is no `head` on `line` for the same
+/// reason: the head is the node no other node claims as a parent.
+///
+/// **The chain's order.** Every node carries its parent, and that is
+/// the order — on both logs. A sequence column would be a second
+/// answer, and a store that got the two out of step would be handing
+/// back a history the model never wrote. Neither `change_point` nor
+/// `pursuit_node` has one, and both are read by the same walk.
+///
+/// **A persona.** The forge answers nothing about whose line this is;
+/// `Lines::list` says so, and grouping and access live outside it. No
+/// forge table carries a `persona_id`, and the persona purge does not
+/// name one.
+///
+/// # What the constraints hold
+///
+/// **`UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id, parent_id)`
+/// are the concurrency control.** Two nodes on one parent is a fork,
+/// which both logs refuse in the model; here the index refuses it as
+/// part of the insert, so the check is the write rather than something
+/// beside it that a caller could be holding a stale answer to. Nothing
+/// reads a head and compares.
+///
+/// **`UNIQUE (pursuit_id) WHERE kind = 'close'`** refuses a second
+/// ending. The parent index alone does not: a second close would sit
+/// on the first, which is a parent nobody has used. Work ends once,
+/// and `Pursuit::end` says so — a row the model would refuse is a row
+/// the read half cannot hand back, so it is better not written.
+///
+/// **`content` carries a foreign key to `asset`, and it restricts.**
+/// This is the one place the forge reaches into the layer below, and
+/// it is not the ledger's old stance turned around by accident. A
+/// ledger records that something happened and stays true whatever
+/// becomes of what it names; a line says what is on it *now*, under
+/// this name, at this content. A line naming bytes somebody deleted is
+/// a line lying about the present, and a removed entry is not an
+/// exception — undoing a removal is adding that entry back, which
+/// needs the content to still be there.
+///
+/// The consequence is that purging a persona whose assets are on a
+/// line is refused, and that is the intended behaviour rather than a
+/// cost of it. What releases an asset is dropping the line that holds
+/// it, which is `discard::releases` in the model and has no verb on
+/// any port yet.
+const V96_FORGE_TABLES: &str = r#"
+CREATE TABLE line (
+    id           BLOB PRIMARY KEY,
+    name         TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    standing     TEXT NOT NULL
+        CHECK (standing IN ('open', 'archived')),
+    genesis_id   BLOB NOT NULL,
+    genesis_at   INTEGER NOT NULL,
+    genesis_by   BLOB NOT NULL,
+    genesis_kind TEXT NOT NULL
+        CHECK (genesis_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE TABLE change_point (
+    id        BLOB PRIMARY KEY,
+    line_id   BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id BLOB NOT NULL,
+    from_work BLOB NOT NULL,
+    by_node   BLOB NOT NULL,
+    at        INTEGER NOT NULL,
+    actor_id  BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_change_point_on_parent
+    ON change_point(line_id, parent_id);
+CREATE INDEX idx_change_point_line ON change_point(line_id);
+CREATE INDEX idx_change_point_from ON change_point(from_work);
+
+CREATE TABLE change_row (
+    point_id  BLOB NOT NULL REFERENCES change_point(id) ON DELETE RESTRICT,
+    entry_id  BLOB NOT NULL,
+    existence TEXT
+        CHECK (existence IN ('present', 'absent')),
+    content   BLOB REFERENCES asset(id) ON DELETE RESTRICT,
+    name      TEXT,
+    PRIMARY KEY (point_id, entry_id),
+    CHECK (existence IS NOT NULL OR content IS NOT NULL OR name IS NOT NULL),
+    CHECK (existence IS NOT 'absent' OR (content IS NULL AND name IS NULL))
+) STRICT;
+
+CREATE INDEX idx_change_row_entry ON change_row(entry_id);
+CREATE INDEX idx_change_row_content ON change_row(content);
+
+CREATE TABLE pursuit (
+    id           BLOB PRIMARY KEY,
+    line_id      BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id    BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    open_node    BLOB NOT NULL,
+    base_id      BLOB NOT NULL,
+    title        TEXT,
+    note         TEXT,
+    open_at      INTEGER NOT NULL,
+    open_by      BLOB NOT NULL,
+    open_kind    TEXT NOT NULL
+        CHECK (open_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_pursuit_line ON pursuit(line_id);
+CREATE INDEX idx_pursuit_parent ON pursuit(parent_id);
+
+CREATE TABLE pursuit_node (
+    id         BLOB PRIMARY KEY,
+    pursuit_id    BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    parent_id  BLOB NOT NULL,
+    kind       TEXT NOT NULL
+        CHECK (kind IN ('round', 'close')),
+    outcome    TEXT
+        CHECK (outcome IN ('satisfied', 'abandoned')),
+    note       TEXT,
+    at         INTEGER NOT NULL,
+    actor_id   BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system')),
+    CHECK ((kind = 'close') = (outcome IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_pursuit_node_on_parent
+    ON pursuit_node(pursuit_id, parent_id);
+CREATE UNIQUE INDEX idx_pursuit_node_one_close
+    ON pursuit_node(pursuit_id) WHERE kind = 'close';
+CREATE INDEX idx_pursuit_node_pursuit ON pursuit_node(pursuit_id);
+
+CREATE TABLE pursuit_op (
+    node_id  BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL,
+    entry_id BLOB NOT NULL,
+    verb     TEXT NOT NULL
+        CHECK (verb IN ('add', 'replace', 'rename', 'remove')),
+    content  BLOB REFERENCES asset(id) ON DELETE RESTRICT,
+    name     TEXT,
+    PRIMARY KEY (node_id, position),
+    CHECK ((verb IN ('add', 'replace')) = (content IS NOT NULL)),
+    CHECK ((verb IN ('add', 'rename')) = (name IS NOT NULL))
+) STRICT;
+
+CREATE INDEX idx_pursuit_op_entry ON pursuit_op(entry_id);
+CREATE INDEX idx_pursuit_op_content ON pursuit_op(content);
+"#;
+
+/// V97 — what a forge handle stands for (#102).
+///
+/// The forge records who did a thing as a handle and a kind, and asks
+/// what the handle means through `boundary::Actors`. This is the row
+/// that answers.
+///
+/// # Why a row rather than the triple on the node
+///
+/// A node is kept forever, and the identity on the other side is not
+/// settled: the owner of an instance is an unbound reference until
+/// authentication binds it. A node that recorded the answer today
+/// would be recording an absence and would have to be rewritten the
+/// day the answer arrives, and nodes do not get rewritten. One row to
+/// update is the whole point of the indirection.
+///
+/// # What a handle stands for
+///
+/// Four kinds, and they are not the attribution triple's. `owner` and
+/// `subject` are the two an [`Author`](asterism_core::domain::attribution::Author)
+/// has; `unrecorded` is a write that named nobody, which is one actor
+/// rather than a new one each time — "nobody said who" is a single
+/// answer, not a crowd. `server` is the instance itself, which is what
+/// a line's rule writes as.
+///
+/// The server is not the `instance` row's id reused. One deployment is
+/// one server today and several is the setting the port's doc names as
+/// the one where "the system did it" stops being an answer — so the
+/// handle namespace stays the forge's own, and `subject` is where a
+/// second server would be told apart.
+///
+/// # Uniqueness over a nullable column
+///
+/// `owner`, `unrecorded` and today's `server` all carry a NULL
+/// subject, and SQLite counts NULLs as distinct in a UNIQUE index — so
+/// a plain one would admit a second owner. The index is over
+/// `COALESCE(subject, '')` instead, which is what makes "one handle
+/// per thing it stands for" a rule rather than an intention.
+const V97_FORGE_ACTOR: &str = r#"
+CREATE TABLE forge_actor (
+    id         BLOB PRIMARY KEY,
+    stands_for TEXT NOT NULL
+        CHECK (stands_for IN ('owner', 'subject', 'unrecorded', 'server')),
+    subject    TEXT,
+    created_at INTEGER NOT NULL,
+    CHECK ((stands_for = 'subject') = (subject IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_forge_actor_stands_for
+    ON forge_actor(stands_for, COALESCE(subject, ''));
+"#;
+
+/// V98 — what was said about work (#102).
+///
+/// Three tables for the forge's own conversations: the thread, what
+/// was said in it, and every correction to what was said.
+///
+/// # Why `forge_` and not `thread`
+///
+/// Because `thread` is taken, by the annotation surface downstairs
+/// that anchors to snapshots, cards and query groups. That is not this
+/// one and could not be: the four things worth remarking on here are a
+/// pursuit, a pass, an entry as a pass had it, and a change point, and
+/// the layer below would have to learn what a pursuit is to carry
+/// them. The collision is the schema saying what the model already
+/// says — two primitives, named apart rather than merged.
+///
+/// # The anchor is four columns and a kind, not a polymorphic id
+///
+/// A thread hangs off one of four things — a pursuit, a pass, one
+/// entry as a pass had it, or a change point — and SQLite has no key
+/// that points at a column whose meaning depends on another. Naming
+/// each target its own nullable column buys the foreign keys back:
+/// `anchor_pursuit` and `anchor_change_point` are real references, and
+/// a `CHECK` says which of them a given `anchor_kind` requires. The
+/// node and entry halves stay bare, for the reason every other node
+/// reference in the forge is bare — a pass is a `pursuit_node` row and
+/// an entry is not a row at all.
+///
+/// The entry anchor carries the pass as well as the entry, because
+/// what it means is *this entry, as this pass had it*. An entry alone
+/// would follow the entry into every other pursuit it is carried into,
+/// which is how a remark about one attempt becomes a remark about the
+/// thing itself.
+///
+/// **The pass does not carry the work it is in, and neither does this.**
+/// A node id identifies one node of one pursuit, so the anchor is the
+/// node — which is why `anchor_pursuit` is set on the `pursuit` kind
+/// and on no other. The service that opens a thread is handed the
+/// work as well, because finding a pass by id means reading the
+/// pursuit that has it; what it hands the model afterwards is the pass.
+///
+/// # Nothing removes and nothing overwrites
+///
+/// No `deleted_at`, and no update path for a body. Correcting a
+/// message writes a `thread_revision` and the body now is the last
+/// one, which is what `Message::amend` does in memory. The absence is
+/// the two logs' absence, for the same reason.
+///
+/// # Order is the clock here, and only here
+///
+/// `said_at` orders messages, and `position` orders the corrections to
+/// one message. Everywhere else in the forge the chain is the order
+/// and a timestamp is evidence; a conversation has no chain to read an
+/// order out of, and nothing derives from the order it has, so a clock
+/// that steps backwards makes a conversation read oddly and cannot
+/// make the line wrong.
+///
+/// The read side asks `parent_id` one question the stamps cannot
+/// answer: a reply kept with an earlier `said_at` than the message it
+/// answers is put back after it. Without that, a clock that stepped
+/// backwards would leave rows that cannot be read at all.
+const V98_FORGE_THREADS: &str = r#"
+CREATE TABLE forge_thread (
+    id                  BLOB PRIMARY KEY,
+    anchor_kind         TEXT NOT NULL
+        CHECK (anchor_kind IN ('pursuit', 'round', 'entry', 'change_point')),
+    anchor_pursuit      BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    anchor_node         BLOB,
+    anchor_entry        BLOB,
+    anchor_change_point BLOB REFERENCES change_point(id) ON DELETE RESTRICT,
+    title               TEXT,
+    created_at          INTEGER NOT NULL,
+    created_by          BLOB NOT NULL,
+    created_kind        TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at          INTEGER NOT NULL,
+    updated_by          BLOB NOT NULL,
+    updated_kind        TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system')),
+    CHECK ((anchor_kind = 'pursuit') = (anchor_pursuit IS NOT NULL)),
+    CHECK ((anchor_kind IN ('round', 'entry')) = (anchor_node IS NOT NULL)),
+    CHECK ((anchor_kind = 'entry') = (anchor_entry IS NOT NULL)),
+    CHECK ((anchor_kind = 'change_point') = (anchor_change_point IS NOT NULL))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_anchor_pursuit ON forge_thread(anchor_pursuit);
+CREATE INDEX idx_forge_thread_anchor_node ON forge_thread(anchor_node);
+CREATE INDEX idx_forge_thread_anchor_change_point ON forge_thread(anchor_change_point);
+
+CREATE TABLE forge_thread_message (
+    id        BLOB PRIMARY KEY,
+    thread_id BLOB NOT NULL REFERENCES forge_thread(id) ON DELETE RESTRICT,
+    parent_id BLOB REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    body      TEXT NOT NULL,
+    said_at   INTEGER NOT NULL,
+    said_by   BLOB NOT NULL,
+    said_kind TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_message_thread
+    ON forge_thread_message(thread_id, said_at);
+
+CREATE TABLE forge_thread_revision (
+    message_id BLOB NOT NULL REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    position   INTEGER NOT NULL,
+    body       TEXT NOT NULL,
+    said_at    INTEGER NOT NULL,
+    said_by    BLOB NOT NULL,
+    said_kind  TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system')),
+    PRIMARY KEY (message_id, position)
+) STRICT;
 "#;
 
 /// Migrations in application order. **Append only** — never rewrite an
@@ -7121,8 +7527,12 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V92_MATERIAL_FINGERPRINT_STATUS),
     Step::Sql(V93_JSON_MATERIAL_MIME),
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
-    Step::Sql(V95_VISUAL_FEATURE),
-    Step::Sql(V96_TAG_EVIDENCE),
+    Step::Sql(V95_DROP_THE_FIRST_FORGE_MODEL),
+    Step::Sql(V96_FORGE_TABLES),
+    Step::Sql(V97_FORGE_ACTOR),
+    Step::Sql(V98_FORGE_THREADS),
+    Step::Sql(V99_VISUAL_FEATURE),
+    Step::Sql(V100_TAG_EVIDENCE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -10497,24 +10907,19 @@ mod tests {
     /// The closed list of tables that record a channel, and wiring more
     /// services to *receive* an `AttributionContext` does not extend it
     /// (an operation ledger is a separate decision, not a column that
-    /// appears table by table). Two waves so far: `asset` /
-    /// `dispatch_job` (V47-V50), and the pursuit family (V79) — forge
-    /// events are actor-carrying by design (#29: who opened the
-    /// pursuit, who recorded the close, who ordered the restamp), with
-    /// the same NULL-means-unrecorded reading and the same write-side
-    /// channel guard.
+    /// appears table by table). One wave stands: `asset` /
+    /// `dispatch_job` (V47-V50). The forge's first model was the other
+    /// three — the pursuit family (V79), the ledger (V82) and the
+    /// project (V84) — and V95 took all of them; the model that
+    /// replaced it records an actor on every node rather than a
+    /// channel on some tables, and where that lands in the schema is
+    /// the adapter's question to answer.
     ///
     /// Read off the schema rather than a hand-kept list: a new
     /// `attributed_via` would otherwise arrive silently, and every one of
     /// them is a place the attribution rule has to answer for — which channel
     /// wrote it, what a NULL means there, and how auth resolves it
-    /// later. Third wave: the ledger (V82) — a membership gesture is a
-    /// statement somebody makes (#22: "who decided"), so it carries
-    /// the triple. Fourth wave: the project (V84) —
-    /// opening one is a statement; `line_merge` deliberately does
-    /// not carry the triple (who approved is who closed, and the
-    /// close event already says so), and the line tables are
-    /// derivation surfaces, not statements.
+    /// later.
     #[test]
     fn only_settled_tables_carry_a_channel_column() {
         let mut conn = test_conn();
@@ -10535,339 +10940,9 @@ mod tests {
 
         assert_eq!(
             carriers,
-            vec![
-                "asset".to_string(),
-                "dispatch_job".to_string(),
-                "project".to_string(),
-                "pursuit".to_string(),
-                "pursuit_event".to_string(),
-                "pursuit_tx".to_string(),
-            ],
+            vec!["asset".to_string(), "dispatch_job".to_string()],
             "a table gained an attribution channel; that is a design decision, not a migration \
              detail — settle where attribution state lives before changing this list"
-        );
-    }
-
-    /// V84's rules are pairing rules, and they live in the schema: a
-    /// verb's payload columns travel with the verb (two two-way
-    /// CHECKs), a project holds one line per name, and a close event
-    /// carries at most one merge. Asserted at insert level because
-    /// `LineVerb::from_columns` only guards the Rust side — a typo
-    /// inside the SQL CHECK text would otherwise go unseen until the
-    /// write path arrives (the `v78_holds_the_two_rules` precedent:
-    /// the schema is where the property actually lives).
-    #[test]
-    fn v84_pairs_verb_and_payload_and_keeps_lines_and_merges_unique() {
-        let mut conn = test_conn();
-        migrate(&mut conn).unwrap();
-        let persona = seed_persona(&conn);
-
-        let project = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO project (id, persona_id, name, created_at) VALUES (?1, ?2, 'album', 0)",
-            params![project, persona],
-        )
-        .unwrap();
-
-        let line = Uuid::now_v7();
-        let line_named_main = |id: Uuid| {
-            conn.execute(
-                "INSERT INTO line (id, project_id, name, created_at) \
-                 VALUES (?1, ?2, 'main', 0)",
-                params![id, project],
-            )
-        };
-        line_named_main(line).unwrap();
-        assert!(
-            line_named_main(Uuid::now_v7()).is_err(),
-            "one project holds one line per name"
-        );
-
-        let entry = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
-             VALUES (?1, ?2, ?3, 0)",
-            params![entry, line, persona],
-        )
-        .unwrap();
-
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        let close = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit_event (id, pursuit_id, persona_id, kind, created_at) \
-             VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
-            params![close, pursuit, persona],
-        )
-        .unwrap();
-
-        let merge = Uuid::now_v7();
-        let merge_of_close = |id: Uuid| {
-            conn.execute(
-                "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
-                 VALUES (?1, ?2, ?3, 0)",
-                params![id, close, persona],
-            )
-        };
-        merge_of_close(merge).unwrap();
-        assert!(
-            merge_of_close(Uuid::now_v7()).is_err(),
-            "one close event carries at most one merge"
-        );
-
-        let event = |verb: &str, with_asset: bool, with_name: bool| {
-            conn.execute(
-                "INSERT INTO line_event \
-                     (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
-                params![
-                    Uuid::now_v7(),
-                    entry,
-                    persona,
-                    verb,
-                    with_asset.then(Uuid::now_v7),
-                    with_name.then_some("key visual"),
-                    merge,
-                ],
-            )
-        };
-
-        event("add", true, true).expect("an add carries both payloads");
-        event("replace", true, false).expect("a replace carries the asset alone");
-        event("rename", false, true).expect("a rename carries the name alone");
-        event("delete", false, false).expect("a delete carries nothing");
-
-        assert!(event("add", true, false).is_err(), "a nameless add");
-        assert!(event("add", false, true).is_err(), "an assetless add");
-        assert!(
-            event("replace", false, false).is_err(),
-            "an assetless replace"
-        );
-        assert!(
-            event("replace", true, true).is_err(),
-            "a replace naming things"
-        );
-        assert!(event("rename", false, false).is_err(), "a nameless rename");
-        assert!(
-            event("delete", true, false).is_err(),
-            "a delete carrying an asset"
-        );
-        assert!(
-            event("fold", false, false).is_err(),
-            "the verb set is closed"
-        );
-    }
-
-    /// V85's rules are pairing rules carried by **column-level** CHECKs
-    /// on ALTER-added columns, which is the arrangement the step doc
-    /// says was measured rather than assumed. This is where the
-    /// measurement is pinned: each rule is asserted against a real
-    /// insert, so a CHECK that survived the ALTER without firing — the
-    /// failure mode that would make the whole choice wrong — cannot
-    /// pass unnoticed.
-    ///
-    /// The other half is the ledger a pre-V85 database already holds.
-    /// `pursuit_tx` rows are history and a lost one is a gesture nobody
-    /// can re-perform, so a row is seeded *before* the step runs and
-    /// read back after with every attribution column named — the four
-    /// that a careless widening would drop.
-    ///
-    /// It runs to *latest* rather than stopping at 85, so what it
-    /// asserts is the shape a caller meets today: V91 dropped the pin
-    /// column, its CHECK and its index, and the rules asserted below
-    /// are the three that outlived it. That makes this the test that
-    /// answers for V91 leaving the surviving column-level CHECKs
-    /// standing — `DROP COLUMN` rewrites the table's schema text, and a
-    /// CHECK lost in that rewrite would fire nowhere and say nothing.
-    #[test]
-    fn v85_leaves_the_ledger_alone_and_pairs_the_new_columns() {
-        let mut conn = test_conn();
-        migrate_to(&mut conn, 84).unwrap();
-        let persona = seed_persona(&conn);
-
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        let legacy_tx = Uuid::now_v7();
-        let legacy_asset = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit_tx \
-                 (id, pursuit_id, persona_id, kind, asset_id, origin, note, \
-                  author_kind, author_subject, operator_ai, attributed_via, created_at) \
-             VALUES (?1, ?2, ?3, 'in', ?4, 'generated', 'first light', \
-                     'subject', 'alice', 'claude-code', 'mcp', 7)",
-            params![legacy_tx, pursuit, persona, legacy_asset],
-        )
-        .unwrap();
-
-        migrate(&mut conn).unwrap();
-
-        type LegacyRow = (
-            Uuid,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            i64,
-        );
-        let carried: LegacyRow = conn
-            .query_row(
-                "SELECT asset_id, kind, origin, note, author_kind, author_subject, \
-                        operator_ai, attributed_via, created_at \
-                 FROM pursuit_tx WHERE id = ?1",
-                params![legacy_tx],
-                |r| {
-                    Ok((
-                        r.get(0)?,
-                        r.get(1)?,
-                        r.get(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                        r.get(5)?,
-                        r.get(6)?,
-                        r.get(7)?,
-                        r.get(8)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            carried,
-            (
-                legacy_asset,
-                "in".to_string(),
-                Some("generated".to_string()),
-                Some("first light".to_string()),
-                Some("subject".to_string()),
-                Some("alice".to_string()),
-                Some("claude-code".to_string()),
-                Some("mcp".to_string()),
-                7
-            ),
-            "the gesture, its origin, and the whole attribution triple are untouched"
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT out_of_scope, target_entry_id IS NULL, \
-                        supersedes_asset_id IS NULL \
-                 FROM pursuit_tx WHERE id = ?1",
-                params![legacy_tx],
-                |r| Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?
-                ))
-            )
-            .unwrap(),
-            (0, 1, 1),
-            "a gesture that predates the columns aimed at nothing and reached outside nothing"
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT project_id IS NULL FROM pursuit WHERE id = ?1",
-                params![pursuit],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            1,
-            "and a pursuit that predates filing is left unfiled rather than given a project"
-        );
-
-        // A project, its line, and one entry to aim at.
-        let project = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO project (id, persona_id, name, created_at) VALUES (?1, ?2, 'album', 0)",
-            params![project, persona],
-        )
-        .unwrap();
-        let line = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line (id, project_id, name, created_at) VALUES (?1, ?2, 'main', 0)",
-            params![line, project],
-        )
-        .unwrap();
-        let entry = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO line_entry (id, line_id, persona_id, created_at) VALUES (?1, ?2, ?3, 0)",
-            params![entry, line, persona],
-        )
-        .unwrap();
-
-        conn.execute(
-            "UPDATE pursuit SET project_id = ?1 WHERE id = ?2",
-            params![project, pursuit],
-        )
-        .expect("a pursuit files under a project");
-
-        let tx = |kind: &str,
-                  origin: Option<&str>,
-                  target: Option<Uuid>,
-                  out_of_scope: i64,
-                  supersedes: Option<Uuid>| {
-            conn.execute(
-                "INSERT INTO pursuit_tx \
-                     (id, pursuit_id, persona_id, kind, asset_id, origin, \
-                      target_entry_id, out_of_scope, \
-                      supersedes_asset_id, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
-                params![
-                    Uuid::now_v7(),
-                    pursuit,
-                    persona,
-                    kind,
-                    Uuid::now_v7(),
-                    origin,
-                    target,
-                    out_of_scope,
-                    supersedes,
-                ],
-            )
-        };
-
-        tx("in", Some("existing"), Some(entry), 0, None)
-            .expect("an existing IN may name the entry it aims at");
-        tx("in", Some("generated"), None, 0, None).expect("an untargeted IN stays legal");
-        tx("in", Some("existing"), Some(entry), 1, None)
-            .expect("an IN may declare it reached outside its scope");
-        tx("update", None, None, 0, Some(legacy_asset))
-            .expect("an update may name the member it revises");
-        tx("update", None, None, 0, None)
-            .expect("an update without one is still admitted — P3 closes that direction");
-
-        assert!(
-            tx("in", Some("generated"), Some(entry), 0, None).is_err(),
-            "only an existing-origin IN targets an entry"
-        );
-        assert!(
-            tx("remove", None, Some(entry), 0, None).is_err(),
-            "a remove targets nothing"
-        );
-        assert!(
-            tx("remove", None, None, 1, None).is_err(),
-            "only an IN can reach outside a scope"
-        );
-        assert!(
-            tx("in", Some("generated"), None, 0, Some(legacy_asset)).is_err(),
-            "only an update supersedes"
-        );
-
-        // The target column references rather than merely records, and
-        // a reference nobody checks is a column of loose uuids.
-        // Asserted with an id that resolves to nothing, which is the
-        // one thing the CHECKs above cannot catch.
-        assert!(
-            tx("in", Some("existing"), Some(Uuid::now_v7()), 0, None).is_err(),
-            "a target that names no entry"
         );
     }
 
@@ -12449,102 +12524,6 @@ mod tests {
             orphans, 0,
             "the backfill mints nothing beyond the dispatches"
         );
-    }
-
-    /// V82 transcribes recorded outputs into the ledger — one
-    /// `'in'/'generated'` row per (pursuit, asset), first dispatch
-    /// wins when the same asset appears in two rounds' outputs, NULL
-    /// attribution, the dispatch's clock. The restamp CHECK is checked
-    /// at the end of the chain rather than at V82, which is the only
-    /// thing this test can honestly say about it.
-    #[test]
-    fn v82_transcribes_outputs_into_the_ledger_once_per_membership() {
-        let mut conn = test_conn();
-        migrate_to(&mut conn, 81).unwrap();
-        let persona = seed_persona(&conn);
-        let a = seed_asset(&conn, persona);
-        let b = seed_asset(&conn, persona);
-        let snapshot = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
-             VALUES (?1, ?2, 'cafe', 0)",
-            params![snapshot, persona],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO snapshot_asset (snapshot_id, asset_id, position) \
-             VALUES (?1, ?2, 0)",
-            params![snapshot, a],
-        )
-        .unwrap();
-        let pursuit = Uuid::now_v7();
-        conn.execute(
-            "INSERT INTO pursuit (id, persona_id, created_at) VALUES (?1, ?2, 0)",
-            params![pursuit, persona],
-        )
-        .unwrap();
-        // Two rounds of one pursuit; `a` appears in both outputs, `b`
-        // in the second only. An idle dispatch with no outputs rides
-        // along to prove it contributes nothing.
-        for (id, outputs, created) in [
-            (Uuid::now_v7(), format!("[\"{a}\"]"), 1_000_i64),
-            (Uuid::now_v7(), format!("[\"{a}\", \"{b}\"]"), 2_000),
-            (Uuid::now_v7(), "[]".to_string(), 3_000),
-        ] {
-            conn.execute(
-                "INSERT INTO dispatch_job (id, snapshot_id, persona_id, exporter_slug, \
-                                           action, state_slug, output_asset_ids, pursuit_id, \
-                                           created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, 'file', 'export', 'done', ?4, ?5, ?6, ?6)",
-                params![id, snapshot, persona, outputs, pursuit, created],
-            )
-            .unwrap();
-        }
-
-        migrate(&mut conn).unwrap();
-
-        struct LedgerRow {
-            asset_id: Uuid,
-            kind: String,
-            origin: Option<String>,
-            author_kind: Option<String>,
-            created_at: i64,
-        }
-        let rows: Vec<LedgerRow> = {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT asset_id, kind, origin, author_kind, created_at \
-                       FROM pursuit_tx WHERE pursuit_id = ?1 ORDER BY created_at, id",
-                )
-                .unwrap();
-            stmt.query_map(params![pursuit], |r| {
-                Ok(LedgerRow {
-                    asset_id: r.get(0)?,
-                    kind: r.get(1)?,
-                    origin: r.get(2)?,
-                    author_kind: r.get(3)?,
-                    created_at: r.get(4)?,
-                })
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-        };
-        assert_eq!(rows.len(), 2, "one membership per asset, not per output");
-        assert_eq!(
-            (rows[0].asset_id, rows[0].created_at),
-            (a, 1_000),
-            "the first dispatch to produce the asset names the entry's clock"
-        );
-        assert_eq!((rows[1].asset_id, rows[1].created_at), (b, 2_000));
-        for row in &rows {
-            assert_eq!(row.kind, "in");
-            assert_eq!(row.origin.as_deref(), Some("generated"));
-            assert_eq!(
-                row.author_kind, None,
-                "nobody recorded these entries; the migration did"
-            );
-        }
     }
 
     /// V87 rebuilds `dispatch_job` to drop one constraint and nothing
@@ -14663,5 +14642,314 @@ mod tests {
             );
             assert!(!status_era_owes(&conn, asset), "{mime} stays answered");
         }
+    }
+    /// V95 drops the eight tables the forge's first model lived in, and
+    /// frees everything they pinned.
+    ///
+    /// Seeded at 94 with a populated family rather than empty tables,
+    /// because rows are the whole question: every edge here is
+    /// `ON DELETE RESTRICT`, `DROP TABLE` fires the same check a delete
+    /// does, and a wrong order fails the migration rather than showing
+    /// up later. Empty tables would drop in any order at all.
+    ///
+    /// The persona is deleted afterwards with foreign keys on — at 94
+    /// those rows would have refused it, which is what "frees" means
+    /// here (the `v88_drops_the_close_record_and_frees_what_it_pinned`
+    /// precedent).
+    #[test]
+    fn v95_drops_the_first_forge_model_and_frees_what_it_pinned() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 94).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let snapshot = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO snapshot (id, persona_id, content_hash, created_at) \
+             VALUES (?1, ?2, 'forge', 0)",
+            params![snapshot, persona],
+        )
+        .unwrap();
+
+        // The project and its line: the only two a production writer
+        // ever reached, and it wrote them together.
+        let project = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO project (id, persona_id, name, created_at) \
+             VALUES (?1, ?2, 'album', 0)",
+            params![project, persona],
+        )
+        .unwrap();
+        let line = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line (id, project_id, name, created_at) \
+             VALUES (?1, ?2, 'main', 0)",
+            params![line, project],
+        )
+        .unwrap();
+
+        // The pursuit family, filed under that project, with the
+        // snapshot edge that pinned `snapshot` and the self-parent edge
+        // that pinned `pursuit`.
+        let parent = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, project_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![parent, persona, project],
+        )
+        .unwrap();
+        let child = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit (id, persona_id, project_id, parent_id, created_at) \
+             VALUES (?1, ?2, ?3, ?4, 0)",
+            params![child, persona, project, parent],
+        )
+        .unwrap();
+        let event = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_event \
+                 (id, pursuit_id, persona_id, kind, snapshot_id, created_at) \
+             VALUES (?1, ?2, ?3, 'closed_satisfied', ?4, 0)",
+            params![event, child, persona, snapshot],
+        )
+        .unwrap();
+
+        // The line's own three, and the ledger gesture that aimed into
+        // them — the edges that made the delete order long.
+        let entry = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_entry (id, line_id, persona_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![entry, line, persona],
+        )
+        .unwrap();
+        let merge = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at) \
+             VALUES (?1, ?2, ?3, 0)",
+            params![merge, event, persona],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO line_event \
+                 (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at) \
+             VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
+            params![Uuid::now_v7(), entry, persona, asset, merge],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pursuit_tx \
+                 (id, pursuit_id, persona_id, kind, asset_id, origin, \
+                  target_entry_id, created_at) \
+             VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, 0)",
+            params![Uuid::now_v7(), child, persona, asset, entry],
+        )
+        .unwrap();
+
+        migrate_to(&mut conn, 95).unwrap();
+
+        // Nothing of the family is left — tables, indexes and all.
+        let left: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master \
+                      WHERE tbl_name IN ('project', 'line', 'line_entry', 'line_merge', \
+                                         'line_event', 'pursuit', 'pursuit_event', \
+                                         'pursuit_tx') \
+                      ORDER BY name",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(
+            left.is_empty(),
+            "nothing of the first model is left: {left:?}"
+        );
+
+        // What the family named is untouched. The drop takes the
+        // forge's record of what somebody was doing, never the rows it
+        // was about.
+        for (table, id) in [("asset", asset), ("snapshot", snapshot)] {
+            let found: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "{table} is not the forge's to take");
+        }
+
+        // And the persona goes, which at 94 it could not have: six of
+        // those tables held a RESTRICT edge to it.
+        conn.execute("DELETE FROM asset WHERE persona_id = ?1", params![persona])
+            .unwrap();
+        conn.execute(
+            "DELETE FROM snapshot WHERE persona_id = ?1",
+            params![persona],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM persona WHERE id = ?1", params![persona])
+            .expect("the forge rows were the only thing pinning the persona");
+    }
+    /// V96's rules are the model's, written where a caller cannot skip
+    /// them. Each is asserted at insert level, because a CHECK or an
+    /// index that is subtly wrong looks exactly like one that is right
+    /// until a row argues with it.
+    ///
+    /// The concurrency ones are the point: nothing here reads a head
+    /// and compares. Two nodes on one parent is a fork, and the index
+    /// refuses it as part of the insert.
+    #[test]
+    fn v96_holds_the_rules_the_model_cannot_hold_from_here() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let line = Uuid::now_v7();
+        let genesis = Uuid::now_v7();
+        let actor = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line \
+                 (id, name, strategy, standing, genesis_id, genesis_at, genesis_by, \
+                  genesis_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, 'ROOT', 'by-hand', 'open', ?2, 0, ?3, 'user', \
+                     0, ?3, 'user', 0, ?3, 'user')",
+            params![line, genesis, actor],
+        )
+        .unwrap();
+
+        // A standing the model does not have is refused.
+        let unknown = conn.execute(
+            "UPDATE line SET standing = 'dropped' WHERE id = ?1",
+            params![line],
+        );
+        assert!(unknown.is_err(), "dropped is absence, not a standing");
+
+        // One change point on the genesis.
+        let first = Uuid::now_v7();
+        let point = |id: Uuid, parent: Uuid| {
+            conn.execute(
+                "INSERT INTO change_point \
+                     (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
+                params![id, line, parent, Uuid::now_v7(), Uuid::now_v7(), actor],
+            )
+        };
+        point(first, genesis).unwrap();
+
+        // A second one on the same parent is a fork.
+        let forked = point(Uuid::now_v7(), genesis);
+        assert!(
+            forked.is_err(),
+            "two change points on one parent is a fork, and a line has none"
+        );
+        // On the head, it is an ordinary append.
+        point(Uuid::now_v7(), first).unwrap();
+
+        // A row must say something, and a removal says only that.
+        let row =
+            |entry: Uuid, existence: Option<&str>, content: Option<Uuid>, name: Option<&str>| {
+                conn.execute(
+                    "INSERT INTO change_row (point_id, entry_id, existence, content, name) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![first, entry, existence, content, name],
+                )
+            };
+        assert!(
+            row(Uuid::now_v7(), None, None, None).is_err(),
+            "a row that states no axis puts an entry in a table that never moved it"
+        );
+        assert!(
+            row(Uuid::now_v7(), Some("absent"), Some(asset), None).is_err(),
+            "a removal that also fills the entry is a table not describing what it did"
+        );
+        let entry = Uuid::now_v7();
+        row(entry, Some("present"), Some(asset), Some("one")).unwrap();
+        row(Uuid::now_v7(), Some("absent"), None, None).unwrap();
+        // The two rows that speak about one axis and stay silent on the
+        // others — what `Row::replaced` and `Row::renamed` produce, and
+        // the shape the removal CHECK has to admit rather than catch.
+        row(Uuid::now_v7(), None, Some(asset), None).unwrap();
+        row(Uuid::now_v7(), None, None, Some("just a name")).unwrap();
+
+        // The asset is held: deleting it is refused while the row names it.
+        let held = conn.execute("DELETE FROM asset WHERE id = ?1", params![asset]);
+        assert!(
+            held.is_err(),
+            "a line naming bytes somebody deleted is a line lying about the present"
+        );
+        // And so, in consequence, is purging the persona that owns it.
+        let owner = conn.execute("DELETE FROM persona WHERE id = ?1", params![persona]);
+        assert!(
+            owner.is_err(),
+            "the cascade reaches the asset and stops there"
+        );
+
+        // A pursuit: one open node, then nodes on its head.
+        let work = Uuid::now_v7();
+        let open_node = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit \
+                 (id, line_id, parent_id, open_node, base_id, title, note, \
+                  open_at, open_by, open_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, ?2, NULL, ?3, ?4, NULL, NULL, 0, ?5, 'user', \
+                     0, ?5, 'user', 0, ?5, 'user')",
+            params![work, line, open_node, genesis, actor],
+        )
+        .unwrap();
+
+        let node = |id: Uuid, parent: Uuid, kind: &str, outcome: Option<&str>| {
+            conn.execute(
+                "INSERT INTO pursuit_node \
+                     (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, 'user')",
+                params![id, work, parent, kind, outcome, actor],
+            )
+        };
+        let round = Uuid::now_v7();
+        node(round, open_node, "round", None).unwrap();
+        assert!(
+            node(Uuid::now_v7(), open_node, "round", None).is_err(),
+            "two rounds on one parent is a fork of the pursuit"
+        );
+        assert!(
+            node(Uuid::now_v7(), round, "round", Some("satisfied")).is_err(),
+            "only an ending says how the work ended"
+        );
+        assert!(
+            node(Uuid::now_v7(), round, "close", None).is_err(),
+            "and an ending has to"
+        );
+
+        let ending = Uuid::now_v7();
+        node(ending, round, "close", Some("satisfied")).unwrap();
+        assert!(
+            node(Uuid::now_v7(), ending, "close", Some("abandoned")).is_err(),
+            "work ends once: the second ending sits on a parent nobody used, so the \
+             parent index alone would admit it"
+        );
+
+        // Operations pair verb and payload, and hold their content.
+        let op = |position: i64, verb: &str, content: Option<Uuid>, name: Option<&str>| {
+            conn.execute(
+                "INSERT INTO pursuit_op (node_id, position, entry_id, verb, content, name) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![round, position, Uuid::now_v7(), verb, content, name],
+            )
+        };
+        op(0, "add", Some(asset), Some("one")).unwrap();
+        op(1, "remove", None, None).unwrap();
+        assert!(op(2, "add", Some(asset), None).is_err(), "an add is named");
+        assert!(
+            op(3, "rename", Some(asset), Some("two")).is_err(),
+            "a rename moves a name and nothing else"
+        );
     }
 }

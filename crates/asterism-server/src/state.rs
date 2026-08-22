@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use asterism_core::application::DispatchService;
-use asterism_core::application::forge::{LegacyPursuitService, ProjectService};
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
     MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
@@ -37,13 +36,6 @@ pub struct ServerCtx {
     /// Immutable content-addressed snapshots (seeds for outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Lifecycle verbs of the pursuit — the unit of work a caller
-    /// files what it is working on under (#29), opened through these
-    /// verbs and no others.
-    pub legacy_pursuit_service: Arc<LegacyPursuitService>,
-    /// The context pursuits file under (#63) — opened deliberately,
-    /// and the owner of the line a satisfied close lands on.
-    pub project_service: Arc<ProjectService>,
     /// Outbound dispatch lifecycle (creates jobs, reifies derived
     /// output, exposes list/detail).
     pub dispatch_service: Arc<DispatchService>,
@@ -115,8 +107,6 @@ impl ServerCtx {
             asset_service: core.asset_service.clone(),
             thumb_service: core.thumb_service.clone(),
             snapshot_service: core.snapshot_service.clone(),
-            legacy_pursuit_service: core.legacy_pursuit_service.clone(),
-            project_service: core.project_service.clone(),
             dispatch_service: core.dispatch_service.clone(),
             query_group_service: core.query_group_service.clone(),
             modality_service: core.modality_service.clone(),

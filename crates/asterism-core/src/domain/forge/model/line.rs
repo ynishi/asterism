@@ -42,12 +42,84 @@
 //! [`Meta`], because "the line moved" and "the line is described
 //! differently" would otherwise collapse into one value that answers
 //! neither question.
+//!
+//! # Standing, and why it is not in the history
+//!
+//! ```text
+//!   Open ──archive──▶ Archived ──(drop)──▶ gone
+//!     ▲                   │                  │
+//!     └──── reopen ───────┘        what it held is released
+//!   takes change points   readable, holds
+//!                         everything still
+//! ```
+//!
+//! [`Standing`] sits beside the name and the strategy rather than in
+//! the chain, for the same reason a rename is not a change point: the
+//! history says what happened to what the line *carries*, and "this
+//! line is finished with" is a statement about the line. It moves
+//! [`Meta`] and nothing else.
+//!
+//! **Dropping is reachable only through the archive**, as purging is
+//! reachable only through the trash everywhere else here. Two steps,
+//! because the second one is irreversible and takes the history with
+//! it.
+//!
+//! # What a line holds, and why anything cares
+//!
+//! [`Line::holds`] is every [`Content`] any change point on the line
+//! has ever named. It is not a cache and not a second record — it is a
+//! fold, like everything else about a line — but it is the one fold
+//! something outside the forge has to act on: **while a line holds a
+//! content, the layer that keeps the bytes may not let it go.**
+//!
+//! An entry taken off the line does not release what it held. The
+//! change point that put it there is still in the chain and still
+//! names it, and the chain is not rewritten. So the set only ever
+//! grows, and the only thing that shrinks it is dropping the line.
+//!
+//! That is deliberate rather than unfortunate. A line says what is on
+//! it *now*: `alive`, under this name, at this content. A line saying
+//! that about bytes somebody deleted is a line telling a lie about the
+//! present, which is a different thing from a log of past events —
+//! those stay true whatever happens to what they name, which is why
+//! the ledger this model replaced could name an asset without holding
+//! it.
+//!
+//! # Rewriting is not a verb here
+//!
+//! There is no filter, no rebase, no editing a change point after the
+//! fact. Wanting one is usually wanting to release a content without
+//! dropping everything, and the answer is that the same result is
+//! reachable with the verbs that already exist: open a new line, and
+//! put on it what should have been there. That is a new history rather
+//! than an edited one, which is what it honestly is — the change
+//! points of a filtered line could not name the work they came out
+//! of, because that work asked for something else.
+//!
+//! What the old line then needs is to be archived and dropped, which
+//! is the pair above.
+
+use std::collections::BTreeSet;
 
 use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::{ChangePoint, History};
 use crate::domain::forge::model::table::EntryStates;
-use crate::domain::forge::model::value::{ChangePointId, LineId, Name, StrategyId};
+use crate::domain::forge::model::value::{ChangePointId, Content, LineId, Name, StrategyId};
+
+/// Whether a line is still being worked on.
+///
+/// Two values and not three: "dropped" is absence, not a state. A row
+/// saying a line is gone would be a line that is still there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum Standing {
+    /// Takes change points, and work may be cut from it.
+    #[default]
+    Open,
+    /// Finished with. Readable in full, holds everything it held, and
+    /// takes nothing new until it is reopened.
+    Archived,
+}
 
 /// One repository: an identifier, a history, and how it settles
 /// collisions.
@@ -56,6 +128,7 @@ pub struct Line {
     id: LineId,
     name: Name,
     strategy: StrategyId,
+    standing: Standing,
     history: History,
     meta: Meta,
 }
@@ -77,8 +150,33 @@ impl Line {
             id: LineId::new(),
             name,
             strategy,
+            standing: Standing::Open,
             history: History::begin(act),
             meta: Meta::opened(act),
+        }
+    }
+
+    /// Rebuilds a line under the id it was kept with, around a
+    /// history put back node by node.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn restored(
+        id: LineId,
+        name: Name,
+        strategy: StrategyId,
+        standing: Standing,
+        history: History,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            strategy,
+            standing,
+            history,
+            meta,
         }
     }
 
@@ -128,6 +226,9 @@ impl Line {
 
     /// Records a change. The only way the line moves.
     pub fn record(&mut self, point: ChangePoint) -> Result<(), ForgeError> {
+        if self.standing == Standing::Archived {
+            return Err(ForgeError::Archived);
+        }
         self.history.record(point)
     }
 
@@ -144,6 +245,81 @@ impl Line {
         self.strategy = strategy;
         self.meta.touched(act);
     }
+
+    /// Whether the line is still being worked on.
+    pub fn standing(&self) -> Standing {
+        self.standing
+    }
+
+    /// Finishes with the line. Idempotent.
+    ///
+    /// Nothing is lost and nothing is released: the history is intact,
+    /// readable, and still holding every content it named. What stops
+    /// is movement — [`record`](Self::record) refuses from here, so
+    /// nothing lands on an archived line and no work closes onto one.
+    ///
+    /// Not a change point, for the reason a rename is not one: the
+    /// chain says what happened to what the line carries, and this did
+    /// not happen to any of that.
+    pub fn archive(&mut self, act: Act) {
+        self.standing = Standing::Archived;
+        self.meta.touched(act);
+    }
+
+    /// Takes it back out of the archive. Idempotent.
+    pub fn reopen(&mut self, act: Act) {
+        self.standing = Standing::Open;
+        self.meta.touched(act);
+    }
+
+    /// Every content this line has ever named.
+    ///
+    /// The set the layer holding the bytes may not let go of while
+    /// this line exists. Folded from the chain like everything else,
+    /// and it only grows: an entry taken off the line does not release
+    /// what it held, because the change point that put it there is
+    /// still in the chain and still names it.
+    ///
+    /// Read the module docs for why a line holds rather than merely
+    /// mentions.
+    pub fn holds(&self) -> BTreeSet<Content> {
+        self.history
+            .changes()
+            .iter()
+            .flat_map(|point| point.table().rows().values())
+            .filter_map(|row| row.content())
+            .collect()
+    }
+
+    /// Whether this line may be dropped, and what is in the way.
+    ///
+    /// Dropping is not a method here, because a value cannot delete
+    /// itself and a `Line` that returned "I am gone" would be a line
+    /// that is still there. What the model owns is the rule; whatever
+    /// does the deleting asks this first.
+    ///
+    /// `open_work` is how many pursuits against this line have not
+    /// ended. The caller counts them because the line does not hold
+    /// its work — the two logs are separate, and a line that kept a
+    /// list of its pursuits would be keeping a second answer to a
+    /// question the pursuits already answer.
+    ///
+    /// # Refusals
+    ///
+    /// - [`NotArchived`](ForgeError::NotArchived) — the line is still
+    ///   open. Dropping is reachable only through the archive.
+    /// - [`WorkStillOpen`](ForgeError::WorkStillOpen) — work is open
+    ///   against it, and dropping would leave a log cut from a history
+    ///   that no longer exists.
+    pub fn may_drop(&self, open_work: usize) -> Result<(), ForgeError> {
+        if self.standing != Standing::Archived {
+            return Err(ForgeError::NotArchived);
+        }
+        if open_work > 0 {
+            return Err(ForgeError::WorkStillOpen(open_work));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +330,7 @@ mod tests {
     use crate::domain::forge::model::value::ActorId;
     use crate::domain::forge::model::value::{Content, EntryId, NodeId, PursuitId};
     use chrono::{DateTime, TimeZone, Utc};
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     fn at(minute: u32) -> DateTime<Utc> {
@@ -169,6 +346,27 @@ mod tests {
             Name::new(Line::ROOT).unwrap(),
             StrategyId::new("mainline-first").unwrap(),
             act(0),
+        )
+    }
+
+    fn content() -> Content {
+        Content::from_uuid(Uuid::now_v7())
+    }
+
+    fn name(text: &str) -> Name {
+        Name::new(text).unwrap()
+    }
+
+    /// A change point sitting on the line's current head, carrying
+    /// whatever the caller wants it to.
+    fn point_carrying(line: &Line, table: Table) -> ChangePoint {
+        ChangePoint::new(line.head(), PursuitId::new(), NodeId::new(), table, act(1))
+    }
+
+    fn a_point(line: &Line) -> ChangePoint {
+        point_carrying(
+            line,
+            Table::one(EntryId::new(), Row::added(content(), name("one"))),
         )
     }
 
@@ -280,5 +478,97 @@ mod tests {
 
         assert_eq!(line.strategy().as_str(), "by-hand");
         assert_eq!(line.meta().updated().at(), at(2));
+    }
+
+    #[test]
+    fn an_archived_line_takes_nothing_and_reopening_lets_it_move_again() {
+        let mut line = root();
+        let point = a_point(&line);
+        line.archive(act(1));
+        assert_eq!(line.standing(), Standing::Archived);
+
+        let refused = line.record(point.clone());
+        assert!(matches!(refused, Err(ForgeError::Archived)), "{refused:?}");
+        assert!(
+            line.history().changes().is_empty(),
+            "a refused record left nothing behind"
+        );
+
+        line.reopen(act(2));
+        assert_eq!(line.standing(), Standing::Open);
+        line.record(point).expect("it moves again");
+        assert_eq!(line.history().changes().len(), 1);
+    }
+
+    #[test]
+    fn archiving_moves_the_description_and_not_the_history() {
+        let mut line = root();
+        let head = line.head();
+        line.archive(act(5));
+
+        assert_eq!(line.head(), head, "the chain did not move");
+        assert_eq!(line.meta().updated().at(), at(5), "the description did");
+        assert_eq!(
+            line.meta().created().at(),
+            at(0),
+            "and the line was still made when it was made"
+        );
+    }
+
+    #[test]
+    fn archiving_and_reopening_are_idempotent() {
+        let mut line = root();
+        line.archive(act(1));
+        line.archive(act(2));
+        assert_eq!(line.standing(), Standing::Archived);
+        line.reopen(act(3));
+        line.reopen(act(4));
+        assert_eq!(line.standing(), Standing::Open);
+    }
+
+    #[test]
+    fn a_line_holds_what_it_has_ever_named_and_taking_an_entry_off_releases_nothing() {
+        let mut line = root();
+        let held = content();
+        let entry = EntryId::new();
+
+        let mut put = BTreeMap::new();
+        put.insert(entry, Row::added(held, name("one")));
+        line.record(point_carrying(&line, Table::of(put).unwrap()))
+            .unwrap();
+        assert!(line.holds().contains(&held));
+
+        let mut off = BTreeMap::new();
+        off.insert(entry, Row::removed());
+        line.record(point_carrying(&line, Table::of(off).unwrap()))
+            .unwrap();
+
+        assert!(!line.states()[&entry].alive, "the entry is off the line");
+        assert!(
+            line.holds().contains(&held),
+            "and the line still holds what it named: the change point that put it \
+             there is still in the chain"
+        );
+    }
+
+    #[test]
+    fn a_line_is_dropped_from_the_archive_and_not_before() {
+        let mut line = root();
+        assert!(matches!(line.may_drop(0), Err(ForgeError::NotArchived)));
+
+        line.archive(act(1));
+        assert!(line.may_drop(0).is_ok());
+    }
+
+    #[test]
+    fn a_line_with_work_still_open_is_not_dropped() {
+        let mut line = root();
+        line.archive(act(1));
+
+        let refused = line.may_drop(2);
+        assert!(
+            matches!(refused, Err(ForgeError::WorkStillOpen(2))),
+            "the refusal says how many: {refused:?}"
+        );
     }
 }

@@ -16,8 +16,8 @@ Ending work — the one act that moves both logs.
                        Closing::Landed { close, point }
 ```
 
-Everywhere else, a decision moves one log. Opening, passing and
-taking something in write only to the work log; renaming a line
+Everywhere else, a decision moves one log. Opening, adding a round
+and taking something in write only to the pursuit; renaming a line
 writes only to its own description. This is the exception, and it
 is the only one: ending work as satisfied puts a change point on
 the line, and the two are one act rather than two that happen to
@@ -52,7 +52,7 @@ value rather than a mutation somebody has to go looking for.
 # This function does not settle anything
 
 A collision is refused here, never resolved. Turning one into a
-divergence writes a pass into the work log, under the line's
+divergence writes a round into the pursuit, under the line's
 strategy, and it happens while the work is open — by the time
 anybody is closing, the question has been settled or it has not.
 

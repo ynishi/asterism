@@ -486,13 +486,32 @@ pub struct CoreCtx {
     /// Immutable content-addressed snapshot lifecycle (seeds outbound
     /// dispatch).
     pub snapshot_service: Arc<SnapshotService>,
-    /// Lifecycle verbs of the pursuit — the minted unit of work (#29).
-    pub legacy_pursuit_service: Arc<asterism_core::application::forge::LegacyPursuitService>,
-    /// The context those pursuits file under, and the owner of the
-    /// line their satisfied closes land on (#63).
-    pub project_service: Arc<asterism_core::application::forge::ProjectService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
+    /// The repository a forge history sits on (#63, #102): opening one,
+    /// reading what is alive on it, and moving the two things about a
+    /// line that its history does not record.
+    pub line_service: Arc<asterism_core::application::forge::LineService>,
+    /// Work against a line: opening it, adding a pass, running the
+    /// line's rule over what it collides with, and ending it.
+    ///
+    /// Neither this nor [`line_service`](Self::line_service) has a
+    /// transport. They are constructed here because the wiring is the
+    /// thing being proved — the whole stack meets a real database at
+    /// startup — and reached from nowhere else until the surface they
+    /// belong on is decided.
+    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
+    /// What was said about work: a remark on a pass, a question about
+    /// one entry it touched, a review of what landed.
+    ///
+    /// Named apart from [`thread_service`](Self::thread_service),
+    /// which is the raw layer's annotation surface and a different
+    /// primitive: that one anchors to snapshots, cards and query
+    /// groups, and this one to a pursuit, a pass, an entry as a pass
+    /// had it, or a change point. Neither could carry the other's
+    /// anchors without learning what the other layer is made of, which
+    /// is why there are two — in the services, and in the tables.
+    pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -650,8 +669,6 @@ pub async fn init_core_with(
     let telemetry = asterism_infra::telemetry::Telemetry::new(isle.clone());
     let observations = asterism_infra::observe::ObservationStore::new(isle.clone());
     let dispatches = Arc::new(sqlite::repo::SqliteDispatchRepository::new(isle.clone()));
-    let pursuits = Arc::new(sqlite::repo::SqlitePursuitRepository::new(isle.clone()));
-    let projects = Arc::new(sqlite::repo::SqliteProjectRepository::new(isle.clone()));
     let query_groups = Arc::new(sqlite::repo::query_group::SqliteQueryGroupRepository::new(
         isle.clone(),
     ));
@@ -1137,22 +1154,40 @@ pub async fn init_core_with(
         query_groups.clone(),
         query_group_service.clone(),
     ));
-    // Lifecycle verbs of the unit of work (#29). No snapshot service
-    // here: the close records a fact and freezes nothing.
-    let legacy_pursuit_service = Arc::new(
-        asterism_core::application::forge::LegacyPursuitService::new(
-            pursuits.clone(),
-            projects.clone(),
-            personas.clone(),
-            assets_arc.clone(),
-        ),
-    );
-    // The context those pursuits file under (#63). No lifecycle of its
-    // own: opened, read, and everything that happens to it happens
-    // through the pursuits filed under it.
-    let project_service = Arc::new(asterism_core::application::forge::ProjectService::new(
-        projects.clone(),
-        personas.clone(),
+
+    // The forge, over the same connection as everything else. Its
+    // ports are one adapter because a close writes to both logs
+    // together, and the two faces beside it are the questions it asks
+    // of the layer below: whose an asset is, and what a handle stands
+    // for.
+    let forge = Arc::new(sqlite::repo::SqliteForge::new(isle.clone()));
+    let forge_rules = Arc::new(asterism_core::domain::forge::strategies::Builtin::default());
+    let forge_actors = Arc::new(sqlite::repo::SqliteActors::new(isle.clone()));
+    let forge_clock = Arc::new(asterism_core::domain::forge::clock::SystemClock);
+    let line_service = Arc::new(asterism_core::application::forge::LineService::new(
+        forge.clone(),
+        forge.clone(),
+        forge_rules.clone(),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    let forge_thread_service = Arc::new(asterism_core::application::forge::ThreadService::new(
+        forge.clone(),
+        forge.clone(),
+        forge.clone(),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
+        forge.clone(),
+        forge.clone(),
+        forge.clone(),
+        forge_rules,
+        asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(
+            sqlite::repo::SqliteStore::new(isle.clone()),
+        )),
+        forge_actors,
+        forge_clock,
     ));
 
     // Register the built-in exporters (`comfy` / `file` / `http`, the
@@ -1287,8 +1322,9 @@ pub async fn init_core_with(
         thumb_service: Arc::new(ThumbService::new(Arc::new(thumbs))),
         snapshot_service,
         dispatch_service,
-        legacy_pursuit_service,
-        project_service,
+        line_service,
+        pursuit_service,
+        forge_thread_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

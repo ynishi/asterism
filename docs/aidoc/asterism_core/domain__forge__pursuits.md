@@ -1,18 +1,18 @@
 # asterism-core::domain::forge::pursuits
 
-Keeping work logs, stated in the forge's own words.
+Keeping pursuits, stated in the forge's own words.
 
 [`Pursuits`] is the other face the forge asks for, and it is the
-quiet one: opening work and adding passes to it are what happens
+quiet one: opening work and adding rounds to it are what happens
 most, and neither touches a line.
 
-# A pass names the node it sits on
+# A round names the node it sits on
 
 [`Pursuits::push`] takes the node the caller believes the work ends
-at, beside the pass it wants to add. The model refuses a pass that
-does not sit on the head, but it judges the work log it was
+at, beside the round it wants to add. The model refuses a round that
+does not sit on the head, but it judges the pursuit it was
 *given*, which is the log as it was when it was read. Naming the
-head makes the write itself conditional, so two passes written at
+head makes the write itself conditional, so two rounds written at
 once cannot both land and the loser is told.
 
 # It cannot end work
@@ -25,7 +25,7 @@ of this trait cannot find a second one.
 
 # Listing hands back whole pursuits, and that is a bet
 
-[`Pursuits::of_line`] and [`Pursuits::children`] return every pass
+[`Pursuits::of_line`] and [`Pursuits::children`] return every round
 of every pursuit they answer with, which is more than a caller
 showing a list needs. There is no lighter shape because the model
 has no half-pursuit, and inventing one for a listing would put a
@@ -38,7 +38,7 @@ not a guess made here.
 
 # Reading gives back the whole pursuit
 
-Adding a pass checks the head, deciding a close folds every pass,
+Adding a round checks the head, deciding a close folds every round,
 and both are rules the model holds about the chain. Handing back
 less would move them to whoever answers this call.
 
@@ -46,5 +46,5 @@ less would move them to whoever answers this call.
 
 ## Traits
 
-- `Pursuits` — Keeps work logs.
+- `Pursuits` — Keeps pursuits.
 

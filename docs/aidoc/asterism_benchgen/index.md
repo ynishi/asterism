@@ -31,13 +31,10 @@ Six subcommands — three that build a corpus, three that measure:
   enqueued, written up as a result file ([`measure`]).
 - `measure-cold` — first-listing cost against a just-restarted
   server, warm repeat alongside it ([`measure`]).
-- `measure-pursuit` — the pursuit membership reads over a seeded
-  100k-asset profile ([`measure_pursuit`]).
 
 Every write path is fenced away from the real library: `seed-meta`
-refuses a database outside `profiles/bench`, everything that speaks
-HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
-throwaway temp directory it creates and removes itself. No fence is
-optional in the direction that matters — there is no flag that
-points any command at the real library.
+refuses a database outside `profiles/bench`, and everything that
+speaks HTTP refuses the Dogfood port. No fence is optional in the
+direction that matters — there is no flag that points any command
+at the real library.
 

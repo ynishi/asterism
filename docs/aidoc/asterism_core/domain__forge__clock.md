@@ -13,8 +13,13 @@ means once it is written.
 
 A forge node does not move once recorded, so a wrong time is wrong
 for good. And the chain — not the clock — is what orders a history,
-so a wrong time breaks nothing: no fold reads it, no comparison
-depends on it, nothing fails. What it does instead is answer a
+so a wrong time breaks nothing: no fold reads it and nothing fails.
+One thing is ordered by it and it is the exception that shows the
+rule — a conversation, which has no chain to read an order out of
+(see [`thread`](crate::domain::forge::model::thread)). A backwards
+clock swaps two remarks there and refuses nothing; the one order it
+cannot produce, an answer before its question, is put right when the
+conversation is read. What a wrong time does instead is answer a
 question incorrectly, quietly, for as long as the record exists.
 
 That question is not incidental. A record of a selection has to say

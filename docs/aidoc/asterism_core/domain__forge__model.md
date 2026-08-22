@@ -146,18 +146,24 @@ say no to stays readable in one place.
 
 # The two logs, and the one place they meet
 
-A history says what changed; a work log ([`pursuit`]) says what
+A history says what changed; a pursuit ([`pursuit`]) says what
 somebody proposes. Neither reads the other, and a change point
 names the pursuit it came out of without knowing anything else
 about it.
 
-Two modules read both at once, and they are the only ones.
+Three modules read both at once, and they are the only ones.
 [`change`] answers what work *would* do to a line — what would
 actually move, and whether anybody moved it first — and answers
 nothing else, because what to do about a collision is a decision.
 [`closing`] is that decision for the one act that ends work: it
 returns the close and, when the work is satisfied, the change point
 born with it, in one value that cannot be taken apart.
+
+[`discard`] is there for a different reason than those two. They
+answer what work *means* against a line; it answers what is lost
+when a line goes — the union of what both records hold, asked as a
+union so that a caller cannot add up half of it and call the rest
+released.
 
 That is also where the two constructors went. `Close::new` and
 `ChangePoint::new` are closed to this module and, outside tests,
@@ -173,24 +179,26 @@ answered is a word people use about their work rather than a shape
 the record has.
 
 **Settling a collision.** Turning one into a divergence writes a
-pass into the work log under the line's strategy, and it happens
+round into the pursuit under the line's strategy, and it happens
 while the work is open. [`closing`] refuses what was never settled;
 it does not settle anything itself.
 
-**Building any of this back from stored values.** Every constructor
-here mints: a line mints its id and its genesis, work mints its id
-and its opening node, a pass mints a node id. There is no
-`from_persisted` anywhere in this module, which means the read half
-of the ports — handing back a whole [`Line`] or a whole pursuit —
-has no implementation but a fake that keeps the objects themselves.
+**A second way to build any of this back from stored values.**
+Every constructor here mints: a line mints its id and its genesis,
+work mints its id and its opening node, a round mints a node id. The
+one place a value is built holding an id somebody else chose is
+[`restore`], and that is the whole of the door.
 
-That is a decision rather than an oversight, and it is worth being
-read as one. A rehydration constructor has to take every field
-including the ids, so it is the one door through which a stored row
-can contradict a rule this module holds — and the shape it should
-take is decided by what a store actually keeps, which is not
-written yet. It arrives with the first adapter, and until then a
-port's read half is a contract nothing has had to satisfy.
+It is one module rather than a `from_persisted` on each type
+because of what it is. A rehydration constructor takes every field
+including the ids, so it is where a stored row could contradict a
+rule this module holds; spread across the types, there would be a
+piece of it on each and nothing that reads as the whole. What
+keeps it honest is that it assembles nothing itself — the nodes go
+back one at a time through [`History::record`], `Pursuit::push` and
+`Pursuit::end`, so a stored chain meets the refusals a fresh write
+meets, and a store that kept something the model would not have
+written cannot hand it back as though it had.
 
 **Whether two contents are the same thing.** An add is taken at its
 word: an entry arrives because somebody meant to put one there, and
@@ -198,6 +206,18 @@ byte-identical content on another entry does not make it fewer than
 two entries. The layer that holds the bytes answers sameness, and
 the forge sees only its outcome — the same [`Content`] coming back.
 The whole of the reasoning is in [`op`].
+
+**A way to release what a line holds without dropping the line.**
+Every content a change point named is held for as long as the line
+exists, and taking the entry off does not release it — the change
+point that put it there is still in the chain. There is no filter,
+no rebase, no editing a point after the fact, and that is a
+decision rather than a gap: a filtered change point could not name
+the work it came out of, because that work asked for something
+else. What a filter is for is reachable already — open a new line
+and put on it what should have been there, which is a new history
+rather than an edited one — and the old line is then archived and
+dropped. See [`line`] for the standing those two words name.
 
 **Anything about people.** No owner, no persona, no actor set.
 [`Act`] records who did a thing, because a history that cannot say
@@ -210,6 +230,7 @@ but neither is a place a reader has to go: what is true of the
 model is stated here, beside the types that hold it.
 
 [`Line`]: line::Line
+[`Standing`]: line::Standing
 [`Line::ROOT`]: line::Line::ROOT
 [`History`]: history::History
 [`History::begin`]: history::History::begin

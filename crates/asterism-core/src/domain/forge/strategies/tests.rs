@@ -46,14 +46,14 @@ fn work_on(line: &Line) -> Pursuit {
     Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
 }
 
-fn passing(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
-    work.push(Round::new(work.log().head(), ops, None, act(minute)).unwrap())
+fn with_a_round(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+    work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())
         .unwrap();
     work
 }
 
 fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) {
-    let mut work = passing(work_on(line), ops, minute);
+    let mut work = with_a_round(work_on(line), ops, minute);
     let closing = close(line, &work, Outcome::Satisfied, None, act(minute)).unwrap();
     closing.apply(line, &mut work).unwrap();
 }
@@ -83,7 +83,7 @@ fn standoff(rule: &dyn Strategy) -> Standoff {
     );
 
     let mine = content();
-    let work = passing(work_on(&line), vec![Op::replace(entry, mine)], 2);
+    let work = with_a_round(work_on(&line), vec![Op::replace(entry, mine)], 2);
 
     let theirs = content();
     landed(&mut line, vec![Op::replace(entry, theirs)], 3);
@@ -182,10 +182,9 @@ fn mainline_first_leaves_the_line_where_it_was_and_carries_ours_beside_it() {
         .expect("a second entry");
     assert_eq!(carried.1.content, Some(mine));
     assert!(carried.1.alive);
-    // The work log says what happened, in ordinary operations.
+    // The pursuit says what happened, in ordinary operations.
     assert!(
-        work.log()
-            .rounds()
+        work.rounds()
             .iter()
             .any(|round| round.act().by().is_system())
     );
@@ -256,11 +255,10 @@ fn discard_mine_leaves_the_line_alone_and_the_work_with_nothing_to_say() {
     );
     assert_eq!(at.line.states()[&entry].content, Some(theirs));
 
-    // What was tried is in the work log — forked from the value the
+    // What was tried is in the pursuit — forked from the value the
     // entry had when the work began, changed, and taken off.
     let written: Vec<_> = at
         .work
-        .log()
         .rounds()
         .iter()
         .filter(|round| round.act().by().is_system())
@@ -339,7 +337,7 @@ fn stale_work_cannot_land_over_a_line_that_moved() {
     ));
     // And nothing the work can write on its own clears that without
     // saying something about the axis in question.
-    let work = passing(at.work, vec![Op::add(content(), name("unrelated"))], 5);
+    let work = with_a_round(at.work, vec![Op::add(content(), name("unrelated"))], 5);
     assert!(matches!(
         close(&at.line, &work, Outcome::Satisfied, None, act(6)),
         Err(ForgeError::Collides(_))
@@ -378,7 +376,7 @@ fn a_rule_that_does_not_settle_what_it_was_asked_is_refused() {
     assert_eq!(refused.unwrap_err(), ForgeError::Unsettled);
 }
 
-/// A rule that refuses writes no pass at all, and the work is left
+/// A rule that refuses writes no round at all, and the work is left
 /// exactly as it was.
 #[test]
 fn a_rule_that_refuses_writes_nothing() {
@@ -402,12 +400,12 @@ fn a_rule_that_refuses_writes_nothing() {
     }
 
     let at = standoff(&MainlineFirst);
-    let before = at.work.log().rounds().len();
+    let before = at.work.rounds().len();
 
     let refused = react(&at.line, &at.work, &Stuck, ActorId::new(), act(4));
 
     assert!(matches!(refused, Err(ForgeError::Strategy(_))));
-    assert_eq!(at.work.log().rounds().len(), before);
+    assert_eq!(at.work.rounds().len(), before);
 }
 
 #[test]
@@ -423,7 +421,7 @@ fn a_rule_this_line_does_not_settle_by_is_refused() {
 fn there_is_nothing_to_react_to_when_nothing_collides() {
     let mut line = line_by(&MainlineFirst);
     landed(&mut line, vec![Op::add(content(), name("theirs"))], 1);
-    let work = passing(work_on(&line), vec![Op::add(content(), name("mine"))], 2);
+    let work = with_a_round(work_on(&line), vec![Op::add(content(), name("mine"))], 2);
 
     let answered = react(&line, &work, &MainlineFirst, ActorId::new(), act(3)).unwrap();
 
@@ -511,5 +509,5 @@ fn what_a_rule_writes_is_written_as_the_server() {
         .expect("the rule answered");
 
     assert_eq!(round.act().by(), Actor::System(server));
-    assert!(!at.work.log().rounds()[0].act().by().is_system());
+    assert!(!at.work.rounds()[0].act().by().is_system());
 }

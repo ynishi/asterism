@@ -18,7 +18,7 @@
 //!
 //! A refusal is a rule saying it could not decide, and this one has
 //! decided: nothing is to be written. So it answers with an empty
-//! list, no pass is written, and the collision stays exactly where a
+//! list, no round is written, and the collision stays exactly where a
 //! person can see it — which is the state they then act on.
 
 use crate::domain::forge::model::op::Op;

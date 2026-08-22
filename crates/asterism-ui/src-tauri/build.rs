@@ -6,7 +6,7 @@
 //! types are avoided so the two sides never drift apart.
 //!
 //! The list below is explicit, not exhaustive, and nothing checks it
-//! against `asterism-contract`. Three deliberate omissions today, all of
+//! against `asterism-contract`. Two deliberate omissions today, both of
 //! the same shape — a surface the UI does not reach:
 //!
 //! - the diagnostics *read* types (`ListDiagQuery` / `DiagDto`) derive
@@ -19,42 +19,34 @@
 //!   HTTP / MCP surface for the agent driving an importer, and the UI
 //!   has no screen for it — the eventual UI is about promoting one
 //!   series to a real Group, which is a different shape from editing
-//!   a rule;
-//! - the forge's project types (`OpenProjectCommand`, `ProjectDto`,
-//!   `LineDto`) stay out while the only surface that opens or reads a
-//!   project is MCP. The `project_id` fields they explain do reach the
-//!   bindings, because they ride on `OpenPursuitCommand` / `PursuitDto`
-//!   which the UI already has — a filed pursuit is visible in the UI
-//!   before a project is.
+//!   a rule.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
-    AttachTagBatchResult, AttachTagCommand, CancelJobCommand, ClosePursuitCommand,
-    CreateDirCommand, CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand,
-    CreateModalityCommand, CreateQueryGroupCommand, CreateSavedQueryCommand, CreateThreadCommand,
-    DeclareAssetMetaCommand, DeclareProvenanceCommand, DeleteAssetCommentCommand,
-    DeleteChapterMarkCommand, DeleteDirCommand, DeleteMaterialLayerCommand,
-    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
-    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSavedQueryCommand,
-    DeleteSessionCommand, DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult,
-    DetachTagCommand, DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand,
-    EditMaterialMarkCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand,
-    MoveDirCommand, MoveGroupToDirCommand, OpenPursuitCommand, PasteImageImportCommand,
+    AttachTagBatchResult, AttachTagCommand, CancelJobCommand, CreateDirCommand,
+    CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
+    CreateQueryGroupCommand, CreateSavedQueryCommand, CreateThreadCommand, DeclareAssetMetaCommand,
+    DeclareProvenanceCommand, DeleteAssetCommentCommand, DeleteChapterMarkCommand,
+    DeleteDirCommand, DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
+    DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
+    DeleteSavedQueryCommand, DeleteSessionCommand, DeleteThreadCommand, DetachTagBatchCommand,
+    DetachTagBatchResult, DetachTagCommand, DispatchRunCommand, EditAssetCommentCommand,
+    EditChapterMarkCommand, EditMaterialMarkCommand, EmptyTrashResult, LinkGroupCommand,
+    MergeAssetsCommand, MoveDirCommand, MoveGroupToDirCommand, PasteImageImportCommand,
     PatchSessionMetadataCommand, PostAssetCommentCommand, PostChapterMarkCommand,
     PostMaterialMarkCommand, PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult,
     PromoteTagToGroupCommand, PromoteTagToGroupResult, PromoteVolatileSelectionCommand,
     PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand, RebuildEdgesCommand,
-    RecordDiagCommand, RecordEventCommand, RecordPursuitTxCommand, RedispatchCommand,
-    RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
-    RenameSavedQueryCommand, RenameSessionCommand, ReopenPursuitCommand, ReorderGroupAssetsCommand,
-    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
-    ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
-    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
-    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
-    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand,
+    RecordDiagCommand, RecordEventCommand, RedispatchCommand, RegisterPersonaCommand,
+    RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand, RenameSavedQueryCommand,
+    RenameSessionCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
+    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto,
@@ -64,11 +56,10 @@ use asterism_contract::dto::{
     GroupLinkDto, GroupSummaryDto, JobDto, JobKindSnapshotDto, JobsSnapshotDto, LineageEdgeDto,
     LineageNodeDto, LineageViewDto, MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto,
     MergeAssetsDto, MergeRefusalDto, MergeTotalsDto, MergeWarningDto, MessageDto, MessageRefDto,
-    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto, PursuitDto,
-    PursuitEventDto, PursuitTxDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto,
-    SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
-    SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadAnchorDto, ThreadDto,
-    VideoPreviewDto, VisualModelStatusDto,
+    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
+    RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto,
+    SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto,
+    ThreadAnchorDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery, RandomAssetsQuery,
@@ -240,15 +231,6 @@ fn main() {
         ThreadAnchorDto,
         MessageDto,
         MessageRefDto,
-        // Pursuit — the unit of work a caller records work into.
-        OpenPursuitCommand,
-        ClosePursuitCommand,
-        RecordPursuitTxCommand,
-        ReopenPursuitCommand,
-        PursuitDto,
-        PursuitEventDto,
-        PursuitViewDto,
-        PursuitTxDto,
     )
     .expect("failed to export TS bindings from asterism-contract");
     tauri_build::build()

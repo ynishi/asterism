@@ -45,7 +45,64 @@ carries, and a rename did not — and recording one does not touch
 differently" would otherwise collapse into one value that answers
 neither question.
 
+# Standing, and why it is not in the history
+
+```text
+  Open ──archive──▶ Archived ──(drop)──▶ gone
+    ▲                   │                  │
+    └──── reopen ───────┘        what it held is released
+  takes change points   readable, holds
+                        everything still
+```
+
+[`Standing`] sits beside the name and the strategy rather than in
+the chain, for the same reason a rename is not a change point: the
+history says what happened to what the line *carries*, and "this
+line is finished with" is a statement about the line. It moves
+[`Meta`] and nothing else.
+
+**Dropping is reachable only through the archive**, as purging is
+reachable only through the trash everywhere else here. Two steps,
+because the second one is irreversible and takes the history with
+it.
+
+# What a line holds, and why anything cares
+
+[`Line::holds`] is every [`Content`] any change point on the line
+has ever named. It is not a cache and not a second record — it is a
+fold, like everything else about a line — but it is the one fold
+something outside the forge has to act on: **while a line holds a
+content, the layer that keeps the bytes may not let it go.**
+
+An entry taken off the line does not release what it held. The
+change point that put it there is still in the chain and still
+names it, and the chain is not rewritten. So the set only ever
+grows, and the only thing that shrinks it is dropping the line.
+
+That is deliberate rather than unfortunate. A line says what is on
+it *now*: `alive`, under this name, at this content. A line saying
+that about bytes somebody deleted is a line telling a lie about the
+present, which is a different thing from a log of past events —
+those stay true whatever happens to what they name, which is why
+the ledger this model replaced could name an asset without holding
+it.
+
+# Rewriting is not a verb here
+
+There is no filter, no rebase, no editing a change point after the
+fact. Wanting one is usually wanting to release a content without
+dropping everything, and the answer is that the same result is
+reachable with the verbs that already exist: open a new line, and
+put on it what should have been there. That is a new history rather
+than an edited one, which is what it honestly is — the change
+points of a filtered line could not name the work they came out
+of, because that work asked for something else.
+
+What the old line then needs is to be archived and dropped, which
+is the pair above.
+
 ## Types
 
 - `Line` — One repository: an identifier, a history, and how it settles
+- `Standing` — Whether a line is still being worked on.
 

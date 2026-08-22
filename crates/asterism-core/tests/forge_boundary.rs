@@ -18,15 +18,6 @@
 //! an import written without one is invisible to a grep, which is
 //! exactly the case that matters. The list here is checked whether
 //! anybody remembered or not.
-//!
-//! # Two populations, and the second is shrinking
-//!
-//! The model this branch replaces still has files under `forge`, and
-//! they reach further — into the raw layer's repositories, into the
-//! application's parsing helpers. They are exempt by name rather than
-//! by rule, because what they name is not a decision anybody is
-//! defending; it is what a deletion will take with it. The exemption
-//! list is a measure of how much is left.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -67,22 +58,6 @@ const SHARED_VOCABULARY: &[(&str, &str)] = &[
          somebody is — the one face that translates it into an actor. \
          A forge node records an `Actor`, never this",
     ),
-];
-
-/// Files still serving the model this branch replaces.
-///
-/// Exempt as a whole, because what they reach for goes when they do.
-/// The list shrinks; it does not grow.
-const LEAVING: &[&str] = &[
-    "domain/forge/line.rs",
-    "domain/forge/project.rs",
-    "domain/forge/pursuit.rs",
-    "domain/forge/repository.rs",
-    "domain/forge/tx.rs",
-    "domain/forge/value.rs",
-    "application/forge/legacy_pursuit_service.rs",
-    "application/forge/project_service.rs",
-    "application/forge/mapping.rs",
 ];
 
 fn src() -> PathBuf {
@@ -154,14 +129,10 @@ fn reaches_outside(code: &str) -> BTreeSet<String> {
 #[test]
 fn the_forge_names_nothing_outside_itself_but_the_shared_vocabulary() {
     let allowed: BTreeSet<&str> = SHARED_VOCABULARY.iter().map(|(path, _)| *path).collect();
-    let leaving: BTreeSet<&str> = LEAVING.iter().copied().collect();
 
     let mut unexpected = Vec::new();
     for file in forge_files() {
         let shown = file.to_string_lossy().replace('\\', "/");
-        if leaving.contains(shown.as_str()) {
-            continue;
-        }
         for named in reaches_outside(&without_tests(&file)) {
             if !allowed.contains(named.as_str()) {
                 unexpected.push(format!("{shown}: {named}"));
@@ -199,28 +170,6 @@ fn every_shared_word_says_why_it_is_shared() {
         SHARED_VOCABULARY.len(),
         "an entry is listed twice; two reasons for one import means one of \
          them is not the reason"
-    );
-}
-
-/// The exemption list measures what is left of the model being
-/// replaced. A name that matches nothing is a file already deleted,
-/// and leaving it there would hide the next one.
-#[test]
-fn every_exempt_file_still_exists() {
-    let present: BTreeSet<String> = forge_files()
-        .iter()
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .collect();
-
-    let stale: Vec<&&str> = LEAVING
-        .iter()
-        .filter(|file| !present.contains(**file))
-        .collect();
-
-    assert!(
-        stale.is_empty(),
-        "these files are exempt and gone. The exemption list is how much of the \
-         replaced model is left, so a stale name overstates it: {stale:#?}"
     );
 }
 

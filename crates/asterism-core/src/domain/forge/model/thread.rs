@@ -10,13 +10,13 @@
 //!
 //! A node carries a note, and a note is one line written once by
 //! whoever wrote the node. This is the rest: a remark on somebody
-//! else's pass, a question about one entry it touched, a review of
+//! else's round, a question about one entry it touched, a review of
 //! what landed.
 //!
 //! # Four anchors, because four things are worth remarking on
 //!
-//! A pursuit as a whole — what this work is for. A pass — the judgement
-//! somebody made in it. One entry a pass touched — this particular
+//! A pursuit as a whole — what this work is for. A round — the judgement
+//! somebody made in it. One entry a round touched — this particular
 //! thing, in this particular attempt. And a change point — a review
 //! after the fact.
 //!
@@ -24,7 +24,7 @@
 //! on an entry alone would make it follow that entry into every other
 //! pursuit it is ever carried into, which is how a note about one
 //! attempt becomes a note about the thing itself. Anchoring at
-//! `(round, entry)` says *this entry, as this pass had it*, and that
+//! `(round, entry)` says *this entry, as this round had it*, and that
 //! does not travel. A change point can be anchored to on its own,
 //! because there is nowhere for a remark on it to travel to.
 //!
@@ -62,12 +62,23 @@
 //! timestamp is evidence. A discussion has no chain to read an order
 //! out of — a reply names its parent, but two replies to one message
 //! are ordered by nothing else — so messages are read in the order
-//! they were written.
+//! they were written, and a conversation reads as a transcript rather
+//! than as a tree.
 //!
 //! It is affordable because nothing derives from it. No fold reads a
 //! thread, no rule consults one, and no refusal depends on the order
 //! of two remarks. A clock that steps backwards makes a conversation
 //! read oddly; it cannot make the line wrong.
+//!
+//! The relation is asked one question and no more. An answer cannot be
+//! read back before its question — [`Thread::say`] refuses a reply to
+//! something the thread does not hold yet — so [`restore`] moves a
+//! reply the stamps put before its parent to just after it, and leaves
+//! everything else where the clock had it. That is the difference
+//! between a conversation that reads oddly and one that cannot be read
+//! at all.
+//!
+//! [`restore`]: super::restore
 
 use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::error::ForgeError;
@@ -86,11 +97,11 @@ use crate::domain::forge::model::value::{
 pub enum Anchor {
     /// The work as a whole.
     Pursuit(PursuitId),
-    /// One pass at it.
+    /// One round at it.
     Round(NodeId),
-    /// One entry, as one pass had it.
+    /// One entry, as one round had it.
     Entry {
-        /// The pass.
+        /// The round.
         round: NodeId,
         /// The entry it touched.
         entry: EntryId,
@@ -105,15 +116,15 @@ impl Anchor {
         Self::Pursuit(work.id())
     }
 
-    /// Hangs a thread off one pass.
+    /// Hangs a thread off one round.
     pub fn round(round: &Round) -> Self {
         Self::Round(round.id())
     }
 
-    /// Hangs a thread off one entry, as one pass had it.
+    /// Hangs a thread off one entry, as one round had it.
     ///
-    /// Refuses an entry the pass did not touch: a remark about what a
-    /// pass did to something has to be about something it did.
+    /// Refuses an entry the round did not touch: a remark about what a
+    /// round did to something has to be about something it did.
     pub fn entry(round: &Round, entry: EntryId) -> Result<Self, ForgeError> {
         if !round.ops().iter().any(|op| op.entry() == entry) {
             return Err(ForgeError::NotInThatRound);
@@ -206,6 +217,30 @@ impl Message {
         }
     }
 
+    /// One message, as a store kept it — corrections and all.
+    ///
+    /// The corrections come in already made rather than through
+    /// [`amend`](Self::amend), because appending them one at a time
+    /// would be the same loop with nothing to check: a revision names
+    /// no parent and answers to no rule, so there is no refusal for a
+    /// stored one to meet. What orders them is the order they are
+    /// given in, which is the order they were written.
+    pub(super) fn restored(
+        id: MessageId,
+        parent: Option<MessageId>,
+        body: Body,
+        act: Act,
+        revisions: Vec<Revision>,
+    ) -> Self {
+        Self {
+            id,
+            parent,
+            body,
+            act,
+            revisions,
+        }
+    }
+
     /// Which message.
     pub fn id(&self) -> MessageId {
         self.id
@@ -266,6 +301,26 @@ impl Thread {
             anchor,
             title,
             messages: vec![first],
+        }
+    }
+
+    /// An empty thread carrying an id somebody else chose, for
+    /// [`restore`](super::restore) to say things into.
+    ///
+    /// Empty is a state [`open`](Self::open) refuses and this one
+    /// permits for exactly as long as it takes `restore` to put the
+    /// messages back through [`say`](Self::say) — which is what checks
+    /// them, and what a store cannot be trusted to have done. A stored
+    /// thread with no messages therefore comes back as a thread with
+    /// no messages rather than as an error, and the module that reads
+    /// rows is where that is refused: the model's job here is that
+    /// what did come back met the rules.
+    pub(super) fn restored(id: ThreadId, anchor: Anchor, title: Option<Name>) -> Self {
+        Self {
+            id,
+            anchor,
+            title,
+            messages: Vec::new(),
         }
     }
 
@@ -355,7 +410,7 @@ mod tests {
         let mut work = Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1));
         let arrival = Op::add(Content::from_uuid(Uuid::now_v7()), name("cut-01"));
         let entry = arrival.entry();
-        let round = Round::new(work.log().head(), vec![arrival], None, act(2)).unwrap();
+        let round = Round::new(work.head(), vec![arrival], None, act(2)).unwrap();
         work.push(round.clone()).unwrap();
         (work, round, entry)
     }
@@ -375,10 +430,10 @@ mod tests {
         );
     }
 
-    /// A remark about what a pass did to something has to be about
+    /// A remark about what a round did to something has to be about
     /// something it did.
     #[test]
-    fn an_entry_that_pass_never_touched_cannot_be_anchored_to() {
+    fn an_entry_that_round_never_touched_cannot_be_anchored_to() {
         let (_, round, _) = work();
 
         let refused = Anchor::entry(&round, EntryId::new());
@@ -480,7 +535,7 @@ mod tests {
         );
 
         thread
-            .say(Message::new(None, body("fixed in the next pass"), act(5)))
+            .say(Message::new(None, body("fixed in the next round"), act(5)))
             .unwrap();
 
         // Both are messages; neither is a status.
