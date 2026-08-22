@@ -20,6 +20,14 @@ so on) live in `asterism-contract`'s crate docs.
 - `edge_to_dto` — Converts a `ConstellationEdge` to an `EdgeDto`.
 - `effective_setting_to_dto` — Converts a resolved setting to its wire DTO, projecting the whole
 - `entity_ref_to_dto` — Converts a domain [`EntityRef`] to its wire DTO.
+- `forge_discarded_to_dto` — Converts what a drop released.
+- `forge_history_to_dto` — Converts a line and its whole chain, in the chain's order.
+- `forge_line_id` — Reads a line id off the wire.
+- `forge_line_to_dto` — Converts a `Line` to the summary a caller reads.
+- `forge_name` — Reads a name off the wire, refusing a blank one.
+- `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
+- `forge_strategy_id` — Reads a strategy id off the wire.
+- `forge_strategy_to_dto` — Converts a rule's id and description to what a chooser reads.
 - `group_link_to_dto` — Converts a `GroupLink` to its wire DTO.
 - `group_summary_to_dto` — Converts a `GroupSummary` to its wire DTO.
 - `group_to_dto` — Converts a `Group` to its wire DTO.

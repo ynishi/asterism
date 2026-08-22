@@ -2,25 +2,33 @@
 //! off.
 //!
 //! ```text
-//!   before      line  E = theirs          work  E = mine
+//!   before      line  E "cut-01" = theirs        work  E = mine
 //!
-//!   writes      add(E', theirs)           the line's version, on its own entry
-//!               add(E'', mine)            this work's, on its own
-//!               remove(E)                 and the entry they disagreed about goes
+//!   writes      add(E',  theirs, "cut-01")       the line's version, kept
+//!               add(E'', mine,   "cut-01 (2)")   this work's, beside it
+//!               remove(E)                        and the entry they argued over goes
 //!
-//!   after       line  E' = theirs, E'' = mine        E is off the line
+//!   after       line  E' "cut-01" = theirs, E'' "cut-01 (2)" = mine
 //! ```
 //!
-//! Neither side inherits the original. Where the other two rules make
-//! one version the continuation of what was there, this one says the
-//! disagreement is the point: both are candidates, and the entry they
-//! were arguing over is not one of them.
+//! Neither side inherits the original entry.
+//! [`MainlineFirst`](super::MainlineFirst) leaves the line's version
+//! standing on it; here it is taken off and both versions arrive on
+//! entries of their own — the disagreement is the point, both are
+//! candidates, and the entry they were arguing over is not one of
+//! them.
 //!
 //! The removal is what makes that true. Leaving `E` on the line would
 //! put a third thing there, holding whichever value won by accident.
 //!
 //! Nothing is lost by removing it — taking an entry off a line is a
 //! change point that says so, and what it held stays readable.
+//!
+//! The name still has to go somewhere, and it goes to the line's
+//! version: the line's is named first, so this work's is the one that
+//! ends up numbered. That is the whole of the difference from
+//! [`MineFirst`](super::MineFirst), which writes the same three
+//! operations the other way round.
 
 use crate::domain::forge::model::op::Op;
 use crate::domain::forge::model::strategy::{About, Divergence, Strategy, StrategyError};
@@ -44,17 +52,15 @@ impl Strategy for BothDiverge {
     fn about(&self) -> About {
         About {
             name: "Keep both, side by side".into(),
-            summary: "Both versions arrive as new entries under numbered names, and the entry \
-                      they disagreed about is taken off the line."
+            summary: "Both versions arrive as new entries, and the entry they disagreed about \
+                      is taken off the line. The line's version keeps the name it answered to; \
+                      this work's is kept beside it under a numbered one."
                 .into(),
         }
     }
 
     fn resolve(&self, at: &Divergence<'_>) -> Result<Vec<Op>, StrategyError> {
         let mut ops = Vec::new();
-        // Seeded with what this work is already asking for: a
-        // previous resolution's entries are in the request and not yet
-        // on the line, so the line cannot say their names are taken.
         let mut claimed: Vec<Name> = claimed_by(at.request());
 
         for entry in at.entries() {

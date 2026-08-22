@@ -110,7 +110,7 @@
     {
       "path": "asterism_infra::forge::rows::LineRow",
       "kind": "struct",
-      "docs": "`line` — the repository, and the two things about it that are not\nin its history."
+      "docs": "`line` — the repository, and the three things about it that are not\nin its history."
     },
     {
       "path": "asterism_infra::forge::rows::PursuitNodeRow",
@@ -185,7 +185,7 @@
     {
       "path": "asterism_infra::forge::rows::take_new_line_apart",
       "kind": "function",
-      "docs": "The row for a line that has just been opened.\n\nOne row and no others, because a line that has just been opened has\na genesis and nothing else — the port that calls this says so, and\n[`Line::open`](asterism_core::domain::forge::model::line::Line::open)\nis the only thing that produces what it takes.\n\nA loop over `history().changes()` here would be a second way for a\nchange point to reach the store, running only for a caller that\ndoes not exist. The port refuses that caller instead, which is a\nstatement somebody can read rather than a branch nothing covers."
+      "docs": "The row for a line that has just been opened.\n\nOne row and no others, because a line that has just been opened has\na genesis and nothing else — the port that calls this says so, and\n[`Line::open`](asterism_core::domain::forge::model::line::Line::open)\nis the only thing that produces what it takes.\n\nA loop over `history().changes()` here would be a second way for a\nchange point to reach the store. The port refuses that caller\ninstead, which is a statement somebody can read rather than a\nbranch nothing covers."
     },
     {
       "path": "asterism_infra::forge::rows::take_pursuit_apart",
@@ -500,12 +500,12 @@
     {
       "path": "asterism_infra::memory::forge",
       "kind": "module",
-      "docs": "The forge's ports, over rows held in memory.\n\n```text\n  Lines / Pursuits / Closings\n           │\n           ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex\n           │\n           └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit\n```\n\nOne `Mutex` over the whole store rather than one per table: the\nclose writes a change point, its rows and an ending together, and a\nreader must not see half of that. A real adapter gets the same\nproperty from a transaction; here it comes from holding the lock\nacross the whole of `commit`, which is the same statement made the\nonly way this store can make it.\n\n# What it is for\n\nProving the model and the services against something that keeps\nrows, before any of it depends on SQLite being right. A store that\nkept the domain objects would answer every call correctly by\nconstruction and would never once ask whether a line can be built\nback out of what was written down — which is the question the whole\nread half exists to ask, and the one the first fake never reached.\n\n# What it is not\n\nDurable, concurrent beyond one process, or a thing to run anything\nreal on. There is no index: reads scan, which is fine at the sizes\na test builds and would not be at any other."
+      "docs": "The forge's ports, over rows held in memory.\n\n```text\n  Lines / Pursuits / Closings / Threads\n           │\n           ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex\n           │\n           └─ read  ──► forge::rows::read_* ──► restore ──► Line /\n                                                Pursuit / Thread\n```\n\nOne `Mutex` over the whole store rather than one per table: the\nclose writes a change point, its rows and an ending together, and a\nreader must not see half of that. A real adapter gets the same\nproperty from a transaction; here it comes from holding the lock\nacross the whole of `commit`, which is the same statement made the\nonly way this store can make it.\n\n# What it is for\n\nProving the model and the services against something that keeps\nrows, before any of it depends on SQLite being right. A store that\nkept the domain objects would answer every call correctly by\nconstruction and would never once ask whether a line can be built\nback out of what was written down — which is the question the whole\nread half exists to ask, and the one the first fake never reached.\n\n# What it is not\n\nDurable, concurrent beyond one process, or a thing to run anything\nreal on. There is no index: reads scan, which is fine at the sizes\na test builds and would not be at any other."
     },
     {
       "path": "asterism_infra::memory::forge::HoldsEverything",
       "kind": "struct",
-      "docs": "What the layer below answers, for a store that has no layer below.\n\nSays yes to everything. The question is whether a persona holds an\nasset, and there are no assets here to hold — a caller wanting the\nrefusal exercised should reach for [`HoldsNothing`]."
+      "docs": "What the layer below answers, for a store that has no layer below.\n\nSays yes to everything. The question is whether an asset exists,\nand there are no assets here to exist — a caller wanting the\nrefusal exercised should reach for [`HoldsNothing`]."
     },
     {
       "path": "asterism_infra::memory::forge::HoldsNothing",
@@ -925,17 +925,17 @@
     {
       "path": "asterism_infra::sqlite::repo::forge",
       "kind": "module",
-      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n# And the one place a log is read to decide something\n\nA close that loses its parent is decided again in here, from a line\nand a pursuit read inside the transaction that lost. That read is\nnot a comparison: nothing is checked against what the caller\ndecided, and the answer comes from the model rather than from this\nadapter. What the transaction contributes is that the logs cannot\nmove between the read and the write, which is why the second\nattempt is the last one.\n\n`contains` is what exactness is guarding against, and the direction\nmatters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*\nof `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a\nsubstring test asked about the ending matches the fork — it reads\n\"somebody pushed a round first\" as \"this work has already ended\",\nand an ending is final where a fork is decided again. So the close\nthat a second decision would have landed is refused instead, and\nthe caller is told the work is over when it is only one round\nfurther along. The other direction cannot happen, which is why\nnaming it would be naming the wrong risk."
+      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits`, `Closings` and `Threads`, where\nthe rest of this directory is one per port. The close is why: it\nwrites a change point, its rows and an ending together, and two\nadapters sharing one transaction is a shape that only reads as\nsharing when they are the same object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same nine shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided: `UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id,\nparent_id)` refuse a fork as part of the insert. The rule is\n[`Closings`]' — \"on the parent nothing has taken\" — and what the\nindex adds is that the check is the write rather than something\nbeside it that could be answered from a row somebody else has\nsince moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n# And the one place a log is read to decide something\n\nA close that loses its parent is decided again in here, from a line\nand a pursuit read inside the transaction that lost. That read is\nnot a comparison: nothing is checked against what the caller\ndecided, and the answer comes from the model rather than from this\nadapter. What the transaction contributes is that the logs cannot\nmove between the read and the write, which is why the second\nattempt is the last one.\n\nWhich column list is which, and what a substring test would read\nout of the wrong one, is on `is_unique_violation`."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge::SqliteForge",
       "kind": "struct",
-      "docs": "SQLite adapter for `Lines`, `Pursuits` and `Closings`."
+      "docs": "SQLite adapter for `Lines`, `Pursuits`, `Closings` and `Threads`."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge_boundary",
       "kind": "module",
-      "docs": "What the forge asks of everything outside it, answered by SQLite.\n\nTwo contracts, and neither is a repository: they are the forge's\nside of questions it cannot answer itself.\n\n- [`SqliteStore`] answers whether a persona holds an asset. One\n  question, because the forge has one.\n- [`SqliteActors`] answers what a handle stands for, and mints one\n  when it has not seen the subject before.\n\nThey live beside the repositories rather than among them because\nwhat they implement is the boundary, not storage — the forge names\n`boundary::Store`, not `AssetRepository`, and that is the whole\narrangement. Putting them in one file keeps the two halves of \"what\nthe forge asks\" readable together."
+      "docs": "What the forge asks of everything outside it, answered by SQLite.\n\nTwo contracts, and neither is a repository: they are the forge's\nside of questions it cannot answer itself.\n\n- [`SqliteStore`] answers whether an asset exists. One question,\n  because the forge has one.\n- [`SqliteActors`] answers what a handle stands for, and mints one\n  when it has not seen the subject before.\n\nThey live beside the repositories rather than among them because\nwhat they implement is the boundary, not storage — the forge names\n`boundary::Store`, not `AssetRepository`, and that is the whole\narrangement. Putting them in one file keeps the two halves of \"what\nthe forge asks\" readable together."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge_boundary::SqliteActors",
@@ -945,7 +945,7 @@
     {
       "path": "asterism_infra::sqlite::repo::forge_boundary::SqliteStore",
       "kind": "struct",
-      "docs": "Answers the forge's one question about the layer below."
+      "docs": "Answers [`Store`] over the `asset` table."
     },
     {
       "path": "asterism_infra::sqlite::repo::group",

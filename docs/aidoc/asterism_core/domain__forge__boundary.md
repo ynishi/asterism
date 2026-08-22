@@ -14,7 +14,7 @@ defect this module exists to make visible.
 ```text
            ┌──────────── the contracts ────────────┐
            │  Store        the layer below answers │
-           │  Correlation  the forge answers       │
+           │  Actors       the side that knows who │
            └───────┬───────────────────┬───────────┘
                    │                   │
         ┌──────────┴───────┐   ┌───────┴──────────┐
@@ -30,51 +30,58 @@ need the other to compile. Naming a contract instead leaves each
 side depending on something neither owns, which is the only
 arrangement where both questions can be asked.
 
-**[`Store`] is the face that asks downward**, and it was the only
-one built for a while. The model refers to content it does not own, and before
-that content is put on a line the forge has to know it is real —
-that question, and no other, is what crosses today. The rest of
-what the forge will eventually ask for (freezing a set, reading a
-round) belongs to work that is not modelled yet, and declaring it
-now would fix a shape nothing has tested.
+**[`Store`] is the face that asks downward.** The model refers to
+content it does not own, and before that content is put on a line
+the forge has to know it is real. The rest of what the forge will
+eventually ask for (freezing a set, reading a round) waits for the
+work that needs it: declaring a question now would fix a shape
+nothing has tested.
 
 **[`Actors`] is the face that asks sideways.** The forge records
 who did a thing as a handle, and what that handle stands for — an
 authenticated user, an instance — belongs to the side that knows
 what a person is. That question crosses here.
 
-**The face that answers upward is not here yet.** What the layer
-below asks the forge is which work a finished round files under,
-and that arrives with the transport that needs it, in this module.
+**The face that answers upward belongs in this module too.** What
+the layer below asks the forge is which work a finished round files
+under, and that question is declared here, with the transport that
+needs it.
 
 # What crosses without a contract
 
 Identity and failure are **shared, not twinned**, and naming them
 directly anywhere in the forge is correct rather than a leak:
-`AssetId`, `PersonaId`, `DomainError`. There is no client for them
-and there should not be one.
+`AssetId` and `DomainError`. There is no client for them and there
+should not be one.
 
-The attribution triple used to be on that list and is not any
-more. It came off for a reason the others do not share: the forge's
-actors are a **wider** set than the triple can spell — a line's own
-rule can act, and no person did that — so it is not a word the
-forge borrows but a word that cannot say what the forge means. It
-crosses through [`Actors`] like any other capability, and the
-forge's own word for who did something is
+`PersonaId` was one of these while [`store::Store`] asked whose an
+asset is. It is not any more — a line carries no owner, so the
+forge has nothing to measure an answer about ownership against —
+and the word left the forge with the question. It also left the
+boundary list that `tests/forge_boundary.rs` enforces, which is a
+wider list than the two words above: the enforced list is every
+name the forge may reach for, and these are the ones a contract may
+be *stated* in.
+
+The attribution triple is on the enforced list for a reason the
+others do not share: the forge's actors are a **wider** set than the triple
+can spell — a line's own rule can act, and no person did that — so
+it is not a word the forge records but a word it asks a question
+in. It crosses at [`Actors`] and is turned into a handle there, and
+the forge's own word for who did something is
 [`Actor`](crate::domain::forge::model::act::Actor).
 
 The reason is that they are not the other side's words that the
-forge borrows — they are words neither side owns. A persona is the
-tenancy axis both sides carry on every row; an asset id is what a
-reference *is* on both sides of the line; a failure has one shape
-or callers cannot handle it. Giving each of them a forge-side twin
-would put a conversion in every file of this layer, and buy a
+forge borrows — they are words neither side owns. An asset id is
+what a reference *is* on both sides of the line; a failure has one
+shape or callers cannot handle it. Giving each of them a forge-side
+twin would put a conversion in every file of this layer, and buy a
 boundary that nothing is crossing.
 
 So the split is: **identity is shared, capability is contracted.**
-What the other side can *do* — answer whether something is held,
-freeze a set, file a round — goes through a face and a client, and
-every one of those is in this module. What something *is* does not.
+What the other side can *do* — answer whether something exists,
+and answer who somebody is — goes through a face, and every face
+there is lives in this module. What something *is* does not.
 
 # Translation happens once, in a client
 
@@ -83,11 +90,17 @@ attribution, the error that both sides already use. The forge's
 [`Content`] is not in it, and must not be: putting it there would
 hand the forge's word for a reference to the side that has its own.
 
-So each face gets a client on this side, and the client is the
-translation. [`StoreClient`] takes the forge's [`Content`] and asks
-the contract in the contract's terms. Callers in the forge see only
-the forge's words; the contract sees only its own. Neither of them
-has to know the other exists.
+So a face gets a client on this side when there is something to
+translate, and the client is where the translation happens.
+[`StoreClient`] takes the forge's [`Content`] and asks the contract
+in the contract's terms. Callers in the forge see only the forge's
+words; the contract sees only its own. Neither of them has to know
+the other exists.
+
+[`Actors`] has no client. What it takes is the attribution triple
+and what it hands back is a handle the forge uses as it stands, so
+there is nothing on either end for a client to convert, and callers
+hold the contract directly.
 
 # What holds this
 
@@ -97,9 +110,12 @@ on a list with a reason beside it. Until the forge is a crate, that
 test is the arrow: a module boundary stops nothing, and
 `use crate::domain::asset::Asset` in a model file compiles today.
 
-It also means the shared vocabulary has a written surface: five
-names, each with the reason it belongs to neither side. That is
-what the split lifts when it happens.
+It also means the shared vocabulary has a written surface: the
+names on that list, each with the reason it belongs to neither
+side. That is what the split lifts when it happens. How many there
+are is not written here — a count in one file and its list in
+another is a thing that goes stale silently, and this pair already
+did once.
 
 # What lives here later
 

@@ -35,10 +35,9 @@ use crate::domain::forge::model::error::ForgeError;
 // the list is `tests/forge_boundary.rs`.
 use crate::domain::value::AssetId;
 
-// SHARED VOCABULARY (candidate): `define_uuid_id!` is not on the boundary
-// list, and this is the only edge out of the model that is not. It
-// shapes nothing — it is how an id newtype is spelled — so it moves
-// with the split rather than before it.
+// SHARED VOCABULARY: `define_uuid_id!` shapes nothing — it is how an
+// id newtype is spelled — so it moves with the split rather than
+// before it.
 use crate::domain::value::define_uuid_id;
 
 define_uuid_id!(

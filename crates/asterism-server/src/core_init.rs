@@ -489,25 +489,23 @@ pub struct CoreCtx {
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
     /// The repository a forge history sits on (#63, #102): opening one,
-    /// reading what is alive on it, and moving the two things about a
-    /// line that its history does not record.
+    /// reading what is alive on it, and moving the three things about
+    /// a line that its history does not record.
     pub line_service: Arc<asterism_core::application::forge::LineService>,
-    /// Work against a line: opening it, adding a pass, running the
+    /// Work against a line: opening it, adding a round, running the
     /// line's rule over what it collides with, and ending it.
     ///
-    /// Neither this nor [`line_service`](Self::line_service) has a
-    /// transport. They are constructed here because the wiring is the
-    /// thing being proved — the whole stack meets a real database at
-    /// startup — and reached from nowhere else until the surface they
-    /// belong on is decided.
+    /// Constructed here whatever reaches it, because the wiring is
+    /// the thing being proved: the whole stack meets a real database
+    /// at startup, and a close writes through two ports at once.
     pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
-    /// What was said about work: a remark on a pass, a question about
+    /// What was said about work: a remark on a round, a question about
     /// one entry it touched, a review of what landed.
     ///
     /// Named apart from [`thread_service`](Self::thread_service),
     /// which is the raw layer's annotation surface and a different
     /// primitive: that one anchors to snapshots, cards and query
-    /// groups, and this one to a pursuit, a pass, an entry as a pass
+    /// groups, and this one to a pursuit, a round, an entry as a round
     /// had it, or a change point. Neither could carry the other's
     /// anchors without learning what the other layer is made of, which
     /// is why there are two — in the services, and in the tables.
@@ -1158,8 +1156,8 @@ pub async fn init_core_with(
     // The forge, over the same connection as everything else. Its
     // ports are one adapter because a close writes to both logs
     // together, and the two faces beside it are the questions it asks
-    // of the layer below: whose an asset is, and what a handle stands
-    // for.
+    // of the layer below: whether an asset exists, and what a handle
+    // stands for.
     let forge = Arc::new(sqlite::repo::SqliteForge::new(isle.clone()));
     let forge_rules = Arc::new(asterism_core::domain::forge::strategies::Builtin::default());
     let forge_actors = Arc::new(sqlite::repo::SqliteActors::new(isle.clone()));

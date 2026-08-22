@@ -41,12 +41,13 @@ const SHARED_VOCABULARY: &[(&str, &str)] = &[
         "what a reference *is* on both sides of the line. `Content` \
          wraps it so that nothing else in the model has to name it",
     ),
-    (
-        "crate::domain::value::PersonaId",
-        "the tenancy axis both sides carry. The forge does not decide \
-         what ownership means; it asks, and asking without saying \
-         whose is asking a question with two right answers",
-    ),
+    // `crate::domain::value::PersonaId` was here, for "the tenancy
+    // axis both sides carry". It is gone because the forge stopped
+    // naming it: `boundary::Store` asks whether content exists, not
+    // whose it is, and a line carries no owner for the answer to be
+    // measured against. Removing it from this list is the point of
+    // removing it from the code — what the lifted crate would have to
+    // carry is one entry shorter.
     (
         "crate::domain::value::define_uuid_id",
         "how an id newtype is spelled. It shapes nothing, and it moves \

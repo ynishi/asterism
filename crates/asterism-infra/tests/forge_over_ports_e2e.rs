@@ -149,7 +149,6 @@ async fn cut(world: &World, line: &Line, label: &str) -> Pursuit {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name(label))],
             None,
             &who("boro"),
@@ -328,7 +327,7 @@ impl World {
             .await
             .expect("work opens against a line that exists");
         self.work
-            .push(&opened.id(), &self.persona, ops, None, &by)
+            .push(&opened.id(), ops, None, &by)
             .await
             .expect("a round with operations in it");
         self.work
@@ -398,7 +397,6 @@ async fn a_line_four_people(world: &World) {
         .work
         .push(
             &boros_work.id(),
-            &world.persona,
             vec![Op::replace(cut, boro_content)],
             None,
             &boro,
@@ -525,13 +523,7 @@ async fn a_line_four_people(world: &World) {
     let tried = world.content().await;
     world
         .work
-        .push(
-            &anas_work.id(),
-            &world.persona,
-            vec![Op::replace(cut, tried)],
-            None,
-            &ana,
-        )
+        .push(&anas_work.id(), vec![Op::replace(cut, tried)], None, &ana)
         .await
         .unwrap();
 
@@ -547,7 +539,6 @@ async fn a_line_four_people(world: &World) {
         .work
         .push(
             &anas_work.id(),
-            &world.persona,
             vec![
                 fork,
                 Op::replace(forked, tried),
@@ -720,7 +711,6 @@ async fn two_pursuits_from_one_head(world: &World) {
             .work
             .push(
                 &work.id(),
-                &world.persona,
                 vec![Op::add(world.content().await, name(label))],
                 None,
                 &who("boro"),
@@ -798,7 +788,6 @@ async fn a_stale_aim_is_decided_again(world: &World) {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("mine"))],
             None,
             &who("boro"),
@@ -1253,7 +1242,6 @@ async fn a_drop_takes_the_line_and_the_work_filed_under_it(world: &World) {
             .work
             .push(
                 &work.id(),
-                &world.persona,
                 vec![Op::add(world.content().await, name(label))],
                 None,
                 &who("boro"),
@@ -1708,7 +1696,6 @@ async fn a_close_whose_work_moved_is_decided_again(world: &World) {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("mine"))],
             None,
             &who("boro"),
@@ -1735,7 +1722,6 @@ async fn a_close_whose_work_moved_is_decided_again(world: &World) {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("later"))],
             None,
             &who("boro"),
@@ -1808,7 +1794,6 @@ async fn a_stale_aim_nobody_decides_again_writes_nothing(world: &World) {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("mine"))],
             None,
             &who("boro"),
@@ -2059,7 +2044,6 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
     let clock = Arc::new(Wound::default());
     let rules = Arc::new(Builtin::default());
     let actors = Arc::new(MemoryActors::new());
-    let persona = PersonaId::new();
 
     let lines = LineService::new(
         stale.clone(),
@@ -2099,7 +2083,6 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
         work_service
             .push(
                 &work.id(),
-                &persona,
                 vec![Op::add(Content::of(AssetId::new()), name(label))],
                 None,
                 &who("boro"),
@@ -2343,7 +2326,6 @@ async fn a_second_ending_and_a_fork_do_not_read_as_each_other() {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("one"))],
             None,
             &who("boro"),
@@ -2443,7 +2425,6 @@ async fn a_close_naming_a_node_the_line_never_had_is_refused_over_sqlite() {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("one"))],
             None,
             &who("boro"),
@@ -2522,7 +2503,6 @@ async fn a_stored_outcome_this_model_has_no_name_for_is_refused() {
         .work
         .push(
             &work.id(),
-            &world.persona,
             vec![Op::add(world.content().await, name("one"))],
             None,
             &who("boro"),

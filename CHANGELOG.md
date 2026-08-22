@@ -10,6 +10,69 @@ and this project adheres to
 
 ### Fixed
 
+- **The forge asks whether content exists, not whose it is — so one person's
+  work can name another person's asset** (#120). `boundary::Store` asked
+  `owns(persona, asset)` and `PursuitService::push` took a `PersonaId` to answer
+  it with. Two things were wrong with that, and building a second surface over
+  the forge is what made both visible.
+
+  A line carries no owner — `Lines::list` says so, grouping and access are
+  outside the forge — so "real but belonging to somebody else" was not a reason
+  a reference was unusable, and refusing it made the case a shared line exists
+  for impossible to express: private work rising into something shared brings
+  the content of whoever had it.
+
+  And the check could not refuse a caller who wanted to pass. The caller chose
+  both halves of the pair, a persona is a column on the asset row, and nothing
+  here knew whether the caller was that persona — so naming the asset's own
+  persona always succeeded. What it caught was a client that paired the two
+  wrongly. It read as a guard on whose asset this is, and it was a consistency
+  check on two values one caller supplied.
+
+  `Store::exists(asset)` is the question the forge actually has, `push` lost the
+  argument, and `PersonaId` left the forge's shared vocabulary with it — the
+  list in `forge_boundary.rs` is one entry shorter because the forge needs less,
+  which is the only reason it ever should be.
+
+  Nothing is deferred by this. "Who" is a question the forge already asks, once,
+  through `boundary::Actors`: a write carries an `Actor`, the handle is resolved
+  by the side that knows what a user is, and it is a handle precisely so that it
+  exists before authentication binds it and keeps pointing at the same actor
+  afterwards. A persona was never the forge's word for who. Access is per line
+  and outside the forge, so what governs putting content on one is who may write
+  to that line — and if an owner ever had to be recorded rather than an author,
+  it would be an `Actor` on the entry, resolved through the same contract.
+
+### Added
+
+- **A line of work is reachable over HTTP** (#120). The forge's verbs were
+  callable from inside the process and nowhere else. Under
+  `/asterism/forge/lines` a caller can now open a line, list them, read one
+  whole or folded, rename it, point it at a different rule, archive it, reopen
+  it and drop it; `/asterism/forge/strategies` beside it says which rules this
+  deployment carries.
+
+  The verbs are acts and are spelled as acts — `POST …/{id}/archive` rather than
+  a resource with a method — which is the form `/asterism/personas/archive` and
+  `/asterism/assets/{id}/source-type` already use. The prefix exists because
+  `/asterism/threads` belongs to the annotation surface on the raw layer, the
+  same collision `CoreCtx` has between `thread_service` and
+  `forge_thread_service`.
+
+  **Every write answers with the line.** The four that move a line's description
+  return nothing from the service, and a caller told only `{"renamed": true}`
+  has to ask again for the name, the standing and the stamp that moved — the
+  second request a screen forgets. `discard` is the exception that proves it: it
+  answers with the asset ids the drop released, and after that write there is no
+  record left to derive them from.
+
+  The wire shapes are a module of their own (`asterism_contract::forge`) and the
+  conversions are in `asterism-core`'s `application::mapping`, where every other
+  conversion is. They stay out of `bindings.ts` until a screen imports one: that
+  list is what the UI consumes, and the forge has no screen yet.
+
+### Fixed
+
 - **A conversation written by a clock that stepped backwards can be read again**
   (#102). A thread was read in stamp order and handed to `Thread::say` one at a
   time, so a reply kept with an earlier stamp than the message it answers was

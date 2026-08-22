@@ -3,11 +3,12 @@
 The forge's ports, over rows held in memory.
 
 ```text
-  Lines / Pursuits / Closings
+  Lines / Pursuits / Closings / Threads
            │
            ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex
            │
-           └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit
+           └─ read  ──► forge::rows::read_* ──► restore ──► Line /
+                                                Pursuit / Thread
 ```
 
 One `Mutex` over the whole store rather than one per table: the

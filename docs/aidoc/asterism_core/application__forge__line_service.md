@@ -4,7 +4,9 @@ Line use cases — opening one, reading what is on it, and moving its
 own description.
 
 ```text
-  open / rename / set_strategy      writes the line's description
+  open                              writes the whole line, genesis
+                                      and history included
+  rename / set_strategy             writes the line's description
   archive / reopen                  writes the line's standing
   get / states / strategies         reads
   discard                           reads both logs, writes neither
@@ -12,8 +14,8 @@ own description.
 ```
 
 Nothing here writes to a line's history. A line moves when work
-ends, and that is [`PursuitService::close`](super::PursuitService),
-which is also the only place both logs are written at once.
+ends, and that is
+[`PursuitService::close`](super::PursuitService).
 
 # The one verb that reads the other log
 
@@ -37,10 +39,6 @@ this deployment carries. Both are lookups with one answer.
 settles collisions by a rule, and the rules differ in what happens
 to somebody's work — so the list a person picks from is built from
 the rules themselves, and every one of them says what it does.
-
-There is no fallback for a name nothing answers to. A line settled
-by whatever rule happened to be available would be settled by a
-rule nobody chose, and no record would say so.
 
 ## Types
 

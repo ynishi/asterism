@@ -29,17 +29,17 @@
 //! and there is no state to integrate at the end. What the close
 //! integrates is a *decision*.
 //!
-//! Nothing here is stored yet. The ports are [`lines`], [`pursuits`],
+//! Nothing here stores anything. The ports are [`lines`], [`pursuits`],
 //! [`closings`] and [`threads`]; what satisfies them lives outside this
-//! crate, and reading one back goes through
-//! [`model::restore`] — the one door a stored value
-//! comes in by.
+//! crate, and reading one back goes through [`model::restore`], the one
+//! door a stored value comes in by.
 //!
 //! # The boundary
 //!
 //! - **The forge names the core; what it writes there is correlation,
-//!   never judgement.** A pursuit refers to content through frozen sets
-//!   ([`Snapshot`]) and ids, and writes nothing onto a core row at all.
+//!   never judgement.** A pursuit refers to content by id — one
+//!   reference, [`Content`](model::value::Content), and no other — and
+//!   writes nothing onto a core row at all.
 //!   What the forge has to say about an asset — lifecycle events,
 //!   ledger gestures — lives on forge rows that name core ids. An
 //!   intent written onto a core row itself would put the forge's
@@ -55,14 +55,57 @@
 //!   around.
 //!
 //!   What the forge does own is its own word for it. A node records an
-//!   [`Actor`](model::act::Actor) — a handle and a kind — because the
-//!   forge's actors include a line's own rule, which is not a person
-//!   and cannot be written as one. Who a handle stands for is asked
-//!   through [`boundary::Actors`], and answered outside.
+//!   [`Actor`](model::act::Actor) — a handle and a kind — and who a
+//!   handle stands for is asked through [`boundary::Actors`] and
+//!   answered outside. Why a handle rather than the triple is in
+//!   [`boundary::actors`].
 //! - **The core does not need the forge.** Importing, deduplicating,
 //!   rating and trashing all work with no pursuit in sight. Sending
 //!   anything out is the raw layer's own business, and the forge has
 //!   no part in it.
+//!
+//! # What the forge may depend on, and what enforces it
+//!
+//! The rule is one sentence: **the forge may not name anything else in
+//! `asterism-core` except the shared vocabulary**, which is
+//! [`DomainError`](crate::error::DomainError),
+//! [`AssetId`](crate::domain::value::AssetId),
+//! `define_uuid_id` (the crate-private macro an id newtype is spelled
+//! with) and
+//! [`AttributionContext`](crate::domain::attribution::AttributionContext).
+//! `tests/forge_boundary.rs` holds that list with a reason beside each
+//! entry and fails on anything else.
+//!
+//! `PersonaId` came off that list, and how it came off is the example
+//! worth keeping: nothing removed it from the list on purpose.
+//! [`boundary::Store`] stopped asking whose an asset is — the reason
+//! is in [`boundary::store`] — and the word simply stopped appearing.
+//! The list shrinks when the forge needs less, and never because
+//! somebody tidied it.
+//!
+//! **The constraint is mutual dependency with the core, and nothing
+//! wider.** Two things follow that are easy to get backwards:
+//!
+//! - **External crates are ordinary here.** The forge imports `chrono`,
+//!   `uuid`, `async_trait`, `thiserror` and `std` directly, and the
+//!   guard does not look at them on purpose — it reads `use crate::`
+//!   lines, because what it answers for is what the forge names *in
+//!   this crate*. A leaf crate is the same case: `asterism-contract`
+//!   imports no Asterism crate at all, so naming it would create no
+//!   cycle and cost the forge nothing it is protecting.
+//! - **Where the DTO conversions live is a separate decision, and it
+//!   is not this one.** They sit in
+//!   [`application::mapping`](crate::application::mapping) because that
+//!   module's own claim is that every conversion goes through it — not
+//!   because putting them here would breach the boundary. It would
+//!   not.
+//!
+//! The direction is what matters: the outside may name the forge, and
+//! the forge may not name the outside. #101 turns that into a crate
+//! graph, where the compiler holds it instead of a test. Until then the
+//! list above is the whole of the contract, and adding to it is a
+//! decision about what the lifted crate would have to carry rather
+//! than a note that something compiles.
 //!
 //! # What is deliberately not here
 //!
@@ -71,9 +114,9 @@
 //! dispatch, and does not wait for anything to come back. Export lives
 //! in the raw layer, where what it records is a thing that happened to
 //! the bytes.
-//! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
-//! the core by, and belongs to the core: it is content-addressed,
-//! deduplicated persona-wide, and carries no story about who froze it.
+//! [`snapshot`](crate::domain::snapshot) belongs to the core: it is
+//! content-addressed, deduplicated persona-wide, and carries no story
+//! about who froze it.
 //! [`duplicate_conflict`](crate::domain::duplicate_conflict) and
 //! [`merge_plan`](crate::domain::merge_plan) answer identity ("are these
 //! the same thing"), which the store asks of itself without being told
@@ -95,8 +138,6 @@
 //! was settled on #63, and the first one — a pursuit whose standing
 //! derived from lifecycle events, a ledger beside it, a line moved one
 //! verb at a time — was removed whole on #102 rather than migrated.
-//!
-//! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
 pub mod boundary;
 pub mod clock;

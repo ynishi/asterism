@@ -1,8 +1,8 @@
 //! Keeping pursuits, stated in the forge's own words.
 //!
-//! [`Pursuits`] is the other face the forge asks for, and it is the
-//! quiet one: opening work and adding rounds to it are what happens
-//! most, and neither touches a line.
+//! [`Pursuits`] is the quiet one of the four faces the forge asks for:
+//! opening work and adding rounds to it are what happens most, and
+//! neither touches a line.
 //!
 //! # A round names the node it sits on
 //!

@@ -12,8 +12,13 @@ use asterism_contract::dto::{
     PersonaThemeDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
     SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
 };
+use asterism_contract::forge::{
+    ForgeChangePointDto, ForgeChangeRowDto, ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineDto,
+    ForgeLineHistoryDto, ForgeStrategyDto,
+};
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use crate::domain::app_setting::EffectiveSetting;
@@ -24,6 +29,12 @@ use crate::domain::color::ColorBucket;
 use crate::domain::dir::Dir;
 use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::ConstellationEdge;
+use crate::domain::forge::model::act::Actor;
+use crate::domain::forge::model::history::ChangePoint;
+use crate::domain::forge::model::line::{Line, Standing};
+use crate::domain::forge::model::strategy::About;
+use crate::domain::forge::model::table::EntryStates;
+use crate::domain::forge::model::value::{Content, Existence, LineId, Name, StrategyId};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
 use crate::domain::material_mark::{MaterialAnchor, MaterialMark};
@@ -1113,6 +1124,143 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
         source_group_id: job.source_group_id.map(|g| g.to_string()),
         source_query_json: job.source_query_json.clone(),
         operator_ai: job.operator_ai().map(|o| o.as_str().to_string()),
+    }
+}
+
+// ---------------------------------------------------------------
+// The forge
+//
+// Here rather than under the forge, and the reason is this module's
+// own claim: every conversion goes through it. The forge's would be
+// the first exception, and an exception is what makes the sentence
+// above stop being checkable by reading one file.
+//
+// Not a dependency argument: naming `asterism-contract` from the
+// forge would breach nothing. Why that is, and what the boundary
+// guard does and does not answer for, is stated where the rule lives
+// — `domain::forge`'s own module doc.
+// ---------------------------------------------------------------
+
+/// Reads a line id off the wire.
+pub fn forge_line_id(raw: &str, field: &str) -> Result<LineId, DomainError> {
+    Ok(LineId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Reads a name off the wire, refusing a blank one.
+pub fn forge_name(raw: impl Into<String>) -> Result<Name, DomainError> {
+    Name::new(raw).map_err(DomainError::from)
+}
+
+/// Reads a strategy id off the wire.
+///
+/// A slug rather than a UUID: the forge does not know the set of rules
+/// and neither does this, so the only thing refused here is a blank
+/// one. Whether the deployment carries it is `LineService`'s answer.
+pub fn forge_strategy_id(raw: impl Into<String>) -> Result<StrategyId, DomainError> {
+    StrategyId::new(raw).map_err(DomainError::from)
+}
+
+/// Converts a `Line` to the summary a caller reads.
+///
+/// The head is derived from the chain rather than read off a column,
+/// which is why it is a projection rather than a field.
+pub fn forge_line_to_dto(line: &Line) -> ForgeLineDto {
+    ForgeLineDto {
+        id: line.id().to_string(),
+        name: line.name().as_str().to_string(),
+        strategy_id: line.strategy().to_string(),
+        standing: match line.standing() {
+            Standing::Open => "open".to_string(),
+            Standing::Archived => "archived".to_string(),
+        },
+        head_id: line.head().to_string(),
+        created_at_ms: line.meta().created().at().timestamp_millis(),
+        updated_at_ms: line.meta().updated().at().timestamp_millis(),
+    }
+}
+
+/// Converts the fold of a line's chain to what is on it.
+///
+/// Ordered by entry id, which is what the fold already is: a
+/// `BTreeMap`, so the wire order is stable across reads of the same
+/// line rather than whatever a hash gave.
+pub fn forge_states_to_dto(states: &EntryStates) -> Vec<ForgeEntryStateDto> {
+    states
+        .iter()
+        .map(|(entry, state)| ForgeEntryStateDto {
+            entry_id: entry.to_string(),
+            alive: state.alive,
+            name: state.name.as_ref().map(|n| n.as_str().to_string()),
+            content_asset_id: state.content.as_ref().map(|c| c.as_uuid().to_string()),
+        })
+        .collect()
+}
+
+/// Converts a line and its whole chain, in the chain's order.
+pub fn forge_history_to_dto(line: &Line) -> ForgeLineHistoryDto {
+    let history = line.history();
+    ForgeLineHistoryDto {
+        line: forge_line_to_dto(line),
+        genesis_id: history.genesis().id().to_string(),
+        genesis_at_ms: history.genesis().act().at().timestamp_millis(),
+        changes: history.changes().iter().map(change_point_to_dto).collect(),
+    }
+}
+
+/// Converts one landing, table included.
+fn change_point_to_dto(point: &ChangePoint) -> ForgeChangePointDto {
+    let (actor_kind, actor_id) = actor_to_columns(point.act().by());
+    ForgeChangePointDto {
+        id: point.id().to_string(),
+        parent_id: point.parent().to_string(),
+        from_pursuit_id: point.from().to_string(),
+        by_node_id: point.by().to_string(),
+        at_ms: point.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+        table: point
+            .table()
+            .rows()
+            .iter()
+            .map(|(entry, row)| ForgeChangeRowDto {
+                entry_id: entry.to_string(),
+                existence: row.existence().map(|axis| match axis {
+                    Existence::Present => "present".to_string(),
+                    Existence::Absent => "absent".to_string(),
+                }),
+                content_asset_id: row.content().map(|c| c.as_uuid().to_string()),
+                name: row.name().map(|n| n.as_str().to_string()),
+            })
+            .collect(),
+    }
+}
+
+/// Splits an actor into the pair a row and a payload both carry.
+fn actor_to_columns(actor: Actor) -> (String, String) {
+    match actor {
+        Actor::User(id) => ("user".to_string(), id.to_string()),
+        Actor::System(id) => ("system".to_string(), id.to_string()),
+    }
+}
+
+/// Converts a rule's id and description to what a chooser reads.
+pub fn forge_strategy_to_dto(id: &StrategyId, about: &About) -> ForgeStrategyDto {
+    ForgeStrategyDto {
+        id: id.as_str().to_string(),
+        name: about.name.clone(),
+        summary: about.summary.clone(),
+    }
+}
+
+/// Converts what a drop released.
+///
+/// The set is `Content`, and `Content` wraps an asset id — so this is
+/// where the forge's one reference into the layer below is spelled in
+/// that layer's vocabulary, for a caller that has to act on it.
+pub fn forge_discarded_to_dto(line: LineId, released: &BTreeSet<Content>) -> ForgeDiscardedDto {
+    ForgeDiscardedDto {
+        line_id: line.to_string(),
+        released_asset_ids: released.iter().map(|c| c.as_uuid().to_string()).collect(),
     }
 }
 

@@ -5,8 +5,8 @@ What the forge asks of everything outside it, answered by SQLite.
 Two contracts, and neither is a repository: they are the forge's
 side of questions it cannot answer itself.
 
-- [`SqliteStore`] answers whether a persona holds an asset. One
-  question, because the forge has one.
+- [`SqliteStore`] answers whether an asset exists. One question,
+  because the forge has one.
 - [`SqliteActors`] answers what a handle stands for, and mints one
   when it has not seen the subject before.
 
@@ -19,5 +19,5 @@ the forge asks" readable together.
 ## Types
 
 - `SqliteActors` — Keeps what a forge handle stands for.
-- `SqliteStore` — Answers the forge's one question about the layer below.
+- `SqliteStore` — Answers [`Store`] over the `asset` table.
 

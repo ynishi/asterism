@@ -1,8 +1,7 @@
 //! What time it is.
 //!
-//! A port for something every other service in this codebase reads off
-//! the system clock directly, and the difference is what a timestamp
-//! means once it is written.
+//! A port rather than a call to the system clock, and the difference
+//! is what a timestamp means once it is written.
 //!
 //! ```text
 //!   elsewhere      a row's updated_at      convenient, overwritten by the next write

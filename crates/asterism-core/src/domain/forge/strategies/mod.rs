@@ -6,7 +6,7 @@
 //!                                          │
 //!                                          ├ mainline-first   the line stays, ours moves aside
 //!                                          ├ mine-first       ours stays, the line's moves aside
-//!                                          ├ both-diverge     both move aside, the old entry goes
+//!                                          ├ both-diverge     the old entry goes, both re-added
 //!                                          ├ discard-mine     ours is written down and dropped
 //!                                          └ by-hand          nothing is written
 //! ```
@@ -45,7 +45,8 @@
 //!   mainline-first   E stays theirs           mine → new entry "cut-01 (2)"
 //!   mine-first       E is taken off           mine → new entry "cut-01"
 //!                                             theirs → new entry "cut-01 (2)"
-//!   both-diverge     E is taken off           both → new entries, both numbered
+//!   both-diverge     E is taken off           theirs → new entry "cut-01"
+//!                                             mine → new entry "cut-01 (2)"
 //!   discard-mine     E stays theirs           mine → new entry, then removed
 //!   by-hand          nothing is written       the collision stands
 //! ```
@@ -54,8 +55,8 @@
 //! removal of the entry that was forked. `mine-first` and
 //! `both-diverge` write the same three and differ in who gets the
 //! name — which is the whole of the difference between "this work's
-//! version is what `cut-01` means now" and "`cut-01` means neither of
-//! them any more".
+//! version is what `cut-01` means now" and "`cut-01` goes on meaning
+//! the line's version, on an entry of its own".
 //!
 //! # Beside the model, not inside it
 //!

@@ -12,6 +12,7 @@
 - [asterism-contract::command](asterism_contract/command.md): Command DTOs — inputs for state-changing operations.
 - [asterism-contract::digest](asterism_contract/digest.md): The notation a digest is written in — the `sha256:` tag, and the
 - [asterism-contract::dto](asterism_contract/dto.md): Response DTOs — outputs shared between the application services, the
+- [asterism-contract::forge](asterism_contract/forge.md): The forge's wire shapes — a line, what is on it, and what a caller
 - [asterism-contract::query](asterism_contract/query.md): Query DTOs — inputs for read-side operations.
 - [asterism-contract::query_group](asterism_contract/query_group.md): Query Group `query_json` — the persisted rule of a query-backed Group.
 - [asterism-contract::sidecar](asterism_contract/sidecar.md): The shape of an exported artefact's `<file>.meta.json` sidecar.
