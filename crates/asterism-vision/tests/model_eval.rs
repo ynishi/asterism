@@ -16,7 +16,9 @@
 #![cfg(all(feature = "fixtures", feature = "onnx"))]
 
 use asterism_vision::encoder::Encoder;
-use asterism_vision::fixtures::relations::{RelatedScenes, RelationStream, unrelated_queries_en};
+use asterism_vision::fixtures::relations::{
+    RelatedScenes, RelationStream, unrelated_queries_en, unrelated_queries_ja,
+};
 use asterism_vision::fixtures::scene::{self, SceneSpec, noise_image};
 use asterism_vision::package::ModelPackage;
 
@@ -44,6 +46,35 @@ fn encode_scene(encoder: &mut Encoder, spec: &SceneSpec) -> Vec<f32> {
     encoder
         .encode_image(img.as_raw(), img.width(), img.height())
         .expect("encode")
+}
+
+/// One language's tag-vs-image measurement.
+#[derive(Default)]
+struct TagMeasure {
+    own_scores: Vec<f32>,
+    own_beats_disjoint: usize,
+    pairs: usize,
+}
+
+impl TagMeasure {
+    fn observe(&mut self, encoder: &mut Encoder, base: &[f32], own: &str, disjoint: &str) {
+        let own_score = cosine(base, &encoder.encode_text(own).expect("tag"));
+        let disjoint_score = cosine(base, &encoder.encode_text(disjoint).expect("tag"));
+        self.own_scores.push(own_score);
+        self.pairs += 1;
+        if own_score > disjoint_score {
+            self.own_beats_disjoint += 1;
+        }
+    }
+
+    fn json(&self) -> serde_json::Value {
+        let mean = self.own_scores.iter().sum::<f32>() / self.own_scores.len().max(1) as f32;
+        serde_json::json!({
+            "own_mean": mean,
+            "own_beats_disjoint": self.own_beats_disjoint,
+            "pairs": self.pairs,
+        })
+    }
 }
 
 /// One pass over the fixture set: every ordering claim the corpus
@@ -120,32 +151,44 @@ fn orderings_hold_and_measurements_print() {
         }
     }
 
-    // Tag matching: a base's own EN tag must beat the disjoint tags of
-    // its hard negative.
-    let mut tag_own_beats_disjoint = 0usize;
-    let mut tag_pairs = 0usize;
-    let mut own_tag_scores = Vec::new();
+    // Tag matching, both languages: a base's own tag must beat the
+    // disjoint tags of its hard negative. JA is measured separately —
+    // the P0 record left SigLIP 2's Japanese behaviour unverified, and
+    // this is the verification.
+    let mut tag = TagMeasure::default();
+    let mut tag_ja = TagMeasure::default();
     for (i, spec) in specs.iter().enumerate() {
         let Some(negative) = &spec.hard_negative else {
             continue;
         };
-        let own = &spec.scene.tags_en()[0];
-        let disjoint = &negative.tags_en()[0];
-        let own_score = cosine(&bases[i], &encoder.encode_text(own).expect("tag"));
-        let disjoint_score = cosine(&bases[i], &encoder.encode_text(disjoint).expect("tag"));
-        own_tag_scores.push(own_score);
-        tag_pairs += 1;
-        if own_score > disjoint_score {
-            tag_own_beats_disjoint += 1;
-        }
+        tag.observe(
+            &mut encoder,
+            &bases[i],
+            &spec.scene.tags_en()[0],
+            &negative.tags_en()[0],
+        );
+        tag_ja.observe(
+            &mut encoder,
+            &bases[i],
+            &spec.scene.tags_ja()[0],
+            &negative.tags_ja()[0],
+        );
     }
 
-    // Honest failure: unrelated queries against every base.
+    // Honest failure: unrelated queries against every base, in both
+    // languages.
     let mut unrelated_query_scores = Vec::new();
     for query in unrelated_queries_en() {
         let q = encoder.encode_text(&query).expect("query");
         for base in &bases {
             unrelated_query_scores.push(cosine(base, &q));
+        }
+    }
+    let mut unrelated_query_ja_scores = Vec::new();
+    for query in unrelated_queries_ja() {
+        let q = encoder.encode_text(&query).expect("query");
+        for base in &bases {
+            unrelated_query_ja_scores.push(cosine(base, &q));
         }
     }
 
@@ -163,8 +206,10 @@ fn orderings_hold_and_measurements_print() {
             "hard_negative_mean": mean(&negative_scores),
             "stranger_mean": mean(&stranger_scores),
             "noise": { "mean": mean(&noise_scores), "max": max(&noise_scores) },
-            "tag": { "own_mean": mean(&own_tag_scores), "own_beats_disjoint": tag_own_beats_disjoint, "pairs": tag_pairs },
+            "tag": tag.json(),
+            "tag_ja": tag_ja.json(),
             "unrelated_query": { "mean": mean(&unrelated_query_scores), "max": max(&unrelated_query_scores) },
+            "unrelated_query_ja": { "mean": mean(&unrelated_query_ja_scores), "max": max(&unrelated_query_ja_scores) },
         })
     );
 
@@ -176,14 +221,19 @@ fn orderings_hold_and_measurements_print() {
          ({lookalike_beats_negative}/{lookalike_pairs})"
     );
     assert!(
-        tag_own_beats_disjoint * 10 >= tag_pairs * 8,
-        "own tags must beat disjoint tags on at least 80% of pairs \
-         ({tag_own_beats_disjoint}/{tag_pairs})"
+        tag.own_beats_disjoint * 10 >= tag.pairs * 8,
+        "own EN tags must beat disjoint tags on at least 80% of pairs \
+         ({}/{})",
+        tag.own_beats_disjoint,
+        tag.pairs
     );
     assert!(
         mean(&noise_scores) < mean(&lookalike_scores),
         "noise must sit below the scene family"
     );
+    // JA is reported, not asserted: the P0 record calls Japanese
+    // behaviour unverified, and a measurement that fails an assertion
+    // would hide the number this run exists to produce.
 }
 
 /// The dim the manifest declares is the dim the towers produce — the

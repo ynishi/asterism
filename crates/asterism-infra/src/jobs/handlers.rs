@@ -402,10 +402,16 @@ pub async fn edge_rebuild(
 /// Similarity floor below which a visual neighbour is not materialised
 /// — weak matches are omitted rather than padded to a count (#112).
 ///
-/// **Provisional.** The final value comes from the fixture ROC once the
-/// encoder is measured; until then this is a conservative placeholder,
-/// recorded as such so a measurement that moves it moves one constant.
-const VISUAL_SCORE_FLOOR: f32 = 0.6;
+/// Measured, not guessed: the model-gated eval
+/// (`asterism-vision/tests/model_eval.rs`, seed 42, 24 bases,
+/// siglip2-base-patch16-256) put look-alikes at a mean cosine of
+/// 0.992 and semantic siblings at 0.952, against hard negatives at
+/// 0.889, strangers at 0.883 and noise topping out at 0.763 — the
+/// space runs high and compact for image-image pairs, so the floor
+/// sits in the gap between the related family and the unrelated one.
+/// Re-measure before reusing this number for any other model id: it
+/// is a property of the model, not of the feature.
+const VISUAL_SCORE_FLOOR: f32 = 0.92;
 /// Bounded top set the visual rebuild materialises per asset.
 const VISUAL_TOP_K: usize = 8;
 /// Page size of the extraction backfill walk.
