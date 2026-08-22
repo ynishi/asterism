@@ -8,6 +8,33 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **A line of work is reachable over HTTP** (#120). The forge's verbs were
+  callable from inside the process and nowhere else. Ten routes under
+  `/asterism/forge/lines` open a line, list them, read one whole or folded,
+  rename it, point it at a different rule, archive it, reopen it and drop it;
+  `/asterism/forge/strategies` says which rules this deployment carries.
+
+  The verbs are acts and are spelled as acts — `POST …/{id}/archive` rather than
+  a resource with a method — which is the form `/asterism/personas/archive` and
+  `/asterism/assets/{id}/source-type` already use. The prefix exists because
+  `/asterism/threads` belongs to the annotation surface on the raw layer, the
+  same collision `CoreCtx` has between `thread_service` and
+  `forge_thread_service`.
+
+  **Every write answers with the line.** The four that move a line's description
+  return nothing from the service, and a caller told only `{"renamed": true}`
+  has to ask again for the name, the standing and the stamp that moved — the
+  second request a screen forgets. `discard` is the exception that proves it: it
+  answers with the asset ids the drop released, and after that write there is no
+  record left to derive them from.
+
+  The wire shapes are a module of their own (`asterism_contract::forge`) and the
+  conversions are in `asterism-core`'s `application::mapping`, where every other
+  conversion is. They stay out of `bindings.ts` until a screen imports one: that
+  list is what the UI consumes, and the forge has no screen yet.
+
 ### Fixed
 
 - **A conversation written by a clock that stepped backwards can be read again**
