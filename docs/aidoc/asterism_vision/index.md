@@ -17,3 +17,7 @@ are graded against: [`fixtures`] generates deterministic scenes with
 derived ground truth, in memory, at test time — deliberately not a
 corpus, because nothing outside the system consumes it.
 
+## Modules
+
+- [`package`](package.md): The model package: the data contract between model *preparation*
+

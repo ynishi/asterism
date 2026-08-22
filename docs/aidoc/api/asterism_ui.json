@@ -8,6 +8,11 @@
       "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation here names its attribution channel explicitly —\n[`AttributionContext::owner_surface`]. This is the owner's own\noperation surface (the desktop app's IPC), so the owner-ness is a\nproperty of the surface rather than a guess about the caller, and the\ncommands carry no attribution fields for it to read. The argument is\nrequired by the service signatures, so a new mutation cannot be added\nhere without choosing."
     },
     {
+      "path": "asterism_ui::commands::accept_tag_suggestion",
+      "kind": "function",
+      "docs": "Accepts one tag suggestion (#112): the ruling lands on the\nevidence row and the tag is linked in `asset_tag`."
+    },
+    {
       "path": "asterism_ui::commands::active_profile",
       "kind": "function",
       "docs": "Returns the active local data profile for persistent UI chrome."
@@ -413,6 +418,11 @@
       "docs": "Sidebar Tags section — every tag paired with the number of\ndistinct assets attached to it. `persona_id` restricts the count\nto that persona's assets so the sidebar tracks the active persona\nfilter; pass `None` for a global count."
     },
     {
+      "path": "asterism_ui::commands::list_tag_suggestions",
+      "kind": "function",
+      "docs": "Lists what the bound visual model proposed for one asset (#112),\nscore-descending, rulings included. Empty without a model."
+    },
+    {
       "path": "asterism_ui::commands::list_thread_messages",
       "kind": "function",
       "docs": "Lists the Messages of a Thread."
@@ -536,6 +546,11 @@
       "path": "asterism_ui::commands::rehome_dropped_path",
       "kind": "function",
       "docs": "Rehomes a dropped path into `~/Pictures/Asterism/dropped/`\nwhen it lives under a volatile TEMP dir (macOS screenshot\nstash lands in `/private/var/folders/…/TemporaryItems/`, and\nscreenshots dragged out of the preview thumbnail vanish once\nthe preview closes — a stale locator would then break every\ndownstream read). The copy also drops the path into the Tauri\n`assetProtocol` scope so `convertFileSrc` works for full-window\nimage playback. Returns the durable path; the frontend feeds it\nstraight into `add_asset`."
+    },
+    {
+      "path": "asterism_ui::commands::reject_tag_suggestion",
+      "kind": "function",
+      "docs": "Rejects one tag suggestion (#112); this model never proposes the\npair again."
     },
     {
       "path": "asterism_ui::commands::remove_asset_from_group",
@@ -671,6 +686,11 @@
       "path": "asterism_ui::commands::update_query_group_query",
       "kind": "function",
       "docs": "\"Update query\": validates + persists a replacement rule (rejecting\ndependency cycles) and re-evaluates the membership."
+    },
+    {
+      "path": "asterism_ui::commands::visual_model_status",
+      "kind": "function",
+      "docs": "Which visual model this process bound, if any (#112)."
     },
     {
       "path": "asterism_ui::error",

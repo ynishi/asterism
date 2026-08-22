@@ -129,6 +129,7 @@
 - [asterism-core::domain::tag](asterism_core/domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [asterism-core::domain::thread](asterism_core/domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [asterism-core::domain::value](asterism_core/domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
+- [asterism-core::domain::visual](asterism_core/domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
 - [asterism-core::error](asterism_core/error.md): `DomainError` — the innermost error type shared across every layer of
 
 ## asterism-disclosure-format 0.0.0
@@ -257,6 +258,7 @@
 - [asterism-infra::search::fan_out](asterism_infra/search__fan_out.md): One [`AssetIndexer`] over several.
 - [asterism-infra::search::tantivy_index](asterism_infra/search__tantivy_index.md): [`AssetRetriever`] + [`AssetIndexer`] adapter backed by an on-disk
 - [asterism-infra::search::tokenizer](asterism_infra/search__tokenizer.md): Registers the `mixed_body` tokenizer on a Tantivy index.
+- [asterism-infra::search::visual_retriever](asterism_infra/search__visual_retriever.md): The retriever that answers `Similar` from stored vectors (#112).
 - [asterism-infra::source_text](asterism_infra/source_text.md): Filesystem adapter for `SourceTextReader` — resolves asset
 - [asterism-infra::sqlite](asterism_infra/sqlite.md): SQLite backend — connection lifecycle and schema migration built on
 - [asterism-infra::sqlite::map](asterism_infra/sqlite__map.md): Row ↔ domain conversion helpers.
@@ -287,8 +289,10 @@
 - [asterism-infra::sqlite::repo::session](asterism_infra/sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
 - [asterism-infra::sqlite::repo::snapshot](asterism_infra/sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [asterism-infra::sqlite::repo::tag](asterism_infra/sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
+- [asterism-infra::sqlite::repo::tag_evidence](asterism_infra/sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
 - [asterism-infra::sqlite::repo::thread](asterism_infra/sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [asterism-infra::sqlite::repo::thumb](asterism_infra/sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
+- [asterism-infra::sqlite::repo::visual](asterism_infra/sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).
 - [asterism-infra::telemetry](asterism_infra/telemetry.md): Local telemetry — append-only `action_log` access (dogfooding
 
 ## asterism-media-probe 0.0.0
@@ -316,6 +320,7 @@
 ## asterism-vision 0.0.0
 
 - [asterism-vision overview](asterism_vision/index.md): # asterism-vision — model *use* for visual features (#112)
+- [asterism-vision::package](asterism_vision/package.md): The model package: the data contract between model *preparation*
 
 ## teams-contract 0.0.0
 

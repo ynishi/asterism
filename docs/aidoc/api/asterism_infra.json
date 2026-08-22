@@ -388,6 +388,21 @@
       "docs": "Retention sweep — purges assets and Groups whose trash stamp has\naged past the configured retention period. Payload is empty (`{}`).\n\nThe cutoff is **not** in the payload: it is derived inside\n`RetentionService::purge_expired` from the injected retention\nvalue, so a job that sat in the queue across a policy change purges\non the current policy rather than the one in force when it was\nenqueued.\n\nChain-enqueues itself while a page comes back full **and made\nprogress**. Both halves matter:\n\n- \"full\" is measured on rows *scanned*, so a page is not mistaken for\n  the end of the backlog just because some rows were skipped.\n- \"made progress\" is what stops a spin. A page that purged nothing\n  would otherwise re-enqueue instantly and forever, and since this\n  queue has no retry policy the failure would surface only as an\n  ever-growing `Jobs` table. The one *expected* skip — a restore\n  landing mid-sweep — needs no chaining anyway: the restored row\n  fails `scan_purgeable`'s predicate on the next pass, so it is gone\n  from the scan regardless. That leaves genuine errors, and retrying\n  those in a tight loop helps nobody; the next startup sweep picks\n  the page back up."
     },
     {
+      "path": "asterism_infra::jobs::handlers::visual_edge_rebuild",
+      "kind": "function",
+      "docs": "Recomputes one asset's visual-similarity edges from stored vectors.\n\nThe scan is the whole persona's vectors under the current model —\ndeliberately not the ±48 h candidate window — and only the bounded\ntop set above [`VISUAL_SCORE_FLOOR`] is materialised. An asset with\nno stored vector clears its visual set rather than keeping stale\nsuggestions alive."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::visual_feature",
+      "kind": "function",
+      "docs": "Encodes one image's pixels into the stored feature vector.\n\n`{ \"asset_id\": ... }` encodes one asset's primary material and\nchain-enqueues the visual rebuild; `{ \"batch\": true }` walks\nmaterials with no answer under the configured model. Dispatched\nonly when an encoder is configured (the cell gate in `mod.rs`)."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::visual_tag_suggest",
+      "kind": "function",
+      "docs": "Proposes channel tags for one encoded image (#112, P3).\n\n`{ \"asset_id\": ... }` is chained from a completed encode;\n`{ \"batch\": true }` walks encoded vectors the pass has not stamped.\nThe pass writes `suggested` evidence only where no row exists (a\nperson's ruling is structurally out of reach), never links a tag —\nacceptance is what writes `asset_tag` — and stamps the vector\nwhether or not anything cleared the floor, so a scene with no\nmatching vocabulary is offered exactly once."
+    },
+    {
       "path": "asterism_infra::jobs::jobs_depth",
       "kind": "function",
       "docs": "Reads [`JobsDepth`] off the apalis `Jobs` table.\n\n`Killed` / `Retry` rows count towards none of the four fields, the\nsame way [`jobs_snapshot`] leaves them out of its four counters. A\ndrain check therefore asks `pending + running == 0`: those are the\ntwo states that still owe work."
@@ -573,6 +588,11 @@
       "docs": "Returns the default SQLite database path (`<asterism_home>/asterism.db`)."
     },
     {
+      "path": "asterism_infra::paths::models_dir",
+      "kind": "function",
+      "docs": "Returns (creating on demand) the profile-local model-package root\n(#112): one subdirectory per installed package\n(`<asterism_home>/models/<model_id>/`).\n\nProfile-local like the Tantivy index and the preview renditions,\nnot shared across profiles: `$ASTERISM_HOME` must sandbox\neverything a profile touches, or a bench run reads the weights the\nuser's real library trusts. Sharing bytes between profiles is a\nsymlink the person makes, not a path this function invents."
+    },
+    {
       "path": "asterism_infra::paths::tantivy_index_dir",
       "kind": "function",
       "docs": "Returns (creating on demand) the profile-local Tantivy index directory."
@@ -681,6 +701,16 @@
       "path": "asterism_infra::search::tokenizer::register_on",
       "kind": "function",
       "docs": "Registers `mixed_body` on the given tokenizer manager. Idempotent\n(register replaces)."
+    },
+    {
+      "path": "asterism_infra::search::visual_retriever",
+      "kind": "module",
+      "docs": "The retriever that answers `Similar` from stored vectors (#112).\n\nA composite over the text retriever: `Text` delegates unchanged,\n`Similar` becomes a brute-force cosine scan over the persona's\nstored feature vectors under the bound model. Brute force on\npurpose — at personal-library scale the whole scan is a few\nmegabytes of f32, and an ANN structure earns its complexity only\nwhen the P2-5 measurements say the scan misses a latency target.\n\nDegradation is layered the way the rest of the feature degrades:\nno bound encoder means `Similar` declines exactly as the text-only\nbuild declines it; a bound encoder with no stored vector for the\nquery asset returns the empty set — \"not encoded yet\" is an honest\nnothing, not an error."
+    },
+    {
+      "path": "asterism_infra::search::visual_retriever::VisualAwareRetriever",
+      "kind": "struct",
+      "docs": "Composite retriever: text unchanged, `Similar` from stored vectors."
     },
     {
       "path": "asterism_infra::source_text",
@@ -1048,6 +1078,21 @@
       "docs": "SQLite adapter for `TagRepository` (uses a writer isle)."
     },
     {
+      "path": "asterism_infra::sqlite::repo::tag_evidence",
+      "kind": "module",
+      "docs": "SQLite adapters for `TagEvidenceRepository` and\n`TagVectorRepository` (#112, P3).\n\nThe evidence adapter's one load-bearing statement is the\n`INSERT OR IGNORE` in [`suggest_if_absent`]: the primary key\n`(asset, tag, model)` is what keeps a rerun of the suggestion job\nfrom touching a person's ruling or an earlier score — the guarantee\nis structural, not a handler branch.\n\n[`suggest_if_absent`]: SqliteTagEvidenceRepository::suggest_if_absent"
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::tag_evidence::SqliteTagEvidenceRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `TagEvidenceRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::tag_evidence::SqliteTagVectorRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `TagVectorRepository` (uses a writer isle)."
+    },
+    {
       "path": "asterism_infra::sqlite::repo::thread",
       "kind": "module",
       "docs": "SQLite adapter for the `ThreadRepository` port.\n\nStorage shape mirrors the V20 migration in\n[`crate::sqlite::migrations`]. Projection columns on `thread`\n(`message_count`, `last_message_at`,\n`updated_at`) are trigger-maintained; `save` therefore preserves\nthem across an `ON CONFLICT DO UPDATE` (title / archive edits only\ntouch the caller-owned columns). `append_message` is idempotent by\n`(thread_id, idempotency_key)` — a repeat write returns the\npre-existing row instead of a constraint error."
@@ -1066,6 +1111,16 @@
       "path": "asterism_infra::sqlite::repo::thumb::SqliteThumbRepository",
       "kind": "struct",
       "docs": "SQLite adapter for the thumbnail cache (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::visual",
+      "kind": "module",
+      "docs": "SQLite adapter for the `VisualFeatureRepository` port (#112).\n\nVectors are stored as little-endian `f32` blobs beside their full\nderivation identity; a row exists only once extraction has answered\n(`computed` with a vector, `failed` with a reason), so the walk's\n`NOT EXISTS` predicate offers each image material exactly once per\nmodel. `preprocess_ver` sits outside the primary key on purpose: a\nrecipe bump *overwrites* the same model's row rather than growing a\nsecond generation, and reads filter on it so a stale-recipe vector\nis never served as current."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::visual::SqliteVisualFeatureRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `VisualFeatureRepository` (uses a writer isle)."
     },
     {
       "path": "asterism_infra::sqlite::schema_version",

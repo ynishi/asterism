@@ -878,6 +878,11 @@
       "docs": "A single channel tag."
     },
     {
+      "path": "asterism_contract::dto::TagSuggestionDto",
+      "kind": "struct",
+      "docs": "One model-proposed tag suggestion awaiting (or carrying) a ruling\n(#112). Distinct from [`TagDto`] on purpose: a suggestion is\nevidence with a score and a disposition, not a tag an asset has."
+    },
+    {
       "path": "asterism_contract::dto::ThreadAnchorDto",
       "kind": "struct",
       "docs": "Thread anchor — what a `ThreadDto` hangs off of.\n\n`anchor_kind`:\n- `\"app_global\"` — Home-tab Inbox / free-form threads. `anchor_id`\n  is `None`.\n- `\"snapshot\"` — anchored to a Snapshot. `anchor_id` is the\n  Snapshot uuid.\n- `\"query_group\"` — anchored to a query Group. `anchor_id` is the\n  Group uuid.\n- `\"card\"` — anchored to an Asset (per-card conversation lane).\n  `anchor_id` is the Asset uuid."
@@ -891,6 +896,11 @@
       "path": "asterism_contract::dto::VideoPreviewDto",
       "kind": "struct",
       "docs": "Where a video's preview rendition stands\n(`GET /asterism/assets/{id}/video-preview`).\n\nSome formats the embedded webview cannot display (VP9 WebM,\nMatroska — measured); for those the player uses a\ntranscoded H.264 MP4 rendition cached beside the profile database.\nThis DTO is how the pane finds out whether one exists yet."
+    },
+    {
+      "path": "asterism_contract::dto::VisualModelStatusDto",
+      "kind": "struct",
+      "docs": "The visual model a running process has bound, if any (#112)."
     },
     {
       "path": "asterism_contract::query",

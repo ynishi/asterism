@@ -41,6 +41,7 @@ command pointing a development build at durable dogfood data.
 - `active_profile` — Returns the active data profile without creating directories.
 - `asterism_home` — Returns (creating on demand) the isolated Asterism home directory.
 - `default_db_path` — Returns the default SQLite database path (`<asterism_home>/asterism.db`).
+- `models_dir` — Returns (creating on demand) the profile-local model-package root
 - `tantivy_index_dir` — Returns (creating on demand) the profile-local Tantivy index directory.
 
 ## Types
