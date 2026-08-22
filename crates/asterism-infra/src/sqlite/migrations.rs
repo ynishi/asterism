@@ -6998,6 +6998,184 @@ DROP TABLE line;
 DROP TABLE project;
 "#;
 
+/// V96 — the tables the forge's second model needs (#102).
+///
+/// Six, and they are the row types `asterism_infra::memory::forge` was
+/// written in: that store keeps the same shapes under a lock, and the
+/// scenario it passes is the one this schema has to pass too. What is
+/// here owes what is there.
+///
+/// # What no column holds
+///
+/// **Anything the history answers.** Liveness, current name and
+/// current content are folded out of the chain on read, so none of
+/// them has a column — a cached copy would be a second source for a
+/// question that already has one, and the two disagree the first time
+/// a write goes half-way. There is no `head` on `line` for the same
+/// reason: the head is the node no other node claims as a parent.
+///
+/// **The chain's order.** A change point carries its parent, and that
+/// is the order. A sequence column would be a second answer, and a
+/// store that got the two out of step would be a store handing back a
+/// history the model never wrote. `work_node.seq` is not that: a work
+/// log is read forwards and its nodes are appended in one place, so
+/// the column is how the log is ordered rather than a copy of
+/// something else that says so.
+///
+/// **A persona.** The forge answers nothing about whose line this is;
+/// `Lines::list` says so, and grouping and access live outside it. No
+/// forge table carries a `persona_id`, and the persona purge does not
+/// name one.
+///
+/// # What the constraints hold
+///
+/// **`UNIQUE (line_id, parent_id)` and `UNIQUE (work_id, parent_id)`
+/// are the concurrency control.** Two nodes on one parent is a fork,
+/// which both logs refuse in the model; here the index refuses it as
+/// part of the insert, so the check is the write rather than something
+/// beside it that a caller could be holding a stale answer to. Nothing
+/// reads a head and compares.
+///
+/// **`UNIQUE (work_id) WHERE kind = 'close'`** refuses a second
+/// ending. The parent index alone does not: a second close would sit
+/// on the first, which is a parent nobody has used. Work ends once,
+/// and `WorkLog::end` says so — a row the model would refuse is a row
+/// the read half cannot hand back, so it is better not written.
+///
+/// **`content` carries a foreign key to `asset`, and it restricts.**
+/// This is the one place the forge reaches into the layer below, and
+/// it is not the ledger's old stance turned around by accident. A
+/// ledger records that something happened and stays true whatever
+/// becomes of what it names; a line says what is on it *now*, under
+/// this name, at this content. A line naming bytes somebody deleted is
+/// a line lying about the present, and a removed entry is not an
+/// exception — undoing a removal is adding that entry back, which
+/// needs the content to still be there.
+///
+/// The consequence is that purging a persona whose assets are on a
+/// line is refused, and that is the intended behaviour rather than a
+/// cost of it. What releases an asset is dropping the line that holds
+/// it, which is `discard::releases` in the model and has no verb on
+/// any port yet.
+const V96_FORGE_TABLES: &str = r#"
+CREATE TABLE line (
+    id           BLOB PRIMARY KEY,
+    name         TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    standing     TEXT NOT NULL
+        CHECK (standing IN ('open', 'archived')),
+    genesis_id   BLOB NOT NULL,
+    genesis_at   INTEGER NOT NULL,
+    genesis_by   BLOB NOT NULL,
+    genesis_kind TEXT NOT NULL
+        CHECK (genesis_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE TABLE change_point (
+    id        BLOB PRIMARY KEY,
+    line_id   BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id BLOB NOT NULL,
+    from_work BLOB NOT NULL,
+    by_node   BLOB NOT NULL,
+    at        INTEGER NOT NULL,
+    actor_id  BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_change_point_on_parent
+    ON change_point(line_id, parent_id);
+CREATE INDEX idx_change_point_line ON change_point(line_id);
+CREATE INDEX idx_change_point_from ON change_point(from_work);
+
+CREATE TABLE change_row (
+    point_id  BLOB NOT NULL REFERENCES change_point(id) ON DELETE RESTRICT,
+    entry_id  BLOB NOT NULL,
+    existence TEXT
+        CHECK (existence IN ('present', 'absent')),
+    content   BLOB REFERENCES asset(id) ON DELETE RESTRICT,
+    name      TEXT,
+    PRIMARY KEY (point_id, entry_id),
+    CHECK (existence IS NOT NULL OR content IS NOT NULL OR name IS NOT NULL),
+    CHECK (existence IS NOT 'absent' OR (content IS NULL AND name IS NULL))
+) STRICT;
+
+CREATE INDEX idx_change_row_entry ON change_row(entry_id);
+CREATE INDEX idx_change_row_content ON change_row(content);
+
+CREATE TABLE work (
+    id           BLOB PRIMARY KEY,
+    line_id      BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id    BLOB REFERENCES work(id) ON DELETE RESTRICT,
+    open_node    BLOB NOT NULL,
+    base_id      BLOB NOT NULL,
+    title        TEXT,
+    note         TEXT,
+    open_at      INTEGER NOT NULL,
+    open_by      BLOB NOT NULL,
+    open_kind    TEXT NOT NULL
+        CHECK (open_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_work_line ON work(line_id);
+CREATE INDEX idx_work_parent ON work(parent_id);
+
+CREATE TABLE work_node (
+    id         BLOB PRIMARY KEY,
+    work_id    BLOB NOT NULL REFERENCES work(id) ON DELETE RESTRICT,
+    parent_id  BLOB NOT NULL,
+    seq        INTEGER NOT NULL,
+    kind       TEXT NOT NULL
+        CHECK (kind IN ('round', 'close')),
+    outcome    TEXT
+        CHECK (outcome IN ('satisfied', 'abandoned')),
+    note       TEXT,
+    at         INTEGER NOT NULL,
+    actor_id   BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system')),
+    CHECK ((kind = 'close') = (outcome IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_work_node_on_parent
+    ON work_node(work_id, parent_id);
+CREATE UNIQUE INDEX idx_work_node_one_close
+    ON work_node(work_id) WHERE kind = 'close';
+CREATE INDEX idx_work_node_work_seq ON work_node(work_id, seq);
+
+CREATE TABLE work_op (
+    node_id  BLOB NOT NULL REFERENCES work_node(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL,
+    entry_id BLOB NOT NULL,
+    verb     TEXT NOT NULL
+        CHECK (verb IN ('add', 'replace', 'rename', 'remove')),
+    content  BLOB REFERENCES asset(id) ON DELETE RESTRICT,
+    name     TEXT,
+    PRIMARY KEY (node_id, position),
+    CHECK ((verb IN ('add', 'replace')) = (content IS NOT NULL)),
+    CHECK ((verb IN ('add', 'rename')) = (name IS NOT NULL))
+) STRICT;
+
+CREATE INDEX idx_work_op_entry ON work_op(entry_id);
+CREATE INDEX idx_work_op_content ON work_op(content);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7096,6 +7274,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V93_JSON_MATERIAL_MIME),
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
     Step::Sql(V95_DROP_THE_FIRST_FORGE_MODEL),
+    Step::Sql(V96_FORGE_TABLES),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -14357,5 +14536,162 @@ mod tests {
         .unwrap();
         conn.execute("DELETE FROM persona WHERE id = ?1", params![persona])
             .expect("the forge rows were the only thing pinning the persona");
+    }
+    /// V96's rules are the model's, written where a caller cannot skip
+    /// them. Each is asserted at insert level, because a CHECK or an
+    /// index that is subtly wrong looks exactly like one that is right
+    /// until a row argues with it.
+    ///
+    /// The concurrency ones are the point: nothing here reads a head
+    /// and compares. Two nodes on one parent is a fork, and the index
+    /// refuses it as part of the insert.
+    #[test]
+    fn v96_holds_the_rules_the_model_cannot_hold_from_here() {
+        let mut conn = test_conn();
+        migrate(&mut conn).unwrap();
+        let persona = seed_persona(&conn);
+        let asset = seed_asset(&conn, persona);
+
+        let line = Uuid::now_v7();
+        let genesis = Uuid::now_v7();
+        let actor = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line \
+                 (id, name, strategy, standing, genesis_id, genesis_at, genesis_by, \
+                  genesis_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, 'ROOT', 'by-hand', 'open', ?2, 0, ?3, 'user', \
+                     0, ?3, 'user', 0, ?3, 'user')",
+            params![line, genesis, actor],
+        )
+        .unwrap();
+
+        // A standing the model does not have is refused.
+        let unknown = conn.execute(
+            "UPDATE line SET standing = 'dropped' WHERE id = ?1",
+            params![line],
+        );
+        assert!(unknown.is_err(), "dropped is absence, not a standing");
+
+        // One change point on the genesis.
+        let first = Uuid::now_v7();
+        let point = |id: Uuid, parent: Uuid| {
+            conn.execute(
+                "INSERT INTO change_point \
+                     (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
+                params![id, line, parent, Uuid::now_v7(), Uuid::now_v7(), actor],
+            )
+        };
+        point(first, genesis).unwrap();
+
+        // A second one on the same parent is a fork.
+        let forked = point(Uuid::now_v7(), genesis);
+        assert!(
+            forked.is_err(),
+            "two change points on one parent is a fork, and a line has none"
+        );
+        // On the head, it is an ordinary append.
+        point(Uuid::now_v7(), first).unwrap();
+
+        // A row must say something, and a removal says only that.
+        let row =
+            |entry: Uuid, existence: Option<&str>, content: Option<Uuid>, name: Option<&str>| {
+                conn.execute(
+                    "INSERT INTO change_row (point_id, entry_id, existence, content, name) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![first, entry, existence, content, name],
+                )
+            };
+        assert!(
+            row(Uuid::now_v7(), None, None, None).is_err(),
+            "a row that states no axis puts an entry in a table that never moved it"
+        );
+        assert!(
+            row(Uuid::now_v7(), Some("absent"), Some(asset), None).is_err(),
+            "a removal that also fills the entry is a table not describing what it did"
+        );
+        let entry = Uuid::now_v7();
+        row(entry, Some("present"), Some(asset), Some("one")).unwrap();
+        row(Uuid::now_v7(), Some("absent"), None, None).unwrap();
+        // The two rows that speak about one axis and stay silent on the
+        // others — what `Row::replaced` and `Row::renamed` produce, and
+        // the shape the removal CHECK has to admit rather than catch.
+        row(Uuid::now_v7(), None, Some(asset), None).unwrap();
+        row(Uuid::now_v7(), None, None, Some("just a name")).unwrap();
+
+        // The asset is held: deleting it is refused while the row names it.
+        let held = conn.execute("DELETE FROM asset WHERE id = ?1", params![asset]);
+        assert!(
+            held.is_err(),
+            "a line naming bytes somebody deleted is a line lying about the present"
+        );
+        // And so, in consequence, is purging the persona that owns it.
+        let owner = conn.execute("DELETE FROM persona WHERE id = ?1", params![persona]);
+        assert!(
+            owner.is_err(),
+            "the cascade reaches the asset and stops there"
+        );
+
+        // A work log: one open node, then nodes on its head.
+        let work = Uuid::now_v7();
+        let open_node = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO work \
+                 (id, line_id, parent_id, open_node, base_id, title, note, \
+                  open_at, open_by, open_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, ?2, NULL, ?3, ?4, NULL, NULL, 0, ?5, 'user', \
+                     0, ?5, 'user', 0, ?5, 'user')",
+            params![work, line, open_node, genesis, actor],
+        )
+        .unwrap();
+
+        let node = |id: Uuid, parent: Uuid, seq: i64, kind: &str, outcome: Option<&str>| {
+            conn.execute(
+                "INSERT INTO work_node \
+                     (id, work_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 0, ?7, 'user')",
+                params![id, work, parent, seq, kind, outcome, actor],
+            )
+        };
+        let pass = Uuid::now_v7();
+        node(pass, open_node, 0, "round", None).unwrap();
+        assert!(
+            node(Uuid::now_v7(), open_node, 1, "round", None).is_err(),
+            "two passes on one parent is a fork of the work log"
+        );
+        assert!(
+            node(Uuid::now_v7(), pass, 1, "round", Some("satisfied")).is_err(),
+            "only an ending says how the work ended"
+        );
+        assert!(
+            node(Uuid::now_v7(), pass, 1, "close", None).is_err(),
+            "and an ending has to"
+        );
+
+        let ending = Uuid::now_v7();
+        node(ending, pass, 1, "close", Some("satisfied")).unwrap();
+        assert!(
+            node(Uuid::now_v7(), ending, 2, "close", Some("abandoned")).is_err(),
+            "work ends once: the second ending sits on a parent nobody used, so the \
+             parent index alone would admit it"
+        );
+
+        // Operations pair verb and payload, and hold their content.
+        let op = |position: i64, verb: &str, content: Option<Uuid>, name: Option<&str>| {
+            conn.execute(
+                "INSERT INTO work_op (node_id, position, entry_id, verb, content, name) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![pass, position, Uuid::now_v7(), verb, content, name],
+            )
+        };
+        op(0, "add", Some(asset), Some("one")).unwrap();
+        op(1, "remove", None, None).unwrap();
+        assert!(op(2, "add", Some(asset), None).is_err(), "an add is named");
+        assert!(
+            op(3, "rename", Some(asset), Some("two")).is_err(),
+            "a rename moves a name and nothing else"
+        );
     }
 }
