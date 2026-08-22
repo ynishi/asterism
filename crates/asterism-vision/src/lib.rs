@@ -17,5 +17,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "onnx")]
+pub mod encoder;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;
+pub mod package;
