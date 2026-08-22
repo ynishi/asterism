@@ -24,8 +24,10 @@
 //! thread exists.
 //!
 //! That is the whole of what this service decides, and it decides it
-//! by asking. The refusals are the model's — an entry a round did not
-//! touch is [`Anchor::entry`]'s refusal, not one written here.
+//! by asking. What the model refuses stays the model's — an entry a
+//! round did not touch is [`Anchor::entry`]'s refusal, not one written
+//! here. What is written here is the other half of a read: no such
+//! round on this work, no such change point on this line.
 //!
 //! # What this service is allowed to decide
 //!

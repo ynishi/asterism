@@ -69,10 +69,9 @@ pub struct ServerCtx {
     /// HTTP (Claude Code / agents) writes on the same rows.
     pub thread_service: Arc<ThreadService>,
     /// A line of work in the forge: opening one, reading what is on
-    /// it, and its lifecycle. Named as `CoreCtx` names it — the forge's
-    /// conversations are `forge_thread_service` there, because
-    /// `thread_service` above was taken first by the annotation
-    /// surface on the raw layer.
+    /// it, and its lifecycle. Named as `CoreCtx` names it — see there
+    /// for why the forge's conversations carry a prefix and this does
+    /// not.
     pub line_service: Arc<asterism_core::application::forge::LineService>,
     /// Registered exporters — surfaces which backends the server can
     /// dispatch to.

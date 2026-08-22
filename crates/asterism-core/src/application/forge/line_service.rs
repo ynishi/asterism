@@ -2,7 +2,9 @@
 //! own description.
 //!
 //! ```text
-//!   open / rename / set_strategy      writes the line's description
+//!   open                              writes the whole line, genesis
+//!                                       and history included
+//!   rename / set_strategy             writes the line's description
 //!   archive / reopen                  writes the line's standing
 //!   get / states / strategies         reads
 //!   discard                           reads both logs, writes neither
@@ -10,8 +12,8 @@
 //! ```
 //!
 //! Nothing here writes to a line's history. A line moves when work
-//! ends, and that is [`PursuitService::close`](super::PursuitService),
-//! which is also the only place both logs are written at once.
+//! ends, and that is
+//! [`PursuitService::close`](super::PursuitService).
 //!
 //! # The one verb that reads the other log
 //!
@@ -35,10 +37,6 @@
 //! settles collisions by a rule, and the rules differ in what happens
 //! to somebody's work — so the list a person picks from is built from
 //! the rules themselves, and every one of them says what it does.
-//!
-//! There is no fallback for a name nothing answers to. A line settled
-//! by whatever rule happened to be available would be settled by a
-//! rule nobody chose, and no record would say so.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -62,9 +60,7 @@ pub struct LineService {
     lines: Arc<dyn Lines>,
     /// Read for one verb only — see [`LineService::discard`]. What a
     /// drop releases is the union of both logs, so the one call that
-    /// drops has to have the other log in hand; a line does not keep a
-    /// list of its work, and one that did would be a second answer to
-    /// what the pursuits already say.
+    /// drops has to have the other log in hand.
     pursuits: Arc<dyn Pursuits>,
     strategies: Arc<dyn Strategies>,
     actors: Arc<dyn Actors>,
@@ -89,13 +85,10 @@ impl LineService {
         }
     }
 
-    /// Opens a line, genesis and all.
+    /// Opens a line, genesis and all — made here, then recorded.
     ///
-    /// `strategy` is required rather than defaulted, because how a line
-    /// settles collisions changes what happens to somebody's work, and
-    /// a line that quietly got the first available answer would settle
-    /// by a rule nobody chose. What to offer as the usual pick is a
-    /// question for whoever assembles the list.
+    /// `strategy` is required rather than defaulted. What to offer as
+    /// the usual pick is a question for whoever assembles the list.
     pub async fn open(
         &self,
         name: Name,
@@ -108,7 +101,7 @@ impl LineService {
         Ok(line)
     }
 
-    /// Reads a line back whole, history included.
+    /// Reads a line back, refusing when there is no such line.
     pub async fn get(&self, id: &LineId) -> Result<Line, DomainError> {
         self.lines
             .get(id)
@@ -116,13 +109,7 @@ impl LineService {
             .ok_or_else(|| DomainError::not_found("line", id))
     }
 
-    /// Every line there is.
-    ///
-    /// Whole lines, which is affordable because a line is a
-    /// repository: there are as many as somebody made on purpose.
-    /// Which of them a person may see is not answered here — a line
-    /// carries no owner, so scoping is for whoever knows what a person
-    /// is.
+    /// Every line there is, unscoped — see [`Lines::list`].
     pub async fn list(&self) -> Result<Vec<Line>, DomainError> {
         self.lines.list().await
     }
@@ -166,10 +153,8 @@ impl LineService {
 
     /// Finishes with a line. Idempotent.
     ///
-    /// Nothing is lost and nothing is released: the history is intact,
-    /// readable, and still holding every content it named. What stops
-    /// is movement — work against an archived line can still be
-    /// abandoned, and nothing lands on it.
+    /// Work against an archived line can still be abandoned, and
+    /// nothing lands on it.
     ///
     /// This is also the only way to reach [`discard`](Self::discard),
     /// which is the model's rule rather than this service's: a line
@@ -196,16 +181,15 @@ impl LineService {
     ///
     /// # What this does not say
     ///
-    /// That any of it is now deletable. Another line naming the same
-    /// content goes on holding it, and this has read one line. The
-    /// layer below is where that is answered, and it answers by
-    /// refusing — which is why the set is handed over rather than
+    /// That any of it is now deletable. The layer below is where that
+    /// is answered — which is why the set is handed over rather than
     /// acted on here.
     ///
     /// # Refusals
     ///
     /// The model's, unchanged: a line still open, or work against it
-    /// that has not ended. Both come from [`discard::releases`], which
+    /// that has not ended. Both come from
+    /// [`releases`](crate::domain::forge::model::discard::releases), which
     /// is asked before anything is written.
     ///
     /// # Whose drop it was outlives nothing here
@@ -242,11 +226,10 @@ impl LineService {
     /// list kept beside them, so it cannot describe a rule that is not
     /// there or miss one that is.
     ///
-    /// Nothing here awaits anything — the rules are code, not rows.
-    /// It is `async` all the same, because the guard that checks every
-    /// verb of this layer for attribution reads only the asynchronous
-    /// ones, and a verb outside that population is a verb nobody is
-    /// checking.
+    /// Nothing here awaits anything — the rules are code, not rows. It
+    /// is `async` all the same, under the rule
+    /// `tests/attribution_guards.rs` holds for every verb of this
+    /// layer.
     pub async fn strategies(&self) -> Vec<(StrategyId, About)> {
         self.strategies
             .all()

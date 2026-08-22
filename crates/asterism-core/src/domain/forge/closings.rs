@@ -1,17 +1,25 @@
 //! Ending work — the one call that writes to both logs.
 //!
 //! ```text
-//!   Lines      open / get / rename / set_strategy      one log
-//!   Pursuits   open / get / push                       one log
-//!   Closings   commit                                  both, or neither
+//!   Lines      open / rename / set_strategy / set_standing   one log
+//!   Pursuits   open / push                                   one log
+//!   Lines      discard                                       three, or none
+//!   Closings   commit                                        both, or neither
 //! ```
 //!
-//! Every other call the forge makes writes to one log. This one writes
-//! to two, because ending work as satisfied puts a change point on the
-//! line and the two nodes are one act. It exists so that "one act" has
-//! somewhere to be true outside the model: [`Closing`] already makes
-//! the pair impossible to hold apart in memory, and this makes it
-//! impossible to store apart.
+//! Writing to one log is the ordinary case — the reads (`get`, `list`,
+//! `of_line`, `children`) write to none, and are left out above. This
+//! one writes to two, because ending work as satisfied puts a change
+//! point on the line and the two nodes are one act. It exists so that
+//! "one act" has somewhere to be true outside the model: [`Closing`]
+//! already makes the pair impossible to hold apart in memory, and this
+//! makes it impossible to store apart.
+//!
+//! It is not the only write that spans logs.
+//! [`Lines::discard`](crate::domain::forge::lines::Lines::discard)
+//! takes a line, the work against it and the conversations under both,
+//! on the same all-or-nothing terms — but it spans them to remove
+//! something, where this one spans them to record one.
 //!
 //! # What the contract requires
 //!

@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use crate::sqlite::map::infra_err;
 
-/// Answers the forge's one question about the layer below.
+/// Answers [`Store`] over the `asset` table.
 #[derive(Clone)]
 pub struct SqliteStore {
     isle: AsyncIsle,

@@ -69,7 +69,7 @@ impl ActRow {
     }
 }
 
-/// `line` — the repository, and the two things about it that are not
+/// `line` — the repository, and the three things about it that are not
 /// in its history.
 #[derive(Debug, Clone)]
 pub struct LineRow {
@@ -280,9 +280,9 @@ pub struct ThreadRevisionRow {
 /// is the only thing that produces what it takes.
 ///
 /// A loop over `history().changes()` here would be a second way for a
-/// change point to reach the store, running only for a caller that
-/// does not exist. The port refuses that caller instead, which is a
-/// statement somebody can read rather than a branch nothing covers.
+/// change point to reach the store. The port refuses that caller
+/// instead, which is a statement somebody can read rather than a
+/// branch nothing covers.
 pub fn take_new_line_apart(line: &Line) -> LineRow {
     LineRow {
         id: line.id(),
@@ -811,12 +811,12 @@ mod tests {
         )
     }
 
-    /// The standing is the one thing about a line that no history
-    /// records, so a column that dropped it would take an archived
-    /// line and hand back an open one — the store quietly undoing a
-    /// decision. Pinned here because nothing else reaches it: no
-    /// service archives a line yet, and this is the whole of the round
-    /// trip that carries it.
+    /// The standing is one of the three things about a line that no
+    /// history records, so a column that dropped it would take an
+    /// archived line and hand back an open one — the store quietly
+    /// undoing a decision. Pinned here because this is the whole of
+    /// the round trip that carries it, in one place rather than spread
+    /// across the layers that call through it.
     #[test]
     fn an_archived_line_comes_back_archived() {
         let mut line = a_line();

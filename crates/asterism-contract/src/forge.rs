@@ -2,10 +2,9 @@
 //! asks it to do.
 //!
 //! A topic module rather than rows in [`command`](crate::command) and
-//! [`dto`](crate::dto), for the reason [`query_group`](crate::query_group)
-//! is one: the forge's vocabulary answers to a model of its own, and a
-//! reader of `LineDto` needs the four or five types beside it more than
-//! it needs the asset DTO two hundred lines up.
+//! [`dto`](crate::dto): the forge's vocabulary answers to a model of
+//! its own, and a reader of [`ForgeLineDto`] needs the types beside it
+//! more than it needs the asset DTO two hundred lines up.
 //!
 //! # The model these are a projection of
 //!
@@ -35,7 +34,8 @@ use schema_bridge::SchemaBridge;
 pub struct ForgeLineDto {
     /// Line id (UUID hyphenated).
     pub id: String,
-    /// What the line is called. One per instance today, named `ROOT`.
+    /// What the line is called. An instance has the lines somebody
+    /// made on purpose; where there is only ever one, it is `ROOT`.
     pub name: String,
     /// The rule this line answers a collision with. A slug rather than
     /// a UUID — the forge does not know the set of rules, and a line
@@ -102,8 +102,10 @@ pub struct ForgeChangePointDto {
 /// Three axes, each stated or left alone — this is not a verb. A row
 /// that moves only the name leaves `existence` and `content_asset_id`
 /// absent, and a reader folding the chain keeps whatever the last
-/// table that spoke about that axis said. A row that says nothing at
-/// all cannot exist: the model refuses to build one.
+/// table that spoke about that axis said. Two shapes cannot exist,
+/// because the model refuses to build them: a row that says nothing at
+/// all, and a row that takes an entry off the line while also naming
+/// or filling it.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct ForgeChangeRowDto {
     /// Entry id (UUID hyphenated).

@@ -1135,14 +1135,10 @@ pub fn dispatch_to_dto(job: &DispatchJob) -> DispatchDto {
 // the first exception, and an exception is what makes the sentence
 // above stop being checkable by reading one file.
 //
-// Not a dependency argument. `asterism-contract` is a leaf — no
-// Asterism crate is imported there — and `asterism-core` already
-// depends on it, so the forge naming it would create no cycle and
-// break nothing about lifting the forge into a crate of its own.
-// `tests/forge_boundary.rs` reads `use crate::` lines because its
-// subject is what the forge names *inside this crate*; the forge
-// already imports `chrono`, `uuid` and `async_trait` directly, and
-// that is by design rather than an oversight.
+// Not a dependency argument: naming `asterism-contract` from the
+// forge would breach nothing. Why that is, and what the boundary
+// guard does and does not answer for, is stated where the rule lives
+// — `domain::forge`'s own module doc.
 // ---------------------------------------------------------------
 
 /// Reads a line id off the wire.

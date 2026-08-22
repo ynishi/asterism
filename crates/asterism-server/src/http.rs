@@ -3169,8 +3169,11 @@ async fn get_forge_line_states(
 
 /// Reads a line back after a write, so the caller sees what it now is.
 ///
-/// **Every write verb on a line answers with the line.** The four that
-/// move its description return nothing from the service — they are
+/// **A write verb on a line answers with the line, unless it has
+/// something the line can no longer say.** `discard` is the one that
+/// has: it answers with the assets the drop released, because after
+/// that write there is no line left to read. The four that move a
+/// line's description return nothing from the service — they are
 /// `Result<(), _>` — and a caller told only "renamed" has to ask again
 /// for the name, the standing and the stamp that moved. That second
 /// request is the thing a screen would forget; `personas/archive`

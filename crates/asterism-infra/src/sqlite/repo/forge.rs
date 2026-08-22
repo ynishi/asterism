@@ -1,26 +1,27 @@
 //! SQLite adapter for the forge's ports.
 //!
-//! One type for `Lines`, `Pursuits` and `Closings`, where the rest of
-//! this directory is one per port. The close is why: it writes a change
-//! point, its rows and an ending together, and two adapters sharing one
-//! transaction is a shape that only reads as sharing when they are the
-//! same object.
+//! One type for `Lines`, `Pursuits`, `Closings` and `Threads`, where
+//! the rest of this directory is one per port. The close is why: it
+//! writes a change point, its rows and an ending together, and two
+//! adapters sharing one transaction is a shape that only reads as
+//! sharing when they are the same object.
 //!
 //! # Where the work is, and where it is not
 //!
 //! Taking a domain value apart and putting one back lives in
 //! [`crate::forge::rows`], which the in-memory store uses too. What is
-//! here is SQL and nothing else: the same six shapes, written as
+//! here is SQL and nothing else: the same nine shapes, written as
 //! columns.
 //!
 //! # The head is never read to be compared
 //!
 //! Nothing here selects a head and checks it against what a caller
-//! decided. Two nodes on one parent is a fork, `UNIQUE (line_id,
-//! parent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the
-//! refusal arrives as part of the insert — so the validation is the
-//! write rather than something beside it that could be answered from a
-//! row somebody else has since moved.
+//! decided: `UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id,
+//! parent_id)` refuse a fork as part of the insert. The rule is
+//! [`Closings`]' — "on the parent nothing has taken" — and what the
+//! index adds is that the check is the write rather than something
+//! beside it that could be answered from a row somebody else has
+//! since moved.
 //!
 //! What that costs is telling one constraint violation from another.
 //! SQLite names the columns rather than the index — `UNIQUE constraint
@@ -37,16 +38,8 @@
 //! move between the read and the write, which is why the second
 //! attempt is the last one.
 //!
-//! `contains` is what exactness is guarding against, and the direction
-//! matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
-//! of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
-//! substring test asked about the ending matches the fork — it reads
-//! "somebody pushed a round first" as "this work has already ended",
-//! and an ending is final where a fork is decided again. So the close
-//! that a second decision would have landed is refused instead, and
-//! the caller is told the work is over when it is only one round
-//! further along. The other direction cannot happen, which is why
-//! naming it would be naming the wrong risk.
+//! Which column list is which, and what a substring test would read
+//! out of the wrong one, is on `is_unique_violation`.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -76,7 +69,7 @@ use crate::forge::rows::{
 };
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
-/// SQLite adapter for `Lines`, `Pursuits` and `Closings`.
+/// SQLite adapter for `Lines`, `Pursuits`, `Closings` and `Threads`.
 #[derive(Clone)]
 pub struct SqliteForge {
     isle: AsyncIsle,
@@ -940,7 +933,6 @@ impl Lines for SqliteForge {
     }
 }
 
-/// Why a line was not dropped.
 /// Writes a thread's head row.
 fn insert_thread(conn: &Connection, head: &ThreadRow) -> rusqlite::Result<()> {
     conn.execute(
@@ -1234,6 +1226,7 @@ impl Threads for SqliteForge {
     }
 }
 
+/// Why a line was not dropped.
 enum DropRefusal {
     /// There is no such line to drop.
     NoSuchLine,

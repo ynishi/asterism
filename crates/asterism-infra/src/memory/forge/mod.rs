@@ -1,11 +1,12 @@
 //! The forge's ports, over rows held in memory.
 //!
 //! ```text
-//!   Lines / Pursuits / Closings
+//!   Lines / Pursuits / Closings / Threads
 //!            │
 //!            ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex
 //!            │
-//!            └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit
+//!            └─ read  ──► forge::rows::read_* ──► restore ──► Line /
+//!                                                 Pursuit / Thread
 //! ```
 //!
 //! One `Mutex` over the whole store rather than one per table: the
@@ -102,7 +103,7 @@ impl MemoryForge {
     /// and "what happens then" is a question worth being able to ask
     /// on purpose rather than discovering.
     ///
-    /// Named so that its one caller is obvious in a grep, and so that
+    /// Named so that its callers are obvious in a grep, and so that
     /// nothing reaches for it to make a refusal go away.
     pub fn force_rows(&self, line: LineId, point: ChangePointRow, rows: Vec<ChangeRowRow>) {
         self.with(|tables| {
@@ -133,9 +134,11 @@ impl MemoryForge {
     /// parent_id)` and `UNIQUE (pursuit_id, parent_id)`, asked the only
     /// way this store can ask them — and both, because
     /// [`Deciding`] names both as races and a store implementing one of
-    /// them would leave the other to whichever store was asked. Nothing
-    /// compares a head: the closing carries the nodes it was decided
-    /// against, which is the only account of them anybody needs.
+    /// them would leave the other to whichever store was asked. No
+    /// close compares a head: the closing carries the nodes it was
+    /// decided against, which is the only account of them anybody
+    /// needs. A push is the exception, and it is this store's alone —
+    /// see `pursuit_head` below.
     ///
     /// The line is asked about only when something is going on it. An
     /// abandoned close puts nothing there, so refusing one because
@@ -158,10 +161,9 @@ impl MemoryForge {
 
     /// Whether this conversation is about something on this line.
     ///
-    /// Three of the four anchors reach a line by a different road, and
-    /// the fourth — an entry as a round had it — arrives by the round's,
-    /// because it is a node id in the same field. The SQLite side asks
-    /// the same three questions as one subquery.
+    /// Three branches for four anchors; the SQLite side's
+    /// `THREADS_OF_A_LINE` says why, and asks the same three as one
+    /// subquery.
     fn anchored_in(tables: &Tables, thread: &ThreadRow, line: &LineId) -> bool {
         let of_this_line = |work: &PursuitId| {
             tables
@@ -229,7 +231,12 @@ impl MemoryForge {
     // There was a `line_head` here, walking the chain to say where a
     // line ends. Nothing reads it any more: a close is refused by the
     // parent already being taken, which is the rule the SQLite index
-    // states, and neither store compares a head to decide anything.
+    // states, so neither store compares a head to decide a close.
+    //
+    // A push is where the two stores differ, and `pursuit_head` above
+    // is the difference: this one compares it to the node the caller
+    // was holding, where the SQLite side writes and lets
+    // `UNIQUE (pursuit_id, parent_id)` refuse the second round.
 }
 
 #[async_trait]

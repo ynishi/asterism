@@ -43,8 +43,7 @@
 //! content on one is who may write to that line. If the forge ever had
 //! to record an owner rather than an author, it would be an `Actor` on
 //! the entry — a fourth axis beside existence, content and name,
-//! resolved through the same contract as every other handle. Nothing
-//! asks for that today.
+//! resolved through the same contract as every other handle.
 //!
 //! [`Lines::list`]: crate::domain::forge::lines::Lines::list
 //!
@@ -55,16 +54,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::forge::model::value::Content;
-// SHARED VOCABULARY: ids and the error are boundary types — the shared
-// vocabulary a contract is allowed to be stated in.
+// SHARED VOCABULARY: an asset id and the error are boundary types —
+// the shared vocabulary a contract is allowed to be stated in.
 use crate::domain::value::AssetId;
 use crate::error::DomainError;
 
 /// What the layer below answers.
 ///
-/// One question today. It grows when the forge has a second thing to
-/// ask, and not before: a method nothing calls is a shape nothing has
-/// checked, and every implementation has to satisfy it anyway.
+/// It grows when the forge has a second thing to ask, and not before:
+/// a method nothing calls is a shape nothing has checked, and every
+/// implementation has to satisfy it anyway.
 #[async_trait]
 pub trait Store: Send + Sync {
     /// Does this id name something?

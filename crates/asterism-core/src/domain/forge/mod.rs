@@ -31,15 +31,15 @@
 //!
 //! Nothing here stores anything. The ports are [`lines`], [`pursuits`],
 //! [`closings`] and [`threads`]; what satisfies them lives outside this
-//! crate — `asterism-infra` has two, one over SQLite and one over rows
-//! under a lock — and reading one back goes through
-//! [`model::restore`], the one door a stored value comes in by.
+//! crate, and reading one back goes through [`model::restore`], the one
+//! door a stored value comes in by.
 //!
 //! # The boundary
 //!
 //! - **The forge names the core; what it writes there is correlation,
-//!   never judgement.** A pursuit refers to content through frozen sets
-//!   ([`Snapshot`]) and ids, and writes nothing onto a core row at all.
+//!   never judgement.** A pursuit refers to content by id — one
+//!   reference, [`Content`](model::value::Content), and no other — and
+//!   writes nothing onto a core row at all.
 //!   What the forge has to say about an asset — lifecycle events,
 //!   ledger gestures — lives on forge rows that name core ids. An
 //!   intent written onto a core row itself would put the forge's
@@ -55,10 +55,10 @@
 //!   around.
 //!
 //!   What the forge does own is its own word for it. A node records an
-//!   [`Actor`](model::act::Actor) — a handle and a kind — because the
-//!   forge's actors include a line's own rule, which is not a person
-//!   and cannot be written as one. Who a handle stands for is asked
-//!   through [`boundary::Actors`], and answered outside.
+//!   [`Actor`](model::act::Actor) — a handle and a kind — and who a
+//!   handle stands for is asked through [`boundary::Actors`] and
+//!   answered outside. Why a handle rather than the triple is in
+//!   [`boundary::actors`].
 //! - **The core does not need the forge.** Importing, deduplicating,
 //!   rating and trashing all work with no pursuit in sight. Sending
 //!   anything out is the raw layer's own business, and the forge has
@@ -76,12 +76,12 @@
 //! `tests/forge_boundary.rs` holds that list with a reason beside each
 //! entry and fails on anything else.
 //!
-//! It was five until `PersonaId` came off, and how it came off is the
-//! example worth keeping: nothing removed it from the list on purpose.
-//! [`boundary::Store`] stopped asking whose an asset is — a line
-//! carries no owner, so the answer had nothing to be measured
-//! against — and the word simply stopped appearing. The list shrinks
-//! when the forge needs less, and never because somebody tidied it.
+//! `PersonaId` came off that list, and how it came off is the example
+//! worth keeping: nothing removed it from the list on purpose.
+//! [`boundary::Store`] stopped asking whose an asset is — the reason
+//! is in [`boundary::store`] — and the word simply stopped appearing.
+//! The list shrinks when the forge needs less, and never because
+//! somebody tidied it.
 //!
 //! **The constraint is mutual dependency with the core, and nothing
 //! wider.** Two things follow that are easy to get backwards:
@@ -114,9 +114,9 @@
 //! dispatch, and does not wait for anything to come back. Export lives
 //! in the raw layer, where what it records is a thing that happened to
 //! the bytes.
-//! [`snapshot`](crate::domain::snapshot) is the handle the forge holds
-//! the core by, and belongs to the core: it is content-addressed,
-//! deduplicated persona-wide, and carries no story about who froze it.
+//! [`snapshot`](crate::domain::snapshot) belongs to the core: it is
+//! content-addressed, deduplicated persona-wide, and carries no story
+//! about who froze it.
 //! [`duplicate_conflict`](crate::domain::duplicate_conflict) and
 //! [`merge_plan`](crate::domain::merge_plan) answer identity ("are these
 //! the same thing"), which the store asks of itself without being told
@@ -138,8 +138,6 @@
 //! was settled on #63, and the first one — a pursuit whose standing
 //! derived from lifecycle events, a ledger beside it, a line moved one
 //! verb at a time — was removed whole on #102 rather than migrated.
-//!
-//! [`Snapshot`]: crate::domain::snapshot::Snapshot
 
 pub mod boundary;
 pub mod clock;

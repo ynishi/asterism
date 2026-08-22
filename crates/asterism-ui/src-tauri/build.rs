@@ -21,13 +21,13 @@
 //!   has no screen for it — the eventual UI is about promoting one
 //!   series to a real Group, which is a different shape from editing
 //!   a rule;
-//! - the forge's types (`asterism_contract::forge`) stay out **for
-//!   now**, and this one is temporary in a way the other two are not.
-//!   A screen is the whole reason that surface is being built — HTTP
-//!   first, the UI on it — but no component imports a forge type
-//!   today, and exporting a shape nothing consumes is how a binding
-//!   drifts from what a screen actually needs. They come in with the
-//!   screen, in the same change.
+//! - the forge's types (`asterism_contract::forge`) stay out until a
+//!   screen imports one, and that is a different reason from the two
+//!   above rather than a weaker one. A screen is the whole reason that
+//!   surface is being built — HTTP first, the UI on it — and
+//!   exporting a shape before the screen that shapes it is how a
+//!   binding drifts from what the screen actually needs. A type enters
+//!   this list in the change that consumes it.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,

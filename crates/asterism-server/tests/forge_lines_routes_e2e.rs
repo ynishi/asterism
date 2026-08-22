@@ -1,7 +1,7 @@
-//! The line's ten verbs, over the real router.
+//! The line's verbs, over the real router.
 //!
 //! `forge_wiring_e2e` proves the services against the store the
-//! application builds. This proves the ten routes in front of them:
+//! application builds. This proves the routes in front of them:
 //! method, path, extractor, the parse from a wire string to a typed id,
 //! and the shape that comes back.
 //!

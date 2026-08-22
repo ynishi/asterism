@@ -35,12 +35,13 @@
 //! can mean here, and it is worth being honest that it is a rename
 //! rather than an override.
 //!
-//! # Compared to putting both aside
+//! # Compared to letting both start over
 //!
-//! [`BothDiverge`](super::BothDiverge) does the same three operations
-//! and hands the original name to neither. The difference is the
-//! answer to "what does `cut-01` mean now" — here it means this
-//! work's version, there it means neither and both are numbered.
+//! [`BothDiverge`](super::BothDiverge) writes the same three
+//! operations and hands the original name the other way. The
+//! difference is the answer to "what does `cut-01` mean now" — here it
+//! means this work's version, there it means the line's, and this
+//! work's is the one that ends up numbered.
 
 use crate::domain::forge::model::op::Op;
 use crate::domain::forge::model::strategy::{About, Divergence, Strategy, StrategyError};
@@ -73,9 +74,6 @@ impl Strategy for MineFirst {
 
     fn resolve(&self, at: &Divergence<'_>) -> Result<Vec<Op>, StrategyError> {
         let mut ops = Vec::new();
-        // Seeded with what this work is already asking for: a
-        // previous resolution's entries are in the request and not yet
-        // on the line, so the line cannot say their names are taken.
         let mut claimed: Vec<Name> = claimed_by(at.request());
 
         for entry in at.entries() {

@@ -7,15 +7,15 @@
 //!
 //! # What that catches and nothing else does
 //!
-//! A service wired to the wrong thing. Every port here has two
-//! implementations, and constructing `PursuitService` with the
+//! A service wired to the wrong thing. A port here has more than one
+//! implementation, and constructing `PursuitService` with the
 //! in-memory store, or with a second `SqliteForge` over a different
 //! connection, compiles and passes every test that builds its own
 //! world. What it does not do is land work on a line the same process
 //! can then read.
 //!
 //! It also answers the one thing a wiring can be wrong about without
-//! anybody noticing: the forge's ports are three faces of one adapter,
+//! anybody noticing: the forge's ports are four faces of one adapter,
 //! and a close writes through two of them at once. If those were not
 //! the same object over the same connection, the change point and the
 //! ending would go to different places and the read below would come
@@ -23,13 +23,11 @@
 //!
 //! # What this covers that the routes do not
 //!
-//! The line's verbs have a transport now
-//! (`forge_lines_routes_e2e`), and the pursuit's and the
-//! conversation's do not yet. This stays either way: a route test
-//! drives the wiring the router reaches, and what is asked here is
-//! whether `CoreCtx` handed three ports one adapter over one
-//! connection. A close writes through two of them at once, and no
-//! request can tell whether those were the same object — only the row
+//! A route test drives the wiring the router reaches. What is asked
+//! here is whether `CoreCtx` handed the forge's ports one adapter over
+//! one connection, which stays worth asking however much of the
+//! surface is routed. A close writes through two of them at once, and
+//! no request can tell whether those were the same object — only the row
 //! that comes back short can, which is what the reads below are for.
 
 use std::sync::Arc;

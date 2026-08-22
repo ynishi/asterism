@@ -6946,7 +6946,7 @@ UPDATE material
 /// gestures beside it, and a line whose entries moved through four
 /// verbs written one event at a time. The model that replaced it keeps
 /// a line's history as a chain of change points carrying a table, and
-/// work as a log of passes — neither of which any column here can be
+/// work as a log of rounds — neither of which any column here can be
 /// read as.
 ///
 /// Dropped rather than migrated, because there is nothing to carry
@@ -7026,10 +7026,9 @@ DROP TABLE project;
 /// back a history the model never wrote. Neither `change_point` nor
 /// `pursuit_node` has one, and both are read by the same walk.
 ///
-/// **A persona.** The forge answers nothing about whose line this is;
-/// `Lines::list` says so, and grouping and access live outside it. No
-/// forge table carries a `persona_id`, and the persona purge does not
-/// name one.
+/// **A persona.** No forge table carries a `persona_id`, and the
+/// persona purge does not name one. Why a line has no owner at all is
+/// `Lines::list`'s.
 ///
 /// # What the constraints hold
 ///
@@ -7048,20 +7047,18 @@ DROP TABLE project;
 ///
 /// **`content` carries a foreign key to `asset`, and it restricts.**
 /// This is the one place the forge reaches into the layer below, and
-/// it is not the ledger's old stance turned around by accident. A
-/// ledger records that something happened and stays true whatever
-/// becomes of what it names; a line says what is on it *now*, under
-/// this name, at this content. A line naming bytes somebody deleted is
-/// a line lying about the present, and a removed entry is not an
-/// exception — undoing a removal is adding that entry back, which
-/// needs the content to still be there.
+/// it is not the ledger's old stance turned around by accident. The
+/// argument is the `line` module's: a line says what is on it *now*,
+/// so a line naming bytes somebody deleted is a line lying about the
+/// present, and a removed entry is not an exception — undoing a
+/// removal is adding that entry back, which needs the content to
+/// still be there.
 ///
-/// The consequence is that purging a persona whose assets are on a
-/// line is refused, and that is the intended behaviour rather than a
-/// cost of it. What releases an asset is dropping the line that holds
-/// it: `discard::releases` in the model, `Lines::discard` on the port,
-/// and `POST /asterism/forge/lines/{id}/discard` over HTTP, which
-/// answers with the assets that went free.
+/// The consequence for this schema is that purging a persona whose
+/// assets are on a line is refused, and that is intended rather than
+/// a cost. What releases an asset is dropping the line that holds it:
+/// `discard::releases` in the model, and `Lines::discard` on the
+/// port.
 const V96_FORGE_TABLES: &str = r#"
 CREATE TABLE line (
     id           BLOB PRIMARY KEY,
@@ -7188,12 +7185,10 @@ CREATE INDEX idx_pursuit_op_content ON pursuit_op(content);
 ///
 /// # Why a row rather than the triple on the node
 ///
-/// A node is kept forever, and the identity on the other side is not
-/// settled: the owner of an instance is an unbound reference until
-/// authentication binds it. A node that recorded the answer today
-/// would be recording an absence and would have to be rewritten the
-/// day the answer arrives, and nodes do not get rewritten. One row to
-/// update is the whole point of the indirection.
+/// Because the indirection needs somewhere to land: one row to update
+/// the day authentication binds an unbound reference, rather than a
+/// history to rewrite. The argument for the handle is
+/// `boundary::actors`'s; this table is where it comes to rest.
 ///
 /// # What a handle stands for
 ///
@@ -7241,35 +7236,33 @@ CREATE UNIQUE INDEX idx_forge_actor_stands_for
 /// Because `thread` is taken, by the annotation surface downstairs
 /// that anchors to snapshots, cards and query groups. That is not this
 /// one and could not be: the four things worth remarking on here are a
-/// pursuit, a pass, an entry as a pass had it, and a change point, and
-/// the layer below would have to learn what a pursuit is to carry
+/// pursuit, a round, an entry as a round had it, and a change point,
+/// and the layer below would have to learn what a pursuit is to carry
 /// them. The collision is the schema saying what the model already
 /// says — two primitives, named apart rather than merged.
 ///
 /// # The anchor is four columns and a kind, not a polymorphic id
 ///
-/// A thread hangs off one of four things — a pursuit, a pass, one
-/// entry as a pass had it, or a change point — and SQLite has no key
+/// A thread hangs off one of four things — a pursuit, a round, one
+/// entry as a round had it, or a change point — and SQLite has no key
 /// that points at a column whose meaning depends on another. Naming
 /// each target its own nullable column buys the foreign keys back:
 /// `anchor_pursuit` and `anchor_change_point` are real references, and
 /// a `CHECK` says which of them a given `anchor_kind` requires. The
 /// node and entry halves stay bare, for the reason every other node
-/// reference in the forge is bare — a pass is a `pursuit_node` row and
-/// an entry is not a row at all.
+/// reference in the forge is bare — a round is a `pursuit_node` row
+/// and an entry is not a row at all.
 ///
-/// The entry anchor carries the pass as well as the entry, because
-/// what it means is *this entry, as this pass had it*. An entry alone
+/// The entry anchor carries the round as well as the entry, because
+/// what it means is *this entry, as this round had it*. An entry alone
 /// would follow the entry into every other pursuit it is carried into,
 /// which is how a remark about one attempt becomes a remark about the
 /// thing itself.
 ///
-/// **The pass does not carry the work it is in, and neither does this.**
+/// **A round does not carry the work it is in, and neither does this.**
 /// A node id identifies one node of one pursuit, so the anchor is the
 /// node — which is why `anchor_pursuit` is set on the `pursuit` kind
-/// and on no other. The service that opens a thread is handed the
-/// work as well, because finding a pass by id means reading the
-/// pursuit that has it; what it hands the model afterwards is the pass.
+/// and on no other.
 ///
 /// # Nothing removes and nothing overwrites
 ///

@@ -1,6 +1,6 @@
 //! Keeping lines, stated in the forge's own words.
 //!
-//! [`Lines`] is one of the two faces the forge asks for. Every type it
+//! [`Lines`] is one of the four faces the forge asks for. Every type it
 //! mentions — [`Line`], [`Name`], [`Act`] — belongs to the model, so
 //! nothing here has to be translated and there is no vocabulary to
 //! isolate. Whatever implements it is somebody else's problem, and the
