@@ -41,8 +41,8 @@ pub enum ForgeError {
     #[error("a message must say something")]
     BlankBody,
 
-    /// A remark was hung on an entry the pass never touched.
-    #[error("that pass did not touch that entry")]
+    /// A remark was hung on an entry the round never touched.
+    #[error("that round did not touch that entry")]
     NotInThatRound,
 
     /// A reply, or a correction, named a message of another
@@ -93,8 +93,8 @@ pub enum ForgeError {
     #[error("two entries would be on the line under the name {0:?}")]
     NameTaken(Name),
 
-    /// A pass carried no operations.
-    #[error("a pass writes something — otherwise nothing happened")]
+    /// A round carried no operations.
+    #[error("a round writes something — otherwise nothing happened")]
     EmptyRound,
 
     /// A conversation had nothing said in it.

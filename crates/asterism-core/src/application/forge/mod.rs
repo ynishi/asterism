@@ -4,7 +4,7 @@
 //! reading what is alive on it, and moving the two things about a line
 //! that are not written into its history — its name and the rule it
 //! settles collisions by. [`PursuitService`] owns work against a line:
-//! opening it, adding a pass, running the line's rule over what the
+//! opening it, adding a round, running the line's rule over what the
 //! work collides with, and ending it. They are apart from the rest
 //! because they are the only services here whose writes carry intent
 //! rather than content (the layer itself is described in

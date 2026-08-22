@@ -9,8 +9,8 @@
 //!   get / anchored / about    read
 //! ```
 //!
-//! Nothing here touches either log. A conversation about a pass does
-//! not change what the pass said, and a remark on a change point does
+//! Nothing here touches either log. A conversation about a round does
+//! not change what the round said, and a remark on a change point does
 //! not move the line — which is why this is a third face rather than
 //! more verbs on the two that write records.
 //!
@@ -24,7 +24,7 @@
 //! thread exists.
 //!
 //! That is the whole of what this service decides, and it decides it
-//! by asking. The refusals are the model's — an entry a pass did not
+//! by asking. The refusals are the model's — an entry a round did not
 //! touch is [`Anchor::entry`]'s refusal, not one written here.
 //!
 //! # What this service is allowed to decide
@@ -55,17 +55,17 @@ use crate::error::DomainError;
 /// is the argument, and [`Anchor`] is what the service has after it
 /// has looked.
 ///
-/// A pass and an entry name the work they are in as well as the node.
+/// A round and an entry name the work they are in as well as the node.
 /// The node id alone would be enough to find a row, and not enough to
-/// refuse one: a pass belongs to a pursuit, and asking for it without
+/// refuse one: a round belongs to a pursuit, and asking for it without
 /// saying which work would take a node from whichever log had it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchored {
     /// The work as a whole.
     Pursuit(PursuitId),
-    /// One pass at it.
+    /// One round at it.
     Round(PursuitId, NodeId),
-    /// One entry, as one pass had it.
+    /// One entry, as one round had it.
     Entry(PursuitId, NodeId, EntryId),
     /// What landed on the line.
     Change(LineId, ChangePointId),
@@ -102,7 +102,7 @@ impl ThreadService {
     /// said in it.
     ///
     /// The anchor is read before anything is written, so a thread
-    /// about a pass nobody wrote is refused rather than kept.
+    /// about a round nobody wrote is refused rather than kept.
     pub async fn open(
         &self,
         about: Anchored,
@@ -128,7 +128,7 @@ impl ThreadService {
     /// Everything said about one thing.
     ///
     /// More than one, because two people can start separate
-    /// conversations about one pass and merging them would be deciding
+    /// conversations about one round and merging them would be deciding
     /// they were about the same thing.
     pub async fn about(&self, about: Anchored) -> Result<Vec<Thread>, DomainError> {
         let anchor = self.resolve(about).await?;
@@ -242,7 +242,7 @@ impl ThreadService {
     }
 }
 
-/// The pass this work wrote under `node`.
+/// The round this work wrote under `node`.
 ///
 /// A free function rather than a method on `Pursuit`, because looking
 /// a node up is what a caller holding an id has to do and not
@@ -254,7 +254,7 @@ fn round_of(work: &Pursuit, node: NodeId) -> Result<&Round, DomainError> {
         .find(|round| round.id() == node)
         .ok_or_else(|| {
             DomainError::Validation(format!(
-                "work {} has no pass {node} to say anything about",
+                "work {} has no round {node} to say anything about",
                 work.id()
             ))
         })

@@ -41,10 +41,10 @@
 //! matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
 //! of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 //! substring test asked about the ending matches the fork — it reads
-//! "somebody pushed a pass first" as "this work has already ended",
+//! "somebody pushed a round first" as "this work has already ended",
 //! and an ending is final where a fork is decided again. So the close
 //! that a second decision would have landed is refused instead, and
-//! the caller is told the work is over when it is only one pass
+//! the caller is told the work is over when it is only one round
 //! further along. The other direction cannot happen, which is why
 //! naming it would be naming the wrong risk.
 
@@ -93,7 +93,7 @@ impl SqliteForge {
 /// taking the line's id as `?1`.
 ///
 /// Three of the four anchors reach a line by a different road, and the
-/// fourth — an entry as a pass had it — arrives by the pass's, since
+/// fourth — an entry as a round had it — arrives by the round's, since
 /// it is a node id in the same column. Written once because a drop
 /// deletes from three tables through it and three copies of a
 /// three-branch predicate is three chances to fix two of them.
@@ -118,7 +118,7 @@ const ONE_ENDING_PER_PURSUIT: &str = "pursuit_node.pursuit_id";
 /// a second ending, and `pursuit_node.pursuit_id, pursuit_node.parent_id` is a
 /// fork. `contains` reads the first out of the second — a fork
 /// answering to the ending's column list — and the ending is the one
-/// refusal here that is final. So the misreading turns "a pass
+/// refusal here that is final. So the misreading turns "a round
 /// arrived, decide again" into "this work is over", and the close that
 /// deciding again would have landed is refused instead.
 fn is_unique_violation(error: &rusqlite::Error, columns: &str) -> bool {
@@ -851,7 +851,7 @@ impl Lines for SqliteForge {
                 tx.pragma_update(None, "defer_foreign_keys", 1)?;
 
                 // What was said about any of it goes too. A remark
-                // hangs off a pursuit, a pass, an entry as a pass had
+                // hangs off a pursuit, a round, an entry as a round had
                 // it, or a change point, and every one of those is
                 // about to stop existing — so a thread left behind
                 // would be a remark about nothing, which the read half
@@ -1301,7 +1301,7 @@ impl Pursuits for SqliteForge {
                         head.updated.kind,
                     ],
                 )?;
-                // A pursuit that opens with passes already on it is not
+                // A pursuit that opens with rounds already on it is not
                 // a thing `Pursuit::open` makes, but the port takes a
                 // whole value and this writes the whole of what it was
                 // given rather than the part it expects.
@@ -1369,7 +1369,7 @@ impl Pursuits for SqliteForge {
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 let (node, ops) = rows::take_round_apart(id, &round);
-                debug_assert_eq!(node.parent, on, "the pass names the node it sits on");
+                debug_assert_eq!(node.parent, on, "the round names the node it sits on");
                 if !pursuit_has_node(&tx, &id, node.parent)? {
                     return Ok(Err(PushRefusal::NotThisPursuit));
                 }
@@ -1389,10 +1389,10 @@ impl Pursuits for SqliteForge {
 
         landed.map_err(|refusal| match refusal {
             PushRefusal::Forked => DomainError::Conflict(format!(
-                "work {id} has moved: this pass sits on {on}, and something is already there"
+                "work {id} has moved: this round sits on {on}, and something is already there"
             )),
             PushRefusal::NotThisPursuit => DomainError::Validation(format!(
-                "this pass sits on {on}, which is not a node of work {id}"
+                "this round sits on {on}, which is not a node of work {id}"
             )),
         })
     }
@@ -1440,7 +1440,7 @@ impl Closings for SqliteForge {
                         return Ok(Ok(()));
                     }
                     // The two ways a log moves under a decision:
-                    // somebody landed on the line, or a pass arrived
+                    // somebody landed on the line, or a round arrived
                     // on the work. Both are answered by deciding
                     // again against what is in front of us.
                     Err(Refusal::LineMoved | Refusal::WorkForked) => {}
@@ -1540,7 +1540,7 @@ fn land(
     // and the whole of the attempt comes back out either way.
     if let Err(error) = insert_work_node(conn, &ending, &[]) {
         // Kept apart, because what happens next differs. A fork means
-        // somebody wrote a pass while this close was being decided,
+        // somebody wrote a round while this close was being decided,
         // and deciding again is what answers it. An ending already
         // there means the work is over, and deciding again finds it
         // over — telling somebody to try that again is telling them to
@@ -1566,15 +1566,15 @@ fn land(
     Ok(Ok(()))
 }
 
-/// Why a pass was not written.
+/// Why a round was not written.
 ///
 /// Apart from [`Refusal`] because the two verbs refuse different
 /// things, and folding them into one enum would give each a variant
 /// the other can never produce.
 enum PushRefusal {
-    /// Somebody wrote a pass on the node this one sits on.
+    /// Somebody wrote a round on the node this one sits on.
     Forked,
-    /// The pass sits on a node this pursuit never had.
+    /// The round sits on a node this pursuit never had.
     NotThisPursuit,
 }
 
@@ -1595,7 +1595,7 @@ enum Refusal {
     /// Something already sits on the change point this close aimed at.
     /// Decide again, here, where the line cannot move.
     LineMoved,
-    /// A pass arrived on the node this close sat on. Same answer:
+    /// A round arrived on the node this close sat on. Same answer:
     /// decide again against the log as it is.
     WorkForked,
     /// The work already has an ending. Deciding again finds the same

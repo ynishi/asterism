@@ -46,14 +46,14 @@ fn work_on(line: &Line) -> Pursuit {
     Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
 }
 
-fn passing(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+fn with_a_round(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
     work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())
         .unwrap();
     work
 }
 
 fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) {
-    let mut work = passing(work_on(line), ops, minute);
+    let mut work = with_a_round(work_on(line), ops, minute);
     let closing = close(line, &work, Outcome::Satisfied, None, act(minute)).unwrap();
     closing.apply(line, &mut work).unwrap();
 }
@@ -83,7 +83,7 @@ fn standoff(rule: &dyn Strategy) -> Standoff {
     );
 
     let mine = content();
-    let work = passing(work_on(&line), vec![Op::replace(entry, mine)], 2);
+    let work = with_a_round(work_on(&line), vec![Op::replace(entry, mine)], 2);
 
     let theirs = content();
     landed(&mut line, vec![Op::replace(entry, theirs)], 3);
@@ -337,7 +337,7 @@ fn stale_work_cannot_land_over_a_line_that_moved() {
     ));
     // And nothing the work can write on its own clears that without
     // saying something about the axis in question.
-    let work = passing(at.work, vec![Op::add(content(), name("unrelated"))], 5);
+    let work = with_a_round(at.work, vec![Op::add(content(), name("unrelated"))], 5);
     assert!(matches!(
         close(&at.line, &work, Outcome::Satisfied, None, act(6)),
         Err(ForgeError::Collides(_))
@@ -376,7 +376,7 @@ fn a_rule_that_does_not_settle_what_it_was_asked_is_refused() {
     assert_eq!(refused.unwrap_err(), ForgeError::Unsettled);
 }
 
-/// A rule that refuses writes no pass at all, and the work is left
+/// A rule that refuses writes no round at all, and the work is left
 /// exactly as it was.
 #[test]
 fn a_rule_that_refuses_writes_nothing() {
@@ -421,7 +421,7 @@ fn a_rule_this_line_does_not_settle_by_is_refused() {
 fn there_is_nothing_to_react_to_when_nothing_collides() {
     let mut line = line_by(&MainlineFirst);
     landed(&mut line, vec![Op::add(content(), name("theirs"))], 1);
-    let work = passing(work_on(&line), vec![Op::add(content(), name("mine"))], 2);
+    let work = with_a_round(work_on(&line), vec![Op::add(content(), name("mine"))], 2);
 
     let answered = react(&line, &work, &MainlineFirst, ActorId::new(), act(3)).unwrap();
 

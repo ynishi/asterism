@@ -10,13 +10,13 @@
 //!
 //! A node carries a note, and a note is one line written once by
 //! whoever wrote the node. This is the rest: a remark on somebody
-//! else's pass, a question about one entry it touched, a review of
+//! else's round, a question about one entry it touched, a review of
 //! what landed.
 //!
 //! # Four anchors, because four things are worth remarking on
 //!
-//! A pursuit as a whole — what this work is for. A pass — the judgement
-//! somebody made in it. One entry a pass touched — this particular
+//! A pursuit as a whole — what this work is for. A round — the judgement
+//! somebody made in it. One entry a round touched — this particular
 //! thing, in this particular attempt. And a change point — a review
 //! after the fact.
 //!
@@ -24,7 +24,7 @@
 //! on an entry alone would make it follow that entry into every other
 //! pursuit it is ever carried into, which is how a note about one
 //! attempt becomes a note about the thing itself. Anchoring at
-//! `(round, entry)` says *this entry, as this pass had it*, and that
+//! `(round, entry)` says *this entry, as this round had it*, and that
 //! does not travel. A change point can be anchored to on its own,
 //! because there is nowhere for a remark on it to travel to.
 //!
@@ -97,11 +97,11 @@ use crate::domain::forge::model::value::{
 pub enum Anchor {
     /// The work as a whole.
     Pursuit(PursuitId),
-    /// One pass at it.
+    /// One round at it.
     Round(NodeId),
-    /// One entry, as one pass had it.
+    /// One entry, as one round had it.
     Entry {
-        /// The pass.
+        /// The round.
         round: NodeId,
         /// The entry it touched.
         entry: EntryId,
@@ -116,15 +116,15 @@ impl Anchor {
         Self::Pursuit(work.id())
     }
 
-    /// Hangs a thread off one pass.
+    /// Hangs a thread off one round.
     pub fn round(round: &Round) -> Self {
         Self::Round(round.id())
     }
 
-    /// Hangs a thread off one entry, as one pass had it.
+    /// Hangs a thread off one entry, as one round had it.
     ///
-    /// Refuses an entry the pass did not touch: a remark about what a
-    /// pass did to something has to be about something it did.
+    /// Refuses an entry the round did not touch: a remark about what a
+    /// round did to something has to be about something it did.
     pub fn entry(round: &Round, entry: EntryId) -> Result<Self, ForgeError> {
         if !round.ops().iter().any(|op| op.entry() == entry) {
             return Err(ForgeError::NotInThatRound);
@@ -430,10 +430,10 @@ mod tests {
         );
     }
 
-    /// A remark about what a pass did to something has to be about
+    /// A remark about what a round did to something has to be about
     /// something it did.
     #[test]
-    fn an_entry_that_pass_never_touched_cannot_be_anchored_to() {
+    fn an_entry_that_round_never_touched_cannot_be_anchored_to() {
         let (_, round, _) = work();
 
         let refused = Anchor::entry(&round, EntryId::new());
@@ -535,7 +535,7 @@ mod tests {
         );
 
         thread
-            .say(Message::new(None, body("fixed in the next pass"), act(5)))
+            .say(Message::new(None, body("fixed in the next round"), act(5)))
             .unwrap();
 
         // Both are messages; neither is a status.

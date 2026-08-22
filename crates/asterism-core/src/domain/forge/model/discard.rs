@@ -126,7 +126,7 @@ mod tests {
         )
     }
 
-    /// Opens work, writes one pass, and ends it the way asked.
+    /// Opens work, writes one round, and ends it the way asked.
     fn work_on(line: &mut Line, ops: Vec<Op>, outcome: Outcome, minute: u32) -> Pursuit {
         let mut work = Pursuit::open(line.id(), None, line.head(), Intent::default(), act(minute));
         work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())

@@ -1,4 +1,4 @@
-//! Work use cases — opening a line of work, writing passes, looking at
+//! Work use cases — opening a line of work, writing rounds, looking at
 //! what the line did, and ending it.
 //!
 //! ```text
@@ -13,7 +13,7 @@
 //! Four verbs and two questions, and only one of them touches a line's
 //! history. That asymmetry is the point of the design rather than an
 //! accident of it: the operation that happens most often, writing a
-//! pass, never reads the line at all, so two people working against
+//! round, never reads the line at all, so two people working against
 //! one line do not contend until one of them finishes.
 //!
 //! # What this service is allowed to decide
@@ -138,7 +138,7 @@ impl PursuitService {
         Ok(pursuit)
     }
 
-    /// Reads work back whole, every pass included.
+    /// Reads work back whole, every round included.
     pub async fn get(&self, id: &PursuitId) -> Result<Pursuit, DomainError> {
         self.pursuits
             .get(id)
@@ -146,7 +146,7 @@ impl PursuitService {
             .ok_or_else(|| DomainError::not_found("pursuit", id))
     }
 
-    /// Writes a pass.
+    /// Writes a round.
     ///
     /// The line is not read. What the work says means nothing on its
     /// own — it is only measured against a line when somebody takes a
@@ -190,7 +190,7 @@ impl PursuitService {
 
     /// Lets the line's rule answer whatever this work collides with.
     ///
-    /// Writes at most one pass, as the server. A rule that leaves
+    /// Writes at most one round, as the server. A rule that leaves
     /// collisions to a person writes nothing and this reports that
     /// nothing was written — the collision is still there to be read.
     ///
@@ -257,7 +257,7 @@ impl PursuitService {
     /// Derived from the two logs on every call, so it cannot go stale
     /// and there is no flag anybody has to clear. What clears a
     /// collision is the work asking for something else — writing a
-    /// pass that stops requesting the axis, which
+    /// round that stops requesting the axis, which
     /// [`resolve`](Self::resolve) does under the line's own rule.
     pub async fn collisions(&self, id: &PursuitId) -> Result<Vec<Collision>, DomainError> {
         let pursuit = self.get(id).await?;
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn work_writes_passes_without_the_line_being_read() {
+    async fn work_writes_rounds_without_the_line_being_read() {
         let world = World::new();
         let (_, work, line) = opened(&world).await;
         let pursuit = work
@@ -765,12 +765,12 @@ mod tests {
 
         let read = work.get(&pursuit.id()).await.unwrap();
         assert_eq!(read.rounds().len(), 1);
-        // The line is where it was: a pass is not a change to it.
+        // The line is where it was: a round is not a change to it.
         assert_eq!(world.line(&line.id()).unwrap().head(), line.head());
     }
 
     #[tokio::test]
-    async fn a_pass_naming_content_the_persona_does_not_hold_is_refused() {
+    async fn a_round_naming_content_the_persona_does_not_hold_is_refused() {
         let world = Arc::new(World {
             holds: false,
             ..World::default()
@@ -794,7 +794,7 @@ mod tests {
         assert!(matches!(refused, Err(DomainError::Validation(_))));
         assert!(
             work.get(&pursuit.id()).await.unwrap().rounds().is_empty(),
-            "the pass was refused before it was written"
+            "the round was refused before it was written"
         );
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
                 .rounds()
                 .iter()
                 .any(|round| round.act().by().is_system()),
-            "the divergence is the server's pass"
+            "the divergence is the server's round"
         );
 
         work.close(&mine.id(), Outcome::Satisfied, None, &by())

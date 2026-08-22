@@ -58,7 +58,7 @@ pub(super) fn claimed_by(request: &Rows) -> Vec<Name> {
 /// alive on the line answers to.
 ///
 /// `claimed` is what this same call has already handed out. Two
-/// entries minted in one pass must not be given one name, and the line
+/// entries minted in one round must not be given one name, and the line
 /// cannot object yet because neither of them is on it.
 pub(super) fn free(
     wanted: &Name,

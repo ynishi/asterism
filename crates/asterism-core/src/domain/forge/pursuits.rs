@@ -1,16 +1,16 @@
 //! Keeping pursuits, stated in the forge's own words.
 //!
 //! [`Pursuits`] is the other face the forge asks for, and it is the
-//! quiet one: opening work and adding passes to it are what happens
+//! quiet one: opening work and adding rounds to it are what happens
 //! most, and neither touches a line.
 //!
-//! # A pass names the node it sits on
+//! # A round names the node it sits on
 //!
 //! [`Pursuits::push`] takes the node the caller believes the work ends
-//! at, beside the pass it wants to add. The model refuses a pass that
+//! at, beside the round it wants to add. The model refuses a round that
 //! does not sit on the head, but it judges the pursuit it was
 //! *given*, which is the log as it was when it was read. Naming the
-//! head makes the write itself conditional, so two passes written at
+//! head makes the write itself conditional, so two rounds written at
 //! once cannot both land and the loser is told.
 //!
 //! # It cannot end work
@@ -23,7 +23,7 @@
 //!
 //! # Listing hands back whole pursuits, and that is a bet
 //!
-//! [`Pursuits::of_line`] and [`Pursuits::children`] return every pass
+//! [`Pursuits::of_line`] and [`Pursuits::children`] return every round
 //! of every pursuit they answer with, which is more than a caller
 //! showing a list needs. There is no lighter shape because the model
 //! has no half-pursuit, and inventing one for a listing would put a
@@ -36,7 +36,7 @@
 //!
 //! # Reading gives back the whole pursuit
 //!
-//! Adding a pass checks the head, deciding a close folds every pass,
+//! Adding a round checks the head, deciding a close folds every round,
 //! and both are rules the model holds about the chain. Handing back
 //! less would move them to whoever answers this call.
 //!
@@ -55,7 +55,7 @@ pub trait Pursuits: Send + Sync {
     /// Records work that has just been opened.
     async fn open(&self, pursuit: &Pursuit) -> Result<(), DomainError>;
 
-    /// Reads work back whole, every pass included.
+    /// Reads work back whole, every round included.
     async fn get(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError>;
 
     /// Every piece of work against a line, open or ended.
@@ -73,11 +73,11 @@ pub trait Pursuits: Send + Sync {
     /// question, and a kept answer would be a second copy of it.
     async fn children(&self, parent: &PursuitId) -> Result<Vec<Pursuit>, DomainError>;
 
-    /// Adds a pass, on the condition that `on` is still the node the
+    /// Adds a round, on the condition that `on` is still the node the
     /// work ends at.
     ///
     /// Returns [`Conflict`](DomainError::Conflict) when it is not:
-    /// somebody else wrote a pass first, and this caller is holding a
+    /// somebody else wrote a round first, and this caller is holding a
     /// log that has moved.
     async fn push(&self, id: &PursuitId, on: NodeId, round: &Round) -> Result<(), DomainError>;
 }

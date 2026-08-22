@@ -413,8 +413,8 @@ mod tests {
         Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
     }
 
-    /// Adds a pass carrying `ops`.
-    fn passing(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+    /// Adds a round carrying `ops`.
+    fn with_a_round(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
         work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())
             .unwrap();
         work
@@ -423,7 +423,7 @@ mod tests {
     /// Lands `ops` on the line through work of its own, and answers
     /// with the change point it made.
     fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) -> ChangePointId {
-        let mut work = passing(work_on(line), ops, minute);
+        let mut work = with_a_round(work_on(line), ops, minute);
         let closing = close(line, &work, Outcome::Satisfied, None, act(minute)).unwrap();
         let moved = closing.point().expect("that work landed").id();
         closing.apply(line, &mut work).unwrap();
@@ -437,7 +437,7 @@ mod tests {
         let entry = arrival.entry();
         landed(&mut line, vec![arrival], 1);
 
-        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        let work = with_a_round(work_on(&line), vec![Op::replace(entry, content())], 2);
         let theirs = landed(&mut line, vec![Op::replace(entry, content())], 3);
 
         let found = collisions(&line, &work).unwrap();
@@ -462,12 +462,12 @@ mod tests {
         let entry = arrival.entry();
         landed(&mut line, vec![arrival], 1);
 
-        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        let work = with_a_round(work_on(&line), vec![Op::replace(entry, content())], 2);
         landed(&mut line, vec![Op::replace(entry, content())], 3);
         assert_eq!(collisions(&line, &work).unwrap().len(), 1);
 
         let theirs = line.states()[&entry].content.unwrap();
-        let work = passing(work, vec![Op::replace(entry, theirs)], 4);
+        let work = with_a_round(work, vec![Op::replace(entry, theirs)], 4);
 
         assert!(collisions(&line, &work).unwrap().is_empty());
     }
@@ -482,10 +482,10 @@ mod tests {
         let entry = arrival.entry();
         landed(&mut line, vec![arrival], 1);
 
-        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        let work = with_a_round(work_on(&line), vec![Op::replace(entry, content())], 2);
         landed(&mut line, vec![Op::replace(entry, content())], 3);
         let theirs = line.states()[&entry].content.unwrap();
-        let work = passing(work, vec![Op::replace(entry, theirs)], 4);
+        let work = with_a_round(work, vec![Op::replace(entry, theirs)], 4);
         assert!(collisions(&line, &work).unwrap().is_empty());
 
         let third = landed(&mut line, vec![Op::replace(entry, content())], 5);
@@ -508,7 +508,7 @@ mod tests {
         let arrival = Op::add(content(), name("key visual"));
         let entry = arrival.entry();
         landed(&mut line, vec![arrival], 1);
-        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 2);
+        let work = with_a_round(work_on(&line), vec![Op::replace(entry, content())], 2);
         landed(&mut line, vec![Op::replace(entry, content())], 3);
 
         assert_eq!(
@@ -525,7 +525,7 @@ mod tests {
         let entry = arrival.entry();
         landed(&mut line, vec![arrival], 1);
 
-        let work = passing(work_on(&line), vec![Op::rename(entry, name("hero"))], 2);
+        let work = with_a_round(work_on(&line), vec![Op::rename(entry, name("hero"))], 2);
         landed(&mut line, vec![Op::replace(entry, content())], 3);
 
         assert!(collisions(&line, &work).unwrap().is_empty());
@@ -541,7 +541,7 @@ mod tests {
         landed(&mut line, vec![arrival], 1);
         landed(&mut line, vec![Op::replace(entry, content())], 2);
 
-        let work = passing(work_on(&line), vec![Op::replace(entry, content())], 3);
+        let work = with_a_round(work_on(&line), vec![Op::replace(entry, content())], 3);
 
         assert!(collisions(&line, &work).unwrap().is_empty());
     }

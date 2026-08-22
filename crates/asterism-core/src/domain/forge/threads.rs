@@ -19,7 +19,7 @@
 //!
 //! One thing does take a conversation, and it is not on this face:
 //! [`Lines::discard`] takes every thread anchored to the line it
-//! drops — to a pursuit, a pass, an entry as a pass had it, or a
+//! drops — to a pursuit, a round, an entry as a round had it, or a
 //! change point, which is all four anchors there are. The alternative
 //! is a remark about something that no longer exists. A conversation
 //! ends when the line it is about is thrown away, and nowhere else.
@@ -48,7 +48,7 @@ pub trait Threads: Send + Sync {
     /// Everything said about one thing.
     ///
     /// More than one thread can hang off the same anchor — two people
-    /// can start separate conversations about one pass, and merging
+    /// can start separate conversations about one round, and merging
     /// them would be deciding they were about the same thing.
     async fn anchored(&self, anchor: Anchor) -> Result<Vec<Thread>, DomainError>;
 

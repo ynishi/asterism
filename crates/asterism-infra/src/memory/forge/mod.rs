@@ -159,7 +159,7 @@ impl MemoryForge {
     /// Whether this conversation is about something on this line.
     ///
     /// Three of the four anchors reach a line by a different road, and
-    /// the fourth — an entry as a pass had it — arrives by the pass's,
+    /// the fourth — an entry as a round had it — arrives by the round's,
     /// because it is a node id in the same field. The SQLite side asks
     /// the same three questions as one subquery.
     fn anchored_in(tables: &Tables, thread: &ThreadRow, line: &LineId) -> bool {
@@ -381,8 +381,8 @@ impl Lines for MemoryForge {
             }
 
             // What was said about any of it goes too, and it goes
-            // first: a remark hangs off a pursuit, a pass, an entry as
-            // a pass had it, or a change point, and all four are about
+            // first: a remark hangs off a pursuit, a round, an entry as
+            // a round had it, or a change point, and all four are about
             // to stop existing. This store has no key to refuse a
             // thread left behind, which is exactly why it has to be
             // the one that remembers — the SQLite side would be told.
@@ -489,7 +489,7 @@ impl Pursuits for MemoryForge {
                 Self::pursuit_head(tables, id).ok_or_else(|| DomainError::not_found("work", id))?;
             if at != on {
                 return Err(DomainError::Conflict(format!(
-                    "work {id} has moved: this pass sits on {on}, and the log ends at {at}"
+                    "work {id} has moved: this round sits on {on}, and the log ends at {at}"
                 )));
             }
             let (node, ops) = rows::take_round_apart(*id, round);

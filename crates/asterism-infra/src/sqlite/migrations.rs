@@ -14825,23 +14825,23 @@ mod tests {
                 params![id, work, parent, kind, outcome, actor],
             )
         };
-        let pass = Uuid::now_v7();
-        node(pass, open_node, "round", None).unwrap();
+        let round = Uuid::now_v7();
+        node(round, open_node, "round", None).unwrap();
         assert!(
             node(Uuid::now_v7(), open_node, "round", None).is_err(),
-            "two passes on one parent is a fork of the pursuit"
+            "two rounds on one parent is a fork of the pursuit"
         );
         assert!(
-            node(Uuid::now_v7(), pass, "round", Some("satisfied")).is_err(),
+            node(Uuid::now_v7(), round, "round", Some("satisfied")).is_err(),
             "only an ending says how the work ended"
         );
         assert!(
-            node(Uuid::now_v7(), pass, "close", None).is_err(),
+            node(Uuid::now_v7(), round, "close", None).is_err(),
             "and an ending has to"
         );
 
         let ending = Uuid::now_v7();
-        node(ending, pass, "close", Some("satisfied")).unwrap();
+        node(ending, round, "close", Some("satisfied")).unwrap();
         assert!(
             node(Uuid::now_v7(), ending, "close", Some("abandoned")).is_err(),
             "work ends once: the second ending sits on a parent nobody used, so the \
@@ -14853,7 +14853,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO pursuit_op (node_id, position, entry_id, verb, content, name) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![pass, position, Uuid::now_v7(), verb, content, name],
+                params![round, position, Uuid::now_v7(), verb, content, name],
             )
         };
         op(0, "add", Some(asset), Some("one")).unwrap();

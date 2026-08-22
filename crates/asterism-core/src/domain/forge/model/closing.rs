@@ -14,8 +14,8 @@
 //!                        Closing::Landed { close, point }
 //! ```
 //!
-//! Everywhere else, a decision moves one log. Opening, passing and
-//! taking something in write only to the pursuit; renaming a line
+//! Everywhere else, a decision moves one log. Opening, adding a round
+//! and taking something in write only to the pursuit; renaming a line
 //! writes only to its own description. This is the exception, and it
 //! is the only one: ending work as satisfied puts a change point on
 //! the line, and the two are one act rather than two that happen to
@@ -50,7 +50,7 @@
 //! # This function does not settle anything
 //!
 //! A collision is refused here, never resolved. Turning one into a
-//! divergence writes a pass into the pursuit, under the line's
+//! divergence writes a round into the pursuit, under the line's
 //! strategy, and it happens while the work is open — by the time
 //! anybody is closing, the question has been settled or it has not.
 //!
@@ -245,8 +245,8 @@ mod tests {
         Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
     }
 
-    /// Adds a pass carrying `ops`, and hands back the pursuit.
-    fn passing(mut pursuit: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+    /// Adds a round carrying `ops`, and hands back the pursuit.
+    fn with_a_round(mut pursuit: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
         let round = Round::new(pursuit.head(), ops, None, act(minute)).unwrap();
         pursuit.push(round).unwrap();
         pursuit
@@ -255,7 +255,7 @@ mod tests {
     /// Lands `ops` on the line through a pursuit of its own, which is
     /// how the line moves under work that is already open.
     fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) -> ChangePointId {
-        let pursuit = passing(work_on(line), ops, minute);
+        let pursuit = with_a_round(work_on(line), ops, minute);
         let closing = close(line, &pursuit, Outcome::Satisfied, None, act(minute)).unwrap();
         let moved = closing.point().unwrap().id();
         let mut pursuit = pursuit;
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn a_satisfied_close_produces_the_change_point_with_it() {
         let line = line();
-        let pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
 
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
 
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn an_abandoned_close_puts_nothing_on_the_line() {
         let line = line();
-        let pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
 
         let closing = close(&line, &pursuit, Outcome::Abandoned, None, act(3)).unwrap();
 
@@ -302,7 +302,7 @@ mod tests {
     fn work_that_says_nothing_new_can_still_be_abandoned() {
         let mut line = line();
         let held = content();
-        let pursuit = passing(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
         landed(&mut line, vec![Op::add(held, name("cut-02"))], 3);
 
         assert!(close(&line, &pursuit, Outcome::Abandoned, None, act(4)).is_ok());
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn applying_puts_both_nodes_on_their_logs() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
         let moved = closing.point().unwrap().id();
 
@@ -334,7 +334,7 @@ mod tests {
         // Somebody else brings that entry back, with the content and
         // name this work was going to give it.
         landed(&mut line, vec![Op::add_to(entry, held, name("cut-01"))], 2);
-        let mut pursuit = passing(
+        let mut pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, held, name("cut-01"))],
             3,
@@ -361,7 +361,7 @@ mod tests {
     fn the_same_content_arriving_as_a_second_entry_is_not_nothing() {
         let mut line = line();
         let held = content();
-        let pursuit = passing(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
         landed(&mut line, vec![Op::add(held, name("cut-02"))], 3);
 
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(4)).unwrap();
@@ -373,7 +373,7 @@ mod tests {
     fn an_axis_the_line_moved_first_and_this_work_has_not_seen_is_refused() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -398,7 +398,7 @@ mod tests {
     }
 
     /// Closing refuses collisions; it never settles them. The line's
-    /// strategy is read where a pass is written, and by the time
+    /// strategy is read where a round is written, and by the time
     /// anybody is closing there is nothing left for it to decide.
     #[test]
     fn closing_refuses_a_collision_whatever_the_strategy_request() {
@@ -406,7 +406,7 @@ mod tests {
             let mut line = line();
             line.set_strategy(StrategyId::new(rule).unwrap(), act(1));
             let entry = EntryId::new();
-            let pursuit = passing(
+            let pursuit = with_a_round(
                 work_on(&line),
                 vec![Op::add_to(entry, content(), name("cut-01"))],
                 2,
@@ -429,7 +429,7 @@ mod tests {
     fn work_that_comes_round_to_the_lines_value_can_close() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -447,7 +447,7 @@ mod tests {
         // Coming round to the line's value, and bringing something of
         // its own that the line has not heard of.
         let theirs = line.states()[&entry].content.unwrap();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             pursuit,
             vec![
                 Op::replace(entry, theirs),
@@ -472,7 +472,7 @@ mod tests {
     fn work_that_is_left_saying_nothing_cannot_close_satisfied() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -483,7 +483,7 @@ mod tests {
             3,
         );
         let theirs = line.states()[&entry].content.unwrap();
-        let pursuit = passing(pursuit, vec![Op::replace(entry, theirs)], 4);
+        let pursuit = with_a_round(pursuit, vec![Op::replace(entry, theirs)], 4);
 
         let refused = close(&line, &pursuit, Outcome::Satisfied, None, act(5));
 
@@ -494,7 +494,7 @@ mod tests {
     fn work_against_another_line_is_refused_rather_than_judged() {
         let line = line();
         let elsewhere = Line::open(name("other"), strategy(), act(0));
-        let pursuit = passing(work_on(&elsewhere), vec![Op::add(content(), name("a"))], 2);
+        let pursuit = with_a_round(work_on(&elsewhere), vec![Op::add(content(), name("a"))], 2);
 
         let refused = close(&line, &pursuit, Outcome::Satisfied, None, act(3));
 
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn work_that_has_ended_cannot_end_again() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         close(&line, &pursuit, Outcome::Satisfied, None, act(3))
             .unwrap()
             .apply(&mut line, &mut pursuit)
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn a_head_that_moved_after_the_decision_refuses_and_leaves_the_work_open() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
 
         landed(&mut line, vec![Op::add(content(), name("elsewhere"))], 4);
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn an_archived_line_refuses_a_satisfied_close_and_allows_an_abandoned_one() {
         let mut line = line();
-        let work = passing(work_on(&line), vec![Op::add(content(), name("one"))], 1);
+        let work = with_a_round(work_on(&line), vec![Op::add(content(), name("one"))], 1);
         line.archive(act(2));
 
         let refused = close(&line, &work, Outcome::Satisfied, None, act(3));

@@ -23,7 +23,7 @@
 //!
 //! [`model`] is where that is written down, and it is the whole of what
 //! the forge holds: a line's history as a chain of change points, work
-//! as a log of passes, and the one act that moves both. What work takes
+//! as a log of rounds, and the one act that moves both. What work takes
 //! up is an asset the owner already manages — an ordinary raw-layer
 //! row, named by an operation. The forge does not hold a working copy,
 //! and there is no state to integrate at the end. What the close

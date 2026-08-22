@@ -157,7 +157,7 @@ pub struct PursuitRow {
     pub open_act: ActRow,
 }
 
-/// `pursuit_node` — a pass or an ending.
+/// `pursuit_node` — a round or an ending.
 ///
 /// No column says where in the log a node sits, for the reason
 /// `change_point` has none: it carries its parent, and that is the
@@ -183,12 +183,12 @@ pub struct PursuitNodeRow {
     pub outcome: Option<Outcome>,
 }
 
-/// `pursuit_op` — one operation of one pass, in the order it was written.
+/// `pursuit_op` — one operation of one round, in the order it was written.
 #[derive(Debug, Clone)]
 pub struct PursuitOpRow {
-    /// The pass that wrote it.
+    /// The round that wrote it.
     pub node: NodeId,
-    /// Its place in that pass, in the order it was written.
+    /// Its place in that round, in the order it was written.
     pub position: usize,
     /// The entry it is about.
     pub entry: EntryId,
@@ -205,7 +205,7 @@ pub struct PursuitOpRow {
 /// The anchor is a kind and four nullable columns rather than one id,
 /// because what it points at is one of four things and no key points
 /// at a column whose meaning depends on another. Two of the four are
-/// rows and carry real references; a pass is a node of a pursuit and
+/// rows and carry real references; a round is a node of a pursuit and
 /// an entry is not a row at all, so those two stay bare — the same
 /// bareness every other node reference in the forge has, for the same
 /// reason.
@@ -357,7 +357,7 @@ pub fn take_pursuit_apart(
     (head, nodes, ops)
 }
 
-/// One pass, for the append a push makes.
+/// One round, for the append a push makes.
 pub fn take_round_apart(pursuit: PursuitId, round: &Round) -> (PursuitNodeRow, Vec<PursuitOpRow>) {
     let node = PursuitNodeRow {
         pursuit,
@@ -767,7 +767,7 @@ fn read_anchor(head: &ThreadRow) -> Result<Anchor, DomainError> {
                 .ok_or_else(|| missing("pursuit", "anchor_pursuit"))?,
         )),
         "round" => Ok(Anchor::Round(
-            head.node.ok_or_else(|| missing("pass", "anchor_node"))?,
+            head.node.ok_or_else(|| missing("round", "anchor_node"))?,
         )),
         "entry" => Ok(Anchor::Entry {
             round: head.node.ok_or_else(|| missing("entry", "anchor_node"))?,

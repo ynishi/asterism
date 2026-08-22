@@ -9,9 +9,9 @@
 //! Two things are being checked that no unit test can reach.
 //!
 //! **That resolving survives being done twice.** Every other test
-//! resolves one collision once. A design can be right for one round
-//! and wrong for the second, because the second starts from a request
-//! the first one rewrote.
+//! resolves one collision once. A design can be right for one
+//! resolution and wrong for the second, because the second starts from
+//! a request the first one rewrote.
 //!
 //! **That the record answers what it is for.** A history of choices is
 //! worth keeping only if, for any one selection, it says what was
@@ -75,12 +75,12 @@ fn content() -> Content {
     Content::from_uuid(Uuid::now_v7())
 }
 
-fn pass(work: &mut Pursuit, ops: Vec<Op>, act: Act) {
+fn round(work: &mut Pursuit, ops: Vec<Op>, act: Act) {
     work.push(Round::new(work.head(), ops, None, act).unwrap())
         .unwrap();
 }
 
-/// Opens work, writes one pass, closes it satisfied, and lands it.
+/// Opens work, writes one round, closes it satisfied, and lands it.
 /// The short way somebody puts something on a line.
 fn lands(line: &mut Line, who: ActorId, ops: Vec<Op>, minute: u32) -> ChangePointId {
     let mut work = Pursuit::open(
@@ -90,7 +90,7 @@ fn lands(line: &mut Line, who: ActorId, ops: Vec<Op>, minute: u32) -> ChangePoin
         Intent::default(),
         by(who, minute),
     );
-    pass(&mut work, ops, by(who, minute));
+    round(&mut work, ops, by(who, minute));
     let closing = close(line, &work, Outcome::Satisfied, None, by(who, minute)).unwrap();
     let moved = closing.point().expect("that work landed").id();
     closing.apply(line, &mut work).unwrap();
@@ -135,7 +135,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
         by(cast.boro, 2),
     );
     let boro_content = content();
-    pass(
+    round(
         &mut boro,
         vec![Op::replace(cut, boro_content)],
         by(cast.boro, 3),
@@ -162,7 +162,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
     let dai_content = content();
     lands(&mut line, cast.dai, vec![Op::replace(cut, dai_content)], 7);
 
-    // The second round. This is the case a single resolution cannot
+    // The second resolution. This is the case a single one cannot
     // reach: Boro's request was rewritten by the first resolution, and
     // what collides now is what that resolution left behind.
     let again = collisions(&line, &boro).unwrap();
@@ -173,7 +173,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
 
     let settled = react(&line, &boro, rule, cast.server, by(cast.boro, 8))
         .unwrap()
-        .expect("the rule answers the second round too");
+        .expect("the rule answers the second resolution too");
     boro.push(settled).unwrap();
     assert!(collisions(&line, &boro).unwrap().is_empty());
 
@@ -203,7 +203,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
         by(cast.ana, 10),
     );
     let tried = content();
-    pass(&mut ana, vec![Op::replace(cut, tried)], by(cast.ana, 11));
+    round(&mut ana, vec![Op::replace(cut, tried)], by(cast.ana, 11));
     lands(&mut line, cast.cyd, vec![Op::replace(cut, content())], 12);
 
     let mut discarding = Line::open(name("scratch"), DiscardMine.id(), by(cast.ana, 10));
@@ -213,7 +213,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
     // the same three operations the rule would have written.
     let fork = Op::add(ana_content, name("cut-01 (dropped)"));
     let forked = fork.entry();
-    pass(
+    round(
         &mut ana,
         vec![
             fork,
@@ -284,13 +284,17 @@ fn a_line_four_people_and_what_the_record_can_answer() {
     );
     assert!(matches!(in_her_log[1].kind(), OpKind::Replace { content } if *content == tried));
 
-    // (d) Who: a person's passes and the server's are told apart on
+    // (d) Who: a person's rounds and the server's are told apart on
     //     the node, without opening it.
     let boro_rounds = boro.rounds();
     let (mine, servers): (Vec<&Round>, Vec<&Round>) =
         boro_rounds.iter().partition(|r| !r.act().by().is_system());
-    assert_eq!(mine.len(), 1, "Boro wrote one pass himself");
-    assert_eq!(servers.len(), 2, "the rule wrote two, one per round");
+    assert_eq!(mine.len(), 1, "Boro wrote one round himself");
+    assert_eq!(
+        servers.len(),
+        2,
+        "the rule wrote two, one for each resolution"
+    );
     assert_eq!(servers[0].act().by(), Actor::System(cast.server));
     assert_eq!(mine[0].act().by(), Actor::User(cast.boro));
 
@@ -336,7 +340,7 @@ fn a_line_settled_by_hand_reaches_the_same_place() {
         by(cast.boro, 2),
     );
     let boro_content = content();
-    pass(
+    round(
         &mut boro,
         vec![Op::replace(cut, boro_content)],
         by(cast.boro, 3),
@@ -355,7 +359,7 @@ fn a_line_settled_by_hand_reaches_the_same_place() {
     let theirs = line.states()[&cut].content.unwrap();
     let fork = Op::add(theirs, name("cut-01 (2)"));
     let forked = fork.entry();
-    pass(
+    round(
         &mut boro,
         vec![
             fork,
@@ -371,7 +375,7 @@ fn a_line_settled_by_hand_reaches_the_same_place() {
 
     assert_eq!(line.states()[&cut].content, Some(theirs));
     assert_eq!(line.states()[&forked].content, Some(boro_content));
-    // And every pass on that log is a person's.
+    // And every round on that log is a person's.
     assert!(boro.rounds().iter().all(|r| !r.act().by().is_system()));
 }
 
@@ -392,7 +396,7 @@ fn abandoning_leaves_the_line_alone_and_the_attempt_readable() {
         by(cast.boro, 1),
     );
     let attempted = content();
-    pass(
+    round(
         &mut boro,
         vec![Op::add(attempted, name("never landed"))],
         by(cast.boro, 2),
@@ -411,7 +415,7 @@ fn abandoning_leaves_the_line_alone_and_the_attempt_readable() {
 }
 
 /// The node ids in a pursuit order it, and nothing about a clock
-/// does — a pass minted with an earlier timestamp still sits where the
+/// does — a round minted with an earlier timestamp still sits where the
 /// chain puts it.
 #[test]
 fn the_chain_orders_a_work_log_and_the_clock_does_not() {
@@ -428,13 +432,13 @@ fn the_chain_orders_a_work_log_and_the_clock_does_not() {
     let entry = EntryId::new();
     let first = content();
     let second = content();
-    pass(
+    round(
         &mut boro,
         vec![Op::add_to(entry, first, name("cut-01"))],
         by(cast.boro, 9),
     );
     // Written second, stamped an hour earlier.
-    pass(
+    round(
         &mut boro,
         vec![Op::replace(entry, second)],
         by(cast.boro, 1),
@@ -443,7 +447,7 @@ fn the_chain_orders_a_work_log_and_the_clock_does_not() {
     assert_eq!(
         boro.request()[&entry].content(),
         Some(second),
-        "the later pass wins because it is later in the chain"
+        "the later round wins because it is later in the chain"
     );
     let parents: Vec<NodeId> = boro.rounds().iter().map(Round::parent).collect();
     assert_eq!(parents[0], boro.opening().id());
@@ -462,7 +466,7 @@ fn a_closing_is_spent_when_it_is_applied() {
         Intent::default(),
         by(cast.boro, 1),
     );
-    pass(
+    round(
         &mut boro,
         vec![Op::add(content(), name("cut-01"))],
         by(cast.boro, 2),

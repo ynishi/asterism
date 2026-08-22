@@ -68,7 +68,7 @@ define_uuid_id!(
 
 define_uuid_id!(
     /// Surrogate id for a node of a pursuit — where it opened, one
-    /// pass at it, or where it ended.
+    /// round at it, or where it ended.
     ///
     /// As with a history, the chain is what orders them, so the id
     /// answers "which node" and never "which came first".

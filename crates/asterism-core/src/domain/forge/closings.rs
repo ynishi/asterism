@@ -83,7 +83,7 @@ use crate::error::DomainError;
 ///
 /// - **A change point already sits where this one would go.** Somebody
 ///   else's work landed on the line first.
-/// - **A node already sits where this ending would go.** A pass was
+/// - **A node already sits where this ending would go.** A round was
 ///   written to the work while its close was being decided.
 ///
 /// Nothing else. A second ending, a node neither log ever had, or a

@@ -14,7 +14,7 @@
 //! # Why this is one module rather than a constructor per type
 //!
 //! Every other constructor in [`model`](super) mints. A line mints its
-//! id and its genesis, work mints its id and its opening node, a pass
+//! id and its genesis, work mints its id and its opening node, a round
 //! mints a node id — which means that until this module existed, no
 //! value here could be built holding an id somebody else chose. That
 //! was the property, and it is the reason the read half of the ports
@@ -33,7 +33,7 @@
 //! back one at a time to [`History::record`], [`Pursuit::push`] and
 //! [`Pursuit::end`] — the same calls a fresh write goes through, and
 //! the same refusals. A chain whose parents do not line up, a table
-//! that would leave two live entries under one name, a pass on a log
+//! that would leave two live entries under one name, a round on a log
 //! that has ended: each of those is a stored row that cannot become a
 //! value here, and the read fails rather than handing back something
 //! the model would not have written.
@@ -135,7 +135,7 @@ pub fn open(id: NodeId, base: ChangePointId, intent: Intent, act: Act) -> Open {
     Open::restored(id, base, intent, act)
 }
 
-/// One pass, as it was kept.
+/// One round, as it was kept.
 ///
 /// Refuses one carrying no operations, for the reason
 /// [`Round::new`](crate::domain::forge::model::pursuit::Round::new)
@@ -164,7 +164,7 @@ pub fn close(
 /// A node of a pursuit after the one it opened at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
-    /// A pass.
+    /// A round.
     Round(Round),
     /// The ending.
     Close(Close),
@@ -533,7 +533,7 @@ mod tests {
             Round::new(
                 work.head(),
                 vec![Op::add(content(), name("one"))],
-                Some("a pass".into()),
+                Some("a round".into()),
                 act(2),
             )
             .unwrap(),
@@ -545,16 +545,16 @@ mod tests {
         let mut nodes: Vec<Node> = work
             .rounds()
             .iter()
-            .map(|pass| {
+            .map(|one| {
                 Node::Round(
                     round(
-                        pass.id(),
-                        pass.parent(),
-                        pass.ops().to_vec(),
-                        pass.note().map(str::to_owned),
-                        *pass.act(),
+                        one.id(),
+                        one.parent(),
+                        one.ops().to_vec(),
+                        one.note().map(str::to_owned),
+                        *one.act(),
                     )
-                    .expect("a pass a store kept carries operations"),
+                    .expect("a round a store kept carries operations"),
                 )
             })
             .collect();
@@ -637,7 +637,7 @@ mod tests {
         let thread = thread(
             held,
             anchor,
-            Some(name("about the second pass")),
+            Some(name("about the second round")),
             vec![
                 message(
                     first,

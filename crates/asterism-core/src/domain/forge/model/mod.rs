@@ -177,13 +177,13 @@
 //! the record has.
 //!
 //! **Settling a collision.** Turning one into a divergence writes a
-//! pass into the pursuit under the line's strategy, and it happens
+//! round into the pursuit under the line's strategy, and it happens
 //! while the work is open. [`closing`] refuses what was never settled;
 //! it does not settle anything itself.
 //!
 //! **A second way to build any of this back from stored values.**
 //! Every constructor here mints: a line mints its id and its genesis,
-//! work mints its id and its opening node, a pass mints a node id. The
+//! work mints its id and its opening node, a round mints a node id. The
 //! one place a value is built holding an id somebody else chose is
 //! [`restore`], and that is the whole of the door.
 //!

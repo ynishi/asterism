@@ -150,7 +150,7 @@ impl LineService {
     /// Points a line at a different rule.
     ///
     /// Takes effect from here on. Divergences a previous rule already
-    /// wrote stay exactly where they are — they are passes in a work
+    /// wrote stay exactly where they are — they are rounds in a work
     /// log, and nothing rewrites those.
     pub async fn set_strategy(
         &self,

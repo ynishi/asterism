@@ -1,4 +1,4 @@
-//! One line of work: what it is trying to do, and every pass at it.
+//! One line of work: what it is trying to do, and every round at it.
 //!
 //! ```text
 //!   Pursuit ── of : →Line ── parent? : →Pursuit
@@ -15,10 +15,10 @@
 //! nodes carry — a line's node carries a table that has changed it, a
 //! pursuit's carries operations that have not changed anything yet.
 //!
-//! # A pass is the unit, not the pursuit
+//! # A round is the unit, not the pursuit
 //!
 //! [`Round`] is where work happens. A pursuit is the container that
-//! says what the passes are for, and it holds nothing that a round
+//! says what the rounds are for, and it holds nothing that a round
 //! could hold instead.
 //!
 //! A round that writes nothing is refused. Work is what a person does
@@ -37,7 +37,7 @@
 //! would shrink the window every time somebody looked at it, and a
 //! change nobody ever reconciled would come out clean.
 //!
-//! # A pass is a write, and nothing else
+//! # A round is a write, and nothing else
 //!
 //! There is no node here that records having looked at something.
 //! Work stops colliding with a line by *saying something different*,
@@ -51,7 +51,7 @@
 //! pushed after it. Satisfied means the intent was met — the act that
 //! turns that into a change point spans both logs and is not here.
 //! Abandoned means it was not, and that is a record rather than a
-//! deletion: the pass that was dropped stays readable, which is the
+//! deletion: the round that was dropped stays readable, which is the
 //! only way "we tried this and stopped" survives.
 //!
 //! Reopening is not a verb. Picking work back up is a new pursuit
@@ -160,7 +160,7 @@ impl Open {
     }
 }
 
-/// One pass at the work.
+/// One round at the work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Round {
     id: NodeId,
@@ -171,13 +171,13 @@ pub struct Round {
 }
 
 impl Round {
-    /// Records a pass.
+    /// Records a round.
     ///
-    /// Refuses one that writes nothing. A pass is what work does, and
+    /// Refuses one that writes nothing. A round is what work does, and
     /// a node carrying no operations is a record that nothing
     /// happened — the pursuit is a record of what did.
     ///
-    /// There is no pass that only looks at something. Looking is not
+    /// There is no round that only looks at something. Looking is not
     /// an operation, and a node that claimed it would be a claim about
     /// the reader rather than a fact about the work: it could be
     /// written without changing anything, and anything a collision
@@ -200,7 +200,7 @@ impl Round {
         })
     }
 
-    /// Rebuilds a pass under the id it was kept with.
+    /// Rebuilds a round under the id it was kept with.
     ///
     /// Refuses an empty one for the reason [`new`](Self::new) does: a
     /// stored node carrying no operations is a record that nothing
@@ -236,12 +236,12 @@ impl Round {
         self.parent
     }
 
-    /// What this pass wrote, in the order it wrote it.
+    /// What this round wrote, in the order it wrote it.
     pub fn ops(&self) -> &[Op] {
         &self.ops
     }
 
-    /// Anything the pass said about itself.
+    /// Anything the round said about itself.
     pub fn note(&self) -> Option<&str> {
         self.note.as_deref()
     }
@@ -360,7 +360,7 @@ impl Pursuit {
     /// Rebuilds work under the id it was kept with, at the node it
     /// opened at and with nothing after it yet.
     ///
-    /// The passes and the ending go back on through
+    /// The rounds and the ending go back on through
     /// [`push`](Self::push) and [`end`](Self::end), which is what
     /// makes a stored chain meet the refusals a fresh one does.
     /// Visible to the model and no further — see
@@ -412,7 +412,7 @@ impl Pursuit {
         &self.opening
     }
 
-    /// Every pass, in order.
+    /// Every round, in order.
     pub fn rounds(&self) -> &[Round] {
         &self.rounds
     }
@@ -464,7 +464,7 @@ impl Pursuit {
     }
 
     /// What this work is asking the line to carry, folded across every
-    /// pass.
+    /// round.
     ///
     /// The line is not an input — see [`fold`]. What the request means
     /// is only decided against a line, and that happens elsewhere.
@@ -477,9 +477,9 @@ impl Pursuit {
         fold(&ops)
     }
 
-    /// Appends a pass.
+    /// Appends a round.
     ///
-    /// Refused if the work has ended, or if the pass does not sit on
+    /// Refused if the work has ended, or if the round does not sit on
     /// the head. Ended work that could still be written to would make
     /// the ending a note rather than a fact, and every reader would
     /// have to ask whether what follows counts.
@@ -496,7 +496,7 @@ impl Pursuit {
 
     /// Ends the work.
     ///
-    /// Refused twice over for the same reason as a pass: work ends
+    /// Refused twice over for the same reason as a round: work ends
     /// once, and the ending sits on the head.
     pub fn end(&mut self, close: Close) -> Result<(), ForgeError> {
         if self.close.is_some() {
@@ -561,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn passes_accumulate_into_what_the_work_request() {
+    fn rounds_accumulate_into_what_the_work_request() {
         let mut pursuit = opened();
         let added = Op::add(content(), name("key visual"));
         let entry = added.entry();
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pass_that_writes_nothing_is_refused() {
+    fn a_round_that_writes_nothing_is_refused() {
         let pursuit = opened();
 
         let refused = Round::new(pursuit.head(), Vec::new(), None, act(1));
@@ -588,16 +588,16 @@ mod tests {
         assert_eq!(refused.unwrap_err(), ForgeError::EmptyRound);
     }
 
-    /// The base is where the work was cut, and no pass moves it —
+    /// The base is where the work was cut, and no round moves it —
     /// there is no operation that could, which is the only way to mean
     /// it.
     #[test]
-    fn passes_do_not_move_the_base() {
+    fn rounds_do_not_move_the_base() {
         let mut pursuit = opened();
         let base = pursuit.base();
 
         for minute in 1..4 {
-            let pass = round(
+            let next = round(
                 pursuit.head(),
                 vec![Op::add(
                     Content::from_uuid(Uuid::now_v7()),
@@ -605,7 +605,7 @@ mod tests {
                 )],
                 minute,
             );
-            pursuit.push(pass).unwrap();
+            pursuit.push(next).unwrap();
         }
 
         assert_eq!(pursuit.base(), base);
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pass_that_does_not_sit_on_the_head_is_refused() {
+    fn a_round_that_does_not_sit_on_the_head_is_refused() {
         let mut pursuit = opened();
         let stale = pursuit.head();
         pursuit

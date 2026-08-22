@@ -317,7 +317,7 @@ impl World {
         Content::of(asset)
     }
 
-    /// Opens work, writes one pass, and closes it satisfied — the
+    /// Opens work, writes one round, and closes it satisfied — the
     /// whole of what a person doing one small thing does.
     async fn lands(&self, line: &Line, subject: &str, ops: Vec<Op>, minute: u32) -> Pursuit {
         self.clock.set(minute);
@@ -330,7 +330,7 @@ impl World {
         self.work
             .push(&opened.id(), &self.persona, ops, None, &by)
             .await
-            .expect("a pass with operations in it");
+            .expect("a round with operations in it");
         self.work
             .close(&opened.id(), Outcome::Satisfied, None, &by)
             .await
@@ -440,7 +440,7 @@ async fn a_line_four_people(world: &World) {
         .expect("the rule had something to write");
     assert!(
         settled.act().by().is_system(),
-        "a pass the rule wrote is the server's"
+        "a round the rule wrote is the server's"
     );
     assert!(
         world
@@ -464,8 +464,8 @@ async fn a_line_four_people(world: &World) {
         .content
         .expect("Dai's value is what the line carries");
 
-    // The second round: Boro's request was rewritten by the first
-    // resolution, and what collides now is what that left behind.
+    // The second resolution: Boro's request was rewritten by the first
+    // one, and what collides now is what that left behind.
     assert!(
         !world
             .work
@@ -481,7 +481,7 @@ async fn a_line_four_people(world: &World) {
         .resolve(&boros_work.id(), &boro)
         .await
         .unwrap()
-        .expect("the rule answers the second round too");
+        .expect("the rule answers the second resolution too");
     assert!(
         world
             .work
@@ -633,13 +633,17 @@ async fn a_line_four_people(world: &World) {
     assert!(matches!(in_her_log[1].kind(), OpKind::Replace { content } if *content == tried));
 
     // (d) Who, and (e) when: both survived the round trip through the
-    //     rows, including which passes the rule wrote.
+    //     rows, including which rounds the rule wrote.
     let (mine, servers): (Vec<_>, Vec<_>) = boros_work
         .rounds()
         .iter()
         .partition(|round| !round.act().by().is_system());
-    assert_eq!(mine.len(), 1, "Boro wrote one pass himself");
-    assert_eq!(servers.len(), 2, "the rule wrote two, one per round");
+    assert_eq!(mine.len(), 1, "Boro wrote one round himself");
+    assert_eq!(
+        servers.len(),
+        2,
+        "the rule wrote two, one for each resolution"
+    );
     assert_eq!(mine[0].act().at(), at(3));
     assert_eq!(servers[0].act().at(), at(6));
     assert_eq!(servers[1].act().at(), at(8));
@@ -857,7 +861,7 @@ async fn a_stale_aim_is_decided_again(world: &World) {
     assert_eq!(alive(&held.states()), vec!["mine", "theirs"]);
 }
 
-/// A conversation about a pass is written, corrected, and read back
+/// A conversation about a round is written, corrected, and read back
 /// with both what it says now and what it said first.
 ///
 /// The round trip the store owes: ids the caller chose, the order the
@@ -886,19 +890,19 @@ async fn a_conversation_is_kept_whole_and_read_back_whole(world: &World) {
         .unwrap();
     world.clock.set(1);
     let work = cut(world, &line, "mine").await;
-    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+    let round = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
 
     world.clock.set(2);
     let thread = world
         .said
         .open(
-            Anchored::Round(work.id(), pass),
-            Some(name("about this pass")),
+            Anchored::Round(work.id(), round),
+            Some(name("about this round")),
             body("this reads oddly"),
             &who("cyd"),
         )
         .await
-        .expect("a pass somebody wrote is a thing to remark on");
+        .expect("a round somebody wrote is a thing to remark on");
 
     world.clock.set(3);
     let first = thread.messages()[0].id();
@@ -922,7 +926,7 @@ async fn a_conversation_is_kept_whole_and_read_back_whole(world: &World) {
 
     let read = world.said.get(&thread.id()).await.expect("it is kept");
     assert_eq!(read.id(), thread.id());
-    assert_eq!(read.title().map(Name::as_str), Some("about this pass"));
+    assert_eq!(read.title().map(Name::as_str), Some("about this round"));
     assert_eq!(read.messages().len(), 2);
 
     // Order is the clock here, which is this record and no other.
@@ -938,17 +942,17 @@ async fn a_conversation_is_kept_whole_and_read_back_whole(world: &World) {
     assert_eq!(read.messages()[0].revisions()[0].act().at(), at(4));
 
     // And it is findable by what it hangs off, which is how anybody
-    // looking at the pass would reach it.
+    // looking at the round would reach it.
     let anchored = world
         .said
-        .about(Anchored::Round(work.id(), pass))
+        .about(Anchored::Round(work.id(), round))
         .await
         .unwrap();
     assert_eq!(anchored.len(), 1);
     assert_eq!(anchored[0].id(), thread.id());
 
     // The pursuit as a whole is a different anchor, and nothing about
-    // the pass answers to it.
+    // the round answers to it.
     assert!(
         world
             .said
@@ -956,7 +960,7 @@ async fn a_conversation_is_kept_whole_and_read_back_whole(world: &World) {
             .await
             .unwrap()
             .is_empty(),
-        "a remark on one pass is not a remark on the work"
+        "a remark on one round is not a remark on the work"
     );
 }
 
@@ -988,7 +992,7 @@ async fn a_conversation_about_something_nobody_wrote_is_refused(world: &World) {
         .unwrap();
     world.clock.set(1);
     let work = cut(world, &line, "mine").await;
-    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+    let round = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
 
     // Work nobody opened.
     let refused = world
@@ -1002,7 +1006,7 @@ async fn a_conversation_about_something_nobody_wrote_is_refused(world: &World) {
         .await;
     assert!(refused.is_err(), "{refused:?}");
 
-    // A pass this work does not have.
+    // A round this work does not have.
     let refused = world
         .said
         .open(
@@ -1014,13 +1018,13 @@ async fn a_conversation_about_something_nobody_wrote_is_refused(world: &World) {
         .await;
     assert!(refused.is_err(), "{refused:?}");
 
-    // And an entry the pass did not touch — the model's own refusal,
+    // And an entry the round did not touch — the model's own refusal,
     // reached through the service because the service is what has the
-    // pass to ask it of.
+    // round to ask it of.
     let refused = world
         .said
         .open(
-            Anchored::Entry(work.id(), pass, EntryId::new()),
+            Anchored::Entry(work.id(), round, EntryId::new()),
             None,
             body("about what?"),
             &who("cyd"),
@@ -1028,14 +1032,14 @@ async fn a_conversation_about_something_nobody_wrote_is_refused(world: &World) {
         .await;
     assert!(
         refused.is_err(),
-        "a remark about what a pass did to something has to be about \
+        "a remark about what a round did to something has to be about \
          something it did: {refused:?}"
     );
 
     assert!(
         world
             .said
-            .about(Anchored::Round(work.id(), pass))
+            .about(Anchored::Round(work.id(), round))
             .await
             .unwrap()
             .is_empty(),
@@ -1374,7 +1378,7 @@ async fn a_drop_something_outside_points_into_is_refused_over_sqlite() {
 
 /// Dropping a line takes what was said about its work with it.
 ///
-/// A conversation is anchored to a pursuit, a pass, an entry as a pass
+/// A conversation is anchored to a pursuit, a round, an entry as a round
 /// had it, or a change point — every one of which goes when the line
 /// does. Leaving the thread behind would keep a remark about something
 /// that is not there, which is the state `restore` refuses to read
@@ -1402,10 +1406,10 @@ async fn dropping_a_line_takes_what_was_said_about_it(world: &World) {
         .unwrap();
     world.clock.set(1);
     let work = cut(world, &line, "mine").await;
-    let pass = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+    let round = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
 
     // One of each anchor that a line can take with it: the work, a
-    // pass of it, and what landed.
+    // round of it, and what landed.
     world.clock.set(2);
     let about_work = world
         .said
@@ -1417,10 +1421,10 @@ async fn dropping_a_line_takes_what_was_said_about_it(world: &World) {
         )
         .await
         .unwrap();
-    let about_pass = world
+    let about_round = world
         .said
         .open(
-            Anchored::Round(work.id(), pass),
+            Anchored::Round(work.id(), round),
             None,
             body("this reads oddly"),
             &who("cyd"),
@@ -1454,7 +1458,7 @@ async fn dropping_a_line_takes_what_was_said_about_it(world: &World) {
         .await
         .expect("what was said about the work goes with the work");
 
-    for thread in [&about_work, &about_pass, &about_landing] {
+    for thread in [&about_work, &about_round, &about_landing] {
         assert!(
             world.said.get(&thread.id()).await.is_err(),
             "the conversation went with the line it was about"
@@ -1662,17 +1666,17 @@ async fn a_drop_of_a_line_reopened_under_it_is_refused(world: &World) {
 }
 
 /// A close whose *work* moved under it is decided again too, and the
-/// pass that arrived is in what lands.
+/// round that arrived is in what lands.
 ///
 /// The other race [`Deciding`] names, and the one a caller never sees
 /// coming: a close is decided against a pursuit, somebody writes a
-/// pass to that pursuit, and the ending now sits on a node something
+/// round to that pursuit, and the ending now sits on a node something
 /// else has. Both stores answer it the same way — SQLite from
 /// `UNIQUE (pursuit_id, parent_id)`, the in-memory store from the same
 /// rule asked of its rows.
 ///
 /// What the last assertion pins is that this is a decision and not a
-/// retry: the pass that arrived is folded into what the second answer
+/// retry: the round that arrived is folded into what the second answer
 /// puts on the line, which replaying the first answer could not do.
 #[tokio::test]
 async fn a_close_whose_work_moved_is_decided_again_over_memory() {
@@ -1713,7 +1717,7 @@ async fn a_close_whose_work_moved_is_decided_again(world: &World) {
         .unwrap();
 
     // Decided against the work as it stands, so the ending sits on the
-    // pass above.
+    // round above.
     let held = world.work.get(&work.id()).await.unwrap();
     let closing = end_work(
         &world.lines.get(&line.id()).await.unwrap(),
@@ -1725,7 +1729,7 @@ async fn a_close_whose_work_moved_is_decided_again(world: &World) {
     .expect("nothing collides");
     assert_eq!(closing.close().parent(), held.head());
 
-    // And *then* another pass arrives on the same work.
+    // And *then* another round arrives on the same work.
     world.clock.set(3);
     world
         .work
@@ -1762,7 +1766,7 @@ async fn a_close_whose_work_moved_is_decided_again(world: &World) {
     assert_eq!(
         alive(&held.states()),
         vec!["later", "mine"],
-        "the pass that arrived is on the line, which a replayed decision \
+        "the round that arrived is on the line, which a replayed decision \
          would have left off"
     );
 }

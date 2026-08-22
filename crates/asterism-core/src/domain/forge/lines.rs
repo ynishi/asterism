@@ -120,7 +120,7 @@ pub trait Lines: Send + Sync {
     /// The line, its history, its change rows, every pursuit named
     /// here with its nodes and their operations, and every
     /// conversation hanging off any of them — a thread anchored to a
-    /// pursuit, a pass, an entry as a pass had it, or a change point
+    /// pursuit, a round, an entry as a round had it, or a change point
     /// on this line goes with what it is about, messages and
     /// corrections included. Nothing else in this codebase deletes a
     /// thread ([`Threads`](super::threads::Threads) has no verb for
