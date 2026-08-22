@@ -15,5 +15,7 @@
 //! queries). File-level variants (exact copy, resize, recompress, crop)
 //! are transforms in [`scene`], applied by the evaluation at call time.
 
+#[cfg(feature = "onnx")]
+pub mod eval;
 pub mod relations;
 pub mod scene;
