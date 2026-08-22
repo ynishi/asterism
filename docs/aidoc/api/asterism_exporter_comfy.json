@@ -1,0 +1,36 @@
+{
+  "crate": "asterism-exporter-comfy",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_exporter_comfy::ACTION_IMG2IMG",
+      "kind": "constant",
+      "docs": "The single action supported at first-slice."
+    },
+    {
+      "path": "asterism_exporter_comfy::ComfyDispatchParams",
+      "kind": "struct",
+      "docs": "Params schema parsed from `params_json`."
+    },
+    {
+      "path": "asterism_exporter_comfy::ComfyHttpExporter",
+      "kind": "struct",
+      "docs": "HTTP-backed Exporter against a ComfyUI backend.\n\nCheap to `Clone` — the underlying reqwest client uses connection\npooling."
+    },
+    {
+      "path": "asterism_exporter_comfy::SCHEMA_NAME",
+      "kind": "constant",
+      "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:comfy:params`)."
+    },
+    {
+      "path": "asterism_exporter_comfy::SLUG",
+      "kind": "constant",
+      "docs": "Slug the registry uses for this exporter."
+    },
+    {
+      "path": "asterism_exporter_comfy::params_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`ComfyDispatchParams`] — streamed by\n`asterism-server schema print exporter:comfy:params`."
+    }
+  ]
+}

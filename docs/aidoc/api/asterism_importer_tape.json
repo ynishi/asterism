@@ -1,0 +1,15 @@
+{
+  "crate": "asterism-importer-tape",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_tape::parser",
+      "kind": "module",
+      "docs": "Persona Tape parser — one terminal transcript file becomes one document."
+    },
+    {
+      "path": "asterism_importer_tape::parser::TapeParser",
+      "kind": "struct"
+    }
+  ]
+}

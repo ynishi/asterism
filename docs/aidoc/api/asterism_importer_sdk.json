@@ -1,0 +1,428 @@
+{
+  "crate": "asterism-importer-sdk",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_sdk::bundle",
+      "kind": "module",
+      "docs": "Deriving the grouping key that ties the footprints of one container\ntogether.\n\nA parser handed one `RawItem` that really is many records — a\ncharacter card's slots, a harvest envelope's conversations — needs a\nkey every one of them can carry so `edge_rebuild` draws a\n`same-bundle` edge across the set. The key has to be **derived from\nthe container's locator**: a random one would move on every\nre-import and split a set that arrived twice into two.\n\n# Why this is not in `png_text` any more\n\nIt used to be. That module read a PNG's `tEXt` chunks and emitted one\n`Footprint::Note` per chunk, and this function existed to bundle\nthose notes back to the image they came out of. The notes are gone —\nthe text inside an image is that image's metadata rather than a\nrecord of its own, and it now travels on the image's row as the\n`Meta` axis. What survived\nis this derivation, and it never had anything to do with PNG text:\nits callers are the card parser and the harvest parser, both of them\nover real containers.\n\n**The namespace bytes are unchanged**, so every id this has ever\nproduced still comes back the same — a card imported before the move\nkeeps its bundle."
+    },
+    {
+      "path": "asterism_importer_sdk::bundle::session_id_for",
+      "kind": "function",
+      "docs": "Derives the shared grouping key for every footprint decomposed from\none container. Stable across re-imports of the same locator, so\n`edge_rebuild` keeps clustering them.\n\nThe name says `session` because the card parser routes the value\ninto `external_session_key` for dialogue greetings and into\n`bundle_id` for everything else; treat it as an opaque key rather\nthan a Session id."
+    },
+    {
+      "path": "asterism_importer_sdk::card",
+      "kind": "module",
+      "docs": "# Character-card parser subsystem\n\nTrait-based decomposition of character-card family formats\n(SillyTavern V2 / V3, CharacterHub, RisuAI, AgnAI, KoboldAI) into\nper-slot [`crate::Footprint`]s. This is the \"one card → many\nfootprints\" pipeline design axiom from [`crate::catalogue`] in\nexecutable form.\n\n## Layers\n\n- [`envelope`] — the parsed wire shape: [`CardEnvelope`] holds\n  `{spec, spec_version, data{…}}` and [`CardContext`] carries the\n  caller-supplied ingest metadata (source_kind, locator,\n  session_id, occurred_at, platform).\n- [`png_chunk`] — base64 UTF-8 JSON decoder for the PNG text chunks\n  `chara` (V2) and `ccv3` (V3). Feeds an envelope back to the\n  parser; chunk framing is `pngmeta`'s.\n- [`parser`] — the extension trait [`CharacterCardParser`] and the\n  canonical V2 slot logic exposed as free functions\n  ([`parser::v2_default`]) so derivatives can chain rather than\n  re-implement.\n- [`registry`] — [`CardParserRegistry`] dispatches an envelope to\n  the right parser by its `spec` string; pre-loaded with [`V2Parser`]\n  + [`V3Parser`].\n\n## Extension pattern\n\n```ignore\nuse asterism_importer_sdk::card::{\n    CardContext, CardEnvelope, CardParserRegistry, CharacterCardParser,\n};\n\nstruct ChubParser;\nimpl CharacterCardParser for ChubParser {\n    fn spec(&self) -> &'static str { \"chara_card_v2\" /* chub piggybacks on V2 */ }\n    fn parse_extras(&self, env: &CardEnvelope, ctx: &CardContext<'_>) -> Vec<_> {\n        // Promote data.extensions.chub.alt_expressions[] → Image × N here\n        Vec::new()\n    }\n}\n```\n\n## Session id\n\nEvery footprint decomposed from one card shares one `session_id`\n(typically [`crate::bundle::session_id_for`] of the container\nlocator), so `edge_rebuild` clusters them via\n`time_proximity = 1.0`."
+    },
+    {
+      "path": "asterism_importer_sdk::card::envelope",
+      "kind": "module",
+      "docs": "Envelope + context types shared by every character-card parser."
+    },
+    {
+      "path": "asterism_importer_sdk::card::envelope::CardContext",
+      "kind": "struct",
+      "docs": "Caller-supplied context every parser needs.\n\nKept separate from [`CardEnvelope`] because the same envelope may\nbe re-ingested against a different persona / at a different\noccurred-at without touching the parsed card."
+    },
+    {
+      "path": "asterism_importer_sdk::card::envelope::CardEnvelope",
+      "kind": "struct",
+      "docs": "Parsed character-card envelope.\n\nA character card, regardless of container (PNG tEXt chunk,\nstandalone `.json`, `.charx` inner file), decodes to one JSON\nobject with three top-level fields: `spec` (`\"chara_card_v2\"` /\n`\"chara_card_v3\"` / vendor slug), `spec_version` (`\"2.0\"` /\n`\"3.0\"`), and `data{…}` (the actual card content). This struct is\nthe parsed form; the raw envelope is kept in `raw` so parsers that\nneed vendor-specific top-level fields (rare) can still reach them."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser",
+      "kind": "module",
+      "docs": "[`CharacterCardParser`] trait + canonical V2 slot logic.\n\nThe trait has six per-slot hooks whose defaults cover the V2 spec.\nDerivatives override individual hooks — see [`crate::card::v3`] for\nthe reference example.\n\nThe V2 slot logic is also exposed as free functions in\n[`v2_default`] so derivatives can chain (e.g. V3\n[`crate::card::v3::V3Parser`] calls [`v2_default::creator_notes`]\nand appends multilingual variants)."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::CharacterCardParser",
+      "kind": "trait",
+      "docs": "Extension trait for character-card decomposition.\n\nImpl this for each spec / vendor variant. The default `parse`\nimplementation runs the six slot hooks in a fixed order; override\nindividual hooks to tweak per-slot behaviour, or override `parse`\nitself for a radically different layout (rare — the V2 six-slot\nshape covers V3 and every third-party derivative surveyed in\n[`crate::catalogue`]).\n\nThe registered [`crate::card::CardParserRegistry`] pre-loads\n[`crate::card::V2Parser`] and [`crate::card::V3Parser`]. Third-party\ncrates add their own parsers via [`crate::card::CardParserRegistry::register`]."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default",
+      "kind": "module",
+      "docs": "Canonical V2 slot logic, exposed as free functions so derivatives\ncan chain (call the V2 version, then append their own outputs)\nrather than re-implement.\n\nEvery function is deterministic given the same envelope + context\nand produces zero footprints when the corresponding slot is\nabsent, empty, or the wrong shape (so importers can call them\nunconditionally without pre-checking)."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::TEXT_SLOT_NAMES",
+      "kind": "constant",
+      "docs": "The six V2 text-slot names, in the order [`text_slots`] emits\nthem. Exposed for derivatives that want to enumerate the same\nslots without depending on the exact list."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::book",
+      "kind": "function",
+      "docs": "V2 default for [`super::CharacterCardParser::parse_book`].\n\nHandles both the V2 embedded array shape\n(`character_book.entries: [{…}]`) and the standalone\ndict-of-uid shape (`character_book.entries: {\"<uid>\": {…}}`).\nEach entry becomes a [`Note`] whose body is the\nentry `content`, with `key[]` (or `keys[]`) merged into labels\nand the raw entry preserved in `extra.raw` so downstream can\nstill reach the position / order / decorator fields verbatim."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::card_tags",
+      "kind": "function",
+      "docs": "Card-level tag labels (`data.tags[]`) as owned strings. Empty\nwhen the slot is absent or not an array."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::creator_notes",
+      "kind": "function",
+      "docs": "V2 default for\n[`super::CharacterCardParser::parse_creator_notes`]. Emits one\n[`Doc`] with `format = Markdown` when the slot is\npresent."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::extensions_bag",
+      "kind": "function",
+      "docs": "Extract the extensions bag (`data.extensions`) as a JSON value\nso every emitted footprint's `extra` can carry the same\nverbatim copy — the canonical pass-through convention documented\nin [`crate::catalogue`]."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::greetings",
+      "kind": "function",
+      "docs": "V2 default for [`super::CharacterCardParser::parse_greetings`].\n\nEmits `first_mes` at `thread_position=0` and each\n`alternate_greetings[i]` at `thread_position=i+1`, all with\n`role = Assistant`."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::mes_example",
+      "kind": "function",
+      "docs": "V2 default for\n[`super::CharacterCardParser::parse_mes_example`]. Emits one\n[`Doc`] with `format = Plain` when the slot is\npresent."
+    },
+    {
+      "path": "asterism_importer_sdk::card::parser::v2_default::text_slots",
+      "kind": "function",
+      "docs": "V2 default for [`super::CharacterCardParser::parse_text_slots`].\n\nEmits one [`Note`] per non-empty text slot, with\nlabels `[\"character-card\", <slot>, <spec>, …tags]` and the\nvendor extensions bag mirrored into `extra.extensions`."
+    },
+    {
+      "path": "asterism_importer_sdk::card::png_chunk",
+      "kind": "module",
+      "docs": "Character-card PNG `tEXt` chunk decoders.\n\nTwo chunk keywords are canonical:\n[`CHARA_KEYWORD`] (V2, base64 UTF-8 JSON) and [`CCV3_KEYWORD`] (V3,\nsame encoding). On read prefer `ccv3` when both are present; the\nPNG importer or a character-card CLI uses\n[`envelope_from_chunk`] to lift each chunk value into a\n[`CardEnvelope`].\n\nChunk framing comes from `pngmeta`: where one chunk ends and the\nnext begins has a single right answer, and a card reader is the\nwrong place to re-derive it. What stays here is the card-specific\nhalf — which keyword wins, and how a chunk value becomes an\nenvelope.\n\nA card is the one thing a PNG's `tEXt` chunks are read for here.\n**Not** metadata in general: an ordinary image's chunks are that\nimage's own metadata and are hashed off its bytes server-side on the\n`Meta` axis (`asterism-core::domain::material_meta`), with no reader\non this side at all. A character card is a different claim — the\nchunk carries an envelope whose slots are separately addressable\nrecords — and [`envelope_from_chunk`] is where that claim is made."
+    },
+    {
+      "path": "asterism_importer_sdk::card::png_chunk::CCV3_KEYWORD",
+      "kind": "constant",
+      "docs": "PNG `tEXt` chunk keyword carrying a V3 character card."
+    },
+    {
+      "path": "asterism_importer_sdk::card::png_chunk::CHARA_KEYWORD",
+      "kind": "constant",
+      "docs": "PNG `tEXt` chunk keyword carrying a V2 character card."
+    },
+    {
+      "path": "asterism_importer_sdk::card::png_chunk::envelope_from_chunk",
+      "kind": "function",
+      "docs": "Decode a `chara` or `ccv3` chunk value into a [`CardEnvelope`].\n\nThe chunk value is expected to be base64-encoded UTF-8 JSON per the\nV2 / V3 spec. Returns `None` when base64 decoding, UTF-8 decoding,\nor JSON parsing fails, or when the resulting JSON does not match\nthe envelope shape ([`CardEnvelope::from_json`]).\n\nWhitespace around the base64 payload is trimmed before decoding\nbecause some editors round-trip a trailing newline into the chunk."
+    },
+    {
+      "path": "asterism_importer_sdk::card::png_chunk::envelope_from_png",
+      "kind": "function",
+      "docs": "Walk a PNG and lift the character card out of it.\n\n`ccv3` (V3) outranks `chara` (V2) per the spec-mandated read\npriority: every `ccv3` chunk is tried before any `chara` chunk.\n\n# Duplicate keywords\n\nPNG permits repeated keywords and editors produce them, because\nappending a chunk is cheaper than rewriting one. Within a keyword\nthis walks the chunks in file order and takes **the first one that\ndecodes** — not the first, not the last.\n\nThe failure this guards against is not \"which copy is newer\" but\n\"one copy is unusable\": a half-written or garbage `chara` left\nbehind by a broken writer would, under a strict first-wins rule,\nmask a perfectly good second copy and lose the card entirely, and\nlast-wins loses it the other way round. Trying each candidate is the\nonly rule that never discards a readable card. When two copies both\ndecode the earlier one wins, since file order is the only order the\ncontainer gives us and a rule that depends on which editor wrote\nlast is not a rule.\n\nWith exactly one chunk per keyword — every card in the wild — this\nis indistinguishable from the map lookup it replaces."
+    },
+    {
+      "path": "asterism_importer_sdk::card::registry",
+      "kind": "module",
+      "docs": "Registry that dispatches a [`CardEnvelope`] to the right\n[`CharacterCardParser`] by its `spec` string.\n\nPre-loaded defaults, first-registration-wins on collision, an\noptional look-up hook, and a `dispatch` that returns `None` when no\nparser claims the spec (so the caller can decide between skipping\nand falling back to raw V2 defaults)."
+    },
+    {
+      "path": "asterism_importer_sdk::card::registry::CardParserRegistry",
+      "kind": "struct",
+      "docs": "Routes envelopes to their parser by exact `spec()` match.\n\nThird-party derivatives (chub / RisuAI / AgnAI / KoboldAI) register\nthemselves here at importer start-up; the pre-loaded defaults\ncover [`V2Parser`] and [`V3Parser`]."
+    },
+    {
+      "path": "asterism_importer_sdk::card::source_parser",
+      "kind": "module",
+      "docs": "[`SourceParser`] adapter that turns any character-card [`RawItem`]\n(PNG tEXt or standalone JSON) into per-slot [`Footprint`]s.\n\nComposes the pipeline:\n[`RawItem`] → [`envelope_from_png`] / [`CardEnvelope::from_json`] →\n[`CardParserRegistry::dispatch`] → `Vec<Footprint>`.\n\nImporter binaries plug this straight into an [`FsScanner`](crate::FsScanner)\nso they only need to configure the source_kind slug and the batch\nposting loop."
+    },
+    {
+      "path": "asterism_importer_sdk::card::source_parser::CharaSourceParser",
+      "kind": "struct",
+      "docs": "[`SourceParser`] that decodes character cards from PNG tEXt chunks\nor standalone JSON and dispatches through a\n[`CardParserRegistry`].\n\nConfigure the `platform` label (`\"SillyTavern\"`, `\"CharacterHub\"`,\n…) via [`Self::with_platform`] and, when custom vendor parsers are\nneeded, hand in a pre-built registry via [`Self::with_registry`]."
+    },
+    {
+      "path": "asterism_importer_sdk::card::v2",
+      "kind": "module",
+      "docs": "Canonical Character Card V2 parser (see [`crate::catalogue`] section 1).\n\nAll six [`super::parser::CharacterCardParser`] hooks inherit their\ndefault implementations, which encode the V2 spec verbatim. This\ntype is a marker whose sole job is to advertise `spec() =\n\"chara_card_v2\"` so [`super::CardParserRegistry`] can route to it."
+    },
+    {
+      "path": "asterism_importer_sdk::card::v2::V2Parser",
+      "kind": "struct",
+      "docs": "V2 character-card parser.\n\nInherits the default composition of [`CharacterCardParser`] —\n[`super::parser::v2_default`] contains the concrete slot logic."
+    },
+    {
+      "path": "asterism_importer_sdk::card::v3",
+      "kind": "module",
+      "docs": "Character Card V3 parser (see [`crate::catalogue`] section 2).\n\nExtends the V2 default composition with three V3-only slot groups:\n\n- `creator_notes_multilingual{lang}` → one extra\n  [`Doc`] (Markdown) per language (appended to the V2\n  creator_notes doc via\n  [`super::parser::v2_default::creator_notes`]).\n- `group_only_greetings[]` → one [`ChatMessage`]\n  per entry, at high thread positions so they sort after normal\n  alternates without colliding.\n- `assets[]` → one [`Image`] per entry, keyed by\n  `(type, name)` so the grid can group emotions / backgrounds under\n  the card's shared `session_id`."
+    },
+    {
+      "path": "asterism_importer_sdk::card::v3::V3Parser",
+      "kind": "struct",
+      "docs": "V3 character-card parser. Inherits V2 slot logic and adds the V3\ndeltas via [`parse_creator_notes`](CharacterCardParser::parse_creator_notes)\nand [`parse_extras`](CharacterCardParser::parse_extras)."
+    },
+    {
+      "path": "asterism_importer_sdk::catalogue",
+      "kind": "module",
+      "docs": "# Import target catalogue\n\nField-mapping reference for schemas Asterism plans to import. Every\ntarget is decomposed into per-record [`crate::Footprint`]s sharing\none `session_id`, so [`asterism-core`]'s `edge_rebuild` clusters the\nsiblings via `time_proximity=1.0` (see\n[`crate::footprint::Note::session_id`] and its neighbours). Targets\nland here as they are surveyed; unverified fields are marked\n**(unverified)** and require a real export sample before an importer\nis written against them.\n\n[`asterism-core`]: https://github.com/ynishi/asterism/tree/main/crates/asterism-core\n\n## Design axioms\n\n1. **One character card ≠ one footprint.** A card is decomposed into\n   many per-slot footprints — name / description / personality →\n   `Note`, first_mes / alternate_greetings → `ChatMessage`, avatar /\n   emotions → `Image`, character_book entries → `Note`. This keeps\n   the grid UI's \"dense, browsable, per-record\" character intact.\n\n2. **No persona bootstrap from the importer.** Persona identity\n   stays with the existing `Persona` aggregate (created out of\n   band); every footprint attaches to a persona id passed via CLI.\n   Character metadata (name / description / avatar / expressions) is\n   treated as *assets* under that persona, not as a persona seed.\n\n3. **`session_id` groups per-container siblings.** All footprints\n   from one card / one chat / one lorebook / one conversation share\n   one `session_id` (typically the container's locator). The domain\n   then draws `time_proximity=1.0` edges automatically.\n\n4. **Extension namespaces pass through `extra`.** Fields under\n   `extensions.chub.*` / `extensions.risuai.*` / `extensions.agnai.*` /\n   … are stored verbatim in the footprint's `extra` JSON — the SDK\n   does not interpret them; downstream tooling can.\n\n## Locator taxonomy\n\nCommon suffixes used across importers. All idempotent, record-level,\nstable across re-imports (see\n[`crate::footprint::FootprintSource::locator`]).\n\n| suffix | meaning | example target |\n|---|---|---|\n| `<file>` | container = one footprint | standalone image, single doc |\n| `<file>#field=<slot>` | one text slot inside a container | V2 `name` / `description` / `personality` |\n| `<file>#greeting=<i>` | array-indexed greeting | `first_mes` / `alternate_greetings[i]` |\n| `<file>#book_entry=<uid>` | lorebook entry (id if present, else content hash) | `character_book.entries` / World Info |\n| `<file>#L<n>` | line-indexed record (append-heavy source) | SillyTavern chat JSONL |\n| `<file>#tree/<msg-id>` | tree-node message | ChatGPT / Claude conversation |\n| `<file>!<zip-inner-path>` | ZIP archive inner entry | `.charx` / SillyTavern backup |\n| `<file>#chunk=<name>` | PNG tEXt chunk | `chara` / `ccv3` |\n| `<file>#hash=<sha1>` | content-hash fallback when no stable id | MemoryPlugin, legacy books |\n\n---\n\n## Character cards\n\n### 1. SillyTavern Character Card V2\n\n**Implemented** — [`crate::card::V2Parser`] covers this section,\nwith a live integration test against SillyTavern's default\ncharacter (`default_Seraphina.png`) in\n`tests/seraphina.rs`.\n\n- Spec: [malfoyslastname/character-card-spec-v2](https://github.com/malfoyslastname/character-card-spec-v2/blob/main/spec_v2.md)\n- Container: PNG (tEXt `chara`, see section 3) or standalone `.json`.\n- Envelope: `{spec: \"chara_card_v2\", spec_version: \"2.0\", data: {…}}`.\n- `data.*`: `name` / `description` / `personality` / `scenario` /\n  `first_mes` / `mes_example` / `creator_notes` / `system_prompt` /\n  `post_history_instructions` / `alternate_greetings[]` /\n  `character_book` (section 9) / `tags[]` / `creator` /\n  `character_version` / `extensions{}`.\n- Split:\n  - `name` / `description` / `personality` / `scenario` /\n    `system_prompt` / `post_history_instructions` → `Note` × 6\n    (label = slot name)\n  - `first_mes` → `ChatMessage` (`role = Assistant`,\n    `thread_position = 0`)\n  - `alternate_greetings[i]` → `ChatMessage` × N\n    (`thread_position = 1 + i`, `extra.greeting_kind = \"alternate\"`)\n  - `mes_example` → `Doc(Plain)` (or `<START>`-split → many\n    `ChatMessage` when the parser recognises the delimiter)\n  - `creator_notes` → `Doc(Markdown)`\n  - `character_book.entries[]` → `Note` × N (see section 9)\n  - `tags[]` → labels (not a footprint)\n  - `extensions.*` → verbatim in every footprint's `extra`\n- Locator: `<container>#field=<slot>` / `#greeting=<i>` /\n  `#book_entry=<id>`.\n\n### 2. Character Card V3 (superset of V2)\n\n**Implemented** — [`crate::card::V3Parser`] extends [`crate::card::V2Parser`]\nwith `creator_notes_multilingual`, `group_only_greetings`, and\n`assets[]`. Unit-tested via schema-based synthetic envelopes in\n`src/card/v3.rs`.\n\n- Spec: [kwaroran/character-card-spec-v3](https://github.com/kwaroran/character-card-spec-v3/blob/main/SPEC_V3.md)\n- Delta vs V2: `assets[]`, `creator_notes_multilingual{lang}`,\n  `group_only_greetings[]` (required), `nickname`, `source[]`,\n  `creation_date` / `modification_date` (Unix seconds),\n  `character_book.use_regex`, character_book entry `content` may\n  embed `@@`-decorators (`@@depth`, `@@role`,\n  `@@activate_only_after`, …).\n- Container: PNG (tEXt `ccv3`, `chara` fallback) or `.charx` ZIP.\n- `.charx` layout:\n  ```text\n  card.json\n  assets/<type>/<category>/<file>\n      type     ∈ icon | background | emotion | user_icon | x_<custom>\n      category ∈ images | audio | video | l2d | 3d | ai | fonts | code | other\n  ```\n- Additional split (on top of section 1):\n  - `assets[type ∈ icon|background]` → `Image` (`label =\n    \"asset:<type>\"`, `extra.ext = \"png\"|\"webp\"|…`)\n  - `assets[type=emotion]` → `Image` × N (`label = \"emotion:<name>\"`)\n  - `creator_notes_multilingual{lang}` → `Doc(Markdown)` × N\n    (`extra.lang = \"<iso-639-1>\"`)\n  - `group_only_greetings[i]` → `ChatMessage` (`label = \"group_only\"`)\n  - character_book decorators → carried on entry `Note.extra.decorators`\n    (parse deferred to downstream)\n- Locator: `<charx>!card.json#field=<slot>` /\n  `<charx>!assets/<type>/<category>/<file>`; PNG same as V2\n  (section 1) but preferring `#chunk=ccv3`.\n\n### 3. PNG tEXt embed\n\n**Implemented** — chunk decoding lives in\n[`crate::card::png_chunk`] ([`crate::card::envelope_from_chunk`]\nfor base64 → envelope, [`crate::card::CHARA_KEYWORD`] /\n[`crate::card::CCV3_KEYWORD`] for the canonical keyword strings).\n\n- Chunks: `chara` (V2 base64 UTF-8 JSON), `ccv3` (V3 base64 UTF-8\n  JSON). tEXt is Latin-1 → base64 → ASCII wrap is spec-mandatory.\n- Read priority: `ccv3` wins, `chara` falls back. Both may coexist\n  on one file (V3 emitters often write both for compatibility).\n- The PNG bitmap itself becomes an `Image` (label = `avatar`);\n  the embed then decomposes per sections 1 / 2.\n- Locator: image = `<png>`; embed container = `<png>#chunk=<name>`;\n  per-record = `<png>#chunk=<name>/field=<slot>`.\n\n### 4. CharacterHub (chub.ai)\n\n- Base: V2 (section 1); chub is a web host, not a spec author.\n- Delta: `data.extensions.chub.*` namespace (observed keys:\n  `alt_expressions`, `related_lorebooks`, `expressions`,\n  `background_image`, `tags`, `stats` — **literal field list\n  unverified**, needs a real card sample to enumerate).\n- Container: PNG (default) or `.json`.\n- Split: identical to V2; `chub.*` fields pass through in `extra`.\n- Locator: identical to V2.\n\n### 5. RisuAI\n\n- Author of V3 spec ([kwaroran/RisuAI](https://github.com/kwaroran/RisuAI)).\n- Containers: `.png` (chara or ccv3), `.json`, `.charx` (ZIP), plus\n  `.risup` (LLM preset — **not** a card) and `.risum` (regex /\n  trigger module — **not** a card, skip on generic import).\n- Delta: `data.extensions.risuai.*` namespace: `emotions`,\n  `additionalAssets`, `customScripts`, `bias`, `viewScreen`,\n  `lowLevelAccess` (**literal shape unverified** — source\n  `src/ts/*` read required).\n- Split: V3 (section 2). Emotions under `assets/emotion/*` → `Image` × N.\n- Locator: V3 (section 2).\n\n### 6. AgnAI\n\n- Schema (verbatim TypeScript): [agnaistic/agnai `common/types/library.ts`](https://github.com/agnaistic/agnai/blob/dev/common/types/library.ts)\n- Container: `.json` (also imports/exports V2 PNG chunks).\n- Delta vs V2: `persona: Persona` object with `kind ∈\n  wpp/sbf/boostyle/text/attributes` replaces flat `personality`;\n  `sprite: FullSprite` (2D avatar composition); `culture`,\n  `insert{depth,prompt}`, `voice`, `imageSettings`, `json:\n  ResponseSchema` are agnai-only.\n- Split:\n  - V2 core (section 1)\n  - `persona.attributes[k]` (when `kind=attributes`) → `Note` × N\n    (`label = \"persona:<k>\"`)\n  - `sprite` → `Note` (`label = \"sprite-composition\"`, JSON in\n    `body`); referenced part images → `Image` × N\n  - `avatar` (base64 or URL) → `Image`\n- Locator: `<json>#field=persona.attribute.<k>` /\n  `#field=sprite` / `#greeting=<i>` / `#book_entry=<i>`.\n\n### 7. KoboldAI Lite preset / story save\n\n- Source (no formal spec): [LostRuins/lite.koboldai.net](https://github.com/LostRuins/lite.koboldai.net)\n- Character preset (V1 subset): `name`, `description`,\n  `personality`, `scenario`, `first_message` (aliases: `first_mes` /\n  `greeting` — **which alias is canonical is unverified**, parse\n  tolerantly).\n- Story save embeds `memory` / `authorsnote` / `worldinfo[]` /\n  `actions[]` / `savedsettings`.\n- Split:\n  - Character preset: `Note` × 4 (name → title label) + `ChatMessage`\n    × 1 (first_message)\n  - `memory` / `authorsnote` → `Note` × 2 (labels = `memory`,\n    `authors-note`)\n  - `worldinfo[]` → `Note` × N (see section 9)\n  - `actions[]` → `ChatMessage` × N (`thread_position = index`,\n    `role` via `is_user`) — **the heaviest path in this crate; one\n    story = N chat messages**\n- Locator: `<json>#field=<slot>` / `#wi=<uid>` / `#action=<i>`.\n\n---\n\n## Chat logs\n\n### 8. SillyTavern chat JSONL\n\n- Container: `.jsonl` at\n  `~/SillyTavern/data/default-user/chats/<char>/<YYYY-MM-DD-HHmmss>.jsonl`\n  (host-side layout; group chats live under `.../group chats/`).\n  Append-heavy — use [`crate::ScanMode::Watch`] with per-record\n  locators.\n- Line 1 = header (`user_name`, `character_name`, `create_date`,\n  `chat_metadata`).\n- Line N (N ≥ 2) = message (`name`, `is_user`, `send_date`, `mes`,\n  `swipes[]`, `swipe_id`, `swipes_info[]`, `extra{model, api,\n  token_count}`).\n- **Date parsing quirk**: `send_date` is typically a human-readable\n  English string (e.g. `\"June 22, 2024 3:14pm\"`), not ISO 8601 or\n  epoch. Some builds emit epoch ms. Parse tolerantly; on failure\n  fall back to [`crate::RawItem::occurred_at`].\n- Split:\n  - Header → drop; use as `session_id` seed + baseline\n    `occurred_at`.\n  - Message → `ChatMessage` (`role` via `is_user` / `is_system` →\n    `User` / `System` / `Assistant`; `extra` carries model / api /\n    token_count).\n  - `swipes[]` alternatives: default = fold into `extra`; per-record\n    option = emit each alt as its own `ChatMessage` with `label =\n    \"swipe:<i>\"` (aligns with the \"dense, browsable\" axiom).\n- Locator: `<file>#L<n>` (line-indexed, safe under append). No\n  intrinsic message id in the format.\n\n### 9. SillyTavern World Info / lorebook\n\n- Container: `.json` at\n  `~/SillyTavern/data/default-user/worlds/<name>.json`, or embedded\n  in V2/V3 `data.character_book`.\n- **Asymmetric shape**: standalone = `entries: { \"<uid>\": {…} }`\n  (dict, keyed by uid); embedded (V2) = `entries: [ {…} ]` (array).\n  Parsers must handle both.\n- Entry field (standalone superset): `uid`, `key[]`,\n  `keysecondary[]`, `comment`, `content`, `constant`, `selective`,\n  `selectiveLogic`, `order`, `position`, `disable`, `probability`,\n  `depth`, `group`, `role` (0=system / 1=user / 2=assistant),\n  `scanDepth`, `caseSensitive`, `matchWholeWords`, `automationId`,\n  `vectorized`, `sticky` / `cooldown` / `delay`, `displayIndex`,\n  `characterFilter`, `excludeRecursion` / `preventRecursion` /\n  `delayUntilRecursion`.\n- Split: each entry → `Note` (`body = content`, `labels = [\"lore\"]\n  + key[]`, `session_id` = book locator, remaining fields → `extra`).\n  Long `content` (> ~3 paragraphs) may escalate to `Doc(Markdown)`\n    at parser discretion.\n- Locator: standalone = `<file>#entry=<uid>`; embedded =\n  `<container>#book_entry=<uid-or-content-sha1[:8]>` (V2 array shape\n  often lacks `uid`, fall back to a content hash).\n\n### 10. NovelAI Lorebook\n\n- Doc: [NovelAI docs — Lorebook](https://docs.novelai.net/en/text/lorebook/)\n  (no formal JSON schema — field list is doc + community reverse).\n- Container: `.lorebook` or `.json` (identical body).\n- Fields: `lorebookVersion` (**current value unverified**),\n  `entries[]` (`text`, `keys[]`, `contextConfig{suffix, tokenBudget,\n  budgetPriority, trimDirection, insertionType, insertionPosition,\n  maximumTrimType, reservedTokens}`, `searchRange`, `enabled`,\n  `forceActivation`, `keyRelative`, `categories[]`, `displayName`,\n  `id`, `lastUpdatedAt`, `phraseBiasGroups[]`), `categories[]`,\n  `settings{}`, top-level `phraseBiasGroups[]`.\n- **Not V2-compatible** — needs its own parser. Community\n  converters emit V2 `character_book` shape when needed.\n- Split: each entry → `Note` (`body = text`, `labels =\n  [\"lorebook\", \"novelai\"] + keys`, `session_id = <file>`, `keys /\n  categories / contextConfig` → `extra`).\n- Locator: `<file>#entry=<entry.id>` (id is stable).\n\n### 11. ChatGPT export\n\n- Path: Settings → Data controls → Export data → emailed zip.\n- Zip contents: `conversations.json`, `chat.html`, `user.json`,\n  `message_feedback.json`, `model_comparisons.json`, (recent —\n  unverified) `shared_conversations.json`,\n  `dalle-generations/<uuid>.png`.\n- `conversations.json` = array of `{id, title, create_time,\n  update_time, mapping: {<node-id>: Node}}` where each `Node =\n  {id, message, parent, children[]}` and each `Message = {id,\n  author.role (user/assistant/system/tool), content.{content_type,\n  parts[]}, create_time, metadata.model_slug, status, recipient}`.\n- Split:\n  - Message → `ChatMessage` (`session_id = <conversation.id>`,\n    `role` via `author.role`, `body = parts.join(\"\\n\\n\")`,\n    `parent_message_id = node.parent`, `thread_position` = BFS\n    index over `mapping`)\n  - Multimodal `parts[]` dict entries with `asset_pointer` →\n    sibling `Image` (same `session_id`; `extra.asset_pointer =\n    \"…\"`)\n  - `dalle-generations/*.png` → `Image` (cross-link via\n    `asset_pointer` when resolvable)\n  - `user.json` / feedback / comparisons → not emitted; feedback\n    merges into corresponding message `extra`\n- Locator: `<zip>!conversations.json#tree/<conversation.id>/<message.id>`\n  / `<zip>!dalle-generations/<filename>`.\n\n### 12. Claude data export\n\n- Path: Settings → Privacy → Data controls → Export data.\n- Zip contents: `conversations.json` (often 100 MB+), `users.json`,\n  `projects.json`, `memories.json` (README / index varies).\n- `Conversation`: `{uuid, name, summary, created_at, updated_at,\n  account.uuid, chat_messages[]}`.\n- `chat_messages[]`: `{uuid, sender ∈ \"human\"|\"assistant\", text,\n  created_at, updated_at, content (structured — tool_use blocks,\n  **shape unverified**), attachments[], files[]}` (attachments and\n  files are **distinct** arrays).\n- `projects.json`: `{uuid, name, description, prompt_template,\n  docs[], creator}`.\n- `memories.json`: `{conversations_memory[], project_memories[]}`\n  (element shape **unverified**).\n- Split:\n  - `chat_messages[]` → `ChatMessage` (`session_id =\n    conversation.uuid`, role: `sender == \"human\"` → `User`,\n    `\"assistant\"` → `Assistant`; `body = text` — or reassemble from\n    `content` when `text` is empty; `thread_position = index`)\n  - Conversation summary → `Doc(Other(\"claude_conversation\"))`\n    (same `session_id`, `title = name`, `excerpt = summary`)\n  - Each project → `Doc(Other(\"claude_project\"))`; `docs[]` inside\n    → `Doc` × N (session_id shared with project uuid)\n  - `memories.json.conversations_memory[]` /\n    `project_memories[]` → `JournalEntry{kind = Memory}` × N\n    (Anthropic's \"memory\" surface aligns directly with this\n    variant's semantics)\n  - `attachments[]` / `files[]`: images → `Image`; docs → `Doc`;\n    `session_id` shared with parent conversation so\n    `edge_rebuild` links siblings\n  - `users.json` → **not emitted** (persona bootstrap is out of\n    scope; see axiom 2)\n- Locator:\n  `<zip>!conversations.json#tree/<conv.uuid>/<msg.uuid>` /\n  `<zip>!projects.json#project=<uuid>[/docs/<id-or-index>]` /\n  `<zip>!memories.json#conversations_memory/<id-or-content-sha1[:8]>`.\n\n---\n\n## AI-native memory\n\n### 13. Letta (formerly MemGPT)\n\n- Repo: [letta-ai/letta](https://github.com/letta-ai/letta). Schema\n  SoT: `letta/schemas/{memory,agent}.py` + `letta/orm/message.py`.\n- Native storage: SQLAlchemy over SQLite (dev) / Postgres (prod).\n  **No first-party zip export** — practical export paths: (a)\n  Python SDK / CLI per-agent JSON dump, (b) SQLite file copy, (c)\n  `pg_dump`.\n- Core memory: `Memory = {agent_type, git_enabled, blocks[Block],\n  file_blocks[FileBlock], prompt_template}`. `ChatMemory`\n  (BasicBlockMemory) preloads `persona` and `human` blocks with\n  `limit = CORE_MEMORY_BLOCK_CHAR_LIMIT`.\n- Message ORM row: `{id, role, text, content[MessageContent],\n  model, name, tool_calls, tool_call_id, step_id, run_id, otid,\n  tool_returns, group_id, sender_id, conversation_id, is_err,\n  sequence_id, approval_request_id, batch_item_id}`. Linear (no\n  `parent` column).\n- Archival: `{id, timestamp, content, tags[]}` on read;\n  `{text, tags, created_at}` on create.\n- Split:\n  - Block (persona / human / custom) → `Note` (`body = value`,\n    `label = <block.label>`); use\n    `Doc` (`format = Markdown`, `labels = [\"handoff\"]`) when the semantic is\n    carry-across-agents rather than static persona text\n  - Archival passage → `JournalEntry{kind = Memory}`\n  - Message row → `ChatMessage` (`session_id = conversation_id`,\n    `thread_position = sequence_id`; `parent_message_id = None`\n    because Letta's chat is linear)\n  - Sources / file_blocks → `Doc`\n- Locator: `<export>#agents/<agent_id>/blocks/<label>` /\n  `#agents/<agent_id>/archival/<passage_id>` /\n  `#agents/<agent_id>/messages/<message.id>`. When `id` is absent\n  the message has no address and is dropped — do **not** fall back\n  to `messages/seq/<sequence_id>`. A sequence number describes the\n  export's contents at one moment, so an export that gains a\n  message ahead of it re-addresses everything behind onto its\n  neighbour (see [`crate::parser`]).\n\n### 14. MemoryPlugin\n\n- API: [help.memoryplugin.com/api-reference](https://help.memoryplugin.com/api-reference/introduction);\n  OpenAPI at `https://www.memoryplugin.com/openapi.json`.\n- Native storage: SaaS, server-side, not exposed.\n- Memory shape (OpenAPI verbatim): `{text, score,\n  metadata.bucketId}`. Create input: `{text, bucketId, source}`.\n  **Record `id` / `created_at` are not exposed in the OpenAPI**\n  response schemas — may exist server-side (unverified).\n- Export: no dedicated `/export` endpoint; the browser extension\n  emits a single JSON blob (shape **unverified**, typical:\n  `{memories[], buckets[]}`).\n- Split:\n  - Memory item → `JournalEntry{kind = Memory}` (`body = text`,\n    `session_id = str(bucketId)`, `labels = [source]`)\n  - Bucket → not emitted; used only as `session_id` grouping\n    (bucket name / description → `extra`)\n  - `POST /api/chat-history/inject` payloads → out of scope\n    (write path, not user data)\n- Locator:\n  `<export.json>#memory/hash=<sha256(text || bucketId || source)>`\n  until a real record id is confirmed.\n\n---\n\n## Whole-account backups\n\n### 15. SillyTavern backup zip\n\n- Container: 7z (default from SillyTavern-Launcher) or zip of the\n  whole `data/<user>/` tree. Inner layout:\n  `characters/` (sections 1 / 2 / 3), `chats/` (section 8),\n  `worldinfo/` (section 9), `groups/`, `group chats/`,\n  `backgrounds/`, `user_avatars/`,\n  `themes/`, `presets/`, `settings.json`, `backups/`.\n- Split: each inner file walks its own catalogue entry\n  (`characters/*` → sections 1 / 2 / 3; `chats/*.jsonl` → section 8;\n  `worldinfo/*.json` → section 9). `backgrounds/` / `user_avatars/` /\n  `themes/` / `presets/` / `settings.json` are config assets —\n  skip (importing them would be noise).\n- Locator prefix: `<backup.7z>!<inner-path>`; the inner path then\n  uses the per-format suffix from the target's own section.\n\n---\n\n## Media (container-scanned)\n\n### 17. Video (MP4 / MOV / WebM)\n\n**Implemented** — [`crate::Video`] variant + `asterism-import video`\nsubcommand. Two probe layers: `mp4parse` (Mozilla, pure Rust) for\nISOBMFF containers (MP4 / MOV), then `matroska` (pure Rust) for\nEBML containers (WebM / MKV).\n\n- Extraction: dims (from `tkhd` / Matroska pixel dims), duration_ms\n  (from track duration × timescale / segment info), codec (H.264 /\n  H.265 / AV1 / VP9 / MP4V / …), from the first video track when\n  present.\n- Extensions: `.mp4` / `.mov` / `.webm` / `.m4v` / `.mkv` / `.avi`\n  accepted by default (`.avi` lands container-only — neither probe\n  reads RIFF).\n- Fixtures verified: `minimal.mp4` (Mozilla), `animation.mov`\n  (openpreserve, 320×240 25fps 1s), `bbb_360_10s.webm` (Big Buck\n  Bunny, CC-BY).\n- Modality slug: `\"video\"`. Codec surfaces as `codec:<slug>` label.\n\n### 18. Audio (MP3 / M4A / WAV / FLAC / OGG)\n\n**Implemented** — [`crate::Audio`] variant + `asterism-import audio`\nsubcommand. Metadata via `lofty` (pure Rust,\nheader-only). Covers voice memos, VoiceLoid / VoiceVox synthesis\noutput, podcasts, music, dictation.\n\n- Extraction: duration_ms, sample_rate, channels, codec (mp3 /\n  aac / pcm / flac / vorbis / opus / speex / …).\n- Extensions: `.mp3` / `.m4a` / `.wav` / `.flac` / `.ogg` /\n  `.opus` / `.oga` / `.aac` / `.aiff` accepted by default.\n- Modality slug: `\"audio\"`. `voice` / `voice-synth` / `music` /\n  `podcast` etc. flow as free-form labels for grid facet.\n\n---\n\n## Agent-harvest intake\n\n### 16. `asterism_agent_harvest` canonical schema\n\n**Implemented** — see [`crate::harvest`] for the schema types\n([`crate::harvest::HarvestEnvelope`]), the parser\n([`crate::harvest::HarvestSourceParser`]), and the prompt-ready\nexample ([`crate::harvest::schema_example_json`]). Exposed through\nthe `asterism-import harvest` subcommand.\n\n- Covers: closed cloud services with **no official export** —\n  Character.AI, Kindroid, Replika, Grok, x.com bot chats — plus\n  any future intake whose native format is not worth carving a\n  dedicated Rust parser for.\n- Container: `.json` files in a landing dir. Watch-mode friendly.\n- Envelope: `{spec: \"asterism_agent_harvest\", spec_version, service,\n  service_user_id?, harvested_at?, characters[]?, conversations[],\n  extra}`.\n- Split: `conversations[].messages[]` → `ChatMessage` × N\n  (`session_id = uuid5(<file>#<conv.id>)`; `role` via\n  `ChatRole::User/Assistant/System/Tool/Other`; `thread_position`\n  = message index; `parent_message_id = message.parent_id`;\n  labels = `[\"agent-harvest\", service, role, \"chat:<title>\"?]`).\n  `characters[]` is preserved in each message's `extra.character`\n  but not emitted as its own footprint in v1 (character metadata\n  should route through sections 1 / 2 when possible).\n- Intake pipeline:\n  ```text\n  raw service dump  →  Claude Code / Codex writes converter\n  (browser scrape,      (prompted with the schema example above)\n   GDPR export,     →  canonical JSON in ~/.asterism/inbox/harvest/\n   DevTools grab)   →  asterism-importer-harvest picks it up\n                    →  Footprint::ChatMessage × N in DB\n  ```\n- Locator: `<file>#conversation=<conv.id>/message=<msg.id-or-idx>`.\n\n---\n\n## Cross-cutting conventions\n\n- **`session_id` sharing.** Every footprint decomposed from the\n  same container (card, chat, book, conversation, agent) shares\n  one `session_id` string — typically the container's own locator.\n  `edge_rebuild` then draws `time_proximity=1.0` edges across the\n  sibling set (see [`crate::footprint::Note::session_id`],\n  [`crate::footprint::Image::session_id`], and\n  [`crate::footprint::JournalEntry::session_id`]).\n- **Extension namespaces pass through.** Any\n  `data.extensions.<vendor>.*` sub-tree is stored verbatim in the\n  footprint's `extra` JSON; the SDK does not interpret it, so\n  third-party tools can query the raw shape later.\n- **Tolerant date parsing.** Chat exports do not agree on\n  `send_date` / `create_time` / `timestamp` format — ISO 8601,\n  Unix seconds, Unix milliseconds, and English human strings show\n  up side by side. Try each in fidelity order (payload → RawItem\n  `mtime` → `Utc::now()`), per the\n  [`crate::parser::SourceParser`] ladder.\n- **Unverified fields.** Anything marked **(unverified)** above\n  needs a real export sample before an importer commits to a\n  struct field for it. Until confirmed, prefer `extra`-bag\n  passthrough over hard-coded fields — cheap now, cheap to promote\n  later once the shape is nailed down.\n\n---\n\n## Experimental / future intake\n\nDesigns not yet implemented. Sketched here so the SDK contract\nshape is nailed down before the first sample arrives — the moment\na real intake source lands, the variant / adapter can go in\nwithout redesigning the surrounding schema.\n\n### E1. LoRA / adapter weights (`Footprint::Weights`, planned)\n\nLoRA fine-tunes, ControlNet adapters, DreamBooth checkpoints,\nIPAdapter models — the \"distilled identity\" surface for a\npersona (my-face LoRA, my-writing-style adapter, this-character's\nvoice model, …). Typical files: `.safetensors` / `.gguf` /\n`.pt` / `.onnx`, 10–500 MB per file.\n\n- New variant: `Footprint::Weights` with typed fields\n  `base_model: Option<String>` (e.g. `\"sdxl-1.0\"` / `\"llama-3-8b\"`),\n  `format: WeightsFormat` (Safetensors / Gguf / Pt / Onnx / Other),\n  `parameter_count: Option<u64>`, `training_config: Value` (extra\n  bag for LR / rank / trigger words / etc.).\n- Modality slug: `\"weights\"`. Labels: `[\"lora\"]` / `[\"adapter\"]` /\n  `[\"dreambooth\"]` / `[\"controlnet\"]` for grid facet.\n- Container is one file = one footprint (weights are indivisible).\n- Adapters intake: dedicated `asterism-importer-weights` binary\n  walking `~/Downloads/` / `~/models/` / civitai export dirs, or\n  folded into an existing `fs`-scanner path with extension filter.\n- Cover: LoRA preview image when present (many `.safetensors`\n  have a sibling `.png`) → sibling `Footprint::Image` with same\n  `session_id`.\n\n### E2. RAG embeddings (server-side companion table, planned)\n\nHigh-dim float embeddings over the corpus (semantic search\nbackbone). Typical scale: 384–1536-dim float32 × millions of\nrows — one embedding per existing asset, per embedding model.\n\n**Not a footprint variant.** Embeddings are derived data over\nexisting assets, so the natural shape is a **server-side\ncompanion table** (`asset_embedding` in `asterism-core`) with\n`(asset_id, embedding_model, vector BLOB)` rows and an ANN index\n(HNSW / IVF). One asset gets N rows (one per model). The SDK\ncontract stays modality-agnostic; embeddings are an infra layer\nthe domain owns.\n\nException: if a user wants to *import* a pre-computed embeddings\ndump (research project export, historical FAISS index), it lands\nvia `Footprint::Weights { format: WeightsFormat::Other(\"faiss\"), … }`\nand a downstream server-side job re-indexes into the companion\ntable.\n\n### E3. Interactive artifacts (Claude Artifacts / ChatGPT Canvas / GitHub Gist)\n\n**Already covered by [`crate::DocFormat`]** — no new variant needed.\nArtifacts map onto `Doc(Html)` / `Doc(Code(lang))` /\n`Doc(Markdown)` depending on payload shape; origin service\n(`\"claude-artifact\"` / `\"chatgpt-canvas\"` / `\"gist\"` /\n`\"observable\"`) flows via `Doc.labels` for facet. Pending: a\ndedicated harvester Skill (browser automation + share-URL grab)\nthat dumps into the section 16 agent-harvest schema for pickup.\n\n### E4. Terminal captures — Persona Tape lands, generic adapter pending\n\nPersona Tape transcripts are covered by `asterism-import tape`: one\n`.txt` terminal session becomes one `Tape` footprint (`Modality::TAPE`) with\nthe original file retained as the searchable source. The broader\nterminal adapter (raw `.log`, VHS `.tape`, and asciinema `.cast`,\nincluding ANSI stripping) is still pending.\n\n### E5. \"PersonaVaultApp\" completion\n\nWith Weights (E1) + Embeddings (E2) landing, one persona's grid\nholds every trace the AI needs to *exist* as that character:\ncharacter card definition, chat history, voice / video / photo\nidentity, LoRA / adapter distillation, and a searchable\nembedding backbone. The current 7-variant SDK contract\n(`ChatMessage` / `Doc` / `Note` / `JournalEntry` / `Image` /\n`Video` / `Audio`) covers the observable side; Weights closes\nthe model-side gap.\n\n### E6. Screenshot pipeline (universal fallback)\n\nScreenshots are the ultimate \"any source works\" capture path —\nwhen a service has no official export (Char.AI, Kindroid,\nSora, Kling, Grok, private chats, closed apps), the user can\nalways screenshot the surface and preserve it. Digital\nAlma-style persona reconstruction (\"gachi de Persona-chan no\nfootprint\") leans heavily on this fallback.\n\n- **Already covered by `asterism-import image`** — no new\n  variant needed. Screenshots are `Footprint::Image` with EXIF\n  / dims / thumb the same as any photo.\n- **Watch-mode integration is the missing UX piece.** Point\n  `asterism-import image --watch --dir ~/Desktop` (macOS\n  default screenshot dir) or `~/Pictures/Screenshots` (Windows) /\n  iCloud Photos Screenshots album at the FS scanner and every\n  `Cmd+Shift+4` shot lands in the grid within seconds. A tiny\n  launchd plist / systemd unit / shortcut wrapper is enough —\n  no code change required.\n- **Screenshot-specific labels.** iOS screenshots carry\n  `mediasubtype = 4` (SPSS) in EXIF; macOS shots write\n  `Software = \"Screenshot\"`. The image parser can auto-add a\n  `\"screenshot\"` label from these hints so the grid facet is\n  free.\n- **Follow-up cover_gen jobs** (server side, not SDK): OCR\n  the screenshot for text search + VLM caption for semantic\n  search. Recovers the \"what was on this screen\" query even\n  when the source service is gone.\n\n### E7. External asset IDs / canonical service references\n\nAI companion services (Kindroid persona id, Character.AI\ncharacter UUID, Suno song id, HeyGen avatar id, HuggingFace\nmodel handle, civitai LoRA id, …) all expose a canonical\nreference the user wants to preserve alongside the footprint.\n\n- **Already covered by existing fields** — no new variant:\n  - `FootprintSource.locator` = canonical URL / id\n    (`https://beta.character.ai/character/<uuid>` etc.)\n  - `FootprintSource.platform` = origin service slug\n    (`\"character.ai\"` / `\"kindroid\"` / `\"suno\"` / …)\n  - `extra.external_ids` = free-form JSON bag for cross-service\n    joins (`{\"character_ai_uuid\": \"...\", \"suno_song_id\": \"...\"}`)\n- **Future promotion**: if cross-service dedup / join becomes a\n  hot query, promote to a first-class\n  `FootprintSource.external_id: Option<String>` field."
+    },
+    {
+      "path": "asterism_importer_sdk::client",
+      "kind": "module",
+      "docs": "Thin HTTP client for the asterism-server API.\n\nOnly wraps the two endpoints an importer actually needs:\n`POST /asterism/assets/add` (single) and\n`POST /asterism/assets/add-batch`."
+    },
+    {
+      "path": "asterism_importer_sdk::client::ApiClient",
+      "kind": "struct",
+      "docs": "HTTP client bound to a running `asterism-server`."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint",
+      "kind": "module",
+      "docs": "`Footprint` — the typed, plugin-facing shape a parser hands back.\n\nA footprint is *one* thing the user collected: one chat message, one\nimage, one doc, one note. This matches the domain intent in\n`asterism-core::domain::asset::Asset` — an aggregate root for a single\nfootprint. The SDK exposes a typed enum here so plugin authors do not\nhave to guess which fields belong on which modality; the compiler\nshows them the shape of every variant.\n\n# Design notes\n\n- **One `Footprint` = one `Asset` on the server.** A parser that\n  receives one `RawItem` (say, one `.jsonl` file) usually emits many\n  footprints (one per chat message inside the file).\n- **Variants are aligned with `Modality` well-known slugs.** New\n  modalities are added as new variants; the crate's API is still\n  pre-stability, so breaking additions\n  are cheap. Aspirationally-open extension via a `Custom` variant is\n  deferred until an external plugin author actually needs it.\n- **`extra` is a per-variant escape hatch.** Fields promoted to\n  variant fields have a `Some`/typed shape enforced by the compiler;\n  everything else lives in `extra` as raw JSON. When several sources\n  grow the same key in `extra`, promote it.\n- **The mapping to `AssetSpec` lives here, not in each parser.** The\n  SDK owns the cover-hint truncation, the modality slug, the label\n  normalisation — plugin authors only choose the variant and fill in\n  the typed fields."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Audio",
+      "kind": "struct",
+      "docs": "One audio clip (voice memo, VoiceLoid / VoiceVox synthesis\noutput, podcast episode, music track, dictation).\n\nMaps to modality slug `\"audio\"`. `voice` / `music` /\n`voice-synth` etc. are conveyed as labels for facet, not as\nseparate variants — the storage shape and UI treatment are the\nsame at the SDK layer."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::COVER_MAX_CHARS",
+      "kind": "constant",
+      "docs": "Maximum cover hint length in Unicode scalar values."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::ChatMessage",
+      "kind": "struct",
+      "docs": "One chat / dialogue message (Claude Code turn, Slack message,\niMessage, …).\n\nMaps to `Modality::DIALOGUE` on the server. `external_session_key`\nis **required** for chat because grouping is the primary\nconstellation signal for this modality — the server resolves the\nkey to a `Session.id` through\n`SessionService::find_or_create_by_external_key`, so re-imports\nconverge on the same Session row."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::ChatRole",
+      "kind": "enum",
+      "docs": "Role a chat participant played on a specific message."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Doc",
+      "kind": "struct",
+      "docs": "One doc / written work product (Markdown note, PDF, spec, code\nfile, …).\n\nMaps to `Modality::WORK_PRODUCT`."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::DocFormat",
+      "kind": "enum",
+      "docs": "Format of a `Doc` footprint.\n\nWell-known Doc containers get typed variants so the compiler\nguides plugin authors and the grid UI can facet cleanly. New\nwidely-adopted formats are added here as new variants while the\nenum can still grow freely; reserve\n[`DocFormat::Other`] for one-off vendor slugs the SDK\ndoes not track.\n\nInteractive artifacts (Claude Artifacts, ChatGPT Canvas, GitHub\nGist) map straight onto [`DocFormat::Html`] / [`DocFormat::Code`]\n/ [`DocFormat::Markdown`] as appropriate — no dedicated variant.\nTheir `Doc.labels` carry the origin service (`\"claude-artifact\"`,\n`\"gist\"`, …) for facet."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Footprint",
+      "kind": "enum",
+      "docs": "The typed shape a parser hands back.\n\nEvery parser returns `Vec<Footprint>` — the vector may be empty\n(raw item was noise) or many (one JSONL file yielding many\nmessages). The SDK converts each footprint to an `AssetSpec` before\nbatching to the server; plugin authors do not touch `AssetSpec`\ndirectly."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::FootprintSource",
+      "kind": "struct",
+      "docs": "Reference to the raw source of a footprint.\n\nDistinct from `asterism_core::domain::value::SourceRef` (the domain\nobject) because the SDK layer speaks in slugs / strings so plugin\nauthors do not have to depend on the core crate."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Image",
+      "kind": "struct",
+      "docs": "One image (photo, screenshot, drawing).\n\nMaps to modality slug `\"image\"` (open slug — not yet a well-known\nconstant on the domain side, but recognised as valid there)."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::JournalEntry",
+      "kind": "struct",
+      "docs": "One journal-style entry — short self-authored text with a\ndomain-specific modality picked from `JournalKind`.\n\nDistinct from [`Note`]: `Note` hardcodes `Modality::MEMORY` and is\nmeant for sources with no journal semantics (Apple Notes, Bear,\nObsidian, …). `JournalEntry` covers persona-journal rows,\ntick-log emitters, and anything else where the source itself\ndistinguishes state / emo / non_rem / memory / tick_log at row level."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::JournalKind",
+      "kind": "enum",
+      "docs": "Kind of journal-style entry the plugin is emitting.\n\nMirrors the domain's `Modality::STATE / EMO / NON_REM / MEMORY /\nTICK_LOG` well-known slugs. `Other` is an escape hatch —\nthe slug is passed through verbatim so sources with a bespoke kind\n(`\"dream\"`, `\"gratitude_log\"`, …) can round-trip without an SDK\nchange. The domain's `Modality` slug space is open, so custom\nvalues are accepted server-side too."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Note",
+      "kind": "struct",
+      "docs": "One short note (mood, idea, quick capture).\n\nMaps to `Modality::MEMORY` — kept distinct from `Doc` because the\ncover template and grid weighting differ."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::REGISTER_MAX_CHARS",
+      "kind": "constant",
+      "docs": "Maximum register-note preview length in Unicode scalar values."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Tape",
+      "kind": "struct",
+      "docs": "One terminal-session transcript / Persona Tape (`.tape`, `.cast`, `.log`).\n\nMaps to `Modality::TAPE`."
+    },
+    {
+      "path": "asterism_importer_sdk::footprint::Video",
+      "kind": "struct",
+      "docs": "One video (recording, screen capture, AI-generated clip).\n\nMaps to modality slug `\"video\"`. Symmetric with [`Image`] plus\n`duration_ms` / `codec` / `framerate` fields that videos need for\ngrid layout and playback previews."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest",
+      "kind": "module",
+      "docs": "# Agent-harvest intake subsystem\n\nCanonical JSON schema (`asterism_agent_harvest` v1) for\ningesting conversations from closed cloud services that ship no\nofficial export — Character.AI, Kindroid, Replika, Grok, and the\nlike. Instead of writing a Rust parser per service, the intake\nflow is:\n\n```text\n(browser scrape / DevTools dump / GDPR export / …)\n        │  raw service-specific JSON\n        ▼\n   Claude Code / Codex agent, prompted with the schema below\n        │  writes a one-off Python converter\n        ▼\n   canonical AgentHarvest JSON file dropped in a landing dir\n        │\n        ▼\n   asterism-importer-harvest binary picks it up and calls\n   HarvestSourceParser → Footprint::ChatMessage × N\n```\n\nThe SDK only sees the canonical schema. Per-service converters are\nthrowaway Python (or shell, or jq) scripts an LLM writes on demand,\nkept alongside the raw dumps by the user.\n\n## Schema (v1)\n\nA prompt-ready example is emitted by\n[`schema_example_json`] — the `asterism-importer-harvest\n--print-schema` CLI flag pipes it to stdout so a user can paste it\ninto Claude Code / Codex with \"convert my dump to this shape\":\n\n```json\n{\n  \"spec\": \"asterism_agent_harvest\",\n  \"spec_version\": \"1.0\",\n  \"service\": \"character.ai\",\n  \"service_user_id\": \"user-abc123\",\n  \"harvested_at\": \"2026-07-18T12:34:56Z\",\n  \"characters\": [\n    {\n      \"id\": \"seraphina-xyz\",\n      \"name\": \"Seraphina\",\n      \"description\": \"A gentle healer in a forest glade.\",\n      \"avatar_uri\": null,\n      \"extra\": {}\n    }\n  ],\n  \"conversations\": [\n    {\n      \"id\": \"conv-abc\",\n      \"character_id\": \"seraphina-xyz\",\n      \"title\": \"First encounter\",\n      \"started_at\": \"2026-01-01T00:00:00Z\",\n      \"messages\": [\n        {\n          \"id\": \"m1\",\n          \"role\": \"user\",\n          \"body\": \"hello\",\n          \"timestamp\": \"2026-01-01T00:00:01Z\",\n          \"parent_id\": null,\n          \"extra\": {}\n        },\n        {\n          \"id\": \"m2\",\n          \"role\": \"assistant\",\n          \"body\": \"welcome, traveler\",\n          \"timestamp\": \"2026-01-01T00:00:05Z\",\n          \"parent_id\": \"m1\",\n          \"extra\": {}\n        }\n      ],\n      \"extra\": {}\n    }\n  ],\n  \"extra\": {}\n}\n```\n\n## Mapping to Footprints\n\n- `conversations[].messages[]` → [`crate::ChatMessage`] × N\n  (`session_id = conversation.id`, `role` via\n  [`crate::ChatRole`], `thread_position` = message index,\n  `parent_message_id = message.parent_id`, `body = message.body`,\n  `occurred_at = message.timestamp || conversation.started_at ||\n  envelope.harvested_at || RawItem.occurred_at || Utc::now()`).\n- `conversations[].title` / `.started_at` → not emitted directly;\n  they seed the shared `session_id` grouping so `edge_rebuild`\n  links siblings.\n- `characters[]` → not emitted in v1 (character metadata is left\n  to a dedicated character-card importer such as\n  [`crate::card::CharaSourceParser`] because that route already\n  knows about avatars, personalities, and lorebooks). Extend v2\n  when a service exposes character metadata in a way no other\n  importer covers.\n- `service` / `service_user_id` / `spec_version` / envelope\n  `extra` → merged verbatim into every emitted footprint's `extra`\n  so downstream queries can filter by `service = \"character.ai\"`\n  etc.\n\nSee [`crate::catalogue`] section 16 for the catalogue-level entry."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope",
+      "kind": "module",
+      "docs": "Typed schema for `asterism_agent_harvest` v1 JSON dumps.\n\nEvery field is either strictly required or has a serde default so a\nminimal well-formed dump only needs `spec`, `spec_version`,\n`service`, and at least one `conversations[].messages[]` entry."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HARVEST_SPEC",
+      "kind": "constant",
+      "docs": "Canonical `spec` string every dump must carry. The parser rejects\npayloads whose `spec` differs, so future revisions (v2, v3) can\ncoexist without silent mis-interpretation."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HARVEST_SPEC_VERSION",
+      "kind": "constant",
+      "docs": "Current `spec_version`. Bumped on breaking schema changes."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HarvestCharacter",
+      "kind": "struct",
+      "docs": "Optional character metadata (persona-side info the harvester\npicked up alongside the conversations)."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HarvestConversation",
+      "kind": "struct",
+      "docs": "One conversation. All messages share the conversation's `id` as\ntheir session_id so `edge_rebuild` clusters them."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HarvestEnvelope",
+      "kind": "struct",
+      "docs": "Top-level envelope for one harvested batch (one file = one dump)."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::envelope::HarvestMessage",
+      "kind": "struct",
+      "docs": "One message inside a conversation. Maps to\n[`crate::ChatMessage`] verbatim."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::parser",
+      "kind": "module",
+      "docs": "[`SourceParser`] impl that decodes `asterism_agent_harvest` JSON\ndumps and emits [`Footprint::ChatMessage`] × N.\n\nA message is addressed `<dump>#conversation=<id>/message=<id>`,\nboth ids as the dump states them. A message with no `id` of its\nown is dropped, not numbered by its place in the array — see\n[`crate::parser`] for the rule and\n[`crate::parser::RecordAddresses`] for the count that goes with it."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::parser::HarvestSourceParser",
+      "kind": "struct",
+      "docs": "SourceParser for the `asterism_agent_harvest` canonical schema.\n\nOne dump file yields one `ChatMessage` per message across every\nconversation in the envelope. Character metadata (`characters[]`)\nis preserved in `extra.character` on the corresponding messages\nvia the character_id ↔ id join, but no dedicated character\nfootprints are emitted in v1 (see the module rustdoc)."
+    },
+    {
+      "path": "asterism_importer_sdk::harvest::schema_example_json",
+      "kind": "function",
+      "docs": "Return the canonical schema example as a `&'static str` (pretty JSON).\nUsed by the `asterism-importer-harvest --print-schema` CLI flag; the\nsame string is embedded in this module's rustdoc."
+    },
+    {
+      "path": "asterism_importer_sdk::mapper",
+      "kind": "module",
+      "docs": "Convenience shape for parser output plus the mapping to the wire\n`AddAssetCommand`."
+    },
+    {
+      "path": "asterism_importer_sdk::mapper::AssetSpec",
+      "kind": "struct",
+      "docs": "What a parser hands back to the pipeline.\n\nThe persona binding and the ingest source stay orthogonal — the\nparser attributes the item to a modality and (when known) a session\n/ labels / metadata; the persona id comes from the importer's CLI\nflag and is set by [`spec_to_command`]."
+    },
+    {
+      "path": "asterism_importer_sdk::mapper::spec_to_command",
+      "kind": "function",
+      "docs": "Turns an `AssetSpec` into the wire command."
+    },
+    {
+      "path": "asterism_importer_sdk::parser",
+      "kind": "module",
+      "docs": "`SourceParser` — turn a scanned [`RawItem`] into one or more\n[`Footprint`]s.\n\nParsers are the only piece an importer author must write; everything\nelse in the pipeline (scanning, mapping to `AddAssetCommand`, HTTP,\nprogress) is provided by the SDK.\n\n# Contract\n\nReturn one `Footprint` per **thing the user collected** (one chat\nmessage, one image, one doc, one note). Do **not** return one giant\n`Footprint` per raw item when the item contains many collectibles —\nfor example, one `.jsonl` file typically becomes many\n`Footprint::ChatMessage`s, not one summary. See\n`crate::footprint::Footprint` for how each variant maps to the\nserver-side asset.\n\n# `occurred_at` fallback ladder\n\nEvery footprint needs a `DateTime<Utc>`. Parsers resolve it in this\norder, top wins:\n\n1. **A timestamp inside the payload** — a `timestamp` field on the\n   JSON record, a `created_at` column on the SQLite row, an EXIF\n   `DateTimeOriginal`. This is per-*record* and is by far the most\n   accurate.\n2. **[`crate::scanner::RawItem::occurred_at`]** — what the scanner\n   derived from the container (file `mtime`, HTTP `Date` header,\n   row timestamp column when the scanner already lifted it). This\n   is per-*container*, so it is a good fallback for single-record\n   items (one image = one file, one doc = one file) and a\n   **coarse** fallback for multi-record containers (all messages\n   in one `.jsonl` share the same `mtime`, which loses ordering).\n3. **`Utc::now()`** — last resort when neither of the above is\n   available. Signals to the caller that ordering downstream will\n   be unreliable.\n\nNever invert the order. Using the file `mtime` for a chat message\ninside a session log makes every message look like it arrived at\nthe moment the file was last flushed, which erases the\nwithin-session ordering the domain relies on for edge / grid\nplacement.\n\n# Partial success on multi-footprint items\n\nOne `RawItem` may yield many footprints (JSONL: one file → many\nmessages; SQLite: one table → many rows). If some records inside\nthe item are malformed, prefer to **skip them and return the good\nones** rather than returning `ParseError::Malformed` for the whole\nbatch — a single bad line should not drop the rest of a session.\nReserve [`ParseError::Malformed`] for cases where the whole\n`RawItem` is unusable (wrong file type, unreadable header).\n\nSkipping is not silent. Count what was dropped and say so once per\ncontainer at the end of `parse`; [`RecordAddresses`] owns both the\ncount and the wording. An importer that drops records without a\nword leaves the operator reading a run that looks complete.\n\n# A record's address is the source's to give\n\nA record inside a container is addressed\n`<container>#<the id the source declared>`. When the source\ndeclares no id there is no address, and the record does not become\nan asset. Do **not** substitute the record's position — a line\nnumber, an array index, an ordinal.\n\nA position describes the container's contents at one moment, not\nthe record. Insert one line ahead and every address behind the\ninsert lands on its neighbour, where the server's\n`(source_kind, source_locator)` lookup finds the neighbour's row\nand discards the arriving payload. Nothing errors; the import\nreports success and the record is gone. The address is also\nunreadable in the other direction — the readers in\n`asterism-infra` match a fragment against the record's own id, and\nno record has the id `L3`, so the body never resolves.\n\n[`RecordAddresses`] is the shared implementation of this rule."
+    },
+    {
+      "path": "asterism_importer_sdk::parser::ParseError",
+      "kind": "enum",
+      "docs": "Errors returned by parsers."
+    },
+    {
+      "path": "asterism_importer_sdk::parser::RecordAddresses",
+      "kind": "struct",
+      "docs": "One container's worth of the addressing rule above: hands back the\nid the source declared, and keeps count of the records it had to\nturn down.\n\nA parser builds one of these per `RawItem`, asks\n[`declared`](Self::declared) for each record's id, skips the\nrecords that come back `None`, and calls [`report`](Self::report)\nonce at the end of `parse`.\n\n```\n# use asterism_importer_sdk::RecordAddresses;\nlet mut addresses = RecordAddresses::in_container(\"/logs/s.jsonl\");\nassert_eq!(addresses.declared(Some(\"u1\")), Some(\"u1\"));\nassert_eq!(addresses.declared(None), None); // caller skips this record\naddresses.report(); // one line on stderr, naming the container\n```\n\nThe report goes to stderr directly rather than through `tracing`:\nno importer crate installs a subscriber, so a `tracing::warn!` here\nwould compile, pass review, and print nothing. The neighbouring\nper-container line in [`crate::runner`] is written the same way."
+    },
+    {
+      "path": "asterism_importer_sdk::parser::SourceParser",
+      "kind": "trait",
+      "docs": "Trait every source parser implements.\n\nOne `RawItem` may produce zero, one, or many `Footprint`s.\nReturning an empty vector is a legitimate \"skip\" signal (for\nexample when the scanner picked up an unrelated file)."
+    },
+    {
+      "path": "asterism_importer_sdk::progress",
+      "kind": "module",
+      "docs": "Tiny progress reporter — running success / failure counters, plus\nan event stream to stderr."
+    },
+    {
+      "path": "asterism_importer_sdk::progress::Progress",
+      "kind": "struct",
+      "docs": "Cheaply cloneable progress handle. All counters live on the same\nshared atomics so multiple pipeline stages can bump them without\ncoordination."
+    },
+    {
+      "path": "asterism_importer_sdk::runner",
+      "kind": "module",
+      "docs": "Shared importer execution pipeline.\n\nCLI/config parsing stays in the outer binary. This module receives\nresolved values plus a scanner/parser pair and owns the mechanical\nscan → parse → batch → HTTP → progress loop.\n\n# Where a declared digest comes from\n\n[`AssetSpec::declared_content_hash`](crate::AssetSpec::declared_content_hash)\nis filled in here rather than in any parser, because this is the one\nplace that can see both halves of the question at once: the scanner\nsays whether its payload is a whole artefact\n([`SourceScanner::payload_is_whole_artefact`]), and the spec says\nwhether the record still lives at the address the scanner read. Only\nwhen both hold do the bytes in hand belong to the locator being\nregistered, and only then is a digest a true statement about the\nfile the server will later open.\n\nA parser could not decide this on its own: it is handed the payload\nand hands back footprints, and whether those footprints kept the\nitem's address or split it into records inside the item is visible\nonly after the mapping — one Claude Code session file yields\nmessages addressed `<file>#<uuid>`, and one PNG yields itself."
+    },
+    {
+      "path": "asterism_importer_sdk::runner::ImportOptions",
+      "kind": "struct"
+    },
+    {
+      "path": "asterism_importer_sdk::runner::ImportSummary",
+      "kind": "struct"
+    },
+    {
+      "path": "asterism_importer_sdk::runner::run_import",
+      "kind": "function"
+    },
+    {
+      "path": "asterism_importer_sdk::scanner",
+      "kind": "module",
+      "docs": "`SourceScanner` trait and shared item type.\n\nEnumerates or watches an external source and produces [`RawItem`]s.\nBundled implementations live in the sibling modules\n([`fs`], and future `sqlite` / `http`); importer authors typically\nreuse one instead of writing their own."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ItemStream",
+      "kind": "type_alias",
+      "docs": "Async stream of scanned items (or per-item errors)."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::RawItem",
+      "kind": "struct",
+      "docs": "A raw scanned item — a payload plus the metadata needed to attribute\nit back to its origin."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ScanError",
+      "kind": "enum",
+      "docs": "Errors returned by scanners."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ScanFuture",
+      "kind": "type_alias",
+      "docs": "Future returned by [`SourceScanner::scan`] — resolves to the item\nstream once the scanner has finished setup."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::ScanMode",
+      "kind": "enum",
+      "docs": "Scan mode passed to [`SourceScanner::scan`]."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::SourceScanner",
+      "kind": "trait",
+      "docs": "Trait every source scanner implements.\n\n`scan` returns a boxed async stream of `RawItem`s (or per-item\nerrors, so a single bad row does not tear the whole scan down)."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::fs",
+      "kind": "module",
+      "docs": "`FsScanner` — filesystem source scanner.\n\nWalks a directory tree, optionally filtered by glob-ish extension\nset, and emits every matching file as a `RawItem`. In `Watch` mode\nthe scanner also stays live and streams filesystem-change events via\n`notify` — new / modified files are re-emitted, deletions are\nignored (deletions on the source do not automatically delete the\ncorresponding asset; that is a policy decision left to the caller)."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::fs::FsScanner",
+      "kind": "struct",
+      "docs": "Filesystem scanner.\n\n- `root` — directory to walk.\n- `extensions` — file extensions (without the leading dot) to keep.\n  An empty vector means \"accept every file\".\n- `source_kind` — slug written to `RawItem.source_kind` (defaults to\n  `\"fs\"`)."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::sqlite",
+      "kind": "module",
+      "docs": "`SqliteScanner` — SQLite source scanner.\n\nOpens an arbitrary SQLite database read-only, runs a user-supplied\n`SELECT` statement, and emits every row as a `RawItem`. Column\nmapping is spelled out by the caller so the same scanner can drive\nimporters over totally unrelated schemas (chat exports, message DBs,\nbespoke tools' scratch tables, and so on).\n\nAsync is faked at the edge: `rusqlite` is blocking, so the scan\nactually runs on a dedicated `spawn_blocking` task and pushes rows\ninto a bounded mpsc.\n\nThis scanner leaves\n[`payload_is_whole_artefact`](super::SourceScanner::payload_is_whole_artefact)\nat its `false` default, and the reason is worth stating rather than\ninheriting: a row's `body` column is a value out of a database, and\nthe `<db>#<id>` address it is given has no bytes of its own for\nanybody to read back. A digest declared from here could never be\nchecked, which is precisely what the server refuses."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::sqlite::ColumnMap",
+      "kind": "struct",
+      "docs": "Column-to-`RawItem` mapping supplied by the importer."
+    },
+    {
+      "path": "asterism_importer_sdk::scanner::sqlite::SqliteScanner",
+      "kind": "struct",
+      "docs": "SQLite scanner.\n\n- `db_path`     — path to the SQLite file (opened read-only).\n- `query`       — SELECT statement that yields the rows to import.\n- `columns`     — how to map the returned columns onto `RawItem`.\n- `source_kind` — slug written to `RawItem.source_kind`\n  (defaults to `\"sqlite\"`)."
+    }
+  ]
+}

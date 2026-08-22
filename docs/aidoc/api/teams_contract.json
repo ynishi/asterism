@@ -1,0 +1,101 @@
+{
+  "crate": "teams-contract",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "teams_contract::command",
+      "kind": "module",
+      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
+    },
+    {
+      "path": "teams_contract::command::CreateTeamCommand",
+      "kind": "struct",
+      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, the operator only\nwhen it is closed."
+    },
+    {
+      "path": "teams_contract::command::GrantOwnerCommand",
+      "kind": "struct",
+      "docs": "Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner\nonly). The resulting ledger event carries both the old and the new\nrole in its payload."
+    },
+    {
+      "path": "teams_contract::command::InviteMemberCommand",
+      "kind": "struct",
+      "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
+    },
+    {
+      "path": "teams_contract::command::LoginCommand",
+      "kind": "struct",
+      "docs": "Presents a credential to `POST /teams/auth/login`."
+    },
+    {
+      "path": "teams_contract::command::RemoveMemberCommand",
+      "kind": "struct",
+      "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
+    },
+    {
+      "path": "teams_contract::command::RevokeOwnerCommand",
+      "kind": "struct",
+      "docs": "Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,\nowner only). Revoking the last owner — including yourself — is a\n`409` (#83 §1: the last owner cannot self-demote)."
+    },
+    {
+      "path": "teams_contract::command::UploadBlobCommand",
+      "kind": "struct",
+      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nThe one command whose fields travel in the **query string**: the\nrequest body is the blob's raw bytes, streamed, so there is no JSON\nbody for them to ride in (the OCI registry `PUT ?digest=` shape,\n#83 §3)."
+    },
+    {
+      "path": "teams_contract::dto",
+      "kind": "module",
+      "docs": "Response DTOs of the `/teams/*` surface.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
+    },
+    {
+      "path": "teams_contract::dto::BlobUploadedDto",
+      "kind": "struct",
+      "docs": "The result of `PUT /teams/{team_id}/blobs?digest=…`.\n\nDeliberately identical for a first copy and a deduplicated one: the\nCAS holding the digest already is server-side knowledge only, and a\nresponse that said \"skipped\" would be the Harnik-2010 dedupe side\nchannel (#83 §3). What the caller learns is what changed *for their\nteam*: the link now exists, and here is the event that recorded it."
+    },
+    {
+      "path": "teams_contract::dto::LedgerEventDto",
+      "kind": "struct",
+      "docs": "One entry of a team's append-only stream\n(`GET /teams/{team_id}/events`, and the receipt every mutation\nroute returns)."
+    },
+    {
+      "path": "teams_contract::dto::MarkedBlobLinkDto",
+      "kind": "struct",
+      "docs": "One marked link — everything unmark (or a decision to let reclaim\nrun) needs."
+    },
+    {
+      "path": "teams_contract::dto::MarkedBlobsDto",
+      "kind": "struct",
+      "docs": "The team's marked-for-purge set\n(`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or\noperator, the mark's own authority).\n\nThis is the read surface the grace-visibility boundary (#83 §3\n[Grace visibility]) *grants*: the mark hides a link from the\nnormal reads, but inside the team it is sayable state — and whoever\nmay mark must be able to see what is marked, or unmark is a verb\naimed blind."
+    },
+    {
+      "path": "teams_contract::dto::PurgeReclaimedDto",
+      "kind": "struct",
+      "docs": "The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).\n\nMark and unmark answer with their [`LedgerEventDto`] alone (the\nreceipt convention); reclaim gets a shape of its own because one\ncall removes many links and triggers the zero-link sweep behind it."
+    },
+    {
+      "path": "teams_contract::dto::RosterDto",
+      "kind": "struct",
+      "docs": "The team's current membership set\n(`GET /teams/{team_id}/roster`)."
+    },
+    {
+      "path": "teams_contract::dto::RosterMemberDto",
+      "kind": "struct",
+      "docs": "One membership row as the roster lists it."
+    },
+    {
+      "path": "teams_contract::dto::SessionDto",
+      "kind": "struct",
+      "docs": "A freshly minted session (`POST /teams/auth/login`)."
+    },
+    {
+      "path": "teams_contract::dto::SubjectRefDto",
+      "kind": "struct",
+      "docs": "One typed reference an event makes."
+    },
+    {
+      "path": "teams_contract::dto::TeamCreatedDto",
+      "kind": "struct",
+      "docs": "The result of `POST /teams/create`."
+    }
+  ]
+}

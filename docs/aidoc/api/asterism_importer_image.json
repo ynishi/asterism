@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-importer-image",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_image::parser",
+      "kind": "module",
+      "docs": "Image `RawItem` → `Footprint::Image` parser.\n\nReads EXIF from the payload with `kamadak-exif` (V2 design D-15 —\nRust-side, never JS-side). Falls back to file mtime when no EXIF is\npresent so PNG screenshots and freshly-generated images still land\nwith a meaningful `occurred_at`.\n\n# One file, one footprint — including the text inside it\n\nThis parser used to read the PNG's `tEXt` chunks and emit one\n`Footprint::Note` per chunk, each addressed `<image>.png#<keyword>`,\nso a ComfyUI export arrived as N + 1 assets. It does not any more:\n**an image file is one record, and the text inside it is that\nrecord's metadata**. The chunks reach the image's own row on the\n`Meta` axis, and\nnothing on this side has to carry them there — the server's\n`material_hash` job already reads the artefact's bytes and hands\nthem to the PNG probe, which writes `material.meta_hash` and\n`material.meta_kv` on the row this parser produced.\n\nSo there is no hand-off to build here, and deliberately none to add:\na metadata set declared by the importer *and* computed from the\nbytes by the server would be two authorities for one value, which is\nthe failure `declared_content_hash` is fenced against. The importer\nstates where the bytes are; what they contain is read from them."
+    },
+    {
+      "path": "asterism_importer_image::parser::ImageParser",
+      "kind": "struct",
+      "docs": "Parses one image file into one `Footprint::Image`."
+    }
+  ]
+}
