@@ -45,6 +45,21 @@ and this project adheres to
 
 ### Added
 
+- **A visual-retrieval corpus with known relationships** (#112). Before any
+  encoder lands, the property it must prove needs a public-safe corpus to be
+  measured against — and personal library images cannot be that corpus.
+  `asterism-benchgen visual-corpus` generates one: procedural scenes whose spec
+  is the ground truth, so EN/JA tags and captions are derived rather than
+  annotated. Every base carries an exact byte copy and resize / recompress /
+  crop variants (the near-duplicate questions a perceptual hash answers); every
+  second base a look-alike (same scene re-drawn, zero shared bytes); every third
+  a semantic sibling (same describable content, different composition and
+  background); every fourth a hard negative (same background, disjoint colors) —
+  plus noise canvases and query strings with no counterpart, which retrieval
+  must be allowed to answer with nothing. The manifest records every relation
+  under its own schema and version, independent of the bench tier, so the bench
+  corpus identity cannot move when this corpus evolves.
+
 - **Generator parameters are extracted from stored metadata behind their own
   port** (#19). The model and seed a run recorded sit inside free-text metadata
   values — a ComfyUI graph, an A1111 parameter line — and reading them out is a
