@@ -1,0 +1,29 @@
+[package]
+name = "asterism-model-lab"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Provider-side model preparation for Asterism: prepare, verify, qualify, and author registry entries"
+publish = false
+
+[[bin]]
+name = "asterism-model-lab"
+path = "src/main.rs"
+
+[dependencies]
+# The use-side library, on purpose: `verify` and `qualify` read a
+# package exactly the way the app will, which is the whole point of
+# checking here. The dependency points from preparation to use — the
+# app never depends back on this crate.
+asterism-vision = { path = "../asterism-vision", features = ["onnx", "fixtures"] }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }

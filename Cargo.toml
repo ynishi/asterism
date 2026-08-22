@@ -23,6 +23,7 @@ members = [
     "crates/asterism-ui/src-tauri",
     "crates/asterism-benchgen",
     "crates/asterism-vision",
+    "crates/asterism-model-lab",
     # The teams plane (#83). Same layering discipline as the asterism-*
     # rows above, one deliberate difference: these four do not inherit
     # the workspace license — each manifest says why where the field
