@@ -7045,7 +7045,7 @@ DROP TABLE project;
 /// **`UNIQUE (pursuit_id) WHERE kind = 'close'`** refuses a second
 /// ending. The parent index alone does not: a second close would sit
 /// on the first, which is a parent nobody has used. Work ends once,
-/// and `WorkLog::end` says so — a row the model would refuse is a row
+/// and `Pursuit::end` says so — a row the model would refuse is a row
 /// the read half cannot hand back, so it is better not written.
 ///
 /// **`content` carries a foreign key to `asset`, and it restricts.**
@@ -14691,7 +14691,7 @@ mod tests {
             "the cascade reaches the asset and stops there"
         );
 
-        // A work log: one open node, then nodes on its head.
+        // A pursuit: one open node, then nodes on its head.
         let work = Uuid::now_v7();
         let open_node = Uuid::now_v7();
         conn.execute(
@@ -14717,7 +14717,7 @@ mod tests {
         node(pass, open_node, 0, "round", None).unwrap();
         assert!(
             node(Uuid::now_v7(), open_node, 1, "round", None).is_err(),
-            "two passes on one parent is a fork of the work log"
+            "two passes on one parent is a fork of the pursuit"
         );
         assert!(
             node(Uuid::now_v7(), pass, 1, "round", Some("satisfied")).is_err(),

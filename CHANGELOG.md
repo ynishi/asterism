@@ -8,6 +8,28 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- **`WorkLog` is gone; a pursuit is its own chain** (#102). It held `open`,
+  `rounds` and `close`, nothing outside a `Pursuit` ever held one, and all six
+  of `Pursuit`'s verbs were straight delegations to it — an indirection that
+  named a thing rather than being one. The fields sit on `Pursuit` now, `push`
+  and `end` keep the invariants they always did, and the accessor for the
+  opening node is `opening` because `open` is the verb that makes a pursuit and
+  one name cannot be both.
+
+  The name is the other half. Everything in the forge is a log: a line has a
+  chain of change points, a pursuit has a chain of passes. Calling one of them
+  "Log" says only "this is a record", which inside the forge distinguishes
+  nothing — and "Work" said nothing `Pursuit` was not already saying. The prose
+  went with the type: forty-three places said "work log" where they meant a
+  pursuit.
+
+  The forge's tables carry the model's words for the same reason: `pursuit`,
+  `pursuit_node` and `pursuit_op`, where V96 first wrote `work`. That name
+  existed to avoid colliding with the first model's `pursuit` table, which V95
+  drops two steps earlier.
+
 ### Added
 
 - **The application builds the forge it uses** (#102). `init_core` constructs

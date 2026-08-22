@@ -185,7 +185,7 @@ pub type Rows = BTreeMap<EntryId, Row>;
 /// wins.
 ///
 /// Order is the order they are given, which is the order they were
-/// written — within a node and across the nodes of one work log.
+/// written — within a node and across the nodes of one pursuit.
 pub fn fold(ops: &[Op]) -> Rows {
     let mut existence: BTreeMap<EntryId, bool> = BTreeMap::new();
     let mut content: BTreeMap<EntryId, Content> = BTreeMap::new();

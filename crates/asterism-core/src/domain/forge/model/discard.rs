@@ -26,7 +26,7 @@
 //!
 //! # Why this is one answer rather than two
 //!
-//! A line holds what its chain named; a work log holds what its
+//! A line holds what its chain named; a pursuit holds what its
 //! operations named. Dropping a line takes the work against it —
 //! a log cut from a history that no longer exists is a record of a
 //! proposal against nothing, and its base names a node that is gone.
@@ -43,7 +43,7 @@
 //! answers what is lost — a question about the two records as records,
 //! which is why it takes the work as a slice rather than reaching for
 //! it: a line does not keep a list of its pursuits, and one that did
-//! would be a second answer to what the work logs already say.
+//! would be a second answer to what the pursuits already say.
 //!
 //! # It does not drop anything
 //!
@@ -129,7 +129,7 @@ mod tests {
     /// Opens work, writes one pass, and ends it the way asked.
     fn work_on(line: &mut Line, ops: Vec<Op>, outcome: Outcome, minute: u32) -> Pursuit {
         let mut work = Pursuit::open(line.id(), None, line.head(), Intent::default(), act(minute));
-        work.push(Round::new(work.log().head(), ops, None, act(minute)).unwrap())
+        work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())
             .unwrap();
         let closing = close(line, &work, outcome, None, act(minute)).unwrap();
         closing.apply(line, &mut work).unwrap();
@@ -155,7 +155,7 @@ mod tests {
         giving_up
             .push(
                 Round::new(
-                    giving_up.log().head(),
+                    giving_up.head(),
                     vec![Op::add(tried, name("tried"))],
                     None,
                     act(2),

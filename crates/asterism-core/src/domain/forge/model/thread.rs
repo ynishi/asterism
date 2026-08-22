@@ -355,7 +355,7 @@ mod tests {
         let mut work = Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1));
         let arrival = Op::add(Content::from_uuid(Uuid::now_v7()), name("cut-01"));
         let entry = arrival.entry();
-        let round = Round::new(work.log().head(), vec![arrival], None, act(2)).unwrap();
+        let round = Round::new(work.head(), vec![arrival], None, act(2)).unwrap();
         work.push(round.clone()).unwrap();
         (work, round, entry)
     }

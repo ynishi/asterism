@@ -76,7 +76,7 @@ fn content() -> Content {
 }
 
 fn pass(work: &mut Pursuit, ops: Vec<Op>, act: Act) {
-    work.push(Round::new(work.log().head(), ops, None, act).unwrap())
+    work.push(Round::new(work.head(), ops, None, act).unwrap())
         .unwrap();
 }
 
@@ -240,10 +240,10 @@ fn a_line_four_people_and_what_the_record_can_answer() {
     // ================================================================
 
     // (a) The population: everything anybody ever proposed for this
-    //     line, whether it lived or not. Read off the work logs.
+    //     line, whether it lived or not. Read off the pursuits.
     let proposed: Vec<EntryId> = [&boro, &ana]
         .iter()
-        .flat_map(|work| work.log().rounds())
+        .flat_map(|work| work.rounds())
         .flat_map(|round| round.ops())
         .map(Op::entry)
         .collect();
@@ -269,10 +269,9 @@ fn a_line_four_people_and_what_the_record_can_answer() {
         .find(|(entry, _)| **entry == forked);
     assert!(
         dropped.is_none(),
-        "Ana's fork never reached the line — it is in her work log and nowhere else"
+        "Ana's fork never reached the line — it is in her pursuit and nowhere else"
     );
     let in_her_log: Vec<_> = ana
-        .log()
         .rounds()
         .iter()
         .flat_map(|round| round.ops())
@@ -287,7 +286,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
 
     // (d) Who: a person's passes and the server's are told apart on
     //     the node, without opening it.
-    let boro_rounds = boro.log().rounds();
+    let boro_rounds = boro.rounds();
     let (mine, servers): (Vec<&Round>, Vec<&Round>) =
         boro_rounds.iter().partition(|r| !r.act().by().is_system());
     assert_eq!(mine.len(), 1, "Boro wrote one pass himself");
@@ -310,7 +309,7 @@ fn a_line_four_people_and_what_the_record_can_answer() {
         .find(|point| point.id() == boro_point)
         .expect("Boro's change point");
     assert_eq!(landed.from(), boro.id());
-    assert_eq!(landed.by(), boro.log().head());
+    assert_eq!(landed.by(), boro.head());
     assert_eq!(boro.outcome(), Some(Outcome::Satisfied));
     assert_eq!(ana.outcome(), Some(Outcome::Abandoned));
 }
@@ -373,12 +372,7 @@ fn a_line_settled_by_hand_reaches_the_same_place() {
     assert_eq!(line.states()[&cut].content, Some(theirs));
     assert_eq!(line.states()[&forked].content, Some(boro_content));
     // And every pass on that log is a person's.
-    assert!(
-        boro.log()
-            .rounds()
-            .iter()
-            .all(|r| !r.act().by().is_system())
-    );
+    assert!(boro.rounds().iter().all(|r| !r.act().by().is_system()));
 }
 
 /// Ends are not the same thing as landings: what a change point names
@@ -410,18 +404,13 @@ fn abandoning_leaves_the_line_alone_and_the_attempt_readable() {
 
     assert_eq!(line.head(), before, "the line did not move");
     assert!(line.states().is_empty());
-    // The attempt is in the work log, in full.
-    let written: Vec<_> = boro
-        .log()
-        .rounds()
-        .iter()
-        .flat_map(|round| round.ops())
-        .collect();
+    // The attempt is in the pursuit, in full.
+    let written: Vec<_> = boro.rounds().iter().flat_map(|round| round.ops()).collect();
     assert_eq!(written.len(), 1);
     assert!(matches!(written[0].kind(), OpKind::Add { content, .. } if *content == attempted));
 }
 
-/// The node ids in a work log order it, and nothing about a clock
+/// The node ids in a pursuit order it, and nothing about a clock
 /// does — a pass minted with an earlier timestamp still sits where the
 /// chain puts it.
 #[test]
@@ -456,9 +445,9 @@ fn the_chain_orders_a_work_log_and_the_clock_does_not() {
         Some(second),
         "the later pass wins because it is later in the chain"
     );
-    let parents: Vec<NodeId> = boro.log().rounds().iter().map(Round::parent).collect();
-    assert_eq!(parents[0], boro.log().open().id());
-    assert_eq!(parents[1], boro.log().rounds()[0].id());
+    let parents: Vec<NodeId> = boro.rounds().iter().map(Round::parent).collect();
+    assert_eq!(parents[0], boro.opening().id());
+    assert_eq!(parents[1], boro.rounds()[0].id());
 }
 
 /// Closing is terminal, and the same closing cannot be applied twice.

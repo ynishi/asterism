@@ -73,7 +73,7 @@ impl SqliteForge {
 
 /// A line's history does not fork.
 const ONE_POINT_PER_PARENT: &str = "change_point.line_id, change_point.parent_id";
-/// Neither does a work log.
+/// Neither does a pursuit.
 const ONE_NODE_PER_PARENT: &str = "pursuit_node.pursuit_id, pursuit_node.parent_id";
 /// And work ends once.
 const ONE_ENDING_PER_PURSUIT: &str = "pursuit_node.pursuit_id";
@@ -312,7 +312,7 @@ fn build_line(conn: &Connection, head: &LineRow) -> rusqlite::Result<Line> {
     })
 }
 
-/// Reads one whole work log: its row, its nodes, and their operations.
+/// Reads one whole pursuit: its row, its nodes, and their operations.
 fn build_pursuit(conn: &Connection, head: &PursuitRow) -> rusqlite::Result<Pursuit> {
     let uuid = *head.id.as_uuid();
     let nodes: Vec<PursuitNodeRow> = conn
@@ -412,7 +412,7 @@ fn insert_work_node(
     Ok(())
 }
 
-/// How many nodes a work log already has, which is the next one's
+/// How many nodes a pursuit already has, which is the next one's
 /// place in it.
 fn next_seq(tx: &Transaction<'_>, work: &PursuitId) -> rusqlite::Result<usize> {
     let count: i64 = tx.query_row(

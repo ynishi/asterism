@@ -415,7 +415,7 @@ mod tests {
 
     /// Adds a pass carrying `ops`.
     fn passing(mut work: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
-        work.push(Round::new(work.log().head(), ops, None, act(minute)).unwrap())
+        work.push(Round::new(work.head(), ops, None, act(minute)).unwrap())
             .unwrap();
         work
     }

@@ -128,7 +128,7 @@ impl MemoryForge {
         rows::read_pursuit(head, &tables.pursuit_nodes, &tables.pursuit_ops).map(Some)
     }
 
-    /// The node a work log currently ends at, read off the rows rather
+    /// The node a pursuit currently ends at, read off the rows rather
     /// than off a rebuilt value: the caller asking is checking whether
     /// its own copy has moved, and rebuilding to answer that would do
     /// the expensive half of a read for a comparison of two ids.

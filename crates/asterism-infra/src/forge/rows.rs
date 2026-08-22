@@ -143,7 +143,7 @@ pub struct PursuitRow {
     /// The last time the description moved.
     pub updated: ActRow,
     /// The node the log opens at. Inline rather than a row of its own:
-    /// a work log has exactly one and can never be without it, so the
+    /// a pursuit has exactly one and can never be without it, so the
     /// join would always match.
     pub open: NodeId,
     /// The change point the work was cut from.
@@ -157,11 +157,11 @@ pub struct PursuitRow {
 }
 
 /// `pursuit_node` — a pass or an ending. `seq` is the log's own order,
-/// kept because a work log is read forwards and a parent chain would
+/// kept because a pursuit is read forwards and a parent chain would
 /// have to be walked to say the same thing.
 #[derive(Debug, Clone)]
 pub struct PursuitNodeRow {
-    /// The work log it belongs to.
+    /// The pursuit it belongs to.
     pub pursuit: PursuitId,
     /// Which node.
     pub id: NodeId,
@@ -258,7 +258,7 @@ pub fn take_change_point_apart(
 pub fn take_pursuit_apart(
     pursuit: &Pursuit,
 ) -> (PursuitRow, Vec<PursuitNodeRow>, Vec<PursuitOpRow>) {
-    let open = pursuit.log().open();
+    let open = pursuit.opening();
     let head = PursuitRow {
         id: pursuit.id(),
         of: pursuit.of(),
@@ -274,12 +274,12 @@ pub fn take_pursuit_apart(
 
     let mut nodes = Vec::new();
     let mut ops = Vec::new();
-    for (seq, round) in pursuit.log().rounds().iter().enumerate() {
+    for (seq, round) in pursuit.rounds().iter().enumerate() {
         let (node, wrote) = take_round_apart(pursuit.id(), round, seq);
         nodes.push(node);
         ops.extend(wrote);
     }
-    if let Some(close) = pursuit.log().close() {
+    if let Some(close) = pursuit.close() {
         nodes.push(take_close_apart(pursuit.id(), close, nodes.len()));
     }
     (head, nodes, ops)
@@ -434,7 +434,7 @@ pub fn read_pursuit(
             }
             other => {
                 return Err(DomainError::Validation(format!(
-                    "a stored work log names a node kind this model does not have: {other}"
+                    "a stored pursuit names a node kind this model does not have: {other}"
                 )));
             }
         }

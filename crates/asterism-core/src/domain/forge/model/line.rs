@@ -302,7 +302,7 @@ impl Line {
     /// ended. The caller counts them because the line does not hold
     /// its work — the two logs are separate, and a line that kept a
     /// list of its pursuits would be keeping a second answer to a
-    /// question the work logs already answer.
+    /// question the pursuits already answer.
     ///
     /// # Refusals
     ///

@@ -180,7 +180,7 @@ async fn the_wired_forge_lands_work_and_reads_it_back() {
         .await
         .expect("the work");
     assert_eq!(ended.outcome(), Some(Outcome::Satisfied));
-    assert_eq!(chain[0].by(), ended.log().head(), "one act, both logs");
+    assert_eq!(chain[0].by(), ended.head(), "one act, both logs");
 }
 
 /// The asset the line is holding cannot be purged out from under it,

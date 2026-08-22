@@ -1,4 +1,4 @@
-//! Keeping work logs, stated in the forge's own words.
+//! Keeping pursuits, stated in the forge's own words.
 //!
 //! [`Pursuits`] is the other face the forge asks for, and it is the
 //! quiet one: opening work and adding passes to it are what happens
@@ -8,7 +8,7 @@
 //!
 //! [`Pursuits::push`] takes the node the caller believes the work ends
 //! at, beside the pass it wants to add. The model refuses a pass that
-//! does not sit on the head, but it judges the work log it was
+//! does not sit on the head, but it judges the pursuit it was
 //! *given*, which is the log as it was when it was read. Naming the
 //! head makes the write itself conditional, so two passes written at
 //! once cannot both land and the loser is told.
@@ -49,7 +49,7 @@ use crate::domain::forge::model::value::{LineId, NodeId, PursuitId};
 // SHARED VOCABULARY: `DomainError` is a boundary type.
 use crate::error::DomainError;
 
-/// Keeps work logs.
+/// Keeps pursuits.
 #[async_trait]
 pub trait Pursuits: Send + Sync {
     /// Records work that has just been opened.

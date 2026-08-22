@@ -487,12 +487,12 @@ async fn a_line_four_people(world: &World) {
     let anas_work = world.work.get(&anas_work.id()).await.unwrap();
 
     // (a) The population: everything anybody proposed, read off the
-    //     work logs the store handed back.
+    //     pursuits the store handed back.
     let filed = world.work.of_line(&line.id()).await.unwrap();
     assert_eq!(filed.len(), 5, "four that landed and one that gave up");
     let proposed: Vec<EntryId> = filed
         .iter()
-        .flat_map(|work| work.log().rounds())
+        .flat_map(|work| work.rounds())
         .flat_map(|round| round.ops())
         .map(Op::entry)
         .collect();
@@ -521,7 +521,6 @@ async fn a_line_four_people(world: &World) {
         "Ana's fork never reached the line"
     );
     let in_her_log: Vec<_> = anas_work
-        .log()
         .rounds()
         .iter()
         .flat_map(|round| round.ops())
@@ -537,7 +536,6 @@ async fn a_line_four_people(world: &World) {
     // (d) Who, and (e) when: both survived the round trip through the
     //     rows, including which passes the rule wrote.
     let (mine, servers): (Vec<_>, Vec<_>) = boros_work
-        .log()
         .rounds()
         .iter()
         .partition(|round| !round.act().by().is_system());
@@ -557,7 +555,7 @@ async fn a_line_four_people(world: &World) {
         .iter()
         .find(|point| point.from() == boros_work.id())
         .expect("Boro's change point");
-    assert_eq!(landed.by(), boros_work.log().head());
+    assert_eq!(landed.by(), boros_work.head());
     assert_eq!(boros_work.outcome(), Some(Outcome::Satisfied));
     assert_eq!(anas_work.outcome(), Some(Outcome::Abandoned));
 

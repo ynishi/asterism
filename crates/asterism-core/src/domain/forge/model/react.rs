@@ -39,7 +39,7 @@
 //!
 //! # Nothing here touches the line
 //!
-//! The pass goes on the work log. A line moves when work ends, and
+//! The pass goes on the pursuit. A line moves when work ends, and
 //! that is somewhere else.
 
 use crate::domain::forge::model::act::{Act, Actor};
@@ -105,7 +105,7 @@ pub fn react(
     settles(line, work, &ops, &found)?;
 
     Ok(Some(Round::new(
-        work.log().head(),
+        work.head(),
         ops,
         None,
         Act::new(act.at(), Actor::System(server)),
@@ -124,7 +124,6 @@ fn settles(
     found: &[crate::domain::forge::model::change::Collision],
 ) -> Result<(), ForgeError> {
     let mut every: Vec<Op> = work
-        .log()
         .rounds()
         .iter()
         .flat_map(|round| round.ops().iter().cloned())

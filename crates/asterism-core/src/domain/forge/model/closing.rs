@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Everywhere else, a decision moves one log. Opening, passing and
-//! taking something in write only to the work log; renaming a line
+//! taking something in write only to the pursuit; renaming a line
 //! writes only to its own description. This is the exception, and it
 //! is the only one: ending work as satisfied puts a change point on
 //! the line, and the two are one act rather than two that happen to
@@ -50,7 +50,7 @@
 //! # This function does not settle anything
 //!
 //! A collision is refused here, never resolved. Turning one into a
-//! divergence writes a pass into the work log, under the line's
+//! divergence writes a pass into the pursuit, under the line's
 //! strategy, and it happens while the work is open — by the time
 //! anybody is closing, the question has been settled or it has not.
 //!
@@ -107,7 +107,7 @@ impl Closing {
     ///
     /// The line first, because recording is the half that can still
     /// refuse — the head may have moved, or the table may hand one
-    /// name to two live entries. If it does refuse, the work log is
+    /// name to two live entries. If it does refuse, the pursuit is
     /// untouched and the pursuit is still open, which is the state a
     /// caller can retry from.
     ///
@@ -161,7 +161,7 @@ pub fn close(
         return Err(ForgeError::AlreadyClosed);
     }
 
-    let at = pursuit.log().head();
+    let at = pursuit.head();
 
     if outcome == Outcome::Abandoned {
         return Ok(Closing {
@@ -247,7 +247,7 @@ mod tests {
 
     /// Adds a pass carrying `ops`, and hands back the pursuit.
     fn passing(mut pursuit: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
-        let round = Round::new(pursuit.log().head(), ops, None, act(minute)).unwrap();
+        let round = Round::new(pursuit.head(), ops, None, act(minute)).unwrap();
         pursuit.push(round).unwrap();
         pursuit
     }

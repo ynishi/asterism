@@ -2,9 +2,9 @@
 //! what the line did, and ending it.
 //!
 //! ```text
-//!   open      reads the line's head, writes the work log
-//!   push      writes the work log. does not read the line
-//!   resolve   reads the line, writes the work log
+//!   open      reads the line's head, writes the pursuit
+//!   push      writes the pursuit. does not read the line
+//!   resolve   reads the line, writes the pursuit
 //!   close     reads both, writes both — the only one
 //!
 //!   collisions / behind    read both, write nothing
@@ -158,7 +158,7 @@ impl PursuitService {
         }
 
         let pursuit = self.get(id).await?;
-        let round = Round::new(pursuit.log().head(), ops, note, self.act(by).await?)?;
+        let round = Round::new(pursuit.head(), ops, note, self.act(by).await?)?;
         self.pursuits.push(id, round.parent(), &round).await?;
         Ok(round)
     }
@@ -170,7 +170,7 @@ impl PursuitService {
     /// nothing was written — the collision is still there to be read.
     ///
     /// Nothing about the line is written. Resolving is work deciding
-    /// something, and what it decides goes in the work log like any
+    /// something, and what it decides goes in the pursuit like any
     /// other decision.
     pub async fn resolve(
         &self,
@@ -454,8 +454,8 @@ mod tests {
             let mut work = self
                 .pursuit(id)
                 .ok_or_else(|| DomainError::not_found("pursuit", id))?;
-            if work.log().head() != on {
-                return Err(DomainError::Conflict("the work log moved".into()));
+            if work.head() != on {
+                return Err(DomainError::Conflict("the pursuit moved".into()));
             }
             work.push(round.clone())?;
             self.put(work);
@@ -651,7 +651,7 @@ mod tests {
         .unwrap();
 
         let read = work.get(&pursuit.id()).await.unwrap();
-        assert_eq!(read.log().rounds().len(), 1);
+        assert_eq!(read.rounds().len(), 1);
         // The line is where it was: a pass is not a change to it.
         assert_eq!(world.line(&line.id()).unwrap().head(), line.head());
     }
@@ -680,12 +680,7 @@ mod tests {
 
         assert!(matches!(refused, Err(DomainError::Validation(_))));
         assert!(
-            work.get(&pursuit.id())
-                .await
-                .unwrap()
-                .log()
-                .rounds()
-                .is_empty(),
+            work.get(&pursuit.id()).await.unwrap().rounds().is_empty(),
             "the pass was refused before it was written"
         );
     }
@@ -898,7 +893,6 @@ mod tests {
         let settled = work.get(&mine.id()).await.unwrap();
         assert!(
             settled
-                .log()
                 .rounds()
                 .iter()
                 .any(|round| round.act().by().is_system()),

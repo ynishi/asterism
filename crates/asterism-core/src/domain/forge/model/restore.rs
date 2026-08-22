@@ -29,8 +29,8 @@
 //! # What it does not do
 //!
 //! **It does not skip the model's questions.** The nodes are handed
-//! back one at a time to [`History::record`], [`WorkLog::push`] and
-//! [`WorkLog::end`] — the same calls a fresh write goes through, and
+//! back one at a time to [`History::record`], [`Pursuit::push`] and
+//! [`Pursuit::end`] — the same calls a fresh write goes through, and
 //! the same refusals. A chain whose parents do not line up, a table
 //! that would leave two live entries under one name, a pass on a log
 //! that has ended: each of those is a stored row that cannot become a
@@ -57,7 +57,7 @@ use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::{ChangePoint, Genesis, History};
 use crate::domain::forge::model::line::{Line, Standing};
 use crate::domain::forge::model::op::Op;
-use crate::domain::forge::model::pursuit::{Close, Intent, Open, Outcome, Pursuit, Round, WorkLog};
+use crate::domain::forge::model::pursuit::{Close, Intent, Open, Outcome, Pursuit, Round};
 use crate::domain::forge::model::table::Table;
 use crate::domain::forge::model::value::{
     ChangePointId, LineId, Name, NodeId, PursuitId, StrategyId,
@@ -158,7 +158,7 @@ pub fn close(
     Close::restored(id, parent, outcome, note, act)
 }
 
-/// A node of a work log after the one it opened at.
+/// A node of a pursuit after the one it opened at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
     /// A pass.
@@ -169,7 +169,7 @@ pub enum Node {
 
 /// A whole pursuit, from the node it opened at and what followed.
 ///
-/// `nodes` are in the log's own order — a work log is a line, not a
+/// `nodes` are in the log's own order — a pursuit is a line, not a
 /// tree, and a store that kept them shuffled is telling this function
 /// something untrue rather than something it should sort out.
 ///
@@ -188,14 +188,14 @@ pub fn pursuit(
     open: Open,
     nodes: Vec<Node>,
 ) -> Result<Pursuit, ForgeError> {
-    let mut log = WorkLog::begin(open);
+    let mut work = Pursuit::restored(id, of, parent, open, meta);
     for node in nodes {
         match node {
-            Node::Round(round) => log.push(round)?,
-            Node::Close(close) => log.end(close)?,
+            Node::Round(round) => work.push(round)?,
+            Node::Close(close) => work.end(close)?,
         }
     }
-    Ok(Pursuit::restored(id, of, parent, log, meta))
+    Ok(work)
 }
 
 /// Puts change points in the chain's order, starting from `head`.
@@ -264,7 +264,7 @@ mod tests {
                 Pursuit::open(line.id(), None, line.head(), Intent::default(), act(minute));
             work.push(
                 Round::new(
-                    work.log().head(),
+                    work.head(),
                     vec![Op::add(content(), name(label))],
                     None,
                     act(minute),
@@ -409,7 +409,7 @@ mod tests {
         let mut work = Pursuit::open(line_a.id(), None, line_a.head(), Intent::default(), act(1));
         work.push(
             Round::new(
-                work.log().head(),
+                work.head(),
                 vec![Op::add(content(), name("one"))],
                 Some("a pass".into()),
                 act(2),
@@ -421,7 +421,6 @@ mod tests {
         closing.apply(&mut line_a, &mut work).unwrap();
 
         let mut nodes: Vec<Node> = work
-            .log()
             .rounds()
             .iter()
             .map(|pass| {
@@ -437,7 +436,7 @@ mod tests {
                 )
             })
             .collect();
-        let ending = work.log().close().expect("it ended");
+        let ending = work.close().expect("it ended");
         nodes.push(Node::Close(close(
             ending.id(),
             ending.parent(),
@@ -452,10 +451,10 @@ mod tests {
             work.parent(),
             meta(*work.meta().created(), *work.meta().updated()),
             open(
-                work.log().open().id(),
+                work.opening().id(),
                 work.base(),
-                work.log().open().intent().clone(),
-                *work.log().open().act(),
+                work.opening().intent().clone(),
+                *work.opening().act(),
             ),
             nodes,
         )
