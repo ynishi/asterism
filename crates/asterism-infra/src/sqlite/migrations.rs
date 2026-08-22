@@ -6938,6 +6938,40 @@ UPDATE material
    AND content_region_hash_status = 'unsupported';
 "#;
 
+/// The visual-feature projection (#112): one row per encoded material
+/// per model configuration, plus the failure records that retire a row
+/// from the extraction walk.
+///
+/// The key carries the full derivation identity — `model_id`,
+/// `feature_kind`, with `preprocess_ver` beside them — so two models'
+/// vectors coexist without seeing each other and replacing a model
+/// deletes exactly its own rows (`DELETE … WHERE model_id = ?`), never
+/// a value a person asserted. `dim` is stored rather than derived so a
+/// blob whose length disagrees with its declared identity is detectably
+/// corrupt.
+///
+/// Rows exist only once extraction has answered: `computed` carries the
+/// vector, `failed` carries a reason and no vector (undecodable bytes,
+/// unreadable original) — absence *is* the pending state, which is what
+/// lets the walk's `NOT EXISTS` predicate offer a row exactly once.
+const V95_VISUAL_FEATURE: &str = r#"
+CREATE TABLE visual_feature (
+    asset_id       BLOB NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+    ord            INTEGER NOT NULL,
+    model_id       TEXT NOT NULL,
+    feature_kind   TEXT NOT NULL,
+    preprocess_ver INTEGER NOT NULL,
+    dim            INTEGER,
+    vector         BLOB,
+    status         TEXT NOT NULL CHECK (status IN ('computed', 'failed')),
+    reason         TEXT,
+    extracted_at   INTEGER NOT NULL,
+    PRIMARY KEY (asset_id, ord, model_id, feature_kind)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_visual_feature_model ON visual_feature (model_id, feature_kind, status);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7035,6 +7069,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V92_MATERIAL_FINGERPRINT_STATUS),
     Step::Sql(V93_JSON_MATERIAL_MIME),
     Step::Sql(V94_CLEAR_STALE_JSON_CONTENT_MARKER),
+    Step::Sql(V95_VISUAL_FEATURE),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

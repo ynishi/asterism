@@ -1476,6 +1476,22 @@ impl AssetService {
             .jobs
             .enqueue_with_priority(JobKind::MaterialHash, payload.clone(), -10)
             .await;
+        // The visual feature (#112) reads and decodes the original, so
+        // it sits below the default priority for the reason the
+        // fingerprint does. Enqueued only for image-bearing assets —
+        // the one family the encoder can answer for — and the handler
+        // settles cheaply when no model is configured, so an ingest
+        // that predates a model install costs one skipped row.
+        if asset
+            .materials
+            .iter()
+            .any(|m| matches!(m.mime, Some(MimeType::Image(_))))
+        {
+            let _ = self
+                .jobs
+                .enqueue_with_priority(JobKind::VisualFeature, payload.clone(), -10)
+                .await;
+        }
         // Chapters are a container's own statement about how its content
         // is divided, so the job is enqueued only for the families that
         // have a playback timeline to divide — the same shape as the

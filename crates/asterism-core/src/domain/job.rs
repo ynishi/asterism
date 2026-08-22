@@ -376,6 +376,36 @@ pub enum JobKind {
     /// row is one artefact that stays unmarked until something
     /// re-fingerprints it.
     DisclosureStamp,
+    /// Encodes an image's pixels into the stored feature vector the
+    /// visual layer (#112) retrieves by.
+    ///
+    /// Two payload shapes, the same split
+    /// [`MaterialHash`](Self::MaterialHash) uses:
+    /// `{ "asset_id": "<uuid>" }` encodes one asset (the ingest
+    /// fan-out), and `{ "batch": true }` walks image materials with no
+    /// stored answer under the configured model, chain-enqueueing
+    /// itself while pages come back full. The batch form is seeded by
+    /// model installation, not by startup: with no model configured
+    /// there is nothing to walk, and the handler skips rather than
+    /// failing so an ingest enqueued before a model exists costs one
+    /// settled row.
+    ///
+    /// Off the ingest critical path for the reason the fingerprint
+    /// walk is: it opens and decodes the original. A completed
+    /// encode chain-enqueues [`VisualEdgeRebuild`](Self::VisualEdgeRebuild)
+    /// for the same asset.
+    VisualFeature,
+    /// Recomputes the visual-similarity edges of one asset from stored
+    /// feature vectors — the visual counterpart of
+    /// [`EdgeRebuild`](Self::EdgeRebuild), owning
+    /// `visual_synth_kinds` and nothing else.
+    ///
+    /// Payload: `{ "asset_id": "<uuid>" }`. The scan is the whole
+    /// persona's vectors under the current model, deliberately not the
+    /// ±48 h candidate window; only the bounded top set above the
+    /// score floor is materialised, and a scan that clears nothing
+    /// writes an empty set rather than padding.
+    VisualEdgeRebuild,
 }
 
 impl JobKind {
@@ -403,6 +433,8 @@ impl JobKind {
             Self::PreviewGen => "preview_gen",
             Self::ChapterScan => "chapter_scan",
             Self::DisclosureStamp => "disclosure_stamp",
+            Self::VisualFeature => "visual_feature",
+            Self::VisualEdgeRebuild => "visual_edge_rebuild",
         }
     }
 
@@ -430,6 +462,8 @@ impl JobKind {
             "preview_gen" => Ok(Self::PreviewGen),
             "chapter_scan" => Ok(Self::ChapterScan),
             "disclosure_stamp" => Ok(Self::DisclosureStamp),
+            "visual_feature" => Ok(Self::VisualFeature),
+            "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

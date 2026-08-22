@@ -637,6 +637,11 @@ pub async fn init_core_with(
     let dirs = sqlite::repo::SqliteDirRepository::new(isle.clone());
     let edges = sqlite::repo::SqliteEdgeRepository::new(isle.clone());
     let thumbs = sqlite::repo::SqliteThumbRepository::new(isle.clone());
+    let visual_features = sqlite::repo::SqliteVisualFeatureRepository::new(isle.clone());
+    // Empty until a model package is installed and bound (#112, later
+    // phase); the two visual jobs skip while it is unset.
+    let visual_encoder_cell: Arc<OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>> =
+        Arc::new(OnceLock::new());
     let modalities = sqlite::repo::SqliteModalityRepository::new(isle.clone());
     let app_settings = Arc::new(sqlite::repo::SqliteAppSettingRepository::new(isle.clone()));
     let app_setting_service = Arc::new(AppSettingService::new(app_settings));
@@ -847,6 +852,8 @@ pub async fn init_core_with(
                     chapter_marks: (*chapter_marks).clone(),
                     previews_dir: previews_dir.clone(),
                     disclosure: disclosure_cell.clone(),
+                    visual_features: visual_features.clone(),
+                    visual_encoder: visual_encoder_cell.clone(),
                 },
                 job_concurrency,
             )

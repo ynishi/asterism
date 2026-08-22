@@ -14,6 +14,7 @@ use asterism_core::domain::constellation::plan_edges;
 use asterism_core::domain::content_hash;
 use asterism_core::domain::derived_text::derive_text;
 use asterism_core::domain::duplicate_conflict::DuplicateAxis;
+use asterism_core::domain::edge::{ConstellationEdge, EdgeKind};
 use asterism_core::domain::measurement::{Measurement, MeasurementStatus};
 use asterism_core::domain::provenance;
 use asterism_core::domain::render::render_policy;
@@ -21,11 +22,15 @@ use asterism_core::domain::repository::{
     AssetBodyRepository, AssetCommentRepository, AssetRepository, DimsProbe, DimsScope,
     DimsWritePolicy, EdgeRepository, IndexDoc, JobQueue, MaterialFingerprint, ModalityRepository,
     SeriesRepository, SourceTextReader, TagRepository, TextLocator, ThumbRepository,
+    VisualFeatureRepository,
 };
 use asterism_core::domain::series::SeriesKey;
 use asterism_core::domain::source_locator::SourceLocator;
 use asterism_core::domain::value::{
     AssetId, AssetRole, CoverTemplate, CoverText, Keyword, MimeType, StrategyId,
+};
+use asterism_core::domain::visual::{
+    VisualEncoder, VisualFeature, VisualFeatureKind, cosine_normalized,
 };
 use asterism_core::error::DomainError;
 
@@ -392,6 +397,269 @@ pub async fn edge_rebuild(
         .replace_synth_edges_of(&asset.id, edges)
         .await?;
     Ok(format!("{count} edge(s) rebuilt"))
+}
+
+/// Similarity floor below which a visual neighbour is not materialised
+/// — weak matches are omitted rather than padded to a count (#112).
+///
+/// **Provisional.** The final value comes from the fixture ROC once the
+/// encoder is measured; until then this is a conservative placeholder,
+/// recorded as such so a measurement that moves it moves one constant.
+const VISUAL_SCORE_FLOOR: f32 = 0.6;
+/// Bounded top set the visual rebuild materialises per asset.
+const VISUAL_TOP_K: usize = 8;
+/// Page size of the extraction backfill walk.
+const VISUAL_FEATURE_PAGE: u32 = 16;
+/// One encode at a time: decode + inference is CPU-bound the way
+/// thumbnail decodes are, and the same host-responsiveness argument
+/// applies (see [`THUMB_DECODE_SLOTS`]).
+static VISUAL_ENCODE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+/// What one offered material came to.
+enum EncodeOutcome {
+    /// A vector was stored.
+    Encoded,
+    /// Extraction answered permanently: a failure record exists, and
+    /// the row leaves the walk. Whatever the cause (undecodable bytes,
+    /// no local bytes), the stored `reason` carries it — this variant
+    /// only says a record was written.
+    Retired,
+    /// Nothing was written: the answer is temporary (an unreadable
+    /// original — a disk that may return), so the row stays in the
+    /// walk for a later pass, the dims-walk rule.
+    Deferred,
+}
+
+/// Encodes one image's pixels into the stored feature vector.
+///
+/// `{ "asset_id": ... }` encodes one asset's primary material and
+/// chain-enqueues the visual rebuild; `{ "batch": true }` walks
+/// materials with no answer under the configured model. Dispatched
+/// only when an encoder is configured (the cell gate in `mod.rs`).
+pub async fn visual_feature(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    if payload.get("batch").and_then(|v| v.as_bool()) == Some(true) {
+        return visual_feature_batch(env, &encoder).await;
+    }
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    let Some(material) = asset.materials.iter().find(|m| m.ord == 0) else {
+        return Ok("no primary material, skipped".into());
+    };
+    if !matches!(material.mime, Some(MimeType::Image(_))) {
+        return Ok("not an image, skipped".into());
+    }
+    let outcome =
+        encode_material(env, &encoder, &asset.id, material.ord, &material.locator).await?;
+    match outcome {
+        EncodeOutcome::Encoded => {
+            enqueue_visual_rebuild(env, &asset.id).await?;
+            Ok("encoded".into())
+        }
+        EncodeOutcome::Retired => Ok("failure recorded, retired".into()),
+        EncodeOutcome::Deferred => Ok("original unreadable, deferred".into()),
+    }
+}
+
+/// One page of the extraction walk; chain-enqueues while pages come
+/// back full, the same shape as the fingerprint backfill. No cursor:
+/// every processed row leaves the walk's predicate (a vector or a
+/// failure record lands), and a deferred row is re-offered on purpose.
+async fn visual_feature_batch(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+) -> Result<String, DomainError> {
+    let identity = encoder.identity().clone();
+    let page = env
+        .deps
+        .visual_features
+        .unextracted(&identity, VisualFeatureKind::Semantic, VISUAL_FEATURE_PAGE)
+        .await?;
+    if page.is_empty() {
+        return Ok("visual backfill: nothing left to encode".into());
+    }
+    let full = page.len() as u32 == VISUAL_FEATURE_PAGE;
+    let (mut encoded, mut retired, mut deferred) = (0usize, 0usize, 0usize);
+    for item in page {
+        match encode_material(env, encoder, &item.asset_id, item.ord, &item.locator).await? {
+            EncodeOutcome::Encoded => {
+                encoded += 1;
+                enqueue_visual_rebuild(env, &item.asset_id).await?;
+            }
+            EncodeOutcome::Retired => retired += 1,
+            EncodeOutcome::Deferred => deferred += 1,
+        }
+    }
+    // A page of nothing but deferred rows would chain into the same
+    // page forever; progress is what re-enqueues.
+    if full && (encoded + retired) > 0 {
+        env.queue
+            .enqueue(
+                asterism_core::domain::job::JobKind::VisualFeature,
+                serde_json::json!({ "batch": true }),
+            )
+            .await?;
+    }
+    Ok(format!(
+        "visual backfill: encoded={encoded} retired={retired} deferred={deferred}"
+    ))
+}
+
+/// Reads, decodes and encodes one material, recording what came back.
+async fn encode_material(
+    env: &JobEnv,
+    encoder: &std::sync::Arc<dyn VisualEncoder>,
+    asset_id: &AssetId,
+    ord: u32,
+    locator: &SourceLocator,
+) -> Result<EncodeOutcome, DomainError> {
+    let identity = encoder.identity().clone();
+    // No local bytes (a container record, a remote locator) is an
+    // answer, not a deferral: nothing will ever decode here.
+    let Some(path) = locator.local_path().map(|p| p.to_path_buf()) else {
+        env.deps
+            .visual_features
+            .mark_unextractable(
+                asset_id,
+                ord,
+                &identity,
+                VisualFeatureKind::Semantic,
+                "no local bytes",
+            )
+            .await?;
+        return Ok(EncodeOutcome::Retired);
+    };
+    // An unreadable original writes nothing at all — the dims-walk
+    // rule: recording it would answer a temporary question permanently.
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(
+                event = "job.visual_feature.unreadable",
+                locator = %locator.to_display(),
+                error = %err,
+                "original unreadable; leaving the row for a later pass"
+            );
+            return Ok(EncodeOutcome::Deferred);
+        }
+    };
+    let _permit = VISUAL_ENCODE_SLOTS
+        .acquire()
+        .await
+        .expect("semaphore never closed");
+    let enc = encoder.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let img = image::load_from_memory(&bytes)
+            .map_err(|e| DomainError::Validation(format!("undecodable image: {e}")))?
+            .to_rgb8();
+        let (w, h) = img.dimensions();
+        enc.encode_image(img.as_raw(), w, h)
+    })
+    .await
+    .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))?;
+    match result {
+        Ok(vector) => {
+            let feature = VisualFeature::new(
+                *asset_id,
+                ord,
+                identity,
+                VisualFeatureKind::Semantic,
+                vector,
+                chrono::Utc::now().timestamp_millis(),
+            )?;
+            env.deps.visual_features.set_visual_feature(feature).await?;
+            Ok(EncodeOutcome::Encoded)
+        }
+        Err(err) => {
+            env.deps
+                .visual_features
+                .mark_unextractable(
+                    asset_id,
+                    ord,
+                    &identity,
+                    VisualFeatureKind::Semantic,
+                    &err.to_string(),
+                )
+                .await?;
+            Ok(EncodeOutcome::Retired)
+        }
+    }
+}
+
+async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), DomainError> {
+    env.queue
+        .enqueue(
+            asterism_core::domain::job::JobKind::VisualEdgeRebuild,
+            serde_json::json!({ "asset_id": asset_id.to_string() }),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Recomputes one asset's visual-similarity edges from stored vectors.
+///
+/// The scan is the whole persona's vectors under the current model —
+/// deliberately not the ±48 h candidate window — and only the bounded
+/// top set above [`VISUAL_SCORE_FLOOR`] is materialised. An asset with
+/// no stored vector clears its visual set rather than keeping stale
+/// suggestions alive.
+pub async fn visual_edge_rebuild(
+    env: &JobEnv,
+    payload: &serde_json::Value,
+) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    let identity = encoder.identity().clone();
+    let Some(asset) = load_target(env, payload).await? else {
+        return Ok("asset gone, skipped".into());
+    };
+    let Some(feature) = env
+        .deps
+        .visual_features
+        .feature_of(&asset.id, 0, &identity, VisualFeatureKind::Semantic)
+        .await?
+    else {
+        env.deps
+            .edges
+            .replace_visual_edges_of(&asset.id, vec![])
+            .await?;
+        return Ok("no stored vector; visual edges cleared".into());
+    };
+    let vectors = env
+        .deps
+        .visual_features
+        .vectors_of_persona(&asset.persona_id, &identity, VisualFeatureKind::Semantic)
+        .await?;
+    let mut scored: Vec<(AssetId, f32)> = vectors
+        .into_iter()
+        .filter(|(id, _)| *id != asset.id)
+        .map(|(id, v)| (id, cosine_normalized(&feature.vector, &v)))
+        .filter(|(_, score)| *score >= VISUAL_SCORE_FLOOR)
+        .collect();
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    scored.truncate(VISUAL_TOP_K);
+    let edges = scored
+        .into_iter()
+        .map(|(to, score)| {
+            let mut edge = ConstellationEdge::new(asset.id, to, EdgeKind::VisualSimilarity)?;
+            edge.weight = Some(score);
+            edge.label = Some(identity.model_id.clone());
+            Ok(edge)
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?;
+    let count = edges.len();
+    env.deps
+        .edges
+        .replace_visual_edges_of(&asset.id, edges)
+        .await?;
+    Ok(format!("{count} visual edge(s) rebuilt"))
 }
 
 /// Session reconciliation stub — the precomputed rkyv snapshot was

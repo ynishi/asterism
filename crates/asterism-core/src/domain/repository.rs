@@ -2534,11 +2534,14 @@ pub struct VisualScanCandidate {
     /// materials only; the field is carried for key-shape parity with
     /// [`VisualFeature`].
     pub ord: u32,
-    /// Where the original's bytes live.
-    pub locator: String,
+    /// Where the original's bytes live — the same type
+    /// [`Material::locator`](crate::domain::material::Material::locator)
+    /// carries, so the batch walk and the per-asset pass hand the
+    /// extractor one reading of one artefact.
+    pub locator: SourceLocator,
     /// Declared media type, when known — the walk offers the row, the
     /// extractor decides whether it can decode it.
-    pub mime: Option<String>,
+    pub mime: Option<MimeType>,
 }
 
 /// Persistence port for model-derived visual features (#112).

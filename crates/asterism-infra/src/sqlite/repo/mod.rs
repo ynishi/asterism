@@ -39,6 +39,7 @@ pub mod snapshot;
 pub mod tag;
 pub mod thread;
 pub mod thumb;
+pub mod visual;
 
 pub use app_setting::SqliteAppSettingRepository;
 pub use asset::SqliteAssetRepository;
@@ -65,3 +66,4 @@ pub use snapshot::SqliteSnapshotRepository;
 pub use tag::SqliteTagRepository;
 pub use thread::SqliteThreadRepository;
 pub use thumb::SqliteThumbRepository;
+pub use visual::SqliteVisualFeatureRepository;
