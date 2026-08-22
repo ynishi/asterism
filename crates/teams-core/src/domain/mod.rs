@@ -3,4 +3,5 @@
 
 pub mod identity;
 pub mod ledger;
+pub mod model_registry;
 pub mod store;
