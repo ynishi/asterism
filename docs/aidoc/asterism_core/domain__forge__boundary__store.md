@@ -32,10 +32,21 @@ What the forge actually needs to know is whether the reference is
 real, because an operation naming content that is not there is a
 line lying about the present. That is one id and no persona.
 
-Whose asset it is stays a real question for a layer that has one to
-ask on behalf of — a surface that has authenticated somebody, which
-this one has not. When there is such a surface, the check belongs
-there, on an identity the caller did not choose.
+Nothing is deferred by this. "Who" is a question the forge already
+asks, once, through [`Actors`](super::actors::Actors): a write
+carries an [`Actor`](crate::domain::forge::model::act::Actor), the
+handle is resolved by the side that knows what a user is, and it is
+a handle precisely so that it exists before authentication binds it
+and keeps pointing at the same actor afterwards. A persona was
+never the forge's word for who, and an asset's owner was never the
+forge's question.
+
+Access is per line and outside the forge, so what governs putting
+content on one is who may write to that line. If the forge ever had
+to record an owner rather than an author, it would be an `Actor` on
+the entry — a fourth axis beside existence, content and name,
+resolved through the same contract as every other handle. Nothing
+asks for that today.
 
 [`Lines::list`]: crate::domain::forge::lines::Lines::list
 
