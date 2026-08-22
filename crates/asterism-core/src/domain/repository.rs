@@ -95,6 +95,15 @@ pub trait PersonaRepository: Send + Sync {
     /// `Conflict` when the persona is still live — as everywhere else,
     /// purge is reachable only through the trash. A missing id is a
     /// no-op.
+    ///
+    /// `Conflict` again when the forge is holding one of its assets.
+    /// A line says what is on it *now*, at this content, so bytes it
+    /// names cannot go while the line does — and the cascade above is
+    /// exactly what would take them. The refusal names how many and
+    /// which lines, because "a foreign key said no" is not something a
+    /// caller can act on. What releases them is dropping the line that
+    /// holds them; taking an entry off does not, since bringing it
+    /// back needs the content to still be there.
     async fn purge(&self, id: &PersonaId) -> Result<(), DomainError>;
 
     /// Lists trashed personas whose stamp is older than `cutoff`, oldest

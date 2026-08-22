@@ -10,6 +10,15 @@ and this project adheres to
 
 ### Added
 
+- **A purge the forge is blocking says so** (#102). Deleting a persona cascades
+  to its assets, and an asset a line names cannot go — so the purge already
+  refused, with a foreign-key error that names a column and tells nobody what to
+  do. It now refuses with how many assets are held and which lines hold them,
+  and with what releases them: dropping the line, since taking an entry off does
+  not. Asked inside the same transaction as the delete, like the live check
+  beside it, so the answer cannot go stale between saying it and acting on it. A
+  persona the forge is not holding purges exactly as before.
+
 - **The forge's two questions have real answers** (#102). `SqliteStore` answers
   whether a persona holds an asset — trashed included, because trashing is
   reversible and the row is still theirs, and reading that stamp here would make
