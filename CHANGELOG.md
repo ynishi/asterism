@@ -45,6 +45,34 @@ and this project adheres to
 
 ### Added
 
+- **The app installs a model from a registry entry** (#126, the fetch half of
+  the first serving step). What the instance now serves, the app could not yet
+  consume: a package still reached `models/` by hand.
+  `POST /asterism/models/fetch` takes the entry by reference (`{"url": …}`) or
+  by value (`{"entry": …}` — the inline form exists because the instance's
+  registry route sits behind its session gate, and neither the queue row nor
+  this server should grow a credential) and enqueues a `ModelFetch` job that
+  downloads each file, verifies it against the entry's digests, and lands the
+  package with one rename.
+
+  The entry stops being ad-hoc JSON: `asterism-vision` gains the typed
+  `RegistryEntry` beside `ModelPackage`, `model-lab registry` authors through
+  it, and the app parses with it — one type, so the two sides cannot drift. All
+  of the install's filesystem half (staging, digest checks, resume, retirement,
+  the final verify through the same `ModelPackage::open` the binder uses) lives
+  there too, unit-tested with made-up bytes; the job handler owns only the
+  network.
+
+  The pipeline has no retry policy, so the install resumes instead: a re-run
+  keeps every staged file whose digest verifies and downloads only the rest.
+  Staging sits **beside** `models/`, never inside it — the binder counts every
+  `models/` subdirectory holding a manifest, and a crashed install staged there
+  would read as a second package and turn the feature off. Landing is a
+  replacement (other packages retired, the binder's one-package rule; re-running
+  an install also heals an ambiguous directory), and binding stays a restart —
+  swapping models remains `clear_derived` plus restart, not a side effect of
+  fetching.
+
 - **The instance carries the model registry entry** (#126, the first serving
   step). A model package reaches a machine today by a person placing it, which
   on a shared instance leaves "everyone runs the same qualified model" an
