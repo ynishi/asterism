@@ -35,14 +35,14 @@ use std::sync::{Arc, Mutex};
 
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::forge::boundary::{Actors, Store};
-use asterism_core::domain::forge::closings::Closings;
+use asterism_core::domain::forge::closings::{Closings, Deciding};
 use asterism_core::domain::forge::lines::Lines;
 use asterism_core::domain::forge::model::act::Act;
 use asterism_core::domain::forge::model::closing::Closing;
 use asterism_core::domain::forge::model::line::Line;
 use asterism_core::domain::forge::model::pursuit::{Pursuit, Round};
 use asterism_core::domain::forge::model::value::{
-    ActorId, ChangePointId, LineId, Name, NodeId, PursuitId, StrategyId,
+    ActorId, LineId, Name, NodeId, PursuitId, StrategyId,
 };
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::value::{AssetId, PersonaId};
@@ -118,6 +118,36 @@ impl MemoryForge {
             .cloned()
             .collect();
         rows::read_line(head, &points, &tables.change_rows).map(Some)
+    }
+
+    /// Whether either half of this closing would land on a parent
+    /// something already has.
+    ///
+    /// The two rules the SQLite adapter gets from `UNIQUE (line_id,
+    /// parent_id)` and `UNIQUE (pursuit_id, parent_id)`, asked the only
+    /// way this store can ask them — and both, because
+    /// [`Deciding`] names both as races and a store implementing one of
+    /// them would leave the other to whichever store was asked. Nothing
+    /// compares a head: the closing carries the nodes it was decided
+    /// against, which is the only account of them anybody needs.
+    ///
+    /// The line is asked about only when something is going on it. An
+    /// abandoned close puts nothing there, so refusing one because
+    /// somebody else landed first would refuse work for giving up in
+    /// the wrong millisecond — the ending, which every close has, is
+    /// asked about either way.
+    fn taken(tables: &Tables, line: &LineId, pursuit: &PursuitId, closing: &Closing) -> bool {
+        let forked = tables
+            .pursuit_nodes
+            .iter()
+            .any(|row| row.pursuit == *pursuit && row.parent == closing.close().parent());
+        let landed = closing.point().is_some_and(|point| {
+            tables
+                .change_points
+                .iter()
+                .any(|row| row.line == *line && row.parent == point.parent())
+        });
+        forked || landed
     }
 
     /// Rebuilds one piece of work from the rows under `id`.
@@ -303,42 +333,37 @@ impl Closings for MemoryForge {
         &self,
         line: &LineId,
         pursuit: &PursuitId,
-        on: ChangePointId,
         closing: &Closing,
+        again: Arc<dyn Deciding>,
     ) -> Result<(), DomainError> {
         self.with(|tables| {
             if !tables.lines.iter().any(|row| row.id == *line) {
                 return Err(DomainError::not_found("line", line));
             }
-            // The same rule the SQLite adapter's `UNIQUE (line_id,
-            // parent_id)` states, asked the only way this store can
-            // ask it: a change point whose parent is already taken is
-            // a fork, and a fork is what "somebody landed first" looks
-            // like from here. Nothing compares a head — `on` is the
-            // caller's account of what it decided against, and the
-            // point it built carries the same node.
-            //
-            // Only a landing is asked. An abandoned close puts nothing
-            // on the line, so refusing one because somebody else
-            // landed first would refuse work for giving up in the
-            // wrong millisecond.
-            if let Some(point) = closing.point() {
-                debug_assert_eq!(
-                    point.parent(),
-                    on,
-                    "the closing names the node the caller says it decided against"
-                );
-                if tables
-                    .change_points
-                    .iter()
-                    .any(|row| row.line == *line && row.parent == point.parent())
-                {
+
+            // Decided outside this lock, so either log may have moved
+            // since. If one has, the answer is decided again from what
+            // is in front of us — and this lock is why that one is
+            // final: nothing can arrive between deciding and writing,
+            // because the whole of both is in here.
+            let decided;
+            let closing = if Self::taken(tables, line, pursuit, closing) {
+                let held = Self::line_at(tables, line)?
+                    .ok_or_else(|| DomainError::not_found("line", line))?;
+                let work = Self::pursuit_at(tables, pursuit)?
+                    .ok_or_else(|| DomainError::not_found("work", pursuit))?;
+                decided = again.close(&held, &work)?;
+                if Self::taken(tables, line, pursuit, &decided) {
                     return Err(DomainError::Conflict(format!(
-                        "line {line} has moved: something already sits on {}",
-                        point.parent()
+                        "an ending decided against line {line} as this write finds it still \
+                         names a parent something has taken"
                     )));
                 }
-            }
+                &decided
+            } else {
+                closing
+            };
+
             // Assembled before anything is pushed, so a refusal from
             // the translation leaves the store as it was. Both halves
             // go on together or neither does — the property the whole

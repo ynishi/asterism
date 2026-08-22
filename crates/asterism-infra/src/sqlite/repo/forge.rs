@@ -27,16 +27,30 @@
 //! failed: change_point.line_id, change_point.parent_id` — so that
 //! column list is what is matched, and matched exactly.
 //!
+//! # And the one place a log is read to decide something
+//!
+//! A close that loses its parent is decided again in here, from a line
+//! and a pursuit read inside the transaction that lost. That read is
+//! not a comparison: nothing is checked against what the caller
+//! decided, and the answer comes from the model rather than from this
+//! adapter. What the transaction contributes is that the logs cannot
+//! move between the read and the write, which is why the second
+//! attempt is the last one.
+//!
 //! `contains` is what exactness is guarding against, and the direction
 //! matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
 //! of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 //! substring test asked about the ending matches the fork — it reads
 //! "somebody pushed a pass first" as "this work has already ended",
-//! and tells a caller that re-reading is pointless when re-reading is
-//! the whole answer. The other direction cannot happen, which is why
+//! and an ending is final where a fork is decided again. So the close
+//! that a second decision would have landed is refused instead, and
+//! the caller is told the work is over when it is only one pass
+//! further along. The other direction cannot happen, which is why
 //! naming it would be naming the wrong risk.
 
-use asterism_core::domain::forge::closings::Closings;
+use std::sync::Arc;
+
+use asterism_core::domain::forge::closings::{Closings, Deciding};
 use asterism_core::domain::forge::lines::Lines;
 use asterism_core::domain::forge::model::act::Act;
 use asterism_core::domain::forge::model::closing::Closing;
@@ -49,7 +63,7 @@ use asterism_core::domain::forge::model::value::{
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
-use rusqlite::{Connection, Row, Transaction, params};
+use rusqlite::{Connection, Row, params};
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
@@ -83,9 +97,11 @@ const ONE_ENDING_PER_PURSUIT: &str = "pursuit_node.pursuit_id";
 /// Matched on the exact column list SQLite reports, because one of
 /// them is a prefix of another: a violation of `pursuit_node.pursuit_id` is
 /// a second ending, and `pursuit_node.pursuit_id, pursuit_node.parent_id` is a
-/// fork. `contains` would read the first out of the second and tell a
-/// caller to read again and re-decide, which is not a move that helps
-/// when the work has already ended.
+/// fork. `contains` reads the first out of the second — a fork
+/// answering to the ending's column list — and the ending is the one
+/// refusal here that is final. So the misreading turns "a pass
+/// arrived, decide again" into "this work is over", and the close that
+/// deciding again would have landed is refused instead.
 fn is_unique_violation(error: &rusqlite::Error, columns: &str) -> bool {
     let rusqlite::Error::SqliteFailure(inner, Some(message)) = error else {
         return false;
@@ -333,6 +349,26 @@ fn build_line(conn: &Connection, head: &LineRow) -> rusqlite::Result<Line> {
     })
 }
 
+/// Reads one whole piece of work under `id`, or nothing if there is
+/// none.
+fn read_work(conn: &Connection, id: &PursuitId) -> rusqlite::Result<Option<Pursuit>> {
+    let head = conn
+        .query_row(
+            "SELECT * FROM pursuit WHERE id = ?1",
+            params![id.as_uuid()],
+            pursuit_row,
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })?;
+    let Some(head) = head else {
+        return Ok(None);
+    };
+    build_pursuit(conn, &head).map(Some)
+}
+
 /// Reads one whole pursuit: its row, its nodes, and their operations.
 fn build_pursuit(conn: &Connection, head: &PursuitRow) -> rusqlite::Result<Pursuit> {
     let uuid = *head.id.as_uuid();
@@ -358,12 +394,19 @@ fn build_pursuit(conn: &Connection, head: &PursuitRow) -> rusqlite::Result<Pursu
     })
 }
 
+/// Writes a change point and its rows.
+///
+/// Takes a connection rather than a transaction because a savepoint is
+/// not one, and an attempt at a close is written inside a savepoint so
+/// that the attempt can come back out on its own. Every caller is
+/// inside a write either way — a bare connection would put these rows
+/// on their own, which is the one thing this port must not do.
 fn insert_change_point(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     point: &ChangePointRow,
     rows: &[ChangeRowRow],
 ) -> rusqlite::Result<()> {
-    tx.execute(
+    conn.execute(
         "INSERT INTO change_point \
              (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -379,7 +422,7 @@ fn insert_change_point(
         ],
     )?;
     for row in rows {
-        tx.execute(
+        conn.execute(
             "INSERT INTO change_row (point_id, entry_id, existence, content, name) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -394,12 +437,15 @@ fn insert_change_point(
     Ok(())
 }
 
+/// Writes a node of a pursuit and the operations under it.
+///
+/// A connection for the same reason [`insert_change_point`] takes one.
 fn insert_work_node(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     node: &PursuitNodeRow,
     ops: &[PursuitOpRow],
 ) -> rusqlite::Result<()> {
-    tx.execute(
+    conn.execute(
         "INSERT INTO pursuit_node \
              (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -416,7 +462,7 @@ fn insert_work_node(
         ],
     )?;
     for op in ops {
-        tx.execute(
+        conn.execute(
             "INSERT INTO pursuit_op (node_id, position, entry_id, verb, content, name) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
@@ -450,12 +496,8 @@ fn insert_work_node(
 /// `restore::chain` walks from the genesis, finds the point
 /// unreachable, and refuses the whole history. A store that accepts
 /// what it can never hand back is worse than one that refuses.
-fn line_has_node(
-    tx: &Transaction<'_>,
-    line: &LineId,
-    node: ChangePointId,
-) -> rusqlite::Result<bool> {
-    let found: i64 = tx.query_row(
+fn line_has_node(conn: &Connection, line: &LineId, node: ChangePointId) -> rusqlite::Result<bool> {
+    let found: i64 = conn.query_row(
         "SELECT COUNT(*) FROM line WHERE id = ?1 AND genesis_id = ?2",
         params![line.as_uuid(), node.as_uuid()],
         |row| row.get(0),
@@ -463,7 +505,7 @@ fn line_has_node(
     if found > 0 {
         return Ok(true);
     }
-    let found: i64 = tx.query_row(
+    let found: i64 = conn.query_row(
         "SELECT COUNT(*) FROM change_point WHERE line_id = ?1 AND id = ?2",
         params![line.as_uuid(), node.as_uuid()],
         |row| row.get(0),
@@ -475,11 +517,11 @@ fn line_has_node(
 /// a node already on it. The line's question, asked of the other log
 /// and for the same reason.
 fn pursuit_has_node(
-    tx: &Transaction<'_>,
+    conn: &Connection,
     pursuit: &PursuitId,
     node: NodeId,
 ) -> rusqlite::Result<bool> {
-    let found: i64 = tx.query_row(
+    let found: i64 = conn.query_row(
         "SELECT COUNT(*) FROM pursuit WHERE id = ?1 AND open_node = ?2",
         params![pursuit.as_uuid(), node.as_uuid()],
         |row| row.get(0),
@@ -487,7 +529,7 @@ fn pursuit_has_node(
     if found > 0 {
         return Ok(true);
     }
-    let found: i64 = tx.query_row(
+    let found: i64 = conn.query_row(
         "SELECT COUNT(*) FROM pursuit_node WHERE pursuit_id = ?1 AND id = ?2",
         params![pursuit.as_uuid(), node.as_uuid()],
         |row| row.get(0),
@@ -676,23 +718,7 @@ impl Pursuits for SqliteForge {
     async fn get(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {
         let id = *id;
         self.isle
-            .call(move |conn| {
-                let head = conn
-                    .query_row(
-                        "SELECT * FROM pursuit WHERE id = ?1",
-                        params![id.as_uuid()],
-                        pursuit_row,
-                    )
-                    .map(Some)
-                    .or_else(|error| match error {
-                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                        other => Err(other),
-                    })?;
-                let Some(head) = head else {
-                    return Ok(None);
-                };
-                build_pursuit(conn, &head).map(Some)
-            })
+            .call(move |conn| read_work(conn, &id))
             .await
             .map_err(infra_err)
     }
@@ -774,66 +800,78 @@ impl Closings for SqliteForge {
         &self,
         line: &LineId,
         pursuit: &PursuitId,
-        on: ChangePointId,
         closing: &Closing,
+        again: Arc<dyn Deciding>,
     ) -> Result<(), DomainError> {
         let (line, pursuit) = (*line, *pursuit);
-        let landing = closing
-            .point()
-            .map(|point| rows::take_change_point_apart(line, point));
-        let close = closing.close().clone();
+        let closing = closing.clone();
 
         let landed = self
             .isle
             .call(move |conn| {
-                let tx = conn.transaction()?;
-                let ending = rows::take_close_apart(pursuit, &close);
+                let mut tx = conn.transaction()?;
 
-                // Both parents before either write. A node naming
-                // something this log never had is a row the read half
-                // could not turn back into a value, and the unique
-                // indexes do not catch it — they refuse a parent used
-                // twice, not one that was never there.
-                if !pursuit_has_node(&tx, &pursuit, ending.parent)? {
-                    return Ok(Err(Refusal::NotThisPursuit));
-                }
-                if let Some((point, _)) = &landing
-                    && !line_has_node(&tx, &line, point.parent)?
-                {
-                    return Ok(Err(Refusal::NotThisLine));
-                }
-
-                // The ending first, so a second one is refused by
-                // `idx_pursuit_node_one_close` before anything reaches the
-                // line — and the whole of it rolls back either way.
-                if let Err(error) = insert_work_node(&tx, &ending, &[]) {
-                    // Kept apart, because the caller's next move
-                    // differs. A fork means somebody wrote a pass
-                    // while this close was being decided, and reading
-                    // again is what answers it. An ending already
-                    // there means the work is over, and reading again
-                    // finds it over — telling somebody to retry that
-                    // is telling them to do it forever.
-                    if is_unique_violation(&error, ONE_NODE_PER_PARENT) {
-                        return Ok(Err(Refusal::WorkForked));
+                // The caller's decision, made outside this transaction
+                // where the line could still move under it. Written
+                // inside a savepoint because a refusal can arrive with
+                // the ending already in — the change point is the half
+                // that loses races, and it goes second.
+                let first = {
+                    let attempt = tx.savepoint()?;
+                    match land(&attempt, &line, &pursuit, &closing)? {
+                        Ok(()) => {
+                            attempt.commit()?;
+                            Ok(())
+                        }
+                        // Dropped unreleased, which rolls the ending
+                        // back to here — and not the transaction, which
+                        // is what keeps the write lock.
+                        Err(refusal) => Err(refusal),
                     }
-                    if is_unique_violation(&error, ONE_ENDING_PER_PURSUIT) {
-                        return Ok(Err(Refusal::WorkAlreadyEnded));
+                };
+
+                match first {
+                    Ok(()) => {
+                        tx.commit()?;
+                        return Ok(Ok(()));
                     }
-                    return Err(error);
+                    // The two ways a log moves under a decision:
+                    // somebody landed on the line, or a pass arrived
+                    // on the work. Both are answered by deciding
+                    // again against what is in front of us.
+                    Err(Refusal::LineMoved | Refusal::WorkForked) => {}
+                    Err(settled) => return Ok(Err(settled)),
                 }
 
-                if let Some((point, rows)) = &landing
-                    && let Err(error) = insert_change_point(&tx, point, rows)
-                {
-                    if is_unique_violation(&error, ONE_POINT_PER_PARENT) {
-                        return Ok(Err(Refusal::LineMoved));
-                    }
-                    return Err(error);
-                }
+                // Read inside the transaction, and this is the whole
+                // reason there is one attempt after this rather than
+                // five. Transactions on this connection begin
+                // IMMEDIATE (see `sqlite::mod`), so the write lock has
+                // been held since before the first attempt — including
+                // on the path where that attempt wrote nothing at all —
+                // and rolling a savepoint back does not end the
+                // transaction holding it. Neither log can move between
+                // this read and the write below. There is no third
+                // answer to lose to.
+                let (Some(held), Some(work)) = (read_line(&tx, &line)?, read_work(&tx, &pursuit)?)
+                else {
+                    return Ok(Err(Refusal::Answered(DomainError::not_found(
+                        "the logs this close was written against",
+                        line,
+                    ))));
+                };
+                let decided = match again.close(&held, &work) {
+                    Ok(decided) => decided,
+                    Err(refused) => return Ok(Err(Refusal::Answered(refused))),
+                };
 
-                tx.commit()?;
-                Ok(Ok(()))
+                match land(&tx, &line, &pursuit, &decided)? {
+                    Ok(()) => {
+                        tx.commit()?;
+                        Ok(Ok(()))
+                    }
+                    Err(refusal) => Ok(Err(refusal)),
+                }
             })
             .await
             .map_err(infra_err)?;
@@ -845,17 +883,83 @@ impl Closings for SqliteForge {
             Refusal::NotThisPursuit => DomainError::Validation(format!(
                 "this ending sits on a node work {pursuit} does not have"
             )),
+            // Reachable only from the second attempt, which decided
+            // against the logs this transaction was holding still. A
+            // line that moved anyway is a line something wrote to
+            // without taking the write lock.
             Refusal::LineMoved => DomainError::Conflict(format!(
-                "line {line} has moved: this close lands on {on}, and something is already there"
+                "line {line} moved under a close decided against it inside the write"
             )),
             Refusal::WorkForked => DomainError::Conflict(format!(
-                "work {pursuit} has moved: a pass arrived where this ending would go"
+                "work {pursuit} moved under a close decided against it inside the write"
             )),
             Refusal::WorkAlreadyEnded => DomainError::Conflict(format!(
                 "work {pursuit} has already ended; reading it again will find the same ending"
             )),
+            Refusal::Answered(refused) => refused,
         })
     }
+}
+
+/// One attempt at putting a closing on the two logs.
+///
+/// Writes both halves or refuses, and says which refusal it was. What
+/// it does not do is decide anything or undo anything: the caller
+/// chooses whether an attempt is a savepoint it can roll back or the
+/// last thing this transaction does.
+fn land(
+    conn: &Connection,
+    line: &LineId,
+    pursuit: &PursuitId,
+    closing: &Closing,
+) -> rusqlite::Result<Result<(), Refusal>> {
+    let ending = rows::take_close_apart(*pursuit, closing.close());
+    let landing = closing
+        .point()
+        .map(|point| rows::take_change_point_apart(*line, point));
+
+    // Both parents before either write. A node naming something this
+    // log never had is a row the read half could not turn back into a
+    // value, and the unique indexes do not catch it — they refuse a
+    // parent used twice, not one that was never there.
+    if !pursuit_has_node(conn, pursuit, ending.parent)? {
+        return Ok(Err(Refusal::NotThisPursuit));
+    }
+    if let Some((point, _)) = &landing
+        && !line_has_node(conn, line, point.parent)?
+    {
+        return Ok(Err(Refusal::NotThisLine));
+    }
+
+    // The ending first, so a second one is refused by
+    // `idx_pursuit_node_one_close` before anything reaches the line —
+    // and the whole of the attempt comes back out either way.
+    if let Err(error) = insert_work_node(conn, &ending, &[]) {
+        // Kept apart, because what happens next differs. A fork means
+        // somebody wrote a pass while this close was being decided,
+        // and deciding again is what answers it. An ending already
+        // there means the work is over, and deciding again finds it
+        // over — telling somebody to try that again is telling them to
+        // do it forever.
+        if is_unique_violation(&error, ONE_NODE_PER_PARENT) {
+            return Ok(Err(Refusal::WorkForked));
+        }
+        if is_unique_violation(&error, ONE_ENDING_PER_PURSUIT) {
+            return Ok(Err(Refusal::WorkAlreadyEnded));
+        }
+        return Err(error);
+    }
+
+    if let Some((point, rows)) = &landing
+        && let Err(error) = insert_change_point(conn, point, rows)
+    {
+        if is_unique_violation(&error, ONE_POINT_PER_PARENT) {
+            return Ok(Err(Refusal::LineMoved));
+        }
+        return Err(error);
+    }
+
+    Ok(Ok(()))
 }
 
 /// Why a pass was not written.
@@ -870,27 +974,32 @@ enum PushRefusal {
     NotThisPursuit,
 }
 
-/// What refused, and what the caller can do about it.
+/// What refused, and what happens next.
 ///
-/// Three rather than two, because two of them come from one table and
-/// mean opposite things: one is worth reading again for and one is
-/// not. Collapsing them would discard the distinction at the only
-/// place it is ever available.
+/// More variants than there are tables, because two of them come from
+/// one table and mean opposite things: one is worth deciding again for
+/// and one is not. Collapsing them would discard the distinction at
+/// the only place it is ever available.
 enum Refusal {
     /// The closing names a node this line never had. Not a race — the
-    /// caller decided against something else — so reading again finds
+    /// caller decided against something else — so deciding again finds
     /// the same thing.
     NotThisLine,
     /// The ending sits on a node this pursuit never had, for the same
     /// reason and with the same answer.
     NotThisPursuit,
     /// Something already sits on the change point this close aimed at.
-    /// Read the line again and decide again.
+    /// Decide again, here, where the line cannot move.
     LineMoved,
     /// A pass arrived on the node this close sat on. Same answer:
-    /// read again.
+    /// decide again against the log as it is.
     WorkForked,
-    /// The work already has an ending. Reading again finds the same
+    /// The work already has an ending. Deciding again finds the same
     /// one, so there is nothing to re-decide.
     WorkAlreadyEnded,
+    /// Deciding again answered with a refusal of its own: the line it
+    /// was handed collides with what the work asks for, already says
+    /// it, or is not there to be read. That answer is the caller's
+    /// answer, and it comes back whole rather than as a race.
+    Answered(DomainError),
 }

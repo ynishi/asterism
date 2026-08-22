@@ -18,52 +18,77 @@
 //!
 //! # What this service is allowed to decide
 //!
-//! Nothing. It loads what the model needs, calls it, writes back what
-//! came out, and — for the one operation that can lose a race — reads
-//! again and asks again. Every refusal in here comes from the model or
-//! from a port.
+//! Nothing. It loads what the model needs, calls it, and writes back
+//! what came out. Every refusal in here comes from the model or from a
+//! port.
 //!
-//! # Losing the race is not an error to report
+//! # Losing the race is not an error to report, and not answered here
 //!
 //! Two pieces of work can finish against one line at the same moment,
-//! and only one of them lands on the head. The other is told, and this
-//! service reads the line again and decides again rather than handing
-//! that back to a caller.
+//! and only one of them lands on the head. What the loser needs is a
+//! fresh decision against the line that won — not the same answer
+//! written again, because normalising against a line that has moved
+//! may leave less to record than there was, or more to collide with.
 //!
-//! It matters that this is a fresh decision and not a retry of the old
-//! one. Reading again means normalising against a line that has moved,
-//! so what the work still changes may be less than it was, and what it
-//! now collides with may be more. Handing back the same answer would
-//! be writing a decision made against a line that no longer exists.
+//! Deciding that again is the model's, and the moment to do it belongs
+//! to whoever is holding the write. So this service hands the store
+//! [`Deciding`] along with what it decided, and the store asks for a
+//! second answer under its own lock if the first is refused. Reading
+//! again from here and trying again would be deciding against a line
+//! that can move between the read and the write, once per attempt, for
+//! as many attempts as anybody has patience for.
 
 use std::sync::Arc;
 
 use crate::domain::attribution::AttributionContext;
 use crate::domain::forge::boundary::{Actors, StoreClient};
 use crate::domain::forge::clock::Clock;
-use crate::domain::forge::closings::Closings;
+use crate::domain::forge::closings::{Closings, Deciding};
 use crate::domain::forge::lines::Lines;
 use crate::domain::forge::model::act::{Act, Actor};
 use crate::domain::forge::model::change::{Collision, collisions, since};
-use crate::domain::forge::model::closing::close;
+use crate::domain::forge::model::closing::{Closing, close};
 use crate::domain::forge::model::line::Line;
 use crate::domain::forge::model::op::{Op, OpKind};
 use crate::domain::forge::model::pursuit::{Intent, Outcome, Pursuit, Round};
 use crate::domain::forge::model::react::react;
-use crate::domain::forge::model::value::{ChangePointId, LineId, PursuitId};
+use crate::domain::forge::model::value::{ActorId, ChangePointId, LineId, PursuitId};
 use crate::domain::forge::pursuits::Pursuits;
 use crate::domain::forge::strategies::Strategies;
 use crate::domain::value::PersonaId;
 use crate::error::DomainError;
 
-/// How many times a close is decided, counting the first.
+/// One person's answer to "what does ending this work put on the
+/// line" — asked once out here, and at most once more inside the
+/// write.
 ///
-/// So five is one attempt and four re-decisions. Bounded because a
-/// line under constant traffic would otherwise keep a caller here
-/// indefinitely; reaching the bound is not a failure of the work but
-/// the line being busier than this caller is patient, so it comes back
-/// as a conflict and asking again is reasonable.
-const ATTEMPTS: usize = 5;
+/// What it holds is everything the caller said and nothing the logs
+/// say: the outcome asked for, the note written, and whose the write
+/// is. The line and the pursuit come from whoever is asking, which is
+/// what makes the second answer a fresh one — same question, logs that
+/// have moved.
+///
+/// The time is not held either. Each answer is stamped when it is
+/// given, so the one that lands says when it was decided rather than
+/// when somebody first asked.
+struct Ending {
+    outcome: Outcome,
+    note: Option<String>,
+    by: ActorId,
+    clock: Arc<dyn Clock>,
+}
+
+impl Deciding for Ending {
+    fn close(&self, line: &Line, pursuit: &Pursuit) -> Result<Closing, DomainError> {
+        Ok(close(
+            line,
+            pursuit,
+            self.outcome,
+            self.note.clone(),
+            Act::new(self.clock.now(), Actor::User(self.by)),
+        )?)
+    }
+}
 
 /// Work use-case service.
 pub struct PursuitService {
@@ -195,6 +220,12 @@ impl PursuitService {
     ///
     /// The one call that writes to both logs, and it writes them as one
     /// — see [`Closings`].
+    ///
+    /// Decided here, against the line as this read finds it, and the
+    /// same decision goes to the store as something it can ask again.
+    /// Which of the two answers lands is the store's to say and not
+    /// this service's to watch: there is no loop here, and nothing to
+    /// count.
     pub async fn close(
         &self,
         id: &PursuitId,
@@ -202,28 +233,22 @@ impl PursuitService {
         note: Option<String>,
         by: &AttributionContext,
     ) -> Result<(), DomainError> {
-        for _ in 0..ATTEMPTS {
-            let pursuit = self.get(id).await?;
-            let line = self.line(&pursuit.of()).await?;
-            let on = line.head();
+        let pursuit = self.get(id).await?;
+        let line = self.line(&pursuit.of()).await?;
 
-            // Stamped per attempt rather than once. Each of these is a
-            // fresh decision against a line that has moved, and the
-            // time on the one that lands is when it was decided — not
-            // when somebody first asked.
-            let act = self.act(by).await?;
-            let closing = close(&line, &pursuit, outcome, note.clone(), act)?;
+        // Resolved once, because who the write is by does not change
+        // when the line does — and resolving it is the one part of an
+        // act that asks a port, which the store cannot do while it is
+        // holding a write open.
+        let ending: Arc<dyn Deciding> = Arc::new(Ending {
+            outcome,
+            note,
+            by: self.actors.resolve(by).await?,
+            clock: self.clock.clone(),
+        });
 
-            return match self.closings.commit(&line.id(), id, on, &closing).await {
-                // Somebody landed first. Read again and decide again.
-                Err(DomainError::Conflict(_)) => continue,
-                other => other,
-            };
-        }
-
-        Err(DomainError::Conflict(
-            "the line moved every time this work tried to land on it".into(),
-        ))
+        let closing = ending.close(&line, &pursuit)?;
+        self.closings.commit(&line.id(), id, &closing, ending).await
     }
 
     /// What this work still asks to write that the line moved after
@@ -333,10 +358,22 @@ mod tests {
     struct World {
         lines: Mutex<Vec<Line>>,
         pursuits: Mutex<Vec<Pursuit>>,
-        /// How many closes have to lose the head before one lands.
-        losses: Mutex<usize>,
-        /// How many closes were attempted, won or lost.
-        attempts: Mutex<usize>,
+        /// An ending somebody else decided, to be landed at the top of
+        /// the next close — so that close finds its parent taken.
+        ///
+        /// The store is where a race is answered now, so the race has
+        /// to happen inside the store: arranging it out here would
+        /// only test a line that had already moved before anybody read
+        /// it, which is the case that never needed answering.
+        first: Mutex<Option<(PursuitId, Closing)>>,
+        /// Whether this store refuses to keep even what was decided
+        /// against the line as it is.
+        adamant: bool,
+        /// How many times the port was called, won or lost.
+        calls: Mutex<usize>,
+        /// How many endings it was handed, counting the ones it asked
+        /// for itself.
+        decisions: Mutex<usize>,
         /// Whether the layer below claims to hold anything.
         holds: bool,
         /// Handles already minted, keyed by who asked.
@@ -349,6 +386,15 @@ mod tests {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 holds: true,
+                ..Self::default()
+            })
+        }
+
+        /// The same store, keeping nothing at all.
+        fn adamant() -> Arc<Self> {
+            Arc::new(Self {
+                holds: true,
+                adamant: true,
                 ..Self::default()
             })
         }
@@ -469,29 +515,49 @@ mod tests {
             &self,
             line: &LineId,
             pursuit: &PursuitId,
-            on: ChangePointId,
             closing: &Closing,
+            again: Arc<dyn Deciding>,
         ) -> Result<(), DomainError> {
-            *self.attempts.lock().unwrap() += 1;
-            {
-                let mut losses = self.losses.lock().unwrap();
-                if *losses > 0 {
-                    *losses -= 1;
-                    return Err(DomainError::Conflict("somebody landed first".into()));
-                }
-            }
+            *self.calls.lock().unwrap() += 1;
+            *self.decisions.lock().unwrap() += 1;
 
             let mut held = self
                 .line(line)
                 .ok_or_else(|| DomainError::not_found("line", line))?;
-            if held.head() != on {
-                return Err(DomainError::Conflict("the line moved".into()));
+
+            // Somebody armed an ending of their own. It lands here,
+            // between the caller's decision and this write — which is
+            // the only place a race can be arranged now that the
+            // service does not read the line twice.
+            if let Some((theirs, ending)) = self.first.lock().unwrap().take() {
+                let mut work = self
+                    .pursuit(&theirs)
+                    .ok_or_else(|| DomainError::not_found("pursuit", theirs))?;
+                ending.apply(&mut held, &mut work).expect("theirs lands");
+                self.put_line(held.clone());
+                self.put(work);
             }
+
             let mut work = self
                 .pursuit(pursuit)
                 .ok_or_else(|| DomainError::not_found("pursuit", pursuit))?;
 
-            closing.clone().apply(&mut held, &mut work)?;
+            // The parent as the constraint sees it: taken, or free.
+            let stale = closing
+                .point()
+                .is_some_and(|point| point.parent() != held.head());
+            let closing = if stale {
+                *self.decisions.lock().unwrap() += 1;
+                again.close(&held, &work)?
+            } else {
+                closing.clone()
+            };
+
+            if self.adamant {
+                return Err(DomainError::Conflict("this store keeps nothing".into()));
+            }
+
+            closing.apply(&mut held, &mut work)?;
 
             self.put_line(held);
             self.put(work);
@@ -580,6 +646,25 @@ mod tests {
             .await
             .unwrap();
         (lines, work, line)
+    }
+
+    /// Work cut from the line, asking for one entry of its own — so
+    /// two of these collide with nothing and both may land.
+    async fn cut(work: &PursuitService, line: &Line, label: &str) -> Pursuit {
+        let pursuit = work
+            .open(&line.id(), None, Intent::default(), &by())
+            .await
+            .unwrap();
+        work.push(
+            &pursuit.id(),
+            &persona(),
+            vec![Op::add(content(), name(label))],
+            None,
+            &by(),
+        )
+        .await
+        .unwrap();
+        pursuit
     }
 
     #[tokio::test]
@@ -715,67 +800,76 @@ mod tests {
         );
     }
 
-    /// Losing the head is not reported. The service reads the line
-    /// again and decides again, which is a fresh decision rather than
-    /// the same one retried.
+    /// Losing the head is not reported and is not read again from
+    /// here. The service hands the store a way to decide again, the
+    /// store asks it once, and the caller is told nothing happened out
+    /// of the ordinary.
     #[tokio::test]
-    async fn a_close_that_loses_the_head_is_decided_again() {
+    async fn a_close_that_loses_the_head_is_decided_again_by_the_store() {
         let world = World::new();
-        *world.losses.lock().unwrap() = 2;
         let (_, work, line) = opened(&world).await;
-        let pursuit = work
-            .open(&line.id(), None, Intent::default(), &by())
-            .await
-            .unwrap();
-        work.push(
-            &pursuit.id(),
-            &persona(),
-            vec![Op::add(content(), name("cut-01"))],
-            None,
-            &by(),
-        )
-        .await
-        .unwrap();
+        let mine = cut(&work, &line, "mine").await;
+        let theirs = cut(&work, &line, "theirs").await;
 
-        work.close(&pursuit.id(), Outcome::Satisfied, None, &by())
+        // Theirs is decided but not landed. The store lands it at the
+        // top of the next close, so mine is decided against a line
+        // that moves before it is written.
+        let ending = close(
+            &world.line(&line.id()).unwrap(),
+            &world.pursuit(&theirs.id()).unwrap(),
+            Outcome::Satisfied,
+            None,
+            Act::new(at(9), Actor::User(ActorId::new())),
+        )
+        .unwrap();
+        *world.first.lock().unwrap() = Some((theirs.id(), ending));
+
+        work.close(&mine.id(), Outcome::Satisfied, None, &by())
             .await
-            .unwrap();
+            .expect("what the store could not keep, it decided again");
 
         assert_eq!(
-            *world.attempts.lock().unwrap(),
-            3,
-            "twice lost, once landed"
+            *world.calls.lock().unwrap(),
+            1,
+            "one call to the port: losing costs a decision, not a round trip"
         );
-        assert_ne!(world.line(&line.id()).unwrap().head(), line.head());
+        assert_eq!(
+            *world.decisions.lock().unwrap(),
+            2,
+            "one decision outside the write, one inside it"
+        );
+
+        // Both are on, and mine sits on theirs rather than beside it.
+        let held = world.line(&line.id()).unwrap();
+        let chain = held.history().changes();
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[0].from(), theirs.id());
+        assert_eq!(chain[1].from(), mine.id());
+        assert_eq!(chain[1].parent(), chain[0].id());
     }
 
-    /// A line busier than this caller is patient comes back as a
-    /// conflict rather than as an unbounded wait.
+    /// A store that cannot keep even what was decided against the line
+    /// as it is says so, and the work stays open.
+    ///
+    /// There is nothing for this service to do about that: the second
+    /// decision was made where the line could not move, so a refusal
+    /// after it is not a race anybody can win by asking again.
     #[tokio::test]
-    async fn a_line_that_never_stops_moving_gives_up_as_a_conflict() {
-        let world = World::new();
-        *world.losses.lock().unwrap() = ATTEMPTS + 1;
+    async fn a_close_the_store_will_not_keep_comes_back_as_a_conflict() {
+        let world = World::adamant();
         let (_, work, line) = opened(&world).await;
-        let pursuit = work
-            .open(&line.id(), None, Intent::default(), &by())
-            .await
-            .unwrap();
-        work.push(
-            &pursuit.id(),
-            &persona(),
-            vec![Op::add(content(), name("cut-01"))],
-            None,
-            &by(),
-        )
-        .await
-        .unwrap();
+        let pursuit = cut(&work, &line, "cut-01").await;
 
         let refused = work
             .close(&pursuit.id(), Outcome::Satisfied, None, &by())
             .await;
 
         assert!(matches!(refused, Err(DomainError::Conflict(_))));
-        assert_eq!(*world.attempts.lock().unwrap(), ATTEMPTS);
+        assert_eq!(
+            *world.calls.lock().unwrap(),
+            1,
+            "and it is not asked a second time"
+        );
         assert!(work.get(&pursuit.id()).await.unwrap().outcome().is_none());
     }
 

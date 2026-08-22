@@ -36,15 +36,16 @@ use std::sync::{Arc, Mutex};
 use asterism_core::application::forge::{LineService, PursuitService};
 use asterism_core::domain::attribution::{AttributionContext, Author};
 use asterism_core::domain::forge::clock::Clock;
-use asterism_core::domain::forge::closings::Closings;
+use asterism_core::domain::forge::closings::{Closings, Deciding};
 use asterism_core::domain::forge::lines::Lines;
-use asterism_core::domain::forge::model::act::Actor;
+use asterism_core::domain::forge::model::act::{Act, Actor};
+use asterism_core::domain::forge::model::closing::{Closing, close as end_work};
 use asterism_core::domain::forge::model::line::Line;
 use asterism_core::domain::forge::model::op::{Op, OpKind};
 use asterism_core::domain::forge::model::pursuit::{Intent, Outcome, Pursuit};
 use asterism_core::domain::forge::model::strategy::Strategy;
 use asterism_core::domain::forge::model::table::EntryStates;
-use asterism_core::domain::forge::model::value::{Content, EntryId, Name, StrategyId};
+use asterism_core::domain::forge::model::value::{ActorId, Content, EntryId, Name, StrategyId};
 use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::strategies::{Builtin, MainlineFirst};
 use asterism_core::domain::value::{AssetId, PersonaId};
@@ -83,6 +84,49 @@ fn who(name: &str) -> AttributionContext {
 
 fn name(text: &str) -> Name {
     Name::new(text).expect("a name")
+}
+
+/// The decision a caller would make again, for the tests that ask the
+/// port directly.
+///
+/// The model, and a time somebody chose — the same two things the
+/// service assembles, without the service.
+struct Decides {
+    outcome: Outcome,
+    at: DateTime<Utc>,
+}
+
+impl Deciding for Decides {
+    fn close(&self, line: &Line, pursuit: &Pursuit) -> Result<Closing, DomainError> {
+        Ok(end_work(
+            line,
+            pursuit,
+            self.outcome,
+            None,
+            Act::new(self.at, Actor::User(ActorId::new())),
+        )?)
+    }
+}
+
+fn decides(outcome: Outcome, minute: u32) -> Arc<dyn Deciding> {
+    Arc::new(Decides {
+        outcome,
+        at: at(minute),
+    })
+}
+
+/// Somebody who will not decide again, so a refused write stays
+/// refused.
+///
+/// What it is for is asking what the store keeps when the second
+/// answer never comes — which is nothing, and that is the property
+/// worth pinning separately from the re-decision itself.
+struct Refuses;
+
+impl Deciding for Refuses {
+    fn close(&self, _line: &Line, _pursuit: &Pursuit) -> Result<Closing, DomainError> {
+        Err(DomainError::Conflict("this caller decides once".into()))
+    }
 }
 
 fn alive(states: &EntryStates) -> Vec<String> {
@@ -659,28 +703,26 @@ async fn two_pursuits_from_one_head(world: &World) {
     assert_eq!(line.head(), chain[1].id());
 }
 
-/// A close aimed at a change point the line has left is refused, and
-/// writes nothing.
+/// A close aimed at a change point the line has left is not written
+/// where it was aimed. The store asks for another and keeps that one.
 ///
 /// The service always aims at the head it just read, so this asks the
 /// port directly — which is the layer that has to hold the rule,
 /// because a caller holding a stale line is exactly the case it exists
 /// for.
 #[tokio::test]
-async fn a_stale_aim_is_refused_over_memory() {
-    a_stale_aim_is_refused(&World::over_memory()).await;
+async fn a_stale_aim_is_decided_again_over_memory() {
+    a_stale_aim_is_decided_again(&World::over_memory()).await;
 }
 
 #[tokio::test]
-async fn a_stale_aim_is_refused_over_sqlite() {
+async fn a_stale_aim_is_decided_again_over_sqlite() {
     let (world, driver) = World::over_sqlite().await;
-    a_stale_aim_is_refused(&world).await;
+    a_stale_aim_is_decided_again(&world).await;
     driver.shutdown().await.unwrap();
 }
 
-async fn a_stale_aim_is_refused(world: &World) {
-    use asterism_core::domain::forge::model::closing::close as end_work;
-
+async fn a_stale_aim_is_decided_again(world: &World) {
     world.clock.set(0);
     let line = world
         .lines
@@ -717,10 +759,7 @@ async fn a_stale_aim_is_refused(world: &World) {
         &work,
         Outcome::Satisfied,
         None,
-        asterism_core::domain::forge::model::act::Act::new(
-            at(3),
-            Actor::User(asterism_core::domain::forge::model::value::ActorId::new()),
-        ),
+        Act::new(at(3), Actor::User(ActorId::new())),
     )
     .expect("nothing collides yet");
     assert_eq!(closing.point().unwrap().parent(), genesis);
@@ -738,15 +777,220 @@ async fn a_stale_aim_is_refused(world: &World) {
         )
         .await;
 
-    let refused =
-        Closings::commit(&*world.closings, &line.id(), &work.id(), genesis, &closing).await;
-    assert!(
-        matches!(refused, Err(DomainError::Conflict(_))),
-        "a close only lands on the head as it is: {refused:?}"
+    Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        &closing,
+        decides(Outcome::Satisfied, 4),
+    )
+    .await
+    .expect("what the parent refused, deciding again answered");
+
+    // The work ended once, and on the line the two closes are in the
+    // order they landed rather than side by side on the genesis.
+    let after = world.work.get(&work.id()).await.unwrap();
+    assert_eq!(after.outcome(), Some(Outcome::Satisfied));
+    let held = world.lines.get(&line.id()).await.unwrap();
+    let chain = held.history().changes();
+    assert_eq!(chain.len(), 2, "one point per close, re-decision and all");
+    assert_eq!(chain[1].parent(), chain[0].id());
+    assert_eq!(chain[1].from(), work.id());
+    assert_eq!(
+        chain[1].act().at(),
+        at(4),
+        "the ending that landed is the one decided second"
+    );
+    assert_eq!(alive(&held.states()), vec!["mine", "theirs"]);
+}
+
+/// A close whose *work* moved under it is decided again too, and the
+/// pass that arrived is in what lands.
+///
+/// The other race [`Deciding`] names, and the one a caller never sees
+/// coming: a close is decided against a pursuit, somebody writes a
+/// pass to that pursuit, and the ending now sits on a node something
+/// else has. Both stores answer it the same way — SQLite from
+/// `UNIQUE (pursuit_id, parent_id)`, the in-memory store from the same
+/// rule asked of its rows.
+///
+/// What the last assertion pins is that this is a decision and not a
+/// retry: the pass that arrived is folded into what the second answer
+/// puts on the line, which replaying the first answer could not do.
+#[tokio::test]
+async fn a_close_whose_work_moved_is_decided_again_over_memory() {
+    a_close_whose_work_moved_is_decided_again(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_close_whose_work_moved_is_decided_again_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_close_whose_work_moved_is_decided_again(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_close_whose_work_moved_is_decided_again(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("mine"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    // Decided against the work as it stands, so the ending sits on the
+    // pass above.
+    let held = world.work.get(&work.id()).await.unwrap();
+    let closing = end_work(
+        &world.lines.get(&line.id()).await.unwrap(),
+        &held,
+        Outcome::Satisfied,
+        None,
+        Act::new(at(2), Actor::User(ActorId::new())),
+    )
+    .expect("nothing collides");
+    assert_eq!(closing.close().parent(), held.head());
+
+    // And *then* another pass arrives on the same work.
+    world.clock.set(3);
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("later"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        &closing,
+        decides(Outcome::Satisfied, 4),
+    )
+    .await
+    .expect("the ending was decided again, on the node the work now ends at");
+
+    let after = world.work.get(&work.id()).await.unwrap();
+    assert_eq!(after.outcome(), Some(Outcome::Satisfied));
+    assert_eq!(
+        after.close().unwrap().act().at(),
+        at(4),
+        "the ending that landed is the one decided second"
     );
 
-    // And nothing of it was written: the work is still open, and the
-    // line still ends where the other close left it.
+    let held = world.lines.get(&line.id()).await.unwrap();
+    assert_eq!(held.history().changes().len(), 1, "one close, one point");
+    assert_eq!(
+        alive(&held.states()),
+        vec!["later", "mine"],
+        "the pass that arrived is on the line, which a replayed decision \
+         would have left off"
+    );
+}
+
+/// And when nobody decides again, the refusal stands and nothing is
+/// kept.
+///
+/// The half of the rule the re-decision hides: the parent is still
+/// what refuses, and a caller that has no second answer is told so
+/// with both logs untouched.
+#[tokio::test]
+async fn a_stale_aim_nobody_decides_again_writes_nothing_over_memory() {
+    a_stale_aim_nobody_decides_again_writes_nothing(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_stale_aim_nobody_decides_again_writes_nothing_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_stale_aim_nobody_decides_again_writes_nothing(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_stale_aim_nobody_decides_again_writes_nothing(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let genesis = line.head();
+
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("mine"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    let before = world.lines.get(&line.id()).await.unwrap();
+    let work = world.work.get(&work.id()).await.unwrap();
+    let closing = end_work(
+        &before,
+        &work,
+        Outcome::Satisfied,
+        None,
+        Act::new(at(3), Actor::User(ActorId::new())),
+    )
+    .expect("nothing collides yet");
+    assert_eq!(closing.point().unwrap().parent(), genesis);
+
+    world
+        .lands(
+            &line,
+            "cyd",
+            vec![Op::add(world.content().await, name("theirs"))],
+            2,
+        )
+        .await;
+
+    let refused = Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        &closing,
+        Arc::new(Refuses),
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(DomainError::Conflict(_))),
+        "a close only lands on a parent nothing has taken: {refused:?}"
+    );
+
+    // And nothing of it was written — including the ending, which goes
+    // in before the change point that refused.
     let after = world.work.get(&work.id()).await.unwrap();
     assert_eq!(after.outcome(), None, "the refused close left no ending");
     assert_eq!(
@@ -869,21 +1113,25 @@ async fn a_line_cannot_be_opened_under_a_rule_this_instance_does_not_carry() {
 ///
 /// The test above never reaches this: its second close reads a line
 /// that has already moved, so it aims correctly the first time. The
-/// retry only runs when the line moves *after* the service has read
-/// it, which is what `Stale` arranges — it hands the service a line
-/// from before the move, once, and then tells the truth.
+/// re-decision only runs when the line moves *after* the service has
+/// read it, which is what `Stale` arranges — it hands the service a
+/// line from before the move, once, and then tells the truth.
 ///
-/// Worth pinning because the loop is the only thing standing between
-/// "somebody landed while you were deciding" and a refusal the caller
-/// would have to understand. Without it the close is correct and
-/// useless.
+/// Worth pinning through the service because the whole point is that
+/// the service does nothing: it decides once, hands that decision over
+/// with a way to make it again, and the store answers the race without
+/// ever coming back. What it proves is that the way to decide again
+/// arrives intact — a service that passed one nothing could call would
+/// pass every test that asks the port directly.
 ///
-/// Asked of the in-memory store, because what is under test is the
-/// service's loop rather than either store: `Stale` has to sit between
+/// Asked of the in-memory store, because `Stale` has to sit between
 /// the service and whatever is beneath it, and the simpler store makes
-/// the seam obvious. Both stores refuse the first attempt the same
-/// way — the parent is taken — which is the fact
-/// [`a_stale_aim_is_refused_over_sqlite`] pins on the other side.
+/// the seam obvious. Note which line the re-decision reads: the store
+/// reads its own rows rather than going back through `Stale`, so the
+/// second answer is against the line that really moved. Both stores
+/// refuse the first attempt the same way — the parent is taken —
+/// which is the fact [`a_stale_aim_is_decided_again_over_sqlite`] pins
+/// on the other side.
 #[tokio::test]
 async fn a_close_whose_line_moves_under_it_is_decided_again() {
     use asterism_core::domain::forge::lines::Lines;
@@ -998,12 +1246,12 @@ async fn a_close_whose_line_moves_under_it_is_decided_again() {
         .await
         .expect("the first attempt was refused; the second decided against the line as it is");
 
-    // Both are on, in the order they landed, and the retry wrote one
-    // change point rather than two.
+    // Both are on, in the order they landed, and deciding again wrote
+    // one change point rather than two.
     let line = Lines::get(&store, &line.id()).await.unwrap().unwrap();
     assert_eq!(alive(&line.states()), vec!["mine", "theirs"]);
     let chain = line.history().changes();
-    assert_eq!(chain.len(), 2, "one point per close, retry and all");
+    assert_eq!(chain.len(), 2, "one point per close, re-decision and all");
     assert_eq!(chain[0].from(), theirs.id());
     assert_eq!(chain[1].from(), mine.id());
     assert_eq!(chain[1].parent(), chain[0].id());
@@ -1040,7 +1288,6 @@ async fn an_abandoned_close_survives_a_moved_line(world: &World) {
         .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
         .await
         .unwrap();
-    let genesis = line.head();
 
     world.clock.set(1);
     let giving_up = world
@@ -1071,10 +1318,18 @@ async fn an_abandoned_close_survives_a_moved_line(world: &World) {
     .expect("giving up is always allowed");
     assert!(!ending.lands());
 
-    // Aimed at the genesis, which the line left two minutes ago.
-    Closings::commit(&*world.closings, &line.id(), &work.id(), genesis, &ending)
-        .await
-        .expect("nothing about this ending depends on where the line is");
+    // Decided against a line that left the genesis two minutes ago,
+    // and handed a decider that would refuse — which is never asked,
+    // because an ending that lands nothing has no parent to lose.
+    Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        &ending,
+        Arc::new(Refuses),
+    )
+    .await
+    .expect("nothing about this ending depends on where the line is");
 
     let after = world.work.get(&work.id()).await.unwrap();
     assert_eq!(after.outcome(), Some(Outcome::Abandoned));
@@ -1231,30 +1486,32 @@ async fn a_second_ending_and_a_fork_do_not_read_as_each_other() {
         &*world.closings,
         &line.id(),
         &work.id(),
-        current.head(),
         &ending,
+        decides(Outcome::Abandoned, 2),
     )
     .await
     .expect("the first ending lands");
 
+    // Handed somebody who refuses to decide again, so the two answers
+    // are told apart by which one comes back. A fork is decided again
+    // and `Refuses` would say so in its own words; an ending is final
+    // and is never asked. Under a substring test the ending's column
+    // list matches the fork's, this call asks `Refuses`, and the
+    // assertion below fails on its message rather than passing on a
+    // phrase nothing produces.
     let again = Closings::commit(
         &*world.closings,
         &line.id(),
         &work.id(),
-        current.head(),
         &ending,
+        Arc::new(Refuses),
     )
     .await
     .expect_err("work ends once");
     let said = again.to_string();
     assert!(
         said.contains("already ended"),
-        "an ending already there is not a thing to read again for: {said}"
-    );
-    assert!(
-        !said.contains("a pass arrived"),
-        "and it is not reported as a fork, which is the misreading a \
-         substring test makes: {said}"
+        "an ending already there is not a thing to decide again for: {said}"
     );
 
     driver.shutdown().await.unwrap();
@@ -1330,8 +1587,8 @@ async fn a_close_naming_a_node_the_line_never_had_is_refused_over_sqlite() {
         &*world.closings,
         &theirs.id(),
         &work.id(),
-        mine.head(),
         &closing,
+        decides(Outcome::Satisfied, 3),
     )
     .await
     .expect_err("that node is not on this line");
