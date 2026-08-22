@@ -31,6 +31,7 @@ use asterism_core::domain::value::{AssetId, Modality, PersonaId, SourceKind, Sou
 use asterism_core::error::DomainError;
 use asterism_disclosure_format::embed;
 use asterism_infra::disclosure::DisclosureWriter;
+use asterism_infra::generator_params::StoredParamExtractor;
 use asterism_infra::sqlite::open_and_migrate_in_memory;
 use asterism_infra::sqlite::repo::{
     SqliteAssetRepository, SqliteEdgeRepository, SqlitePersonaRepository,
@@ -70,6 +71,7 @@ impl Fixture {
             assets.clone(),
             edges.clone(),
             writer,
+            Arc::new(StoredParamExtractor),
             PromptDisclosure::Embed,
         );
         Self {
@@ -270,6 +272,29 @@ async fn the_record_comes_out_of_what_the_library_stored() {
         Some("dispatch-1"),
         "the dispatch is the caller's context, not the library's"
     );
+    fx.close().await;
+}
+
+/// The generator parameters come out of the same stored rows the rest
+/// of the record does. The asset here has no file on disk at all — its
+/// locator names one that was never written — and the extraction still
+/// answers, because its input is the row the fingerprint job stored.
+#[tokio::test]
+async fn generator_params_are_extracted_from_stored_rows_without_a_file() {
+    let fx = Fixture::open().await;
+    let persona = fx.seed_persona().await;
+    let graph = r#"{
+        "3": {"class_type": "KSampler",
+              "inputs": {"seed": 620206974400, "model": ["4", 0]}},
+        "4": {"class_type": "CheckpointLoaderSimple",
+              "inputs": {"ckpt_name": "cetus-mix_v4.safetensors"}}
+    }"#;
+    let meta_kv = serde_json::json!({ "prompt": graph, "workflow": "{}" }).to_string();
+    let asset = fx.seed_asset(persona, None, Some(&meta_kv)).await;
+
+    let record = fx.service.record_for(&asset, None).await.unwrap();
+    assert_eq!(record.model.as_deref(), Some("cetus-mix_v4.safetensors"));
+    assert_eq!(record.seed.as_deref(), Some("620206974400"));
     fx.close().await;
 }
 

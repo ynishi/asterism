@@ -100,6 +100,7 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [`domain::disclosure::generator_keys`](domain__disclosure__generator_keys.md): Keys that only a generator writes, one per family.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
@@ -134,6 +135,7 @@ the private design notes.
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::forge::value`](domain__forge__value.md): The forge's surrogate ids.
+- [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.

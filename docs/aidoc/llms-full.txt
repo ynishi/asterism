@@ -570,6 +570,7 @@ the private design notes.
 - [`domain::disclosure::outcome`](domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [`domain::disclosure::record`](domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [`domain::disclosure::source_type`](domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [`domain::disclosure::generator_keys`](domain__disclosure__generator_keys.md): Keys that only a generator writes, one per family.
 - [`domain::dispatch`](domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [`domain::duplicate_conflict`](domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [`domain::edge`](domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
@@ -604,6 +605,7 @@ the private design notes.
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
 - [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [`domain::forge::value`](domain__forge__value.md): The forge's surrogate ids.
+- [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
 - [`domain::job`](domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -3217,6 +3219,32 @@ mark on one is a false statement.
 - `UnknownSourceType` — A value that is not a term of the IPTC digital source type vocabulary.
 
 
+<!-- asterism_core/domain__disclosure__generator_keys.md -->
+# asterism-core::domain::disclosure::generator_keys
+
+Keys that only a generator writes, one per family.
+
+Matched by presence rather than by value: what identifies a ComfyUI
+export is *that it carries a `workflow`*, not what the workflow says.
+A container that happens to carry a keyword of the same name from
+somewhere else is a false positive this accepts — it costs a
+`trainedAlgorithmicMedia` on a file that is not one, which is the
+direction that would matter, so each entry is a keyword no general
+tool writes rather than a plausible-sounding word.
+
+Public because family membership is one fact with two readers: the
+evidence rule here, and the parameter extraction registry
+(`asterism-infra`), which routes a row to a family's judgement by
+the same keys. A second list on that side would be a way for "what
+counts as ComfyUI" to disagree with itself.
+
+## Constants
+
+- `A1111` — AUTOMATIC1111 and its forks write one text blob under this
+- `COMFY` — ComfyUI writes both of these: the API-format graph it executed
+- `COMFY_API_GRAPH` — The first of [`COMFY`] under its own name: the API-format graph
+
+
 <!-- asterism_core/domain__dispatch.md -->
 # asterism-core::domain::dispatch
 
@@ -5461,6 +5489,76 @@ filing.
 - `PursuitTxId` — Surrogate id for a `PursuitTx` — one entry in a pursuit's
 
 
+<!-- asterism_core/domain__generator_params.md -->
+# asterism-core::domain::generator_params
+
+`generator_params` — what an extraction concluded about the
+parameters a generator recorded, and the port the conclusion comes
+through.
+
+The values in question — the checkpoint a run loaded, the seed it
+sampled with — are not stored as fields. They sit inside the
+free-text metadata values the import path copied verbatim
+([`material_meta`](crate::domain::material_meta)'s rule: strings,
+unparsed), and reading them out is a parser, not a mapping. What is
+extractable is decided **per file, not per generator family**: the
+same input on the same node class holds a literal in one graph and a
+link to another node's output in the next. That is why this is a
+port with an outcome vocabulary rather than a lookup table.
+
+# The three layers, and which one this is
+
+The split is the one [`probe`](crate::domain::probe) argues for —
+"the parser is the part that grows per format, and it is the part
+that belongs furthest from here":
+
+| layer | holds |
+|---|---|
+| this module, in the core | the outcome vocabulary and the trait |
+| `asterism-media-probe` | the pure grammar — the A1111 line tokeniser, a function of a string with no opinion about which keys matter |
+| `asterism-infra` | the judgement and the registry — which input key names a seed, what a two-element array means, which families are recognised at all |
+
+# Not on the artefact probe
+
+That port is keyed by container mime and selected before any byte is
+read, and a generator family is not a mime — one `image/png` may be
+ComfyUI, A1111, InvokeAI or NovelAI, knowable only after the
+metadata is read. It already refused a third axis once, for raw
+metadata, on the same reasoning
+([`ArtefactProbe::meta_raw_of`](crate::domain::probe::ArtefactProbe::meta_raw_of)).
+The input here is the **stored metadata rows** — the canonical
+object [`read_evidence`](crate::domain::disclosure::read_evidence)
+already parses — so an extractor re-runs across the whole library
+without opening a single file.
+
+# Workflow identity is not here
+
+It is not extractable from either family — the ComfyUI graph mints
+no run id, and A1111's grammar has no such field — so there is no
+`workflow` member of [`GeneratorParams`] to be perpetually absent.
+If a workflow identity ever reaches the manifest it is a value the
+user supplies, on the hand-assertion footing
+[`asserted_source_type`](crate::domain::disclosure::asserted_source_type)
+established, not an extraction.
+
+# Extraction does not touch the meta axis
+
+The digest and its canonical form say one thing — *the container
+carried this text* — and extraction changes neither that input nor
+that definition. An extractor reads the stored values; it never
+rewrites them, so every digest stands exactly as it did before the
+extractor existed.
+
+## Types
+
+- `GeneratorParams` — One extraction's conclusion about every parameter it answers for.
+- `ParamExtraction` — What an extraction concluded about one parameter.
+
+## Traits
+
+- `ParamExtractor` — Reads generator parameters out of stored metadata.
+
+
 <!-- asterism_core/domain__group.md -->
 # asterism-core::domain::group
 
@@ -7461,6 +7559,7 @@ this crate.
 - [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
@@ -7651,6 +7750,56 @@ specific backend.
 ## Traits
 
 - `ReEnqueue` — Small port around "put this dispatch id back on the queue for
+
+
+<!-- asterism_infra/generator_params.md -->
+# asterism-infra::generator_params
+
+Reading generator parameters out of stored metadata rows — the
+judgement and the registry behind the
+[`ParamExtractor`](asterism_core::domain::generator_params::ParamExtractor)
+port.
+
+This is the layer that holds opinions. The core owns the outcome
+vocabulary and the trait; `asterism-media-probe::a1111` owns the
+grammar of one family's text; what lives here is every judgement
+neither of them may make — which input key names a seed, which node
+input is a checkpoint, what a two-element array means, and which
+families are recognised at all.
+
+# The registry, and how a third family arrives
+
+Two families are recognised: ComfyUI, routed by the keys
+[`generator_keys::COMFY`] writes, and AUTOMATIC1111, routed by
+[`generator_keys::A1111`] — the same one-fact key list the
+disclosure evidence rule reads, which is why it is imported rather
+than restated. A family this registry does not recognise (InvokeAI,
+NovelAI) reads as
+[`NotApplicable`](ParamExtraction::NotApplicable) today; adding one
+is a routing arm in [`params_of`](StoredParamExtractor::params_of),
+a judgement function beside the two here, and — where the family's
+text needs a grammar — a tokeniser in the media-probe crate on
+`a1111`'s terms.
+
+# Extractability is decided per file
+
+The same input on the same node class holds a literal in one graph
+and a link to another node's output in the next — any custom seed
+node, any converted widget. A link is read as
+[`Indirect`](ParamExtraction::Indirect), never resolved: the walk
+that would resolve it is the future improvement the state exists to
+leave findable. And where a graph carries more than one candidate
+and they disagree, the answer is
+[`Ambiguous`](ParamExtraction::Ambiguous) rather than a winner —
+there is no evidence about which sampler produced the file, and a
+wrong value in a signed claim is the unrecoverable direction. That
+refusal is also why no "which sampler won" is recorded beside the
+value: agreement extracts and disagreement refuses, so no choice is
+ever made.
+
+## Types
+
+- `StoredParamExtractor` — The extractor over stored rows.
 
 
 <!-- asterism_infra/jobs.md -->

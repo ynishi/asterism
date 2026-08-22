@@ -41,6 +41,7 @@ use crate::domain::measurement::MeasurementStatus;
 
 use crate::domain::disclosure::{self, ParentEvidence, PromptDisclosure};
 use crate::domain::edge::EdgeKind;
+use crate::domain::generator_params::{GeneratorParams, ParamExtractor};
 use crate::domain::repository::{AssetRepository, EdgeRepository};
 use crate::domain::value::AssetId;
 use crate::error::DomainError;
@@ -95,11 +96,17 @@ pub struct DisclosureService {
     assets: Arc<dyn AssetRepository>,
     edges: Arc<dyn EdgeRepository>,
     writer: Arc<dyn DisclosureWriter>,
+    params: Arc<dyn ParamExtractor>,
     prompts: PromptDisclosure,
 }
 
 impl DisclosureService {
     /// Builds the service over its ports.
+    ///
+    /// `params` reads generator parameters out of the same stored
+    /// metadata the evidence rule reads — a port because the judgement
+    /// (which node input is a seed, which families exist) is adapter
+    /// knowledge the core does not hold.
     ///
     /// `prompts` is configuration, not a port: it is the one thing this
     /// service decides rather than reads, and it decides it the same way
@@ -110,12 +117,14 @@ impl DisclosureService {
         assets: Arc<dyn AssetRepository>,
         edges: Arc<dyn EdgeRepository>,
         writer: Arc<dyn DisclosureWriter>,
+        params: Arc<dyn ParamExtractor>,
         prompts: PromptDisclosure,
     ) -> Self {
         Self {
             assets,
             edges,
             writer,
+            params,
             prompts,
         }
     }
@@ -232,11 +241,22 @@ impl DisclosureService {
             });
         }
 
+        // Extraction is a reading of the same stored value the
+        // evidence comes from, so it runs where the evidence is read
+        // and never opens a file. An asset with no stored metadata is
+        // material the extraction does not apply to — a final answer,
+        // where `NotYet` would claim the question was never asked.
+        let params = match meta_kv.as_deref() {
+            Some(meta_kv) => self.params.params_of(meta_kv),
+            None => GeneratorParams::not_applicable(),
+        };
+
         Ok(disclosure::record_for(
             &asset_id.to_string(),
             asset.title.as_deref(),
             dispatch_id,
             meta_kv.as_deref(),
+            &params,
             &parents,
             disclosure::asserted_source_type(&asset.extra),
             self.prompts,

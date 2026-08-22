@@ -157,6 +157,7 @@ pub mod duplicate_conflict;
 pub mod edge;
 pub mod embedded_text;
 pub mod forge;
+pub mod generator_params;
 pub mod group;
 pub mod instance;
 pub mod job;

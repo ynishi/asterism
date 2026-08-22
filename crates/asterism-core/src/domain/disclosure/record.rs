@@ -112,6 +112,16 @@ pub struct DisclosureRecord {
     /// Asset ids this file was derived from, in the order the edges were
     /// read. Manifest-only.
     pub parents: Vec<String>,
+    /// The model or checkpoint the run loaded, when the extraction port
+    /// read one out of the stored metadata — verbatim, as the container
+    /// stated it. Manifest-only: IPTC's `AISystemUsed` already carries
+    /// the *system*, and a checkpoint name is a different statement
+    /// with no property of its own. It rides the prompt's withholding
+    /// switch, for the reason `record_for` gives where it attaches it.
+    pub model: Option<String>,
+    /// The seed the run sampled with, on the same terms as
+    /// [`model`](Self::model).
+    pub seed: Option<String>,
     /// Human-readable title for the manifest. Absent is fine — C2PA
     /// treats it as a label, and an empty one is better than a
     /// manufactured one.
@@ -134,6 +144,8 @@ impl DisclosureRecord {
             asset_id: asset_id.into(),
             dispatch_id: None,
             parents: Vec::new(),
+            model: None,
+            seed: None,
             title: None,
         }
     }
@@ -173,6 +185,24 @@ impl DisclosureRecord {
         self
     }
 
+    /// States the extracted model or checkpoint name.
+    ///
+    /// Reaching for this is the same disclosure decision
+    /// [`with_prompt`](Self::with_prompt) names — the value comes out
+    /// of the blob the withholding switch exists to contain — and
+    /// `record_for` is where the decision is made.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// States the extracted seed, on the same terms as
+    /// [`with_model`](Self::with_model).
+    pub fn with_seed(mut self, seed: impl Into<String>) -> Self {
+        self.seed = Some(seed.into());
+        self
+    }
+
     /// Sets the manifest title.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
@@ -186,7 +216,8 @@ impl DisclosureRecord {
     /// and writing an empty packet into a file is a modification that
     /// buys nothing. The caller checks this rather than the emitter
     /// refusing, because "there was nothing to say" is a normal outcome
-    /// and not an error.
+    /// and not an error. The extracted model and seed do not count for
+    /// the same reason the identifiers do not: they are manifest-only.
     pub fn discloses_anything(&self) -> bool {
         self.source_type.is_some()
             || self.ai_system.is_some()
@@ -231,6 +262,10 @@ impl DisclosureRecord {
             asset_id: self.asset_id.clone(),
             dispatch_id: self.dispatch_id.clone(),
             parents: self.parents.clone(),
+            // Kept, like the identifiers: manifest-only fields do not
+            // travel in the segment being escaped.
+            model: self.model.clone(),
+            seed: self.seed.clone(),
             title: self.title.clone(),
         }
     }
@@ -260,6 +295,8 @@ impl DisclosureRecord {
             asset_id: self.asset_id.clone(),
             dispatch_id: self.dispatch_id.clone(),
             parents: self.parents.clone(),
+            model: self.model.clone(),
+            seed: self.seed.clone(),
             title: self.title.clone(),
         }
     }
@@ -294,6 +331,8 @@ mod tests {
             .with_ai_system("ComfyUI", Some("0.3.0".into()))
             .with_prompt("a very long prompt")
             .with_parents(vec!["parent-1".into()])
+            .with_model("cetus-mix_v4")
+            .with_seed("12345")
             .with_dispatch("dispatch-1");
 
         let reduced = record.essential();
@@ -310,6 +349,8 @@ mod tests {
         // travel in.
         assert_eq!(reduced.parents, vec!["parent-1".to_string()]);
         assert_eq!(reduced.dispatch_id.as_deref(), Some("dispatch-1"));
+        assert_eq!(reduced.model.as_deref(), Some("cetus-mix_v4"));
+        assert_eq!(reduced.seed.as_deref(), Some("12345"));
     }
 
     #[test]
@@ -327,6 +368,8 @@ mod tests {
             .with_ai_system("ComfyUI", Some("0.3.0".into()))
             .with_prompt("a prompt")
             .with_parents(vec!["parent-1".into()])
+            .with_model("cetus-mix_v4")
+            .with_seed("12345")
             .with_dispatch("dispatch-1")
             .with_title("a title");
 
@@ -343,6 +386,19 @@ mod tests {
         assert_eq!(mark.parents, vec!["parent-1".to_string()]);
         assert_eq!(mark.dispatch_id.as_deref(), Some("dispatch-1"));
         assert_eq!(mark.title.as_deref(), Some("a title"));
+        assert_eq!(mark.model.as_deref(), Some("cetus-mix_v4"));
+        assert_eq!(mark.seed.as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn the_extracted_params_are_manifest_only_and_not_a_disclosure() {
+        // Like the identifiers: a record holding nothing but an
+        // extracted model and seed renders an empty XMP packet, and
+        // writing one would be a modification that buys nothing.
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_model("cetus-mix_v4")
+            .with_seed("12345");
+        assert!(!record.discloses_anything());
     }
 
     #[test]
