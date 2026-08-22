@@ -10,6 +10,32 @@ and this project adheres to
 
 ### Fixed
 
+- **A conversation written by a clock that stepped backwards can be read again**
+  (#102). A thread was read in stamp order and handed to `Thread::say` one at a
+  time, so a reply kept with an earlier stamp than the message it answers was
+  refused — and the thread became permanently unreadable, which is the inverse
+  of what the read half is for. The three places saying a wrong time breaks
+  nothing were wrong about this one. A conversation is still read in the order
+  it was said, and still reads as a transcript rather than a tree: the one
+  message that moves is a reply the stamps put before its parent, and it moves
+  to just after it. Replies answering each other in a circle are still refused,
+  because none of them can be put after its parent.
+
+- **A drop asks the standing inside the write, as it already asked the work**
+  (#102). A line is dropped from the archive, and the port held that condition
+  against a `Line` the service read before the write — so a line taken back out
+  of the archive in between was dropped anyway, which is the same race
+  `covering` exists to refuse, one field over. Both stores read the standing
+  where it cannot go stale and refuse with `Conflict`.
+
+  The refusal for a work list that does not match is now two refusals, because
+  it was telling two stories with one message. Work the drop did not name is
+  work opened since the caller read the list, and that is the race: `Conflict`.
+  A name that is not against this line cannot arrive by a race at all — nothing
+  removes a pursuit but a drop of its line, and that line is the one being
+  dropped — so it is the caller naming somebody else's work, and it answers
+  `Validation`, as the model's `NotThisLine` does one layer up.
+
 - **A pursuit's nodes are ordered by its chain, like everything else** (#102).
   `pursuit_node` carried a `seq` column, and the two places explaining it
   disagreed: the migration argued it was how the log is ordered rather than a
