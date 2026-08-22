@@ -488,6 +488,19 @@ pub struct CoreCtx {
     pub snapshot_service: Arc<SnapshotService>,
     /// Outbound dispatch lifecycle.
     pub dispatch_service: Arc<DispatchService>,
+    /// The repository a forge history sits on (#63, #102): opening one,
+    /// reading what is alive on it, and moving the two things about a
+    /// line that its history does not record.
+    pub line_service: Arc<asterism_core::application::forge::LineService>,
+    /// Work against a line: opening it, adding a pass, running the
+    /// line's rule over what it collides with, and ending it.
+    ///
+    /// Neither this nor [`line_service`](Self::line_service) has a
+    /// transport. They are constructed here because the wiring is the
+    /// thing being proved — the whole stack meets a real database at
+    /// startup — and reached from nowhere else until the surface they
+    /// belong on is decided.
+    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
     /// Query Group evaluate-and-materialize pipeline: startup refresh,
     /// the create / update-rule commands, and (W4) the refresh job.
     pub query_group_service: Arc<QueryGroupService>,
@@ -1093,6 +1106,33 @@ pub async fn init_core_with(
         query_group_service.clone(),
     ));
 
+    // The forge, over the same connection as everything else. Its
+    // ports are one adapter because a close writes to both logs
+    // together, and the two faces beside it are the questions it asks
+    // of the layer below: whose an asset is, and what a handle stands
+    // for.
+    let forge = Arc::new(sqlite::repo::SqliteForge::new(isle.clone()));
+    let forge_rules = Arc::new(asterism_core::domain::forge::strategies::Builtin::default());
+    let forge_actors = Arc::new(sqlite::repo::SqliteActors::new(isle.clone()));
+    let forge_clock = Arc::new(asterism_core::domain::forge::clock::SystemClock);
+    let line_service = Arc::new(asterism_core::application::forge::LineService::new(
+        forge.clone(),
+        forge_rules.clone(),
+        forge_actors.clone(),
+        forge_clock.clone(),
+    ));
+    let pursuit_service = Arc::new(asterism_core::application::forge::PursuitService::new(
+        forge.clone(),
+        forge.clone(),
+        forge.clone(),
+        forge_rules,
+        asterism_core::domain::forge::boundary::StoreClient::new(Arc::new(
+            sqlite::repo::SqliteStore::new(isle.clone()),
+        )),
+        forge_actors,
+        forge_clock,
+    ));
+
     // Register the built-in exporters (`comfy` / `file` / `http`, the
     // last of them twice).
     //
@@ -1224,6 +1264,8 @@ pub async fn init_core_with(
         thumb_service: Arc::new(ThumbService::new(Arc::new(thumbs))),
         snapshot_service,
         dispatch_service,
+        line_service,
+        pursuit_service,
         query_group_service,
         modality_service: Arc::new(ModalityService::new(Arc::new(modalities))),
         series_strategy_service: Arc::new(SeriesStrategyService::new(

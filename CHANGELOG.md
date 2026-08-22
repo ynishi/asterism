@@ -10,6 +10,14 @@ and this project adheres to
 
 ### Added
 
+- **The application builds the forge it uses** (#102). `init_core` constructs
+  `SqliteForge`, `SqliteStore` and `SqliteActors` over the connection everything
+  else shares, and hands `LineService` and `PursuitService` to `CoreCtx`.
+  Neither has a transport, so a test is their only caller — which is the point:
+  a service wired to the wrong store compiles and passes every test that builds
+  its own world, and the only thing that catches it is landing work on a line
+  the same process then reads back.
+
 - **A purge the forge is blocking says so** (#102). Deleting a persona cascades
   to its assets, and an asset a line names cannot go — so the purge already
   refused, with a foreign-key error that names a column and tells nobody what to
