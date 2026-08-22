@@ -91,8 +91,8 @@ and this project adheres to
   itself so that a thread hanging off something nobody wrote is not a value
   anybody can make — and a caller has ids, not things. So `Anchored` names what
   to look for in ids, and the service reads the pursuit or the line before a
-  thread exists. An entry a pass did not touch is refused by the model, reached
-  through the service because the service is what has the pass to ask it of.
+  thread exists. An entry a round did not touch is refused by the model, reached
+  through the service because the service is what has the round to ask it of.
 
   The tables are `forge_thread`, `forge_thread_message` and
   `forge_thread_revision`, and the prefix is the point: `thread` is taken by the
@@ -102,12 +102,12 @@ and this project adheres to
   new field is `forge_thread_service` beside the existing `thread_service`.
 
   Dropping a line now takes what was said about its work with it. Every anchor a
-  thread can have — a pursuit, a pass, an entry as a pass had it, a change point
-  — is something a drop deletes, so a thread left behind would be a remark about
-  nothing. Over SQLite two of the four anchors are foreign keys, so a drop that
-  ignored them was refused rather than wrong; the in-memory store had nothing to
-  refuse it and kept the dangling thread. Both are fixed, and the test that says
-  so was written failing over both.
+  thread can have — a pursuit, a round, an entry as a round had it, a change
+  point — is something a drop deletes, so a thread left behind would be a remark
+  about nothing. Over SQLite two of the four anchors are foreign keys, so a drop
+  that ignored them was refused rather than wrong; the in-memory store had
+  nothing to refuse it and kept the dangling thread. Both are fixed, and the
+  test that says so was written failing over both.
 
 - **A line can be archived, reopened and dropped through a service** (#102). The
   three verbs existed in the model and nowhere else, so nothing could release a
@@ -157,7 +157,7 @@ and this project adheres to
 
   Two refusals reach the second decision and are named as such beside the port:
   a change point already where this one would go, and a node already where this
-  ending would go — somebody landed on the line, or a pass arrived on the work.
+  ending would go — somebody landed on the line, or a round arrived on the work.
   Everything else is final, including work that has already ended, which is the
   one refusal that asking again cannot change. Both stores implement that
   division rather than each holding half of it.
@@ -179,7 +179,7 @@ and this project adheres to
   one name cannot be both.
 
   The name is the other half. Everything in the forge is a log: a line has a
-  chain of change points, a pursuit has a chain of passes. Calling one of them
+  chain of change points, a pursuit has a chain of rounds. Calling one of them
   "Log" says only "this is a record", which inside the forge distinguishes
   nothing — and "Work" said nothing `Pursuit` was not already saying. The prose
   went with the type: forty-three places said "work log" where they meant a
@@ -240,7 +240,7 @@ and this project adheres to
   SQLite reports, because `work_node.work_id` is the second ending and is a
   _prefix_ of `work_node.work_id, work_node.parent_id`, which is a fork — so a
   substring test asked about the ending matches the fork, and reports "this work
-  has already ended" when somebody merely pushed a pass first. The two are kept
+  has already ended" when somebody merely pushed a round first. The two are kept
   apart at the one place the difference is available: a fork is answered by
   reading again, and an ending already there is not answered by anything.
 
@@ -307,7 +307,7 @@ and this project adheres to
   nothing itself: the nodes go back one at a time through `History::record`,
   `WorkLog::push` and `WorkLog::end`, so a stored chain meets the refusals a
   fresh write meets. A chain whose parents do not line up, a table that would
-  leave two live entries under one name, a pass after the ending — each is a
+  leave two live entries under one name, a round after the ending — each is a
   read that fails rather than a value the model would not have written. The
   chain needs no sequence column either: a change point carries its parent, so
   the points arrive in any order and the links are walked.
@@ -335,7 +335,7 @@ and this project adheres to
   beside it, and the line whose entries moved through four verbs written one
   event at a time are gone — services, ports, adapters, transport and schema.
   The model settled in #63 keeps a line's history as a chain of change points
-  carrying a table, and work as a log of passes; nothing in the old shape can be
+  carrying a table, and work as a log of rounds; nothing in the old shape can be
   read as either, so it goes rather than being carried across.
 
   **What disappears from the outside.** Eight HTTP routes under
@@ -433,9 +433,9 @@ and this project adheres to
 
 - **Work can be put on a line, and the two are one act** (#63). The other half
   of the forge's model, and the layer that drives it. Work opens against a line,
-  cut from wherever the line is at that moment, and writes passes that never
+  cut from wherever the line is at that moment, and writes rounds that never
   read the line — the operation that happens most often is the one that cannot
-  contend with anybody. What a pass asks for only means something measured
+  contend with anybody. What a round asks for only means something measured
   against a line, and that happens when the work ends: ending it as satisfied
   produces the close and the change point together, in one value that cannot be
   taken apart, written through one call that keeps all of it or none of it.
@@ -457,16 +457,16 @@ and this project adheres to
 
   Resolving is therefore ordinary work, and automatic resolution writes what a
   person would have written by hand, in the same four verbs, into an ordinary
-  pass. Five rules ship and a line names one — keep the line's version and carry
-  this work's onto a new entry; keep this work's under the contested name and
-  move the line's aside; put both aside and take the old entry off; write this
-  work's version down and then remove it, so what was tried stays readable; or
-  write nothing and leave the collision standing for somebody to answer. Rules
-  say what they do, so choosing one is a choice somebody makes rather than a
-  default they inherit. What a rule returns is checked rather than trusted: the
-  model folds it in and refuses the rule if the collisions it was asked about
-  are still there. What a rule writes is recorded as the server rather than as
-  the person who asked for it.
+  round. Five rules ship and a line names one — keep the line's version and
+  carry this work's onto a new entry; keep this work's under the contested name
+  and move the line's aside; put both aside and take the old entry off; write
+  this work's version down and then remove it, so what was tried stays readable;
+  or write nothing and leave the collision standing for somebody to answer.
+  Rules say what they do, so choosing one is a choice somebody makes rather than
+  a default they inherit. What a rule returns is checked rather than trusted:
+  the model folds it in and refuses the rule if the collisions it was asked
+  about are still there. What a rule writes is recorded as the server rather
+  than as the person who asked for it.
 
   Who did a thing is the forge's own word now: a handle, and whether it was a
   person or the server. What the handle stands for — which authenticated user,
@@ -478,16 +478,17 @@ and this project adheres to
   because a timestamp here is evidence in a record that never moves and nothing
   orders anything by it — so a wrong one breaks nothing and misleads for good.
 
-  Work can be discussed as well as done. A thread hangs off a pursuit, one pass,
-  one entry as one pass had it, or what landed — the four things worth remarking
-  on — and it is the forge's own rather than the annotation surface the layer
-  below has, which anchors to snapshots and cards and could not learn these four
-  without learning what a pursuit is. The entry anchor names the pass as well as
-  the entry, so a remark about one attempt does not follow that entry into every
-  other pursuit it is ever carried into. Nothing is overwritten: a correction
-  appends a revision and every earlier wording stays readable. Nothing is
-  resolved either — whether a remark is dealt with is a word people use about
-  their work rather than a shape the record has, so a later message says it.
+  Work can be discussed as well as done. A thread hangs off a pursuit, one
+  round, one entry as one round had it, or what landed — the four things worth
+  remarking on — and it is the forge's own rather than the annotation surface
+  the layer below has, which anchors to snapshots and cards and could not learn
+  these four without learning what a pursuit is. The entry anchor names the
+  round as well as the entry, so a remark about one attempt does not follow that
+  entry into every other pursuit it is ever carried into. Nothing is
+  overwritten: a correction appends a revision and every earlier wording stays
+  readable. Nothing is resolved either — whether a remark is dealt with is a
+  word people use about their work rather than a shape the record has, so a
+  later message says it.
 
   Lines can be listed, work can be found by the line it is against, and work
   filed under a larger piece of work can be found by its parent — the last one a
