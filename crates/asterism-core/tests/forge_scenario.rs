@@ -32,9 +32,7 @@ use asterism_core::domain::forge::model::table::EntryStates;
 use asterism_core::domain::forge::model::value::{
     ActorId, ChangePointId, Content, EntryId, Name, NodeId,
 };
-use asterism_core::domain::forge::strategies::{
-    Builtin, ByHand, DiscardMine, MainlineFirst, Strategies,
-};
+use asterism_core::domain::forge::strategies::{Builtin, ByHand, MainlineFirst, Strategies};
 use chrono::{DateTime, TimeZone, Utc};
 use uuid::Uuid;
 
@@ -206,11 +204,14 @@ fn a_line_four_people_and_what_the_record_can_answer() {
     round(&mut ana, vec![Op::replace(cut, tried)], by(cast.ana, 11));
     lands(&mut line, cast.cyd, vec![Op::replace(cut, content())], 12);
 
-    let mut discarding = Line::open(name("scratch"), DiscardMine.id(), by(cast.ana, 10));
-    let _ = &mut discarding; // the rule is exercised on its own line below
-
-    // On this line the rule keeps both, so Ana drops hers by hand:
-    // the same three operations the rule would have written.
+    // This line's rule is `MainlineFirst`, which keeps both versions,
+    // so Ana gives hers up by hand. The shape is `DiscardMine`'s —
+    // fork, carry, drop the fork, concede the axis — but not its
+    // operations: that rule forks from what the entry was at Ana's
+    // base, under a name `naming::free` picks, and this forks from
+    // Ana's own content under a name written here. What is being
+    // pinned is that a person can reach the same place the rule would
+    // have, on a line that does not carry it.
     let fork = Op::add(ana_content, name("cut-01 (dropped)"));
     let forked = fork.entry();
     round(

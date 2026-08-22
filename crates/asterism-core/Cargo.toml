@@ -91,3 +91,8 @@ icu_locale_core = { workspace = true }
 # by construction rather than by test. The same reasoning
 # `asterism-importer-sdk` gives for the same dev-dependency.
 pngmeta     = { version = "0.2.1", features = ["inflate", "test-util"] }
+
+# Read by `forge_boundary.rs` to walk a file's `use` tree and its
+# qualified paths as syntax. `full` for item syntax, `visit` for the
+# traversal, `parsing` to get there from a string.
+syn         = { version = "2", features = ["full", "visit", "parsing"] }
