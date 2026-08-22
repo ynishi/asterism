@@ -1,0 +1,22 @@
+[package]
+name = "asterism-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Model-use side of Asterism's visual features: fixtures now, pHash and the encoder as they land"
+publish = false
+
+[features]
+# The fixture generator is evaluation material, not product surface: the
+# app links this crate without it, and tests / benches / the provider
+# tooling opt in.
+fixtures = []
+
+[dependencies]
+anyhow = { workspace = true }
+image = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
