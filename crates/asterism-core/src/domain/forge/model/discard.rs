@@ -4,10 +4,25 @@
 //!   Line (Archived)          Pursuit*  (against it, all ended)
 //!     └ holds ──┐              └ holds ──┐
 //!               ▼                        ▼
-//!            releases(line, work) ──▶ every Content that was held
-//!                                     by either, and by nothing
-//!                                     else afterwards
+//!            releases(line, work) ──▶ every Content this line and
+//!                                     its work stop holding
 //! ```
+//!
+//! # What it does not say
+//!
+//! **That anything is free afterwards.** This answers for one line and
+//! the work against it, which is all it is given and all it could
+//! check. Another line naming the same content goes on holding it, and
+//! a caller reading this as "safe to delete" would be reading a claim
+//! about one holder as a claim about every holder.
+//!
+//! What catches that is the store: the reference is a foreign key, and
+//! deleting content a second line names is refused there. That refusal
+//! names a column and no more, which is exactly the shape the persona
+//! purge was given a message for — so a caller acting on this set has
+//! the same work to do, and this module is not the place it gets done.
+//! Answering "is anything else holding it" needs every line, and
+//! nothing here has them.
 //!
 //! # Why this is one answer rather than two
 //!

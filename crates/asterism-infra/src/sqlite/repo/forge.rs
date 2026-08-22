@@ -25,11 +25,16 @@
 //! What that costs is telling one constraint violation from another.
 //! SQLite names the columns rather than the index — `UNIQUE constraint
 //! failed: change_point.line_id, change_point.parent_id` — so that
-//! column list is what is matched, exactly rather than by substring:
-//! `work_node.work_id` is the second ending, and it is a prefix of
-//! `work_node.work_id, work_node.parent_id`, which is a fork. Reading
-//! one as the other would tell a caller to re-decide something that
-//! cannot be re-decided.
+//! column list is what is matched, and matched exactly.
+//!
+//! `contains` is what exactness is guarding against, and the direction
+//! matters: `work_node.work_id` is the second ending and is a *prefix*
+//! of `work_node.work_id, work_node.parent_id`, which is a fork. So a
+//! substring test asked about the ending matches the fork — it reads
+//! "somebody pushed a pass first" as "this work has already ended",
+//! and tells a caller that re-reading is pointless when re-reading is
+//! the whole answer. The other direction cannot happen, which is why
+//! naming it would be naming the wrong risk.
 
 use asterism_core::domain::forge::closings::Closings;
 use asterism_core::domain::forge::lines::Lines;
@@ -713,10 +718,18 @@ impl Closings for SqliteForge {
                 // `idx_work_node_one_close` before anything reaches the
                 // line — and the whole of it rolls back either way.
                 if let Err(error) = insert_work_node(&tx, &ending, &[]) {
-                    if is_unique_violation(&error, ONE_NODE_PER_PARENT)
-                        || is_unique_violation(&error, ONE_ENDING_PER_WORK)
-                    {
-                        return Ok(Err(Refusal::WorkMoved));
+                    // Kept apart, because the caller's next move
+                    // differs. A fork means somebody wrote a pass
+                    // while this close was being decided, and reading
+                    // again is what answers it. An ending already
+                    // there means the work is over, and reading again
+                    // finds it over — telling somebody to retry that
+                    // is telling them to do it forever.
+                    if is_unique_violation(&error, ONE_NODE_PER_PARENT) {
+                        return Ok(Err(Refusal::WorkForked));
+                    }
+                    if is_unique_violation(&error, ONE_ENDING_PER_WORK) {
+                        return Ok(Err(Refusal::WorkAlreadyEnded));
                     }
                     return Err(error);
                 }
@@ -740,16 +753,30 @@ impl Closings for SqliteForge {
             Refusal::LineMoved => DomainError::Conflict(format!(
                 "line {line} has moved: this close lands on {on}, and something is already there"
             )),
-            Refusal::WorkMoved => DomainError::Conflict(format!(
-                "work {pursuit} has moved: it already has an ending, or a pass where this \
-                 one would go"
+            Refusal::WorkForked => DomainError::Conflict(format!(
+                "work {pursuit} has moved: a pass arrived where this ending would go"
+            )),
+            Refusal::WorkAlreadyEnded => DomainError::Conflict(format!(
+                "work {pursuit} has already ended; reading it again will find the same ending"
             )),
         })
     }
 }
 
-/// Which of the two logs refused, so the message can say which.
+/// What refused, and what the caller can do about it.
+///
+/// Three rather than two, because two of them come from one table and
+/// mean opposite things: one is worth reading again for and one is
+/// not. Collapsing them would discard the distinction at the only
+/// place it is ever available.
 enum Refusal {
+    /// Something already sits on the change point this close aimed at.
+    /// Read the line again and decide again.
     LineMoved,
-    WorkMoved,
+    /// A pass arrived on the node this close sat on. Same answer:
+    /// read again.
+    WorkForked,
+    /// The work already has an ending. Reading again finds the same
+    /// one, so there is nothing to re-decide.
+    WorkAlreadyEnded,
 }

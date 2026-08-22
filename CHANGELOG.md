@@ -55,10 +55,12 @@ and this project adheres to
   part of the insert — nothing reads a head and compares. A second ending needs
   its own partial index, because it sits on the first, which is a parent nobody
   has used. Telling one violation from another is done on the exact column list
-  SQLite reports rather than by substring: `work_node.work_id` is a second
-  ending and is a prefix of `work_node.work_id, work_node.parent_id`, which is a
-  fork, and reading one as the other would tell a caller to re-decide something
-  that cannot be re-decided.
+  SQLite reports, because `work_node.work_id` is the second ending and is a
+  _prefix_ of `work_node.work_id, work_node.parent_id`, which is a fork — so a
+  substring test asked about the ending matches the fork, and reports "this work
+  has already ended" when somebody merely pushed a pass first. The two are kept
+  apart at the one place the difference is available: a fork is answered by
+  reading again, and an ending already there is not answered by anything.
 
   **`content` restricts `asset`, on both logs.** An asset a line or a work log
   holds cannot be deleted, and purging the persona that owns it is refused at

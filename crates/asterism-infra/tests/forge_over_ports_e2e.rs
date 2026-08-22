@@ -1157,3 +1157,91 @@ async fn line_entries(
         .copied()
         .collect()
 }
+
+/// A second ending and a fork are told apart, and the message says
+/// which.
+///
+/// Both come out of one table, and one of them is a prefix of the
+/// other in what SQLite reports — so a substring test reads the fork
+/// as the ending. They mean opposite things to a caller: a fork is
+/// answered by reading again, and an ending already there is not
+/// answered by anything.
+///
+/// Over SQLite only. The distinction is the schema's, and the
+/// in-memory store has no constraint to make it.
+#[tokio::test]
+async fn a_second_ending_and_a_fork_do_not_read_as_each_other() {
+    use asterism_core::domain::forge::closings::Closings;
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::closing::close as end_work;
+    use asterism_core::domain::forge::model::value::ActorId;
+
+    let (world, driver) = World::over_sqlite().await;
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .push(
+            &work.id(),
+            &world.persona,
+            vec![Op::add(world.content().await, name("one"))],
+            None,
+            &who("boro"),
+        )
+        .await
+        .unwrap();
+
+    // Decide an ending, land it, then try to land the same one again.
+    let held = world.work.get(&work.id()).await.unwrap();
+    let current = world.lines.get(&line.id()).await.unwrap();
+    let ending = end_work(
+        &current,
+        &held,
+        Outcome::Abandoned,
+        None,
+        Act::new(at(2), Actor::User(ActorId::new())),
+    )
+    .unwrap();
+    Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        current.head(),
+        &ending,
+    )
+    .await
+    .expect("the first ending lands");
+
+    let again = Closings::commit(
+        &*world.closings,
+        &line.id(),
+        &work.id(),
+        current.head(),
+        &ending,
+    )
+    .await
+    .expect_err("work ends once");
+    let said = again.to_string();
+    assert!(
+        said.contains("already ended"),
+        "an ending already there is not a thing to read again for: {said}"
+    );
+    assert!(
+        !said.contains("a pass arrived"),
+        "and it is not reported as a fork, which is the misreading a \
+         substring test makes: {said}"
+    );
+
+    driver.shutdown().await.unwrap();
+}
