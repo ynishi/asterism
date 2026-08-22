@@ -10,6 +10,15 @@ and this project adheres to
 
 ### Changed
 
+- **docs/aidoc/ documents the whole workspace again.** The nineteen-crate
+  `exclude` list left the workspace manifest, and CI's cargo-aidoc floor rose to
+  `^0.4.0` — the release that removed the 512 KiB `llms-full.txt` lint the list
+  existed to stay under (no spec publishes a size limit for that file, and its
+  consumers chunk it rather than reading it whole). The teams plane, both
+  plug-in planes with their adapters, `asterism-media-probe` and
+  `asterism-benchgen` get generated docs back; the full inventory renders at
+  638,823 bytes across 276 chunks with nothing dropped.
+
 - **The three-state moved out of the digest columns** (#17). The
   `unsupported:<mime>` / `unhashable:no-bytes` marker strings that rode inside
   `material.content_hash`, `content_region_hash` and `meta_hash` became a status

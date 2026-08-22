@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-importer-video",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_importer_video::parser",
+      "kind": "module",
+      "docs": "Video `RawItem` → `Footprint::Video` parser.\n\nTwo probe layers, tried in order: `mp4parse` for ISOBMFF (MP4 /\nMOV), then `matroska` for EBML (WebM / MKV). Each rejects the\nother's container at the first magic bytes, so the order is cost\nonly, not correctness. A container neither probe reads (AVI) still\nlands — as a footprint without dims / duration / codec, which is\nthe contract for every probe miss."
+    },
+    {
+      "path": "asterism_importer_video::parser::VideoParser",
+      "kind": "struct",
+      "docs": "Turns a scanned video file into `Footprint::Video`."
+    }
+  ]
+}

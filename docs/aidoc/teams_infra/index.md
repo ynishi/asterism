@@ -1,0 +1,66 @@
+# teams-infra 0.0.0
+
+# teams-infra — adapters for the teams plane
+
+The SQLite layer (#89, second slice of #83): the teams-owned
+database, its migration series, the state tables over the
+`teams-core` domain types, and the per-team append-only ledger.
+Auth v0 (#91, third slice) adds the instance-local password adapter
+and the DB-backed session store. The local blob adapter (#93,
+fourth slice) is the CAS backing behind `teams-core`'s blob port —
+staging → verify → fsync → rename. The #95 slice adds the purge
+two-step's mark state ([`sqlite`] V3 + the repository's
+mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
+([`backup`]).
+
+## Layout
+
+- [`paths`] — where the teams database and the blob store live: the
+  profile conventions of `asterism-infra`, mirrored for the teams
+  plane (own env pair, own home root, own marker), so the two
+  planes never open each other's files.
+- [`sqlite`] — connection lifecycle (WAL, through the workspace's
+  `rusqlite-isle` line), the fresh `PRAGMA user_version` migration
+  series starting at V1, and the repository.
+- [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
+  behind `teams-core`'s auth port, opaque sessions with expiry and
+  a cleanup path.
+- [`blob`] — the local CAS adapter behind `teams-core`'s blob port:
+  `blobs/sha256/<2ch>/<64hex>` plus a staging dir, the
+  declared-digest write path, and the startup sweep (#83 §3).
+- [`gc`] — the zero-link sweep (#83 §3 registry-GC shape): bytes no
+  team links are deleted, under the guard that keeps the sweep and
+  a racing upload from interleaving.
+- [`backup`] — quiesce → `VACUUM INTO` → DB-first/blobs-after
+  archive (#83 §4).
+
+## The one write rule
+
+Every public state-changing operation on
+[`SqliteTeamsRepository`](sqlite::repo::SqliteTeamsRepository) opens
+one transaction, applies the state change **and** appends the
+corresponding ledger event, and commits or rolls back the two
+together (#83 §2 audit-log pattern). No public method writes state
+without appending, and none appends without a state change — the
+single documented exception is the locator, whose operations are
+private-space and by design never land in any team's ledger.
+
+## Dependency rule
+
+This crate depends on `teams-core` and never on `asterism-infra` /
+`-contract` / `-server` (#83 §4): those are the local app's
+plumbing, and the teams plane owns its own.
+
+## Modules
+
+- [`auth`](auth.md): Auth adapters for the teams plane (#83 §5).
+- [`auth::password`](auth__password.md): `auth::password` — the v0 instance-local credential adapter
+- [`backup`](backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
+- [`blob`](blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+- [`gc`](gc.md): `gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
+- [`paths`](paths.md): Data-profile and on-disk layout conventions for the teams plane.
+- [`sqlite`](sqlite.md): SQLite backend for the teams plane — connection lifecycle and schema
+- [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
+- [`sqlite::migrations`](sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [`sqlite::repo`](sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
+

@@ -1,0 +1,196 @@
+{
+  "crate": "teams-infra",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "teams_infra::auth",
+      "kind": "module",
+      "docs": "Auth adapters for the teams plane (#83 §5).\n\nv0 is the instance-local password adapter ([`password`]): argon2id\nhashing behind `teams-core`'s\n[`CredentialVerifier`](teams_core::port::auth::CredentialVerifier)\nport, plus the DB-backed opaque session store — the session lives\nhere and not in the domain on purpose (#83 §1: a session is a\nshort-lived infra artifact that resolves to a `user_id`, and the\nledger never sees one). OIDC is a later adapter behind the same\nport; 2FA is deferred by design."
+    },
+    {
+      "path": "teams_infra::auth::password",
+      "kind": "module",
+      "docs": "`auth::password` — the v0 instance-local credential adapter\n(#83 §5).\n\nThree decisions carry this module:\n\n- **Hashing is argon2id through RustCrypto's `argon2`** (OWASP's\n  current first choice), default parameters, PHC-string storage —\n  never a hand-rolled construction. Verification runs *inside* the\n  SQLite isle closure: the isle's dedicated thread keeps the key\n  derivation off the async executor without a second thread pool,\n  at the cost of serialising logins behind one another and behind\n  other DB work — an accepted trade at this plane's team-scale,\n  single-server topology (#83 §4).\n- **Sessions are DB-backed opaque tokens** (#83 §1: a session is a\n  short-lived infra artifact the ledger never sees). The client\n  holds 32 CSPRNG bytes hex-encoded; the table holds the SHA-256 of\n  that, so a leaked database never contains a usable bearer token.\n  Expiry is enforced twice: [`PasswordAuth::resolve_session`]\n  rejects **and deletes** an expired row on touch, and\n  [`PasswordAuth::cleanup_expired`] sweeps in bulk (the server runs\n  it on every login, so the table cannot accumulate dead rows\n  faster than logins happen).\n- **No default credentials exist** ([`reject_default_credential`]):\n  the bootstrap admin (#83 §5, the §1 InstanceOperator) is created\n  only from operator-supplied values, and a blank, too-short,\n  login-equal, or well-known placeholder password is *refused* at\n  creation time rather than warned about.\n\nThe port implementation ([`CredentialVerifier`]) keeps the port's\none-arm contract: a wrong password and an unknown login are the\nsame `Ok(None)`, and the unknown-login path verifies against a\nprocess-local dummy hash so the two answers cost the same work\n(username-enumeration resistance on the timing side too)."
+    },
+    {
+      "path": "teams_infra::auth::password::AccountRecord",
+      "kind": "struct",
+      "docs": "One credential-store row, as the server's gate consumes it: who the\nsession resolves to, and whether that account is the env/CLI\nbootstrap identity (#83 §1 InstanceOperator)."
+    },
+    {
+      "path": "teams_infra::auth::password::PasswordAuth",
+      "kind": "struct",
+      "docs": "The v0 password + session adapter over the teams database."
+    },
+    {
+      "path": "teams_infra::auth::password::reject_default_credential",
+      "kind": "function",
+      "docs": "Refuses the credentials the \"no fixed defaults\" rule (#83 §5)\nexists to keep out: blank, shorter than the floor, equal to the\nlogin, or on the well-known-placeholder list."
+    },
+    {
+      "path": "teams_infra::backup",
+      "kind": "module",
+      "docs": "`backup` — the all-in-one instance backup (#83 §4, the #95 slice):\nquiesce → `VACUUM INTO` snapshot → DB-first archive.\n\n## The three steps, and why in this order\n\n1. **Quiesce + snapshot.** The whole `VACUUM INTO` runs inside one\n   `AsyncIsle` call — the isle *is* the single writer of the\n   deployment shape (#83 §4), so holding its one connection for the\n   duration is the app-level consistency point: no repository write\n   can interleave with the snapshot. The snapshot is never a copy\n   of the live file — copying a live SQLite file is a documented\n   corruption path (WAL content is not in the main file), while\n   `VACUUM INTO` writes a complete, transactionally consistent\n   database.\n2. **DB first, blobs after.** The archive receives the snapshot\n   before a single blob is read. The asymmetry is #83 §3's, applied\n   to backup (§4): every link in the snapshot points at bytes that\n   were durable *before* that link committed and are read *after*\n   the snapshot — so the worst inconsistency a backup can hold is\n   an orphan blob (uploaded after the snapshot; harmless, the\n   restored instance's sweep collects it), never a dangling DB\n   reference. The one caveat is a **reclaim + sweep landing between\n   the two steps** — it can remove bytes the snapshot still links —\n   which is why backup wants a quiet instance (the CLI holds the\n   writer for step 1, and the single-process shape means a stopped\n   or idle server for the rest).\n3. **One archive.** A plain uncompressed tar (the workspace\n   manifest's `tar` line says why no compression): `db/teams.db`\n   first, then `blobs/sha256/<shard>/<hex>` for every blob. Tar\n   preserves entry order, so \"DB first\" is not only what the code\n   does — it is readable in the artefact, and the tests assert it\n   there. `staging/` is never archived: its contents are garbage by\n   definition (#93's startup sweep deletes them).\n\n## Where the snapshot lands\n\nIn a fresh local temp directory, never at the destination: the\ndestination may be a mounted/rclone network target, and a live\nSQLite file must never sit on network storage (#83 §4 hard rule —\nnetwork storage is a backup *destination* only). Only the finished\narchive is written to the destination path.\n\n## Restore\n\nDocumentation, not a command (#95): unpack the archive, place\n`db/teams.db` where the server's `--db` points and `blobs/` where\n`--blobs` points, start the server. The restore e2e in\n`teams-server` proves the unpacked pair serves an existing link\nend-to-end. The full text ships on `teams-server backup --help`."
+    },
+    {
+      "path": "teams_infra::backup::ARCHIVE_BLOBS_PREFIX",
+      "kind": "constant",
+      "docs": "The blob tree's prefix inside the archive; entries continue with\nthe CAS's own layout (`sha256/<shard>/<hex>`)."
+    },
+    {
+      "path": "teams_infra::backup::ARCHIVE_DB_ENTRY",
+      "kind": "constant",
+      "docs": "The snapshot's entry name inside the archive — first entry, always."
+    },
+    {
+      "path": "teams_infra::backup::BackupReport",
+      "kind": "struct",
+      "docs": "What a completed backup wrote — enough for the CLI to report and\nfor a caller to sanity-check."
+    },
+    {
+      "path": "teams_infra::backup::create_backup",
+      "kind": "function",
+      "docs": "Runs the whole backup: quiesce + `VACUUM INTO` through `isle`, then\nthe DB-first tar of snapshot + `<blob_root>/sha256` to\n`destination`. See the module doc for the ordering contract.\n\n`destination` must not already exist — a backup never overwrites a\nprevious one (an interrupted overwrite would destroy the good copy\nit was replacing); pick a fresh name per run."
+    },
+    {
+      "path": "teams_infra::blob",
+      "kind": "module",
+      "docs": "`blob` — [`LocalFileStorageAdapter`], the v0 backing of the\ninstance's global CAS (#83 §3, the #93 slice).\n\n## Layout\n\n```text\n<root>/sha256/<2ch>/<64hex>   one file per digest — the CAS proper\n<root>/staging/               in-flight writes, unique names\n```\n\nThe path under `sha256/` is the digest's canonical form with the\n`sha256:` prefix stripped — this module is the path-mapping edge #83\n§3 names as the only place the prefix comes off. Everywhere else\n(the port, the link table, the wire) the digest keeps its prefix.\n\n## Write path\n\nStream into a uniquely named staging file while hashing → verify\nthe computed digest against the **declared** one (the domain's\n[`verify_declared_digest`], so the mismatch arm is the same\nrejection everywhere) → `fsync` the file → rename into the final\npath → `fsync` the parent directories. This hardens the `.part`\nprecedent from `asterism-infra`'s preview jobs: same\ntemp-then-rename shape, plus the fsyncs and the digest gate, because\nhere the rename is what makes bytes *exist* for the link layer and\na half-written blob must never be reachable under its digest.\n\nA mismatch deletes the staging file and reports the computed digest\n(carried by [`DomainError::DigestMismatch`]); nothing lands. An\nabandoned write (crash, dropped connection) leaves only a staging\ntemp, which the startup sweep removes — [`open`] runs it, and it is\nthe only mechanical cleanup this layer owes (#83 §3 lifecycle).\n\n## Concurrent same-digest writes\n\nEach writer streams into its own staging file and finishes with an\natomic `rename` onto the same final path. `rename` replaces: the\nlast writer's inode wins, every earlier writer's file is dropped by\nthe filesystem, and since every renamed file has already been\nverified to hash to the digest it is named by, the replacement swaps\nbytes for identical bytes — a value-level no-op. Both callers\nsucceed and one physical copy remains. There is deliberately **no\nexists-check shortcut** before or during the write: skipping the\nwork when the blob is already present would make a duplicate upload\nobservably cheaper, which is the Harnik-2010 side channel the\nupload contract closes by always accepting the full body.\n\n[`open`]: LocalFileStorageAdapter::open\n[`verify_declared_digest`]: teams_core::domain::store::verify_declared_digest"
+    },
+    {
+      "path": "teams_infra::blob::LocalFileStorageAdapter",
+      "kind": "struct",
+      "docs": "Local-filesystem CAS adapter — one physical copy per instance,\nfiled by digest (#83 §3).\n\nImplements the [`BlobStore`] port (whole-buffer `put`) and exposes\nthe streaming write path ([`begin_put`]) and the streaming read\nhandle ([`open_blob`]) as inherent methods: the port's owned-`Vec`\nsignature is the v0 contract, and the stream forms live here beside\nit until a second adapter needs them to show through the port —\nexactly the extension order the port's doc reserves.\n\n[`begin_put`]: Self::begin_put\n[`open_blob`]: Self::open_blob"
+    },
+    {
+      "path": "teams_infra::blob::StagingWrite",
+      "kind": "struct",
+      "docs": "One in-flight streaming write: the staging file, the running hash,\nand the promise that nothing becomes visible until [`commit`]'s\nrename.\n\nDropping this without committing removes the staging file\n(best-effort, synchronously — the startup sweep catches whatever a\ncrash leaves behind).\n\n[`commit`]: Self::commit"
+    },
+    {
+      "path": "teams_infra::gc",
+      "kind": "module",
+      "docs": "`gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95\nslice): blob bytes that no team links anymore are deleted, after a\nreclaim and on demand (`teams-server gc`).\n\n## What the sweep protects\n\nA blob's bytes survive while **any** link row references its digest\n— marked-for-purge links included, because a marked link is\nrestorable during its grace window and restoring a link whose bytes\nwere swept would be a dangling reference by another name. The\nsweep's question is therefore\n[`SqliteTeamsRepository::digest_linked_anywhere`], deliberately not\nthe read surface's visibility predicate.\n\n## The racing same-digest upload, and why the answer is a lock\n\nThe #93 adapter's write path makes bytes durable (staging → rename)\n**before** the link row commits (#83 §3 ordering). That order is\nwhat makes a dangling link impossible for uploads — and it is\nexactly what a concurrent sweep could break: between the upload's\nrename and its link commit, the digest has bytes and zero links,\nand a sweep deciding in that window would delete bytes whose link\nis about to commit — a dangling link, manufactured by the sweeper.\n\nRe-checking links after removing the file cannot close this: the\nhazardous interleaving (upload renames → sweep checks links, sees\nzero → sweep deletes → upload's link commits) has the re-check land\n*before* the link exists, however many times it re-checks. What\ncloses it is excluding the interleaving: [`GcGuard`] is a\n`tokio::sync::RwLock` — every upload holds it **shared** across its\nrename→link-commit span (uploads never block each other), and the\nsweep holds it **exclusive** across its check-and-delete, so no\nupload is ever mid-span while the sweep decides. This leans on the\nsingle-process deployment shape #93 fixed (one server process owns\nDB and blob dir); a second process bypasses the guard, which is why\nthe `gc` CLI documents \"stopped server or same process\" and why\ncross-process coordination stays out of scope (#95 out-of-scope\nlist)."
+    },
+    {
+      "path": "teams_infra::gc::GcGuard",
+      "kind": "struct",
+      "docs": "The lock that keeps the zero-link sweep and the upload write path\nfrom interleaving (module doc). One per process, shared between the\nupload handlers and every sweep — construct it once beside the\nadapter and hand `Arc`s around."
+    },
+    {
+      "path": "teams_infra::gc::sweep_zero_link_blobs",
+      "kind": "function",
+      "docs": "Deletes every CAS blob that no team links (marked links count as\nlinks — module doc), returning the digests whose bytes went.\n\nRuns under the guard's exclusive phase, so no upload sits between\nits rename and its link commit while this decides; a same-digest\nupload therefore lands wholly before the sweep (linked — spared) or\nwholly after it (bytes rewritten by its own staging → rename, then\nlinked). Deletion itself is the adapter's idempotent `delete`, so a\ndigest that vanished by other means is \"already true\", not an\nerror."
+    },
+    {
+      "path": "teams_infra::paths",
+      "kind": "module",
+      "docs": "Data-profile and on-disk layout conventions for the teams plane.\n\nThis mirrors `asterism-infra`'s profile mechanism — the same\nselection table, the same marker guard — with every name swapped so\nthe two planes cannot open each other's data by accident:\n\n| | local app | teams plane |\n|---|---|---|\n| profile env | `ASTERISM_PROFILE` | `ASTERISM_TEAMS_PROFILE` |\n| home env | `ASTERISM_HOME` | `ASTERISM_TEAMS_HOME` |\n| named home | `~/.asterism/profiles/<p>` | `~/.asterism-teams/profiles/<p>` |\n| marker | `.asterism-profile` | `.asterism-teams-profile` |\n| database | `asterism.db` | `teams.db` |\n\nMirrored rather than imported because importing would mean a\n`teams-* → asterism-infra` edge, which #83 §4 forbids in any form.\n\nThe selection table is the one `asterism-infra` settled on:\n\n| `$ASTERISM_TEAMS_HOME` | `$ASTERISM_TEAMS_PROFILE` | result |\n|---|---|---|\n| unset | unset | the build's default — `dev` in debug, `dogfood` in release |\n| unset | `dev` / `dogfood` / `bench` | that profile, under `~/.asterism-teams/profiles/` |\n| unset | `custom` | error: `custom` is a home, and none was given |\n| set | unset | error: name the profile too |\n| set | `dev` / `dogfood` / `bench` | that profile, at the explicit path |\n| set | `custom` | `custom` at the explicit path, unguarded |\n\nNamed homes contain a marker; opening a home whose marker disagrees\nwith the requested profile is rejected before SQLite is touched.\nThe marker is published the way the sibling publishes its own —\ncontents written to a temporary file, synced, then hard-linked\nunder the marker's name (`create_new` fallback only where the\nfilesystem has no hard links): the name appears already complete or\nnot at all, so no observable state ever holds an empty marker. A\ncrash between creating the name and writing its contents would\notherwise wedge the home permanently — an empty marker rejects\nevery later open with `marker says \"\"`, and nothing here repairs\none — which is why the mechanism is mirrored rather than simplified\nfor this plane's quieter topology. `hard_link` rather than `rename`\nfor the sibling's reason too: rename replaces, and two profiles\nracing for one fresh home must never both claim it."
+    },
+    {
+      "path": "teams_infra::paths::DataProfile",
+      "kind": "enum",
+      "docs": "Isolated local dataset selected for the current process — same four\nprofiles as the local app, because the workloads they separate\n(disposable dev data / durable daily data / reproducible stress\ndata / an explicit unguarded path) are the same on this plane."
+    },
+    {
+      "path": "teams_infra::paths::active_profile",
+      "kind": "function",
+      "docs": "Returns the active teams-plane data profile without creating\ndirectories."
+    },
+    {
+      "path": "teams_infra::paths::default_blob_root",
+      "kind": "function",
+      "docs": "Returns the default blob store root (`<teams_home>/blobs`), under\nthe same profile guard as the database — the two live and move\ntogether, which is what lets #83 §3's ordering rule (bytes durable\nbefore the link commits) mean one machine's durability, not two."
+    },
+    {
+      "path": "teams_infra::paths::default_db_path",
+      "kind": "function",
+      "docs": "Returns the default teams SQLite database path\n(`<teams_home>/teams.db`) — the teams plane's own file, sharing\nnothing with the app database."
+    },
+    {
+      "path": "teams_infra::paths::teams_home",
+      "kind": "function",
+      "docs": "Returns (creating on demand) the teams-plane home directory for the\nactive profile, with the marker guard applied."
+    },
+    {
+      "path": "teams_infra::sqlite",
+      "kind": "module",
+      "docs": "SQLite backend for the teams plane — connection lifecycle and schema\nmigration built on `rusqlite-isle`, mirroring `asterism-infra`'s\nconventions over the teams-owned database.\n\n## Layout\n\n- [`migrations`] — `PRAGMA user_version`-based append-only\n  migrations, a fresh series starting at V1 (this database shares\n  nothing with the app database — #83 §4).\n- [`repo`] — the repository over the state tables and the ledger.\n- [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry\n  points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the\n  pragmas set and the schema migrated.\n- [`open_existing_at_latest`] — the maintenance verbs' entry point\n  (#95): pragmas only, **no migration**, refused unless the schema\n  is already current.\n\n## Pragma choices\n\nSame set as the app database, for the same reasons:\n\n- `journal_mode = WAL` — the 1-writer / N-readers setup #83 §4\n  names as the workload fit (append-only ledger, short tx).\n- `synchronous = NORMAL` — the usual tradeoff paired with WAL.\n- `foreign_keys = ON` — SQLite defaults to `OFF` per connection, so\n  it is reissued inside every init closure.\n- `busy_timeout = 5000` — one process by deployment shape, but a\n  backup command will eventually share the file, and waiting beats\n  an immediate `SQLITE_BUSY`.\n\nOne non-pragma setting rides along: transactions default to `BEGIN\nIMMEDIATE`. Every repository write opens a transaction that will\nwrite, and a DEFERRED transaction that upgrades from read to write\nbypasses the busy handler on the upgrade (the same trap\n`asterism-infra` documents from its 2026-07/08 flakes) — taking the\nwrite lock at `BEGIN` keeps every wait on the busy-handler path."
+    },
+    {
+      "path": "teams_infra::sqlite::map",
+      "kind": "module",
+      "docs": "Row ↔ domain conversion helpers for the teams tables.\n\nThe reading convention is `asterism-infra`'s: inside an isle closure\nonly `rusqlite` primitives are handled, and promoting rows into\ndomain types (including validation) happens **outside** the closure.\nWrites are the deliberate exception, documented in\n[`repo`](crate::sqlite::repo): the same-tx rule requires the domain\ninvariants to be evaluated *inside* the transaction, on the state it\nis about to change."
+    },
+    {
+      "path": "teams_infra::sqlite::map::actor_from_json",
+      "kind": "function",
+      "docs": "Parses the `actor` TEXT column back into a [`LedgerActor`]."
+    },
+    {
+      "path": "teams_infra::sqlite::map::actor_to_json",
+      "kind": "function",
+      "docs": "Serialises a [`LedgerActor`] into the `actor` TEXT column — the\nserde-tagged JSON form, so the member/operator distinction lands in\nstorage exactly as the domain spells it."
+    },
+    {
+      "path": "teams_infra::sqlite::map::infra_err",
+      "kind": "function",
+      "docs": "Wraps an infrastructure error (typically `IsleError`) into\n`DomainError::Infra`."
+    },
+    {
+      "path": "teams_infra::sqlite::map::subject_from_ref",
+      "kind": "function",
+      "docs": "Rebuilds a [`SubjectRef`] from its `(ref_type, ref_value)` columns —\nthe inverse of [`subject_to_ref`], through the same serde\nrepresentation."
+    },
+    {
+      "path": "teams_infra::sqlite::map::subject_to_ref",
+      "kind": "function",
+      "docs": "Splits a [`SubjectRef`] into the `(ref_type, ref_value)` pair the\n`ledger_subject` table is keyed by.\n\nGoes through the serde representation rather than a hand-written\nmatch so the columns and the wire form cannot disagree: the tag is\nthe `ref_type`, the content — a string in every variant (digests,\nthe uuid's hyphenated form, the opaque forge identity) — is the\n`ref_value`. A trace query looking for a subject encodes it the same\nway, so index walks compare exactly what appends wrote."
+    },
+    {
+      "path": "teams_infra::sqlite::migrations",
+      "kind": "module",
+      "docs": "Teams-database schema migrations — `PRAGMA user_version` scheme.\n\nA fresh series starting at V1: this database shares nothing with the\napp database, not even a version counter (#83 §4). The mechanism is\n`asterism-infra`'s: `MIGRATIONS[i]` upgrades from version `i` to\n`i + 1`, [`migrate`] applies every pending batch inside its own\ntransaction and bumps `user_version` on success. **Never rewrite a\npast batch** — schema changes go at the end.\n\n## Schema decisions\n\n- **Ids are 16-byte BLOBs (UUID v7)**, timestamps are `INTEGER`\n  epoch ms, tables are `STRICT` — the workspace conventions.\n- **State tables are the SoT, the ledger is the record** (#83 §2\n  audit-log pattern). `team` / `membership` / `team_blob_link` /\n  `locator` are authoritative; `ledger_event` is what happened.\n- **`ledger_event` is append-only in the schema, not only in the\n  API**: no `updated_at`, no soft-delete column anywhere near it,\n  and `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort — the\n  repository exposes no update/delete path, and the schema backs\n  that up against raw SQL too.\n- **`ledger_event` carries no foreign key to `team`.** The record\n  outlives the state on purpose: deleting a team removes its rows\n  (memberships and links cascade) while the same transaction\n  appends `teams.team.deleted/1` — a stream that must survive the\n  row it chronicles cannot reference it.\n- **Subjects land in `ledger_subject`, keyed `(ref_type,\n  ref_value)`** with an index in that order, so trace queries walk\n  the index and never parse payload JSON (#83 §2). The table is the\n  only store of an event's subjects — rebuilding the envelope joins\n  it, so there is no second copy to drift.\n- **`seq` is assigned by storage inside the write transaction**\n  (`MAX(seq) + 1` per team): monotonic by the primary key, gapless\n  under the single-writer deployment shape because no two\n  transactions compute it concurrently.\n- **`role` is TEXT with no CHECK constraint**: the word list is the\n  domain's ([`teams_core::domain::identity::Role::parse`]), so a\n  later tier is a new word and a new match arm, not a schema\n  migration (#83 §1). The repository passes every stored value back\n  through the domain parser on read."
+    },
+    {
+      "path": "teams_infra::sqlite::migrations::LATEST_VERSION",
+      "kind": "constant",
+      "docs": "Latest schema version (`MIGRATIONS.len()`)."
+    },
+    {
+      "path": "teams_infra::sqlite::migrations::migrate",
+      "kind": "function",
+      "docs": "Applies every pending migration up to the latest version.\nIdempotent: re-running against an already-up-to-date database is a\nno-op. Each batch runs inside its own transaction; a failure rolls\nback only that batch and leaves earlier migrations in place."
+    },
+    {
+      "path": "teams_infra::sqlite::open_and_migrate",
+      "kind": "function",
+      "docs": "Opens the teams database, applying any pending migrations before\nreturning. The returned `AsyncIsleDriver` owns the lifecycle —\ncallers should `driver.shutdown().await` at process exit to drain\nqueued jobs and join the SQLite thread.\n\nThe default path is [`crate::paths::default_db_path`]; taking the\npath as a parameter keeps this function free of environment reads,\nthe same split the paths module uses internally."
+    },
+    {
+      "path": "teams_infra::sqlite::open_and_migrate_in_memory",
+      "kind": "function",
+      "docs": "Opens an in-memory teams database with migrations applied (used by\ntests). WAL is a no-op on memory databases."
+    },
+    {
+      "path": "teams_infra::sqlite::open_existing_at_latest",
+      "kind": "function",
+      "docs": "Opens the teams database **without migrating**, refusing unless its\nschema is exactly [`LATEST_VERSION`] — the entry point for the\nmaintenance verbs (`teams-server gc` / `backup`, #95).\n\nA maintenance verb must never change the instance it maintains as a\nside effect of looking at it: a newer binary asked to *back up* a\npre-upgrade database would otherwise migrate it first and archive\nthe migrated schema — the wrong artefact, produced by the command\nwhose whole job was to preserve the instance as it stands. Only the\nper-connection pragmas are applied here (a persistent-state write\nlike the WAL switch happened at the instance's creation and is a\nno-op on every database this plane produced); on a version mismatch\n— older *or* newer — the connection is shut down and the error\nnames the fix."
+    },
+    {
+      "path": "teams_infra::sqlite::repo",
+      "kind": "module",
+      "docs": "The teams repository — state tables and the per-team ledger behind\none write rule.\n\n## The same-tx rule is the only write API shape (#83 §2)\n\nEvery public state-changing method here opens one transaction,\napplies the state change **and** appends the corresponding ledger\nevent, and commits or rolls back the two together. There is no\npublic method that writes state without appending, and none that\nappends without a state change. The one documented exception is\n[`SqliteTeamsRepository::record_locator`]: locators are\nprivate-space, and private-space operations never land in any\nteam's ledger (#83 §2 — the ledger's scope is the team boundary),\nwhich is also why the v0 kind registry has no locator kind.\n\n## Where the domain runs\n\nInvariants are evaluated by the domain, on current state, *inside*\nthe transaction that would record the change: the last-owner rule\nis [`TeamRoster`]'s answer over the membership rows as they read\nunder the write lock, and role TEXT goes through [`Role::parse`] in\nboth directions. This is the deliberate exception to the\nread-side convention (promotion outside the closure —\n[`map`](crate::sqlite::map)): a check made outside the transaction\nwould be a check against state the transaction no longer holds.\n\nDomain refusals inside a closure travel as the inner `Result` of a\nnested pair — the outer error is SQLite's, the inner is the\ndomain's, and the transaction rolls back on either.\n\n## What `seq` means here\n\nStorage assigns it: `MAX(seq) + 1` per team, computed inside the\nwrite transaction. The primary key makes it monotonic; the\nsingle-writer deployment shape (#83 §4 — one server, one\nconnection, `BEGIN IMMEDIATE`) makes it gapless, because a\nrolled-back transaction never leaves a hole behind — the next\nappend recomputes over what actually committed. The domain's\n[`EventSeq`] validates what storage hands back and mints nothing."
+    },
+    {
+      "path": "teams_infra::sqlite::repo::SqliteTeamsRepository",
+      "kind": "struct",
+      "docs": "SQLite repository for the teams plane — teams, memberships, blob\nlinks, locators, and the append-only ledger, all through the write\nrule in the module doc."
+    },
+    {
+      "path": "teams_infra::sqlite::schema_version",
+      "kind": "function",
+      "docs": "Reads the current schema version from an already-open isle."
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "crate": "asterism-exporter-file",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_exporter_file::ACTION_WRITE",
+      "kind": "constant",
+      "docs": "The single action name — every params variant flows through the\nsame `write` action; the actual write behaviour is controlled by\n[`FileDispatchParams::mode`]."
+    },
+    {
+      "path": "asterism_exporter_file::FileDispatchParams",
+      "kind": "struct",
+      "docs": "Params schema for [`SLUG`] dispatch calls."
+    },
+    {
+      "path": "asterism_exporter_file::FileExporter",
+      "kind": "struct",
+      "docs": "Filesystem-backed [`Exporter`].\n\nStateless — cheap to `Clone`; a single instance is registered per\nserver via [`asterism_infra::dispatch::ExporterRegistry`]."
+    },
+    {
+      "path": "asterism_exporter_file::SCHEMA_NAME",
+      "kind": "constant",
+      "docs": "Public name for this exporter's params schema in the\n`asterism-server schema` CLI (`exporter:file:params`)."
+    },
+    {
+      "path": "asterism_exporter_file::SLUG",
+      "kind": "constant",
+      "docs": "Slug the registry uses for this exporter."
+    },
+    {
+      "path": "asterism_exporter_file::WriteMode",
+      "kind": "enum",
+      "docs": "Write mode."
+    },
+    {
+      "path": "asterism_exporter_file::params_example_json",
+      "kind": "function",
+      "docs": "Canonical example JSON for [`FileDispatchParams`] — the shape\nan external caller (CC, LLM prompt, Comfy plugin author) needs\nto construct a valid params blob. Streamed by\n`asterism-server schema print exporter:file:params`."
+    }
+  ]
+}

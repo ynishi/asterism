@@ -1,0 +1,16 @@
+{
+  "crate": "asterism-media-probe",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_media_probe::a1111",
+      "kind": "module",
+      "docs": "`a1111` — the line grammar of AUTOMATIC1111's `parameters` text,\nand nothing about what any line means.\n\nThe blob this reads is the one value that family writes: the prompt,\nthe negative prompt and the sampler settings in one line-oriented\ntext. The settings ride the last line as comma-separated `Key:\nvalue` pairs, and a value that itself contains a comma or a colon is\ndouble-quoted with backslash escapes — `Lora hashes: \"name:\na1b2c3d4\"` is one pair, not two. That quoting rule is the whole\nreason this is a tokeniser rather than two `split` calls.\n\n# A pure function of a string, with no judgement\n\nThe same contract as the rest of this crate, one level up from\nbytes: boundaries out, judgement left to the caller. Which keys\nmatter — whether `Model` outranks `Model hash`, what an empty\n`Seed` means — is the caller's question, and answering it here\nwould put a registry's opinions into a grammar\n([`png`](crate::png)'s module doc on why the judgement stayed\nbehind when the parsing moved).\n\n# Refusal is all-or-nothing\n\nA line is a settings line when **every** top-level comma-separated\npart carries a `key: value` split. A prompt that happens to end the\nblob and happens to contain a colon does not half-parse into a\nplausible pair list — one part without a separator refuses the whole\nline, and the caller sees no settings rather than wrong ones."
+    },
+    {
+      "path": "asterism_media_probe::a1111::settings",
+      "kind": "function",
+      "docs": "The settings pairs of a `parameters` blob, in the order written.\n\nThe last line of the blob, tokenised — that is where the family\nwrites them. An empty result is a blob with no settings line: a\nprompt alone, an empty string, or a last line that refuses to parse\n(module docs). Duplicate keys are preserved as written; deciding\nbetween them is judgement, not grammar."
+    }
+  ]
+}

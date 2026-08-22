@@ -42,59 +42,23 @@ description   = "Persona/Char/Memory grid UI — local-first Asterism for person
 version       = "0.0.0"
 edition       = "2024"
 
-# What docs/aidoc/ describes: the app's own layers. What it leaves out:
-# the teams plane, and the plug-in planes with their adapters.
+# docs/aidoc/ describes the whole workspace: the app's own layers, the
+# teams plane, both plug-in planes with their adapters, and the bench
+# tooling.
 #
-# The reason is one number. `llms-full.txt` concatenates every module
-# narrative in the workspace, cargo-aidoc warns over 512 KiB, and
-# `--strict` makes that warning an error — so the cap decides what may
-# be documented, and there is no setting for it. The file was at 95.8%
-# of the cap on the app crates alone (502,338 of 524,288 bytes) and the
-# forge model (#63) went 58,019 bytes over it. Each teams slice had
-# breached it before that (#89's CI run, by 1,795 bytes).
-#
-# The line drawn here is between what somebody reads to change this
-# application — core, infra, contract, server, ui — and what somebody
-# reads to write a plug-in against it. The second is a stable surface
-# with an audience of its own, and it is the half that can be lifted
-# out without the rest of the docs stopping making sense. Bench tooling
-# goes with it: nothing depends on `asterism-benchgen` and nothing in
-# the shipped app runs it.
-#
-# What that costs, stated where it is paid: the excluded crates have no
-# entry under docs/aidoc/ at all, not merely a smaller one, so an agent
-# working on an importer or an exporter has rustdoc and the source and
-# nothing generated. Remove entries as headroom allows — deliberately,
-# cap in view — or lift the cap in cargo-aidoc first, which is the fix
-# that would let this list shrink rather than grow.
+# An `exclude` list stood here until cargo-aidoc 0.4.0. Its reason was
+# one number: `llms-full.txt` concatenates every module narrative, the
+# tool warned over 512 KiB with no setting to change it, and `--strict`
+# made the warning an error — so the cap decided what could be
+# documented, and nineteen crates (teams, importers, exporters,
+# media-probe, benchgen) had no docs/aidoc/ entry at all. 0.4.0 removed
+# that lint outright: no spec or platform publishes a size limit for
+# the file, and its consumers chunk it rather than reading it into a
+# context window. A workspace that wants a bound now opts in via
+# `llms-full-max-bytes`, which truncates at chunk boundaries and lists
+# what it dropped; this one wants the whole inventory instead, which is
+# what an absent key and an absent list say.
 [workspace.metadata.aidoc]
-exclude = [
-  # Pre-v0, and each slice breaches the cap on its own.
-  "teams-core",
-  "teams-infra",
-  "teams-contract",
-  "teams-server",
-  # The inbound plug-in plane: the SDK a scanner/parser is written
-  # against, and the adapters written against it.
-  "asterism-importer-sdk",
-  "asterism-importer",
-  "asterism-importer-audio",
-  "asterism-importer-cc",
-  "asterism-importer-image",
-  "asterism-importer-persona-journal",
-  "asterism-importer-tape",
-  "asterism-importer-video",
-  # The outbound plug-in plane, and the probe the adapters share.
-  "asterism-dispatch-sdk",
-  "asterism-exporter-common",
-  "asterism-exporter-comfy",
-  "asterism-exporter-file",
-  "asterism-exporter-http",
-  "asterism-media-probe",
-  # Bench corpus tooling: nothing depends on it, and the app never
-  # runs it.
-  "asterism-benchgen",
-]
 
 [workspace.dependencies]
 # --- External integrations (kept commented out until reintroduced) ---
