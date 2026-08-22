@@ -925,6 +925,8 @@ pub async fn init_core_with(
         query_group_invalidator.clone(),
         session_service.clone(),
         previews_dir.clone(),
+        Arc::new(sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone())),
+        visual_encoder_cell.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),

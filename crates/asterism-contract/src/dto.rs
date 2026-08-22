@@ -697,6 +697,39 @@ fn default_fold_policy() -> String {
     "auto".to_string()
 }
 
+/// One model-proposed tag suggestion awaiting (or carrying) a ruling
+/// (#112). Distinct from [`TagDto`] on purpose: a suggestion is
+/// evidence with a score and a disposition, not a tag an asset has.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TagSuggestionDto {
+    /// Proposed tag id.
+    pub tag_id: String,
+    /// Proposed tag's channel name.
+    pub name: String,
+    /// Which model proposed it.
+    pub model_id: String,
+    /// Cosine similarity that cleared the suggestion floor.
+    pub score: f32,
+    /// `suggested` / `accepted` / `rejected`.
+    pub disposition: String,
+    /// When the model proposed it (epoch ms).
+    pub suggested_at_ms: i64,
+    /// When a person ruled, if they have (epoch ms).
+    pub resolved_at_ms: Option<i64>,
+}
+
+/// The visual model a running process has bound, if any (#112).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct VisualModelStatusDto {
+    /// Bound model's stable id; `None` when the process runs without
+    /// a model (feature off, no package, or a failed bind).
+    pub model_id: Option<String>,
+    /// Bound model's vector dimensionality.
+    pub dim: Option<u32>,
+    /// Bound model's preprocessing revision.
+    pub preprocess_ver: Option<u32>,
+}
+
 /// A single channel tag.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TagDto {

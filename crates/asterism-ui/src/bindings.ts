@@ -204,6 +204,10 @@ export type AssetDto = { id: string; persona_id: string; source_kind: string; lo
 
 export type TagDto = { id: string; name: string; axis: string | null; };
 
+export type TagSuggestionDto = { tag_id: string; name: string; model_id: string; score: number; disposition: string; suggested_at_ms: number; resolved_at_ms: number | null; };
+
+export type VisualModelStatusDto = { model_id: string | null; dim: number | null; preprocess_ver: number | null; };
+
 export type TagCountDto = { tag: { id: string; name: string; axis: string | null; }; asset_count: number; };
 
 export type SessionDto = { id: string; persona_id: string; external_key: string; title: string | null; note: string | null; cover_hint: string | null; started_at_ms: number; ended_at_ms: number; message_count: number; created_at_ms: number; updated_at_ms: number; };

@@ -67,7 +67,8 @@ use asterism_contract::dto::{
     ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto, PursuitDto,
     PursuitEventDto, PursuitTxDto, PursuitViewDto, RetrievedIdsDto, RetrievedPageDto,
     SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
-    SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto, VideoPreviewDto,
+    SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadAnchorDto, ThreadDto,
+    VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery, RandomAssetsQuery,
@@ -186,6 +187,8 @@ fn main() {
         AssetIndexPageDto,
         AssetDto,
         TagDto,
+        TagSuggestionDto,
+        VisualModelStatusDto,
         TagCountDto,
         SessionDto,
         SessionPageDto,

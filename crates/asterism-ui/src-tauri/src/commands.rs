@@ -1142,6 +1142,54 @@ pub async fn attach_tag(
         .await?)
 }
 
+/// Lists what the bound visual model proposed for one asset (#112),
+/// score-descending, rulings included. Empty without a model.
+#[tauri::command]
+pub async fn list_tag_suggestions(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<Vec<asterism_contract::dto::TagSuggestionDto>, UiError> {
+    Ok(state.asset_service.tag_suggestions_of(&asset_id).await?)
+}
+
+/// Accepts one tag suggestion (#112): the ruling lands on the
+/// evidence row and the tag is linked in `asset_tag`.
+#[tauri::command]
+pub async fn accept_tag_suggestion(
+    state: State<'_, AppState>,
+    asset_id: String,
+    tag_id: String,
+) -> Result<(), UiError> {
+    state
+        .asset_service
+        .accept_tag_suggestion(&asset_id, &tag_id)
+        .await?;
+    Ok(())
+}
+
+/// Rejects one tag suggestion (#112); this model never proposes the
+/// pair again.
+#[tauri::command]
+pub async fn reject_tag_suggestion(
+    state: State<'_, AppState>,
+    asset_id: String,
+    tag_id: String,
+) -> Result<(), UiError> {
+    state
+        .asset_service
+        .reject_tag_suggestion(&asset_id, &tag_id)
+        .await?;
+    Ok(())
+}
+
+/// Which visual model this process bound, if any (#112).
+#[tauri::command]
+pub async fn visual_model_status(
+    state: State<'_, AppState>,
+) -> Result<asterism_contract::dto::VisualModelStatusDto, UiError> {
+    Ok(state.asset_service.visual_model_status())
+}
+
 /// Removes a tag from an asset. Idempotent — a missing link is a
 /// no-op; the tag row is left in place for other assets.
 #[tauri::command]
