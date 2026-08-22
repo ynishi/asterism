@@ -21,13 +21,16 @@
 //! ending would go to different places and the read below would come
 //! back short.
 //!
-//! # Neither service has a transport
+//! # What this covers that the routes do not
 //!
-//! So this is where they are reachable from, and the test is the only
-//! caller they have. That is stated rather than worked around: the
-//! surface they belong on is decided in another issue, and wiring them
-//! to nothing until then would leave the adapter unexercised by the
-//! app that owns it.
+//! The line's verbs have a transport now
+//! (`forge_lines_routes_e2e`), and the pursuit's and the
+//! conversation's do not yet. This stays either way: a route test
+//! drives the wiring the router reaches, and what is asked here is
+//! whether `CoreCtx` handed three ports one adapter over one
+//! connection. A close writes through two of them at once, and no
+//! request can tell whether those were the same object — only the row
+//! that comes back short can, which is what the reads below are for.
 
 use std::sync::Arc;
 

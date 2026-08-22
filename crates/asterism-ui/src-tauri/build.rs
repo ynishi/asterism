@@ -6,8 +6,9 @@
 //! types are avoided so the two sides never drift apart.
 //!
 //! The list below is explicit, not exhaustive, and nothing checks it
-//! against `asterism-contract`. Two deliberate omissions today, both of
-//! the same shape — a surface the UI does not reach:
+//! against `asterism-contract`. Three deliberate omissions today. The
+//! first two are one shape — a surface the UI will not reach — and the
+//! third is a surface it has not reached yet:
 //!
 //! - the diagnostics *read* types (`ListDiagQuery` / `DiagDto`) derive
 //!   `SchemaBridge` but stay out, because reading `/asterism/diag` is
@@ -19,7 +20,14 @@
 //!   HTTP / MCP surface for the agent driving an importer, and the UI
 //!   has no screen for it — the eventual UI is about promoting one
 //!   series to a real Group, which is a different shape from editing
-//!   a rule.
+//!   a rule;
+//! - the forge's types (`asterism_contract::forge`) stay out **for
+//!   now**, and this one is temporary in a way the other two are not.
+//!   A screen is the whole reason that surface is being built — HTTP
+//!   first, the UI on it — but no component imports a forge type
+//!   today, and exporting a shape nothing consumes is how a binding
+//!   drifts from what a screen actually needs. They come in with the
+//!   screen, in the same change.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,

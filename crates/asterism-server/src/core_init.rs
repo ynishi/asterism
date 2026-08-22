@@ -492,14 +492,15 @@ pub struct CoreCtx {
     /// reading what is alive on it, and moving the two things about a
     /// line that its history does not record.
     pub line_service: Arc<asterism_core::application::forge::LineService>,
-    /// Work against a line: opening it, adding a pass, running the
+    /// Work against a line: opening it, adding a round, running the
     /// line's rule over what it collides with, and ending it.
     ///
-    /// Neither this nor [`line_service`](Self::line_service) has a
-    /// transport. They are constructed here because the wiring is the
-    /// thing being proved — the whole stack meets a real database at
-    /// startup — and reached from nowhere else until the surface they
-    /// belong on is decided.
+    /// This one has no transport yet — the surface it belongs on is
+    /// decided and not built. [`line_service`](Self::line_service) is
+    /// reachable over HTTP under `/asterism/forge/lines`; this is
+    /// constructed here all the same, because the wiring is the thing
+    /// being proved: the whole stack meets a real database at startup,
+    /// and a close writes through two ports at once.
     pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
     /// What was said about work: a remark on a pass, a question about
     /// one entry it touched, a review of what landed.

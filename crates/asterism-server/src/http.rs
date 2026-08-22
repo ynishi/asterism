@@ -51,11 +51,20 @@ use asterism_contract::dto::{
     RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
     SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto, VideoPreviewDto,
 };
+use asterism_contract::forge::{
+    ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto,
+    ForgeStrategyDto, OpenForgeLineCommand, RenameForgeLineCommand, SetForgeLineStrategyCommand,
+};
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
     ListJobLogQuery, ListObservationsQuery, ListPerfQuery, RandomAssetsQuery, SearchAssetsQuery,
 };
 use asterism_core::DomainError;
+use asterism_core::application::mapping::{
+    forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_name,
+    forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
+};
+use asterism_core::domain::forge::model::value::LineId;
 use asterism_core::domain::observation::Stream;
 use asterism_core::domain::value::MimeType;
 use axum::body::{Body, Bytes};
@@ -395,6 +404,42 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             get(list_thread_messages).post(append_thread_message),
         )
         .route("/asterism/messages/delete", post(delete_message))
+        // The forge, under a prefix of its own. `/asterism/threads`
+        // above is the annotation surface on the raw layer, which
+        // anchors to snapshots and cards; the forge's conversations
+        // anchor to work. Neither could carry the other's anchors, and
+        // the same collision is why `CoreCtx` has `thread_service` and
+        // `forge_thread_service` side by side. Prefixing all of the
+        // forge keeps the pair impossible rather than resolved noun by
+        // noun.
+        //
+        // The verbs are acts and are spelled as acts, which is the
+        // form `/asterism/personas/archive` and
+        // `/asterism/assets/{id}/source-type` already use here.
+        .route(
+            "/asterism/forge/lines",
+            get(list_forge_lines).post(open_forge_line),
+        )
+        .route("/asterism/forge/lines/{id}", get(get_forge_line))
+        .route(
+            "/asterism/forge/lines/{id}/states",
+            get(get_forge_line_states),
+        )
+        .route("/asterism/forge/lines/{id}/rename", post(rename_forge_line))
+        .route(
+            "/asterism/forge/lines/{id}/strategy",
+            post(set_forge_line_strategy),
+        )
+        .route(
+            "/asterism/forge/lines/{id}/archive",
+            post(archive_forge_line),
+        )
+        .route("/asterism/forge/lines/{id}/reopen", post(reopen_forge_line))
+        .route(
+            "/asterism/forge/lines/{id}/discard",
+            post(discard_forge_line),
+        )
+        .route("/asterism/forge/strategies", get(list_forge_strategies))
         .with_state(ctx)
 }
 
@@ -3056,4 +3101,190 @@ async fn delete_message(
         .delete_message(command, &asserted(None, None, None)?)
         .await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ---------------------------------------------------------------
+// The forge — a line
+//
+// The service takes typed ids and the wire carries strings, so the
+// parsing is here. It is the adapter's job in both directions: a path
+// segment that is not a UUID is malformed input and says so, rather
+// than reaching a service that would have to describe a shape it does
+// not accept.
+// ---------------------------------------------------------------
+
+/// Reads a line id out of a path segment.
+fn line_id(raw: &str) -> Result<LineId, DomainError> {
+    forge_line_id(raw, "line id")
+}
+
+/// `POST /asterism/forge/lines` — opens a line.
+async fn open_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<OpenForgeLineCommand>,
+) -> ApiResult<ForgeLineDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let line = ctx
+        .line_service
+        .open(
+            forge_name(command.name)?,
+            forge_strategy_id(command.strategy_id)?,
+            &attribution,
+        )
+        .await?;
+    Ok(Json(forge_line_to_dto(&line)))
+}
+
+/// `GET /asterism/forge/lines` — every line, without its history.
+async fn list_forge_lines(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<Vec<ForgeLineDto>> {
+    let lines = ctx.line_service.list().await?;
+    Ok(Json(lines.iter().map(forge_line_to_dto).collect()))
+}
+
+/// `GET /asterism/forge/lines/{id}` — the line and its whole history.
+///
+/// This grows with the line. A surface showing what is *on* a line
+/// wants `/states` instead; this one is for showing how it got there.
+async fn get_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<ForgeLineHistoryDto> {
+    let line = ctx.line_service.get(&line_id(&id)?).await?;
+    Ok(Json(forge_history_to_dto(&line)))
+}
+
+/// `GET /asterism/forge/lines/{id}/states` — what is on the line,
+/// folded from the chain.
+async fn get_forge_line_states(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgeEntryStateDto>> {
+    let states = ctx.line_service.states(&line_id(&id)?).await?;
+    Ok(Json(forge_states_to_dto(&states)))
+}
+
+/// Reads a line back after a write, so the caller sees what it now is.
+///
+/// **Every write verb on a line answers with the line.** The four that
+/// move its description return nothing from the service — they are
+/// `Result<(), _>` — and a caller told only "renamed" has to ask again
+/// for the name, the standing and the stamp that moved. That second
+/// request is the thing a screen would forget; `personas/archive`
+/// answers with the persona for the same reason. The read costs one
+/// more query and buys a surface where no write leaves the caller
+/// holding a value it knows is stale.
+async fn line_now(ctx: &ServerCtx, id: &LineId) -> Result<Json<ForgeLineDto>, ApiError> {
+    Ok(Json(forge_line_to_dto(&ctx.line_service.get(id).await?)))
+}
+
+/// `POST /asterism/forge/lines/{id}/rename` — moves the line's own
+/// description. Not a landing: nothing goes on the chain.
+async fn rename_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<RenameForgeLineCommand>,
+) -> ApiResult<ForgeLineDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = line_id(&id)?;
+    ctx.line_service
+        .rename(&id, &forge_name(command.name)?, &attribution)
+        .await?;
+    line_now(&ctx, &id).await
+}
+
+/// `POST /asterism/forge/lines/{id}/strategy` — points the line at a
+/// different rule, from here on.
+async fn set_forge_line_strategy(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<SetForgeLineStrategyCommand>,
+) -> ApiResult<ForgeLineDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = line_id(&id)?;
+    ctx.line_service
+        .set_strategy(&id, &forge_strategy_id(command.strategy_id)?, &attribution)
+        .await?;
+    line_now(&ctx, &id).await
+}
+
+/// `POST /asterism/forge/lines/{id}/archive` — finished with. Takes no
+/// landing until it is reopened, and is the only state a drop can be
+/// reached from.
+async fn archive_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<ForgeLineActCommand>,
+) -> ApiResult<ForgeLineDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = line_id(&id)?;
+    ctx.line_service.archive(&id, &attribution).await?;
+    line_now(&ctx, &id).await
+}
+
+/// `POST /asterism/forge/lines/{id}/reopen` — takes it back out.
+async fn reopen_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<ForgeLineActCommand>,
+) -> ApiResult<ForgeLineDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = line_id(&id)?;
+    ctx.line_service.reopen(&id, &attribution).await?;
+    line_now(&ctx, &id).await
+}
+
+/// `POST /asterism/forge/lines/{id}/discard` — takes the line, its
+/// history and every piece of work against it.
+///
+/// **The response is the point.** It names the assets the forge was
+/// holding and is not holding any more; after this write there is no
+/// record left to derive them from, so a caller that ignores the body
+/// has lost the only answer there will be.
+async fn discard_forge_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<ForgeLineActCommand>,
+) -> ApiResult<ForgeDiscardedDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = line_id(&id)?;
+    let released = ctx.line_service.discard(&id, &attribution).await?;
+    Ok(Json(forge_discarded_to_dto(id, &released)))
+}
+
+/// `GET /asterism/forge/strategies` — every rule a line can be pointed
+/// at, built from the rules this deployment carries.
+async fn list_forge_strategies(
+    State(ctx): State<Arc<ServerCtx>>,
+) -> ApiResult<Vec<ForgeStrategyDto>> {
+    let rules = ctx.line_service.strategies().await;
+    Ok(Json(
+        rules
+            .iter()
+            .map(|(id, about)| forge_strategy_to_dto(id, about))
+            .collect(),
+    ))
 }
