@@ -46,10 +46,11 @@ and this project adheres to
 ### Added
 
 - **A line of work is reachable over HTTP** (#120). The forge's verbs were
-  callable from inside the process and nowhere else. Ten routes under
-  `/asterism/forge/lines` open a line, list them, read one whole or folded,
-  rename it, point it at a different rule, archive it, reopen it and drop it;
-  `/asterism/forge/strategies` says which rules this deployment carries.
+  callable from inside the process and nowhere else. Under
+  `/asterism/forge/lines` a caller can now open a line, list them, read one
+  whole or folded, rename it, point it at a different rule, archive it, reopen
+  it and drop it; `/asterism/forge/strategies` beside it says which rules this
+  deployment carries.
 
   The verbs are acts and are spelled as acts — `POST …/{id}/archive` rather than
   a resource with a method — which is the form `/asterism/personas/archive` and
