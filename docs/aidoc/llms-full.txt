@@ -1074,10 +1074,11 @@ contracts in both directions, so neither can be compiled with the
 other in front of it. Wire them directly and each needs the other
 to build, which is the state that makes either impossible to move.
 
-**Shared identity is not a crossing.** `PersonaId`, `AssetId`, the
-attribution triple and `DomainError` are named directly here, as
-they are everywhere else, because they belong to neither side. The
-rule is about capability, never about what something is.
+**Shared identity is not a crossing.** `AssetId`, the attribution
+triple and `DomainError` are named directly here, as they are
+everywhere else, because they belong to neither side. The rule is
+about capability, never about what something is. `PersonaId` was in
+that list until the forge stopped asking whose an asset is.
 
 
 <!-- asterism_core/application__forge__line_service.md -->
@@ -3528,12 +3529,18 @@ The rule is one sentence: **the forge may not name anything else in
 `asterism-core` except the shared vocabulary**, which is
 [`DomainError`](crate::error::DomainError),
 [`AssetId`](crate::domain::value::AssetId),
-[`PersonaId`](crate::domain::value::PersonaId),
 `define_uuid_id` (the crate-private macro an id newtype is spelled
 with) and
 [`AttributionContext`](crate::domain::attribution::AttributionContext).
 `tests/forge_boundary.rs` holds that list with a reason beside each
 entry and fails on anything else.
+
+It was five until `PersonaId` came off, and how it came off is the
+example worth keeping: nothing removed it from the list on purpose.
+[`boundary::Store`] stopped asking whose an asset is — a line
+carries no owner, so the answer had nothing to be measured
+against — and the word simply stopped appearing. The list shrinks
+when the forge needs less, and never because somebody tidied it.
 
 **The constraint is mutual dependency with the core, and nothing
 wider.** Two things follow that are easy to get backwards:
@@ -3648,8 +3655,13 @@ and that arrives with the transport that needs it, in this module.
 
 Identity and failure are **shared, not twinned**, and naming them
 directly anywhere in the forge is correct rather than a leak:
-`AssetId`, `PersonaId`, `DomainError`. There is no client for them
-and there should not be one.
+`AssetId` and `DomainError`. There is no client for them and there
+should not be one.
+
+`PersonaId` was on that list while [`store::Store`] asked
+whose an asset is. It does not any more — a line carries no owner,
+so the forge has nothing to measure an answer about ownership
+against — and the word left the forge with the question.
 
 The attribution triple used to be on that list and is not any
 more. It came off for a reason the others do not share: the forge's
@@ -3661,15 +3673,14 @@ forge's own word for who did something is
 [`Actor`](crate::domain::forge::model::act::Actor).
 
 The reason is that they are not the other side's words that the
-forge borrows — they are words neither side owns. A persona is the
-tenancy axis both sides carry on every row; an asset id is what a
-reference *is* on both sides of the line; a failure has one shape
-or callers cannot handle it. Giving each of them a forge-side twin
-would put a conversion in every file of this layer, and buy a
+forge borrows — they are words neither side owns. An asset id is
+what a reference *is* on both sides of the line; a failure has one
+shape or callers cannot handle it. Giving each of them a forge-side
+twin would put a conversion in every file of this layer, and buy a
 boundary that nothing is crossing.
 
 So the split is: **identity is shared, capability is contracted.**
-What the other side can *do* — answer whether something is held,
+What the other side can *do* — answer whether something exists,
 freeze a set, file a round — goes through a face and a client, and
 every one of those is in this module. What something *is* does not.
 
@@ -3694,9 +3705,12 @@ on a list with a reason beside it. Until the forge is a crate, that
 test is the arrow: a module boundary stops nothing, and
 `use crate::domain::asset::Asset` in a model file compiles today.
 
-It also means the shared vocabulary has a written surface: five
-names, each with the reason it belongs to neither side. That is
-what the split lifts when it happens.
+It also means the shared vocabulary has a written surface: the
+names on that list, each with the reason it belongs to neither
+side. That is what the split lifts when it happens. How many there
+are is not written here — a count in one file and its list in
+another is a thing that goes stale silently, and this pair already
+did once.
 
 # What lives here later
 
@@ -3782,18 +3796,37 @@ already agree on, and the shared error. [`StoreClient`] is the
 forge's side of it, and the only thing in the forge that turns a
 [`Content`] into the id a contract can carry.
 
-# Ownership, not existence
+# Existence, not ownership
 
-The question is `owns`, not `exists`, and the difference is the
-persona. A reference to something real but belonging to somebody
-else is exactly as unusable as a reference to nothing, and a
-crossing that forgets whose data it is asking about is the kind of
-mistake that does not surface until two tenants are in the same
-database. Carrying the persona in the signature means forgetting it
-does not compile.
+The question is `exists`, and it used to be `owns(persona, asset)`.
+That was wrong twice over, and the second HTTP surface built on it
+is what made both visible.
 
-The forge does not decide what ownership means — it asks, and the
-side that holds the content answers.
+**A line carries no owner.** [`Lines::list`] says so: grouping and
+access are outside the forge, and an instance has the lines
+somebody made on purpose rather than one per person. So "real but
+belonging to somebody else" is not a reason a reference is
+unusable *here* — putting one person's asset on a shared line is
+the thing a shared line is for.
+
+**And the check could not refuse a caller who wanted to pass.** A
+persona is a column on the asset row and the caller chose both
+halves of the pair, so naming the asset's own persona always
+succeeded — and nothing here knew whether the caller was that
+persona. What it caught was a client that paired the two wrongly.
+It read as a guard on whose asset this is, and it was a consistency
+check on two values one caller supplied.
+
+What the forge actually needs to know is whether the reference is
+real, because an operation naming content that is not there is a
+line lying about the present. That is one id and no persona.
+
+Whose asset it is stays a real question for a layer that has one to
+ask on behalf of — a surface that has authenticated somebody, which
+this one has not. When there is such a surface, the check belongs
+there, on an identity the caller did not choose.
+
+[`Lines::list`]: crate::domain::forge::lines::Lines::list
 
 [`Content`]: crate::domain::forge::model::value::Content
 
@@ -12387,8 +12420,8 @@ What the forge asks of everything outside it, answered by SQLite.
 Two contracts, and neither is a repository: they are the forge's
 side of questions it cannot answer itself.
 
-- [`SqliteStore`] answers whether a persona holds an asset. One
-  question, because the forge has one.
+- [`SqliteStore`] answers whether an asset exists. One question,
+  because the forge has one.
 - [`SqliteActors`] answers what a handle stands for, and mints one
   when it has not seen the subject before.
 

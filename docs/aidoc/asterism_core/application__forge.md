@@ -40,8 +40,9 @@ contracts in both directions, so neither can be compiled with the
 other in front of it. Wire them directly and each needs the other
 to build, which is the state that makes either impossible to move.
 
-**Shared identity is not a crossing.** `PersonaId`, `AssetId`, the
-attribution triple and `DomainError` are named directly here, as
-they are everywhere else, because they belong to neither side. The
-rule is about capability, never about what something is.
+**Shared identity is not a crossing.** `AssetId`, the attribution
+triple and `DomainError` are named directly here, as they are
+everywhere else, because they belong to neither side. The rule is
+about capability, never about what something is. `PersonaId` was in
+that list until the forge stopped asking whose an asset is.
 

@@ -490,7 +490,7 @@
     {
       "path": "asterism_infra::memory::forge::HoldsEverything",
       "kind": "struct",
-      "docs": "What the layer below answers, for a store that has no layer below.\n\nSays yes to everything. The question is whether a persona holds an\nasset, and there are no assets here to hold — a caller wanting the\nrefusal exercised should reach for [`HoldsNothing`]."
+      "docs": "What the layer below answers, for a store that has no layer below.\n\nSays yes to everything. The question is whether an asset exists,\nand there are no assets here to exist — a caller wanting the\nrefusal exercised should reach for [`HoldsNothing`]."
     },
     {
       "path": "asterism_infra::memory::forge::HoldsNothing",
@@ -905,7 +905,7 @@
     {
       "path": "asterism_infra::sqlite::repo::forge_boundary",
       "kind": "module",
-      "docs": "What the forge asks of everything outside it, answered by SQLite.\n\nTwo contracts, and neither is a repository: they are the forge's\nside of questions it cannot answer itself.\n\n- [`SqliteStore`] answers whether a persona holds an asset. One\n  question, because the forge has one.\n- [`SqliteActors`] answers what a handle stands for, and mints one\n  when it has not seen the subject before.\n\nThey live beside the repositories rather than among them because\nwhat they implement is the boundary, not storage — the forge names\n`boundary::Store`, not `AssetRepository`, and that is the whole\narrangement. Putting them in one file keeps the two halves of \"what\nthe forge asks\" readable together."
+      "docs": "What the forge asks of everything outside it, answered by SQLite.\n\nTwo contracts, and neither is a repository: they are the forge's\nside of questions it cannot answer itself.\n\n- [`SqliteStore`] answers whether an asset exists. One question,\n  because the forge has one.\n- [`SqliteActors`] answers what a handle stands for, and mints one\n  when it has not seen the subject before.\n\nThey live beside the repositories rather than among them because\nwhat they implement is the boundary, not storage — the forge names\n`boundary::Store`, not `AssetRepository`, and that is the whole\narrangement. Putting them in one file keeps the two halves of \"what\nthe forge asks\" readable together."
     },
     {
       "path": "asterism_infra::sqlite::repo::forge_boundary::SqliteActors",
