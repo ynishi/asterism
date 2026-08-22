@@ -10,6 +10,14 @@ and this project adheres to
 
 ### Changed
 
+- **PUBLIC_DEVELOPMENT.md separates classification from permission to act.** A
+  new paragraph states that an ALLOW outcome only says information may appear in
+  a public artifact — it grants no push, publish, or release, and coding agents
+  stay barred from pushing, publishing, and opening pull requests regardless of
+  how a diff classifies. An agent had read the policy's "public by default"
+  stance as licence to treat remote pushes as outside the rules; the document
+  now closes that reading.
+
 - **docs/aidoc/ documents the whole workspace again.** The nineteen-crate
   `exclude` list left the workspace manifest, and CI's cargo-aidoc floor rose to
   `^0.4.0` — the release that removed the 512 KiB `llms-full.txt` lint the list
