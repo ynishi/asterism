@@ -10,6 +10,17 @@ and this project adheres to
 
 ### Fixed
 
+- **A pursuit's nodes are ordered by its chain, like everything else** (#102).
+  `pursuit_node` carried a `seq` column, and the two places explaining it
+  disagreed: the migration argued it was how the log is ordered rather than a
+  copy of something else, while the row types conceded that a parent chain would
+  say the same thing. The change-point side had already settled it by keeping no
+  sequence and walking the links. The column and its index are gone, and both
+  logs are read by the same walk — which is stricter than the sort was: two
+  nodes on one parent is a log that forked, and a node the walk cannot reach is
+  a log with a hole in it, where a sort would have quietly read the reachable
+  part.
+
 - **The store no longer guesses at a value it cannot read, or accepts a node the
   log never had** (#102). Two defects with one root, both found by review after
   the adapter shipped.

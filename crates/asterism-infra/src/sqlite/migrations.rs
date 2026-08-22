@@ -7020,13 +7020,11 @@ DROP TABLE project;
 /// a write goes half-way. There is no `head` on `line` for the same
 /// reason: the head is the node no other node claims as a parent.
 ///
-/// **The chain's order.** A change point carries its parent, and that
-/// is the order. A sequence column would be a second answer, and a
-/// store that got the two out of step would be a store handing back a
-/// history the model never wrote. `pursuit_node.seq` is not that: a work
-/// log is read forwards and its nodes are appended in one place, so
-/// the column is how the log is ordered rather than a copy of
-/// something else that says so.
+/// **The chain's order.** Every node carries its parent, and that is
+/// the order — on both logs. A sequence column would be a second
+/// answer, and a store that got the two out of step would be handing
+/// back a history the model never wrote. Neither `change_point` nor
+/// `pursuit_node` has one, and both are read by the same walk.
 ///
 /// **A persona.** The forge answers nothing about whose line this is;
 /// `Lines::list` says so, and grouping and access live outside it. No
@@ -7146,7 +7144,6 @@ CREATE TABLE pursuit_node (
     id         BLOB PRIMARY KEY,
     pursuit_id    BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
     parent_id  BLOB NOT NULL,
-    seq        INTEGER NOT NULL,
     kind       TEXT NOT NULL
         CHECK (kind IN ('round', 'close')),
     outcome    TEXT
@@ -7163,7 +7160,7 @@ CREATE UNIQUE INDEX idx_pursuit_node_on_parent
     ON pursuit_node(pursuit_id, parent_id);
 CREATE UNIQUE INDEX idx_pursuit_node_one_close
     ON pursuit_node(pursuit_id) WHERE kind = 'close';
-CREATE INDEX idx_pursuit_node_seq ON pursuit_node(pursuit_id, seq);
+CREATE INDEX idx_pursuit_node_pursuit ON pursuit_node(pursuit_id);
 
 CREATE TABLE pursuit_op (
     node_id  BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
@@ -14705,33 +14702,33 @@ mod tests {
         )
         .unwrap();
 
-        let node = |id: Uuid, parent: Uuid, seq: i64, kind: &str, outcome: Option<&str>| {
+        let node = |id: Uuid, parent: Uuid, kind: &str, outcome: Option<&str>| {
             conn.execute(
                 "INSERT INTO pursuit_node \
-                     (id, pursuit_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 0, ?7, 'user')",
-                params![id, work, parent, seq, kind, outcome, actor],
+                     (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, ?6, 'user')",
+                params![id, work, parent, kind, outcome, actor],
             )
         };
         let pass = Uuid::now_v7();
-        node(pass, open_node, 0, "round", None).unwrap();
+        node(pass, open_node, "round", None).unwrap();
         assert!(
-            node(Uuid::now_v7(), open_node, 1, "round", None).is_err(),
+            node(Uuid::now_v7(), open_node, "round", None).is_err(),
             "two passes on one parent is a fork of the pursuit"
         );
         assert!(
-            node(Uuid::now_v7(), pass, 1, "round", Some("satisfied")).is_err(),
+            node(Uuid::now_v7(), pass, "round", Some("satisfied")).is_err(),
             "only an ending says how the work ended"
         );
         assert!(
-            node(Uuid::now_v7(), pass, 1, "close", None).is_err(),
+            node(Uuid::now_v7(), pass, "close", None).is_err(),
             "and an ending has to"
         );
 
         let ending = Uuid::now_v7();
-        node(ending, pass, 1, "close", Some("satisfied")).unwrap();
+        node(ending, pass, "close", Some("satisfied")).unwrap();
         assert!(
-            node(Uuid::now_v7(), ending, 2, "close", Some("abandoned")).is_err(),
+            node(Uuid::now_v7(), ending, "close", Some("abandoned")).is_err(),
             "work ends once: the second ending sits on a parent nobody used, so the \
              parent index alone would admit it"
         );

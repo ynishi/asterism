@@ -134,13 +134,19 @@ impl MemoryForge {
     /// the expensive half of a read for a comparison of two ids.
     fn pursuit_head(tables: &Tables, id: &PursuitId) -> Option<NodeId> {
         let head = tables.pursuits.iter().find(|row| row.id == *id)?;
-        tables
+        // Walk from the node it opened at, because the parent is the
+        // order — there is no sequence to take a maximum of.
+        let by_parent: HashMap<NodeId, NodeId> = tables
             .pursuit_nodes
             .iter()
             .filter(|node| node.pursuit == *id)
-            .max_by_key(|node| node.seq)
-            .map(|node| node.id)
-            .or(Some(head.open))
+            .map(|node| (node.parent, node.id))
+            .collect();
+        let mut at = head.open;
+        while let Some(next) = by_parent.get(&at) {
+            at = *next;
+        }
+        Some(at)
     }
 
     // There was a `line_head` here, walking the chain to say where a
@@ -283,12 +289,7 @@ impl Pursuits for MemoryForge {
                     "work {id} has moved: this pass sits on {on}, and the log ends at {at}"
                 )));
             }
-            let seq = tables
-                .pursuit_nodes
-                .iter()
-                .filter(|node| node.pursuit == *id)
-                .count();
-            let (node, ops) = rows::take_round_apart(*id, round, seq);
+            let (node, ops) = rows::take_round_apart(*id, round);
             tables.pursuit_nodes.push(node);
             tables.pursuit_ops.extend(ops);
             Ok(())
@@ -338,18 +339,12 @@ impl Closings for MemoryForge {
                     )));
                 }
             }
-            let seq = tables
-                .pursuit_nodes
-                .iter()
-                .filter(|node| node.pursuit == *pursuit)
-                .count();
-
             // Assembled before anything is pushed, so a refusal from
             // the translation leaves the store as it was. Both halves
             // go on together or neither does — the property the whole
             // port exists for, and the only way this store can state
             // it.
-            let ending = rows::take_close_apart(*pursuit, closing.close(), seq);
+            let ending = rows::take_close_apart(*pursuit, closing.close());
             let landing = closing
                 .point()
                 .map(|point| rows::take_change_point_apart(*line, point));

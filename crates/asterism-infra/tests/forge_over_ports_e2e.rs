@@ -771,6 +771,13 @@ async fn a_stale_aim_is_refused(world: &World) {
 /// it on the way in. That is the point: the read half refuses it too,
 /// so a repair job, a bad migration or a hand-edited database is
 /// caught at the door rather than trusted.
+///
+/// Asked of the in-memory store, because it is the one with a way to
+/// write rows nothing checked (`force_rows`). What refuses them is
+/// `rows::read_line`, which both stores share, so the SQLite side is
+/// answered by the same code — and separately, by a hand-edited
+/// database in
+/// [`a_stored_outcome_this_model_has_no_name_for_is_refused`].
 #[tokio::test]
 async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
     use asterism_core::domain::forge::lines::Lines;
@@ -870,6 +877,13 @@ async fn a_line_cannot_be_opened_under_a_rule_this_instance_does_not_carry() {
 /// "somebody landed while you were deciding" and a refusal the caller
 /// would have to understand. Without it the close is correct and
 /// useless.
+///
+/// Asked of the in-memory store, because what is under test is the
+/// service's loop rather than either store: `Stale` has to sit between
+/// the service and whatever is beneath it, and the simpler store makes
+/// the seam obvious. Both stores refuse the first attempt the same
+/// way — the parent is taken — which is the fact
+/// [`a_stale_aim_is_refused_over_sqlite`] pins on the other side.
 #[tokio::test]
 async fn a_close_whose_line_moves_under_it_is_decided_again() {
     use asterism_core::domain::forge::lines::Lines;

@@ -232,7 +232,6 @@ fn pursuit_node_row(row: &Row<'_>) -> rusqlite::Result<PursuitNodeRow> {
         pursuit: PursuitId::from_uuid(row.get("pursuit_id")?),
         id: NodeId::from_uuid(row.get("id")?),
         parent: NodeId::from_uuid(row.get("parent_id")?),
-        seq: row.get::<_, i64>("seq")? as usize,
         kind: match row.get::<_, String>("kind")?.as_str() {
             "round" => "round",
             "close" => "close",
@@ -402,13 +401,12 @@ fn insert_work_node(
 ) -> rusqlite::Result<()> {
     tx.execute(
         "INSERT INTO pursuit_node \
-             (id, pursuit_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             node.id.as_uuid(),
             node.pursuit.as_uuid(),
             node.parent.as_uuid(),
-            node.seq as i64,
             node.kind,
             node.outcome.map(outcome_slug),
             node.note.as_deref(),
@@ -495,17 +493,6 @@ fn pursuit_has_node(
         |row| row.get(0),
     )?;
     Ok(found > 0)
-}
-
-/// How many nodes a pursuit already has, which is the next one's
-/// place in it.
-fn next_seq(tx: &Transaction<'_>, work: &PursuitId) -> rusqlite::Result<usize> {
-    let count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM pursuit_node WHERE pursuit_id = ?1",
-        params![work.as_uuid()],
-        |row| row.get(0),
-    )?;
-    Ok(count as usize)
 }
 
 #[async_trait]
@@ -746,16 +733,12 @@ impl Pursuits for SqliteForge {
 
     async fn push(&self, id: &PursuitId, on: NodeId, round: &Round) -> Result<(), DomainError> {
         let id = *id;
-        // Assembled outside, because `seq` is the only thing about it
-        // the store decides and the rest is the caller's value taken
-        // apart.
         let round = round.clone();
         let landed = self
             .isle
             .call(move |conn| {
                 let tx = conn.transaction()?;
-                let seq = next_seq(&tx, &id)?;
-                let (node, ops) = rows::take_round_apart(id, &round, seq);
+                let (node, ops) = rows::take_round_apart(id, &round);
                 debug_assert_eq!(node.parent, on, "the pass names the node it sits on");
                 if !pursuit_has_node(&tx, &id, node.parent)? {
                     return Ok(Err(PushRefusal::NotThisPursuit));
@@ -804,8 +787,7 @@ impl Closings for SqliteForge {
             .isle
             .call(move |conn| {
                 let tx = conn.transaction()?;
-                let seq = next_seq(&tx, &pursuit)?;
-                let ending = rows::take_close_apart(pursuit, &close, seq);
+                let ending = rows::take_close_apart(pursuit, &close);
 
                 // Both parents before either write. A node naming
                 // something this log never had is a row the read half

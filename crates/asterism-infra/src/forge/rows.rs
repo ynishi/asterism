@@ -156,19 +156,22 @@ pub struct PursuitRow {
     pub open_act: ActRow,
 }
 
-/// `pursuit_node` — a pass or an ending. `seq` is the log's own order,
-/// kept because a pursuit is read forwards and a parent chain would
-/// have to be walked to say the same thing.
+/// `pursuit_node` — a pass or an ending.
+///
+/// No column says where in the log a node sits, for the reason
+/// `change_point` has none: it carries its parent, and that is the
+/// order. A sequence beside the chain would be a second answer to a
+/// question the chain already answers, and the two disagree the first
+/// time a write goes half-way.
 #[derive(Debug, Clone)]
 pub struct PursuitNodeRow {
     /// The pursuit it belongs to.
     pub pursuit: PursuitId,
     /// Which node.
     pub id: NodeId,
-    /// The node before it.
+    /// The node before it. This is the order, and a reader walks the
+    /// links — the same walk the line side does.
     pub parent: NodeId,
-    /// Its place in the log, counting from the first pass.
-    pub seq: usize,
     /// `round` or `close`.
     pub kind: &'static str,
     /// One short free-text slot.
@@ -274,28 +277,23 @@ pub fn take_pursuit_apart(
 
     let mut nodes = Vec::new();
     let mut ops = Vec::new();
-    for (seq, round) in pursuit.rounds().iter().enumerate() {
-        let (node, wrote) = take_round_apart(pursuit.id(), round, seq);
+    for round in pursuit.rounds() {
+        let (node, wrote) = take_round_apart(pursuit.id(), round);
         nodes.push(node);
         ops.extend(wrote);
     }
     if let Some(close) = pursuit.close() {
-        nodes.push(take_close_apart(pursuit.id(), close, nodes.len()));
+        nodes.push(take_close_apart(pursuit.id(), close));
     }
     (head, nodes, ops)
 }
 
 /// One pass, for the append a push makes.
-pub fn take_round_apart(
-    pursuit: PursuitId,
-    round: &Round,
-    seq: usize,
-) -> (PursuitNodeRow, Vec<PursuitOpRow>) {
+pub fn take_round_apart(pursuit: PursuitId, round: &Round) -> (PursuitNodeRow, Vec<PursuitOpRow>) {
     let node = PursuitNodeRow {
         pursuit,
         id: round.id(),
         parent: round.parent(),
-        seq,
         kind: "round",
         note: round.note().map(str::to_owned),
         act: ActRow::of(round.act()),
@@ -326,12 +324,11 @@ pub fn take_round_apart(
 }
 
 /// One ending, for the append a commit makes.
-pub fn take_close_apart(pursuit: PursuitId, close: &Close, seq: usize) -> PursuitNodeRow {
+pub fn take_close_apart(pursuit: PursuitId, close: &Close) -> PursuitNodeRow {
     PursuitNodeRow {
         pursuit,
         id: close.id(),
         parent: close.parent(),
-        seq,
         kind: "close",
         note: close.note().map(str::to_owned),
         act: ActRow::of(close.act()),
@@ -385,19 +382,17 @@ pub fn read_line(
 
 /// Rebuilds work from its row, its nodes and their operations.
 ///
-/// Nodes are sorted by `seq` first: the log is read forwards, and
-/// [`restore::pursuit`] hands them back to `push` and `end` in the
-/// order they arrive.
+/// Nodes are put in the log's order first, by walking the parent
+/// links from the node the pursuit opened at — the same walk the line
+/// side does, and the reason neither table keeps a sequence beside the
+/// chain. [`restore::pursuit`] then hands them back to `push` and
+/// `end` in the order they arrive.
 pub fn read_pursuit(
     head: &PursuitRow,
     nodes: &[PursuitNodeRow],
     ops: &[PursuitOpRow],
 ) -> Result<Pursuit, DomainError> {
-    let mut ordered: Vec<&PursuitNodeRow> = nodes
-        .iter()
-        .filter(|node| node.pursuit == head.id)
-        .collect();
-    ordered.sort_by_key(|node| node.seq);
+    let ordered = chain(head, nodes)?;
 
     let mut built = Vec::with_capacity(ordered.len());
     for node in ordered {
@@ -456,6 +451,49 @@ pub fn read_pursuit(
         ),
         built,
     )?)
+}
+
+/// Puts a pursuit's nodes in the log's order, walking from the node it
+/// opened at.
+///
+/// The same shape as [`restore`]'s walk over a line's chain, and here
+/// for the same reason: the parent is the order, so nothing has to
+/// keep a second answer beside it.
+///
+/// Refuses anything that is not one chain covering every node given. A
+/// leftover is a node the walk could not reach — a log with a hole in
+/// it, or a second branch — and neither is a thing to read the
+/// reachable part of.
+fn chain<'a>(
+    head: &PursuitRow,
+    nodes: &'a [PursuitNodeRow],
+) -> Result<Vec<&'a PursuitNodeRow>, DomainError> {
+    let mut by_parent: std::collections::HashMap<NodeId, &PursuitNodeRow> =
+        std::collections::HashMap::new();
+    for node in nodes.iter().filter(|node| node.pursuit == head.id) {
+        if by_parent.insert(node.parent, node).is_some() {
+            return Err(DomainError::Validation(format!(
+                "pursuit {} has two nodes on one parent, which is a log that forked",
+                head.id
+            )));
+        }
+    }
+
+    let total = by_parent.len();
+    let mut ordered = Vec::with_capacity(total);
+    let mut at = head.open;
+    while let Some(node) = by_parent.remove(&at) {
+        at = node.id;
+        ordered.push(node);
+    }
+    if !by_parent.is_empty() {
+        return Err(DomainError::Validation(format!(
+            "pursuit {} has {} nodes the walk from its opening cannot reach",
+            head.id,
+            by_parent.len()
+        )));
+    }
+    Ok(ordered)
 }
 
 /// One operation, from the verb and the two payload columns that
