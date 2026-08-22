@@ -10,6 +10,30 @@ and this project adheres to
 
 ### Fixed
 
+- **The guard on the forge's boundary reads syntax instead of lines, and was
+  blind to the half of its subject somebody would actually write** (#121).
+  `forge_boundary.rs` keeps the forge liftable into a crate of its own: it
+  collects what forge code names outside the forge and refuses anything not on a
+  small allow-list, and it separately refuses the domain half reaching up into
+  the application layer. It matched text — a line beginning `use crate::`, minus
+  any line containing the word "forge" — and every application-side forge path
+  contains that word, so `use crate::application::forge::…` was thrown away
+  before the comparison. The filter was meant to skip the forge naming itself,
+  and could not tell that from the forge's model naming the forge's own service,
+  which is the coupling that gets written by accident.
+
+  Three more ordinary shapes went through it, all demonstrated against the tree:
+  `pub use`, a `use` that rustfmt had wrapped across lines, and a renamed
+  import, which was recorded with the rename attached and so would have reported
+  an allow-listed word as coupling. A whole file of tests was measured as
+  production code, because the `#[cfg(test)]` that brings such a file in sits in
+  the parent.
+
+  It now parses with `syn`, expands the `use` tree through its groups, renames
+  and globs, follows the parent's declaration to know which files are tests, and
+  additionally catches a `crate::…` path written out where it is used rather
+  than imported — which the text scan never looked for at all.
+
 - **A round written by a rule is asked whether its content exists, the same as a
   round written by a person** (#121). `PursuitService::push` asked the boundary
   about every operation before writing; `resolve` handed what the rule produced
