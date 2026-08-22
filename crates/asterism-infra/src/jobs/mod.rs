@@ -949,6 +949,7 @@ mod tests {
                 assets.clone(),
                 edges.clone(),
                 Arc::new(crate::disclosure::DisclosureWriter::unsigned()),
+                Arc::new(crate::generator_params::StoredParamExtractor),
                 // The composition root's answer, so the fixture exercises
                 // what a deployment runs rather than a friendlier setting.
                 PromptDisclosure::Withhold,

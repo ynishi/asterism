@@ -40,6 +40,7 @@
 pub mod disclosure;
 pub mod dispatch;
 pub(crate) mod fingerprint;
+pub mod generator_params;
 pub mod jobs;
 pub mod observe;
 pub mod paths;

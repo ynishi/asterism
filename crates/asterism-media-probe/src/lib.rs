@@ -66,6 +66,10 @@
 //! contract — boundaries out, judgement left to the caller — and that is
 //! the part worth having twice.
 
+// Ungated: a grammar over text that is already out of its container
+// needs no image dependency — its caller holds stored rows, not files.
+pub mod a1111;
+
 #[cfg(feature = "image")]
 pub mod jpeg;
 

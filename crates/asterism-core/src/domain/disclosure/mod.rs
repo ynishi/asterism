@@ -89,6 +89,8 @@ pub use source_type::DigitalSourceType;
 
 use std::collections::BTreeMap;
 
+use crate::domain::generator_params::GeneratorParams;
+
 /// Keys that only a generator writes, one per family.
 ///
 /// Matched by presence rather than by value: what identifies a ComfyUI
@@ -98,10 +100,22 @@ use std::collections::BTreeMap;
 /// `trainedAlgorithmicMedia` on a file that is not one, which is the
 /// direction that would matter, so each entry is a keyword no general
 /// tool writes rather than a plausible-sounding word.
-mod generator_keys {
+///
+/// Public because family membership is one fact with two readers: the
+/// evidence rule here, and the parameter extraction registry
+/// (`asterism-infra`), which routes a row to a family's judgement by
+/// the same keys. A second list on that side would be a way for "what
+/// counts as ComfyUI" to disagree with itself.
+pub mod generator_keys {
     /// ComfyUI writes both of these: the API-format graph it executed
     /// and the editor graph it was authored in.
-    pub const COMFY: &[&str] = &["prompt", "workflow"];
+    pub const COMFY: &[&str] = &[COMFY_API_GRAPH, "workflow"];
+    /// The first of [`COMFY`] under its own name: the API-format graph
+    /// the run executed. Presence is all the evidence rule reads; the
+    /// extraction registry also reads the *value*, and a bare
+    /// `"prompt"` on that side would be the second copy of this fact
+    /// the module doc above says not to keep.
+    pub const COMFY_API_GRAPH: &str = "prompt";
     /// AUTOMATIC1111 and its forks write one text blob under this
     /// keyword — the prompt, the negative prompt and the sampler
     /// settings in one line-oriented value.
@@ -392,15 +406,19 @@ pub enum PromptDisclosure {
 /// Builds the record for one artefact.
 ///
 /// `meta_kv` is the canonical metadata of the material the file came
-/// from; `parents` are its recorded `derived_from` edges, in the order
-/// they were read; `asserted` is the person's own source-type statement
-/// when one is recorded ([`asserted_source_type`]); `prompts` decides
-/// whether the prompt is disclosed at all ([`PromptDisclosure`]).
+/// from; `params` is what the extraction port read out of that same
+/// metadata ([`GeneratorParams`], [`GeneratorParams::not_yet`] where
+/// nothing ran); `parents` are its recorded `derived_from` edges, in
+/// the order they were read; `asserted` is the person's own source-type
+/// statement when one is recorded ([`asserted_source_type`]); `prompts`
+/// decides whether the prompt is disclosed at all
+/// ([`PromptDisclosure`]).
 pub fn record_for(
     asset_id: &str,
     title: Option<&str>,
     dispatch_id: Option<&str>,
     meta_kv: Option<&str>,
+    params: &GeneratorParams,
     parents: &[ParentEvidence],
     asserted: Option<DigitalSourceType>,
     prompts: PromptDisclosure,
@@ -467,6 +485,24 @@ pub fn record_for(
         if let (PromptDisclosure::Embed, Some(prompt)) = (prompts, evidence.prompt) {
             record = record.with_prompt(prompt);
         }
+        // The extracted parameters ride under the same switch as the
+        // prompt, not beside it. They are read out of the very blob the
+        // switch was written to contain — the checkpoint name is the
+        // "model trained locally and named after a person or a client"
+        // in [`PromptDisclosure`]'s own argument — so a record that
+        // withheld the blob and then stated its most identifying field
+        // as a structured value would have moved the leak, not closed
+        // it. Under `Embed` the blob already discloses both, and the
+        // structured copy adds no new statement. Only an extraction
+        // carries a value; every refusal and marker attaches nothing.
+        if prompts == PromptDisclosure::Embed {
+            if let Some(model) = params.model.value() {
+                record = record.with_model(model);
+            }
+            if let Some(seed) = params.seed.value() {
+                record = record.with_seed(seed);
+            }
+        }
     }
 
     record
@@ -475,6 +511,7 @@ pub fn record_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::generator_params::ParamExtraction;
 
     fn meta(pairs: &[(&str, &str)]) -> String {
         let fields: BTreeMap<String, String> = pairs
@@ -503,6 +540,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -525,6 +563,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -543,6 +582,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -569,6 +609,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -589,6 +630,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[parent("parent-1", ParentOrigin::NotSynthetic)],
             None,
             PromptDisclosure::Embed,
@@ -610,6 +652,7 @@ mod tests {
             None,
             None,
             None,
+            &GeneratorParams::not_yet(),
             &[],
             Some(DigitalSourceType::DigitalCapture),
             PromptDisclosure::Embed,
@@ -633,6 +676,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             Some(DigitalSourceType::HumanEdits),
             PromptDisclosure::Embed,
@@ -653,6 +697,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             Some(DigitalSourceType::TrainedAlgorithmicMedia),
             PromptDisclosure::Embed,
@@ -721,6 +766,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[parent("parent-1", ParentOrigin::Unknown)],
             None,
             PromptDisclosure::Embed,
@@ -766,6 +812,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[
                 parent("parent-1", ParentOrigin::Unknown),
                 parent("parent-2", ParentOrigin::NotSynthetic),
@@ -789,6 +836,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[
                 parent("parent-1", ParentOrigin::Synthetic),
                 parent("parent-2", ParentOrigin::Synthetic),
@@ -814,6 +862,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -834,6 +883,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[parent("parent-1", ParentOrigin::NotSynthetic)],
             None,
             PromptDisclosure::Embed,
@@ -858,6 +908,7 @@ mod tests {
                 None,
                 None,
                 meta_kv,
+                &GeneratorParams::not_yet(),
                 &[],
                 None,
                 PromptDisclosure::Embed,
@@ -893,6 +944,7 @@ mod tests {
             Some("  "),
             Some("dispatch-1"),
             None,
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -920,6 +972,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Withhold,
@@ -940,6 +993,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -964,6 +1018,7 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Embed,
@@ -977,10 +1032,106 @@ mod tests {
             None,
             None,
             Some(&meta_kv),
+            &GeneratorParams::not_yet(),
             &[],
             None,
             PromptDisclosure::Withhold,
         );
         assert_eq!(withheld.prompt, None);
+    }
+
+    fn extracted() -> GeneratorParams {
+        GeneratorParams {
+            model: ParamExtraction::Extracted("client-name-v3".into()),
+            seed: ParamExtraction::Extracted("620206974400".into()),
+        }
+    }
+
+    #[test]
+    fn extracted_params_ride_under_the_prompts_own_switch() {
+        // The checkpoint name is read out of the very blob the
+        // withholding switch was written to contain. A record that
+        // withheld the blob and then stated the name as a structured
+        // field would have moved the leak, not closed it.
+        let meta_kv = meta(&[("workflow", "{}")]);
+
+        let embedded = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &extracted(),
+            &[],
+            None,
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(embedded.model.as_deref(), Some("client-name-v3"));
+        assert_eq!(embedded.seed.as_deref(), Some("620206974400"));
+
+        let withheld = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &extracted(),
+            &[],
+            None,
+            PromptDisclosure::Withhold,
+        );
+        assert_eq!(withheld.model, None);
+        assert_eq!(withheld.seed, None);
+    }
+
+    #[test]
+    fn extracted_params_do_not_ride_beside_a_term_that_denies_a_generator() {
+        // The same rule the system name follows: a seed beside a term
+        // the signer chose precisely to say "no model made this" would
+        // put the container's contradiction into their signed claim.
+        let meta_kv = meta(&[("workflow", "{}")]);
+        let record = record_for(
+            "asset-1",
+            None,
+            None,
+            Some(&meta_kv),
+            &extracted(),
+            &[],
+            Some(DigitalSourceType::HumanEdits),
+            PromptDisclosure::Embed,
+        );
+        assert_eq!(record.model, None);
+        assert_eq!(record.seed, None);
+    }
+
+    #[test]
+    fn only_an_extraction_attaches_a_value() {
+        // Every refusal and every marker is a statement about why there
+        // is no value, and none of them is a value. Writing one into
+        // the record would be the guess the vocabulary exists to
+        // refuse.
+        let meta_kv = meta(&[("workflow", "{}")]);
+        for state in [
+            ParamExtraction::NotApplicable,
+            ParamExtraction::Absent,
+            ParamExtraction::Indirect,
+            ParamExtraction::Ambiguous,
+            ParamExtraction::NotYet,
+        ] {
+            let params = GeneratorParams {
+                model: state.clone(),
+                seed: state.clone(),
+            };
+            let record = record_for(
+                "asset-1",
+                None,
+                None,
+                Some(&meta_kv),
+                &params,
+                &[],
+                None,
+                PromptDisclosure::Embed,
+            );
+            assert_eq!(record.model, None, "for {state:?}");
+            assert_eq!(record.seed, None, "for {state:?}");
+        }
     }
 }
