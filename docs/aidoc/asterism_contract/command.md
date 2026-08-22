@@ -21,7 +21,6 @@ convert them into domain types and surface any validation failures as
 - `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
 - `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
 - `CancelJobCommand` — Requests cancellation of a running or pending job.
-- `ClosePursuitCommand` — Closes a pursuit (#29): records a one-way lifecycle fact, never a
 - `ConflictResolution` — How a person answered one raised duplicate question.
 - `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
 - `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
@@ -69,8 +68,6 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
-- `OpenProjectCommand` — Opens a project (#63 decisions 1–2): the repo of the forge's git
-- `OpenPursuitCommand` — Opens a pursuit — the "start new pursuit" affordance (#29), and
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
 - `PasteImageImportCommand` — Writes a clipboard-pasted image blob to disk and dispatches
@@ -89,7 +86,6 @@ convert them into domain types and surface any validation failures as
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
-- `RecordPursuitTxCommand` — Appends one gesture to a pursuit's membership ledger (#22): an
 - `RedispatchCommand` — Re-runs a finished dispatch with the same frozen input, exporter,
 - `RegisterPersonaCommand` — Registers a new persona in Asterism.
 - `RemoveAssetFromGroupCommand` — Removes an asset from a Group. Idempotent — missing link is a
@@ -98,7 +94,6 @@ convert them into domain types and surface any validation failures as
 - `RenameSavedQueryCommand` — Renames a `SavedQuery`. Uniqueness `(persona_id, name)` is
 - `RenameSessionCommand` — Rewrites a Session's title
 - `RenameTagCommand` — Renames a tag in place (`POST /asterism/tags/rename`).
-- `ReopenPursuitCommand` — Reopens a pursuit (#29). Legal on an already-open pursuit: the
 - `ReorderGroupAssetsCommand` — Rewrites the front-to-back order of a Group. `ordered_asset_ids` is
 - `ReorderGroupChildrenCommand` — Rewrites the order of a Group's child groups. Same drift-tolerant
 - `ReorderPersonasCommand` — Rewrites `display_order` across a persona slice. `ordered_ids`
