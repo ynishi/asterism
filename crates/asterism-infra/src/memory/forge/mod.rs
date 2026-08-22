@@ -50,7 +50,7 @@ use asterism_core::error::DomainError;
 use async_trait::async_trait;
 
 use crate::forge::rows::{
-    self, ChangePointRow, ChangeRowRow, LineRow, WorkNodeRow, WorkOpRow, WorkRow,
+    self, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
 };
 
 /// Everything the store holds, in the shape it holds it.
@@ -59,9 +59,9 @@ struct Tables {
     lines: Vec<LineRow>,
     change_points: Vec<ChangePointRow>,
     change_rows: Vec<ChangeRowRow>,
-    work: Vec<WorkRow>,
-    work_nodes: Vec<WorkNodeRow>,
-    work_ops: Vec<WorkOpRow>,
+    pursuits: Vec<PursuitRow>,
+    pursuit_nodes: Vec<PursuitNodeRow>,
+    pursuit_ops: Vec<PursuitOpRow>,
 }
 
 /// An in-memory forge store. Clone it to hand the same tables to every
@@ -121,23 +121,23 @@ impl MemoryForge {
     }
 
     /// Rebuilds one piece of work from the rows under `id`.
-    fn work_at(tables: &Tables, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {
-        let Some(head) = tables.work.iter().find(|row| row.id == *id) else {
+    fn pursuit_at(tables: &Tables, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {
+        let Some(head) = tables.pursuits.iter().find(|row| row.id == *id) else {
             return Ok(None);
         };
-        rows::read_work(head, &tables.work_nodes, &tables.work_ops).map(Some)
+        rows::read_pursuit(head, &tables.pursuit_nodes, &tables.pursuit_ops).map(Some)
     }
 
     /// The node a work log currently ends at, read off the rows rather
     /// than off a rebuilt value: the caller asking is checking whether
     /// its own copy has moved, and rebuilding to answer that would do
     /// the expensive half of a read for a comparison of two ids.
-    fn work_head(tables: &Tables, id: &PursuitId) -> Option<NodeId> {
-        let head = tables.work.iter().find(|row| row.id == *id)?;
+    fn pursuit_head(tables: &Tables, id: &PursuitId) -> Option<NodeId> {
+        let head = tables.pursuits.iter().find(|row| row.id == *id)?;
         tables
-            .work_nodes
+            .pursuit_nodes
             .iter()
-            .filter(|node| node.work == *id)
+            .filter(|node| node.pursuit == *id)
             .max_by_key(|node| node.seq)
             .map(|node| node.id)
             .or(Some(head.open))
@@ -233,32 +233,32 @@ impl Lines for MemoryForge {
 #[async_trait]
 impl Pursuits for MemoryForge {
     async fn open(&self, pursuit: &Pursuit) -> Result<(), DomainError> {
-        let (head, nodes, ops) = rows::take_work_apart(pursuit);
+        let (head, nodes, ops) = rows::take_pursuit_apart(pursuit);
         self.with(|tables| {
-            if tables.work.iter().any(|row| row.id == head.id) {
+            if tables.pursuits.iter().any(|row| row.id == head.id) {
                 return Err(DomainError::Conflict(format!(
                     "work {} is already open",
                     head.id
                 )));
             }
-            tables.work.push(head);
-            tables.work_nodes.extend(nodes);
-            tables.work_ops.extend(ops);
+            tables.pursuits.push(head);
+            tables.pursuit_nodes.extend(nodes);
+            tables.pursuit_ops.extend(ops);
             Ok(())
         })
     }
 
     async fn get(&self, id: &PursuitId) -> Result<Option<Pursuit>, DomainError> {
-        self.with(|tables| Self::work_at(tables, id))
+        self.with(|tables| Self::pursuit_at(tables, id))
     }
 
     async fn of_line(&self, line: &LineId) -> Result<Vec<Pursuit>, DomainError> {
         self.with(|tables| {
             tables
-                .work
+                .pursuits
                 .iter()
                 .filter(|row| row.of == *line)
-                .map(|row| rows::read_work(row, &tables.work_nodes, &tables.work_ops))
+                .map(|row| rows::read_pursuit(row, &tables.pursuit_nodes, &tables.pursuit_ops))
                 .collect()
         })
     }
@@ -266,10 +266,10 @@ impl Pursuits for MemoryForge {
     async fn children(&self, parent: &PursuitId) -> Result<Vec<Pursuit>, DomainError> {
         self.with(|tables| {
             tables
-                .work
+                .pursuits
                 .iter()
                 .filter(|row| row.parent == Some(*parent))
-                .map(|row| rows::read_work(row, &tables.work_nodes, &tables.work_ops))
+                .map(|row| rows::read_pursuit(row, &tables.pursuit_nodes, &tables.pursuit_ops))
                 .collect()
         })
     }
@@ -277,20 +277,20 @@ impl Pursuits for MemoryForge {
     async fn push(&self, id: &PursuitId, on: NodeId, round: &Round) -> Result<(), DomainError> {
         self.with(|tables| {
             let at =
-                Self::work_head(tables, id).ok_or_else(|| DomainError::not_found("work", id))?;
+                Self::pursuit_head(tables, id).ok_or_else(|| DomainError::not_found("work", id))?;
             if at != on {
                 return Err(DomainError::Conflict(format!(
                     "work {id} has moved: this pass sits on {on}, and the log ends at {at}"
                 )));
             }
             let seq = tables
-                .work_nodes
+                .pursuit_nodes
                 .iter()
-                .filter(|node| node.work == *id)
+                .filter(|node| node.pursuit == *id)
                 .count();
             let (node, ops) = rows::take_round_apart(*id, round, seq);
-            tables.work_nodes.push(node);
-            tables.work_ops.extend(ops);
+            tables.pursuit_nodes.push(node);
+            tables.pursuit_ops.extend(ops);
             Ok(())
         })
     }
@@ -339,9 +339,9 @@ impl Closings for MemoryForge {
                 }
             }
             let seq = tables
-                .work_nodes
+                .pursuit_nodes
                 .iter()
-                .filter(|node| node.work == *pursuit)
+                .filter(|node| node.pursuit == *pursuit)
                 .count();
 
             // Assembled before anything is pushed, so a refusal from
@@ -354,7 +354,7 @@ impl Closings for MemoryForge {
                 .point()
                 .map(|point| rows::take_change_point_apart(*line, point));
 
-            tables.work_nodes.push(ending);
+            tables.pursuit_nodes.push(ending);
             if let Some((point, change_rows)) = landing {
                 tables.change_points.push(point);
                 tables.change_rows.extend(change_rows);

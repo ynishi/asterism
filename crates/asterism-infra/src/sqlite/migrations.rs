@@ -7000,10 +7000,16 @@ DROP TABLE project;
 
 /// V96 — the tables the forge's second model needs (#102).
 ///
-/// Six, and they are the row types `asterism_infra::memory::forge` was
-/// written in: that store keeps the same shapes under a lock, and the
-/// scenario it passes is the one this schema has to pass too. What is
-/// here owes what is there.
+/// Six, and they are the row types `asterism_infra::forge::rows` is
+/// written in: the in-memory store keeps the same shapes under a lock,
+/// and the scenario it passes is the one this schema has to pass too.
+/// What is here owes what is there.
+///
+/// The tables carry the model's own words. `pursuit` is what the model
+/// calls one line of work, and the first model's table of that name
+/// went with it in `V95` — so there is nothing to tell apart, and a
+/// second vocabulary for one thing would be a reader's problem with no
+/// reader's benefit.
 ///
 /// # What no column holds
 ///
@@ -7017,7 +7023,7 @@ DROP TABLE project;
 /// **The chain's order.** A change point carries its parent, and that
 /// is the order. A sequence column would be a second answer, and a
 /// store that got the two out of step would be a store handing back a
-/// history the model never wrote. `work_node.seq` is not that: a work
+/// history the model never wrote. `pursuit_node.seq` is not that: a work
 /// log is read forwards and its nodes are appended in one place, so
 /// the column is how the log is ordered rather than a copy of
 /// something else that says so.
@@ -7029,14 +7035,14 @@ DROP TABLE project;
 ///
 /// # What the constraints hold
 ///
-/// **`UNIQUE (line_id, parent_id)` and `UNIQUE (work_id, parent_id)`
+/// **`UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id, parent_id)`
 /// are the concurrency control.** Two nodes on one parent is a fork,
 /// which both logs refuse in the model; here the index refuses it as
 /// part of the insert, so the check is the write rather than something
 /// beside it that a caller could be holding a stale answer to. Nothing
 /// reads a head and compares.
 ///
-/// **`UNIQUE (work_id) WHERE kind = 'close'`** refuses a second
+/// **`UNIQUE (pursuit_id) WHERE kind = 'close'`** refuses a second
 /// ending. The parent index alone does not: a second close would sit
 /// on the first, which is a parent nobody has used. Work ends once,
 /// and `WorkLog::end` says so — a row the model would refuse is a row
@@ -7111,10 +7117,10 @@ CREATE TABLE change_row (
 CREATE INDEX idx_change_row_entry ON change_row(entry_id);
 CREATE INDEX idx_change_row_content ON change_row(content);
 
-CREATE TABLE work (
+CREATE TABLE pursuit (
     id           BLOB PRIMARY KEY,
     line_id      BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
-    parent_id    BLOB REFERENCES work(id) ON DELETE RESTRICT,
+    parent_id    BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
     open_node    BLOB NOT NULL,
     base_id      BLOB NOT NULL,
     title        TEXT,
@@ -7133,12 +7139,12 @@ CREATE TABLE work (
         CHECK (updated_kind IN ('user', 'system'))
 ) STRICT;
 
-CREATE INDEX idx_work_line ON work(line_id);
-CREATE INDEX idx_work_parent ON work(parent_id);
+CREATE INDEX idx_pursuit_line ON pursuit(line_id);
+CREATE INDEX idx_pursuit_parent ON pursuit(parent_id);
 
-CREATE TABLE work_node (
+CREATE TABLE pursuit_node (
     id         BLOB PRIMARY KEY,
-    work_id    BLOB NOT NULL REFERENCES work(id) ON DELETE RESTRICT,
+    pursuit_id    BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
     parent_id  BLOB NOT NULL,
     seq        INTEGER NOT NULL,
     kind       TEXT NOT NULL
@@ -7153,14 +7159,14 @@ CREATE TABLE work_node (
     CHECK ((kind = 'close') = (outcome IS NOT NULL))
 ) STRICT;
 
-CREATE UNIQUE INDEX idx_work_node_on_parent
-    ON work_node(work_id, parent_id);
-CREATE UNIQUE INDEX idx_work_node_one_close
-    ON work_node(work_id) WHERE kind = 'close';
-CREATE INDEX idx_work_node_work_seq ON work_node(work_id, seq);
+CREATE UNIQUE INDEX idx_pursuit_node_on_parent
+    ON pursuit_node(pursuit_id, parent_id);
+CREATE UNIQUE INDEX idx_pursuit_node_one_close
+    ON pursuit_node(pursuit_id) WHERE kind = 'close';
+CREATE INDEX idx_pursuit_node_seq ON pursuit_node(pursuit_id, seq);
 
-CREATE TABLE work_op (
-    node_id  BLOB NOT NULL REFERENCES work_node(id) ON DELETE RESTRICT,
+CREATE TABLE pursuit_op (
+    node_id  BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
     position INTEGER NOT NULL,
     entry_id BLOB NOT NULL,
     verb     TEXT NOT NULL
@@ -7172,8 +7178,8 @@ CREATE TABLE work_op (
     CHECK ((verb IN ('add', 'rename')) = (name IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX idx_work_op_entry ON work_op(entry_id);
-CREATE INDEX idx_work_op_content ON work_op(content);
+CREATE INDEX idx_pursuit_op_entry ON pursuit_op(entry_id);
+CREATE INDEX idx_pursuit_op_content ON pursuit_op(content);
 "#;
 
 /// V97 — what a forge handle stands for (#102).
@@ -14689,7 +14695,7 @@ mod tests {
         let work = Uuid::now_v7();
         let open_node = Uuid::now_v7();
         conn.execute(
-            "INSERT INTO work \
+            "INSERT INTO pursuit \
                  (id, line_id, parent_id, open_node, base_id, title, note, \
                   open_at, open_by, open_kind, created_at, created_by, created_kind, \
                   updated_at, updated_by, updated_kind) \
@@ -14701,8 +14707,8 @@ mod tests {
 
         let node = |id: Uuid, parent: Uuid, seq: i64, kind: &str, outcome: Option<&str>| {
             conn.execute(
-                "INSERT INTO work_node \
-                     (id, work_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
+                "INSERT INTO pursuit_node \
+                     (id, pursuit_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 0, ?7, 'user')",
                 params![id, work, parent, seq, kind, outcome, actor],
             )
@@ -14733,7 +14739,7 @@ mod tests {
         // Operations pair verb and payload, and hold their content.
         let op = |position: i64, verb: &str, content: Option<Uuid>, name: Option<&str>| {
             conn.execute(
-                "INSERT INTO work_op (node_id, position, entry_id, verb, content, name) \
+                "INSERT INTO pursuit_op (node_id, position, entry_id, verb, content, name) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![pass, position, Uuid::now_v7(), verb, content, name],
             )

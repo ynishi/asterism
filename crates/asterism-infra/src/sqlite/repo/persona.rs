@@ -327,7 +327,7 @@ impl PersonaRepository for SqlitePersonaRepository {
 
                 // The forge holds what it names, and the schema says
                 // so with a foreign key from `change_row.content` and
-                // `work_op.content`. Without this the delete below
+                // `pursuit_op.content`. Without this the delete below
                 // still refuses — the cascade reaches `asset` and the
                 // key stops it — but it refuses as a foreign-key
                 // error, which names a column and tells nobody what to
@@ -339,16 +339,16 @@ impl PersonaRepository for SqlitePersonaRepository {
                     "SELECT COUNT(*) FROM asset a \
                       WHERE a.persona_id = ?1 \
                         AND (EXISTS (SELECT 1 FROM change_row r WHERE r.content = a.id) \
-                          OR EXISTS (SELECT 1 FROM work_op o WHERE o.content = a.id))",
+                          OR EXISTS (SELECT 1 FROM pursuit_op o WHERE o.content = a.id))",
                     params![uuid],
                     |r| r.get(0),
                 )?;
                 if held > 0 {
                     let mut stmt = tx.prepare(
                         "SELECT DISTINCT l.name FROM line l \
-                          JOIN work w ON w.line_id = l.id \
-                          JOIN work_node n ON n.work_id = w.id \
-                          JOIN work_op o ON o.node_id = n.id \
+                          JOIN pursuit w ON w.line_id = l.id \
+                          JOIN pursuit_node n ON n.pursuit_id = w.id \
+                          JOIN pursuit_op o ON o.node_id = n.id \
                           JOIN asset a ON a.id = o.content \
                          WHERE a.persona_id = ?1 \
                          UNION \

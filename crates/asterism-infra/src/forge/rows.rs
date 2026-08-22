@@ -129,11 +129,9 @@ pub struct ChangeRowRow {
     pub name: Option<Name>,
 }
 
-/// `work` — one line of work. Named for the table rather than the
-/// type, because `pursuit` was the first model's and the two are not
-/// the same thing.
+/// `pursuit` — one line of work.
 #[derive(Debug, Clone)]
-pub struct WorkRow {
+pub struct PursuitRow {
     /// Which piece of work.
     pub id: PursuitId,
     /// The line it is against, declared when it opened.
@@ -158,13 +156,13 @@ pub struct WorkRow {
     pub open_act: ActRow,
 }
 
-/// `work_node` — a pass or an ending. `seq` is the log's own order,
+/// `pursuit_node` — a pass or an ending. `seq` is the log's own order,
 /// kept because a work log is read forwards and a parent chain would
 /// have to be walked to say the same thing.
 #[derive(Debug, Clone)]
-pub struct WorkNodeRow {
+pub struct PursuitNodeRow {
     /// The work log it belongs to.
-    pub work: PursuitId,
+    pub pursuit: PursuitId,
     /// Which node.
     pub id: NodeId,
     /// The node before it.
@@ -181,9 +179,9 @@ pub struct WorkNodeRow {
     pub outcome: Option<Outcome>,
 }
 
-/// `work_op` — one operation of one pass, in the order it was written.
+/// `pursuit_op` — one operation of one pass, in the order it was written.
 #[derive(Debug, Clone)]
-pub struct WorkOpRow {
+pub struct PursuitOpRow {
     /// The pass that wrote it.
     pub node: NodeId,
     /// Its place in that pass, in the order it was written.
@@ -255,16 +253,18 @@ pub fn take_change_point_apart(
     )
 }
 
-/// The work's own row, and one `work_node` row plus its `work_op`s for
+/// The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
 /// every node after the one it opened at.
-pub fn take_work_apart(work: &Pursuit) -> (WorkRow, Vec<WorkNodeRow>, Vec<WorkOpRow>) {
-    let open = work.log().open();
-    let head = WorkRow {
-        id: work.id(),
-        of: work.of(),
-        parent: work.parent(),
-        created: ActRow::of(work.meta().created()),
-        updated: ActRow::of(work.meta().updated()),
+pub fn take_pursuit_apart(
+    pursuit: &Pursuit,
+) -> (PursuitRow, Vec<PursuitNodeRow>, Vec<PursuitOpRow>) {
+    let open = pursuit.log().open();
+    let head = PursuitRow {
+        id: pursuit.id(),
+        of: pursuit.of(),
+        parent: pursuit.parent(),
+        created: ActRow::of(pursuit.meta().created()),
+        updated: ActRow::of(pursuit.meta().updated()),
         open: open.id(),
         base: open.base(),
         title: open.intent().title.clone(),
@@ -274,25 +274,25 @@ pub fn take_work_apart(work: &Pursuit) -> (WorkRow, Vec<WorkNodeRow>, Vec<WorkOp
 
     let mut nodes = Vec::new();
     let mut ops = Vec::new();
-    for (seq, round) in work.log().rounds().iter().enumerate() {
-        let (node, wrote) = take_round_apart(work.id(), round, seq);
+    for (seq, round) in pursuit.log().rounds().iter().enumerate() {
+        let (node, wrote) = take_round_apart(pursuit.id(), round, seq);
         nodes.push(node);
         ops.extend(wrote);
     }
-    if let Some(close) = work.log().close() {
-        nodes.push(take_close_apart(work.id(), close, nodes.len()));
+    if let Some(close) = pursuit.log().close() {
+        nodes.push(take_close_apart(pursuit.id(), close, nodes.len()));
     }
     (head, nodes, ops)
 }
 
 /// One pass, for the append a push makes.
 pub fn take_round_apart(
-    work: PursuitId,
+    pursuit: PursuitId,
     round: &Round,
     seq: usize,
-) -> (WorkNodeRow, Vec<WorkOpRow>) {
-    let node = WorkNodeRow {
-        work,
+) -> (PursuitNodeRow, Vec<PursuitOpRow>) {
+    let node = PursuitNodeRow {
+        pursuit,
         id: round.id(),
         parent: round.parent(),
         seq,
@@ -312,7 +312,7 @@ pub fn take_round_apart(
                 OpKind::Rename { name } => ("rename", None, Some(name.clone())),
                 OpKind::Remove => ("remove", None, None),
             };
-            WorkOpRow {
+            PursuitOpRow {
                 node: round.id(),
                 position,
                 entry: op.entry(),
@@ -326,9 +326,9 @@ pub fn take_round_apart(
 }
 
 /// One ending, for the append a commit makes.
-pub fn take_close_apart(work: PursuitId, close: &Close, seq: usize) -> WorkNodeRow {
-    WorkNodeRow {
-        work,
+pub fn take_close_apart(pursuit: PursuitId, close: &Close, seq: usize) -> PursuitNodeRow {
+    PursuitNodeRow {
+        pursuit,
         id: close.id(),
         parent: close.parent(),
         seq,
@@ -388,19 +388,22 @@ pub fn read_line(
 /// Nodes are sorted by `seq` first: the log is read forwards, and
 /// [`restore::pursuit`] hands them back to `push` and `end` in the
 /// order they arrive.
-pub fn read_work(
-    head: &WorkRow,
-    nodes: &[WorkNodeRow],
-    ops: &[WorkOpRow],
+pub fn read_pursuit(
+    head: &PursuitRow,
+    nodes: &[PursuitNodeRow],
+    ops: &[PursuitOpRow],
 ) -> Result<Pursuit, DomainError> {
-    let mut ordered: Vec<&WorkNodeRow> = nodes.iter().filter(|node| node.work == head.id).collect();
+    let mut ordered: Vec<&PursuitNodeRow> = nodes
+        .iter()
+        .filter(|node| node.pursuit == head.id)
+        .collect();
     ordered.sort_by_key(|node| node.seq);
 
     let mut built = Vec::with_capacity(ordered.len());
     for node in ordered {
         match node.kind {
             "round" => {
-                let mut wrote: Vec<&WorkOpRow> =
+                let mut wrote: Vec<&PursuitOpRow> =
                     ops.iter().filter(|op| op.node == node.id).collect();
                 wrote.sort_by_key(|op| op.position);
                 let mut written = Vec::with_capacity(wrote.len());
@@ -457,7 +460,7 @@ pub fn read_work(
 
 /// One operation, from the verb and the two payload columns that
 /// travel with it.
-fn read_op(row: &WorkOpRow) -> Result<Op, DomainError> {
+fn read_op(row: &PursuitOpRow) -> Result<Op, DomainError> {
     let missing = |what: &str| {
         DomainError::Validation(format!("a stored `{}` operation has no {what}", row.verb))
     };

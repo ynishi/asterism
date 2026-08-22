@@ -17,7 +17,7 @@
 //!
 //! Nothing here selects a head and checks it against what a caller
 //! decided. Two nodes on one parent is a fork, `UNIQUE (line_id,
-//! parent_id)` and `UNIQUE (work_id, parent_id)` refuse one, and the
+//! parent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the
 //! refusal arrives as part of the insert — so the validation is the
 //! write rather than something beside it that could be answered from a
 //! row somebody else has since moved.
@@ -28,8 +28,8 @@
 //! column list is what is matched, and matched exactly.
 //!
 //! `contains` is what exactness is guarding against, and the direction
-//! matters: `work_node.work_id` is the second ending and is a *prefix*
-//! of `work_node.work_id, work_node.parent_id`, which is a fork. So a
+//! matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
+//! of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
 //! substring test asked about the ending matches the fork — it reads
 //! "somebody pushed a pass first" as "this work has already ended",
 //! and tells a caller that re-reading is pointless when re-reading is
@@ -54,7 +54,7 @@ use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
 use crate::forge::rows::{
-    self, ActRow, ChangePointRow, ChangeRowRow, LineRow, WorkNodeRow, WorkOpRow, WorkRow,
+    self, ActRow, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
 };
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
@@ -74,15 +74,15 @@ impl SqliteForge {
 /// A line's history does not fork.
 const ONE_POINT_PER_PARENT: &str = "change_point.line_id, change_point.parent_id";
 /// Neither does a work log.
-const ONE_NODE_PER_PARENT: &str = "work_node.work_id, work_node.parent_id";
+const ONE_NODE_PER_PARENT: &str = "pursuit_node.pursuit_id, pursuit_node.parent_id";
 /// And work ends once.
-const ONE_ENDING_PER_WORK: &str = "work_node.work_id";
+const ONE_ENDING_PER_PURSUIT: &str = "pursuit_node.pursuit_id";
 
 /// Whether this error is that unique constraint, and not another.
 ///
 /// Matched on the exact column list SQLite reports, because one of
-/// them is a prefix of another: a violation of `work_node.work_id` is
-/// a second ending, and `work_node.work_id, work_node.parent_id` is a
+/// them is a prefix of another: a violation of `pursuit_node.pursuit_id` is
+/// a second ending, and `pursuit_node.pursuit_id, pursuit_node.parent_id` is a
 /// fork. `contains` would read the first out of the second and tell a
 /// caller to read again and re-decide, which is not a move that helps
 /// when the work has already ended.
@@ -181,8 +181,8 @@ fn change_row_row(row: &Row<'_>) -> rusqlite::Result<ChangeRowRow> {
     })
 }
 
-fn work_row(row: &Row<'_>) -> rusqlite::Result<WorkRow> {
-    Ok(WorkRow {
+fn pursuit_row(row: &Row<'_>) -> rusqlite::Result<PursuitRow> {
+    Ok(PursuitRow {
         id: PursuitId::from_uuid(row.get("id")?),
         of: LineId::from_uuid(row.get("line_id")?),
         parent: row
@@ -208,10 +208,10 @@ fn work_row(row: &Row<'_>) -> rusqlite::Result<WorkRow> {
     })
 }
 
-fn work_node_row(row: &Row<'_>) -> rusqlite::Result<WorkNodeRow> {
+fn pursuit_node_row(row: &Row<'_>) -> rusqlite::Result<PursuitNodeRow> {
     let kind = row.get::<_, String>("kind")?;
-    Ok(WorkNodeRow {
-        work: PursuitId::from_uuid(row.get("work_id")?),
+    Ok(PursuitNodeRow {
+        pursuit: PursuitId::from_uuid(row.get("pursuit_id")?),
         id: NodeId::from_uuid(row.get("id")?),
         parent: NodeId::from_uuid(row.get("parent_id")?),
         seq: row.get::<_, i64>("seq")? as usize,
@@ -227,9 +227,9 @@ fn work_node_row(row: &Row<'_>) -> rusqlite::Result<WorkNodeRow> {
     })
 }
 
-fn work_op_row(row: &Row<'_>) -> rusqlite::Result<WorkOpRow> {
+fn pursuit_op_row(row: &Row<'_>) -> rusqlite::Result<PursuitOpRow> {
     let verb = row.get::<_, String>("verb")?;
-    Ok(WorkOpRow {
+    Ok(PursuitOpRow {
         node: NodeId::from_uuid(row.get("node_id")?),
         position: row.get::<_, i64>("position")? as usize,
         entry: EntryId::from_uuid(row.get("entry_id")?),
@@ -313,22 +313,22 @@ fn build_line(conn: &Connection, head: &LineRow) -> rusqlite::Result<Line> {
 }
 
 /// Reads one whole work log: its row, its nodes, and their operations.
-fn build_work(conn: &Connection, head: &WorkRow) -> rusqlite::Result<Pursuit> {
+fn build_pursuit(conn: &Connection, head: &PursuitRow) -> rusqlite::Result<Pursuit> {
     let uuid = *head.id.as_uuid();
-    let nodes: Vec<WorkNodeRow> = conn
-        .prepare("SELECT * FROM work_node WHERE work_id = ?1")?
-        .query_map(params![uuid], work_node_row)?
+    let nodes: Vec<PursuitNodeRow> = conn
+        .prepare("SELECT * FROM pursuit_node WHERE pursuit_id = ?1")?
+        .query_map(params![uuid], pursuit_node_row)?
         .collect::<rusqlite::Result<_>>()?;
-    let ops: Vec<WorkOpRow> = conn
+    let ops: Vec<PursuitOpRow> = conn
         .prepare(
-            "SELECT o.* FROM work_op o \
-             JOIN work_node n ON n.id = o.node_id \
-             WHERE n.work_id = ?1",
+            "SELECT o.* FROM pursuit_op o \
+             JOIN pursuit_node n ON n.id = o.node_id \
+             WHERE n.pursuit_id = ?1",
         )?
-        .query_map(params![uuid], work_op_row)?
+        .query_map(params![uuid], pursuit_op_row)?
         .collect::<rusqlite::Result<_>>()?;
 
-    rows::read_work(head, &nodes, &ops).map_err(|error| {
+    rows::read_pursuit(head, &nodes, &ops).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Blob,
@@ -375,16 +375,16 @@ fn insert_change_point(
 
 fn insert_work_node(
     tx: &Transaction<'_>,
-    node: &WorkNodeRow,
-    ops: &[WorkOpRow],
+    node: &PursuitNodeRow,
+    ops: &[PursuitOpRow],
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO work_node \
-             (id, work_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
+        "INSERT INTO pursuit_node \
+             (id, pursuit_id, parent_id, seq, kind, outcome, note, at, actor_id, actor_kind) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             node.id.as_uuid(),
-            node.work.as_uuid(),
+            node.pursuit.as_uuid(),
             node.parent.as_uuid(),
             node.seq as i64,
             node.kind,
@@ -397,7 +397,7 @@ fn insert_work_node(
     )?;
     for op in ops {
         tx.execute(
-            "INSERT INTO work_op (node_id, position, entry_id, verb, content, name) \
+            "INSERT INTO pursuit_op (node_id, position, entry_id, verb, content, name) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 op.node.as_uuid(),
@@ -416,7 +416,7 @@ fn insert_work_node(
 /// place in it.
 fn next_seq(tx: &Transaction<'_>, work: &PursuitId) -> rusqlite::Result<usize> {
     let count: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM work_node WHERE work_id = ?1",
+        "SELECT COUNT(*) FROM pursuit_node WHERE pursuit_id = ?1",
         params![work.as_uuid()],
         |row| row.get(0),
     )?;
@@ -553,12 +553,12 @@ impl Lines for SqliteForge {
 #[async_trait]
 impl Pursuits for SqliteForge {
     async fn open(&self, pursuit: &Pursuit) -> Result<(), DomainError> {
-        let (head, nodes, ops) = rows::take_work_apart(pursuit);
+        let (head, nodes, ops) = rows::take_pursuit_apart(pursuit);
         self.isle
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 tx.execute(
-                    "INSERT INTO work \
+                    "INSERT INTO pursuit \
                          (id, line_id, parent_id, open_node, base_id, title, note, \
                           open_at, open_by, open_kind, created_at, created_by, created_kind, \
                           updated_at, updated_by, updated_kind) \
@@ -588,7 +588,7 @@ impl Pursuits for SqliteForge {
                 // whole value and this writes the whole of what it was
                 // given rather than the part it expects.
                 for node in &nodes {
-                    let its: Vec<WorkOpRow> = ops
+                    let its: Vec<PursuitOpRow> = ops
                         .iter()
                         .filter(|op| op.node == node.id)
                         .cloned()
@@ -607,9 +607,9 @@ impl Pursuits for SqliteForge {
             .call(move |conn| {
                 let head = conn
                     .query_row(
-                        "SELECT * FROM work WHERE id = ?1",
+                        "SELECT * FROM pursuit WHERE id = ?1",
                         params![id.as_uuid()],
-                        work_row,
+                        pursuit_row,
                     )
                     .map(Some)
                     .or_else(|error| match error {
@@ -619,7 +619,7 @@ impl Pursuits for SqliteForge {
                 let Some(head) = head else {
                     return Ok(None);
                 };
-                build_work(conn, &head).map(Some)
+                build_pursuit(conn, &head).map(Some)
             })
             .await
             .map_err(infra_err)
@@ -629,13 +629,13 @@ impl Pursuits for SqliteForge {
         let line = *line;
         self.isle
             .call(move |conn| {
-                let heads: Vec<WorkRow> = conn
-                    .prepare("SELECT * FROM work WHERE line_id = ?1")?
-                    .query_map(params![line.as_uuid()], work_row)?
+                let heads: Vec<PursuitRow> = conn
+                    .prepare("SELECT * FROM pursuit WHERE line_id = ?1")?
+                    .query_map(params![line.as_uuid()], pursuit_row)?
                     .collect::<rusqlite::Result<_>>()?;
                 heads
                     .iter()
-                    .map(|head| build_work(conn, head))
+                    .map(|head| build_pursuit(conn, head))
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -646,13 +646,13 @@ impl Pursuits for SqliteForge {
         let parent = *parent;
         self.isle
             .call(move |conn| {
-                let heads: Vec<WorkRow> = conn
-                    .prepare("SELECT * FROM work WHERE parent_id = ?1")?
-                    .query_map(params![parent.as_uuid()], work_row)?
+                let heads: Vec<PursuitRow> = conn
+                    .prepare("SELECT * FROM pursuit WHERE parent_id = ?1")?
+                    .query_map(params![parent.as_uuid()], pursuit_row)?
                     .collect::<rusqlite::Result<_>>()?;
                 heads
                     .iter()
-                    .map(|head| build_work(conn, head))
+                    .map(|head| build_pursuit(conn, head))
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -715,7 +715,7 @@ impl Closings for SqliteForge {
                 let ending = rows::take_close_apart(pursuit, &close, seq);
 
                 // The ending first, so a second one is refused by
-                // `idx_work_node_one_close` before anything reaches the
+                // `idx_pursuit_node_one_close` before anything reaches the
                 // line — and the whole of it rolls back either way.
                 if let Err(error) = insert_work_node(&tx, &ending, &[]) {
                     // Kept apart, because the caller's next move
@@ -728,7 +728,7 @@ impl Closings for SqliteForge {
                     if is_unique_violation(&error, ONE_NODE_PER_PARENT) {
                         return Ok(Err(Refusal::WorkForked));
                     }
-                    if is_unique_violation(&error, ONE_ENDING_PER_WORK) {
+                    if is_unique_violation(&error, ONE_ENDING_PER_PURSUIT) {
                         return Ok(Err(Refusal::WorkAlreadyEnded));
                     }
                     return Err(error);

@@ -196,7 +196,7 @@ impl World {
     /// Content that exists.
     ///
     /// Over SQLite this writes an asset first, because `change_row`
-    /// and `work_op` carry a foreign key to one — which is the forge
+    /// and `pursuit_op` carry a foreign key to one — which is the forge
     /// holding what it names, and the reason a reference here cannot
     /// be a uuid nobody minted. Over the in-memory store there is
     /// nothing below to hold, so it is the id and no row.
