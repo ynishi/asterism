@@ -619,13 +619,21 @@ async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), 
 
 /// Similarity floor below which a tag is not proposed (#112, P3).
 ///
-/// **Provisional** pending the fixture threshold sweep: the first
-/// measured pass put true image-tag matches at means 0.129 (EN) /
-/// 0.123 (JA) against unrelated-query ceilings of 0.050 / 0.073 —
+/// Measured: the fixture threshold sweep
+/// (`asterism-vision/tests/model_eval.rs`, seed 42, 24 bases, EN+JA
+/// vocabulary, siglip2-base-patch16-256) ran precision/recall at
+/// 0.06–0.16 and this value is the curve's knee — 0.32 / 0.68 at
+/// 0.12, against 0.22 / 0.94 at 0.10 and 0.41 / 0.33 at 0.14, where
+/// recall halves for one step. Two bounds on the read: the fixture
+/// vocabulary is adversarially compositional (every color × shape
+/// crossing exists, so half-matches score high), which makes the
+/// measured precision a pessimistic floor for a real library; and
 /// image-text cosine is a different regime from image-image, which is
-/// why this is not [`VISUAL_SCORE_FLOOR`]. The sweep will replace this
-/// with a precision-anchored value and its provenance.
-const TAG_SCORE_FLOOR: f32 = 0.10;
+/// why this is not [`VISUAL_SCORE_FLOOR`]. A suggestion is a queue a
+/// person rules on, ordered by score — recall is worth more than
+/// precision here, and the UI shows the strongest first. Re-measure
+/// for any other model id.
+const TAG_SCORE_FLOOR: f32 = 0.12;
 
 /// Proposes channel tags for one encoded image (#112, P3).
 ///

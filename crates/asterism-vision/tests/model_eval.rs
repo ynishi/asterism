@@ -192,6 +192,55 @@ fn orderings_hold_and_measurements_print() {
         }
     }
 
+    // Threshold sweep for the tag-suggestion floor: every base scored
+    // against the whole fixture vocabulary (EN and JA together — the
+    // production job scores one flat Tag list), ground truth = the
+    // base's own tags in both languages. Reported per threshold so the
+    // floor is picked from a curve, not a pair of means.
+    let vocabulary: Vec<String> = {
+        let mut seen = Vec::new();
+        for spec in &specs {
+            for tag in spec.scene.tags_en().into_iter().chain(spec.scene.tags_ja()) {
+                if !seen.contains(&tag) {
+                    seen.push(tag);
+                }
+            }
+        }
+        seen
+    };
+    let vocab_vectors: Vec<Vec<f32>> = vocabulary
+        .iter()
+        .map(|name| encoder.encode_text(name).expect("vocab"))
+        .collect();
+    let mut sweep = Vec::new();
+    for threshold in [0.06f32, 0.08, 0.10, 0.12, 0.14, 0.16] {
+        let (mut tp, mut fp, mut fn_) = (0usize, 0usize, 0usize);
+        for (i, spec) in specs.iter().enumerate() {
+            let truth: Vec<&String> = vocabulary
+                .iter()
+                .filter(|name| {
+                    spec.scene.tags_en().contains(name) || spec.scene.tags_ja().contains(name)
+                })
+                .collect();
+            for (name, vector) in vocabulary.iter().zip(&vocab_vectors) {
+                let hit = cosine(&bases[i], vector) >= threshold;
+                let is_true = truth.contains(&name);
+                match (hit, is_true) {
+                    (true, true) => tp += 1,
+                    (true, false) => fp += 1,
+                    (false, true) => fn_ += 1,
+                    (false, false) => {}
+                }
+            }
+        }
+        sweep.push(serde_json::json!({
+            "threshold": threshold,
+            "precision": tp as f32 / (tp + fp).max(1) as f32,
+            "recall": tp as f32 / (tp + fn_).max(1) as f32,
+            "tp": tp, "fp": fp, "fn": fn_,
+        }));
+    }
+
     let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
     let max = |v: &[f32]| v.iter().copied().fold(f32::MIN, f32::max);
     println!(
@@ -210,6 +259,7 @@ fn orderings_hold_and_measurements_print() {
             "tag_ja": tag_ja.json(),
             "unrelated_query": { "mean": mean(&unrelated_query_scores), "max": max(&unrelated_query_scores) },
             "unrelated_query_ja": { "mean": mean(&unrelated_query_ja_scores), "max": max(&unrelated_query_ja_scores) },
+            "tag_threshold_sweep": sweep,
         })
     );
 
