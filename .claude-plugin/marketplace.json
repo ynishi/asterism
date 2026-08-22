@@ -19,6 +19,21 @@
         "prose",
         "formatting"
       ]
+    },
+    {
+      "name": "doc-review",
+      "source": "./plugins/doc-review",
+      "description": "Reads the prose a change touches against the code beside it, and the prose the change makes false without touching it.",
+      "version": "0.1.0",
+      "license": "MIT OR Apache-2.0",
+      "homepage": "https://github.com/ynishi/asterism",
+      "repository": "https://github.com/ynishi/asterism",
+      "keywords": [
+        "asterism",
+        "agents",
+        "documentation",
+        "review"
+      ]
     }
   ]
 }
