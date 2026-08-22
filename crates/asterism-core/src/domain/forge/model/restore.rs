@@ -51,7 +51,8 @@
 //! sequence number beside the chain, and a store that got the order
 //! wrong is caught by `record` rather than believed.
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
@@ -213,20 +214,26 @@ pub fn message(
 
 /// A whole conversation, from what it hangs off and what was said.
 ///
-/// `messages` are in the order they were written, which for a thread
-/// is the order a store kept them in and not an order anything
-/// derives: a reply names its parent, but two replies to one message
-/// are ordered by nothing else. See the module docs on
-/// [`thread`](super::thread) for why that is affordable here and
-/// nowhere else in this model.
+/// `messages` are in the order a store kept them, which is the order
+/// they were said in, and it is kept — with one exception. A reply the
+/// order given puts *before* the message it answers is moved to just
+/// after it, because a conversation cannot be read back in an order
+/// that has an answer preceding its question. Nothing else moves; this
+/// is not a threading pass, and a conversation whose clock behaved
+/// comes back exactly as it was given. See the module docs on
+/// [`thread`](super::thread) for what orders what.
+///
+/// That exception is what keeps a clock that stepped backwards from
+/// making a conversation unreadable rather than merely odd.
 ///
 /// # Refusals
 ///
 /// - [`NotInThatThread`](ForgeError::NotInThatThread) — a message
 ///   replies to one this thread does not hold. Handed back through
 ///   [`Thread::say`], so a stored reply meets the refusal a fresh one
-///   meets — including the case a store could produce and a caller
-///   could not: a reply that arrived *before* the message it answers.
+///   meets. Replies that answer each other in a circle are held to the
+///   same refusal: none of them can be put after its parent, so they
+///   arrive as they were given and the first one meets it.
 /// - [`EmptyThread`](ForgeError::EmptyThread) — nothing was said. A
 ///   thread with no messages is somebody having opened a conversation
 ///   and said nothing, which [`Thread::open`] refuses to make and this
@@ -241,10 +248,76 @@ pub fn thread(
         return Err(ForgeError::EmptyThread);
     }
     let mut held = Thread::restored(id, anchor, title);
-    for message in messages {
+    for message in replies_after_parents(messages) {
         held.say(message)?;
     }
     Ok(held)
+}
+
+/// Moves a reply that arrived before the message it answers, and
+/// nothing else.
+///
+/// The order given is the order a conversation was said in, and that
+/// is the order it reads in — this is not a threading pass. The only
+/// message that moves is one the order given puts before its parent,
+/// and it moves the shortest distance that fixes it: everything the
+/// clock already got right stays where it was. So four remarks said
+/// 1, 2, 3, 4 with 3 answering 1 come back 1, 2, 3, 4, and only a
+/// clock that stepped backwards makes this function do anything.
+///
+/// A reply whose parent is not here at all does not move, because that
+/// is [`Thread::say`]'s refusal to give and not this function's. Nor
+/// does a circle of replies: nothing in it can be put after its
+/// parent, and what cannot be placed is handed over to meet the same
+/// refusal rather than disappear from the conversation.
+fn replies_after_parents(messages: Vec<Message>) -> Vec<Message> {
+    let total = messages.len();
+    let mut at: HashMap<MessageId, usize> = HashMap::with_capacity(total);
+    for (index, message) in messages.iter().enumerate() {
+        at.insert(message.id(), index);
+    }
+
+    // A reply whose parent is not here, and one that names itself, are
+    // taken as answering nothing: both are refusals to hand to `say`,
+    // and neither is an order to work out.
+    let mut answers: Vec<Vec<usize>> = vec![Vec::new(); total];
+    let mut waiting_on: Vec<Option<usize>> = vec![None; total];
+    for (index, message) in messages.iter().enumerate() {
+        if let Some(&parent) = message.parent().and_then(|parent| at.get(&parent))
+            && parent != index
+        {
+            answers[parent].push(index);
+            waiting_on[index] = Some(parent);
+        }
+    }
+
+    // Earliest first among everything whose parent is already out,
+    // which is what keeps the given order everywhere it was already
+    // right: a message only waits while something it answers is still
+    // to come.
+    let mut ready: BinaryHeap<Reverse<usize>> = (0..total)
+        .filter(|index| waiting_on[*index].is_none())
+        .map(Reverse)
+        .collect();
+    let mut order = Vec::with_capacity(total);
+    let mut taken = vec![false; total];
+    while let Some(Reverse(index)) = ready.pop() {
+        taken[index] = true;
+        order.push(index);
+        for answer in &answers[index] {
+            ready.push(Reverse(*answer));
+        }
+    }
+
+    // A circle answering itself: none of these ever became ready. They
+    // go back in the order they came, to meet `say`.
+    order.extend((0..total).filter(|index| !taken[*index]));
+
+    let mut held: Vec<Option<Message>> = messages.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .filter_map(|index| held[index].take())
+        .collect()
 }
 
 /// Puts change points in the chain's order, starting from `head`.
@@ -593,19 +666,95 @@ mod tests {
         assert_eq!(thread.messages()[0].said().as_str(), "this reads oddly");
     }
 
-    /// A reply the store handed over before the message it answers is
-    /// refused, rather than read back as a thread whose parents point
-    /// forwards.
+    /// A reply the store handed over before the message it answers
+    /// comes back, after it. The order given is a clock's, and a clock
+    /// that stepped backwards is not a conversation to lose: the reply
+    /// says what it answers, and that is where it goes.
     #[test]
-    fn a_stored_reply_that_arrives_before_its_parent_is_refused() {
+    fn a_stored_reply_kept_before_its_parent_still_comes_back() {
+        let (first, second) = (MessageId::new(), MessageId::new());
+        let thread = thread(
+            ThreadId::new(),
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            vec![
+                message(second, Some(first), body("agreed"), act(1), Vec::new()),
+                message(first, None, body("this reads oddly"), act(3), Vec::new()),
+            ],
+        )
+        .expect("a conversation written by a clock that stepped back");
+
+        assert_eq!(thread.messages().len(), 2);
+        assert_eq!(thread.messages()[0].id(), first);
+        assert_eq!(thread.messages()[1].id(), second);
+    }
+
+    /// A conversation the clock got right comes back exactly as it was
+    /// said. A reply to something further up is not pulled next to
+    /// what it answers: reading a thread is not threading it.
+    #[test]
+    fn a_conversation_said_in_order_comes_back_in_that_order() {
+        let (one, two, three, four) = (
+            MessageId::new(),
+            MessageId::new(),
+            MessageId::new(),
+            MessageId::new(),
+        );
+        let thread = thread(
+            ThreadId::new(),
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            vec![
+                message(one, None, body("this reads oddly"), act(1), Vec::new()),
+                message(two, None, body("the next one too"), act(2), Vec::new()),
+                // Answers the first and was said third. A threading
+                // pass would put it second.
+                message(three, Some(one), body("agreed"), act(3), Vec::new()),
+                message(four, None, body("I will take both"), act(4), Vec::new()),
+            ],
+        )
+        .expect("a store kept a conversation somebody had");
+
+        let said: Vec<MessageId> = thread.messages().iter().map(|held| held.id()).collect();
+        assert_eq!(said, vec![one, two, three, four]);
+    }
+
+    /// And a reply that arrived early moves the shortest distance that
+    /// makes it readable: after the message it answers, not to the end
+    /// and not into a tree.
+    #[test]
+    fn a_reply_that_arrived_early_moves_only_past_what_it_answers() {
+        let (one, two, three) = (MessageId::new(), MessageId::new(), MessageId::new());
+        let thread = thread(
+            ThreadId::new(),
+            Anchor::Pursuit(PursuitId::new()),
+            None,
+            vec![
+                // Said second, kept first: the clock stepped back.
+                message(two, Some(one), body("agreed"), act(1), Vec::new()),
+                message(one, None, body("this reads oddly"), act(2), Vec::new()),
+                message(three, None, body("I will take it"), act(3), Vec::new()),
+            ],
+        )
+        .expect("a conversation written by a clock that stepped back");
+
+        let said: Vec<MessageId> = thread.messages().iter().map(|held| held.id()).collect();
+        assert_eq!(said, vec![one, two, three]);
+    }
+
+    /// Replies answering each other in a circle are still refused:
+    /// none of them can be put after its parent, and a conversation
+    /// that answers itself is not one anybody had.
+    #[test]
+    fn stored_replies_that_answer_each_other_are_refused() {
         let (first, second) = (MessageId::new(), MessageId::new());
         let refused = thread(
             ThreadId::new(),
             Anchor::Pursuit(PursuitId::new()),
             None,
             vec![
-                message(second, Some(first), body("agreed"), act(3), Vec::new()),
-                message(first, None, body("this reads oddly"), act(1), Vec::new()),
+                message(first, Some(second), body("agreed"), act(1), Vec::new()),
+                message(second, Some(first), body("so do I"), act(2), Vec::new()),
             ],
         );
         assert!(

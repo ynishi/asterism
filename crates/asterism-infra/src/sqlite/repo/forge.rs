@@ -66,7 +66,7 @@ use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::threads::Threads;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
@@ -786,31 +786,54 @@ impl Lines for SqliteForge {
             .call(move |conn| {
                 let tx = conn.transaction()?;
 
-                let found: i64 = tx.query_row(
-                    "SELECT COUNT(*) FROM line WHERE id = ?1",
-                    params![id.as_uuid()],
-                    |row| row.get(0),
-                )?;
-                if found == 0 {
+                let standing: Option<String> = tx
+                    .query_row(
+                        "SELECT standing FROM line WHERE id = ?1",
+                        params![id.as_uuid()],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(standing) = standing else {
                     return Ok(Err(DropRefusal::NoSuchLine));
+                };
+
+                // The first condition the port states. A drop is
+                // decided against an archived line, and the standing
+                // it was decided against is read here rather than
+                // trusted from the caller's copy: a line taken back
+                // out of the archive in between is exactly the race
+                // `covering` exists to distrust, one field over.
+                if standing != standing_slug(Standing::Archived) {
+                    return Ok(Err(DropRefusal::Reopened));
                 }
 
-                // The condition the port states. Asked inside the
-                // write, where the answer cannot go stale — a pursuit
-                // opened between the caller's read and this one is the
-                // whole case, and it is why the ids come in rather than
-                // being looked up here.
+                // The second. Asked inside the write, where the answer
+                // cannot go stale — a pursuit opened between the
+                // caller's read and this one is the whole case, and it
+                // is why the ids come in rather than being looked up
+                // here.
                 let against: Vec<Uuid> = tx
                     .prepare("SELECT id FROM pursuit WHERE line_id = ?1")?
                     .query_map(params![id.as_uuid()], |row| row.get(0))?
                     .collect::<rusqlite::Result<_>>()?;
                 let against: BTreeSet<Uuid> = against.into_iter().collect();
                 let named: BTreeSet<Uuid> = covering.iter().map(|one| *one.as_uuid()).collect();
-                if against != named {
-                    return Ok(Err(DropRefusal::WorkMoved {
-                        against: against.len(),
-                        named: named.len(),
-                    }));
+                // Two ways the sets differ, and they are not one
+                // refusal. Work this drop did not name is work opened
+                // since the caller read the list — a race, and the
+                // whole reason the ids come in. A name that is not
+                // against this line at all cannot have got there by a
+                // race: nothing removes a pursuit but a drop of its
+                // line, and that line is here. It is the caller
+                // naming somebody else's work, which is the model's
+                // `NotThisLine` arriving one layer down.
+                let opened = against.difference(&named).count();
+                let elsewhere = named.difference(&against).count();
+                if elsewhere > 0 {
+                    return Ok(Err(DropRefusal::WorkOfAnotherLine { elsewhere }));
+                }
+                if opened > 0 {
+                    return Ok(Err(DropRefusal::WorkOpenedSince { opened }));
                 }
 
                 // Every foreign key inside the forge is RESTRICT, and
@@ -897,9 +920,17 @@ impl Lines for SqliteForge {
 
         dropped.map_err(|refusal| match refusal {
             DropRefusal::NoSuchLine => DomainError::not_found("line", id),
-            DropRefusal::WorkMoved { against, named } => DomainError::Conflict(format!(
-                "line {id} has {against} pieces of work against it, and this drop was decided \
-                 against {named}"
+            DropRefusal::Reopened => DomainError::Conflict(format!(
+                "line {id} is out of the archive again, and a drop is decided against an \
+                 archived line"
+            )),
+            DropRefusal::WorkOpenedSince { opened } => DomainError::Conflict(format!(
+                "{opened} pieces of work have been opened on line {id} since this drop was \
+                 decided, and what it releases was decided without them"
+            )),
+            DropRefusal::WorkOfAnotherLine { elsewhere } => DomainError::Validation(format!(
+                "this drop of line {id} names {elsewhere} pieces of work that are not against \
+                 it, and what another line holds is not this drop's to release"
             )),
             DropRefusal::StillReferenced => DomainError::Validation(format!(
                 "something outside line {id} points into it and is staying — work on another \
@@ -978,8 +1009,16 @@ fn insert_revision(conn: &Connection, row: &ThreadRevisionRow) -> rusqlite::Resu
 /// correction.
 fn build_thread(conn: &Connection, head: &ThreadRow) -> rusqlite::Result<Thread> {
     let uuid = *head.id.as_uuid();
+    // Ordered here as well as in `read_thread`, which sorts by the
+    // stamp and keeps what it is given for two remarks sharing one.
+    // Without this that tie is whatever order the scan produced, so
+    // one conversation could read two ways. The index is on
+    // `(thread_id, said_at)`.
     let messages: Vec<ThreadMessageRow> = conn
-        .prepare("SELECT * FROM forge_thread_message WHERE thread_id = ?1")?
+        .prepare(
+            "SELECT * FROM forge_thread_message WHERE thread_id = ?1 \
+             ORDER BY said_at, id",
+        )?
         .query_map(params![uuid], thread_message_row)?
         .collect::<rusqlite::Result<_>>()?;
     let revisions: Vec<ThreadRevisionRow> = conn
@@ -1198,10 +1237,17 @@ impl Threads for SqliteForge {
 enum DropRefusal {
     /// There is no such line to drop.
     NoSuchLine,
-    /// The work against the line is not the work the caller decided
-    /// against, so what they were told it releases is not what it
-    /// would release.
-    WorkMoved { against: usize, named: usize },
+    /// The line is out of the archive, so the standing the drop was
+    /// decided against is not the standing it has.
+    Reopened,
+    /// Work was opened on the line after the caller read the list, so
+    /// what they were told the drop releases left it out. A race.
+    WorkOpenedSince { opened: usize },
+    /// The caller named work that is not against this line, which no
+    /// race can produce — nothing removes a pursuit but a drop of its
+    /// line, and this line is still here. The model refuses the same
+    /// thing as `NotThisLine`, one layer up.
+    WorkOfAnotherLine { elsewhere: usize },
     /// A row outside this line names one inside it, and taking the
     /// line would leave that row pointing at nothing.
     StillReferenced,

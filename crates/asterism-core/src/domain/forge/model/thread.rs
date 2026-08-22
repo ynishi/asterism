@@ -62,12 +62,23 @@
 //! timestamp is evidence. A discussion has no chain to read an order
 //! out of — a reply names its parent, but two replies to one message
 //! are ordered by nothing else — so messages are read in the order
-//! they were written.
+//! they were written, and a conversation reads as a transcript rather
+//! than as a tree.
 //!
 //! It is affordable because nothing derives from it. No fold reads a
 //! thread, no rule consults one, and no refusal depends on the order
 //! of two remarks. A clock that steps backwards makes a conversation
 //! read oddly; it cannot make the line wrong.
+//!
+//! The relation is asked one question and no more. An answer cannot be
+//! read back before its question — [`Thread::say`] refuses a reply to
+//! something the thread does not hold yet — so [`restore`] moves a
+//! reply the stamps put before its parent to just after it, and leaves
+//! everything else where the clock had it. That is the difference
+//! between a conversation that reads oddly and one that cannot be read
+//! at all.
+//!
+//! [`restore`]: super::restore
 
 use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::error::ForgeError;

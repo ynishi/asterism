@@ -702,11 +702,13 @@ fn read_op(row: &PursuitOpRow) -> Result<Op, DomainError> {
 /// correction.
 ///
 /// Messages are put in the order they were said, which for a thread is
-/// a stamp and not a chain. [`restore::thread`] then hands them back
-/// to `say` one at a time, so a reply naming a message this thread
-/// does not hold is a read that fails — including the case a store can
-/// produce and a caller cannot, where a reply was kept with an earlier
-/// stamp than the message it answers.
+/// a stamp and not a chain. [`restore::thread`] keeps that order,
+/// moving only a reply the stamps put before the message it answers,
+/// and hands them back to `say` one at a time — so a reply naming a
+/// message this thread does not hold is a read that fails. A reply
+/// kept with an earlier stamp than its parent is not that case: it is
+/// a clock that stepped backwards, and it is put back after what it
+/// answers rather than refused.
 pub fn read_thread(
     head: &ThreadRow,
     messages: &[ThreadMessageRow],

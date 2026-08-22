@@ -332,14 +332,25 @@ impl Lines for MemoryForge {
 
     async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError> {
         self.with(|tables| {
-            if !tables.lines.iter().any(|row| row.id == *id) {
+            let Some(line) = tables.lines.iter().find(|row| row.id == *id) else {
                 return Err(DomainError::not_found("line", id));
+            };
+
+            // The first condition the port states, asked of the rows
+            // rather than of the caller's copy: a drop is decided
+            // against an archived line, and a line taken back out of
+            // the archive in between is the race `covering` exists to
+            // distrust, one field over.
+            if line.standing != Standing::Archived {
+                return Err(DomainError::Conflict(format!(
+                    "line {id} is out of the archive again, and a drop is decided against an \
+                     archived line"
+                )));
             }
 
-            // The condition the port states, asked of the rows: the
-            // work against this line has to be the work the caller
-            // decided against. Order is not part of it, and neither is
-            // how the caller found them.
+            // The second: the work against this line has to be the
+            // work the caller decided against. Order is not part of
+            // it, and neither is how the caller found them.
             let against: BTreeSet<PursuitId> = tables
                 .pursuits
                 .iter()
@@ -347,12 +358,25 @@ impl Lines for MemoryForge {
                 .map(|row| row.id)
                 .collect();
             let named: BTreeSet<PursuitId> = covering.iter().copied().collect();
-            if against != named {
+            // Two ways the sets differ, and they are not one refusal.
+            // Work this drop did not name is work opened since the
+            // caller read the list — a race. A name that is not
+            // against this line cannot have got there by a race:
+            // nothing removes a pursuit but a drop of its line, and
+            // that line is here. It is the model's `NotThisLine`,
+            // arriving one layer down.
+            let elsewhere = named.difference(&against).count();
+            if elsewhere > 0 {
+                return Err(DomainError::Validation(format!(
+                    "this drop of line {id} names {elsewhere} pieces of work that are not \
+                     against it, and what another line holds is not this drop's to release"
+                )));
+            }
+            let opened = against.difference(&named).count();
+            if opened > 0 {
                 return Err(DomainError::Conflict(format!(
-                    "line {id} has {} pieces of work against it, and this drop was decided \
-                     against {}",
-                    against.len(),
-                    named.len()
+                    "{opened} pieces of work have been opened on line {id} since this drop was \
+                     decided, and what it releases was decided without them"
                 )));
             }
 

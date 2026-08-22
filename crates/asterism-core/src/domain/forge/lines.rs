@@ -111,27 +111,61 @@ pub trait Lines: Send + Sync {
         act: &Act,
     ) -> Result<(), DomainError>;
 
-    /// Takes the line and everything under it, on the condition that
-    /// the work against it is exactly `covering`.
+    /// Takes the line and everything under it, on two conditions asked
+    /// here: that the line is still archived, and that the work
+    /// against it is exactly `covering`.
     ///
-    /// The line, its history, its change rows, and every pursuit named
-    /// here with its nodes and their operations. All of it or none of
-    /// it: a line whose history went while its work stayed is work
-    /// whose base names a node that is gone, which no read can turn
-    /// back into a value.
+    /// # What goes
     ///
-    /// # Why the work is named rather than found
+    /// The line, its history, its change rows, every pursuit named
+    /// here with its nodes and their operations, and every
+    /// conversation hanging off any of them — a thread anchored to a
+    /// pursuit, a pass, an entry as a pass had it, or a change point
+    /// on this line goes with what it is about, messages and
+    /// corrections included. Nothing else in this codebase deletes a
+    /// thread ([`Threads`](super::threads::Threads) has no verb for
+    /// it); a drop is where a conversation ends, because a remark
+    /// about a thing that no longer exists is a remark no read can
+    /// make sense of.
+    ///
+    /// All of it or none of it: a line whose history went while its
+    /// work stayed is work whose base names a node that is gone, which
+    /// no read can turn back into a value.
+    ///
+    /// # Why the conditions are asked here rather than trusted
     ///
     /// Because what a caller was told a drop would release was
-    /// computed from a list of pursuits, and a list that has grown
-    /// since is a list that made the answer wrong — quietly, and in
-    /// the direction that leaves bytes held by nothing. Naming them
-    /// makes the write conditional on the set the decision covered,
-    /// so work opened in between is [`Conflict`](DomainError::Conflict)
-    /// rather than a silent understatement.
+    /// computed from a line and a list of pursuits it read first, and
+    /// either can have moved by the time the write runs. A list that
+    /// has grown makes the answer wrong quietly, in the direction that
+    /// leaves bytes held by nothing; a line taken back out of the
+    /// archive makes it a drop of a line somebody is using again.
+    /// Both are asked inside the write, where they cannot go stale,
+    /// and both come back as [`Conflict`](DomainError::Conflict)
+    /// rather than as a silent understatement.
     ///
-    /// That is the same shape as ending work: the store does not
-    /// re-derive what the model decided, it refuses to write when what
-    /// was decided no longer describes what is there.
+    /// A drop has a third condition, and it is the one that stays
+    /// where the decision was made: every pursuit here has ended
+    /// ([`WorkStillOpen`](crate::domain::forge::model::error::ForgeError::WorkStillOpen)).
+    /// It does not need asking again, because work that has ended
+    /// cannot start — an ending is a node and nothing takes one back —
+    /// so the only way that answer can change under the write is work
+    /// *opened* since, which is exactly what `covering` catches. The
+    /// two conditions here are the two that can move.
+    ///
+    /// # What a store may refuse and how
+    ///
+    /// A name in `covering` that is not against this line is not a
+    /// race and is not to be reported as one: nothing removes a
+    /// pursuit but a drop of its line, and that line is the one being
+    /// dropped. It is a caller naming somebody else's work, which the
+    /// model refuses as
+    /// [`NotThisLine`](crate::domain::forge::model::error::ForgeError::NotThisLine),
+    /// so a store meeting it answers
+    /// [`Validation`](DomainError::Validation) rather than `Conflict`.
+    ///
+    /// All of this is the same shape as ending work: the store does
+    /// not re-derive what the model decided, it refuses to write when
+    /// what was decided no longer describes what is there.
     async fn discard(&self, id: &LineId, covering: &[PursuitId]) -> Result<(), DomainError>;
 }

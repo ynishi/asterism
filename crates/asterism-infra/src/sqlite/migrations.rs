@@ -7285,6 +7285,11 @@ CREATE UNIQUE INDEX idx_forge_actor_stands_for
 /// order out of, and nothing derives from the order it has, so a clock
 /// that steps backwards makes a conversation read oddly and cannot
 /// make the line wrong.
+///
+/// The read side asks `parent_id` one question the stamps cannot
+/// answer: a reply kept with an earlier `said_at` than the message it
+/// answers is put back after it. Without that, a clock that stepped
+/// backwards would leave rows that cannot be read at all.
 const V98_FORGE_THREADS: &str = r#"
 CREATE TABLE forge_thread (
     id                  BLOB PRIMARY KEY,

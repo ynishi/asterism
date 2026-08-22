@@ -1522,6 +1522,145 @@ async fn a_drop_that_does_not_cover_the_work_is_refused(world: &World) {
         .expect("and so did the work");
 }
 
+/// A drop naming work that is not against the line is refused as the
+/// caller's mistake, not as a race.
+///
+/// The two ways `covering` can differ from what is there are not one
+/// refusal. Work the drop did not name is work opened since the list
+/// was read — that is the race. A name that is not against this line
+/// cannot have arrived that way: nothing removes a pursuit but a drop
+/// of its line, and this line is the one still here. Reporting it as a
+/// conflict would tell a caller to read again and retry, and reading
+/// again returns the same answer forever.
+#[tokio::test]
+async fn a_drop_naming_another_lines_work_is_refused_over_memory() {
+    a_drop_naming_another_lines_work_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_drop_naming_another_lines_work_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_drop_naming_another_lines_work_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_drop_naming_another_lines_work_is_refused(world: &World) {
+    world.clock.set(0);
+    let going = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let staying = world
+        .lines
+        .open(name("the other one"), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+
+    world.clock.set(1);
+    let mine = world
+        .work
+        .open(&going.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .close(&mine.id(), Outcome::Abandoned, None, &who("boro"))
+        .await
+        .unwrap();
+    let theirs = world
+        .work
+        .open(&staying.id(), None, Intent::default(), &who("cyd"))
+        .await
+        .unwrap();
+
+    world.clock.set(2);
+    world.lines.archive(&going.id(), &who("ana")).await.unwrap();
+
+    let refused = Lines::discard(&*world.lines_port, &going.id(), &[mine.id(), theirs.id()])
+        .await
+        .expect_err("the other line's work is not this drop's to release");
+    assert!(
+        matches!(refused, DomainError::Validation(_)),
+        "naming somebody else's work is a mistake, not a race: {refused:?}"
+    );
+
+    // And nothing went, on either line.
+    world.lines.get(&going.id()).await.expect("the line stayed");
+    world
+        .work
+        .get(&theirs.id())
+        .await
+        .expect("and so did the work it named");
+}
+
+/// A drop of a line somebody took back out of the archive is refused,
+/// and takes nothing.
+///
+/// The other half of the same race. A drop is decided against an
+/// archived line — that is where "finished with" is said — and the
+/// standing it was decided against is a field that can move between
+/// the decision and the write, exactly as the work list can. Holding
+/// the condition against the caller's copy of the line would drop a
+/// line somebody is using again, which is the one loss here that
+/// nobody asked for.
+#[tokio::test]
+async fn a_drop_of_a_line_reopened_under_it_is_refused_over_memory() {
+    a_drop_of_a_line_reopened_under_it_is_refused(&World::over_memory()).await;
+}
+
+#[tokio::test]
+async fn a_drop_of_a_line_reopened_under_it_is_refused_over_sqlite() {
+    let (world, driver) = World::over_sqlite().await;
+    a_drop_of_a_line_reopened_under_it_is_refused(&world).await;
+    driver.shutdown().await.unwrap();
+}
+
+async fn a_drop_of_a_line_reopened_under_it_is_refused(world: &World) {
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("boro"))
+        .await
+        .unwrap();
+    world
+        .work
+        .close(&work.id(), Outcome::Abandoned, None, &who("boro"))
+        .await
+        .unwrap();
+    world.clock.set(2);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+
+    // Decided against the archived line, and then somebody wants it
+    // back before the write runs.
+    world.clock.set(3);
+    world.lines.reopen(&line.id(), &who("cyd")).await.unwrap();
+
+    let refused = Lines::discard(&*world.lines_port, &line.id(), &[work.id()])
+        .await
+        .expect_err("a drop is decided against an archived line, and this one is open");
+    assert!(
+        matches!(refused, DomainError::Conflict(_)),
+        "a standing that moved is a race, not malformed input: {refused:?}"
+    );
+
+    // And nothing went: the line still reads, still open, and so does
+    // its work.
+    let stayed = world.lines.get(&line.id()).await.expect("the line stayed");
+    assert_eq!(stayed.standing(), Standing::Open);
+    world
+        .work
+        .get(&work.id())
+        .await
+        .expect("and so did the work");
+}
+
 /// A close whose *work* moved under it is decided again too, and the
 /// pass that arrived is in what lands.
 ///
