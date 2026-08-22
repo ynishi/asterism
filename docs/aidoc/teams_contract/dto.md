@@ -13,6 +13,7 @@ its own (#83 §1).
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
+- `ModelRegistryPublishedDto` — The receipt of `PUT /teams/models/registry` (#126) — the envelope
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.

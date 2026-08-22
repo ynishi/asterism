@@ -21,6 +21,8 @@
 //! | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
 //! | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
 //! | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
+//! | PUT | `/teams/models/registry` | the operator only — instance scope (#126), no team gate |
+//! | GET | `/teams/models/registry` | any authenticated account — the live entry's bytes, verbatim |
 //!
 //! ## The gate (#83 §5: every route, no exceptions)
 //!
@@ -86,8 +88,8 @@ use teams_contract::command::{
     RevokeOwnerCommand, UploadBlobCommand,
 };
 use teams_contract::dto::{
-    BlobUploadedDto, LedgerEventDto, MarkedBlobLinkDto, MarkedBlobsDto, PurgeReclaimedDto,
-    RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
+    BlobUploadedDto, LedgerEventDto, MarkedBlobLinkDto, MarkedBlobsDto, ModelRegistryPublishedDto,
+    PurgeReclaimedDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
 };
 use teams_core::DomainError;
 use teams_core::domain::identity::{
@@ -95,6 +97,7 @@ use teams_core::domain::identity::{
     TeamVerb, may_create_team, verb_allowed,
 };
 use teams_core::domain::ledger::LedgerEvent;
+use teams_core::domain::model_registry::ModelRegistryEntry;
 use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
 use teams_infra::auth::password::AccountRecord;
@@ -122,6 +125,11 @@ enum ApiError {
     /// single variant so the four cannot drift into distinguishable
     /// bodies (see the module doc).
     BlobNotFound,
+    /// `GET /teams/models/registry` while nothing has been published
+    /// (#126) — a plain absence, sayable to any authenticated account:
+    /// which model an instance runs is exactly what the registry
+    /// exists to tell its members.
+    ModelRegistryEmpty,
     /// The auth limiter refused the attempt.
     RateLimited,
 }
@@ -170,6 +178,11 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "NotFound",
                 "no such blob in this team".to_string(),
+            ),
+            Self::ModelRegistryEmpty => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "no model registry entry has been published on this instance".to_string(),
             ),
             Self::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -254,6 +267,13 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         // `404` for every miss instead of the gate's 403/404 split —
         // the module doc's "one deliberate exception".
         .route("/teams/{team_id}/blobs/{digest}", get(read_blob))
+        // Instance scope (#126): no team to gate on. `models` is a
+        // static segment, which axum prefers over the `{team_id}`
+        // capture — the same grammar note as `purge` above.
+        .route(
+            "/teams/models/registry",
+            get(model_registry).put(publish_model_registry),
+        )
         .merge(team_scoped)
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_gate))
         .with_state(ctx);
@@ -835,6 +855,70 @@ async fn read_blob(
     response
         .headers_mut()
         .insert(header::CONTENT_LENGTH, HeaderValue::from(length));
+    Ok(response)
+}
+
+// ----------------------------------------------------------------------
+// Handlers — model registry (#126, the first serving step).
+// ----------------------------------------------------------------------
+
+/// `PUT /teams/models/registry` — the operator only.
+///
+/// The body is the provider's entry, exactly as `asterism-model-lab
+/// registry` printed it; the domain validates the envelope (one JSON
+/// object, the `-v1` schema tag, a non-empty `model_id`) and keeps the
+/// bytes verbatim — the instance is a carrier, not an authority
+/// (#126 decision 2), so nothing deeper is read here. Publishing
+/// supersedes the live entry in the same transaction: one active model
+/// per instance is the distribution invariant (#126 decision 1).
+///
+/// Operator, not owner: which model an instance runs is an instance
+/// concern — it keys every member's derived rows across every team —
+/// so the authority is the instance capacity, the same shape as
+/// closed-registration create.
+async fn publish_model_registry(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    body: String,
+) -> Result<Json<ModelRegistryPublishedDto>, ApiError> {
+    if !account.operator {
+        return Err(ApiError::Forbidden(
+            "publishing the model registry entry is the operator's act; the model is an \
+             instance concern (#126), not any one team's"
+                .to_string(),
+        ));
+    }
+    let entry = ModelRegistryEntry::parse(&body)?;
+    let model_id = entry.model_id().to_string();
+    let published_at_ms = now_ms();
+    ctx.repo.publish_model_entry(entry, published_at_ms).await?;
+    Ok(Json(ModelRegistryPublishedDto {
+        model_id,
+        published_at_ms,
+    }))
+}
+
+/// `GET /teams/models/registry` — any authenticated account; `404`
+/// while nothing has been published.
+///
+/// Serves the provider's bytes verbatim. The member app verifies what
+/// it downloads against this entry's digests through its own package
+/// reader — the entry is the trust anchor and this route is transport
+/// (#126 decision 2), which is why re-serialization has no place here:
+/// the bytes a member checks must be bytes the provider authored.
+async fn model_registry(State(ctx): State<Arc<TeamsCtx>>) -> Result<Response, ApiError> {
+    let entry = ctx
+        .repo
+        .current_model_entry()
+        .await?
+        .ok_or(ApiError::ModelRegistryEmpty)?;
+    // A sized body, so hyper sets the length itself — unlike the blob
+    // route's stream, which has to say it.
+    let mut response = Response::new(Body::from(entry.raw().to_string()));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
     Ok(response)
 }
 
