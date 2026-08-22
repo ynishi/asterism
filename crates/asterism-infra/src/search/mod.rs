@@ -44,6 +44,8 @@
 pub mod fan_out;
 pub mod tantivy_index;
 pub mod tokenizer;
+pub mod visual_retriever;
 
 pub use fan_out::FanOutIndexer;
 pub use tantivy_index::TantivyIndex;
+pub use visual_retriever::VisualAwareRetriever;

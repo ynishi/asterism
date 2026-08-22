@@ -567,6 +567,7 @@ dependencies = [
  "asterism-disclosure-format",
  "asterism-dispatch-sdk",
  "asterism-media-probe",
+ "asterism-vision",
  "async-trait",
  "base64 0.22.1",
  "bytecheck 0.6.12",

@@ -89,3 +89,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Future LLM-backed tools call `agent-block-core` indirectly (out of this
 # crate's dependency graph) to keep the surface small.
 # agent-block-core = { workspace = true }
+
+[features]
+# The ONNX encoder path (#112). Off by default so CI and ordinary
+# builds never download or link onnxruntime; a serve that should bind a
+# model package runs with `--features vision`. Without it the encoder
+# cell stays unset, `Similar` retrieval declines, and every visual job
+# skips — the pre-feature behaviour.
+vision = ["asterism-infra/vision"]
