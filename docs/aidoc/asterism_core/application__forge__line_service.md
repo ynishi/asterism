@@ -5,12 +5,24 @@ own description.
 
 ```text
   open / rename / set_strategy      writes the line's description
+  archive / reopen                  writes the line's standing
   get / states / strategies         reads
+  discard                           reads both logs, writes neither
+                                      — it takes them away
 ```
 
 Nothing here writes to a line's history. A line moves when work
 ends, and that is [`PursuitService::close`](super::PursuitService),
 which is also the only place both logs are written at once.
+
+# The one verb that reads the other log
+
+[`LineService::discard`]. What a drop releases is the union of what
+the line holds and what the work against it holds, so the call that
+drops has to ask the pursuits — and it is the only one here that
+does. Every other verb on this service can answer from a line
+alone, which is why the dependency is worth naming rather than
+assuming.
 
 # What this service is allowed to decide
 

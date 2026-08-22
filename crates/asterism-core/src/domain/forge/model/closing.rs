@@ -14,8 +14,8 @@
 //!                        Closing::Landed { close, point }
 //! ```
 //!
-//! Everywhere else, a decision moves one log. Opening, passing and
-//! taking something in write only to the work log; renaming a line
+//! Everywhere else, a decision moves one log. Opening, adding a round
+//! and taking something in write only to the pursuit; renaming a line
 //! writes only to its own description. This is the exception, and it
 //! is the only one: ending work as satisfied puts a change point on
 //! the line, and the two are one act rather than two that happen to
@@ -50,7 +50,7 @@
 //! # This function does not settle anything
 //!
 //! A collision is refused here, never resolved. Turning one into a
-//! divergence writes a pass into the work log, under the line's
+//! divergence writes a round into the pursuit, under the line's
 //! strategy, and it happens while the work is open — by the time
 //! anybody is closing, the question has been settled or it has not.
 //!
@@ -63,7 +63,7 @@ use crate::domain::forge::model::act::Act;
 use crate::domain::forge::model::change::{collisions, normalise, write_set};
 use crate::domain::forge::model::error::ForgeError;
 use crate::domain::forge::model::history::ChangePoint;
-use crate::domain::forge::model::line::Line;
+use crate::domain::forge::model::line::{Line, Standing};
 use crate::domain::forge::model::pursuit::{Close, Outcome, Pursuit};
 use crate::domain::forge::model::table::Table;
 
@@ -107,7 +107,7 @@ impl Closing {
     ///
     /// The line first, because recording is the half that can still
     /// refuse — the head may have moved, or the table may hand one
-    /// name to two live entries. If it does refuse, the work log is
+    /// name to two live entries. If it does refuse, the pursuit is
     /// untouched and the pursuit is still open, which is the state a
     /// caller can retry from.
     ///
@@ -133,6 +133,10 @@ impl Closing {
 /// - [`NotThisLine`](ForgeError::NotThisLine) — the pursuit is against
 ///   another line. Answering anything else would be judging work
 ///   against a history that has nothing to do with it.
+/// - [`Archived`](ForgeError::Archived) — the line is finished with,
+///   and a satisfied close is the one thing that moves it. Refused
+///   before anything is folded, because the answer does not depend on
+///   what the work asked for.
 /// - [`AlreadyClosed`](ForgeError::AlreadyClosed) — work ends once.
 /// - [`UnknownBase`](ForgeError::UnknownBase) — the node the work was
 ///   cut from is not in this history.
@@ -157,13 +161,22 @@ pub fn close(
         return Err(ForgeError::AlreadyClosed);
     }
 
-    let at = pursuit.log().head();
+    let at = pursuit.head();
 
     if outcome == Outcome::Abandoned {
         return Ok(Closing {
             close: Close::new(at, Outcome::Abandoned, note, act),
             point: None,
         });
+    }
+
+    // Asked before the fold, because it does not depend on it: an
+    // archived line takes no change point, and a satisfied close is a
+    // change point. Work against one that is finished with can still
+    // give up — that is the branch above, and it is the reason this
+    // sits after it rather than beside `NotThisLine`.
+    if line.standing() == Standing::Archived {
+        return Err(ForgeError::Archived);
     }
 
     // What is left after the line's own answer is subtracted. An axis
@@ -232,9 +245,9 @@ mod tests {
         Pursuit::open(line.id(), None, line.head(), Intent::default(), act(1))
     }
 
-    /// Adds a pass carrying `ops`, and hands back the pursuit.
-    fn passing(mut pursuit: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
-        let round = Round::new(pursuit.log().head(), ops, None, act(minute)).unwrap();
+    /// Adds a round carrying `ops`, and hands back the pursuit.
+    fn with_a_round(mut pursuit: Pursuit, ops: Vec<Op>, minute: u32) -> Pursuit {
+        let round = Round::new(pursuit.head(), ops, None, act(minute)).unwrap();
         pursuit.push(round).unwrap();
         pursuit
     }
@@ -242,7 +255,7 @@ mod tests {
     /// Lands `ops` on the line through a pursuit of its own, which is
     /// how the line moves under work that is already open.
     fn landed(line: &mut Line, ops: Vec<Op>, minute: u32) -> ChangePointId {
-        let pursuit = passing(work_on(line), ops, minute);
+        let pursuit = with_a_round(work_on(line), ops, minute);
         let closing = close(line, &pursuit, Outcome::Satisfied, None, act(minute)).unwrap();
         let moved = closing.point().unwrap().id();
         let mut pursuit = pursuit;
@@ -253,7 +266,7 @@ mod tests {
     #[test]
     fn a_satisfied_close_produces_the_change_point_with_it() {
         let line = line();
-        let pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
 
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
 
@@ -273,7 +286,7 @@ mod tests {
     #[test]
     fn an_abandoned_close_puts_nothing_on_the_line() {
         let line = line();
-        let pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
 
         let closing = close(&line, &pursuit, Outcome::Abandoned, None, act(3)).unwrap();
 
@@ -289,7 +302,7 @@ mod tests {
     fn work_that_says_nothing_new_can_still_be_abandoned() {
         let mut line = line();
         let held = content();
-        let pursuit = passing(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
         landed(&mut line, vec![Op::add(held, name("cut-02"))], 3);
 
         assert!(close(&line, &pursuit, Outcome::Abandoned, None, act(4)).is_ok());
@@ -298,7 +311,7 @@ mod tests {
     #[test]
     fn applying_puts_both_nodes_on_their_logs() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
         let moved = closing.point().unwrap().id();
 
@@ -321,7 +334,7 @@ mod tests {
         // Somebody else brings that entry back, with the content and
         // name this work was going to give it.
         landed(&mut line, vec![Op::add_to(entry, held, name("cut-01"))], 2);
-        let mut pursuit = passing(
+        let mut pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, held, name("cut-01"))],
             3,
@@ -348,7 +361,7 @@ mod tests {
     fn the_same_content_arriving_as_a_second_entry_is_not_nothing() {
         let mut line = line();
         let held = content();
-        let pursuit = passing(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
+        let pursuit = with_a_round(work_on(&line), vec![Op::add(held, name("cut-01"))], 2);
         landed(&mut line, vec![Op::add(held, name("cut-02"))], 3);
 
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(4)).unwrap();
@@ -360,7 +373,7 @@ mod tests {
     fn an_axis_the_line_moved_first_and_this_work_has_not_seen_is_refused() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -385,7 +398,7 @@ mod tests {
     }
 
     /// Closing refuses collisions; it never settles them. The line's
-    /// strategy is read where a pass is written, and by the time
+    /// strategy is read where a round is written, and by the time
     /// anybody is closing there is nothing left for it to decide.
     #[test]
     fn closing_refuses_a_collision_whatever_the_strategy_request() {
@@ -393,7 +406,7 @@ mod tests {
             let mut line = line();
             line.set_strategy(StrategyId::new(rule).unwrap(), act(1));
             let entry = EntryId::new();
-            let pursuit = passing(
+            let pursuit = with_a_round(
                 work_on(&line),
                 vec![Op::add_to(entry, content(), name("cut-01"))],
                 2,
@@ -416,7 +429,7 @@ mod tests {
     fn work_that_comes_round_to_the_lines_value_can_close() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -434,7 +447,7 @@ mod tests {
         // Coming round to the line's value, and bringing something of
         // its own that the line has not heard of.
         let theirs = line.states()[&entry].content.unwrap();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             pursuit,
             vec![
                 Op::replace(entry, theirs),
@@ -459,7 +472,7 @@ mod tests {
     fn work_that_is_left_saying_nothing_cannot_close_satisfied() {
         let mut line = line();
         let entry = EntryId::new();
-        let pursuit = passing(
+        let pursuit = with_a_round(
             work_on(&line),
             vec![Op::add_to(entry, content(), name("cut-01"))],
             2,
@@ -470,7 +483,7 @@ mod tests {
             3,
         );
         let theirs = line.states()[&entry].content.unwrap();
-        let pursuit = passing(pursuit, vec![Op::replace(entry, theirs)], 4);
+        let pursuit = with_a_round(pursuit, vec![Op::replace(entry, theirs)], 4);
 
         let refused = close(&line, &pursuit, Outcome::Satisfied, None, act(5));
 
@@ -481,7 +494,7 @@ mod tests {
     fn work_against_another_line_is_refused_rather_than_judged() {
         let line = line();
         let elsewhere = Line::open(name("other"), strategy(), act(0));
-        let pursuit = passing(work_on(&elsewhere), vec![Op::add(content(), name("a"))], 2);
+        let pursuit = with_a_round(work_on(&elsewhere), vec![Op::add(content(), name("a"))], 2);
 
         let refused = close(&line, &pursuit, Outcome::Satisfied, None, act(3));
 
@@ -491,7 +504,7 @@ mod tests {
     #[test]
     fn work_that_has_ended_cannot_end_again() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         close(&line, &pursuit, Outcome::Satisfied, None, act(3))
             .unwrap()
             .apply(&mut line, &mut pursuit)
@@ -509,7 +522,7 @@ mod tests {
     #[test]
     fn a_head_that_moved_after_the_decision_refuses_and_leaves_the_work_open() {
         let mut line = line();
-        let mut pursuit = passing(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
+        let mut pursuit = with_a_round(work_on(&line), vec![Op::add(content(), name("cut-01"))], 2);
         let closing = close(&line, &pursuit, Outcome::Satisfied, None, act(3)).unwrap();
 
         landed(&mut line, vec![Op::add(content(), name("elsewhere"))], 4);
@@ -518,5 +531,23 @@ mod tests {
 
         assert_eq!(refused, Err(ForgeError::NotOnHead));
         assert!(pursuit.outcome().is_none());
+    }
+
+    /// An archived line takes no change point, so the one close that
+    /// would put one there is refused — and the one that would not is
+    /// still allowed, because giving up is not a thing the line has an
+    /// opinion about.
+    #[test]
+    fn an_archived_line_refuses_a_satisfied_close_and_allows_an_abandoned_one() {
+        let mut line = line();
+        let work = with_a_round(work_on(&line), vec![Op::add(content(), name("one"))], 1);
+        line.archive(act(2));
+
+        let refused = close(&line, &work, Outcome::Satisfied, None, act(3));
+        assert!(matches!(refused, Err(ForgeError::Archived)), "{refused:?}");
+
+        let giving_up = close(&line, &work, Outcome::Abandoned, None, act(4))
+            .expect("work against a finished line can still say it gave up");
+        assert!(!giving_up.lands());
     }
 }

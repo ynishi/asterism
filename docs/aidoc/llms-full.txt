@@ -32,15 +32,12 @@ Six subcommands — three that build a corpus, three that measure:
   enqueued, written up as a result file ([`measure`]).
 - `measure-cold` — first-listing cost against a just-restarted
   server, warm repeat alongside it ([`measure`]).
-- `measure-pursuit` — the pursuit membership reads over a seeded
-  100k-asset profile ([`measure_pursuit`]).
 
 Every write path is fenced away from the real library: `seed-meta`
-refuses a database outside `profiles/bench`, everything that speaks
-HTTP refuses the Dogfood port, and `measure-pursuit` writes only a
-throwaway temp directory it creates and removes itself. No fence is
-optional in the direction that matters — there is no flag that
-points any command at the real library.
+refuses a database outside `profiles/bench`, and everything that
+speaks HTTP refuses the Dogfood port. No fence is optional in the
+direction that matters — there is no flag that points any command
+at the real library.
 
 
 <!-- asterism_contract/index.md -->
@@ -125,7 +122,6 @@ convert them into domain types and surface any validation failures as
 - `AttachTagCommand` — Attaches a tag to an asset by name (creates the tag if it does
 - `BatchGroupMembershipCommand` — Applies a batch of group-membership changes in one call: every
 - `CancelJobCommand` — Requests cancellation of a running or pending job.
-- `ClosePursuitCommand` — Closes a pursuit (#29): records a one-way lifecycle fact, never a
 - `ConflictResolution` — How a person answered one raised duplicate question.
 - `CreateDirCommand` — Creates a sidebar Dir under a persona (`parent_id = None` = root).
 - `CreateDispatchCommand` — Kicks off one exporter invocation against a frozen `Snapshot`.
@@ -173,8 +169,6 @@ convert them into domain types and surface any validation failures as
 - `MoveDirCommand` — Re-parents a Dir (`None` = to the root). Rejected when the target
 - `MoveGroupToDirCommand` — Files a Group under a Dir (`None` = back to the root level).
 - `OnDuplicate` — What the caller wants done if the asset being registered turns out
-- `OpenProjectCommand` — Opens a project (#63 decisions 1–2): the repo of the forge's git
-- `OpenPursuitCommand` — Opens a pursuit — the "start new pursuit" affordance (#29), and
 - `OrganizeByLocationCommand` — Auto-organises existing assets under a Dir tree derived from
 - `OrganizeByLocationResult` — Result summary of an `organize-by-location` run.
 - `PasteImageImportCommand` — Writes a clipboard-pasted image blob to disk and dispatches
@@ -193,7 +187,6 @@ convert them into domain types and surface any validation failures as
 - `RebuildEdgesCommand` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `RecordDiagCommand` — Appends one webview-origin diagnostic to `diag_log`
 - `RecordEventCommand` — Appends one telemetry event to the local `event_log` (dogfooding
-- `RecordPursuitTxCommand` — Appends one gesture to a pursuit's membership ledger (#22): an
 - `RedispatchCommand` — Re-runs a finished dispatch with the same frozen input, exporter,
 - `RegisterPersonaCommand` — Registers a new persona in Asterism.
 - `RemoveAssetFromGroupCommand` — Removes an asset from a Group. Idempotent — missing link is a
@@ -202,7 +195,6 @@ convert them into domain types and surface any validation failures as
 - `RenameSavedQueryCommand` — Renames a `SavedQuery`. Uniqueness `(persona_id, name)` is
 - `RenameSessionCommand` — Rewrites a Session's title
 - `RenameTagCommand` — Renames a tag in place (`POST /asterism/tags/rename`).
-- `ReopenPursuitCommand` — Reopens a pursuit (#29). Legal on an already-open pursuit: the
 - `ReorderGroupAssetsCommand` — Rewrites the front-to-back order of a Group. `ordered_asset_ids` is
 - `ReorderGroupChildrenCommand` — Rewrites the order of a Group's child groups. Same drift-tolerant
 - `ReorderPersonasCommand` — Rewrites `display_order` across a persona slice. `ordered_ids`
@@ -328,7 +320,6 @@ the domain types.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
 - `JobsSnapshotDto` — Snapshot of the background-jobs table used by the UI progress
-- `LineDto` — One named line of a project (#63 decisions 1–2) — the branch of the
 - `LineageEdgeDto` — One `derived_from` link in a lineage walk. Direction is
 - `LineageNodeDto` — One asset in a multi-hop lineage walk.
 - `LineageViewDto` — Multi-hop `derived_from` lineage around one asset.
@@ -347,12 +338,7 @@ the domain types.
 - `PersonaDto` — Persona payload.
 - `PersonaProfileDto` — Per-persona identity signal — the avatar / short bio / role
 - `PersonaThemeDto` — Per-persona visual chrome — currently holds the wallpaper asset
-- `ProjectDto` — The repo of the forge's git analogy (#63 decisions 1–2): the shared
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
-- `PursuitDto` — The minted unit of work (#29): one line of generation and curation
-- `PursuitEventDto` — One lifecycle fact about a pursuit (#29): a close or a reopen,
-- `PursuitTxDto` — One gesture in a pursuit's append-only membership ledger (#22):
-- `PursuitViewDto` — One pursuit, opened up (#29): the thin row plus everything the
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
 - `SampledPageDto` — A random handful drawn from the set a filter describes — the answer to
@@ -574,11 +560,9 @@ the private design notes.
 - [`application::dispatch_service`](application__dispatch_service.md): `DispatchService` — the transport-fronted half of the outbound
 - [`application::fold_redirect`](application__fold_redirect.md): Redirecting a named id set through the folds that happened after it
 - [`application::forge`](application__forge.md): Forge use cases — the verbs of a line of work.
-- [`application::forge::legacy_pursuit_service`](application__forge__legacy_pursuit_service.md): `LegacyPursuitService` — the lifecycle verbs of the minted unit of work
 - [`application::forge::line_service`](application__forge__line_service.md): Line use cases — opening one, reading what is on it, and moving its
-- [`application::forge::mapping`](application__forge__mapping.md): Wire parsing for the forge's own ids.
-- [`application::forge::project_service`](application__forge__project_service.md): Project use cases — opening the context work files under, and
-- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing passes, looking at
+- [`application::forge::pursuit_service`](application__forge__pursuit_service.md): Work use cases — opening a line of work, writing rounds, looking at
+- [`application::forge::thread_service`](application__forge__thread_service.md): Saying something about work, and correcting it.
 - [`application::mapping`](application__mapping.md): Conversion between domain types and contract DTOs.
 - [`application::material_layer_service`](application__material_layer_service.md): `MaterialLayerService` — the bands of marks over an Asset's
 - [`application::material_mark_service`](application__material_mark_service.md): `MaterialMarkService` — the marks placed into an Asset's material.
@@ -626,30 +610,26 @@ the private design notes.
 - [`domain::forge::boundary::store`](domain__forge__boundary__store.md): The face that asks downward, and the client that speaks it.
 - [`domain::forge::clock`](domain__forge__clock.md): What time it is.
 - [`domain::forge::closings`](domain__forge__closings.md): Ending work — the one call that writes to both logs.
-- [`domain::forge::line`](domain__forge__line.md): `Line` — a project's canonical set, and the forge identity that
 - [`domain::forge::lines`](domain__forge__lines.md): Keeping lines, stated in the forge's own words.
 - [`domain::forge::model`](domain__forge__model.md): The forge's model — the domain, and only the domain.
 - [`domain::forge::model::act`](domain__forge__model__act.md): When something happened, and who did it.
 - [`domain::forge::model::change`](domain__forge__model__change.md): Putting work on a line — the one place both logs are read at once.
 - [`domain::forge::model::closing`](domain__forge__model__closing.md): Ending work — the one act that moves both logs.
+- [`domain::forge::model::discard`](domain__forge__model__discard.md): What goes when a line goes, and what that lets go of.
 - [`domain::forge::model::error`](domain__forge__model__error.md): What the model refuses.
 - [`domain::forge::model::history`](domain__forge__model__history.md): A line's history: what it carries, and how it got there.
 - [`domain::forge::model::line`](domain__forge__model__line.md): The line — the forge's top entity.
 - [`domain::forge::model::op`](domain__forge__model__op.md): What work writes, and what it folds into.
-- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every pass at it.
+- [`domain::forge::model::pursuit`](domain__forge__model__pursuit.md): One line of work: what it is trying to do, and every round at it.
 - [`domain::forge::model::react`](domain__forge__model__react.md): Letting a line's rule answer a collision.
+- [`domain::forge::model::restore`](domain__forge__model__restore.md): Building the model back from what a store kept.
 - [`domain::forge::model::strategy`](domain__forge__model__strategy.md): How a line settles a collision — the contract, and not the rule.
 - [`domain::forge::model::table`](domain__forge__model__table.md): What a change point carries, and what folding a sequence of them
 - [`domain::forge::model::thread`](domain__forge__model__thread.md): Saying something about work.
 - [`domain::forge::model::value`](domain__forge__model__value.md): The values the model is made of.
-- [`domain::forge::project`](domain__forge__project.md): `Project` — the repo of the forge's git analogy (#63): the shared
-- [`domain::forge::pursuit`](domain__forge__pursuit.md): `Pursuit` — the minted unit of work: one line of generation and
-- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping work logs, stated in the forge's own words.
-- [`domain::forge::repository`](domain__forge__repository.md): The forge's persistence ports.
+- [`domain::forge::pursuits`](domain__forge__pursuits.md): Keeping pursuits, stated in the forge's own words.
 - [`domain::forge::strategies`](domain__forge__strategies.md): The rules a line can settle collisions by, and the lookup that
 - [`domain::forge::threads`](domain__forge__threads.md): Keeping what was said about work.
-- [`domain::forge::tx`](domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
-- [`domain::forge::value`](domain__forge__value.md): The forge's surrogate ids.
 - [`domain::generator_params`](domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [`domain::group`](domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [`domain::instance`](domain__instance.md): Instance identity — the referent behind
@@ -1014,36 +994,25 @@ trash view's hydration depends on that.
 
 Forge use cases — the verbs of a line of work.
 
-[`legacy_pursuit_service`] owns the lifecycle (open / close / reopen) and
-the reads over it; [`project_service`] owns the filing it hangs
-under. They are apart from the rest because they are the only
-services here whose writes carry intent rather than content (the
-layer itself is described in
+[`LineService`] owns the repository a history sits on: opening one,
+reading what is alive on it, and moving the two things about a line
+that are not written into its history — its name and the rule it
+settles collisions by. [`PursuitService`] owns work against a line:
+opening it, adding a round, running the line's rule over what the
+work collides with, and ending it. They are apart from the rest
+because they are the only services here whose writes carry intent
+rather than content (the layer itself is described in
 [`domain::forge`](crate::domain::forge)).
 
-# Which model a service here serves
+Neither has a transport. The first model's did, and it went with it
+on #102; what these two are reachable through today is a caller
+inside the process, and the adapter under them is where that
+changes.
 
-Two live side by side while one replaces the other, so this is
-worth being able to tell at a glance rather than by reading:
-
-```text
-  legacy_pursuit_service   PursuitEvent / PursuitTx / standing
-                           wired to transport, extended by nobody,
-                           deleted when its replacement is wired
-
-  (arriving)               domain::forge::model — a line's history
-                           as a chain, work as a log of passes
-```
-
-The naming is deliberate: what is leaving carries the qualified
-name, and the plain one belongs to what stays. A file named for the
-current model, serving the old one, is the thing this avoids.
-
-Nothing in the raw layer is edited by either of them. Closing a
-pursuit records that a line of work ended and touches no asset: no
-trash, no label, no rating. Integrating the conclusion back into the
-library is the raw layer's own business, and stays on the raw
-layer's verbs.
+Nothing in the raw layer is edited by either of them. Ending work
+records that it ended and touches no asset: no trash, no label, no
+rating. Integrating the conclusion back into the library is the raw
+layer's own business, and stays on the raw layer's verbs.
 
 # Which way the services may point
 
@@ -1069,45 +1038,6 @@ they are everywhere else, because they belong to neither side. The
 rule is about capability, never about what something is.
 
 
-<!-- asterism_core/application__forge__legacy_pursuit_service.md -->
-# asterism-core::application::forge::legacy_pursuit_service
-
-`LegacyPursuitService` — the lifecycle verbs of the minted unit of work
-(#29): open, close, reopen, and the reads that derive standing.
-
-**This is on its way out, and the name says so.** The model it
-serves — `PursuitEvent`, `PursuitTx`, the standing derived from
-them — is superseded by [`model`](crate::domain::forge::model),
-where a line's history is a chain of change points and work is a
-log of passes. Nothing here is being extended.
-
-It is still the one wired to transport, so it stays until the
-service that replaces it can answer the same surface. That service
-is `PursuitService`, which took this one's name: the code that is
-leaving carries the awkward one, so that a reader never has to work
-out which of two same-named services is current.
-
-When the replacement is wired, this file and the model under it go
-in one deletion. Until then, a change here is a change to something
-scheduled for removal, and is worth questioning on those grounds
-alone.
-
-The open creates one (naming intent up front), the one-way
-lifecycle facts (close / reopen) are recorded rather than written
-as a status, and the ledger takes the membership gestures.
-Transport routes land in the next slice of #29; until then the
-service fronts the e2e surface through `CoreCtx`, the same way
-every service is reachable there.
-
-The close writes one row and materialises nothing: it records that
-a line of work ended, and what the line of work was on stays
-derivable from the ledger it leaves alone.
-
-## Types
-
-- `LegacyPursuitService` — Pursuit lifecycle use-case service.
-
-
 <!-- asterism_core/application__forge__line_service.md -->
 # asterism-core::application::forge::line_service
 
@@ -1116,12 +1046,24 @@ own description.
 
 ```text
   open / rename / set_strategy      writes the line's description
+  archive / reopen                  writes the line's standing
   get / states / strategies         reads
+  discard                           reads both logs, writes neither
+                                      — it takes them away
 ```
 
 Nothing here writes to a line's history. A line moves when work
 ends, and that is [`PursuitService::close`](super::PursuitService),
 which is also the only place both logs are written at once.
+
+# The one verb that reads the other log
+
+[`LineService::discard`]. What a drop releases is the union of what
+the line holds and what the work against it holds, so the call that
+drops has to ask the pursuits — and it is the only one here that
+does. Every other verb on this service can answer from a line
+alone, which is why the dependency is worth naming rather than
+assuming.
 
 # What this service is allowed to decide
 
@@ -1146,67 +1088,16 @@ rule nobody chose, and no record would say so.
 - `LineService` — Line use-case service.
 
 
-<!-- asterism_core/application__forge__mapping.md -->
-# asterism-core::application::forge::mapping
-
-Wire parsing for the forge's own ids.
-
-Two functions, and they are here rather than in
-[`application::mapping`](crate::application::mapping) for one
-reason: that module is the raw layer's, and a forge id parsed there
-made the raw layer name a forge type (#81). Nothing but the forge's
-services ever called them.
-
-The uuid reading itself stays shared — [`parse_uuid`] is about
-uuids, not about either side, and two copies of "is this a uuid"
-would be two error messages for one mistake.
-
-## Functions
-
-- `parse_project_id` — Parses the wire representation of a project id.
-- `parse_pursuit_id` — Parses the wire representation of a pursuit id.
-
-
-<!-- asterism_core/application__forge__project_service.md -->
-# asterism-core::application::forge::project_service
-
-Project use cases — opening the context work files under, and
-reading it back (#63 decisions 1–2).
-
-**Deprecated.** The model this serves is replaced by
-[`model`](crate::domain::forge::model), where a line is the top and
-nothing groups lines inside the forge.
-
-Thin next to [`legacy_pursuit_service`](super::legacy_pursuit_service), and it
-stays that way while the merge is unwritten: a project has no
-lifecycle of its own. It is opened, it is read, and everything that
-happens *to* it happens through the pursuits filed under it.
-
-Two rules live here rather than in the schema, for opposite
-reasons. **Name uniqueness among one persona's projects** is
-application-side and read-checked, so two callers racing can both
-find the name free and both write it — the rule is advisory under
-concurrency, and closing that is a schema decision (a partial
-UNIQUE) rather than a service one. **The line minted with the
-project** is the other way round: the repository writes both in one
-transaction, and this layer only decides that there is exactly one
-and what it is called.
-
-## Types
-
-- `ProjectService` — Project use-case service.
-
-
 <!-- asterism_core/application__forge__pursuit_service.md -->
 # asterism-core::application::forge::pursuit_service
 
-Work use cases — opening a line of work, writing passes, looking at
+Work use cases — opening a line of work, writing rounds, looking at
 what the line did, and ending it.
 
 ```text
-  open      reads the line's head, writes the work log
-  push      writes the work log. does not read the line
-  resolve   reads the line, writes the work log
+  open      reads the line's head, writes the pursuit
+  push      writes the pursuit. does not read the line
+  resolve   reads the line, writes the pursuit
   close     reads both, writes both — the only one
 
   collisions / behind    read both, write nothing
@@ -1215,32 +1106,77 @@ what the line did, and ending it.
 Four verbs and two questions, and only one of them touches a line's
 history. That asymmetry is the point of the design rather than an
 accident of it: the operation that happens most often, writing a
-pass, never reads the line at all, so two people working against
+round, never reads the line at all, so two people working against
 one line do not contend until one of them finishes.
 
 # What this service is allowed to decide
 
-Nothing. It loads what the model needs, calls it, writes back what
-came out, and — for the one operation that can lose a race — reads
-again and asks again. Every refusal in here comes from the model or
-from a port.
+Nothing. It loads what the model needs, calls it, and writes back
+what came out. Every refusal in here comes from the model or from a
+port.
 
-# Losing the race is not an error to report
+# Losing the race is not an error to report, and not answered here
 
 Two pieces of work can finish against one line at the same moment,
-and only one of them lands on the head. The other is told, and this
-service reads the line again and decides again rather than handing
-that back to a caller.
+and only one of them lands on the head. What the loser needs is a
+fresh decision against the line that won — not the same answer
+written again, because normalising against a line that has moved
+may leave less to record than there was, or more to collide with.
 
-It matters that this is a fresh decision and not a retry of the old
-one. Reading again means normalising against a line that has moved,
-so what the work still changes may be less than it was, and what it
-now collides with may be more. Handing back the same answer would
-be writing a decision made against a line that no longer exists.
+Deciding that again is the model's, and the moment to do it belongs
+to whoever is holding the write. So this service hands the store
+[`Deciding`] along with what it decided, and the store asks for a
+second answer under its own lock if the first is refused. Reading
+again from here and trying again would be deciding against a line
+that can move between the read and the write, once per attempt, for
+as many attempts as anybody has patience for.
 
 ## Types
 
 - `PursuitService` — Work use-case service.
+
+
+<!-- asterism_core/application__forge__thread_service.md -->
+# asterism-core::application::forge::thread_service
+
+Saying something about work, and correcting it.
+
+```text
+  open      resolves an anchor, writes the thread and its first message
+  say       writes a message
+  amend     writes a correction
+  rename    writes the thread's title
+
+  get / anchored / about    read
+```
+
+Nothing here touches either log. A conversation about a round does
+not change what the round said, and a remark on a change point does
+not move the line — which is why this is a third face rather than
+more verbs on the two that write records.
+
+# An anchor is resolved, not accepted
+
+[`Anchor`] is built from the thing itself rather than from its id,
+so that a thread hanging off something nobody wrote is not a value
+anybody can make. A caller with an id has not got the thing, so
+this service reads it: [`Anchored`] names what to look for, and
+every verb that takes one loads the pursuit or the line before a
+thread exists.
+
+That is the whole of what this service decides, and it decides it
+by asking. The refusals are the model's — an entry a round did not
+touch is [`Anchor::entry`]'s refusal, not one written here.
+
+# What this service is allowed to decide
+
+Nothing else. It resolves, calls the model, and writes back what
+came out.
+
+## Types
+
+- `Anchored` — What a caller says a thread hangs off, in ids.
+- `ThreadService` — Conversation use-case service.
 
 
 <!-- asterism_core/application__mapping.md -->
@@ -3485,30 +3421,27 @@ verdict — which is the failure mode this split exists to prevent.
 # The loop
 
 ```text
-  open
-    │
-    v
-  IN ──> the ledger ──> what the line of work is on
-    ^                            │
-    │                            │
-    └──── an asset the owner ─────┤
-          already holds           │
-                                  v
-                                close
-                         pursuit_event.closed_satisfied
-                         (or .closed_abandoned — nothing lands)
+   Line = repository            Pursuit = the pursuit
+    └ History                    └ Open → Round* → Close
+       Genesis → ChangePoint*       Open → Round* → Close
+              ▲ head                  └ base ── cut from a ChangePoint
+              │                              │
+              └──── close(Satisfied) ────────┘
 ```
 
-[`pursuit`] is the minted unit of work and its lifecycle facts. What
-it takes up is an asset the owner already manages — an ordinary
-raw-layer row, staged into the pursuit by a ledger gesture. The
-forge does not hold a working copy, and there is no state to
-integrate at the end. What the close integrates is a *decision*.
+[`model`] is where that is written down, and it is the whole of what
+the forge holds: a line's history as a chain of change points, work
+as a log of rounds, and the one act that moves both. What work takes
+up is an asset the owner already manages — an ordinary raw-layer
+row, named by an operation. The forge does not hold a working copy,
+and there is no state to integrate at the end. What the close
+integrates is a *decision*.
 
-**Membership** — what a line of work is working on — moves through
-the ledger ([`tx`]): every entry, removal and reversal is an
-append-only gesture, and membership derives on read. The close
-records that the line of work ended and selects nothing out of it.
+Nothing here is stored yet. The ports are [`lines`], [`pursuits`],
+[`closings`] and [`threads`]; what satisfies them lives outside this
+crate, and reading one back goes through
+[`model::restore`] — the one door a stored value
+comes in by.
 
 # The boundary
 
@@ -3566,10 +3499,10 @@ whether or not anybody is pursuing anything.
 [`asset_comment`](crate::domain::asset_comment) are annotation
 surfaces both layers write to.
 
-Background: the workflow design on #21, implemented by #29 and #34.
-The domain model this layer is growing toward is #63, and [`model`]
-is where it is written down — both logs, and the one act that moves
-them together.
+Background: the workflow design on #21. The model this layer holds
+was settled on #63, and the first one — a pursuit whose standing
+derived from lifecycle events, a ledger beside it, a line moved one
+verb at a time — was removed whole on #102 rather than migrated.
 
 [`Snapshot`]: crate::domain::snapshot::Snapshot
 
@@ -3802,8 +3735,13 @@ means once it is written.
 
 A forge node does not move once recorded, so a wrong time is wrong
 for good. And the chain — not the clock — is what orders a history,
-so a wrong time breaks nothing: no fold reads it, no comparison
-depends on it, nothing fails. What it does instead is answer a
+so a wrong time breaks nothing: no fold reads it and nothing fails.
+One thing is ordered by it and it is the exception that shows the
+rule — a conversation, which has no chain to read an order out of
+(see [`thread`](crate::domain::forge::model::thread)). A backwards
+clock swaps two remarks there and refuses nothing; the one order it
+cannot produce, an answer before its question, is put right when the
+conversation is read. What a wrong time does instead is answer a
 question incorrectly, quietly, for as long as the record exists.
 
 That question is not incidental. A record of a selection has to say
@@ -3864,17 +3802,24 @@ nothing to compensate for afterwards — an ending that half-happened
 would leave the two logs disagreeing about whether work is over,
 and no later read could tell which of them was right.
 
-**Conditional on the head.** `on` is the node the line was at when
-the closing was decided. If the line has moved since, the write is
-refused with [`Conflict`](DomainError::Conflict) and nothing is
-kept — the decision was made against a line that no longer exists,
-and writing it anyway would undo whatever arrived in between.
+**On the parent nothing has taken.** A closing names the node it
+sits on, and two nodes on one parent is a fork. The write refuses
+one, which is what "the line moved since this was decided" looks
+like from underneath — somebody else's change point is already
+where this one would go.
 
-That condition is the whole of the concurrency story. Nothing is
-locked while a caller decides, no order is imposed on who gets to
-close first, and a caller that loses reads the line again and
-decides again — where the collision with whoever won becomes
-visible in the ordinary way.
+**Decided again, once, by whoever is holding the write.** A caller
+that loses that race does not hear about it. The store asks
+[`Deciding`] for an ending against the two logs as the write finds
+them, and that attempt is final: the caller decided outside the
+write, where the line could still move, and this one is decided
+inside it, where it cannot.
+
+That is the whole of the concurrency story. Nothing is locked while
+a caller decides, no order is imposed on who gets to close first,
+and losing costs one re-decision rather than a round trip — where
+the collision with whoever won becomes visible in the ordinary way,
+because deciding again is deciding against the line that won.
 
 # How it is achieved is not stated here
 
@@ -3897,78 +3842,7 @@ with the hard one.
 ## Traits
 
 - `Closings` — Keeps what ending work produced.
-
-
-<!-- asterism_core/domain__forge__line.md -->
-# asterism-core::domain::forge::line
-
-`Line` — a project's canonical set, and the forge identity that
-makes "the living one" a derivable fact (#63 decisions 1–3).
-
-Raw asset ids are one-off: a replacement is a different row, and
-nothing in the core says the new row *is* the old thing, newer. The
-entry is that statement — a minted identity above asset ids — and
-the four merge verbs (add / replace / delete / rename) are the only
-things that ever move it. Liveness, current name, and current
-version all derive on read from the verb sequence, exactly like
-`PursuitStanding`: latest event per entry wins, and history is the
-sequence itself, not a second record of it.
-
-# Shape
-
-- [`Line`] is one named line of a project — the branch of the git
-  analogy. v1 mints exactly one per project, named [`Line::MAIN`]
-  (application-enforced), so "the mainline" is a description — the
-  line named `main` — rather than a type of its own, and the
-  schema admits siblings before the code does (the V82 admit-ahead
-  stance).
-- [`LineEntry`] is the identity; it carries no name column —
-  the current name is the latest naming verb's, so renames are
-  history like everything else.
-- [`LineEvent`] is one verb applied to one entry.
-  [`LineVerb`] carries each verb's payload so a caller cannot
-  file an add without a name or a delete with an asset; storage
-  enforces the same pairing with two-way CHECKs.
-- [`Merge`] is the record that one satisfied close applied its
-  verbs — approval *is* the merge event, so every event names the
-  merge it landed under, and who approved derives through the
-  close event's attribution rather than being copied here.
-
-# The boundary, restated
-
-A line *references* asset ids; it never annotates or mutates
-an asset (the PR #62 rule). A dead entry's asset row stays live and
-restorable — `delete` is a statement about the canonical set, not
-about bytes, and it keeps the same distance from trash that every
-other forge verb does.
-
-# Invariants (service-enforced, entity-checked where local)
-
-- Verb payload pairing and non-blank names are checked here.
-- Living-name uniqueness within a line is an application rule
-  checked at merge time — dead names are reusable, so it cannot be
-  a schema constraint.
-- An entry's first event is an `add`; later events land on an
-  existing entry. The write path (P3) enforces this; on read the
-  derive tolerates a dangling tail by answering `None` on the axes
-  the missing `add` would have filled. That tolerance is *weaker*
-  than the ledger's, which drops a dangling gesture's asset from
-  membership outright (`tx.rs`) — deliberately so: an event row
-  names an entry that exists, so deriving its presence states
-  nothing false, where a membership would.
-
-## Functions
-
-- `entry_state` — Derives one entry's state from its events: latest by
-
-## Types
-
-- `EntryState` — One entry's derived position: alive or dead, and what it currently
-- `Line` — One named line of a project. v1 restricts a project to exactly one,
-- `LineEntry` — The forge identity above raw asset ids (#63 decision 1). Deliberately
-- `LineEvent` — One verb applied to one entry, filed under the merge that landed it.
-- `LineVerb` — The closed set of merge verbs, payload included (#63 decision 2).
-- `Merge` — The record that one satisfied close applied its verbs (#63 decision
+- `Deciding` — Ending work, against the two logs as they are handed over.
 
 
 <!-- asterism_core/domain__forge__lines.md -->
@@ -4002,14 +3876,22 @@ and recording checks its head. Handing back less would move those
 rules to whoever answers this call, and there would be as many
 copies of them as there are implementations.
 
-# There is nothing that removes
+# Nothing removes part of a line, and one call removes all of it
 
-No delete, no truncate, no rewrite of a recorded node — the same
-absence the model has, for the same reason: everything that ever
-happened stays reachable, and a path that exists gets called.
-Renaming a line and changing its strategy are here because they
-move a line's own description, which is a record the history does
-not keep.
+No truncate, no rewrite of a recorded node, no delete of anything
+inside a history — the same absence the model has, for the same
+reason: everything that ever happened stays reachable, and a path
+that exists gets called. Renaming a line, changing its strategy and
+archiving it are here because they move a line's own description,
+which is a record the history does not keep.
+
+[`Lines::discard`] is the exception, and it is whole-line or
+nothing. A line that holds bytes somebody else may want back has to
+be lettable-go of somehow, and the model's answer is that the way
+out is the whole way out: archive it, end the work against it, and
+then it goes with everything under it. Half of it going is the
+state that would leave a history unreadable, which is what every
+other absence here is protecting.
 
 # The error is the shared one
 
@@ -4178,18 +4060,24 @@ say no to stays readable in one place.
 
 # The two logs, and the one place they meet
 
-A history says what changed; a work log ([`pursuit`]) says what
+A history says what changed; a pursuit ([`pursuit`]) says what
 somebody proposes. Neither reads the other, and a change point
 names the pursuit it came out of without knowing anything else
 about it.
 
-Two modules read both at once, and they are the only ones.
+Three modules read both at once, and they are the only ones.
 [`change`] answers what work *would* do to a line — what would
 actually move, and whether anybody moved it first — and answers
 nothing else, because what to do about a collision is a decision.
 [`closing`] is that decision for the one act that ends work: it
 returns the close and, when the work is satisfied, the change point
 born with it, in one value that cannot be taken apart.
+
+[`discard`] is there for a different reason than those two. They
+answer what work *means* against a line; it answers what is lost
+when a line goes — the union of what both records hold, asked as a
+union so that a caller cannot add up half of it and call the rest
+released.
 
 That is also where the two constructors went. `Close::new` and
 `ChangePoint::new` are closed to this module and, outside tests,
@@ -4205,24 +4093,26 @@ answered is a word people use about their work rather than a shape
 the record has.
 
 **Settling a collision.** Turning one into a divergence writes a
-pass into the work log under the line's strategy, and it happens
+round into the pursuit under the line's strategy, and it happens
 while the work is open. [`closing`] refuses what was never settled;
 it does not settle anything itself.
 
-**Building any of this back from stored values.** Every constructor
-here mints: a line mints its id and its genesis, work mints its id
-and its opening node, a pass mints a node id. There is no
-`from_persisted` anywhere in this module, which means the read half
-of the ports — handing back a whole [`Line`] or a whole pursuit —
-has no implementation but a fake that keeps the objects themselves.
+**A second way to build any of this back from stored values.**
+Every constructor here mints: a line mints its id and its genesis,
+work mints its id and its opening node, a round mints a node id. The
+one place a value is built holding an id somebody else chose is
+[`restore`], and that is the whole of the door.
 
-That is a decision rather than an oversight, and it is worth being
-read as one. A rehydration constructor has to take every field
-including the ids, so it is the one door through which a stored row
-can contradict a rule this module holds — and the shape it should
-take is decided by what a store actually keeps, which is not
-written yet. It arrives with the first adapter, and until then a
-port's read half is a contract nothing has had to satisfy.
+It is one module rather than a `from_persisted` on each type
+because of what it is. A rehydration constructor takes every field
+including the ids, so it is where a stored row could contradict a
+rule this module holds; spread across the types, there would be a
+piece of it on each and nothing that reads as the whole. What
+keeps it honest is that it assembles nothing itself — the nodes go
+back one at a time through [`History::record`], `Pursuit::push` and
+`Pursuit::end`, so a stored chain meets the refusals a fresh write
+meets, and a store that kept something the model would not have
+written cannot hand it back as though it had.
 
 **Whether two contents are the same thing.** An add is taken at its
 word: an entry arrives because somebody meant to put one there, and
@@ -4230,6 +4120,18 @@ byte-identical content on another entry does not make it fewer than
 two entries. The layer that holds the bytes answers sameness, and
 the forge sees only its outcome — the same [`Content`] coming back.
 The whole of the reasoning is in [`op`].
+
+**A way to release what a line holds without dropping the line.**
+Every content a change point named is held for as long as the line
+exists, and taking the entry off does not release it — the change
+point that put it there is still in the chain. There is no filter,
+no rebase, no editing a point after the fact, and that is a
+decision rather than a gap: a filtered change point could not name
+the work it came out of, because that work asked for something
+else. What a filter is for is reachable already — open a new line
+and put on it what should have been there, which is a new history
+rather than an edited one — and the old line is then archived and
+dropped. See [`line`] for the standing those two words name.
 
 **Anything about people.** No owner, no persona, no actor set.
 [`Act`] records who did a thing, because a history that cannot say
@@ -4242,6 +4144,7 @@ but neither is a place a reader has to go: what is true of the
 model is stated here, beside the types that hold it.
 
 [`Line`]: line::Line
+[`Standing`]: line::Standing
 [`Line::ROOT`]: line::Line::ROOT
 [`History`]: history::History
 [`History::begin`]: history::History::begin
@@ -4456,8 +4359,8 @@ Ending work — the one act that moves both logs.
                        Closing::Landed { close, point }
 ```
 
-Everywhere else, a decision moves one log. Opening, passing and
-taking something in write only to the work log; renaming a line
+Everywhere else, a decision moves one log. Opening, adding a round
+and taking something in write only to the pursuit; renaming a line
 writes only to its own description. This is the exception, and it
 is the only one: ending work as satisfied puts a change point on
 the line, and the two are one act rather than two that happen to
@@ -4492,7 +4395,7 @@ value rather than a mutation somebody has to go looking for.
 # This function does not settle anything
 
 A collision is refused here, never resolved. Turning one into a
-divergence writes a pass into the work log, under the line's
+divergence writes a round into the pursuit, under the line's
 strategy, and it happens while the work is open — by the time
 anybody is closing, the question has been settled or it has not.
 
@@ -4508,6 +4411,68 @@ refused here is the state the logs are actually in.
 ## Types
 
 - `Closing` — What ending work produced.
+
+
+<!-- asterism_core/domain__forge__model__discard.md -->
+# asterism-core::domain::forge::model::discard
+
+What goes when a line goes, and what that lets go of.
+
+```text
+  Line (Archived)          Pursuit*  (against it, all ended)
+    └ holds ──┐              └ holds ──┐
+              ▼                        ▼
+           releases(line, work) ──▶ every Content this line and
+                                    its work stop holding
+```
+
+# What it does not say
+
+**That anything is free afterwards.** This answers for one line and
+the work against it, which is all it is given and all it could
+check. Another line naming the same content goes on holding it, and
+a caller reading this as "safe to delete" would be reading a claim
+about one holder as a claim about every holder.
+
+What catches that is the store: the reference is a foreign key, and
+deleting content a second line names is refused there. That refusal
+names a column and no more, which is exactly the shape the persona
+purge was given a message for — so a caller acting on this set has
+the same work to do, and this module is not the place it gets done.
+Answering "is anything else holding it" needs every line, and
+nothing here has them.
+
+# Why this is one answer rather than two
+
+A line holds what its chain named; a pursuit holds what its
+operations named. Dropping a line takes the work against it —
+a log cut from a history that no longer exists is a record of a
+proposal against nothing, and its base names a node that is gone.
+So the set that becomes releasable is the union, and asking for it
+as a union is the point: a caller adding the two up itself is a
+caller that can forget the second one, and forgetting it looks
+exactly like success.
+
+# This module reads both logs
+
+It is the third that does, after [`change`](super::change) and
+[`closing`](super::closing), and the reason is different from
+theirs. Those two answer what work *means* against a line. This one
+answers what is lost — a question about the two records as records,
+which is why it takes the work as a slice rather than reaching for
+it: a line does not keep a list of its pursuits, and one that did
+would be a second answer to what the pursuits already say.
+
+# It does not drop anything
+
+There is no delete here, as there is nowhere else in this module —
+see the model's own note on that. What this returns is what a drop
+*would* release, together with the refusals that say a drop may not
+happen at all. Whatever does the deleting asks first.
+
+## Functions
+
+- `releases` — What dropping this line would let go of.
 
 
 <!-- asterism_core/domain__forge__model__error.md -->
@@ -4668,9 +4633,66 @@ carries, and a rename did not — and recording one does not touch
 differently" would otherwise collapse into one value that answers
 neither question.
 
+# Standing, and why it is not in the history
+
+```text
+  Open ──archive──▶ Archived ──(drop)──▶ gone
+    ▲                   │                  │
+    └──── reopen ───────┘        what it held is released
+  takes change points   readable, holds
+                        everything still
+```
+
+[`Standing`] sits beside the name and the strategy rather than in
+the chain, for the same reason a rename is not a change point: the
+history says what happened to what the line *carries*, and "this
+line is finished with" is a statement about the line. It moves
+[`Meta`] and nothing else.
+
+**Dropping is reachable only through the archive**, as purging is
+reachable only through the trash everywhere else here. Two steps,
+because the second one is irreversible and takes the history with
+it.
+
+# What a line holds, and why anything cares
+
+[`Line::holds`] is every [`Content`] any change point on the line
+has ever named. It is not a cache and not a second record — it is a
+fold, like everything else about a line — but it is the one fold
+something outside the forge has to act on: **while a line holds a
+content, the layer that keeps the bytes may not let it go.**
+
+An entry taken off the line does not release what it held. The
+change point that put it there is still in the chain and still
+names it, and the chain is not rewritten. So the set only ever
+grows, and the only thing that shrinks it is dropping the line.
+
+That is deliberate rather than unfortunate. A line says what is on
+it *now*: `alive`, under this name, at this content. A line saying
+that about bytes somebody deleted is a line telling a lie about the
+present, which is a different thing from a log of past events —
+those stay true whatever happens to what they name, which is why
+the ledger this model replaced could name an asset without holding
+it.
+
+# Rewriting is not a verb here
+
+There is no filter, no rebase, no editing a change point after the
+fact. Wanting one is usually wanting to release a content without
+dropping everything, and the answer is that the same result is
+reachable with the verbs that already exist: open a new line, and
+put on it what should have been there. That is a new history rather
+than an edited one, which is what it honestly is — the change
+points of a filtered line could not name the work they came out
+of, because that work asked for something else.
+
+What the old line then needs is to be archived and dropped, which
+is the pair above.
+
 ## Types
 
 - `Line` — One repository: an identifier, a history, and how it settles
+- `Standing` — Whether a line is still being worked on.
 
 
 <!-- asterism_core/domain__forge__model__op.md -->
@@ -4766,11 +4788,11 @@ says nothing about its existence, and should not.
 <!-- asterism_core/domain__forge__model__pursuit.md -->
 # asterism-core::domain::forge::model::pursuit
 
-One line of work: what it is trying to do, and every pass at it.
+One line of work: what it is trying to do, and every round at it.
 
 ```text
   Pursuit ── of : →Line ── parent? : →Pursuit
-   └ WorkLog
+   └ Open → Round* → Close
        Open ──▶ Round ──▶ Round ──▶ Close?
          │        │  └ ops
          │        └ parent
@@ -4781,12 +4803,12 @@ The shape mirrors a line's history deliberately: a root that is not
 like the others, a chain that only grows, and everything the thing
 currently asks for derived by folding it. What differs is what the
 nodes carry — a line's node carries a table that has changed it, a
-work log's carries operations that have not changed anything yet.
+pursuit's carries operations that have not changed anything yet.
 
-# A pass is the unit, not the pursuit
+# A round is the unit, not the pursuit
 
 [`Round`] is where work happens. A pursuit is the container that
-says what the passes are for, and it holds nothing that a round
+says what the rounds are for, and it holds nothing that a round
 could hold instead.
 
 A round that writes nothing is refused. Work is what a person does
@@ -4805,7 +4827,7 @@ the two is how that is found out — so a base that crept forward
 would shrink the window every time somebody looked at it, and a
 change nobody ever reconciled would come out clean.
 
-# A pass is a write, and nothing else
+# A round is a write, and nothing else
 
 There is no node here that records having looked at something.
 Work stops colliding with a line by *saying something different*,
@@ -4819,7 +4841,7 @@ whatever depended on it could be had for nothing.
 pushed after it. Satisfied means the intent was met — the act that
 turns that into a change point spans both logs and is not here.
 Abandoned means it was not, and that is a record rather than a
-deletion: the pass that was dropped stays readable, which is the
+deletion: the round that was dropped stays readable, which is the
 only way "we tried this and stopped" survives.
 
 Reopening is not a verb. Picking work back up is a new pursuit
@@ -4843,8 +4865,7 @@ looking — and a stored answer would be a second copy of it.
 - `Open` — The node work begins at.
 - `Outcome` — How a pursuit ended.
 - `Pursuit` — One line of work against one line.
-- `Round` — One pass at the work.
-- `WorkLog` — The chain of passes.
+- `Round` — One round at the work.
 
 
 <!-- asterism_core/domain__forge__model__react.md -->
@@ -4855,7 +4876,7 @@ Letting a line's rule answer a collision.
 ```text
   collisions(L, W)
        ├─ none ─────────────────────────────────► nothing to do
-       └─ some ──► Strategy::resolve ──► ops ──► a pass, written by the server
+       └─ some ──► Strategy::resolve ──► ops ──► a round, written by the server
                          │                 │
                          │                 └─ checked: do these actually settle it?
                          └─ none ──────────────► the collision stands, for a person
@@ -4863,7 +4884,7 @@ Letting a line's rule answer a collision.
 
 **A rule does nothing a person could not have done.** It writes the
 operations somebody resolving by hand would have written, in the
-same four verbs, into an ordinary pass. There is no vocabulary for
+same four verbs, into an ordinary round. There is no vocabulary for
 resolving, no transformation applied on the way onto a line, and no
 record of resolution separate from the operations themselves. What
 it does is save somebody the typing.
@@ -4886,17 +4907,91 @@ had been handled.
 # A rule that writes nothing is not a failure
 
 Some lines are meant to be sorted out by hand. Their rule returns
-nothing, no pass is written, and the collision stays exactly where
+nothing, no round is written, and the collision stays exactly where
 anybody can see it — which is the state a person then acts on.
 
 # Nothing here touches the line
 
-The pass goes on the work log. A line moves when work ends, and
+The round goes on the pursuit. A line moves when work ends, and
 that is somewhere else.
 
 ## Functions
 
 - `react` — Runs the line's rule over whatever this work collides with.
+
+
+<!-- asterism_core/domain__forge__model__restore.md -->
+# asterism-core::domain::forge::model::restore
+
+Building the model back from what a store kept.
+
+```text
+  stored rows ──► restore::line / restore::pursuit / restore::thread
+                       │
+                       ├─ the ids come from outside, here and
+                       │  nowhere else in the model
+                       │
+                       └─ the nodes go back through record / push /
+                          end / say — the same refusals a fresh
+                          write meets
+```
+
+# Why this is one module rather than a constructor per type
+
+Every other constructor in [`model`](super) mints. A line mints its
+id and its genesis, work mints its id and its opening node, a round
+mints a node id — which means that until this module existed, no
+value here could be built holding an id somebody else chose. That
+was the property, and it is the reason the read half of the ports
+had no implementation but a fake for as long as it did.
+
+A rehydration constructor takes every field including the id, so it
+is the one door through which a stored row can contradict a rule
+this module holds. Spreading it across the types would put a piece
+of that door on each of them and leave nothing that could be read
+as the whole. Here it is one file, and what it may and may not do
+is stated once.
+
+# What it does not do
+
+**It does not skip the model's questions.** The nodes are handed
+back one at a time to [`History::record`], [`Pursuit::push`] and
+[`Pursuit::end`] — the same calls a fresh write goes through, and
+the same refusals. A chain whose parents do not line up, a table
+that would leave two live entries under one name, a round on a log
+that has ended: each of those is a stored row that cannot become a
+value here, and the read fails rather than handing back something
+the model would not have written.
+
+That is the cost as well as the point. The check that reads a name
+twice folds the chain, so putting back a history of *n* change
+points costs what *n* reads cost, and a store that keeps something
+it cannot read back is a store that has to be repaired rather than
+opened. Both are consequences somebody may want to price
+differently later; neither is a thing to discover by accident.
+
+**It does not put the chain in order.** A change point carries its
+parent, so [`line()`] takes them in whatever order a store hands them
+over and walks the links from the genesis. Nothing has to keep a
+sequence number beside the chain, and a store that got the order
+wrong is caught by `record` rather than believed.
+
+## Functions
+
+- `change_point` — One change point, as it was kept.
+- `close` — The node work ended at.
+- `genesis` — The node a line began at.
+- `line` — A whole line, from its genesis and the change points on it.
+- `message` — One thing said, as it was kept, with every correction to it.
+- `meta` — The two stamps a store kept for a thing's description.
+- `open` — The node work opened at.
+- `pursuit` — A whole pursuit, from the node it opened at and what followed.
+- `round` — One round, as it was kept.
+- `thread` — A whole conversation, from what it hangs off and what was said.
+
+## Types
+
+- `Node` — A node of a pursuit after the one it opened at.
 
 
 <!-- asterism_core/domain__forge__model__strategy.md -->
@@ -4905,7 +5000,7 @@ that is somewhere else.
 How a line settles a collision — the contract, and not the rule.
 
 ```text
-  collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a pass carries them
+  collision ──► Strategy::resolve ──► Ok(complete ops)  ──► a round carries them
                       │                                     and the collision is gone
                       └──────────────► Err              ──► no op is written at all
 ```
@@ -4927,7 +5022,7 @@ module holds the contract and no rule that satisfies it.
 
 What the model does require is one sentence: a strategy decides an
 id and a name, and returns them as operations complete enough to go
-straight into a pass. There is no half-written entry, no entry that
+straight into a round. There is no half-written entry, no entry that
 gets a name later, and no path that writes some operations and then
 fails — a refusal writes nothing, and the work stays open carrying
 its collision.
@@ -5070,13 +5165,13 @@ Saying something about work.
 
 A node carries a note, and a note is one line written once by
 whoever wrote the node. This is the rest: a remark on somebody
-else's pass, a question about one entry it touched, a review of
+else's round, a question about one entry it touched, a review of
 what landed.
 
 # Four anchors, because four things are worth remarking on
 
-A pursuit as a whole — what this work is for. A pass — the judgement
-somebody made in it. One entry a pass touched — this particular
+A pursuit as a whole — what this work is for. A round — the judgement
+somebody made in it. One entry a round touched — this particular
 thing, in this particular attempt. And a change point — a review
 after the fact.
 
@@ -5084,7 +5179,7 @@ after the fact.
 on an entry alone would make it follow that entry into every other
 pursuit it is ever carried into, which is how a note about one
 attempt becomes a note about the thing itself. Anchoring at
-`(round, entry)` says *this entry, as this pass had it*, and that
+`(round, entry)` says *this entry, as this round had it*, and that
 does not travel. A change point can be anchored to on its own,
 because there is nowhere for a remark on it to travel to.
 
@@ -5122,12 +5217,23 @@ Everywhere else in this model the chain orders things and a
 timestamp is evidence. A discussion has no chain to read an order
 out of — a reply names its parent, but two replies to one message
 are ordered by nothing else — so messages are read in the order
-they were written.
+they were written, and a conversation reads as a transcript rather
+than as a tree.
 
 It is affordable because nothing derives from it. No fold reads a
 thread, no rule consults one, and no refusal depends on the order
 of two remarks. A clock that steps backwards makes a conversation
 read oddly; it cannot make the line wrong.
+
+The relation is asked one question and no more. An answer cannot be
+read back before its question — [`Thread::say`] refuses a reply to
+something the thread does not hold yet — so [`restore`] moves a
+reply the stamps put before its parent to just after it, and leaves
+everything else where the clock had it. That is the difference
+between a conversation that reads oddly and one that cannot be read
+at all.
+
+[`restore`]: super::restore
 
 ## Types
 
@@ -5179,124 +5285,28 @@ proposed.
 - `LineId` — Surrogate id for a `Line` — one repository.
 - `MessageId` — Surrogate id for a `Message`.
 - `Name` — A name something can answer to: trimmed, and never blank.
-- `NodeId` — Surrogate id for a node of a work log — where it opened, one
+- `NodeId` — Surrogate id for a node of a pursuit — where it opened, one
 - `PursuitId` — Surrogate id for a `Pursuit` — one line of work.
 - `StrategyId` — Which rule a line settles collisions by.
 - `ThreadId` — Surrogate id for a `Thread` — one run of messages about one
 
 
-<!-- asterism_core/domain__forge__project.md -->
-# asterism-core::domain::forge::project
-
-`Project` — the repo of the forge's git analogy (#63): the shared
-context pursuits file under, and the owner of a mainline.
-
-The pursuit answers "one line of work"; the project answers "one
-body of work" — the unit a mainline is canonical *for*. Without it
-the mainline would be a persona-wide singleton, and two unrelated
-efforts would fight over one namespace of living names. With it,
-scope has a referent (an `In(Existing)` of another project's living
-asset is cross-project contamination, catchable at IN time) and
-"the canonical set" means canonical for something in particular.
-
-# Shape
-
-- [`Project`] is a thin, immutable row: identity, persona, a
-  required human name, an optional note. No status column, no
-  members — what belongs to a project derives through its pursuits
-  and its mainline, never from a membership table.
-- [`Line`](crate::domain::forge::line::Line) rows are the
-  project's lines. v1 mints exactly one, named
-  [`MAIN`](crate::domain::forge::line::Line::MAIN), in the same
-  transaction as the project (application-enforced); the schema
-  admits more so a later multi-line model is an enum's worth of
-  change, not a migration.
-
-# Invariants (service-enforced, entity-checked where local)
-
-- `name` is non-blank (checked here); uniqueness among one
-  persona's projects is an application rule, checked where both
-  rows are visible — like living-name uniqueness on a line,
-  and unlike a schema UNIQUE, so a later archival verb can free
-  names without a migration.
-- A pursuit filing under a project shares its persona
-  (cross-aggregate, application service — the persona cascade
-  rule every forge pairing states).
-
-## Types
-
-- `Project` — The repo above the pursuits. Thin and immutable: identity plus a
-
-
-<!-- asterism_core/domain__forge__pursuit.md -->
-# asterism-core::domain::forge::pursuit
-
-`Pursuit` — the minted unit of work: one line of generation and
-curation toward an intent, identified by a minted id that its events
-are stamped with (#29, design on #21).
-
-Content ancestry cannot express this unit: round N+1 built from the
-same sources with a new prompt shares no derivation edge with round
-N's outputs, rejected rounds have no descendants, and abandonment has
-no ancestry expression at all. So the identity is minted up front —
-the convergent form of every surviving forge (Gerrit's Change-Id,
-Jujutsu's change id, Radicle's COB ids) — and everything else about
-the pursuit is a projection over the stamped events.
-
-# Shape
-
-- [`Pursuit`] is a thin, immutable row: identity, persona, optional
-  filing, optional parent, optional human label. No status column,
-  no members.
-- [`PursuitEvent`] is a one-way lifecycle fact (close / reopen);
-  **standing is derived on read** by [`standing`] — latest event by
-  `(created_at, id)` wins, no row means open. A repeat close is a new
-  fact, not an error.
-
-# Invariants (service-enforced, entity-checked where local)
-
-- A stamped event's persona equals its pursuit's persona; `parent_id`
-  never crosses personas; a parent exists before its child. These are
-  cross-aggregate and live in the application service, like the
-  persona cascade.
-- `project_id` never crosses personas either, and the foreign key
-  cannot say so: `project` carries its own `persona_id`, and
-  `pursuit.project_id` references only `project(id)`. So filing
-  under someone else's project is refused where both rows are
-  visible — the same place, and for the same reason, as `parent_id`.
-- `snapshot_id` may only accompany `closed_satisfied` (checked here):
-  it is the kept set frozen at close. `None` on a `closed_satisfied`
-  is a defined state — "concluded with nothing kept" — because an
-  empty snapshot is domain-rejected.
-
-## Functions
-
-- `standing` — Derives standing from a pursuit's events: latest by
-
-## Types
-
-- `Pursuit` — The minted unit of work. Thin and immutable: identity plus intent
-- `PursuitEvent` — One lifecycle fact about a pursuit.
-- `PursuitEventKind` — The closed set of lifecycle facts. One-way: no event edits another,
-- `PursuitStanding` — Live standing of a pursuit, derived on read — never stored.
-
-
 <!-- asterism_core/domain__forge__pursuits.md -->
 # asterism-core::domain::forge::pursuits
 
-Keeping work logs, stated in the forge's own words.
+Keeping pursuits, stated in the forge's own words.
 
 [`Pursuits`] is the other face the forge asks for, and it is the
-quiet one: opening work and adding passes to it are what happens
+quiet one: opening work and adding rounds to it are what happens
 most, and neither touches a line.
 
-# A pass names the node it sits on
+# A round names the node it sits on
 
 [`Pursuits::push`] takes the node the caller believes the work ends
-at, beside the pass it wants to add. The model refuses a pass that
-does not sit on the head, but it judges the work log it was
+at, beside the round it wants to add. The model refuses a round that
+does not sit on the head, but it judges the pursuit it was
 *given*, which is the log as it was when it was read. Naming the
-head makes the write itself conditional, so two passes written at
+head makes the write itself conditional, so two rounds written at
 once cannot both land and the loser is told.
 
 # It cannot end work
@@ -5309,7 +5319,7 @@ of this trait cannot find a second one.
 
 # Listing hands back whole pursuits, and that is a bet
 
-[`Pursuits::of_line`] and [`Pursuits::children`] return every pass
+[`Pursuits::of_line`] and [`Pursuits::children`] return every round
 of every pursuit they answer with, which is more than a caller
 showing a list needs. There is no lighter shape because the model
 has no half-pursuit, and inventing one for a listing would put a
@@ -5322,7 +5332,7 @@ not a guess made here.
 
 # Reading gives back the whole pursuit
 
-Adding a pass checks the head, deciding a close folds every pass,
+Adding a round checks the head, deciding a close folds every round,
 and both are rules the model holds about the chain. Handing back
 less would move them to whoever answers this call.
 
@@ -5330,25 +5340,7 @@ less would move them to whoever answers this call.
 
 ## Traits
 
-- `Pursuits` — Keeps work logs.
-
-
-<!-- asterism_core/domain__forge__repository.md -->
-# asterism-core::domain::forge::repository
-
-The forge's persistence ports.
-
-Split from [`domain::repository`](crate::domain::repository), which
-held these two beside the raw layer's twenty-eight and so made the
-forge's storage contract part of the file a new raw-layer port is
-added to. Nothing about the traits changed in the move.
-
-The raw layer does not name these, and needs nothing of a pursuit.
-
-## Traits
-
-- `ProjectRepository` — Persistence port for the forge's project and its lines (#63
-- `PursuitRepository` — Persistence port for the pursuit family (#29): the minted unit of
+- `Pursuits` — Keeps pursuits.
 
 
 <!-- asterism_core/domain__forge__strategies.md -->
@@ -5455,83 +5447,26 @@ Messages and every correction to them. A conversation is read in
 full or it is read misleadingly: a correction the reader does not
 see is a sentence attributed to somebody who withdrew it.
 
-# Nothing removes and nothing overwrites
+# Nothing here removes and nothing overwrites
 
 No delete, and no method that replaces a message. Correcting one
 appends, which is what [`Thread::amend`] does in memory and what
 this keeps. The absence is the same one the two logs have and it is
 there for the same reason.
 
+One thing does take a conversation, and it is not on this face:
+[`Lines::discard`] takes every thread anchored to the line it
+drops — to a pursuit, a round, an entry as a round had it, or a
+change point, which is all four anchors there are. The alternative
+is a remark about something that no longer exists. A conversation
+ends when the line it is about is thrown away, and nowhere else.
+
 [`Thread::amend`]: crate::domain::forge::model::thread::Thread::amend
+[`Lines::discard`]: super::lines::Lines::discard
 
 ## Traits
 
 - `Threads` — Keeps what was said.
-
-
-<!-- asterism_core/domain__forge__tx.md -->
-# asterism-core::domain::forge::tx
-
-`PursuitTx` — the pursuit's append-only membership ledger (#22,
-model on #63): every asset that enters the line of work, every
-mid-work removal, and every reversal, one row per gesture.
-
-The ledger is what makes "what is this line of work on" answerable
-without being handed in: membership is **what the pursuit
-accumulated**, derived here — never a caller-supplied snapshot.
-Mid-work tidying feels like free manipulation on the surface;
-underneath, every gesture is a ledger entry, which is the
-difference between a workspace and a record.
-
-# Shape
-
-- [`PursuitTx`] is one gesture: `in` (with its [`TxOrigin`]),
-  `remove`, `unremove` — and `update`, the model's reserved verb
-  for the external-edit round-trip, admitted by the vocabulary but
-  written by nothing yet.
-- **Membership is derived on read** by [`ledger`]: latest tx per
-  asset by `(created_at, id)` wins — `in` / `unremove` mean
-  present, `remove` means removed, `update` changes nothing. No
-  row is ever edited.
-- The asset reference is an id, not a foreign key: the ledger is
-  history and history outlives the asset (the same stance every
-  raw-layer row taking an id list holds).
-
-## Functions
-
-- `ledger` — Derives the ledger state from a pursuit's gestures: latest tx per
-
-## Types
-
-- `Ledger` — The derived state of a pursuit's ledger: every asset that ever
-- `MemberState` — One asset's derived position in a pursuit's ledger.
-- `PursuitTx` — One recorded membership gesture.
-- `PursuitTxKind` — The closed set of ledger gestures. `In` carries its origin because
-- `TxOrigin` — Where an `in` gesture brought its asset from. A fact about the
-- `TxTarget` — What an `in` declares about a line entry it is aimed at (#63
-
-
-<!-- asterism_core/domain__forge__value.md -->
-# asterism-core::domain::forge::value
-
-The forge's surrogate ids.
-
-Split from [`domain::value`](crate::domain::value) so that the raw
-layer's id vocabulary contains no forge type. Every id declared here
-is named nowhere outside `domain::forge` and `application::forge` —
-nothing on the raw side holds one, because a raw export carries no
-filing.
-
-## Types
-
-- `LineEntryId` — Surrogate id for a `LineEntry` — the name-like forge identity
-- `LineEventId` — Surrogate id for a `LineEvent` — one merge verb applied to an
-- `LineId` — Surrogate id for a `Line` — one named line of a project, the
-- `MergeId` — Surrogate id for a `Merge` — the record that one satisfied
-- `ProjectId` — Surrogate id for a `Project` — the repo of the forge's git
-- `PursuitEventId` — Surrogate id for a `PursuitEvent` — one one-way lifecycle fact
-- `PursuitId` — Surrogate id for a `Pursuit` — the minted unit of work that
-- `PursuitTxId` — Surrogate id for a `PursuitTx` — one entry in a pursuit's
 
 
 <!-- asterism_core/domain__generator_params.md -->
@@ -10203,6 +10138,8 @@ this crate.
 - [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
+- [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
@@ -10211,6 +10148,8 @@ this crate.
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
 - [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
 - [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [`memory`](memory.md): In-memory adapters — the ports satisfied without a database.
+- [`memory::forge`](memory__forge.md): The forge's ports, over rows held in memory.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
@@ -10236,6 +10175,8 @@ this crate.
 - [`sqlite::repo::dir`](sqlite__repo__dir.md): SQLite adapter for `DirRepository`.
 - [`sqlite::repo::dispatch`](sqlite__repo__dispatch.md): SQLite adapter for the `DispatchRepository` port.
 - [`sqlite::repo::edge`](sqlite__repo__edge.md): SQLite adapter for the `EdgeRepository` port.
+- [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
+- [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
@@ -10244,8 +10185,6 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
-- [`sqlite::repo::project`](sqlite__repo__project.md): SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
-- [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.
@@ -10394,6 +10333,70 @@ specific backend.
 ## Traits
 
 - `ReEnqueue` — Small port around "put this dispatch id back on the queue for
+
+
+<!-- asterism_infra/forge.md -->
+# asterism-infra::forge
+
+What every forge store keeps, whatever it keeps it in.
+
+[`rows`] is the shape, and both adapters serve it: the in-memory one
+holds these values under a lock, the SQLite one writes them as
+columns. Having it here rather than inside either is what makes
+that a shared contract rather than one of them copying the other —
+and it is why the SQLite tables can be read as owing what this
+module already says.
+
+Nothing here talks to a store. Taking a domain value apart and
+putting one back is the same work whichever store is underneath,
+and the half that differs is the half that is not here.
+
+
+<!-- asterism_infra/forge__rows.md -->
+# asterism-infra::forge::rows
+
+The shapes a store keeps, and the two translations either side of
+them.
+
+Every field here is a scalar or an id. Nothing holds a [`Line`], a
+[`Pursuit`], a [`ChangePoint`] or an [`Op`] — that is the whole
+point of the module, and the reason it is written out rather than
+replaced by keeping the domain values in a map.
+
+The names match what the SQLite tables will be called, because the
+adapter that writes those is meant to be able to read this one as a
+specification of what it owes.
+
+## Functions
+
+- `anchor_columns` — Flattens an anchor into the columns a store keeps it in.
+- `read_line` — Rebuilds a line from its row, its change points and their rows.
+- `read_pursuit` — Rebuilds work from its row, its nodes and their operations.
+- `read_thread` — Rebuilds a conversation from its row, what was said, and every
+- `take_anchor_apart` — The head row of a thread, anchor flattened into its five columns.
+- `take_change_point_apart` — One change point's rows, for the single-node write a close makes.
+- `take_close_apart` — One ending, for the append a commit makes.
+- `take_message_apart` — One thing said, for the append `say` makes.
+- `take_new_line_apart` — The row for a line that has just been opened.
+- `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for
+- `take_revision_apart` — One correction, for the append `amend` makes.
+- `take_revisions_apart` — Every correction to one message, oldest first.
+- `take_round_apart` — One round, for the append a push makes.
+- `take_thread_apart` — A whole conversation, for the write that opens one.
+
+## Types
+
+- `ActRow` — An act, flattened the way a row carries one: a stamp, a handle, and
+- `AnchorColumns` — What a thread hangs off, as the five columns that carry it.
+- `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
+- `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
+- `LineRow` — `line` — the repository, and the two things about it that are not
+- `PursuitNodeRow` — `pursuit_node` — a round or an ending.
+- `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was written.
+- `PursuitRow` — `pursuit` — one line of work.
+- `ThreadMessageRow` — `forge_thread_message` — one thing said.
+- `ThreadRevisionRow` — `forge_thread_revision` — a correction to something said.
+- `ThreadRow` — `forge_thread` — one conversation, and what it hangs off.
 
 
 <!-- asterism_infra/generator_params.md -->
@@ -10720,6 +10723,68 @@ add a channel round-trip to get back to it.
 ## Functions
 
 - `make_thumb` — Extracts one frame from the video at `path_str`, scaled to fit a
+
+
+<!-- asterism_infra/memory.md -->
+# asterism-infra::memory
+
+In-memory adapters — the ports satisfied without a database.
+
+These are not test doubles in the usual sense. A double stands in
+for a thing; these are the thing, built over a `Mutex<Vec<Row>>`
+instead of over SQLite. What makes that worth having is what it
+forces: a store keeps rows, so an adapter here decomposes a domain
+value on the way in and rebuilds it on the way out, and the rebuild
+goes through the same door a real one will.
+
+The alternative — a fake that keeps the domain objects themselves —
+satisfies the same traits and answers the same calls, and never
+once meets the question the read half exists to ask. A service
+passing against one of those has been tested against a `HashMap`
+wearing a port's name.
+
+
+<!-- asterism_infra/memory__forge.md -->
+# asterism-infra::memory::forge
+
+The forge's ports, over rows held in memory.
+
+```text
+  Lines / Pursuits / Closings
+           │
+           ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex
+           │
+           └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit
+```
+
+One `Mutex` over the whole store rather than one per table: the
+close writes a change point, its rows and an ending together, and a
+reader must not see half of that. A real adapter gets the same
+property from a transaction; here it comes from holding the lock
+across the whole of `commit`, which is the same statement made the
+only way this store can make it.
+
+# What it is for
+
+Proving the model and the services against something that keeps
+rows, before any of it depends on SQLite being right. A store that
+kept the domain objects would answer every call correctly by
+construction and would never once ask whether a line can be built
+back out of what was written down — which is the question the whole
+read half exists to ask, and the one the first fake never reached.
+
+# What it is not
+
+Durable, concurrent beyond one process, or a thing to run anything
+real on. There is no index: reads scan, which is fine at the sizes
+a test builds and would not be at any other.
+
+## Types
+
+- `HoldsEverything` — What the layer below answers, for a store that has no layer below.
+- `HoldsNothing` — The same face, answering no.
+- `MemoryActors` — Handles for whoever is writing, minted once per subject and kept.
+- `MemoryForge` — An in-memory forge store. Clone it to hand the same tables to every
 
 
 <!-- asterism_infra/observe.md -->
@@ -12094,9 +12159,9 @@ authenticated deployment cannot resolve. A new row landing in the
 legacy bucket would be indistinguishable from one that predates the
 column.
 
-Called by the row builders in [`super::asset`], [`super::dispatch`],
-[`super::pursuit`] and [`super::project`], at the point where the
-values about to be bound are visible as the columns themselves.
+Called by the row builders in [`super::asset`] and
+[`super::dispatch`], at the point where the values about to be
+bound are visible as the columns themselves.
 
 [`attribution_columns`] lives here for the same reason: it is the
 encoding half of the same concern, wanted by every table that
@@ -12167,6 +12232,89 @@ backend could sit behind it later. v1 stores edges in the dedicated
 ## Types
 
 - `SqliteEdgeRepository` — SQLite adapter for `EdgeRepository` (uses a writer isle).
+
+
+<!-- asterism_infra/sqlite__repo__forge.md -->
+# asterism-infra::sqlite::repo::forge
+
+SQLite adapter for the forge's ports.
+
+One type for `Lines`, `Pursuits` and `Closings`, where the rest of
+this directory is one per port. The close is why: it writes a change
+point, its rows and an ending together, and two adapters sharing one
+transaction is a shape that only reads as sharing when they are the
+same object.
+
+# Where the work is, and where it is not
+
+Taking a domain value apart and putting one back lives in
+[`crate::forge::rows`], which the in-memory store uses too. What is
+here is SQL and nothing else: the same six shapes, written as
+columns.
+
+# The head is never read to be compared
+
+Nothing here selects a head and checks it against what a caller
+decided. Two nodes on one parent is a fork, `UNIQUE (line_id,
+parent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the
+refusal arrives as part of the insert — so the validation is the
+write rather than something beside it that could be answered from a
+row somebody else has since moved.
+
+What that costs is telling one constraint violation from another.
+SQLite names the columns rather than the index — `UNIQUE constraint
+failed: change_point.line_id, change_point.parent_id` — so that
+column list is what is matched, and matched exactly.
+
+# And the one place a log is read to decide something
+
+A close that loses its parent is decided again in here, from a line
+and a pursuit read inside the transaction that lost. That read is
+not a comparison: nothing is checked against what the caller
+decided, and the answer comes from the model rather than from this
+adapter. What the transaction contributes is that the logs cannot
+move between the read and the write, which is why the second
+attempt is the last one.
+
+`contains` is what exactness is guarding against, and the direction
+matters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*
+of `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a
+substring test asked about the ending matches the fork — it reads
+"somebody pushed a round first" as "this work has already ended",
+and an ending is final where a fork is decided again. So the close
+that a second decision would have landed is refused instead, and
+the caller is told the work is over when it is only one round
+further along. The other direction cannot happen, which is why
+naming it would be naming the wrong risk.
+
+## Types
+
+- `SqliteForge` — SQLite adapter for `Lines`, `Pursuits` and `Closings`.
+
+
+<!-- asterism_infra/sqlite__repo__forge_boundary.md -->
+# asterism-infra::sqlite::repo::forge_boundary
+
+What the forge asks of everything outside it, answered by SQLite.
+
+Two contracts, and neither is a repository: they are the forge's
+side of questions it cannot answer itself.
+
+- [`SqliteStore`] answers whether a persona holds an asset. One
+  question, because the forge has one.
+- [`SqliteActors`] answers what a handle stands for, and mints one
+  when it has not seen the subject before.
+
+They live beside the repositories rather than among them because
+what they implement is the boundary, not storage — the forge names
+`boundary::Store`, not `AssetRepository`, and that is the whole
+arrangement. Putting them in one file keeps the two halves of "what
+the forge asks" readable together.
+
+## Types
+
+- `SqliteActors` — Keeps what a forge handle stands for.
+- `SqliteStore` — Answers the forge's one question about the layer below.
 
 
 <!-- asterism_infra/sqlite__repo__group.md -->
@@ -12265,39 +12413,6 @@ SQLite adapter for the `PersonaThemeRepository` port.
 ## Types
 
 - `SqlitePersonaThemeRepository` — SQLite adapter for `PersonaThemeRepository` (uses a writer isle).
-
-
-<!-- asterism_infra/sqlite__repo__project.md -->
-# asterism-infra::sqlite::repo::project
-
-SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
-
-Two tables: `project` (thin, immutable, insert-only, like `pursuit`)
-and `line`, which is the same but owned by a project rather than a
-persona. The pair is written in one transaction — a project whose
-line is missing has nothing a merge could land on, and no later
-read would notice the difference between that and a project nobody
-has merged into yet.
-
-## Types
-
-- `SqliteProjectRepository` — SQLite adapter for `ProjectRepository`.
-
-
-<!-- asterism_infra/sqlite__repo__pursuit.md -->
-# asterism-infra::sqlite::repo::pursuit
-
-SQLite adapter for the `PursuitRepository` port (#29, extended by
-#22).
-
-Three tables, one concern: `pursuit` (thin, immutable,
-insert-only), `pursuit_event` (append-only lifecycle facts), and
-`pursuit_tx` (the append-only membership ledger). Every write here
-lands on one table; nothing in this adapter spans two.
-
-## Types
-
-- `SqlitePursuitRepository` — SQLite adapter for `PursuitRepository`.
 
 
 <!-- asterism_infra/sqlite__repo__query_group.md -->
@@ -12689,19 +12804,6 @@ this router at `/mcp`).
 The server is bound to loopback in v1 and does not authenticate
 requests.
 
-# Why the pursuit routes are plural
-
-`dispatch` is singular here and `snapshots` is plural, so the
-pursuit family had to pick one rather than match whichever
-neighbour was read last. It is plural (`/asterism/pursuits/...`)
-because it has the shape the plural families have and `dispatch`
-does not: a collection read that answers with many rows
-(`GET /asterism/pursuits?persona_id=…`, the multi-pursuit overview
-the design calls a first-class need) alongside the per-id reads.
-`personas`, `assets`, `groups`, `snapshots` and `threads` are all
-spelled that way; `dispatch` is the outlier, and one outlier is not
-a convention to extend.
-
 ## Functions
 
 - `record_webview_diag` — Re-emits one webview-origin diagnostic as a `tracing` event, which
@@ -12753,9 +12855,6 @@ agent should read, not a broken call.
 - `DuplicateConflictsParams` — `duplicate_conflicts` input — the same persona / limit pair the
 - `MaterialLayersParams` — `material_layers` input.
 - `MaterialMarksParams` — `material_marks` input.
-- `ProjectGetParams` — `project_get` input.
-- `ProjectListParams` — `project_list` input.
-- `PursuitViewParams` — `pursuit_view` input.
 
 
 <!-- asterism_server/mcp_proxy.md -->
@@ -12907,7 +13006,6 @@ here without choosing.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
-- `close_pursuit` — Records that a pursuit concluded — `satisfied` (freezing the kept set
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -12939,7 +13037,6 @@ here without choosing.
 - `get_dispatch` — Fetches a dispatch job by id — used by the poll loop that drives
 - `get_persona_profile` — Fetches the persona's identity signal (avatar / bio / role).
 - `get_persona_theme` — Fetches the persona's UI chrome (wallpaper reference). `None`
-- `get_pursuit` — One pursuit with its standing derived from the latest event.
 - `get_session` — Fetches one Session by surrogate id (`None` when absent). Used
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
@@ -12967,7 +13064,6 @@ here without choosing.
 - `list_modality_asset_counts` — Sidebar Modality counts — `(modality_slug, asset_count)`, optionally
 - `list_persona_asset_counts` — Sidebar Persona counts — `(persona_id, asset_count)` per persona
 - `list_personas` — Lists every persona (used to render the sidebar).
-- `list_pursuits` — A persona's pursuits, most-recent first, each with its standing —
 - `list_sessions` — Sessions view — one row per `session_id` in the query scope.
 - `list_settings` — Every known application setting, resolved through code default →
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
@@ -12978,7 +13074,6 @@ here without choosing.
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
-- `open_pursuit` — Opens a pursuit and names what it is for, ahead of any work in it.
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -12990,8 +13085,6 @@ here without choosing.
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
 - `purge_persona` — Permanently deletes an already-trashed persona and everything it
-- `pursuit_events` — A pursuit's lifecycle facts, oldest first.
-- `pursuit_view` — One pursuit opened up: the row and its standing, its events, and its
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -13004,7 +13097,6 @@ here without choosing.
 - `rename_dir` — Renames a Dir.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
-- `reopen_pursuit` — Records that a pursuit carried on after a close. Legal on one that is
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.

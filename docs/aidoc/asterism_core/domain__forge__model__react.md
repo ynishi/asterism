@@ -5,7 +5,7 @@ Letting a line's rule answer a collision.
 ```text
   collisions(L, W)
        ├─ none ─────────────────────────────────► nothing to do
-       └─ some ──► Strategy::resolve ──► ops ──► a pass, written by the server
+       └─ some ──► Strategy::resolve ──► ops ──► a round, written by the server
                          │                 │
                          │                 └─ checked: do these actually settle it?
                          └─ none ──────────────► the collision stands, for a person
@@ -13,7 +13,7 @@ Letting a line's rule answer a collision.
 
 **A rule does nothing a person could not have done.** It writes the
 operations somebody resolving by hand would have written, in the
-same four verbs, into an ordinary pass. There is no vocabulary for
+same four verbs, into an ordinary round. There is no vocabulary for
 resolving, no transformation applied on the way onto a line, and no
 record of resolution separate from the operations themselves. What
 it does is save somebody the typing.
@@ -36,12 +36,12 @@ had been handled.
 # A rule that writes nothing is not a failure
 
 Some lines are meant to be sorted out by hand. Their rule returns
-nothing, no pass is written, and the collision stays exactly where
+nothing, no round is written, and the collision stays exactly where
 anybody can see it — which is the state a person then acts on.
 
 # Nothing here touches the line
 
-The pass goes on the work log. A line moves when work ends, and
+The round goes on the pursuit. A line moves when work ends, and
 that is somewhere else.
 
 ## Functions

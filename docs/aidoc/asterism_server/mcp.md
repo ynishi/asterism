@@ -42,7 +42,4 @@ agent should read, not a broken call.
 - `DuplicateConflictsParams` — `duplicate_conflicts` input — the same persona / limit pair the
 - `MaterialLayersParams` — `material_layers` input.
 - `MaterialMarksParams` — `material_marks` input.
-- `ProjectGetParams` — `project_get` input.
-- `ProjectListParams` — `project_list` input.
-- `PursuitViewParams` — `pursuit_view` input.
 

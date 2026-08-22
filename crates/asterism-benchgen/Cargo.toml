@@ -35,12 +35,6 @@ rayon = { workspace = true }
 # `AsyncIsle` is what the repository adapters are built on; the seeder
 # opens the connection and owns the driver's lifetime.
 rusqlite-isle = { workspace = true }
-# `measure-pursuit` seeds its noise floor (100k plain asset rows) and
-# the `_trace` return notes with raw batched SQL — the volume half of
-# that fixture is about scale, not schema fidelity; everything with a
-# domain constructor (pursuits, dispatches, events) still goes through
-# the repository ports.
-rusqlite = { workspace = true }
 tempfile = "3"
 uuid = { workspace = true }
 serde = { workspace = true }

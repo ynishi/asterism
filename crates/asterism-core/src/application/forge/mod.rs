@@ -1,35 +1,24 @@
 //! Forge use cases — the verbs of a line of work.
 //!
-//! [`legacy_pursuit_service`] owns the lifecycle (open / close / reopen) and
-//! the reads over it; [`project_service`] owns the filing it hangs
-//! under. They are apart from the rest because they are the only
-//! services here whose writes carry intent rather than content (the
-//! layer itself is described in
+//! [`LineService`] owns the repository a history sits on: opening one,
+//! reading what is alive on it, and moving the two things about a line
+//! that are not written into its history — its name and the rule it
+//! settles collisions by. [`PursuitService`] owns work against a line:
+//! opening it, adding a round, running the line's rule over what the
+//! work collides with, and ending it. They are apart from the rest
+//! because they are the only services here whose writes carry intent
+//! rather than content (the layer itself is described in
 //! [`domain::forge`](crate::domain::forge)).
 //!
-//! # Which model a service here serves
+//! Neither has a transport. The first model's did, and it went with it
+//! on #102; what these two are reachable through today is a caller
+//! inside the process, and the adapter under them is where that
+//! changes.
 //!
-//! Two live side by side while one replaces the other, so this is
-//! worth being able to tell at a glance rather than by reading:
-//!
-//! ```text
-//!   legacy_pursuit_service   PursuitEvent / PursuitTx / standing
-//!                            wired to transport, extended by nobody,
-//!                            deleted when its replacement is wired
-//!
-//!   (arriving)               domain::forge::model — a line's history
-//!                            as a chain, work as a log of passes
-//! ```
-//!
-//! The naming is deliberate: what is leaving carries the qualified
-//! name, and the plain one belongs to what stays. A file named for the
-//! current model, serving the old one, is the thing this avoids.
-//!
-//! Nothing in the raw layer is edited by either of them. Closing a
-//! pursuit records that a line of work ended and touches no asset: no
-//! trash, no label, no rating. Integrating the conclusion back into the
-//! library is the raw layer's own business, and stays on the raw
-//! layer's verbs.
+//! Nothing in the raw layer is edited by either of them. Ending work
+//! records that it ended and touches no asset: no trash, no label, no
+//! rating. Integrating the conclusion back into the library is the raw
+//! layer's own business, and stays on the raw layer's verbs.
 //!
 //! # Which way the services may point
 //!
@@ -54,13 +43,10 @@
 //! they are everywhere else, because they belong to neither side. The
 //! rule is about capability, never about what something is.
 
-pub mod legacy_pursuit_service;
 pub mod line_service;
-pub mod mapping;
-pub mod project_service;
 pub mod pursuit_service;
+pub mod thread_service;
 
-pub use legacy_pursuit_service::LegacyPursuitService;
 pub use line_service::LineService;
-pub use project_service::ProjectService;
 pub use pursuit_service::PursuitService;
+pub use thread_service::{Anchored, ThreadService};

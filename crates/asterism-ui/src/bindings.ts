@@ -304,19 +304,3 @@ export type MessageDto = { id: string; thread_id: string; author_kind: string; a
 
 export type MessageRefDto = { kind: string; id: string; };
 
-export type OpenPursuitCommand = { persona_id: string; pursuit_id: string | null; project_id: string | null; parent_pursuit_id: string | null; title: string | null; note: string | null; operator_ai: string | null; };
-
-export type ClosePursuitCommand = { pursuit_id: string; outcome: string; note: string | null; operator_ai: string | null; };
-
-export type RecordPursuitTxCommand = { pursuit_id: string; kind: string; asset_id: string; origin: string | null; note: string | null; operator_ai: string | null; };
-
-export type ReopenPursuitCommand = { pursuit_id: string; note: string | null; operator_ai: string | null; };
-
-export type PursuitDto = { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; };
-
-export type PursuitEventDto = { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; };
-
-export type PursuitViewDto = { pursuit: { id: string; persona_id: string; project_id: string | null; parent_id: string | null; title: string | null; note: string | null; standing: string; created_at_ms: number; }; events: { id: string; pursuit_id: string; kind: string; snapshot_id: string | null; note: string | null; created_at_ms: number; }[]; txs: { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; }[]; };
-
-export type PursuitTxDto = { id: string; pursuit_id: string; kind: string; origin: string | null; asset_id: string; note: string | null; author_kind: string | null; operator_ai: string | null; created_at_ms: number; };
-

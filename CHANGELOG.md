@@ -8,6 +8,362 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- **A conversation written by a clock that stepped backwards can be read again**
+  (#102). A thread was read in stamp order and handed to `Thread::say` one at a
+  time, so a reply kept with an earlier stamp than the message it answers was
+  refused — and the thread became permanently unreadable, which is the inverse
+  of what the read half is for. The three places saying a wrong time breaks
+  nothing were wrong about this one. A conversation is still read in the order
+  it was said, and still reads as a transcript rather than a tree: the one
+  message that moves is a reply the stamps put before its parent, and it moves
+  to just after it. Replies answering each other in a circle are still refused,
+  because none of them can be put after its parent.
+
+- **A drop asks the standing inside the write, as it already asked the work**
+  (#102). A line is dropped from the archive, and the port held that condition
+  against a `Line` the service read before the write — so a line taken back out
+  of the archive in between was dropped anyway, which is the same race
+  `covering` exists to refuse, one field over. Both stores read the standing
+  where it cannot go stale and refuse with `Conflict`.
+
+  The refusal for a work list that does not match is now two refusals, because
+  it was telling two stories with one message. Work the drop did not name is
+  work opened since the caller read the list, and that is the race: `Conflict`.
+  A name that is not against this line cannot arrive by a race at all — nothing
+  removes a pursuit but a drop of its line, and that line is the one being
+  dropped — so it is the caller naming somebody else's work, and it answers
+  `Validation`, as the model's `NotThisLine` does one layer up.
+
+- **A pursuit's nodes are ordered by its chain, like everything else** (#102).
+  `pursuit_node` carried a `seq` column, and the two places explaining it
+  disagreed: the migration argued it was how the log is ordered rather than a
+  copy of something else, while the row types conceded that a parent chain would
+  say the same thing. The change-point side had already settled it by keeping no
+  sequence and walking the links. The column and its index are gone, and both
+  logs are read by the same walk — which is stricter than the sort was: two
+  nodes on one parent is a log that forked, and a node the walk cannot reach is
+  a log with a hole in it, where a sort would have quietly read the reachable
+  part.
+
+- **The store no longer guesses at a value it cannot read, or accepts a node the
+  log never had** (#102). Two defects with one root, both found by review after
+  the adapter shipped.
+
+  The row readers coerced every enum with a wildcard arm, so an `outcome` the
+  model has no name for came back as `satisfied` — work that gave up reading as
+  work that landed. A `CHECK` keeps such a row out of an ordinary write, which
+  is why it looked harmless; the read half is what answers for a database
+  somebody repaired by hand, and answering by guessing is the one thing it must
+  not do. Every arm is exhaustive now and an unknown value is a read that fails.
+
+  And a close whose change point named a node the line never had was written and
+  never readable again. The unique indexes refuse a parent used twice, not one
+  that was never there, and the port takes the line id and the closing
+  separately — so a closing decided against one line and committed against
+  another goes in, and `restore::chain` refuses the whole history from then on.
+  Both writes now check the parent against the log they are landing on, inside
+  the transaction where the answer cannot go stale. Not a foreign key, because a
+  parent is either the genesis or a change point, the genesis is a column rather
+  than a row, and SQLite has no key pointing at two tables — giving it a row
+  would mean one whose `from_work` and `by_node` are both NULL, which is the
+  shape the model refuses to have as a type and no better as a table.
+
+### Added
+
+- **`Threads` has an implementation: what was said about work is kept** (#102).
+  The model held 489 lines of conversation — four anchors, messages, corrections
+  that append rather than overwrite — and the port in front of it had no
+  implementation at all. No service, no adapter, nothing that could keep a
+  remark. `ThreadService` opens a conversation, says something in one, corrects
+  what was said and renames the thread; `V98` gives it three tables; both stores
+  satisfy the port.
+
+  `restore` gained its third door. A stored thread could not be rebuilt before
+  this — `Message::new` mints an id and `Thread::open` mints one, so nothing
+  could hold the ids a store kept. Messages go back through `Thread::say` one at
+  a time, which is what makes a stored reply meet the refusal a fresh one meets,
+  including the case a store can produce and a caller cannot: a reply kept with
+  an earlier stamp than the message it answers.
+
+  An anchor is resolved rather than accepted. `Anchor` is built from the thing
+  itself so that a thread hanging off something nobody wrote is not a value
+  anybody can make — and a caller has ids, not things. So `Anchored` names what
+  to look for in ids, and the service reads the pursuit or the line before a
+  thread exists. An entry a round did not touch is refused by the model, reached
+  through the service because the service is what has the round to ask it of.
+
+  The tables are `forge_thread`, `forge_thread_message` and
+  `forge_thread_revision`, and the prefix is the point: `thread` is taken by the
+  annotation surface on the raw layer, which anchors to snapshots, cards and
+  query groups. Neither could carry the other's anchors without learning what
+  the other layer is made of. The same collision appears in `CoreCtx`, where the
+  new field is `forge_thread_service` beside the existing `thread_service`.
+
+  Dropping a line now takes what was said about its work with it. Every anchor a
+  thread can have — a pursuit, a round, an entry as a round had it, a change
+  point — is something a drop deletes, so a thread left behind would be a remark
+  about nothing. Over SQLite two of the four anchors are foreign keys, so a drop
+  that ignored them was refused rather than wrong; the in-memory store had
+  nothing to refuse it and kept the dangling thread. Both are fixed, and the
+  test that says so was written failing over both.
+
+- **A line can be archived, reopened and dropped through a service** (#102). The
+  three verbs existed in the model and nowhere else, so nothing could release a
+  held asset: the forge refused to let an asset it names be deleted, and there
+  was no way to stop naming it. `Lines` gains `set_standing` and `discard`,
+  `LineService` gains `archive`, `reopen` and `discard`, and the refusal now has
+  a way out — archive the line, end the work against it, drop it, and what it
+  was holding comes back as the answer.
+
+  `discard` returns what the drop released rather than dropping and leaving the
+  caller to work it out, because after the write there is no record left to work
+  it out from. It is the union of both logs, which is `discard::releases`
+  finally having a caller: a line holds what its chain named, its work holds
+  what its operations named, and a caller adding those up itself is a caller who
+  can forget the second one.
+
+  The port takes the pursuits the drop covers, and refuses when the work against
+  the line is not that set. What a caller was told a drop frees was computed
+  from a list, and a pursuit opened since that list was read is content the
+  answer left out — silently, and in the direction that leaves bytes held by
+  nothing. Same shape as ending work: the store does not re-derive the decision,
+  it refuses to write when the decision no longer describes what is there.
+
+  Over SQLite the drop defers its foreign keys to the commit. Every key inside
+  the forge is `RESTRICT` and `pursuit.parent_id` points at `pursuit`, so work
+  filed under work is a chain that no single ordering of deletes answers.
+  Deferring keeps the one check that matters: a reference into the line from
+  outside it still fails, and fails the whole drop.
+
+### Changed
+
+- **A close that loses its parent is decided again inside the write, once**
+  (#102). `PursuitService::close` used to loop five times: read the line,
+  decide, write, and on a conflict read again — with `ATTEMPTS = 5` as the
+  number of times a caller was willing to lose before the whole thing came back
+  as a conflict. Every attempt decided outside the write, so every attempt could
+  lose the same way, and the bound was the only thing standing between a busy
+  line and a caller waiting forever.
+
+  The decision still happens outside the write, where it belongs. What changed
+  is what happens when the write refuses: `Closings::commit` now takes a
+  `Deciding` alongside the closing, and asks it for a second answer against the
+  two logs as the write finds them — under the transaction that already holds
+  the write lock, where nothing can arrive between the read and the write. That
+  attempt is final. There is no loop and no number: either the parent is free,
+  or one re-decision settles it.
+
+  Two refusals reach the second decision and are named as such beside the port:
+  a change point already where this one would go, and a node already where this
+  ending would go — somebody landed on the line, or a round arrived on the work.
+  Everything else is final, including work that has already ended, which is the
+  one refusal that asking again cannot change. Both stores implement that
+  division rather than each holding half of it.
+
+  The port lost its `on` parameter with the loop. It named the head a caller
+  decided against, and nothing compared it to anything —
+  `UNIQUE (line_id, parent_id)` refuses a taken parent as part of the insert,
+  and the closing already carries the node it names. In SQLite an attempt is a
+  savepoint, so an ending written before the change point that refused comes
+  back out before the second decision is made; the in-memory store gets the same
+  property from holding its lock across both.
+
+- **`WorkLog` is gone; a pursuit is its own chain** (#102). It held `open`,
+  `rounds` and `close`, nothing outside a `Pursuit` ever held one, and all six
+  of `Pursuit`'s verbs were straight delegations to it — an indirection that
+  named a thing rather than being one. The fields sit on `Pursuit` now, `push`
+  and `end` keep the invariants they always did, and the accessor for the
+  opening node is `opening` because `open` is the verb that makes a pursuit and
+  one name cannot be both.
+
+  The name is the other half. Everything in the forge is a log: a line has a
+  chain of change points, a pursuit has a chain of rounds. Calling one of them
+  "Log" says only "this is a record", which inside the forge distinguishes
+  nothing — and "Work" said nothing `Pursuit` was not already saying. The prose
+  went with the type: forty-three places said "work log" where they meant a
+  pursuit.
+
+  The forge's tables carry the model's words for the same reason: `pursuit`,
+  `pursuit_node` and `pursuit_op`, where V96 first wrote `work`. That name
+  existed to avoid colliding with the first model's `pursuit` table, which V95
+  drops two steps earlier.
+
+### Added
+
+- **The application builds the forge it uses** (#102). `init_core` constructs
+  `SqliteForge`, `SqliteStore` and `SqliteActors` over the connection everything
+  else shares, and hands `LineService` and `PursuitService` to `CoreCtx`.
+  Neither has a transport, so a test is their only caller — which is the point:
+  a service wired to the wrong store compiles and passes every test that builds
+  its own world, and the only thing that catches it is landing work on a line
+  the same process then reads back.
+
+- **A purge the forge is blocking says so** (#102). Deleting a persona cascades
+  to its assets, and an asset a line names cannot go — so the purge already
+  refused, with a foreign-key error that names a column and tells nobody what to
+  do. It now refuses with how many assets are held and which lines hold them,
+  and with what releases them: dropping the line, since taking an entry off does
+  not. Asked inside the same transaction as the delete, like the live check
+  beside it, so the answer cannot go stale between saying it and acting on it. A
+  persona the forge is not holding purges exactly as before.
+
+- **The forge's two questions have real answers** (#102). `SqliteStore` answers
+  whether a persona holds an asset — trashed included, because trashing is
+  reversible and the row is still theirs, and reading that stamp here would make
+  an operation legal or not depending on what somebody had tidied away that
+  morning. `SqliteActors` answers what a handle stands for, over a `forge_actor`
+  table (`V97`) minted on first sight. Four kinds: the two an `Author` has, one
+  for a write that named nobody, and one for the instance itself, which is what
+  a line's rule writes as. Keyed on the author and nothing else — an agent
+  acting for somebody does not make a second somebody. Three of the four carry
+  no subject, and SQLite counts NULLs as distinct in a unique index, so the
+  index is over `COALESCE(subject, '')`; a plain one admits a second owner.
+
+- **The forge has a store, and the scenario runs over both** (#102). `V96` adds
+  the six tables the in-memory store was written in — `line`, `change_point`,
+  `change_row`, `work`, `work_node`, `work_op` — and `SqliteForge` satisfies
+  `Lines`, `Pursuits` and `Closings` over them. One adapter rather than one per
+  port, because a close writes a change point, its rows and an ending together
+  and two adapters sharing a transaction only reads as sharing when they are the
+  same object. Taking a domain value apart and putting one back moved to
+  `asterism_infra::forge::rows`, which both stores use, so the SQLite tables can
+  be read as owing what that module already says.
+
+  **The concurrency control is the write's own constraint.** Two nodes on one
+  parent is a fork, which both logs refuse in the model, so
+  `UNIQUE (line_id, parent_id)` and `UNIQUE (work_id, parent_id)` refuse it as
+  part of the insert — nothing reads a head and compares. A second ending needs
+  its own partial index, because it sits on the first, which is a parent nobody
+  has used. Telling one violation from another is done on the exact column list
+  SQLite reports, because `work_node.work_id` is the second ending and is a
+  _prefix_ of `work_node.work_id, work_node.parent_id`, which is a fork — so a
+  substring test asked about the ending matches the fork, and reports "this work
+  has already ended" when somebody merely pushed a round first. The two are kept
+  apart at the one place the difference is available: a fork is answered by
+  reading again, and an ending already there is not answered by anything.
+
+  **`content` restricts `asset`, on both logs.** An asset a line or a work log
+  holds cannot be deleted, and purging the persona that owns it is refused at
+  the same edge. Taking the entry off the line does not release it — undoing a
+  removal is adding that entry back, and that needs the content to be there.
+  What releases it is dropping the line, which the model answers with
+  `discard::releases` and no port has a verb for yet.
+
+  `forge_over_ports_e2e` now runs its scenario over both stores from one body.
+  Two disagreements surfaced doing that and both were the in-memory store being
+  wrong: it refused an abandoned close because the line had moved, though an
+  abandoned close puts nothing on the line and the model refuses one for nothing
+  but the wrong line or a second ending; and it compared a head where the index
+  compares a parent. Both now state the rule the schema states.
+
+- **A line has a standing, and says what it holds** (#102). The model had no
+  answer to "this line is finished with" and no answer to "what would be lost if
+  it went", which left the layer below with no way to protect the bytes a line
+  points at. `Standing` is `Open` or `Archived` — beside the name and the
+  strategy rather than in the chain, for the reason a rename is not a change
+  point — and an archived line refuses `record`, so nothing lands on one and no
+  satisfied close reaches one. Giving up still works: work against a finished
+  line can close abandoned, because that puts nothing on it.
+
+  `Line::holds` is every content any change point on the line has ever named,
+  and `Pursuit::holds` is the same for a work log. **This is what the layer
+  holding the bytes may not let go of.** A line says what is on it _now_ —
+  alive, under this name, at this content — so a line pointing at bytes somebody
+  deleted is a line lying about the present. That is different from a log of
+  past events, which stays true whatever happens to what it names, and it is why
+  the ledger this model replaced could name an asset without holding it.
+
+  Taking an entry off the line releases nothing: the change point that put it
+  there is still in the chain and still names it — and it has to, because
+  undoing a removal is adding that entry back, which needs the content to still
+  be there. So the set only grows, and the one thing that shrinks it is dropping
+  the line. `Line::may_drop` holds that rule — dropping is reachable only
+  through the archive, as purging is reachable only through the trash everywhere
+  else here, and a line with work still open against it refuses with the count.
+
+  What a drop releases is asked as one question, `discard::releases`, rather
+  than added up by the caller. Dropping a line takes the work against it, so the
+  releasable set is the union of both logs' `holds` — and the half a caller
+  would forget is the second one, because work that gave up put nothing on the
+  line and what it named is in its log and nowhere else. Forgetting it looks
+  exactly like success, which is why the union is the shape of the answer.
+
+  **Rewriting is deliberately not a verb.** No filter, no rebase, no editing a
+  change point after the fact. A filtered change point could not name the work
+  it came out of, because that work asked for something else; what a filter is
+  for is reachable already — open a new line and put on it what should have been
+  there — and the old line is then archived and dropped.
+
+- **The forge's model can be built back from stored values** (#102).
+  `model::restore` is the one door an id comes in by. Every other constructor in
+  the model mints — a line mints its id and its genesis, work mints its id and
+  its opening node — which is why the read half of the ports had no
+  implementation but a fake for as long as it did: nothing could hold an id
+  somebody else chose. The door is one module rather than a `from_persisted` per
+  type, because spread across the types there would be a piece of it on each and
+  nothing that reads as the whole. What keeps it honest is that it assembles
+  nothing itself: the nodes go back one at a time through `History::record`,
+  `WorkLog::push` and `WorkLog::end`, so a stored chain meets the refusals a
+  fresh write meets. A chain whose parents do not line up, a table that would
+  leave two live entries under one name, a round after the ending — each is a
+  read that fails rather than a value the model would not have written. The
+  chain needs no sequence column either: a change point carries its parent, so
+  the points arrive in any order and the links are walked.
+
+- **An in-memory forge store, and the scenario run over it** (#102).
+  `asterism_infra::memory::forge` satisfies `Lines`, `Pursuits` and `Closings`
+  over rows under a `Mutex` — decomposing a domain value on the way in and
+  rebuilding it through `restore` on the way out. That is the whole reason it
+  exists: a fake that kept the domain objects answers every call correctly by
+  construction and never asks whether a line can be rebuilt from what was
+  written down, which is the question the read half is for. The row types are
+  named for the tables the SQLite adapter will create, so it can be read as a
+  specification of what that adapter owes.
+
+  `forge_over_ports_e2e` runs `asterism-core`'s `forge_scenario` again through
+  the services and that store, and adds two things the model alone cannot be
+  asked: that a close which loses the race re-reads and lands on the second
+  attempt, and that a stored state the model would have refused does not come
+  back through the read half.
+
+### Removed
+
+- **The forge's first model, tables and all** (#102). The pursuit whose standing
+  derived from a stream of lifecycle events, the ledger of membership gestures
+  beside it, and the line whose entries moved through four verbs written one
+  event at a time are gone — services, ports, adapters, transport and schema.
+  The model settled in #63 keeps a line's history as a chain of change points
+  carrying a table, and work as a log of rounds; nothing in the old shape can be
+  read as either, so it goes rather than being carried across.
+
+  **What disappears from the outside.** Eight HTTP routes under
+  `/asterism/pursuits`, eight MCP tools (`pursuit_open` / `pursuit_view` /
+  `pursuit_close` / `pursuit_reopen` / `pursuit_tx` and the three `project_*`
+  reads), seven Tauri commands, and the commands and DTOs they were spelled in —
+  `OpenPursuitCommand`, `ClosePursuitCommand`, `RecordPursuitTxCommand`,
+  `ReopenPursuitCommand`, `OpenProjectCommand`, `PursuitDto`, `PursuitEventDto`,
+  `PursuitViewDto`, `PursuitTxDto`, `ProjectDto`. The replacement has no
+  transport yet: its verbs are reachable from inside the process and nowhere
+  else, which is the honest state to be in until the adapter under them exists.
+  No screen loses anything — the UI never had one for this, and the generated
+  bindings shrink by nine types nothing imported.
+
+  **What disappears from the database.** `project`, `line`, `line_entry`,
+  `line_merge`, `line_event`, `pursuit`, `pursuit_event` and `pursuit_tx` are
+  dropped (V95), children before parents because every edge in the family is
+  `ON DELETE RESTRICT`. Only `project` and `line` ever had a production writer,
+  and what it wrote was a project row with an empty `main` beside it — the entry
+  and event tables were reached by tests alone, so no instance holds a line with
+  anything on it. The persona purge loses six of its eleven ordered deletes and
+  keeps the one it is named for.
+
+  **`tests/forge_boundary.rs` now runs with no exemptions.** Its list of files
+  serving the replaced model was the measure of what was left; it is empty, so
+  the guard reads every line of forge code and the forge names nothing outside
+  itself but the five words of shared vocabulary.
+
 ### Changed
 
 - **PUBLIC_DEVELOPMENT.md separates classification from permission to act.** A
@@ -77,9 +433,9 @@ and this project adheres to
 
 - **Work can be put on a line, and the two are one act** (#63). The other half
   of the forge's model, and the layer that drives it. Work opens against a line,
-  cut from wherever the line is at that moment, and writes passes that never
+  cut from wherever the line is at that moment, and writes rounds that never
   read the line — the operation that happens most often is the one that cannot
-  contend with anybody. What a pass asks for only means something measured
+  contend with anybody. What a round asks for only means something measured
   against a line, and that happens when the work ends: ending it as satisfied
   produces the close and the change point together, in one value that cannot be
   taken apart, written through one call that keeps all of it or none of it.
@@ -101,16 +457,16 @@ and this project adheres to
 
   Resolving is therefore ordinary work, and automatic resolution writes what a
   person would have written by hand, in the same four verbs, into an ordinary
-  pass. Five rules ship and a line names one — keep the line's version and carry
-  this work's onto a new entry; keep this work's under the contested name and
-  move the line's aside; put both aside and take the old entry off; write this
-  work's version down and then remove it, so what was tried stays readable; or
-  write nothing and leave the collision standing for somebody to answer. Rules
-  say what they do, so choosing one is a choice somebody makes rather than a
-  default they inherit. What a rule returns is checked rather than trusted: the
-  model folds it in and refuses the rule if the collisions it was asked about
-  are still there. What a rule writes is recorded as the server rather than as
-  the person who asked for it.
+  round. Five rules ship and a line names one — keep the line's version and
+  carry this work's onto a new entry; keep this work's under the contested name
+  and move the line's aside; put both aside and take the old entry off; write
+  this work's version down and then remove it, so what was tried stays readable;
+  or write nothing and leave the collision standing for somebody to answer.
+  Rules say what they do, so choosing one is a choice somebody makes rather than
+  a default they inherit. What a rule returns is checked rather than trusted:
+  the model folds it in and refuses the rule if the collisions it was asked
+  about are still there. What a rule writes is recorded as the server rather
+  than as the person who asked for it.
 
   Who did a thing is the forge's own word now: a handle, and whether it was a
   person or the server. What the handle stands for — which authenticated user,
@@ -122,16 +478,17 @@ and this project adheres to
   because a timestamp here is evidence in a record that never moves and nothing
   orders anything by it — so a wrong one breaks nothing and misleads for good.
 
-  Work can be discussed as well as done. A thread hangs off a pursuit, one pass,
-  one entry as one pass had it, or what landed — the four things worth remarking
-  on — and it is the forge's own rather than the annotation surface the layer
-  below has, which anchors to snapshots and cards and could not learn these four
-  without learning what a pursuit is. The entry anchor names the pass as well as
-  the entry, so a remark about one attempt does not follow that entry into every
-  other pursuit it is ever carried into. Nothing is overwritten: a correction
-  appends a revision and every earlier wording stays readable. Nothing is
-  resolved either — whether a remark is dealt with is a word people use about
-  their work rather than a shape the record has, so a later message says it.
+  Work can be discussed as well as done. A thread hangs off a pursuit, one
+  round, one entry as one round had it, or what landed — the four things worth
+  remarking on — and it is the forge's own rather than the annotation surface
+  the layer below has, which anchors to snapshots and cards and could not learn
+  these four without learning what a pursuit is. The entry anchor names the
+  round as well as the entry, so a remark about one attempt does not follow that
+  entry into every other pursuit it is ever carried into. Nothing is
+  overwritten: a correction appends a revision and every earlier wording stays
+  readable. Nothing is resolved either — whether a remark is dealt with is a
+  word people use about their work rather than a shape the record has, so a
+  later message says it.
 
   Lines can be listed, work can be found by the line it is against, and work
   filed under a larger piece of work can be found by its parent — the last one a

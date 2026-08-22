@@ -42,6 +42,8 @@ this crate.
 - [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
+- [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
@@ -50,6 +52,8 @@ this crate.
 - [`jobs::thumb_ffmpeg`](jobs__thumb_ffmpeg.md): Video frame extraction through an external `ffmpeg`, for the
 - [`jobs::thumb_macos`](jobs__thumb_macos.md): ImageIO fast path for `thumb_gen` on macOS.
 - [`jobs::thumb_video`](jobs__thumb_video.md): Video frame extraction for `thumb_gen` on macOS.
+- [`memory`](memory.md): In-memory adapters — the ports satisfied without a database.
+- [`memory::forge`](memory__forge.md): The forge's ports, over rows held in memory.
 - [`observe`](observe.md): Observation — the `tracing` subscriber and the streams it writes.
 - [`paths`](paths.md): Data-profile and on-disk layout conventions.
 - [`probes`](probes.md): The probes this build has, and the one question a caller asks of all
@@ -75,6 +79,8 @@ this crate.
 - [`sqlite::repo::dir`](sqlite__repo__dir.md): SQLite adapter for `DirRepository`.
 - [`sqlite::repo::dispatch`](sqlite__repo__dispatch.md): SQLite adapter for the `DispatchRepository` port.
 - [`sqlite::repo::edge`](sqlite__repo__edge.md): SQLite adapter for the `EdgeRepository` port.
+- [`sqlite::repo::forge`](sqlite__repo__forge.md): SQLite adapter for the forge's ports.
+- [`sqlite::repo::forge_boundary`](sqlite__repo__forge_boundary.md): What the forge asks of everything outside it, answered by SQLite.
 - [`sqlite::repo::group`](sqlite__repo__group.md): SQLite adapter for `GroupRepository`.
 - [`sqlite::repo::instance`](sqlite__repo__instance.md): SQLite adapter for the `InstanceRepository` port.
 - [`sqlite::repo::material_layer`](sqlite__repo__material_layer.md): SQLite adapter for the `MaterialLayerRepository` port.
@@ -83,8 +89,6 @@ this crate.
 - [`sqlite::repo::persona`](sqlite__repo__persona.md): SQLite adapter for the `PersonaRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::persona_profile`](sqlite__repo__persona_profile.md): SQLite adapter for the `PersonaProfileRepository` port.
 - [`sqlite::repo::persona_theme`](sqlite__repo__persona_theme.md): SQLite adapter for the `PersonaThemeRepository` port.
-- [`sqlite::repo::project`](sqlite__repo__project.md): SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).
-- [`sqlite::repo::pursuit`](sqlite__repo__pursuit.md): SQLite adapter for the `PursuitRepository` port (#29, extended by
 - [`sqlite::repo::query_group`](sqlite__repo__query_group.md): SQLite adapter for `QueryGroupRepository` — the persistence half of
 - [`sqlite::repo::series`](sqlite__repo__series.md): SQLite adapter for the `SeriesRepository` port — the series axis's
 - [`sqlite::repo::session`](sqlite__repo__session.md): SQLite adapter for the [`SessionRepository`] port.

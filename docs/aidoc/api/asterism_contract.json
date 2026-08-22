@@ -68,11 +68,6 @@
       "docs": "Requests cancellation of a running or pending job."
     },
     {
-      "path": "asterism_contract::command::ClosePursuitCommand",
-      "kind": "struct",
-      "docs": "Closes a pursuit (#29): records a one-way lifecycle fact, never a\nstatus write. A repeat close is a new fact — standing re-derives\nfrom the latest event.\n\nBoth outcomes record the ending and apply nothing else. Neither\nselects among the pursuit's members, and neither writes a snapshot\nonto the event: the close says the line of work ended, and the\nledger says what entered it."
-    },
-    {
       "path": "asterism_contract::command::ConflictResolution",
       "kind": "enum",
       "docs": "How a person answered one raised duplicate question.\n\nThe wire half of\n`asterism_core::domain::duplicate_conflict::ConflictResolution`, two\ndeclarations of one closed set for the reason [`OnDuplicate`]\nrecords about its own pair.\n\nTwo values because a person looking at a pair has two things to say.\nThere is deliberately no \"skip\" / \"later\": leaving the question\nunanswered is what the queue already represents, and spelling it as\nan answer would close a row that nobody decided."
@@ -308,16 +303,6 @@
       "docs": "What the caller wants done if the asset being registered turns out\nto hold bytes an existing asset already holds.\n\nThe wire half of `asterism_core::domain::value::OnDuplicate`, which\nis the type the row is written from. Two declarations of the same\nclosed set rather than one, because this crate is a leaf — it has\nno dependency on `asterism-core` (that arrow points the other way),\nand it is the crate the TypeScript bindings and the MCP tool schemas\nare generated from. The `snake_case` tokens are `ask` / `fold` /\n`separate` on both sides, and the single conversion between them\n(`AssetService::add`) is an exhaustive match, so a variant added to\neither set stops compiling until the other is answered for.\n\nSpelled as an enum rather than a free string — unlike `author_kind`,\nthe neighbouring caller-asserted field — because the set really is\nclosed and small: a caller reading the generated schema sees the\nthree answers instead of guessing, and an unknown token is refused\nby deserialisation, above every side effect the ingest could have."
     },
     {
-      "path": "asterism_contract::command::OpenProjectCommand",
-      "kind": "struct",
-      "docs": "Opens a project (#63 decisions 1–2): the repo of the forge's git\nanalogy — the shared context pursuits file under, and the owner of\nthe line they land on.\n\nA deliberate act, like opening a pursuit, and the line comes with\nit: one named `main` is minted in the same transaction, because a\nproject with nothing to land on is not a project anything could\nmerge into. Opening one is a statement, so the row carries the\nattribution triple."
-    },
-    {
-      "path": "asterism_contract::command::OpenPursuitCommand",
-      "kind": "struct",
-      "docs": "Opens a pursuit — the \"start new pursuit\" affordance (#29), and\nthe only way one comes into being. A caller names the intent here,\nthen records what goes in through the ledger. An empty pursuit that\nnever receives work is an honest record, closable as abandoned."
-    },
-    {
       "path": "asterism_contract::command::OrganizeByLocationCommand",
       "kind": "struct",
       "docs": "Auto-organises existing assets under a Dir tree derived from\neach asset's `source_locator` parent path. When `base_dir` is\nset, only locators that start with it are affected and the tree\nis built from the components *after* the prefix — this matches\nthe drag-drop story where the folder the user dropped becomes\nthe tree root, or the HTTP call where the caller passes an\nexplicit root. When `base_dir` is `None`, the tree is derived\nfrom every component of the locator's parent.\n\nA single Group named `<joined path>` is auto-created inside the\nleaf Dir (Group names are `(persona, name)` unique globally, so\nthe joined path is used verbatim to avoid collisions between\ntwo different folder trees whose leaves happen to share a name),\nand every matched asset is idempotently added to that Group."
@@ -408,11 +393,6 @@
       "docs": "Appends one telemetry event to the local `event_log` (dogfooding\nmetrics — `app_open` / `persona_switch` / `search` / `burst_open` /\n`asset_open`, kinds are open slugs). `occurred_at` is stamped\nserver-side; the recording path is fire-and-forget on the UI side\nso it never blocks an interaction. Local-only: rows never leave\nthe machine."
     },
     {
-      "path": "asterism_contract::command::RecordPursuitTxCommand",
-      "kind": "struct",
-      "docs": "Appends one gesture to a pursuit's membership ledger (#22): an\nasset entering (`in`, with its origin), a mid-work removal, or its\nreversal. Append-only — membership derives on read, latest gesture\nper asset wins. `update` is the model's reserved round-trip verb\nand is refused here until that slice lands."
-    },
-    {
       "path": "asterism_contract::command::RedispatchCommand",
       "kind": "struct",
       "docs": "Re-runs a finished dispatch with the same frozen input, exporter,\naction, and params (P2). The snapshot row is shared — the\ncontent hash already deduped it — so history grows by one job row\nonly."
@@ -451,11 +431,6 @@
       "path": "asterism_contract::command::RenameTagCommand",
       "kind": "struct",
       "docs": "Renames a tag in place (`POST /asterism/tags/rename`).\n\nThe new name goes through the same normalisation as\n[`AttachTagCommand`] (trim; empty is rejected), so a name minted\nhere and a name minted by an attach cannot drift apart.\n\n**Renaming never merges.** When the normalised name already\nbelongs to a *different* tag the call is rejected with `409\nConflict` and the caller is pointed at [`MergeTagsCommand`] —\ncollapsing two channels destroys one of them, which is an\nexplicit gesture, not a side effect of a typo fix. Renaming a tag\nto the name it already carries succeeds as a no-op."
-    },
-    {
-      "path": "asterism_contract::command::ReopenPursuitCommand",
-      "kind": "struct",
-      "docs": "Reopens a pursuit (#29). Legal on an already-open pursuit: the\nfact is recorded and standing does not change."
     },
     {
       "path": "asterism_contract::command::ReorderGroupAssetsCommand",
@@ -748,11 +723,6 @@
       "docs": "Snapshot of the background-jobs table used by the UI progress\nbanner (status roll-up + per-kind breakdown)."
     },
     {
-      "path": "asterism_contract::dto::LineDto",
-      "kind": "struct",
-      "docs": "One named line of a project (#63 decisions 1–2) — the branch of the\nforge's git analogy, and what a satisfied close merges into."
-    },
-    {
       "path": "asterism_contract::dto::LineageEdgeDto",
       "kind": "struct",
       "docs": "One `derived_from` link in a lineage walk. Direction is\nchild → parent, matching the stored edge."
@@ -843,34 +813,9 @@
       "docs": "Per-persona visual chrome — currently holds the wallpaper asset\nreference. Returned by `get_persona_theme` and echoed back by\n`set_persona_theme` so the UI can flip its CSS variables without\na follow-up query."
     },
     {
-      "path": "asterism_contract::dto::ProjectDto",
-      "kind": "struct",
-      "docs": "The repo of the forge's git analogy (#63 decisions 1–2): the shared\ncontext pursuits file under, and the owner of the lines they land\non. Carries its lines rather than making the caller ask again —\nthere is exactly one in v1, and a project without one could not be\nmerged into."
-    },
-    {
       "path": "asterism_contract::dto::ProvenanceViewDto",
       "kind": "struct",
       "docs": "Composite response for `GET /asterism/assets/{id}/provenance` —\nthe provenance (\"derived from\") mini-graph the detail view surfaces.\n\nSemantics (aligned with the write path in\n`dispatch_service::reify_derived`, which writes\n`ConstellationEdge { from = derived_asset, to = parent, kind =\nDerivedFrom }`):\n\n- `ancestors` — cards this asset was *derived from* (Selection\n  inputs that seeded the dispatch producing this asset). Empty\n  for imported assets that never went through a dispatch.\n- `descendants` — cards *derived from* this asset (this asset\n  sat as a Selection input for some later dispatch). Empty for\n  leaves that were never re-dispatched.\n\nMVP scope: 1 hop in each direction, capped at `limit`. Deeper\nlineage traversal is a follow-up (each side can be re-fetched\nagainst the picked card to walk further)."
-    },
-    {
-      "path": "asterism_contract::dto::PursuitDto",
-      "kind": "struct",
-      "docs": "The minted unit of work (#29): one line of generation and curation\ntoward an intent. The row is thin and immutable — `standing` is\nderived on read from the lifecycle events, never stored."
-    },
-    {
-      "path": "asterism_contract::dto::PursuitEventDto",
-      "kind": "struct",
-      "docs": "One lifecycle fact about a pursuit (#29): a close or a reopen,\nappend-only. A repeat close is a new fact; standing re-derives."
-    },
-    {
-      "path": "asterism_contract::dto::PursuitTxDto",
-      "kind": "struct",
-      "docs": "One gesture in a pursuit's append-only membership ledger (#22):\nan asset entering (`in`, with its origin), a mid-work removal, or\nits reversal. Membership is derived on read — latest gesture per\nasset wins."
-    },
-    {
-      "path": "asterism_contract::dto::PursuitViewDto",
-      "kind": "struct",
-      "docs": "One pursuit, opened up (#29): the thin row plus everything the\nrecord correlates to it — all of it derived at read time, none of\nit stored on the pursuit."
     },
     {
       "path": "asterism_contract::dto::RetrievedIdsDto",

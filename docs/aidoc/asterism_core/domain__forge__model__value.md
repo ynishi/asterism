@@ -38,7 +38,7 @@ proposed.
 - `LineId` — Surrogate id for a `Line` — one repository.
 - `MessageId` — Surrogate id for a `Message`.
 - `Name` — A name something can answer to: trimmed, and never blank.
-- `NodeId` — Surrogate id for a node of a work log — where it opened, one
+- `NodeId` — Surrogate id for a node of a pursuit — where it opened, one
 - `PursuitId` — Surrogate id for a `Pursuit` — one line of work.
 - `StrategyId` — Which rule a line settles collisions by.
 - `ThreadId` — Surrogate id for a `Thread` — one run of messages about one

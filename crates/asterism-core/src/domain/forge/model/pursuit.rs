@@ -1,8 +1,8 @@
-//! One line of work: what it is trying to do, and every pass at it.
+//! One line of work: what it is trying to do, and every round at it.
 //!
 //! ```text
 //!   Pursuit ── of : →Line ── parent? : →Pursuit
-//!    └ WorkLog
+//!    └ Open → Round* → Close
 //!        Open ──▶ Round ──▶ Round ──▶ Close?
 //!          │        │  └ ops
 //!          │        └ parent
@@ -13,12 +13,12 @@
 //! like the others, a chain that only grows, and everything the thing
 //! currently asks for derived by folding it. What differs is what the
 //! nodes carry — a line's node carries a table that has changed it, a
-//! work log's carries operations that have not changed anything yet.
+//! pursuit's carries operations that have not changed anything yet.
 //!
-//! # A pass is the unit, not the pursuit
+//! # A round is the unit, not the pursuit
 //!
 //! [`Round`] is where work happens. A pursuit is the container that
-//! says what the passes are for, and it holds nothing that a round
+//! says what the rounds are for, and it holds nothing that a round
 //! could hold instead.
 //!
 //! A round that writes nothing is refused. Work is what a person does
@@ -37,7 +37,7 @@
 //! would shrink the window every time somebody looked at it, and a
 //! change nobody ever reconciled would come out clean.
 //!
-//! # A pass is a write, and nothing else
+//! # A round is a write, and nothing else
 //!
 //! There is no node here that records having looked at something.
 //! Work stops colliding with a line by *saying something different*,
@@ -51,7 +51,7 @@
 //! pushed after it. Satisfied means the intent was met — the act that
 //! turns that into a change point spans both logs and is not here.
 //! Abandoned means it was not, and that is a record rather than a
-//! deletion: the pass that was dropped stays readable, which is the
+//! deletion: the round that was dropped stays readable, which is the
 //! only way "we tried this and stopped" survives.
 //!
 //! Reopening is not a verb. Picking work back up is a new pursuit
@@ -68,10 +68,12 @@
 //! under a parent, and what they changed, is a question answered by
 //! looking — and a stored answer would be a second copy of it.
 
+use std::collections::BTreeSet;
+
 use crate::domain::forge::model::act::{Act, Meta};
 use crate::domain::forge::model::error::ForgeError;
-use crate::domain::forge::model::op::{Op, Rows, fold};
-use crate::domain::forge::model::value::{ChangePointId, LineId, Name, NodeId, PursuitId};
+use crate::domain::forge::model::op::{Op, OpKind, Rows, fold};
+use crate::domain::forge::model::value::{ChangePointId, Content, LineId, Name, NodeId, PursuitId};
 
 /// Why a pursuit was opened, in the words of whoever opened it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -123,6 +125,20 @@ impl Open {
         }
     }
 
+    /// Rebuilds the node work opened at, under the id it was kept
+    /// with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(id: NodeId, base: ChangePointId, intent: Intent, act: Act) -> Self {
+        Self {
+            id,
+            base,
+            intent,
+            act,
+        }
+    }
+
     /// Which node.
     pub fn id(&self) -> NodeId {
         self.id
@@ -144,7 +160,7 @@ impl Open {
     }
 }
 
-/// One pass at the work.
+/// One round at the work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Round {
     id: NodeId,
@@ -155,13 +171,13 @@ pub struct Round {
 }
 
 impl Round {
-    /// Records a pass.
+    /// Records a round.
     ///
-    /// Refuses one that writes nothing. A pass is what work does, and
+    /// Refuses one that writes nothing. A round is what work does, and
     /// a node carrying no operations is a record that nothing
-    /// happened — the work log is a record of what did.
+    /// happened — the pursuit is a record of what did.
     ///
-    /// There is no pass that only looks at something. Looking is not
+    /// There is no round that only looks at something. Looking is not
     /// an operation, and a node that claimed it would be a claim about
     /// the reader rather than a fact about the work: it could be
     /// written without changing anything, and anything a collision
@@ -184,6 +200,32 @@ impl Round {
         })
     }
 
+    /// Rebuilds a round under the id it was kept with.
+    ///
+    /// Refuses an empty one for the reason [`new`](Self::new) does: a
+    /// stored node carrying no operations is a record that nothing
+    /// happened, and reading it back would let the log say what it was
+    /// refused permission to say. Visible to the model and no further
+    /// — see [`restore`](super::restore).
+    pub(super) fn restored(
+        id: NodeId,
+        parent: NodeId,
+        ops: Vec<Op>,
+        note: Option<String>,
+        act: Act,
+    ) -> Result<Self, ForgeError> {
+        if ops.is_empty() {
+            return Err(ForgeError::EmptyRound);
+        }
+        Ok(Self {
+            id,
+            parent,
+            ops,
+            note,
+            act,
+        })
+    }
+
     /// Which node.
     pub fn id(&self) -> NodeId {
         self.id
@@ -194,12 +236,12 @@ impl Round {
         self.parent
     }
 
-    /// What this pass wrote, in the order it wrote it.
+    /// What this round wrote, in the order it wrote it.
     pub fn ops(&self) -> &[Op] {
         &self.ops
     }
 
-    /// Anything the pass said about itself.
+    /// Anything the round said about itself.
     pub fn note(&self) -> Option<&str> {
         self.note.as_deref()
     }
@@ -237,6 +279,26 @@ impl Close {
         }
     }
 
+    /// Rebuilds an ending under the id it was kept with.
+    ///
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(
+        id: NodeId,
+        parent: NodeId,
+        outcome: Outcome,
+        note: Option<String>,
+        act: Act,
+    ) -> Self {
+        Self {
+            id,
+            parent,
+            outcome,
+            note,
+            act,
+        }
+    }
+
     /// Which node.
     pub fn id(&self) -> NodeId {
         self.id
@@ -263,104 +325,15 @@ impl Close {
     }
 }
 
-/// The chain of passes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkLog {
-    open: Open,
-    rounds: Vec<Round>,
-    close: Option<Close>,
-}
-
-impl WorkLog {
-    /// Begins a work log at the node work was cut at.
-    pub fn begin(open: Open) -> Self {
-        Self {
-            open,
-            rounds: Vec::new(),
-            close: None,
-        }
-    }
-
-    /// The node work began at.
-    pub fn open(&self) -> &Open {
-        &self.open
-    }
-
-    /// Every pass, in order.
-    pub fn rounds(&self) -> &[Round] {
-        &self.rounds
-    }
-
-    /// How it ended, if it has.
-    pub fn close(&self) -> Option<&Close> {
-        self.close.as_ref()
-    }
-
-    /// The last node — what the next one takes as its parent.
-    pub fn head(&self) -> NodeId {
-        if let Some(close) = &self.close {
-            return close.id();
-        }
-        self.rounds
-            .last()
-            .map(Round::id)
-            .unwrap_or_else(|| self.open.id())
-    }
-
-    /// Appends a pass.
-    ///
-    /// Refused if the work has ended, or if the pass does not sit on
-    /// the head. Ended work that could still be written to would make
-    /// the ending a note rather than a fact, and every reader would
-    /// have to ask whether what follows counts.
-    pub fn push(&mut self, round: Round) -> Result<(), ForgeError> {
-        if self.close.is_some() {
-            return Err(ForgeError::AlreadyClosed);
-        }
-        if round.parent() != self.head() {
-            return Err(ForgeError::NotOnHead);
-        }
-        self.rounds.push(round);
-        Ok(())
-    }
-
-    /// Ends the work.
-    ///
-    /// Refused twice over for the same reason as a pass: work ends
-    /// once, and the ending sits on the head.
-    pub fn end(&mut self, close: Close) -> Result<(), ForgeError> {
-        if self.close.is_some() {
-            return Err(ForgeError::AlreadyClosed);
-        }
-        if close.parent() != self.head() {
-            return Err(ForgeError::NotOnHead);
-        }
-        self.close = Some(close);
-        Ok(())
-    }
-
-    /// What this work is asking the line to carry, folded across every
-    /// pass.
-    ///
-    /// The line is not an input — see [`fold`]. What the request means
-    /// is only decided against a line, and that happens elsewhere.
-    pub fn request(&self) -> Rows {
-        let ops: Vec<Op> = self
-            .rounds
-            .iter()
-            .flat_map(|round| round.ops().iter().cloned())
-            .collect();
-        fold(&ops)
-    }
-}
-
 /// One line of work against one line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pursuit {
     id: PursuitId,
     of: LineId,
     parent: Option<PursuitId>,
-    log: WorkLog,
+    opening: Open,
+    rounds: Vec<Round>,
+    close: Option<Close>,
     meta: Meta,
 }
 
@@ -377,8 +350,36 @@ impl Pursuit {
             id: PursuitId::new(),
             of,
             parent,
-            log: WorkLog::begin(Open::new(base, intent, act)),
+            opening: Open::new(base, intent, act),
+            rounds: Vec::new(),
+            close: None,
             meta: Meta::opened(act),
+        }
+    }
+
+    /// Rebuilds work under the id it was kept with, at the node it
+    /// opened at and with nothing after it yet.
+    ///
+    /// The rounds and the ending go back on through
+    /// [`push`](Self::push) and [`end`](Self::end), which is what
+    /// makes a stored chain meet the refusals a fresh one does.
+    /// Visible to the model and no further — see
+    /// [`restore`](super::restore).
+    pub(super) fn restored(
+        id: PursuitId,
+        of: LineId,
+        parent: Option<PursuitId>,
+        opening: Open,
+        meta: Meta,
+    ) -> Self {
+        Self {
+            id,
+            of,
+            parent,
+            opening,
+            rounds: Vec::new(),
+            close: None,
+            meta,
         }
     }
 
@@ -400,12 +401,36 @@ impl Pursuit {
 
     /// The change point this work was cut from. Fixed.
     pub fn base(&self) -> ChangePointId {
-        self.log.open().base()
+        self.opening.base()
     }
 
-    /// The passes.
-    pub fn log(&self) -> &WorkLog {
-        &self.log
+    /// The node the work opened at.
+    ///
+    /// Named for the node rather than the verb, because
+    /// [`open`](Self::open) is the verb and one name cannot be both.
+    pub fn opening(&self) -> &Open {
+        &self.opening
+    }
+
+    /// Every round, in order.
+    pub fn rounds(&self) -> &[Round] {
+        &self.rounds
+    }
+
+    /// How it ended, if it has.
+    pub fn close(&self) -> Option<&Close> {
+        self.close.as_ref()
+    }
+
+    /// The last node — what the next one takes as its parent.
+    pub fn head(&self) -> NodeId {
+        if let Some(close) = &self.close {
+            return close.id();
+        }
+        self.rounds
+            .last()
+            .map(Round::id)
+            .unwrap_or_else(|| self.opening.id())
     }
 
     /// When the work was opened, and the last time its own
@@ -416,22 +441,72 @@ impl Pursuit {
 
     /// Whether the work has ended, and how.
     pub fn outcome(&self) -> Option<Outcome> {
-        self.log.close().map(Close::outcome)
+        self.close.as_ref().map(Close::outcome)
     }
 
-    /// What this work is asking the line to carry.
+    /// Every content this work has ever named.
+    ///
+    /// The line's [`holds`](crate::domain::forge::model::line::Line::holds)
+    /// with the same meaning and the same reason: an operation naming
+    /// content that somebody deleted is an operation that cannot be
+    /// read, folded, or landed. Work that gave up still holds what it
+    /// named — what it tried is the record, and a record pointing at
+    /// nothing is not one.
+    pub fn holds(&self) -> BTreeSet<Content> {
+        self.rounds
+            .iter()
+            .flat_map(|round| round.ops())
+            .filter_map(|op| match op.kind() {
+                OpKind::Add { content, .. } | OpKind::Replace { content } => Some(*content),
+                OpKind::Rename { .. } | OpKind::Remove => None,
+            })
+            .collect()
+    }
+
+    /// What this work is asking the line to carry, folded across every
+    /// round.
+    ///
+    /// The line is not an input — see [`fold`]. What the request means
+    /// is only decided against a line, and that happens elsewhere.
     pub fn request(&self) -> Rows {
-        self.log.request()
+        let ops: Vec<Op> = self
+            .rounds
+            .iter()
+            .flat_map(|round| round.ops().iter().cloned())
+            .collect();
+        fold(&ops)
     }
 
-    /// Records a pass.
+    /// Appends a round.
+    ///
+    /// Refused if the work has ended, or if the round does not sit on
+    /// the head. Ended work that could still be written to would make
+    /// the ending a note rather than a fact, and every reader would
+    /// have to ask whether what follows counts.
     pub fn push(&mut self, round: Round) -> Result<(), ForgeError> {
-        self.log.push(round)
+        if self.close.is_some() {
+            return Err(ForgeError::AlreadyClosed);
+        }
+        if round.parent() != self.head() {
+            return Err(ForgeError::NotOnHead);
+        }
+        self.rounds.push(round);
+        Ok(())
     }
 
     /// Ends the work.
+    ///
+    /// Refused twice over for the same reason as a round: work ends
+    /// once, and the ending sits on the head.
     pub fn end(&mut self, close: Close) -> Result<(), ForgeError> {
-        self.log.end(close)
+        if self.close.is_some() {
+            return Err(ForgeError::AlreadyClosed);
+        }
+        if close.parent() != self.head() {
+            return Err(ForgeError::NotOnHead);
+        }
+        self.close = Some(close);
+        Ok(())
     }
 }
 
@@ -441,7 +516,7 @@ mod tests {
     use crate::domain::forge::model::act::Actor;
     use crate::domain::forge::model::table::Row;
     use crate::domain::forge::model::value::ActorId;
-    use crate::domain::forge::model::value::Content;
+    use crate::domain::forge::model::value::{Content, EntryId};
     use chrono::{DateTime, TimeZone, Utc};
     use uuid::Uuid;
 
@@ -481,62 +556,56 @@ mod tests {
 
         assert!(pursuit.request().is_empty());
         assert_eq!(pursuit.outcome(), None);
-        assert_eq!(pursuit.log().head(), pursuit.log().open().id());
-        assert!(pursuit.log().rounds().is_empty());
+        assert_eq!(pursuit.head(), pursuit.opening().id());
+        assert!(pursuit.rounds().is_empty());
     }
 
     #[test]
-    fn passes_accumulate_into_what_the_work_request() {
+    fn rounds_accumulate_into_what_the_work_request() {
         let mut pursuit = opened();
         let added = Op::add(content(), name("key visual"));
         let entry = added.entry();
         let held = content();
 
+        pursuit.push(round(pursuit.head(), vec![added], 1)).unwrap();
         pursuit
-            .push(round(pursuit.log().head(), vec![added], 1))
-            .unwrap();
-        pursuit
-            .push(round(
-                pursuit.log().head(),
-                vec![Op::replace(entry, held)],
-                2,
-            ))
+            .push(round(pursuit.head(), vec![Op::replace(entry, held)], 2))
             .unwrap();
 
         assert_eq!(
             pursuit.request()[&entry],
             Row::added(held, name("key visual"))
         );
-        assert_eq!(pursuit.log().rounds().len(), 2);
+        assert_eq!(pursuit.rounds().len(), 2);
     }
 
     #[test]
-    fn a_pass_that_writes_nothing_is_refused() {
+    fn a_round_that_writes_nothing_is_refused() {
         let pursuit = opened();
 
-        let refused = Round::new(pursuit.log().head(), Vec::new(), None, act(1));
+        let refused = Round::new(pursuit.head(), Vec::new(), None, act(1));
 
         assert_eq!(refused.unwrap_err(), ForgeError::EmptyRound);
     }
 
-    /// The base is where the work was cut, and no pass moves it —
+    /// The base is where the work was cut, and no round moves it —
     /// there is no operation that could, which is the only way to mean
     /// it.
     #[test]
-    fn passes_do_not_move_the_base() {
+    fn rounds_do_not_move_the_base() {
         let mut pursuit = opened();
         let base = pursuit.base();
 
         for minute in 1..4 {
-            let pass = round(
-                pursuit.log().head(),
+            let next = round(
+                pursuit.head(),
                 vec![Op::add(
                     Content::from_uuid(Uuid::now_v7()),
                     name("key visual"),
                 )],
                 minute,
             );
-            pursuit.push(pass).unwrap();
+            pursuit.push(next).unwrap();
         }
 
         assert_eq!(pursuit.base(), base);
@@ -547,36 +616,27 @@ mod tests {
         let mut pursuit = opened();
         pursuit
             .push(round(
-                pursuit.log().head(),
+                pursuit.head(),
                 vec![Op::add(content(), name("key visual"))],
                 1,
             ))
             .unwrap();
 
         pursuit
-            .end(Close::new(
-                pursuit.log().head(),
-                Outcome::Satisfied,
-                None,
-                act(2),
-            ))
+            .end(Close::new(pursuit.head(), Outcome::Satisfied, None, act(2)))
             .unwrap();
 
-        let after = round(
-            pursuit.log().head(),
-            vec![Op::add(content(), name("late"))],
-            3,
-        );
+        let after = round(pursuit.head(), vec![Op::add(content(), name("late"))], 3);
         assert_eq!(pursuit.push(after).unwrap_err(), ForgeError::AlreadyClosed);
-        let twice = Close::new(pursuit.log().head(), Outcome::Abandoned, None, act(4));
+        let twice = Close::new(pursuit.head(), Outcome::Abandoned, None, act(4));
         assert_eq!(pursuit.end(twice).unwrap_err(), ForgeError::AlreadyClosed);
         assert_eq!(pursuit.outcome(), Some(Outcome::Satisfied));
     }
 
     #[test]
-    fn a_pass_that_does_not_sit_on_the_head_is_refused() {
+    fn a_round_that_does_not_sit_on_the_head_is_refused() {
         let mut pursuit = opened();
-        let stale = pursuit.log().head();
+        let stale = pursuit.head();
         pursuit
             .push(round(
                 stale,
@@ -588,7 +648,7 @@ mod tests {
         let refused = pursuit.push(round(stale, vec![Op::add(content(), name("alternate"))], 2));
 
         assert_eq!(refused.unwrap_err(), ForgeError::NotOnHead);
-        assert_eq!(pursuit.log().rounds().len(), 1);
+        assert_eq!(pursuit.rounds().len(), 1);
     }
 
     /// Abandoned work keeps everything it wrote. That is the whole
@@ -598,13 +658,11 @@ mod tests {
         let mut pursuit = opened();
         let added = Op::add(content(), name("key visual"));
         let entry = added.entry();
-        pursuit
-            .push(round(pursuit.log().head(), vec![added], 1))
-            .unwrap();
+        pursuit.push(round(pursuit.head(), vec![added], 1)).unwrap();
 
         pursuit
             .end(Close::new(
-                pursuit.log().head(),
+                pursuit.head(),
                 Outcome::Abandoned,
                 Some("the client went another way".to_string()),
                 act(2),
@@ -614,7 +672,7 @@ mod tests {
         assert_eq!(pursuit.outcome(), Some(Outcome::Abandoned));
         assert!(pursuit.request().contains_key(&entry));
         assert_eq!(
-            pursuit.log().close().unwrap().note(),
+            pursuit.close().unwrap().note(),
             Some("the client went another way")
         );
     }
@@ -638,8 +696,63 @@ mod tests {
         assert_eq!(pursuit.of(), line);
         assert_eq!(pursuit.parent(), Some(epic));
         assert_eq!(
-            pursuit.log().open().intent().title.as_ref(),
+            pursuit.opening().intent().title.as_ref(),
             Some(&name("the album cover"))
         );
+    }
+
+    /// A pursuit holds what it named, for the same reason a line
+    /// does: an operation pointing at bytes somebody deleted is one
+    /// nothing can fold, land, or read back.
+    #[test]
+    fn a_work_log_holds_what_its_operations_named_including_the_one_it_took_off() {
+        let mut work = opened();
+        let added = content();
+        let replaced = content();
+        let entry = EntryId::new();
+
+        work.push(
+            Round::new(
+                work.head(),
+                vec![
+                    Op::add_to(entry, added, name("one")),
+                    Op::replace(entry, replaced),
+                    Op::rename(entry, name("two")),
+                    Op::remove(entry),
+                ],
+                None,
+                act(1),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let held = work.holds();
+        assert!(held.contains(&added), "what it first asked for");
+        assert!(held.contains(&replaced), "and what it moved to");
+        assert_eq!(held.len(), 2, "a rename and a removal name no content");
+    }
+
+    /// Giving up releases nothing. What was tried is the record, and a
+    /// record pointing at nothing is not one.
+    #[test]
+    fn abandoned_work_still_holds_what_it_named() {
+        let mut work = opened();
+        let tried = content();
+        work.push(
+            Round::new(
+                work.head(),
+                vec![Op::add(tried, name("tried"))],
+                None,
+                act(1),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        work.end(Close::new(work.head(), Outcome::Abandoned, None, act(2)))
+            .unwrap();
+
+        assert_eq!(work.outcome(), Some(Outcome::Abandoned));
+        assert!(work.holds().contains(&tried));
     }
 }

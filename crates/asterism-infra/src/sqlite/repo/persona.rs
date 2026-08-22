@@ -288,8 +288,8 @@ impl PersonaRepository for SqlitePersonaRepository {
         // separate statement pair for the reason documented on
         // `AssetRepository::purge` (two processes share this file).
         //
-        // 0 = purged (or absent), 1 = still live.
-        let verdict: u8 = self
+        // The same is true of what the forge holds: see `Verdict`.
+        let verdict = self
             .isle
             .call(move |conn| {
                 // Persona delete cascades to snapshot / dispatch_job /
@@ -302,49 +302,10 @@ impl PersonaRepository for SqlitePersonaRepository {
                 // abort. Remove the restricting references explicitly, in
                 // order, inside one transaction before the persona row (and
                 // its remaining cascades) go:
-                //   dispatch_job → pursuit_tx →
-                //   line_event → line_merge →
-                //   pursuit_event → line_entry → pursuit → line →
-                //   project → bucket.origin clear → snapshot → persona.
+                //   dispatch_job → bucket.origin clear → snapshot →
+                //   persona.
                 //
                 // `dispatch_job` leads for its `snapshot_id` alone.
-                //
-                // The pursuit tables (V79, extended by V82) are RESTRICT
-                // on *everything* — persona, snapshot, and each other —
-                // so their slots in the order are pinned before
-                // `snapshot` (which `pursuit_event.snapshot_id`
-                // restricts).
-                // `parent_id` is
-                // a self-FK RESTRICT, so parents are unhooked before the
-                // single DELETE — the bucket.origin_snapshot_id precedent,
-                // cheaper than ordering the delete children-first.
-                //
-                // The forge's project and its lines (V84, extended by
-                // V85) are RESTRICT on everything as well, and they
-                // wedge the pursuit slots apart. `line_merge` restricts
-                // `pursuit_event`, so it goes before the events it
-                // hangs on; `line_event` restricts `line_merge` and
-                // `line_entry`, so it goes before both of those.
-                // `pursuit_tx` restricts `line_entry` through its aim
-                // column, so it moves ahead of that; it restricted
-                // `line_event` through a second aim column until V90
-                // dropped that one, which relaxes the order by an edge
-                // without changing it. `line` restricts `project`, and
-                // `pursuit.project_id` restricts it too, so `project`
-                // waits for the pursuits and the lines alike. Only
-                // `line` carries no persona column — it is swept
-                // through its project.
-                //
-                // This order holds only
-                // while a forge row's persona agrees with the persona
-                // owning its structural parent — an entry filed under
-                // another persona's line, or an aim reaching into one,
-                // is an edge *no* order satisfies, and the persona
-                // stays un-purgeable. Nothing writes these tables yet;
-                // P2's service is what owes the rule, because unlike a
-                // wrong order (deterministic, and caught by the test
-                // below) a wrong persona is data-dependent and has no
-                // second sweep to catch it.
                 let tx = conn.transaction()?;
                 let live: Option<bool> = tx
                     .query_row(
@@ -359,47 +320,54 @@ impl PersonaRepository for SqlitePersonaRepository {
                     })?;
                 match live {
                     // Absent: the caller's intent already holds.
-                    None => return Ok(0),
-                    Some(true) => return Ok(1),
+                    None => return Ok(Verdict::Gone),
+                    Some(true) => return Ok(Verdict::Live),
                     Some(false) => {}
+                }
+
+                // The forge holds what it names, and the schema says
+                // so with a foreign key from `change_row.content` and
+                // `pursuit_op.content`. Without this the delete below
+                // still refuses — the cascade reaches `asset` and the
+                // key stops it — but it refuses as a foreign-key
+                // error, which names a column and tells nobody what to
+                // do. Asked here, inside the same transaction as the
+                // delete for the reason the live check is, so the
+                // answer cannot go stale between saying it and acting
+                // on it.
+                let held: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM asset a \
+                      WHERE a.persona_id = ?1 \
+                        AND (EXISTS (SELECT 1 FROM change_row r WHERE r.content = a.id) \
+                          OR EXISTS (SELECT 1 FROM pursuit_op o WHERE o.content = a.id))",
+                    params![uuid],
+                    |r| r.get(0),
+                )?;
+                if held > 0 {
+                    let mut stmt = tx.prepare(
+                        "SELECT DISTINCT l.name FROM line l \
+                          JOIN pursuit w ON w.line_id = l.id \
+                          JOIN pursuit_node n ON n.pursuit_id = w.id \
+                          JOIN pursuit_op o ON o.node_id = n.id \
+                          JOIN asset a ON a.id = o.content \
+                         WHERE a.persona_id = ?1 \
+                         UNION \
+                        SELECT DISTINCT l.name FROM line l \
+                          JOIN change_point p ON p.line_id = l.id \
+                          JOIN change_row r ON r.point_id = p.id \
+                          JOIN asset a ON a.id = r.content \
+                         WHERE a.persona_id = ?1 \
+                         ORDER BY 1",
+                    )?;
+                    let lines: Vec<String> = stmt
+                        .query_map(params![uuid], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    return Ok(Verdict::Held { held, lines });
                 }
                 tx.execute(
                     "DELETE FROM dispatch_job WHERE persona_id = ?1",
                     params![uuid],
                 )?;
-                tx.execute(
-                    "DELETE FROM pursuit_tx WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "DELETE FROM line_event WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "DELETE FROM line_merge WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "DELETE FROM pursuit_event WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "DELETE FROM line_entry WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute(
-                    "UPDATE pursuit SET parent_id = NULL WHERE persona_id = ?1",
-                    params![uuid],
-                )?;
-                tx.execute("DELETE FROM pursuit WHERE persona_id = ?1", params![uuid])?;
-                // No persona column of its own; swept through the
-                // project that holds it.
-                tx.execute(
-                    "DELETE FROM line WHERE project_id IN \
-                     (SELECT id FROM project WHERE persona_id = ?1)",
-                    params![uuid],
-                )?;
-                tx.execute("DELETE FROM project WHERE persona_id = ?1", params![uuid])?;
                 tx.execute(
                     "UPDATE bucket SET origin_snapshot_id = NULL WHERE persona_id = ?1",
                     params![uuid],
@@ -407,16 +375,49 @@ impl PersonaRepository for SqlitePersonaRepository {
                 tx.execute("DELETE FROM snapshot WHERE persona_id = ?1", params![uuid])?;
                 tx.execute("DELETE FROM persona WHERE id = ?1", params![uuid])?;
                 tx.commit()?;
-                Ok(0)
+                Ok(Verdict::Gone)
             })
             .await
             .map_err(infra_err)?;
-        if verdict == 1 {
-            return Err(DomainError::Conflict(format!(
+        match verdict {
+            Verdict::Gone => Ok(()),
+            Verdict::Live => Err(DomainError::Conflict(format!(
                 "persona {id} is still live; trash it before purging"
-            )));
+            ))),
+            Verdict::Held { held, lines } => Err(DomainError::Conflict(format!(
+                "persona {id} has {held} asset(s) the forge is holding, on {}. \
+                 A line holds what it has ever named, and releases it when the line \
+                 itself is dropped — taking an entry off does not, because bringing \
+                 it back needs the content to still be there",
+                describe(&lines)
+            ))),
         }
-        Ok(())
+    }
+}
+
+/// What the purge found in the way, so the answer can be one value
+/// rather than a number the caller has to remember the meaning of.
+enum Verdict {
+    /// Purged, or never there.
+    Gone,
+    /// Still live: the trash comes first.
+    Live,
+    /// The forge is holding assets of this persona.
+    Held { held: i64, lines: Vec<String> },
+}
+
+/// Names the lines in the way, and stops naming them before the
+/// message stops being readable.
+fn describe(lines: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let named: Vec<String> = lines
+        .iter()
+        .take(SHOWN)
+        .map(|name| format!("`{name}`"))
+        .collect();
+    match lines.len().checked_sub(SHOWN) {
+        Some(0) | None => format!("line {}", named.join(", ")),
+        Some(rest) => format!("line {} and {rest} more", named.join(", ")),
     }
 }
 
@@ -486,11 +487,7 @@ mod delete_order_tests {
         let snapshot = Uuid::now_v7();
         let dispatch = Uuid::now_v7();
         let bucket = Uuid::now_v7();
-        let parent_pursuit = Uuid::now_v7();
-        let child_pursuit = Uuid::now_v7();
         let bystander = Uuid::now_v7();
-        let bystander_project = Uuid::now_v7();
-        let bystander_line = Uuid::now_v7();
         isle.call(move |conn| {
             conn.execute(
                 "INSERT INTO persona (id, name, accent_color, display_order, archived,
@@ -514,26 +511,6 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 0)",
                 params![snapshot, asset],
             )?;
-            // The pursuit family (V79): RESTRICT on persona, snapshot
-            // and self-parent — every edge the ordered cleanup has to
-            // unhook.
-            conn.execute(
-                "INSERT INTO pursuit (id, persona_id, created_at)
-                 VALUES (?1, ?2, 0)",
-                params![parent_pursuit, persona],
-            )?;
-            conn.execute(
-                "INSERT INTO pursuit (id, persona_id, parent_id, created_at)
-                 VALUES (?1, ?2, ?3, 0)",
-                params![child_pursuit, persona, parent_pursuit],
-            )?;
-            // pursuit_event.snapshot_id → snapshot (ON DELETE RESTRICT).
-            conn.execute(
-                "INSERT INTO pursuit_event
-                     (id, pursuit_id, persona_id, kind, snapshot_id, created_at)
-                 VALUES (?1, ?2, ?3, 'closed_satisfied', ?4, 0)",
-                params![Uuid::now_v7(), child_pursuit, persona, snapshot],
-            )?;
             // dispatch_job.snapshot_id → snapshot (ON DELETE RESTRICT).
             conn.execute(
                 "INSERT INTO dispatch_job
@@ -549,93 +526,14 @@ mod delete_order_tests {
                  VALUES (?1, ?2, 'g', 0, 0, ?3)",
                 params![bucket, persona, snapshot],
             )?;
-            // The V82 addition that survived V87: pursuit_tx → pursuit
-            // / persona, both RESTRICT, both edges the extended order
-            // has to unhook.
-            conn.execute(
-                "INSERT INTO pursuit_tx
-                     (id, pursuit_id, persona_id, kind, asset_id, origin, created_at)
-                 VALUES (?1, ?2, ?3, 'in', ?4, 'generated', 0)",
-                params![Uuid::now_v7(), child_pursuit, persona, asset],
-            )?;
-            let event = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO pursuit_event
-                     (id, pursuit_id, persona_id, kind, created_at)
-                 VALUES (?1, ?2, ?3, 'closed_satisfied', 0)",
-                params![event, child_pursuit, persona],
-            )?;
-            // The V84/V85 additions: project → persona, line →
-            // project, line_entry → line / persona, line_merge →
-            // pursuit_event / persona, line_event → line_entry /
-            // line_merge / persona, and a targeted IN reaching from
-            // pursuit_tx into line_entry. Every one is RESTRICT.
-            // `line_merge → pursuit_event` is what wedges the merge
-            // ahead of the events, and `line_event → line_merge` wedges
-            // the event ahead of the merge — seeded so the order is
-            // exercised rather than assumed.
-            let project = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO project (id, persona_id, name, created_at)
-                 VALUES (?1, ?2, 'album', 0)",
-                params![project, persona],
-            )?;
-            conn.execute(
-                "UPDATE pursuit SET project_id = ?1 WHERE persona_id = ?2",
-                params![project, persona],
-            )?;
-            let line = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO line (id, project_id, name, created_at)
-                 VALUES (?1, ?2, 'main', 0)",
-                params![line, project],
-            )?;
-            let entry = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO line_entry (id, line_id, persona_id, created_at)
-                 VALUES (?1, ?2, ?3, 0)",
-                params![entry, line, persona],
-            )?;
-            let merge = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO line_merge (id, pursuit_event_id, persona_id, created_at)
-                 VALUES (?1, ?2, ?3, 0)",
-                params![merge, event, persona],
-            )?;
-            let line_event = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO line_event
-                     (id, entry_id, persona_id, verb, asset_id, name, merge_id, created_at)
-                 VALUES (?1, ?2, ?3, 'add', ?4, 'key visual', ?5, 0)",
-                params![line_event, entry, persona, asset, merge],
-            )?;
-            conn.execute(
-                "INSERT INTO pursuit_tx
-                     (id, pursuit_id, persona_id, kind, asset_id, origin,
-                      target_entry_id, created_at)
-                 VALUES (?1, ?2, ?3, 'in', ?4, 'existing', ?5, 0)",
-                params![Uuid::now_v7(), child_pursuit, persona, asset, entry],
-            )?;
-            // A bystander with a project and line of its own. `line`
-            // is the one forge table swept through a subquery rather
-            // than by its own persona column, so it is the one whose
-            // scoping a rewrite could widen without any single-persona
-            // test noticing.
+            // A bystander persona, so the sweep's scoping is exercised
+            // rather than assumed: what it leaves standing has to be
+            // somebody else's.
             conn.execute(
                 "INSERT INTO persona (id, name, accent_color, display_order, archived,
                                       created_at, updated_at)
                  VALUES (?1, 'q', NULL, 1, 0, 0, 0)",
                 params![bystander],
-            )?;
-            conn.execute(
-                "INSERT INTO project (id, persona_id, name, created_at)
-                 VALUES (?1, ?2, 'other', 0)",
-                params![bystander_project, bystander],
-            )?;
-            conn.execute(
-                "INSERT INTO line (id, project_id, name, created_at)
-                 VALUES (?1, ?2, 'main', 0)",
-                params![bystander_line, bystander_project],
             )?;
             Ok(())
         })
@@ -655,7 +553,7 @@ mod delete_order_tests {
             .await
             .expect("ordered cleanup must delete the persona without an FK error");
 
-        let counts: (i64, i64, i64, i64, i64, i64, i64) = isle
+        let counts: (i64, i64, i64, i64, i64) = isle
             .call(|conn| {
                 let personas: i64 =
                     conn.query_row("SELECT COUNT(*) FROM persona", [], |r| r.get(0))?;
@@ -667,61 +565,144 @@ mod delete_order_tests {
                     conn.query_row("SELECT COUNT(*) FROM dispatch_job", [], |r| r.get(0))?;
                 let buckets: i64 =
                     conn.query_row("SELECT COUNT(*) FROM bucket", [], |r| r.get(0))?;
-                let pursuits: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM pursuit", [], |r| r.get(0))?;
-                let events: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM pursuit_event", [], |r| r.get(0))?;
-                Ok((
-                    personas, snapshots, members, dispatches, buckets, pursuits, events,
-                ))
+                Ok((personas, snapshots, members, dispatches, buckets))
             })
             .await
             .unwrap();
         assert_eq!(
             counts,
-            (1, 0, 0, 0, 0, 0, 0),
+            (1, 0, 0, 0, 0),
             "everything of the purged persona swept; the bystander persona left alone"
         );
-        let ledger_count: i64 = isle
-            .call(|conn| conn.query_row("SELECT COUNT(*) FROM pursuit_tx", [], |r| r.get(0)))
-            .await
-            .unwrap();
-        assert_eq!(ledger_count, 0, "the ledger swept with them");
-        let forge_counts: (i64, i64, i64, i64, i64) = isle
+        driver.shutdown().await.unwrap();
+    }
+    /// The forge holding an asset stops the purge, and the refusal
+    /// says what is holding it.
+    ///
+    /// Without the guard the delete still refuses — the cascade
+    /// reaches `asset` and the foreign key stops it — but it refuses
+    /// with a column name and no move. This asserts the message
+    /// instead: the count, the line, and what releases it.
+    #[tokio::test]
+    async fn a_persona_whose_asset_is_on_a_line_is_not_purged_and_is_told_why() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = Uuid::now_v7();
+        let asset = Uuid::now_v7();
+        let bystander_asset = Uuid::now_v7();
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO persona (id, name, accent_color, display_order, archived, \
+                                      created_at, updated_at) \
+                 VALUES (?1, 'p', NULL, 0, 0, 0, 0)",
+                params![persona],
+            )?;
+            for id in [asset, bystander_asset] {
+                conn.execute(
+                    "INSERT INTO asset (id, persona_id, source_kind, source_locator, \
+                                        modality, labels, occurred_at, created_at, updated_at) \
+                     VALUES (?1, ?2, 'fs', ?3, 'dialogue', '[]', 0, 0, 0)",
+                    params![id, persona, format!("a-{id}.md")],
+                )?;
+            }
+
+            // A line with one of them on it. Only the first is held;
+            // the second is this persona's too and nothing names it.
+            let line = Uuid::now_v7();
+            let genesis = Uuid::now_v7();
+            let actor = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO line \
+                     (id, name, strategy, standing, genesis_id, genesis_at, genesis_by, \
+                      genesis_kind, created_at, created_by, created_kind, \
+                      updated_at, updated_by, updated_kind) \
+                 VALUES (?1, 'ROOT', 'by-hand', 'open', ?2, 0, ?3, 'user', \
+                         0, ?3, 'user', 0, ?3, 'user')",
+                params![line, genesis, actor],
+            )?;
+            let point = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO change_point \
+                     (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
+                params![point, line, genesis, Uuid::now_v7(), Uuid::now_v7(), actor],
+            )?;
+            conn.execute(
+                "INSERT INTO change_row (point_id, entry_id, existence, content, name) \
+                 VALUES (?1, ?2, 'present', ?3, 'one')",
+                params![point, Uuid::now_v7(), asset],
+            )
+        })
+        .await
+        .unwrap();
+
+        let repo = SqlitePersonaRepository::new(isle.clone());
+        let id = PersonaId::from_uuid(persona);
+        repo.trash(&id, chrono::Utc::now()).await.unwrap();
+
+        let refused = repo.purge(&id).await.expect_err("the forge is holding one");
+        let DomainError::Conflict(said) = &refused else {
+            panic!("a held asset is the state fighting back: {refused:?}");
+        };
+        assert!(
+            said.contains("1 asset(s)"),
+            "the count is the one that is held, not every asset it owns: {said}"
+        );
+        assert!(said.contains("`ROOT`"), "and it names the line: {said}");
+        assert!(
+            said.contains("dropped"),
+            "and what releases it, or the refusal leaves nowhere to go: {said}"
+        );
+
+        // Nothing was taken on the way to refusing.
+        let left: (i64, i64) = isle
             .call(|conn| {
-                let projects: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM project", [], |r| r.get(0))?;
-                let lines: i64 = conn.query_row("SELECT COUNT(*) FROM line", [], |r| r.get(0))?;
-                let entries: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM line_entry", [], |r| r.get(0))?;
-                let merges: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM line_merge", [], |r| r.get(0))?;
-                let line_events: i64 =
-                    conn.query_row("SELECT COUNT(*) FROM line_event", [], |r| r.get(0))?;
-                Ok((projects, lines, entries, merges, line_events))
+                Ok((
+                    conn.query_row("SELECT COUNT(*) FROM persona", [], |r| r.get(0))?,
+                    conn.query_row("SELECT COUNT(*) FROM asset", [], |r| r.get(0))?,
+                ))
             })
             .await
             .unwrap();
-        assert_eq!(
-            forge_counts,
-            (1, 1, 0, 0, 0),
-            "the purged persona's project and lines swept; the bystander's pair untouched"
-        );
-        let survivor: (Uuid, Uuid) = isle
-            .call(move |conn| {
-                conn.query_row(
-                    "SELECT p.id, l.id FROM project p JOIN line l ON l.project_id = p.id",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-            })
+        assert_eq!(left, (1, 2), "a refused purge is not a partial one");
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// And a persona the forge has never heard of purges as it always
+    /// did — the guard is a refusal for a state that exists, not a new
+    /// hoop.
+    #[tokio::test]
+    async fn a_persona_the_forge_is_not_holding_still_purges() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let persona = Uuid::now_v7();
+        isle.call(move |conn| {
+            conn.execute(
+                "INSERT INTO persona (id, name, accent_color, display_order, archived, \
+                                      created_at, updated_at) \
+                 VALUES (?1, 'p', NULL, 0, 0, 0, 0)",
+                params![persona],
+            )?;
+            conn.execute(
+                "INSERT INTO asset (id, persona_id, source_kind, source_locator, \
+                                    modality, labels, occurred_at, created_at, updated_at) \
+                 VALUES (?1, ?2, 'fs', 'a.md', 'dialogue', '[]', 0, 0, 0)",
+                params![Uuid::now_v7(), persona],
+            )
+        })
+        .await
+        .unwrap();
+
+        let repo = SqlitePersonaRepository::new(isle.clone());
+        let id = PersonaId::from_uuid(persona);
+        repo.trash(&id, chrono::Utc::now()).await.unwrap();
+        repo.purge(&id).await.expect("nothing is holding anything");
+
+        let left: i64 = isle
+            .call(|conn| conn.query_row("SELECT COUNT(*) FROM persona", [], |r| r.get(0)))
             .await
             .unwrap();
-        assert_eq!(
-            survivor,
-            (bystander_project, bystander_line),
-            "and the pair still standing is the bystander's, not a stray of the purged one"
-        );
+        assert_eq!(left, 0);
+
         driver.shutdown().await.unwrap();
     }
 }

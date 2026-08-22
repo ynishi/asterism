@@ -15,30 +15,27 @@ verdict — which is the failure mode this split exists to prevent.
 # The loop
 
 ```text
-  open
-    │
-    v
-  IN ──> the ledger ──> what the line of work is on
-    ^                            │
-    │                            │
-    └──── an asset the owner ─────┤
-          already holds           │
-                                  v
-                                close
-                         pursuit_event.closed_satisfied
-                         (or .closed_abandoned — nothing lands)
+   Line = repository            Pursuit = the pursuit
+    └ History                    └ Open → Round* → Close
+       Genesis → ChangePoint*       Open → Round* → Close
+              ▲ head                  └ base ── cut from a ChangePoint
+              │                              │
+              └──── close(Satisfied) ────────┘
 ```
 
-[`pursuit`] is the minted unit of work and its lifecycle facts. What
-it takes up is an asset the owner already manages — an ordinary
-raw-layer row, staged into the pursuit by a ledger gesture. The
-forge does not hold a working copy, and there is no state to
-integrate at the end. What the close integrates is a *decision*.
+[`model`] is where that is written down, and it is the whole of what
+the forge holds: a line's history as a chain of change points, work
+as a log of rounds, and the one act that moves both. What work takes
+up is an asset the owner already manages — an ordinary raw-layer
+row, named by an operation. The forge does not hold a working copy,
+and there is no state to integrate at the end. What the close
+integrates is a *decision*.
 
-**Membership** — what a line of work is working on — moves through
-the ledger ([`tx`]): every entry, removal and reversal is an
-append-only gesture, and membership derives on read. The close
-records that the line of work ended and selects nothing out of it.
+Nothing here is stored yet. The ports are [`lines`], [`pursuits`],
+[`closings`] and [`threads`]; what satisfies them lives outside this
+crate, and reading one back goes through
+[`model::restore`] — the one door a stored value
+comes in by.
 
 # The boundary
 
@@ -96,10 +93,10 @@ whether or not anybody is pursuing anything.
 [`asset_comment`](crate::domain::asset_comment) are annotation
 surfaces both layers write to.
 
-Background: the workflow design on #21, implemented by #29 and #34.
-The domain model this layer is growing toward is #63, and [`model`]
-is where it is written down — both logs, and the one act that moves
-them together.
+Background: the workflow design on #21. The model this layer holds
+was settled on #63, and the first one — a pursuit whose standing
+derived from lifecycle events, a ledger beside it, a line moved one
+verb at a time — was removed whole on #102 rather than migrated.
 
 [`Snapshot`]: crate::domain::snapshot::Snapshot
 

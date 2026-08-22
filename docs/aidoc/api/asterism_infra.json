@@ -78,6 +78,141 @@
       "docs": "Executes one step of the dispatch state machine.\n\nReturns a short human-readable status for the progress emitter.\nStructured to leave the poll loop safe against:\n  - duplicate ticks: terminal-state guard exits fast.\n  - lost handles: `Pending` reruns `dispatch` because `handle` is `None`.\n  - dead exporters: the runner marks the job `Failed` and stops."
     },
     {
+      "path": "asterism_infra::forge",
+      "kind": "module",
+      "docs": "What every forge store keeps, whatever it keeps it in.\n\n[`rows`] is the shape, and both adapters serve it: the in-memory one\nholds these values under a lock, the SQLite one writes them as\ncolumns. Having it here rather than inside either is what makes\nthat a shared contract rather than one of them copying the other —\nand it is why the SQLite tables can be read as owing what this\nmodule already says.\n\nNothing here talks to a store. Taking a domain value apart and\nputting one back is the same work whichever store is underneath,\nand the half that differs is the half that is not here."
+    },
+    {
+      "path": "asterism_infra::forge::rows",
+      "kind": "module",
+      "docs": "The shapes a store keeps, and the two translations either side of\nthem.\n\nEvery field here is a scalar or an id. Nothing holds a [`Line`], a\n[`Pursuit`], a [`ChangePoint`] or an [`Op`] — that is the whole\npoint of the module, and the reason it is written out rather than\nreplaced by keeping the domain values in a map.\n\nThe names match what the SQLite tables will be called, because the\nadapter that writes those is meant to be able to read this one as a\nspecification of what it owes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ActRow",
+      "kind": "struct",
+      "docs": "An act, flattened the way a row carries one: a stamp, a handle, and\nwhich kind of actor the handle names."
+    },
+    {
+      "path": "asterism_infra::forge::rows::AnchorColumns",
+      "kind": "type_alias",
+      "docs": "What a thread hangs off, as the five columns that carry it.\n\nApart from the row it goes into, because asking *which threads hang\noff this* is the same flattening with nothing to put it in: a query\nhas an anchor and no thread, no title and no act. Sharing this is\nwhat keeps the answer to that question and the row it is matched\nagainst from drifting apart."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ChangePointRow",
+      "kind": "struct",
+      "docs": "`change_point` — one move of a line, without the table it carries."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ChangeRowRow",
+      "kind": "struct",
+      "docs": "`change_row` — one axis-triple of one entry, under one change\npoint. The primary key is `(point, entry)`."
+    },
+    {
+      "path": "asterism_infra::forge::rows::LineRow",
+      "kind": "struct",
+      "docs": "`line` — the repository, and the two things about it that are not\nin its history."
+    },
+    {
+      "path": "asterism_infra::forge::rows::PursuitNodeRow",
+      "kind": "struct",
+      "docs": "`pursuit_node` — a round or an ending.\n\nNo column says where in the log a node sits, for the reason\n`change_point` has none: it carries its parent, and that is the\norder. A sequence beside the chain would be a second answer to a\nquestion the chain already answers, and the two disagree the first\ntime a write goes half-way."
+    },
+    {
+      "path": "asterism_infra::forge::rows::PursuitOpRow",
+      "kind": "struct",
+      "docs": "`pursuit_op` — one operation of one round, in the order it was written."
+    },
+    {
+      "path": "asterism_infra::forge::rows::PursuitRow",
+      "kind": "struct",
+      "docs": "`pursuit` — one line of work."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ThreadMessageRow",
+      "kind": "struct",
+      "docs": "`forge_thread_message` — one thing said.\n\n`said_at` is the order, which is this record and no other: a reply\nnames its parent, and two replies to one message are ordered by\nnothing else. Everywhere else in the forge a chain is the order and\na stamp is evidence."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ThreadRevisionRow",
+      "kind": "struct",
+      "docs": "`forge_thread_revision` — a correction to something said.\n\nThe body now is the last of these, and every earlier one stays\nreadable. `position` orders them, because a correction names no\nparent and there is no chain to read an order out of."
+    },
+    {
+      "path": "asterism_infra::forge::rows::ThreadRow",
+      "kind": "struct",
+      "docs": "`forge_thread` — one conversation, and what it hangs off.\n\nThe anchor is a kind and four nullable columns rather than one id,\nbecause what it points at is one of four things and no key points\nat a column whose meaning depends on another. Two of the four are\nrows and carry real references; a round is a node of a pursuit and\nan entry is not a row at all, so those two stay bare — the same\nbareness every other node reference in the forge has, for the same\nreason."
+    },
+    {
+      "path": "asterism_infra::forge::rows::anchor_columns",
+      "kind": "function",
+      "docs": "Flattens an anchor into the columns a store keeps it in."
+    },
+    {
+      "path": "asterism_infra::forge::rows::read_line",
+      "kind": "function",
+      "docs": "Rebuilds a line from its row, its change points and their rows.\n\nThe refusals are the model's, reached through\n[`restore::line`]: a chain that does not line up, or a table that\nwould leave two live entries under one name, fails the read."
+    },
+    {
+      "path": "asterism_infra::forge::rows::read_pursuit",
+      "kind": "function",
+      "docs": "Rebuilds work from its row, its nodes and their operations.\n\nNodes are put in the log's order first, by walking the parent\nlinks from the node the pursuit opened at — the same walk the line\nside does, and the reason neither table keeps a sequence beside the\nchain. [`restore::pursuit`] then hands them back to `push` and\n`end` in the order they arrive."
+    },
+    {
+      "path": "asterism_infra::forge::rows::read_thread",
+      "kind": "function",
+      "docs": "Rebuilds a conversation from its row, what was said, and every\ncorrection.\n\nMessages are put in the order they were said, which for a thread is\na stamp and not a chain. [`restore::thread`] keeps that order,\nmoving only a reply the stamps put before the message it answers,\nand hands them back to `say` one at a time — so a reply naming a\nmessage this thread does not hold is a read that fails. A reply\nkept with an earlier stamp than its parent is not that case: it is\na clock that stepped backwards, and it is put back after what it\nanswers rather than refused."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_anchor_apart",
+      "kind": "function",
+      "docs": "The head row of a thread, anchor flattened into its five columns."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_change_point_apart",
+      "kind": "function",
+      "docs": "One change point's rows, for the single-node write a close makes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_close_apart",
+      "kind": "function",
+      "docs": "One ending, for the append a commit makes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_message_apart",
+      "kind": "function",
+      "docs": "One thing said, for the append `say` makes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_new_line_apart",
+      "kind": "function",
+      "docs": "The row for a line that has just been opened.\n\nOne row and no others, because a line that has just been opened has\na genesis and nothing else — the port that calls this says so, and\n[`Line::open`](asterism_core::domain::forge::model::line::Line::open)\nis the only thing that produces what it takes.\n\nA loop over `history().changes()` here would be a second way for a\nchange point to reach the store, running only for a caller that\ndoes not exist. The port refuses that caller instead, which is a\nstatement somebody can read rather than a branch nothing covers."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_pursuit_apart",
+      "kind": "function",
+      "docs": "The work's own row, and one `pursuit_node` row plus its `pursuit_op`s for\nevery node after the one it opened at."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_revision_apart",
+      "kind": "function",
+      "docs": "One correction, for the append `amend` makes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_revisions_apart",
+      "kind": "function",
+      "docs": "Every correction to one message, oldest first."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_round_apart",
+      "kind": "function",
+      "docs": "One round, for the append a push makes."
+    },
+    {
+      "path": "asterism_infra::forge::rows::take_thread_apart",
+      "kind": "function",
+      "docs": "A whole conversation, for the write that opens one.\n\nThe stamps both come from the first message: a thread is opened by\nsaying something, so the moment it was opened is the moment that\nwas said, and there is no second act to take them from."
+    },
+    {
       "path": "asterism_infra::generator_params",
       "kind": "module",
       "docs": "Reading generator parameters out of stored metadata rows — the\njudgement and the registry behind the\n[`ParamExtractor`](asterism_core::domain::generator_params::ParamExtractor)\nport.\n\nThis is the layer that holds opinions. The core owns the outcome\nvocabulary and the trait; `asterism-media-probe::a1111` owns the\ngrammar of one family's text; what lives here is every judgement\nneither of them may make — which input key names a seed, which node\ninput is a checkpoint, what a two-element array means, and which\nfamilies are recognised at all.\n\n# The registry, and how a third family arrives\n\nTwo families are recognised: ComfyUI, routed by the keys\n[`generator_keys::COMFY`] writes, and AUTOMATIC1111, routed by\n[`generator_keys::A1111`] — the same one-fact key list the\ndisclosure evidence rule reads, which is why it is imported rather\nthan restated. A family this registry does not recognise (InvokeAI,\nNovelAI) reads as\n[`NotApplicable`](ParamExtraction::NotApplicable) today; adding one\nis a routing arm in [`params_of`](StoredParamExtractor::params_of),\na judgement function beside the two here, and — where the family's\ntext needs a grammar — a tokeniser in the media-probe crate on\n`a1111`'s terms.\n\n# Extractability is decided per file\n\nThe same input on the same node class holds a literal in one graph\nand a link to another node's output in the next — any custom seed\nnode, any converted widget. A link is read as\n[`Indirect`](ParamExtraction::Indirect), never resolved: the walk\nthat would resolve it is the future improvement the state exists to\nleave findable. And where a graph carries more than one candidate\nand they disagree, the answer is\n[`Ambiguous`](ParamExtraction::Ambiguous) rather than a winner —\nthere is no evidence about which sampler produced the file, and a\nwrong value in a signed claim is the unrecoverable direction. That\nrefusal is also why no \"which sampler won\" is recorded beside the\nvalue: agreement extracts and disagreement refuses, so no choice is\never made."
@@ -341,6 +476,36 @@
       "path": "asterism_infra::jobs::thumb_video::make_thumb",
       "kind": "function",
       "docs": "Extracts one frame from the video at `path_str`, scaled to fit a\n`target_px` box, and returns JPEG-encoded bytes.\n\nRuns synchronously — call inside `spawn_blocking`, like the image\npath it sits beside."
+    },
+    {
+      "path": "asterism_infra::memory",
+      "kind": "module",
+      "docs": "In-memory adapters — the ports satisfied without a database.\n\nThese are not test doubles in the usual sense. A double stands in\nfor a thing; these are the thing, built over a `Mutex<Vec<Row>>`\ninstead of over SQLite. What makes that worth having is what it\nforces: a store keeps rows, so an adapter here decomposes a domain\nvalue on the way in and rebuilds it on the way out, and the rebuild\ngoes through the same door a real one will.\n\nThe alternative — a fake that keeps the domain objects themselves —\nsatisfies the same traits and answers the same calls, and never\nonce meets the question the read half exists to ask. A service\npassing against one of those has been tested against a `HashMap`\nwearing a port's name."
+    },
+    {
+      "path": "asterism_infra::memory::forge",
+      "kind": "module",
+      "docs": "The forge's ports, over rows held in memory.\n\n```text\n  Lines / Pursuits / Closings\n           │\n           ├─ write ──► forge::rows::take_*_apart ──► Vec under a Mutex\n           │\n           └─ read  ──► forge::rows::read_* ──► restore ──► Line / Pursuit\n```\n\nOne `Mutex` over the whole store rather than one per table: the\nclose writes a change point, its rows and an ending together, and a\nreader must not see half of that. A real adapter gets the same\nproperty from a transaction; here it comes from holding the lock\nacross the whole of `commit`, which is the same statement made the\nonly way this store can make it.\n\n# What it is for\n\nProving the model and the services against something that keeps\nrows, before any of it depends on SQLite being right. A store that\nkept the domain objects would answer every call correctly by\nconstruction and would never once ask whether a line can be built\nback out of what was written down — which is the question the whole\nread half exists to ask, and the one the first fake never reached.\n\n# What it is not\n\nDurable, concurrent beyond one process, or a thing to run anything\nreal on. There is no index: reads scan, which is fine at the sizes\na test builds and would not be at any other."
+    },
+    {
+      "path": "asterism_infra::memory::forge::HoldsEverything",
+      "kind": "struct",
+      "docs": "What the layer below answers, for a store that has no layer below.\n\nSays yes to everything. The question is whether a persona holds an\nasset, and there are no assets here to hold — a caller wanting the\nrefusal exercised should reach for [`HoldsNothing`]."
+    },
+    {
+      "path": "asterism_infra::memory::forge::HoldsNothing",
+      "kind": "struct",
+      "docs": "The same face, answering no."
+    },
+    {
+      "path": "asterism_infra::memory::forge::MemoryActors",
+      "kind": "struct",
+      "docs": "Handles for whoever is writing, minted once per subject and kept.\n\nThe forge asks who a write is by and records the answer; what a\nhandle stands for is somebody else's question. This answers it the\nway an authenticated deployment eventually will — the same subject\ngets the same handle back — without knowing what a subject is\nbeyond the string the attribution triple carries."
+    },
+    {
+      "path": "asterism_infra::memory::forge::MemoryForge",
+      "kind": "struct",
+      "docs": "An in-memory forge store. Clone it to hand the same tables to every\nport — the services take one `Arc` each, and they all have to be\nlooking at the same rows."
     },
     {
       "path": "asterism_infra::observe",
@@ -670,7 +835,7 @@
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard",
       "kind": "module",
-      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`], [`super::dispatch`],\n[`super::pursuit`] and [`super::project`], at the point where the\nvalues about to be bound are visible as the columns themselves.\n\n[`attribution_columns`] lives here for the same reason: it is the\nencoding half of the same concern, wanted by every table that\ncarries the triple, and a home in any one adapter would make the\nnext one reach sideways into a sibling."
+      "docs": "Write-side guard for the attribution columns.\n\n`Author::from_columns` is the read-side check SQLite cannot express\nas a CHECK on an `ALTER TABLE` column. This is its write-side twin\nfor the rule the channel column adds: **a row that records an author\nor an operator records the channel that answer arrived through.**\n\nWithout it, \"author set, channel NULL\" would keep being produced by\nnew writes, and that shape already means something else — it is how\na V47 / V48 row looks, which is precisely the set of rows an\nauthenticated deployment cannot resolve. A new row landing in the\nlegacy bucket would be indistinguishable from one that predates the\ncolumn.\n\nCalled by the row builders in [`super::asset`] and\n[`super::dispatch`], at the point where the values about to be\nbound are visible as the columns themselves.\n\n[`attribution_columns`] lives here for the same reason: it is the\nencoding half of the same concern, wanted by every table that\ncarries the triple, and a home in any one adapter would make the\nnext one reach sideways into a sibling."
     },
     {
       "path": "asterism_infra::sqlite::repo::attribution_guard::AttributionColumns",
@@ -726,6 +891,31 @@
       "path": "asterism_infra::sqlite::repo::edge::SqliteEdgeRepository",
       "kind": "struct",
       "docs": "SQLite adapter for `EdgeRepository` (uses a writer isle)."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::forge",
+      "kind": "module",
+      "docs": "SQLite adapter for the forge's ports.\n\nOne type for `Lines`, `Pursuits` and `Closings`, where the rest of\nthis directory is one per port. The close is why: it writes a change\npoint, its rows and an ending together, and two adapters sharing one\ntransaction is a shape that only reads as sharing when they are the\nsame object.\n\n# Where the work is, and where it is not\n\nTaking a domain value apart and putting one back lives in\n[`crate::forge::rows`], which the in-memory store uses too. What is\nhere is SQL and nothing else: the same six shapes, written as\ncolumns.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided. Two nodes on one parent is a fork, `UNIQUE (line_id,\nparent_id)` and `UNIQUE (pursuit_id, parent_id)` refuse one, and the\nrefusal arrives as part of the insert — so the validation is the\nwrite rather than something beside it that could be answered from a\nrow somebody else has since moved.\n\nWhat that costs is telling one constraint violation from another.\nSQLite names the columns rather than the index — `UNIQUE constraint\nfailed: change_point.line_id, change_point.parent_id` — so that\ncolumn list is what is matched, and matched exactly.\n\n# And the one place a log is read to decide something\n\nA close that loses its parent is decided again in here, from a line\nand a pursuit read inside the transaction that lost. That read is\nnot a comparison: nothing is checked against what the caller\ndecided, and the answer comes from the model rather than from this\nadapter. What the transaction contributes is that the logs cannot\nmove between the read and the write, which is why the second\nattempt is the last one.\n\n`contains` is what exactness is guarding against, and the direction\nmatters: `pursuit_node.pursuit_id` is the second ending and is a *prefix*\nof `pursuit_node.pursuit_id, pursuit_node.parent_id`, which is a fork. So a\nsubstring test asked about the ending matches the fork — it reads\n\"somebody pushed a round first\" as \"this work has already ended\",\nand an ending is final where a fork is decided again. So the close\nthat a second decision would have landed is refused instead, and\nthe caller is told the work is over when it is only one round\nfurther along. The other direction cannot happen, which is why\nnaming it would be naming the wrong risk."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::forge::SqliteForge",
+      "kind": "struct",
+      "docs": "SQLite adapter for `Lines`, `Pursuits` and `Closings`."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::forge_boundary",
+      "kind": "module",
+      "docs": "What the forge asks of everything outside it, answered by SQLite.\n\nTwo contracts, and neither is a repository: they are the forge's\nside of questions it cannot answer itself.\n\n- [`SqliteStore`] answers whether a persona holds an asset. One\n  question, because the forge has one.\n- [`SqliteActors`] answers what a handle stands for, and mints one\n  when it has not seen the subject before.\n\nThey live beside the repositories rather than among them because\nwhat they implement is the boundary, not storage — the forge names\n`boundary::Store`, not `AssetRepository`, and that is the whole\narrangement. Putting them in one file keeps the two halves of \"what\nthe forge asks\" readable together."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::forge_boundary::SqliteActors",
+      "kind": "struct",
+      "docs": "Keeps what a forge handle stands for."
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::forge_boundary::SqliteStore",
+      "kind": "struct",
+      "docs": "Answers the forge's one question about the layer below."
     },
     {
       "path": "asterism_infra::sqlite::repo::group",
@@ -806,26 +996,6 @@
       "path": "asterism_infra::sqlite::repo::persona_theme::SqlitePersonaThemeRepository",
       "kind": "struct",
       "docs": "SQLite adapter for `PersonaThemeRepository` (uses a writer isle)."
-    },
-    {
-      "path": "asterism_infra::sqlite::repo::project",
-      "kind": "module",
-      "docs": "SQLite adapter for the `ProjectRepository` port (#63 decisions 1–2).\n\nTwo tables: `project` (thin, immutable, insert-only, like `pursuit`)\nand `line`, which is the same but owned by a project rather than a\npersona. The pair is written in one transaction — a project whose\nline is missing has nothing a merge could land on, and no later\nread would notice the difference between that and a project nobody\nhas merged into yet."
-    },
-    {
-      "path": "asterism_infra::sqlite::repo::project::SqliteProjectRepository",
-      "kind": "struct",
-      "docs": "SQLite adapter for `ProjectRepository`."
-    },
-    {
-      "path": "asterism_infra::sqlite::repo::pursuit",
-      "kind": "module",
-      "docs": "SQLite adapter for the `PursuitRepository` port (#29, extended by\n#22).\n\nThree tables, one concern: `pursuit` (thin, immutable,\ninsert-only), `pursuit_event` (append-only lifecycle facts), and\n`pursuit_tx` (the append-only membership ledger). Every write here\nlands on one table; nothing in this adapter spans two."
-    },
-    {
-      "path": "asterism_infra::sqlite::repo::pursuit::SqlitePursuitRepository",
-      "kind": "struct",
-      "docs": "SQLite adapter for `PursuitRepository`."
     },
     {
       "path": "asterism_infra::sqlite::repo::query_group",

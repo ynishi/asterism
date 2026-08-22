@@ -28,14 +28,22 @@ and recording checks its head. Handing back less would move those
 rules to whoever answers this call, and there would be as many
 copies of them as there are implementations.
 
-# There is nothing that removes
+# Nothing removes part of a line, and one call removes all of it
 
-No delete, no truncate, no rewrite of a recorded node — the same
-absence the model has, for the same reason: everything that ever
-happened stays reachable, and a path that exists gets called.
-Renaming a line and changing its strategy are here because they
-move a line's own description, which is a record the history does
-not keep.
+No truncate, no rewrite of a recorded node, no delete of anything
+inside a history — the same absence the model has, for the same
+reason: everything that ever happened stays reachable, and a path
+that exists gets called. Renaming a line, changing its strategy and
+archiving it are here because they move a line's own description,
+which is a record the history does not keep.
+
+[`Lines::discard`] is the exception, and it is whole-line or
+nothing. A line that holds bytes somebody else may want back has to
+be lettable-go of somehow, and the model's answer is that the way
+out is the whole way out: archive it, end the work against it, and
+then it goes with everything under it. Half of it going is the
+state that would leave a history unreadable, which is what every
+other absence here is protecting.
 
 # The error is the shared one
 

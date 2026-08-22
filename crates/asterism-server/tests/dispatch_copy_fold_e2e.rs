@@ -34,8 +34,7 @@
 use std::sync::{Arc, Mutex};
 
 use asterism_contract::command::{
-    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, OpenPursuitCommand,
-    RegisterPersonaCommand,
+    AddAssetCommand, CreateDispatchCommand, CreateSnapshotCommand, RegisterPersonaCommand,
 };
 use asterism_core::application_support::DispatchRunnerService;
 use asterism_core::application_support::duplicate_detection::{
@@ -272,25 +271,6 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         )
         .await
         .expect("freeze snapshot");
-    // The ledger assertion below reads a pursuit the export never
-    // names — that is the point of it: an export is a raw-layer verb
-    // and puts nothing into a line of work.
-    let pursuit = core
-        .legacy_pursuit_service
-        .open(
-            OpenPursuitCommand {
-                persona_id: persona.id.clone(),
-                pursuit_id: None,
-                project_id: None,
-                parent_pursuit_id: None,
-                title: Some("the export".into()),
-                note: None,
-                operator_ai: None,
-            },
-            &unattributed(),
-        )
-        .await
-        .expect("open a pursuit for the ledger read");
     let dispatch = core
         .dispatch_service
         .create(
@@ -350,21 +330,6 @@ async fn an_exported_copy_is_not_folded_into_the_input_it_copied() {
         queue.of_kind(JobKind::MaterialHash),
         vec![serde_json::json!({ "asset_id": copy_id_str })],
         "reify enqueued exactly one fingerprint, for the row it minted"
-    );
-    // The fingerprint is the whole of what reify enqueues. An export
-    // files nothing into a pursuit's ledger and asks for nothing on its
-    // behalf — a dispatch is a raw-layer export and names no line of
-    // work at all. Asserted here because this is the only harness that
-    // drives a real reify with a recording queue.
-    let filed = core
-        .legacy_pursuit_service
-        .view(&pursuit.id)
-        .await
-        .expect("view the pursuit the export never named");
-    assert!(
-        filed.txs.is_empty(),
-        "an export writes no ledger gesture: {:?}",
-        filed.txs
     );
     // And it wrote the lineage: a reader has to be able to see where
     // the copy came from, or the rule below has nothing to read.
