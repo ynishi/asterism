@@ -12,6 +12,13 @@ entitlement. See the licensing section in the [README](README.md#licence), and
 [Third-party material](#third-party-material) for files brought in from
 elsewhere.
 
+An outcome under this policy is never permission to act. ALLOW means a piece of
+information may appear in a public artifact; it says nothing about whether a
+push, publish, or release may happen, or who may run it. Those operations are
+governed by their own rules — coding agents do not push, publish, or open pull
+requests regardless of how a diff classifies — and no outcome in this document
+loosens them.
+
 Two neighbouring documents pick up where this one stops:
 [SECURITY.md](SECURITY.md) for vulnerability reports, and
 [After a disclosure](#after-a-disclosure) for the case where protected content
