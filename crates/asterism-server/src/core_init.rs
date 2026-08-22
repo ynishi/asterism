@@ -1199,6 +1199,7 @@ pub async fn init_core_with(
         assets_arc.clone(),
         edges_arc.clone(),
         Arc::new(disclosure_writer()),
+        Arc::new(asterism_infra::generator_params::StoredParamExtractor),
         PromptDisclosure::Withhold,
     )));
 

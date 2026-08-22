@@ -133,6 +133,18 @@ pub fn definition(record: &DisclosureRecord) -> Value {
     if let Some(version) = &record.ai_system_version {
         asterism.insert("ai_system_version".into(), json!(version));
     }
+    // The extracted generator parameters, verbatim as the container
+    // stated them — the seed as its literal text rather than a JSON
+    // number, so no serialiser's habits enter a signed claim. Optional
+    // fields added to shape 1 rather than a shape 2: a reader keyed on
+    // the schema walks what is present, and nothing has ever read
+    // shape 1 without them.
+    if let Some(model) = &record.model {
+        asterism.insert("model".into(), json!(model));
+    }
+    if let Some(seed) = &record.seed {
+        asterism.insert("seed".into(), json!(seed));
+    }
     assertions.push(json!({ "label": ASTERISM_LABEL, "data": Value::Object(asterism) }));
 
     let mut definition = serde_json::Map::new();
@@ -221,7 +233,9 @@ mod tests {
     #[test]
     fn unestablished_fields_are_absent_rather_than_null() {
         // A null reads as "asked and unknown". An asset with no parents
-        // is not an asset whose parents are unknown.
+        // is not an asset whose parents are unknown — and an asset
+        // whose seed was refused or never extracted is not one whose
+        // seed is null.
         let definition = definition(&DisclosureRecord::for_asset("asset-1"));
         let data = assertion(&definition, ASTERISM_LABEL).unwrap()["data"]
             .as_object()
@@ -230,6 +244,22 @@ mod tests {
         assert!(!data.contains_key("derived_from"));
         assert!(!data.contains_key("dispatch_id"));
         assert!(!data.contains_key("ai_system"));
+        assert!(!data.contains_key("model"));
+        assert!(!data.contains_key("seed"));
+    }
+
+    #[test]
+    fn the_extracted_params_reach_the_assertion_as_the_container_stated_them() {
+        // The seed stays the literal text the container carried — a
+        // string in the JSON, not a number a serialiser re-rendered.
+        let record = DisclosureRecord::for_asset("asset-1")
+            .with_model("cetus-mix_v4.safetensors")
+            .with_seed("620206974400");
+        let definition = definition(&record);
+        let data = &assertion(&definition, ASTERISM_LABEL).unwrap()["data"];
+        assert_eq!(data["model"], "cetus-mix_v4.safetensors");
+        assert_eq!(data["seed"], "620206974400");
+        assert!(data["seed"].is_string(), "verbatim text, not a number");
     }
 
     #[test]

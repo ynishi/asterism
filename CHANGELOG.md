@@ -200,6 +200,23 @@ and this project adheres to
 
 ### Added
 
+- **Generator parameters are extracted from stored metadata behind their own
+  port** (#19). The model and seed a run recorded sit inside free-text metadata
+  values — a ComfyUI graph, an A1111 parameter line — and reading them out is a
+  parser, not a mapping. Three layers now do it: an outcome vocabulary and a
+  `ParamExtractor` port in the core, whose outcome is six states rather than an
+  `Option` (`extracted` / `not applicable` / `absent` / `indirect` / `ambiguous`
+  / `not yet`) so a value behind a graph link stays findable and a disagreement
+  is refused rather than guessed; a pure A1111 line tokeniser in
+  `asterism-media-probe`, with no opinion about which keys matter; and the
+  judgement — which input key names a seed, what a two-element array means,
+  which families are recognised — in `asterism-infra`. Extraction runs over
+  stored rows without opening a file, touches neither the metadata digest nor
+  its canonical form, and its values reach the C2PA manifest's custom assertion
+  as `model` and `seed`, riding the prompt's own withholding switch because they
+  are read out of the very blob that switch was written to contain. Workflow
+  identity is not extractable from either family and is not pretended otherwise.
+
 - **The forge has a model of its own** (#63). A line is a repository — the top
   of the forge, with one canonical history and everything on it derived by
   folding that history. A history begins at a genesis and grows by one change

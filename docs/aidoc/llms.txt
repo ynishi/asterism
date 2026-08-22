@@ -65,6 +65,7 @@
 - [asterism-core::domain::disclosure::outcome](asterism_core/domain__disclosure__outcome.md): What applying a record to a file actually achieved.
 - [asterism-core::domain::disclosure::record](asterism_core/domain__disclosure__record.md): `DisclosureRecord` — everything one exported file is going to say
 - [asterism-core::domain::disclosure::source_type](asterism_core/domain__disclosure__source_type.md): `DigitalSourceType` — the one field a synthetic file is obliged to
+- [asterism-core::domain::disclosure::generator_keys](asterism_core/domain__disclosure__generator_keys.md): Keys that only a generator writes, one per family.
 - [asterism-core::domain::dispatch](asterism_core/domain__dispatch.md): `DispatchJob` — one exporter invocation against a Snapshot.
 - [asterism-core::domain::duplicate_conflict](asterism_core/domain__duplicate_conflict.md): `DuplicateConflict` — one open question of the form "these two rows
 - [asterism-core::domain::edge](asterism_core/domain__edge.md): `ConstellationEdge` — the backbone of the hover-burst experience.
@@ -99,6 +100,7 @@
 - [asterism-core::domain::forge::threads](asterism_core/domain__forge__threads.md): Keeping what was said about work.
 - [asterism-core::domain::forge::tx](asterism_core/domain__forge__tx.md): `PursuitTx` — the pursuit's append-only membership ledger (#22,
 - [asterism-core::domain::forge::value](asterism_core/domain__forge__value.md): The forge's surrogate ids.
+- [asterism-core::domain::generator_params](asterism_core/domain__generator_params.md): `generator_params` — what an extraction concluded about the
 - [asterism-core::domain::group](asterism_core/domain__group.md): `Group` — a user-curated set of assets, persona-scoped.
 - [asterism-core::domain::instance](asterism_core/domain__instance.md): Instance identity — the referent behind
 - [asterism-core::domain::job](asterism_core/domain__job.md): `Job` — lifecycle model for asynchronous work.
@@ -144,6 +146,7 @@
 - [asterism-infra::disclosure](asterism_infra/disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [asterism-infra::dispatch](asterism_infra/dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [asterism-infra::dispatch::runtime](asterism_infra/dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [asterism-infra::generator_params](asterism_infra/generator_params.md): Reading generator parameters out of stored metadata rows — the
 - [asterism-infra::jobs](asterism_infra/jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [asterism-infra::jobs::chapter_ffmetadata](asterism_infra/jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [asterism-infra::jobs::handlers](asterism_infra/jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
