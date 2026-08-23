@@ -695,7 +695,7 @@
     {
       "path": "asterism_ui::error",
       "kind": "module",
-      "docs": "`UiError` — error type crossed by Tauri command handlers.\n\nTauri commands must return `Result<T, E>` where `E: Serialize`\n(`anyhow` will not do). We use a `serde` tagged enum\n(`{ kind, message }`) so the TypeScript side can pattern-match on the\nvariant."
+      "docs": "`UiError` — error type crossed by Tauri command handlers.\n\nTauri commands must return `Result<T, E>` where `E: Serialize`\n(`anyhow` will not do). We use a `serde` tagged enum\n(`{ kind, message }`) so the TypeScript side can pattern-match on the\nvariant.\n\nInternally tagged with named fields rather than\n`content = \"message\"` around a tuple, and the reason is one field\non one variant: a conflict carries `reason` beside its message, and\na variant holding two things cannot be a tuple behind a `content`\nkey without nesting them. What crosses the wire is unchanged for\nevery other variant — `{ kind, message }`, read that way in\n`src/lib/mutate.ts` — and a conflict is that plus one field a\nreader is free to ignore."
     },
     {
       "path": "asterism_ui::error::UiError",

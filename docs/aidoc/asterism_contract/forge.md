@@ -24,15 +24,25 @@ showing how a line got where it is.
 
 ## Types
 
+- `CloseForgePursuitCommand` — Ends a piece of work.
 - `ForgeChangePointDto` — One node of a line's history.
 - `ForgeChangeRowDto` — What one landing said about one entry.
+- `ForgeCloseDto` — How a piece of work ended.
+- `ForgeCollisionDto` — One axis of one entry that this work asks to move and the line has
 - `ForgeDiscardedDto` — What dropping a line released.
 - `ForgeEntryStateDto` — Where one entry stands on a line, folded from the whole chain.
 - `ForgeLineActCommand` — Archives a line, reopens one, or drops one — the three verbs whose
 - `ForgeLineDto` — A line, without what is on it.
 - `ForgeLineHistoryDto` — A line's whole history: where it began and every landing since.
+- `ForgeOpDto` — One operation of a round.
+- `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
+- `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
+- `ForgeResolvedDto` — What `resolve` did.
+- `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `OpenForgeLineCommand` — Opens a line.
+- `OpenForgePursuitCommand` — Opens work against a line.
+- `PushForgeRoundCommand` — Writes a round.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 

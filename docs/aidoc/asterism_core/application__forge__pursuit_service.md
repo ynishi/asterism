@@ -22,7 +22,10 @@ one line do not contend until one of them finishes.
 
 Nothing. It loads what the model needs, calls it, and writes back
 what came out. Every refusal in here comes from the model or from a
-port.
+port — including the one this file words itself, which turns a
+boundary's "no" about content into the refusal a caller reads,
+because the boundary answers whether and only the caller can be
+told why.
 
 ## Types
 
