@@ -106,9 +106,17 @@ impl MemoryForge {
     ///
     /// Named so that its callers are obvious in a grep, and so that
     /// nothing reaches for it to make a refusal go away.
+    /// Both arguments are checked against each other, not only against
+    /// the line: rows filed under a point nobody passed would sit in
+    /// the table attached to nothing, which is a mistake in the test
+    /// rather than the corruption a test means to write.
     pub fn force_rows(&self, line: LineId, point: ChangePointRow, rows: Vec<ChangeRowRow>) {
         self.with(|tables| {
             debug_assert_eq!(point.line, line, "the point is filed under the line given");
+            debug_assert!(
+                rows.iter().all(|row| row.point == point.id),
+                "the rows are filed under the point given"
+            );
             tables.change_points.push(point);
             tables.change_rows.extend(rows);
         });
@@ -131,6 +139,11 @@ impl MemoryForge {
             debug_assert!(
                 nodes.iter().all(|node| node.pursuit == pursuit),
                 "the nodes are filed under the pursuit given"
+            );
+            let written: BTreeSet<NodeId> = nodes.iter().map(|node| node.id).collect();
+            debug_assert!(
+                ops.iter().all(|op| written.contains(&op.node)),
+                "the ops are filed under a node given"
             );
             tables.pursuit_nodes.extend(nodes);
             tables.pursuit_ops.extend(ops);

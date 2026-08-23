@@ -566,17 +566,30 @@ mod tests {
             .await
             .unwrap();
 
+        // Which of the two is missing is named, because "look
+        // somewhere else" is only useful with the id to look for.
+        let absent_child = GroupId::new();
         let refused = groups
-            .link(&parent.id, &GroupId::new(), now)
+            .link(&parent.id, &absent_child, now)
             .await
             .expect_err("a child nobody made");
         assert!(
             matches!(
-                refused,
-                DomainError::NotFound {
-                    entity: "group",
-                    ..
-                }
+                &refused,
+                DomainError::NotFound { entity: "group", id } if *id == absent_child.to_string()
+            ),
+            "{refused}"
+        );
+
+        let absent_parent = GroupId::new();
+        let refused = groups
+            .link(&absent_parent, &parent.id, now)
+            .await
+            .expect_err("a parent nobody made");
+        assert!(
+            matches!(
+                &refused,
+                DomainError::NotFound { entity: "group", id } if *id == absent_parent.to_string()
             ),
             "{refused}"
         );

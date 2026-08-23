@@ -794,22 +794,28 @@ impl GroupRepository for SqliteGroupRepository {
         let child_uuid = *child.as_uuid();
         let now_ms = datetime_to_ms(&now);
         // 0 = ok, 1 = persona mismatch, 2 = cycle, 3 = query-rule
-        // cycle, 4 = one of the two groups is not there.
+        // cycle, 4 = the parent is not there, 5 = the child is not
+        // there. Told apart because "look somewhere else" is only
+        // useful with the id to look for; when both are missing the
+        // parent is named, since that is the one the caller reaches
+        // through.
         let verdict: u8 = self
             .isle
             .call(move |conn| {
                 // Presence first, then ownership; the rule is on
-                // `StoreFault::Absent`. Both groups are counted,
-                // because either one may be the one that is missing.
-                let present: u8 = conn.query_row(
-                    "SELECT (SELECT COUNT(*) FROM bucket WHERE id = ?1)
-                          + (SELECT COUNT(*) FROM bucket WHERE id = ?2)",
-                    params![parent_uuid, child_uuid],
-                    |row| row.get(0),
-                )?;
-                if present < 2 {
+                // `StoreFault::Absent`.
+                let mut present =
+                    conn.prepare("SELECT EXISTS (SELECT 1 FROM bucket WHERE id = ?1)")?;
+                let parent_there: bool =
+                    present.query_row(params![parent_uuid], |row| row.get(0))?;
+                if !parent_there {
                     return Ok(4);
                 }
+                let child_there: bool = present.query_row(params![child_uuid], |row| row.get(0))?;
+                if !child_there {
+                    return Ok(5);
+                }
+                drop(present);
                 let same_persona: bool = conn.query_row(
                     "SELECT EXISTS (
                          SELECT 1 FROM bucket p, bucket c
@@ -875,7 +881,8 @@ impl GroupRepository for SqliteGroupRepository {
             1 => Err(DomainError::Validation(
                 "groups belong to different personas".into(),
             )),
-            4 => Err(StoreFault::absent("group", format!("{parent} or {child}")).into()),
+            4 => Err(StoreFault::absent("group", parent).into()),
+            5 => Err(StoreFault::absent("group", child).into()),
             2 => Err(StoreFault::blocked_by(
                 "link rejected: it would make the groups contain each other (cycle)",
                 "unlink the opposing edge first, and the same link then works",

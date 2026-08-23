@@ -2672,6 +2672,65 @@ async fn a_stored_outcome_this_model_has_no_name_for_is_refused() {
     driver.shutdown().await.unwrap();
 }
 
+/// The door checks its own arguments against each other.
+///
+/// `force_nodes` exists to write a log the model would have refused,
+/// so nothing downstream can tell a deliberately corrupt log from a
+/// test that filed an op under a node it never passed — the op would
+/// simply sit in the table attached to nothing, and the read would
+/// answer about a pursuit that has one fewer round than the test
+/// thinks. The `debug_assert!` is what tells them apart, and this is
+/// what says the assert is live.
+#[tokio::test]
+#[should_panic(expected = "the ops are filed under a node given")]
+async fn the_forced_door_refuses_an_op_under_a_node_it_was_not_given() {
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::pursuit::Intent;
+    use asterism_core::domain::forge::model::value::ActorId;
+    use asterism_infra::forge::rows;
+
+    let world = World::over_memory();
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("ana"))
+        .await
+        .unwrap();
+
+    let round = NodeId::new();
+    let stamp = rows::ActRow::of(&Act::new(at(1), Actor::User(ActorId::new())));
+    world
+        .memory
+        .as_ref()
+        .expect("the forced-rows test runs over memory")
+        .force_nodes(
+            work.id(),
+            vec![rows::PursuitNodeRow {
+                pursuit: work.id(),
+                id: round,
+                parent: work.head(),
+                kind: "round",
+                note: None,
+                act: stamp,
+                outcome: None,
+            }],
+            // Not `round`, and not any node this call writes.
+            vec![rows::PursuitOpRow {
+                node: NodeId::new(),
+                position: 0,
+                entry: EntryId::new(),
+                verb: "add",
+                content: Some(world.content().await),
+                name: Some(name("cut-01")),
+            }],
+        );
+}
+
 /// Asking about a round or a change point that is not there is a
 /// `404`, and asking about a real round that never touched the named
 /// entry is a `400`.
