@@ -43,6 +43,16 @@ tightening, is advisory: recorded once, blocking nothing. Round 1 is the only
 round that raises phrasing at all, and a later round that has found new wording
 to improve has found nothing.
 
+Prose upkeep is not yours. Whether a comment is still true, sited where it
+belongs, or a second copy of something belongs to the doc review — here the
+`doc-reviewer` agent in `plugins/doc-review`, which has its own rules about what
+is not a finding. In particular, **a sentence recording that a rule changed is
+not a defect**: it is a constraint written in the past tense, and deleting it
+lets the next reader undo the rule. Do not list those. If the doc review has not
+been run on this diff, say so in one line rather than reviewing prose in its
+place; it is a plugin, so it may not be installed, and "not installed" is the
+answer to report.
+
 Findings that gather in one place are not a list of edits. When several land on
 one section or one mechanism, say that the design of that part is what to
 revisit and name the question to settle. Answering them one at a time leaves the
@@ -63,3 +73,12 @@ wrapped (CONTRIBUTING.md, "Where prose wraps").
 
 Report findings with file:line. Findings, not approval: the pass is that nothing
 inaccurate is left, advisory notes and all.
+
+Open the report with this, quoted whole, on every run including one that found
+nothing — a reader acting on the list will not go and read this file first:
+
+> **How to act on this report.** A finding quoted beside the code, schema or
+> decision it contradicts is a fix. Everything else here is advisory: recorded,
+> blocking nothing, and a commit may land with all of it open. Prose upkeep
+> belongs to the doc review, not to this one, and **a sentence recording that a
+> rule changed is not a defect** — leave it where it is.

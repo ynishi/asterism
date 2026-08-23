@@ -32,6 +32,14 @@
 - Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) before every
   commit — `pub-checker` on the diff, `reviewer` with the issue number, which is
   all it needs.
+- Prose against code is a third review, and it is the one that owns comments:
+  `doc-reviewer`, from the `doc-review` plugin
+  (`/plugin install doc-review@asterism`, same marketplace as `prose-shape`).
+  Run it on the diff beside `pub-checker`. It is a plugin, so it may not be
+  installed on this machine — then say that the prose was not reviewed, and do
+  not let `reviewer` stand in for it. Neither of the other two decides what a
+  comment should say, and a sentence recording that a rule changed is not a
+  defect to any of them: it is what stops the next reader undoing the rule.
 - Do not carry a wrapping width from one artefact to another; three differ, and
   each has its own check to say so. `commit-msg-check` answers for commit
   messages, `just md-fmt` wraps the markdown in the tree and `just md-check`

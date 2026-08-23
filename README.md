@@ -154,12 +154,13 @@ Every crate has `publish = false`; nothing is distributed via crates.io.
 ## Development environment
 
 `just check` is the gate. Beyond a stable Rust toolchain and Node for the UI,
-two things are installed per machine rather than per checkout:
+three things are installed per machine rather than per checkout:
 
-| Needed by                                                                                                               | Install                                                                                                                   | Without it                                                                                    |
-| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `aidoc-guard` (inside `just check`)                                                                                     | `cargo install cargo-aidoc` (0.2.2 or newer), then `rustup toolchain install "$(cargo aidoc --print-required-toolchain)"` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues                     |
-| `prose-shape`, recommended — see [CONTRIBUTING.md](CONTRIBUTING.md#working-with-coding-agents--the-recommended-pattern) | in Claude Code: `/plugin marketplace add ynishi/asterism`, then `/plugin install prose-shape@asterism`                    | nothing catches a pull request body hard-wrapped into a renderer that folds paragraphs itself |
+| Needed by                                                                                                               | Install                                                                                                                   | Without it                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `aidoc-guard` (inside `just check`)                                                                                     | `cargo install cargo-aidoc` (0.2.2 or newer), then `rustup toolchain install "$(cargo aidoc --print-required-toolchain)"` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues                                     |
+| `prose-shape`, recommended — see [CONTRIBUTING.md](CONTRIBUTING.md#working-with-coding-agents--the-recommended-pattern) | in Claude Code: `/plugin marketplace add ynishi/asterism`, then `/plugin install prose-shape@asterism`                    | nothing catches a pull request body hard-wrapped into a renderer that folds paragraphs itself                 |
+| `doc-review`, recommended — same section                                                                                | same marketplace: `/plugin install doc-review@asterism`                                                                   | nothing reads a comment for whether it is still true; the change reviewer says so rather than covering for it |
 
 The toolchain is a dated nightly rather than the channel, and the tool names it
 rather than this file: rustdoc's JSON carries a `format_version`, every nightly
