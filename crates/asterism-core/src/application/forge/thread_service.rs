@@ -218,10 +218,13 @@ impl ThreadService {
                     .changes()
                     .iter()
                     .find(|change| change.id() == point)
+                    // The path addressed it and it is not there, which
+                    // is a `404`. Distinct from the entry case below
+                    // it, where the round exists and simply never
+                    // touched what the caller named — that one is the
+                    // model's refusal about the pairing.
                     .ok_or_else(|| {
-                        DomainError::Validation(format!(
-                            "line {line} has no change point {point} to say anything about"
-                        ))
+                        DomainError::not_found("change point", format!("{point} on line {line}"))
                     })?;
                 Ok(Anchor::change(landed))
             }
@@ -254,10 +257,5 @@ fn round_of(work: &Pursuit, node: NodeId) -> Result<&Round, DomainError> {
     work.rounds()
         .iter()
         .find(|round| round.id() == node)
-        .ok_or_else(|| {
-            DomainError::Validation(format!(
-                "work {} has no round {node} to say anything about",
-                work.id()
-            ))
-        })
+        .ok_or_else(|| DomainError::not_found("round", format!("{node} in work {}", work.id())))
 }

@@ -114,6 +114,29 @@ impl MemoryForge {
         });
     }
 
+    /// The same door for a pursuit's log.
+    ///
+    /// Reading a pursuit replays `Pursuit::push` and `Pursuit::end`
+    /// the way reading a line replays `History::record`, so the work
+    /// half needs the same door [`force_rows`](Self::force_rows) opens
+    /// for the line half: a way to write a log the model would have
+    /// refused, and ask the read what it does with one.
+    pub fn force_nodes(
+        &self,
+        pursuit: PursuitId,
+        nodes: Vec<PursuitNodeRow>,
+        ops: Vec<PursuitOpRow>,
+    ) {
+        self.with(|tables| {
+            debug_assert!(
+                nodes.iter().all(|node| node.pursuit == pursuit),
+                "the nodes are filed under the pursuit given"
+            );
+            tables.pursuit_nodes.extend(nodes);
+            tables.pursuit_ops.extend(ops);
+        });
+    }
+
     /// Rebuilds one line from the rows under `id`.
     fn line_at(tables: &Tables, id: &LineId) -> Result<Option<Line>, DomainError> {
         let Some(head) = tables.lines.iter().find(|row| row.id == *id) else {

@@ -738,6 +738,16 @@ impl GroupRepository for SqliteGroupRepository {
                 // Guard: the target dir must belong to the same
                 // persona as the group. NULL (root) always passes.
                 if let Some(dir) = dir_uuid {
+                    // Presence first, then ownership; the rule is on
+                    // `StoreFault::Absent`.
+                    let present: bool = conn.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM dir WHERE id = ?1)",
+                        params![dir],
+                        |row| row.get(0),
+                    )?;
+                    if !present {
+                        return Ok(3);
+                    }
                     let same_persona: bool = conn.query_row(
                         "SELECT EXISTS (
                              SELECT 1 FROM dir
@@ -761,9 +771,12 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(infra_err)?;
         match verdict {
             1 => Err(DomainError::Validation(
-                "dir and group belong to different personas (or the dir does not exist)".into(),
+                "the dir and the group belong to different personas".into(),
             )),
             2 => Err(DomainError::not_found("group", id)),
+            3 => Err(
+                StoreFault::absent("dir", dir_id.map(DirId::to_string).unwrap_or_default()).into(),
+            ),
             _ => Ok(()),
         }
     }
@@ -780,10 +793,23 @@ impl GroupRepository for SqliteGroupRepository {
         let parent_uuid = *parent.as_uuid();
         let child_uuid = *child.as_uuid();
         let now_ms = datetime_to_ms(&now);
-        // 0 = ok, 1 = persona mismatch / missing group, 2 = cycle.
+        // 0 = ok, 1 = persona mismatch, 2 = cycle, 3 = query-rule
+        // cycle, 4 = one of the two groups is not there.
         let verdict: u8 = self
             .isle
             .call(move |conn| {
+                // Presence first, then ownership; the rule is on
+                // `StoreFault::Absent`. Both groups are counted,
+                // because either one may be the one that is missing.
+                let present: u8 = conn.query_row(
+                    "SELECT (SELECT COUNT(*) FROM bucket WHERE id = ?1)
+                          + (SELECT COUNT(*) FROM bucket WHERE id = ?2)",
+                    params![parent_uuid, child_uuid],
+                    |row| row.get(0),
+                )?;
+                if present < 2 {
+                    return Ok(4);
+                }
                 let same_persona: bool = conn.query_row(
                     "SELECT EXISTS (
                          SELECT 1 FROM bucket p, bucket c
@@ -847,8 +873,9 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(infra_err)?;
         match verdict {
             1 => Err(DomainError::Validation(
-                "groups belong to different personas (or one of them does not exist)".into(),
+                "groups belong to different personas".into(),
             )),
+            4 => Err(StoreFault::absent("group", format!("{parent} or {child}")).into()),
             2 => Err(StoreFault::blocked_by(
                 "link rejected: it would make the groups contain each other (cycle)",
                 "unlink the opposing edge first, and the same link then works",

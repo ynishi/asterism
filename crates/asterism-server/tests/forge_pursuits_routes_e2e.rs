@@ -526,6 +526,34 @@ async fn two_conflicts_from_close_carry_different_advice() {
     // that could not be expressed before.
     assert_ne!(over["reason"], blocked["reason"]);
 
+    // `"blocked"` arrives here two ways, which is why the token is
+    // where the reading stops and the message is where it goes on.
+    // The second way is the line being archived: nothing about this
+    // close collides, and reopening the line lets the identical
+    // request through.
+    let after = open_work(&router, &line, "after hours").await;
+    push(&router, &after, vec![add(&entry, &content[0], "cut-02")]).await;
+    let (status, _) = call(
+        &router,
+        post(
+            &format!("/asterism/forge/lines/{line}/archive"),
+            serde_json::json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, shut) = close(&router, &after, "satisfied").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{shut}");
+    assert_eq!(
+        shut["reason"], "blocked",
+        "an archived line is state refusing, and reopening it clears: {shut}"
+    );
+    assert_ne!(
+        shut["message"], blocked["message"],
+        "one token, two things to do — the message is the part that says which"
+    );
+
     // And a refusal that is not a conflict carries no token at all:
     // a 400 asks one thing of a caller, so a field to branch on would
     // be a field with one value.

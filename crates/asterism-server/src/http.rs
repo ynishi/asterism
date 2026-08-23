@@ -77,7 +77,6 @@ use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
 use asterism_core::domain::observation::Stream;
 use asterism_core::domain::value::MimeType;
-use asterism_core::error::ConflictKind;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -128,17 +127,8 @@ impl IntoResponse for ApiError {
             }
             DomainError::Infra(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal"),
         };
-        let reason = match &self.0 {
-            DomainError::Conflict { kind, .. } => Some(kind.as_str()),
-            // A pack id is already registered: the caller has to name
-            // a different one, which is what `Clashes` means. Said
-            // here because the variant predates the kind and carries
-            // no room for one.
-            DomainError::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
-            _ => None,
-        };
         let mut body = serde_json::json!({ "kind": kind, "message": self.0.to_string() });
-        if let (Some(reason), Some(object)) = (reason, body.as_object_mut()) {
+        if let (Some(reason), Some(object)) = (self.0.reason(), body.as_object_mut()) {
             object.insert("reason".into(), serde_json::Value::from(reason));
         }
         (status, Json(body)).into_response()
@@ -3635,13 +3625,14 @@ async fn resolve_forge_pursuit(
 /// puts what it says on the line if it says anything.
 ///
 /// **A 409 from here is not always worth retrying, and the body says
-/// which kind it is.** Four refusals reach `Conflict`, and they want
-/// four different things from a caller. The `reason` token tells them
-/// apart:
+/// which kind it is.** Five refusals reach `Conflict`, and the `reason`
+/// token tells them apart:
 ///
-/// - `"blocked"` — the line moved under this work, so it collides.
-///   Resolve first, then this same close works. Retrying it alone
-///   loops.
+/// - `"blocked"` — something has to change first, and the message says
+///   what. Two arrive here: the line moved under this work and it
+///   collides, which resolving clears; or the line is archived, which
+///   reopening clears. Retrying alone loops on either, and the two want
+///   different actions, so the message is the part to read.
 /// - `"raced"` — the second decision inside the write lost to a
 ///   landing that arrived meanwhile. Retrying is reasonable and will
 ///   usually win.
@@ -3649,9 +3640,9 @@ async fn resolve_forge_pursuit(
 /// - `"clashes"` — the change would leave two entries under one name.
 ///   The caller has to ask for something different.
 ///
-/// All four are 409, because all four are a conflict with the current
-/// state; the status was never the thing that could separate them, and
-/// `reason` is what does.
+/// All of them are 409, because all of them are a conflict with the
+/// current state; the status was never the thing that could separate
+/// them, and `reason` is what does.
 async fn close_forge_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,

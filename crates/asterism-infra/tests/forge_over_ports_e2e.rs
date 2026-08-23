@@ -1965,6 +1965,97 @@ async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
     );
 }
 
+/// And the same for a pursuit.
+///
+/// Reading work replays `Pursuit::push` and `Pursuit::end` the way
+/// reading a line replays `History::record`, so both halves are asked
+/// over a port rather than one — and this is the half where the refusal
+/// has more ways to arrive, since a log has an ending and a chain does
+/// not.
+#[tokio::test]
+async fn work_the_store_could_not_have_been_given_does_not_come_back() {
+    use asterism_core::domain::forge::model::act::Act;
+    use asterism_core::domain::forge::model::pursuit::{Intent, Outcome};
+    use asterism_core::domain::forge::model::value::{ActorId, NodeId};
+    use asterism_infra::forge::rows;
+
+    let world = World::over_memory();
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    let work = world
+        .work
+        .open(&line.id(), None, Intent::default(), &who("ana"))
+        .await
+        .unwrap();
+
+    // A round after the ending. `Pursuit::end` refuses to put anything
+    // after a close and `Pursuit::push` refuses to write to work that
+    // has ended, so no path through the services makes this — which is
+    // exactly why the read half has to answer for it.
+    let ending = NodeId::new();
+    let after = NodeId::new();
+    let stamp = rows::ActRow::of(&Act::new(at(1), Actor::User(ActorId::new())));
+    world
+        .memory
+        .as_ref()
+        .expect("the forced-rows test runs over memory")
+        .force_nodes(
+            work.id(),
+            vec![
+                rows::PursuitNodeRow {
+                    pursuit: work.id(),
+                    id: ending,
+                    parent: work.head(),
+                    kind: "close",
+                    note: None,
+                    act: stamp,
+                    outcome: Some(Outcome::Abandoned),
+                },
+                rows::PursuitNodeRow {
+                    pursuit: work.id(),
+                    id: after,
+                    parent: ending,
+                    kind: "round",
+                    note: None,
+                    act: stamp,
+                    outcome: None,
+                },
+            ],
+            vec![rows::PursuitOpRow {
+                node: after,
+                position: 0,
+                entry: EntryId::new(),
+                verb: "add",
+                content: Some(world.content().await),
+                name: Some(name("cut-01")),
+            }],
+        );
+
+    let refused = Pursuits::get(&*world.pursuits_port, &work.id()).await;
+    assert!(
+        matches!(refused, Err(DomainError::Infra(_))),
+        "a log that says work carried on after it ended is the store's \
+         doing, not a caller's: {refused:?}"
+    );
+    let Err(refused) = refused else {
+        unreachable!("asserted above")
+    };
+    assert!(
+        refused.to_string().contains("could not have been written"),
+        "the refusal says whose fault it is: {refused}"
+    );
+    // The inner refusal travels, so the row's actual fault is readable
+    // rather than only its category.
+    assert!(
+        refused.to_string().contains("has ended"),
+        "and which rule the row broke: {refused}"
+    );
+}
+
 /// Every strategy the instance carries is answerable through the
 /// service, and a line that names one it does not carry is refused
 /// rather than quietly settled by something else.
@@ -2579,4 +2670,60 @@ async fn a_stored_outcome_this_model_has_no_name_for_is_refused() {
     );
 
     driver.shutdown().await.unwrap();
+}
+
+/// Asking about a round or a change point that is not there is a
+/// `404`, and asking about a real round that never touched the named
+/// entry is a `400`.
+///
+/// The two live one line apart in `ThreadService` and they are not the
+/// same answer. A round nobody made and a point never landed are the
+/// caller addressing something absent — there is somewhere else to
+/// look. An entry id against a round that exists is the model refusing
+/// a pairing: both things are there and the request is what is wrong.
+#[tokio::test]
+async fn asking_about_something_that_is_not_there_is_not_the_same_as_a_pairing_refused() {
+    let world = World::over_memory();
+    world.clock.set(0);
+    let line = world
+        .lines
+        .open(name(Line::ROOT), MainlineFirst.id(), &who("ana"))
+        .await
+        .unwrap();
+    world.clock.set(1);
+    let work = cut(&world, &line, "mine").await;
+    let round = world.work.get(&work.id()).await.unwrap().rounds()[0].id();
+
+    let no_round = world
+        .said
+        .about(Anchored::Round(work.id(), NodeId::new()))
+        .await
+        .expect_err("a round nobody made");
+    assert!(
+        matches!(&no_round, DomainError::NotFound { entity, .. } if *entity == "round"),
+        "{no_round}"
+    );
+
+    let no_point = world
+        .said
+        .about(Anchored::Change(
+            line.id(),
+            asterism_core::domain::forge::model::value::ChangePointId::new(),
+        ))
+        .await
+        .expect_err("a point that never landed");
+    assert!(
+        matches!(&no_point, DomainError::NotFound { entity, .. } if *entity == "change point"),
+        "{no_point}"
+    );
+
+    let untouched = world
+        .said
+        .about(Anchored::Entry(work.id(), round, EntryId::new()))
+        .await
+        .expect_err("the round is real and never touched that entry");
+    assert!(
+        matches!(&untouched, DomainError::Validation(_)),
+        "{untouched}"
+    );
 }
