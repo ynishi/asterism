@@ -263,6 +263,11 @@
       "docs": "Builds an artifact from a run's outputs, stamping the schema and\nthe identity fields from the encoder's."
     },
     {
+      "path": "asterism_infra::heads::bind_current",
+      "kind": "function",
+      "docs": "Resolves the promoted head against the bound encoder — the scoring\nside's one read, at startup.\n\n`Ok(None)` is the ordinary case: no pointer, zero-shot scores. An\nerror is a pointer that exists but cannot be honoured — a dangling\nlabel, a corrupt artifact, an identity that is not the bound\nencoder's, a row whose width disagrees, a key that is not a tag id\n— and the caller's move is to warn and score zero-shot: a head\nthat cannot be verified must not score, and startup must not fail\nover a file the person can delete."
+    },
+    {
       "path": "asterism_infra::heads::current_label",
       "kind": "function",
       "docs": "The promoted label, if any. Absent (or dangling) means zero-shot."

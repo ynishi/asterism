@@ -297,6 +297,27 @@ and this project adheres to
 
 ### Added
 
+- **The promoted head scores** (#132, the scoring side phase 2 promised). At
+  startup, beside the encoder, the process reads the `heads/current` pointer and
+  binds the promoted head — after verifying it: the artifact must carry the
+  bound encoder's exact identity, every row must be the encoder's width, and
+  every key must be a tag id. A pointer that cannot be honoured is a warning and
+  zero-shot scores; startup never fails over a file a person can delete.
+
+  In the suggestion pass, a tag the head holds a trained row for follows the
+  row's verdict — its acceptance probability, floored at even odds, no text
+  vector needed at all — while every other tag stays zero-shot. The phase-1
+  machinery pays off unchanged: the walk stamp is per-head, so binding a new
+  head re-offers the whole encoded library through the ordinary batch walk (now
+  also seeded at startup, beside the encode walk's seed), re-scored from cached
+  vectors and never re-encoded, with rulings untouched and the superseded head's
+  unaffirmed suggestions retired.
+
+  One scale wart, carried knowingly: a trained row's probability and a zero-shot
+  cosine land in the same queue. Within one tag the scale is consistent, and the
+  queue sorts per asset; a screen that renders both side by side is where this
+  gets revisited.
+
 - **The tag head trains on the person's own rulings** (#132 phase 2, the tune).
   Every accepted or rejected suggestion is a labeled example, and the new
   `HeadTrain` job (`POST /asterism/heads/train`) turns them into a head: per-tag

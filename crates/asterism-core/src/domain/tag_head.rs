@@ -29,9 +29,31 @@
 //! cannot beat cosine stays unpromoted and the zero-shot pass simply
 //! continues.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
+use crate::domain::value::TagId;
+use crate::domain::visual::TagHeadRef;
 use crate::error::DomainError;
+
+/// The promoted head as the scoring pass holds it: a label and the
+/// trained rows, keyed by tag. A tag without a row keeps zero-shot —
+/// the artifact's contract, now in memory.
+///
+/// Bound once at startup beside the encoder and never swapped in a
+/// running process; a newer promotion applies on the next launch. The
+/// probability a trained row produces sits on a different scale from
+/// cosine (0..1 versus roughly −1..1), and both land in the same
+/// suggestion queue — a known wart, sorted per asset, revisited when
+/// a screen renders the scores side by side.
+#[derive(Debug, Clone)]
+pub struct BoundTagHead {
+    /// The label suggestions and stamps carry while this head scores.
+    pub head: TagHeadRef,
+    /// The trained rows; absent tags score zero-shot.
+    pub rows: BTreeMap<TagId, TrainedRow>,
+}
 
 /// Minimum rulings **per class** (accepted, rejected) before a tag is
 /// trainable: three to learn from and one to hold out, under

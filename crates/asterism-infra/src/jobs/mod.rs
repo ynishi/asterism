@@ -221,6 +221,12 @@ pub struct JobDeps {
     /// the composition root.
     pub visual_encoder:
         Arc<std::sync::OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>>,
+    /// The promoted trained head (#132), bound once at startup beside
+    /// the encoder from the `heads/` pointer. Unset means the
+    /// zero-shot pass scores — no package, no promotion, or a
+    /// promoted head that failed verification (which the composition
+    /// root warns about rather than failing startup over).
+    pub tag_head: Arc<std::sync::OnceLock<Arc<asterism_core::domain::tag_head::BoundTagHead>>>,
 }
 
 /// Execution environment handed to worker handlers via apalis' `Data`
@@ -1217,6 +1223,7 @@ mod tests {
             disclosure,
             visual_features: crate::sqlite::repo::SqliteVisualFeatureRepository::new(isle.clone()),
             visual_encoder: Arc::new(std::sync::OnceLock::new()),
+            tag_head: Arc::new(std::sync::OnceLock::new()),
             tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
             tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
         }
@@ -1294,6 +1301,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle),
             },
@@ -1633,6 +1641,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -1773,6 +1782,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -1963,6 +1973,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -2152,6 +2163,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -2356,6 +2368,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -2574,6 +2587,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -2672,6 +2686,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -2766,6 +2781,7 @@ mod tests {
                     isle.clone(),
                 ),
                 visual_encoder: Arc::new(std::sync::OnceLock::new()),
+                tag_head: Arc::new(std::sync::OnceLock::new()),
                 tag_evidence: crate::sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                 tag_vectors: crate::sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
             },
@@ -3765,6 +3781,119 @@ mod tests {
             .await
             .unwrap();
         assert!(out.contains("backfill"), "{out}");
+        let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(out.contains("nothing left"), "{out}");
+    }
+
+    /// The bound trained head scores its rows and the per-head stamp
+    /// re-walks the already-suggested library (#132): a tag with a
+    /// trained row follows the row's verdict instead of cosine, every
+    /// other tag stays zero-shot, and rows the new head does not
+    /// affirm leave the queue.
+    #[tokio::test]
+    async fn a_bound_head_scores_its_rows_and_rewalks_the_library() {
+        use asterism_core::domain::repository::{TagEvidenceRepository, TagRepository};
+        use asterism_core::domain::tag_head::{BoundTagHead, TrainedRow};
+        use asterism_core::domain::visual::{TagHeadRef, TagSuggestionDisposition};
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let (isle, _driver) = crate::sqlite::open_and_migrate_in_memory().await.unwrap();
+        let search_dir = tempfile::tempdir().unwrap();
+        let image_dir = tempfile::tempdir().unwrap();
+        let env = series_job_env(&isle, pool.clone(), search_dir.path()).await;
+
+        let persona = uuid::Uuid::now_v7();
+        let red =
+            seed_image_asset(&isle, persona, image_dir.path(), "red.png", [220, 30, 20]).await;
+        let blue =
+            seed_image_asset(&isle, persona, image_dir.path(), "blue.png", [10, 20, 230]).await;
+        env.deps
+            .visual_encoder
+            .set(Arc::new(FakeVisualEncoder::new()))
+            .map_err(|_| ())
+            .unwrap();
+        let out = handlers::visual_feature(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(out.contains("encoded=2"), "{out}");
+        let red_tag = env.deps.tags.find_or_create("red circle").await.unwrap();
+        let blue_tag = env.deps.tags.find_or_create("blue square").await.unwrap();
+
+        // The zero-shot pass walks and stamps both assets.
+        handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(out.contains("nothing left"), "{out}");
+
+        // A trained head arrives with two rows: the blue tag weighted
+        // to accept a blue vector (fake encoder: normalized mean RGB +
+        // constant, so the third channel is the blue one) and reject a
+        // red one — and the red tag rejecting everything, so the
+        // zero-shot red-on-red suggestion is no longer affirmed and
+        // retirement has something real to do.
+        let mut rows = std::collections::BTreeMap::new();
+        rows.insert(
+            blue_tag.id,
+            TrainedRow {
+                weights: vec![0.0, 0.0, 8.0, 0.0],
+                bias: -2.0,
+            },
+        );
+        rows.insert(
+            red_tag.id,
+            TrainedRow {
+                weights: vec![0.0; 4],
+                bias: -5.0,
+            },
+        );
+        env.deps
+            .tag_head
+            .set(Arc::new(BoundTagHead {
+                head: TagHeadRef::new("head-v1").unwrap(),
+                rows,
+            }))
+            .map_err(|_| ())
+            .unwrap();
+
+        // The per-head stamp re-offers the whole library to the new
+        // head — no re-encode happened, the vectors are the same.
+        let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
+            .await
+            .unwrap();
+        assert!(!out.contains("nothing left"), "{out}");
+
+        // Blue: the trained row accepts, and the evidence carries the
+        // head that said so, with a probability past even odds.
+        let blue_rows = env
+            .deps
+            .tag_evidence
+            .of_asset(&blue, "fake-model")
+            .await
+            .unwrap();
+        let b = blue_rows.iter().find(|r| r.tag_id == blue_tag.id).unwrap();
+        assert_eq!(b.head.as_str(), "head-v1");
+        assert_eq!(b.disposition, TagSuggestionDisposition::Suggested);
+        assert!(b.score > 0.5, "{}", b.score);
+
+        // Red: both trained rows reject it, so nothing lands — and the
+        // zero-shot pass's red-on-red suggestion, which head-v1 did
+        // not re-affirm, has been retired. An unruled suggestion is
+        // the current head's opinion, and the current head's opinion
+        // is "no".
+        let red_rows = env
+            .deps
+            .tag_evidence
+            .of_asset(&red, "fake-model")
+            .await
+            .unwrap();
+        assert!(red_rows.is_empty(), "{red_rows:?}");
+
+        // Stamped under head-v1: the walk is done until the next head.
         let out = handlers::visual_tag_suggest(&env, &serde_json::json!({ "batch": true }))
             .await
             .unwrap();
