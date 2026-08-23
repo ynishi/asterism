@@ -1,17 +1,21 @@
 //! SQLite adapters for `TagEvidenceRepository` and
 //! `TagVectorRepository` (#112, P3).
 //!
-//! The evidence adapter's one load-bearing statement is the
-//! `INSERT OR IGNORE` in [`suggest_if_absent`]: the primary key
-//! `(asset, tag, model)` is what keeps a rerun of the suggestion job
-//! from touching a person's ruling or an earlier score — the guarantee
-//! is structural, not a handler branch.
+//! The evidence adapter's one load-bearing statement is the upsert in
+//! [`suggest_under_head`]: the primary key `(asset, tag, model)` plus
+//! the update's `WHERE disposition = 'suggested' AND head <> excluded`
+//! is what keeps a rerun of the suggestion job from touching a
+//! person's ruling — or a same-head rerun from moving a score — while
+//! letting a *new* head replace an unruled suggestion (#132). The
+//! guarantee is structural, not a handler branch.
 //!
-//! [`suggest_if_absent`]: SqliteTagEvidenceRepository::suggest_if_absent
+//! [`suggest_under_head`]: SqliteTagEvidenceRepository::suggest_under_head
 
 use asterism_core::domain::repository::{TagEvidenceRepository, TagVectorRepository};
 use asterism_core::domain::value::{AssetId, TagId};
-use asterism_core::domain::visual::{ModelIdentity, TagEvidence, TagSuggestionDisposition};
+use asterism_core::domain::visual::{
+    ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition,
+};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -51,26 +55,62 @@ impl SqliteTagEvidenceRepository {
 
 #[async_trait]
 impl TagEvidenceRepository for SqliteTagEvidenceRepository {
-    async fn suggest_if_absent(
+    async fn suggest_under_head(
         &self,
         asset_id: &AssetId,
         tag_id: &TagId,
         model_id: &str,
+        head: &TagHeadRef,
         score: f32,
         at_ms: i64,
     ) -> Result<bool, DomainError> {
         let asset = *asset_id.as_uuid();
         let tag = *tag_id.as_uuid();
         let model_id = model_id.to_string();
+        let head = head.as_str().to_string();
+        self.isle
+            .call(move |conn| {
+                // The update arm fires only on an unruled row from a
+                // different head: a ruling never matches (disposition
+                // moved), and a same-head rerun never matches (head
+                // equal), so `changes()` is exactly "this pass said
+                // something new".
+                let n = conn.execute(
+                    "INSERT INTO tag_evidence
+                       (asset_id, tag_id, model_id, score, disposition, suggested_at, head)
+                     VALUES (?1, ?2, ?3, ?4, 'suggested', ?5, ?6)
+                     ON CONFLICT (asset_id, tag_id, model_id) DO UPDATE SET
+                       score = excluded.score,
+                       suggested_at = excluded.suggested_at,
+                       head = excluded.head
+                     WHERE tag_evidence.disposition = 'suggested'
+                       AND tag_evidence.head <> excluded.head",
+                    params![asset, tag, model_id, score as f64, at_ms, head],
+                )?;
+                Ok(n == 1)
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    async fn retire_stale_suggestions(
+        &self,
+        asset_id: &AssetId,
+        model_id: &str,
+        keep: &TagHeadRef,
+    ) -> Result<u64, DomainError> {
+        let asset = *asset_id.as_uuid();
+        let model_id = model_id.to_string();
+        let keep = keep.as_str().to_string();
         self.isle
             .call(move |conn| {
                 let n = conn.execute(
-                    "INSERT OR IGNORE INTO tag_evidence
-                       (asset_id, tag_id, model_id, score, disposition, suggested_at)
-                     VALUES (?1, ?2, ?3, ?4, 'suggested', ?5)",
-                    params![asset, tag, model_id, score as f64, at_ms],
+                    "DELETE FROM tag_evidence
+                      WHERE asset_id = ?1 AND model_id = ?2
+                        AND disposition = 'suggested' AND head <> ?3",
+                    params![asset, model_id, keep],
                 )?;
-                Ok(n == 1)
+                Ok(n as u64)
             })
             .await
             .map_err(infra_err)
@@ -83,19 +123,26 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
     ) -> Result<Vec<TagEvidence>, DomainError> {
         let asset = *asset_id.as_uuid();
         let model = model_id.to_string();
-        type Row = (Uuid, f64, String, i64, Option<i64>);
+        type Row = (Uuid, f64, String, i64, Option<i64>, String);
         let rows: Vec<Row> = self
             .isle
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT tag_id, score, disposition, suggested_at, resolved_at
+                    "SELECT tag_id, score, disposition, suggested_at, resolved_at, head
                        FROM tag_evidence
                       WHERE asset_id = ?1 AND model_id = ?2
                       ORDER BY score DESC",
                 )?;
                 let rows = stmt
                     .query_map(params![asset, model], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
@@ -103,25 +150,37 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
             .await
             .map_err(infra_err)?;
         rows.into_iter()
-            .map(|(tag, score, disposition, suggested_at, resolved_at)| {
-                Ok(TagEvidence {
-                    asset_id: *asset_id,
-                    tag_id: TagId::from_uuid(tag),
-                    model_id: model_id.to_string(),
-                    score: score as f32,
-                    // A stored disposition outside the three slugs is a
-                    // row that could not have been written, not a thing
-                    // the caller asked for.
-                    disposition: TagSuggestionDisposition::parse(&disposition).map_err(|_| {
-                        StoreFault::CorruptRow(format!(
-                            "a stored tag_evidence row names a disposition this model \
+            .map(
+                |(tag, score, disposition, suggested_at, resolved_at, head)| {
+                    Ok(TagEvidence {
+                        asset_id: *asset_id,
+                        tag_id: TagId::from_uuid(tag),
+                        model_id: model_id.to_string(),
+                        // A blank head, like a disposition outside the
+                        // three slugs below, is a row that could not have
+                        // been written.
+                        head: TagHeadRef::new(head).map_err(|_| {
+                            StoreFault::CorruptRow(
+                                "a stored tag_evidence row carries a blank head ref".to_string(),
+                            )
+                        })?,
+                        score: score as f32,
+                        // A stored disposition outside the three slugs is a
+                        // row that could not have been written, not a thing
+                        // the caller asked for.
+                        disposition: TagSuggestionDisposition::parse(&disposition).map_err(
+                            |_| {
+                                StoreFault::CorruptRow(format!(
+                                    "a stored tag_evidence row names a disposition this model \
                              does not have: {disposition:?}"
-                        ))
-                    })?,
-                    suggested_at_ms: suggested_at,
-                    resolved_at_ms: resolved_at,
-                })
-            })
+                                ))
+                            },
+                        )?,
+                        suggested_at_ms: suggested_at,
+                        resolved_at_ms: resolved_at,
+                    })
+                },
+            )
             .collect()
     }
 
@@ -298,6 +357,12 @@ mod tests {
     use crate::sqlite::open_and_migrate_in_memory;
     use asterism_core::error::ConflictKind;
 
+    /// The day-one head, spelled short: every pre-#132 test scores
+    /// under it.
+    fn zs() -> TagHeadRef {
+        TagHeadRef::zero_shot()
+    }
+
     async fn seed_asset_and_tags(isle: &AsyncIsle) -> (AssetId, TagId, TagId) {
         let persona = Uuid::now_v7();
         let asset = Uuid::now_v7();
@@ -344,12 +409,12 @@ mod tests {
         let (asset, tag_a, tag_b) = seed_asset_and_tags(&isle).await;
 
         assert!(
-            repo.suggest_if_absent(&asset, &tag_a, "m", 0.31, 1)
+            repo.suggest_under_head(&asset, &tag_a, "m", &zs(), 0.31, 1)
                 .await
                 .unwrap()
         );
         assert!(
-            repo.suggest_if_absent(&asset, &tag_b, "m", 0.22, 1)
+            repo.suggest_under_head(&asset, &tag_b, "m", &zs(), 0.22, 1)
                 .await
                 .unwrap()
         );
@@ -364,13 +429,13 @@ mod tests {
         // A rerun proposes again, with different scores: nothing lands.
         assert!(
             !repo
-                .suggest_if_absent(&asset, &tag_a, "m", 0.99, 3)
+                .suggest_under_head(&asset, &tag_a, "m", &zs(), 0.99, 3)
                 .await
                 .unwrap()
         );
         assert!(
             !repo
-                .suggest_if_absent(&asset, &tag_b, "m", 0.99, 3)
+                .suggest_under_head(&asset, &tag_b, "m", &zs(), 0.99, 3)
                 .await
                 .unwrap()
         );
@@ -402,7 +467,7 @@ mod tests {
 
         // A different model has its own namespace.
         assert!(
-            repo.suggest_if_absent(&asset, &tag_b, "m2", 0.5, 5)
+            repo.suggest_under_head(&asset, &tag_b, "m2", &zs(), 0.5, 5)
                 .await
                 .unwrap()
         );
@@ -423,11 +488,11 @@ mod tests {
             preprocess_ver: 1,
         };
         evidence
-            .suggest_if_absent(&asset, &tag_a, "m", 0.4, 1)
+            .suggest_under_head(&asset, &tag_a, "m", &zs(), 0.4, 1)
             .await
             .unwrap();
         evidence
-            .suggest_if_absent(&asset, &tag_a, "m2", 0.4, 1)
+            .suggest_under_head(&asset, &tag_a, "m2", &zs(), 0.4, 1)
             .await
             .unwrap();
         vectors
@@ -442,6 +507,99 @@ mod tests {
         assert_eq!(vectors.clear_derived("m").await.unwrap(), 1);
         assert_eq!(evidence.of_asset(&asset, "m").await.unwrap().len(), 0);
         assert_eq!(evidence.of_asset(&asset, "m2").await.unwrap().len(), 1);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_new_head_rescores_unruled_rows_and_never_a_ruling() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteTagEvidenceRepository::new(isle.clone());
+        let (asset, tag_a, tag_b) = seed_asset_and_tags(&isle).await;
+        let trained = TagHeadRef::new("head-v1").unwrap();
+
+        // Zero-shot proposes both; the person rules one.
+        repo.suggest_under_head(&asset, &tag_a, "m", &zs(), 0.31, 1)
+            .await
+            .unwrap();
+        repo.suggest_under_head(&asset, &tag_b, "m", &zs(), 0.22, 1)
+            .await
+            .unwrap();
+        repo.resolve(&asset, &tag_a, "m", TagSuggestionDisposition::Accepted, 2)
+            .await
+            .unwrap();
+
+        // The trained head re-proposes both: the ruling stands
+        // untouched, the unruled row takes the new head's score.
+        assert!(
+            !repo
+                .suggest_under_head(&asset, &tag_a, "m", &trained, 0.9, 3)
+                .await
+                .unwrap(),
+            "a ruling is out of every head's reach"
+        );
+        assert!(
+            repo.suggest_under_head(&asset, &tag_b, "m", &trained, 0.8, 3)
+                .await
+                .unwrap()
+        );
+        let rows = repo.of_asset(&asset, "m").await.unwrap();
+        let b = rows.iter().find(|r| r.tag_id == tag_b).unwrap();
+        assert_eq!(b.head, trained);
+        assert!((b.score - 0.8).abs() < 1e-6, "the new head's score wins");
+        let a = rows.iter().find(|r| r.tag_id == tag_a).unwrap();
+        assert_eq!(a.head, zs(), "the ruled row keeps the head that ruled");
+
+        // A rerun under the same head moves nothing — first score
+        // stands, the pre-#132 guarantee, now per head.
+        assert!(
+            !repo
+                .suggest_under_head(&asset, &tag_b, "m", &trained, 0.99, 4)
+                .await
+                .unwrap()
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retiring_stale_suggestions_spares_rulings_and_the_current_head() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteTagEvidenceRepository::new(isle.clone());
+        let (asset, tag_a, tag_b) = seed_asset_and_tags(&isle).await;
+        let trained = TagHeadRef::new("head-v1").unwrap();
+
+        // Zero-shot proposed both; the person ruled one; the trained
+        // head's pass re-affirmed neither (both fell below its floor).
+        repo.suggest_under_head(&asset, &tag_a, "m", &zs(), 0.31, 1)
+            .await
+            .unwrap();
+        repo.suggest_under_head(&asset, &tag_b, "m", &zs(), 0.22, 1)
+            .await
+            .unwrap();
+        repo.resolve(&asset, &tag_a, "m", TagSuggestionDisposition::Rejected, 2)
+            .await
+            .unwrap();
+
+        // The stale zero-shot suggestion leaves; the ruling stays.
+        assert_eq!(
+            repo.retire_stale_suggestions(&asset, "m", &trained)
+                .await
+                .unwrap(),
+            1
+        );
+        let rows = repo.of_asset(&asset, "m").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tag_id, tag_a);
+        assert_eq!(rows[0].disposition, TagSuggestionDisposition::Rejected);
+
+        // Idempotent once nothing stale remains.
+        assert_eq!(
+            repo.retire_stale_suggestions(&asset, "m", &trained)
+                .await
+                .unwrap(),
+            0
+        );
 
         driver.shutdown().await.unwrap();
     }

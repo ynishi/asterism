@@ -52,7 +52,8 @@ use crate::domain::value::{
     ThreadId,
 };
 use crate::domain::visual::{
-    ModelIdentity, TagEvidence, TagSuggestionDisposition, VisualFeature, VisualFeatureKind,
+    ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition, VisualFeature,
+    VisualFeatureKind,
 };
 use crate::error::DomainError;
 
@@ -2626,26 +2627,34 @@ pub trait VisualFeatureRepository: Send + Sync {
     /// and re-running the walk.
     async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
 
-    /// Stamps that the tag-suggestion pass ran over this vector,
-    /// whether or not anything cleared the floor — "ran and found
-    /// nothing" must not look like "never ran", or the batch walk
-    /// re-offers the row forever.
+    /// Stamps that the tag-suggestion pass ran over this vector
+    /// **under this head**, whether or not anything cleared the floor
+    /// — "ran and found nothing" must not look like "never ran", or
+    /// the batch walk re-offers the row forever. The head is part of
+    /// the stamp (#132): a stamp from a superseded head does not
+    /// count, which is what makes a head swap re-score the library
+    /// through the ordinary walk instead of needing a machinery of
+    /// its own. The instant is stamped beside the head for audit —
+    /// since #132 the walk selects on the head alone.
     async fn stamp_tag_suggested(
         &self,
         asset_id: &AssetId,
         ord: u32,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
+        head: &TagHeadRef,
         at_ms: i64,
     ) -> Result<(), DomainError>;
 
-    /// Encoded vectors the suggestion pass has not stamped — the tag
-    /// backfill's page, for the library encoded before the pass
-    /// existed (or before a batch was seeded).
+    /// Encoded vectors the suggestion pass has not stamped **under
+    /// this head** — the tag backfill's page. Covers both the library
+    /// encoded before the pass existed and, since #132, every vector
+    /// whose stamp belongs to a superseded head.
     async fn unsuggested(
         &self,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
+        head: &TagHeadRef,
         limit: u32,
     ) -> Result<Vec<AssetId>, DomainError>;
 }
@@ -2655,19 +2664,38 @@ pub trait VisualFeatureRepository: Send + Sync {
 /// the `duplicate_conflict` shape.
 #[async_trait]
 pub trait TagEvidenceRepository: Send + Sync {
-    /// Writes a `suggested` row **only where no row exists** for
-    /// `(asset, tag, model)`, returning whether one was written. The
-    /// if-absent is the whole guarantee: a person's `accepted` /
-    /// `rejected` — and an earlier suggestion's score — are out of the
-    /// machine's reach by construction, not by handler discipline.
-    async fn suggest_if_absent(
+    /// Writes a `suggested` row for `(asset, tag, model)`, or replaces
+    /// an **unruled** one that a *different* head proposed (#132),
+    /// returning whether anything was written. Two guarantees, both
+    /// structural rather than handler discipline: a person's
+    /// `accepted` / `rejected` is out of the machine's reach — no head
+    /// overwrites a ruling — and within one head the first score
+    /// stands, so a rerun is a no-op. Across heads the newest pass's
+    /// score wins on unruled rows, which is what retraining is *for*:
+    /// a suggestion is the current head's opinion; a ruling is a
+    /// person's.
+    async fn suggest_under_head(
         &self,
         asset_id: &AssetId,
         tag_id: &TagId,
         model_id: &str,
+        head: &TagHeadRef,
         score: f32,
         at_ms: i64,
     ) -> Result<bool, DomainError>;
+
+    /// Deletes `suggested` rows of this asset and model that a head
+    /// **other than** `keep` proposed, returning the count. The
+    /// suggestion pass calls this after scoring, so what a superseded
+    /// head proposed and the current head no longer affirms does not
+    /// linger in the queue; rulings are structurally out of reach, as
+    /// everywhere on this port.
+    async fn retire_stale_suggestions(
+        &self,
+        asset_id: &AssetId,
+        model_id: &str,
+        keep: &TagHeadRef,
+    ) -> Result<u64, DomainError>;
 
     /// Every evidence row of one asset under one model, score-descending.
     async fn of_asset(

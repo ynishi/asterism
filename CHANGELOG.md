@@ -217,6 +217,26 @@ and this project adheres to
 
 ### Added
 
+- **Suggestions know which head proposed them** (#132 phase 1, the identity
+  split). The encoder's identity keys the vectors; the head keys what was made
+  of them. `tag_evidence` rows and the walk stamp now carry a head ref — today
+  always the zero-shot head, which is exactly what every existing row was scored
+  by, so the migration backfills the truth rather than a guess.
+
+  The plumbing is the point: a trained head (#132 phase 2) will arrive as a new
+  ref, and three structural properties are already in place for it. The walk's
+  page selects on "not stamped under the _current_ head", so a head swap
+  re-offers the whole encoded library through the ordinary batch walk —
+  re-scored from cached vectors, never re-encoded. The evidence upsert lets a
+  new head replace an **unruled** suggestion while a person's ruling stays out
+  of every head's reach, structurally — and within one head the first score
+  still stands, the pre-#132 guarantee, now per head. And after each pass,
+  suggestions a superseded head made that the current head no longer affirms
+  leave the queue, so a retrain cannot strand stale proposals behind.
+
+  Behaviour today is unchanged: one head exists, the scoring is the same cosine
+  over the same vocabulary matrix, at the same floor.
+
 - **The app installs a model from a registry entry** (#126, the fetch half of
   the first serving step). What the instance now serves, the app could not yet
   consume: a package still reached `models/` by hand.

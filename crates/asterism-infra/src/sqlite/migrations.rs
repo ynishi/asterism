@@ -7024,6 +7024,28 @@ CREATE TABLE tag_vector (
 ALTER TABLE visual_feature ADD COLUMN tag_suggested_at INTEGER;
 "#;
 
+/// V101 — suggestions and the walk stamp learn which head proposed
+/// (#132 phase 1, the identity split).
+///
+/// The encoder's identity keys the vectors; the head keys what was
+/// made of them. `tag_evidence.head` records the proposing head — the
+/// day-one value is the zero-shot head, which is exactly what every
+/// existing row was scored by, so the default backfills the truth.
+/// `visual_feature.tag_suggested_head` makes the walk stamp per-head:
+/// the pass's page selects on "not stamped under the *current* head",
+/// so introducing a trained head re-offers the whole encoded library
+/// through the ordinary batch walk — re-scored, never re-encoded —
+/// and rows already stamped get their stamp's head named so they are
+/// not re-offered to the head that already saw them.
+const V101_TAG_HEAD_REF: &str = r#"
+ALTER TABLE tag_evidence ADD COLUMN head TEXT NOT NULL DEFAULT 'zero-shot';
+
+ALTER TABLE visual_feature ADD COLUMN tag_suggested_head TEXT;
+
+UPDATE visual_feature SET tag_suggested_head = 'zero-shot'
+ WHERE tag_suggested_at IS NOT NULL;
+"#;
+
 /// V95 — the forge's first model goes, tables and all (#102).
 ///
 /// What these eight tables held is the shape the forge was designed
@@ -7527,6 +7549,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V98_FORGE_THREADS),
     Step::Sql(V99_VISUAL_FEATURE),
     Step::Sql(V100_TAG_EVIDENCE),
+    Step::Sql(V101_TAG_HEAD_REF),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

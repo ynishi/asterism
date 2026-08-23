@@ -12,7 +12,7 @@
 use asterism_core::domain::repository::{VisualFeatureRepository, VisualScanCandidate};
 use asterism_core::domain::source_locator::SourceLocator;
 use asterism_core::domain::value::{AssetId, MimeType, PersonaId};
-use asterism_core::domain::visual::{ModelIdentity, VisualFeature, VisualFeatureKind};
+use asterism_core::domain::visual::{ModelIdentity, TagHeadRef, VisualFeature, VisualFeatureKind};
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 use rusqlite::params;
@@ -281,18 +281,21 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         ord: u32,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
+        head: &TagHeadRef,
         at_ms: i64,
     ) -> Result<(), DomainError> {
         let asset = *asset_id.as_uuid();
         let ident = identity.clone();
         let kind_slug = kind.as_str();
+        let head = head.as_str().to_string();
         self.isle
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE visual_feature SET tag_suggested_at = ?1
-                      WHERE asset_id = ?2 AND ord = ?3 AND model_id = ?4
-                        AND feature_kind = ?5",
-                    params![at_ms, asset, ord, ident.model_id, kind_slug],
+                    "UPDATE visual_feature
+                        SET tag_suggested_at = ?1, tag_suggested_head = ?2
+                      WHERE asset_id = ?3 AND ord = ?4 AND model_id = ?5
+                        AND feature_kind = ?6",
+                    params![at_ms, head, asset, ord, ident.model_id, kind_slug],
                 )?;
                 Ok(())
             })
@@ -304,20 +307,27 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
         &self,
         identity: &ModelIdentity,
         kind: VisualFeatureKind,
+        head: &TagHeadRef,
         limit: u32,
     ) -> Result<Vec<AssetId>, DomainError> {
         let ident = identity.clone();
         let kind_slug = kind.as_str();
+        let head = head.as_str().to_string();
         let rows: Vec<Uuid> = self
             .isle
             .call(move |conn| {
+                // "Not stamped under the *current* head": a NULL stamp
+                // and a superseded head's stamp read the same, which
+                // is what makes a head swap re-walk the library (#132)
+                // through this ordinary page.
                 let mut stmt = conn.prepare(
                     "SELECT vf.asset_id FROM visual_feature vf
                       WHERE vf.model_id = ?1 AND vf.feature_kind = ?2
                         AND vf.preprocess_ver = ?3 AND vf.status = 'computed'
-                        AND vf.ord = 0 AND vf.tag_suggested_at IS NULL
+                        AND vf.ord = 0
+                        AND (vf.tag_suggested_head IS NULL OR vf.tag_suggested_head <> ?4)
                       ORDER BY vf.asset_id
-                      LIMIT ?4",
+                      LIMIT ?5",
                 )?;
                 let rows = stmt
                     .query_map(
@@ -325,6 +335,7 @@ impl VisualFeatureRepository for SqliteVisualFeatureRepository {
                             ident.model_id,
                             kind_slug,
                             ident.preprocess_ver,
+                            head,
                             limit as i64
                         ],
                         |r| r.get::<_, Uuid>(0),
@@ -549,5 +560,63 @@ mod tests {
         );
 
         driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_head_swap_reoffers_what_an_earlier_head_stamped() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteVisualFeatureRepository::new(isle.clone());
+        let (_p, a, b) = seed_two_images(&isle).await;
+        repo.set_visual_feature(feature(a, vec![0.0; 4]))
+            .await
+            .unwrap();
+        repo.set_visual_feature(feature(b, vec![0.0; 4]))
+            .await
+            .unwrap();
+        let zs = TagHeadRef::zero_shot();
+        let kind = VisualFeatureKind::Semantic;
+
+        // The zero-shot pass walks both, stamps one.
+        assert_eq!(
+            repo.unsuggested(&identity(), kind, &zs, 10).await.unwrap(),
+            vec_sorted(a, b)
+        );
+        repo.stamp_tag_suggested(&a, 0, &identity(), kind, &zs, 9)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.unsuggested(&identity(), kind, &zs, 10).await.unwrap(),
+            vec![b]
+        );
+
+        // A trained head arrives: the zero-shot stamp does not count,
+        // so the whole encoded library is re-offered — the #132 re-
+        // score path, through the ordinary walk.
+        let trained = TagHeadRef::new("head-v1").unwrap();
+        assert_eq!(
+            repo.unsuggested(&identity(), kind, &trained, 10)
+                .await
+                .unwrap(),
+            vec_sorted(a, b)
+        );
+        repo.stamp_tag_suggested(&a, 0, &identity(), kind, &trained, 10)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.unsuggested(&identity(), kind, &trained, 10)
+                .await
+                .unwrap(),
+            vec![b]
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The walk orders by asset id; the two seeded ids are random, so
+    /// tests sort the expectation the same way.
+    fn vec_sorted(a: AssetId, b: AssetId) -> Vec<AssetId> {
+        let mut v = vec![a, b];
+        v.sort_by_key(|id| *id.as_uuid());
+        v
     }
 }

@@ -39,6 +39,50 @@ pub struct ModelIdentity {
     pub preprocess_ver: u32,
 }
 
+/// Which scoring head proposed a suggestion (#132, the identity
+/// split).
+///
+/// The encoder's [`ModelIdentity`] keys the vectors; the head keys
+/// what was *made of* them. Suggestions and the walk stamp carry both,
+/// so replacing the head re-scores cached vectors — the walk re-offers
+/// every vector stamped under another head — without re-encoding
+/// anything, and a person's ruling, which neither key reaches, stays
+/// ruled across every head.
+///
+/// Day one there is exactly one head, [`Self::zero_shot`]: cosine over
+/// the tag-name vocabulary matrix. A trained head (#132 phase 2)
+/// arrives as a new ref.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TagHeadRef(String);
+
+impl TagHeadRef {
+    /// The day-one head: zero-shot cosine over the vocabulary matrix.
+    pub fn zero_shot() -> Self {
+        Self("zero-shot".into())
+    }
+
+    /// A named head — a trained artifact's ref. Blank is refused, and
+    /// surrounding whitespace is trimmed: the label is an equality
+    /// key on every suggestion and stamp, and two spellings of one
+    /// head would read as a head swap — a phantom re-walk of the
+    /// whole library.
+    pub fn new(label: impl Into<String>) -> Result<Self, DomainError> {
+        let label = label.into();
+        let trimmed = label.trim();
+        if trimmed.is_empty() {
+            return Err(DomainError::Validation(
+                "a head ref is a non-empty label".into(),
+            ));
+        }
+        Ok(Self(trimmed.to_string()))
+    }
+
+    /// The label, as stored beside every suggestion.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// What kind of feature a stored vector is.
 ///
 /// One kind exists today. The enum exists so that a later image-only
@@ -168,6 +212,9 @@ pub struct TagEvidence {
     pub tag_id: TagId,
     /// Which model proposed it.
     pub model_id: String,
+    /// Which head scored it (#132) — [`TagHeadRef::zero_shot`] until a
+    /// trained head exists.
+    pub head: TagHeadRef,
     /// Cosine similarity that cleared the floor.
     pub score: f32,
     /// Where the suggestion stands.
@@ -258,5 +305,16 @@ mod tests {
         assert_eq!(cosine_normalized(&a, &b), 0.0);
         let opposite = [-1.0, 0.0, 0.0];
         assert_eq!(cosine_normalized(&a, &opposite), -1.0);
+    }
+
+    #[test]
+    fn a_head_ref_is_a_trimmed_label_and_zero_shot_is_pinned() {
+        // The stored spelling V101's default backfills — the migration
+        // and this constant must never drift apart.
+        assert_eq!(TagHeadRef::zero_shot().as_str(), "zero-shot");
+        // Whitespace does not mint a second head: the label is an
+        // equality key, and a phantom head would re-walk the library.
+        assert_eq!(TagHeadRef::new("  head-v1 ").unwrap().as_str(), "head-v1");
+        assert!(TagHeadRef::new("   ").is_err());
     }
 }

@@ -3093,6 +3093,11 @@
       "docs": "One scored tag suggestion with its full derivation identity."
     },
     {
+      "path": "asterism_core::domain::visual::TagHeadRef",
+      "kind": "struct",
+      "docs": "Which scoring head proposed a suggestion (#132, the identity\nsplit).\n\nThe encoder's [`ModelIdentity`] keys the vectors; the head keys\nwhat was *made of* them. Suggestions and the walk stamp carry both,\nso replacing the head re-scores cached vectors — the walk re-offers\nevery vector stamped under another head — without re-encoding\nanything, and a person's ruling, which neither key reaches, stays\nruled across every head.\n\nDay one there is exactly one head, [`Self::zero_shot`]: cosine over\nthe tag-name vocabulary matrix. A trained head (#132 phase 2)\narrives as a new ref."
+    },
+    {
       "path": "asterism_core::domain::visual::TagSuggestionDisposition",
       "kind": "enum",
       "docs": "Where one tag suggestion stands between the model and the person.\n\nThe machine writes only the first state, and only where no row\nexists; the other two are a person's ruling and are never\noverwritten by a rerun. A rejection is scoped to the model that\nearned it — a materially different model may re-suggest."
