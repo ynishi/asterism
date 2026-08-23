@@ -297,6 +297,29 @@ and this project adheres to
 
 ### Added
 
+- **The app carries its encoder** (#132 phase 0). The bundled encoder is
+  `siglip2-base-patch16-256-q4v` — the current model with a q4f16 vision tower
+  over an int8 text tower, ~372 MB against the fp32 pair's ~1.5 GB — chosen by
+  measurement, not preference. Three candidates ran the same fixture
+  qualification (seed 42, 24 bases, EN+JA vocabulary): SigLIP v1 at 224/int8
+  (~205 MB) failed outright — Japanese matching zero, English recall 0.11 at any
+  usable floor, its 32k vocabulary against this family's 256k — and the all-int8
+  pair (~412 MB) held Japanese but lost recall (0.59) to the q4f16-vision mix
+  (0.79) at the same floor. The winner's floor is 0.10, one step below fp32's
+  0.12, because quantization compresses the cosine distribution: the tag floor
+  is now measured per model id, while the visual-edge floor measured the same on
+  both builds and stays one constant.
+
+  Binding resolves profile first, bundle second: the profile-local `models/`
+  stays the override — including its ambiguous two-package refusal, which the
+  bundle deliberately does not paper over — and only an empty `models/` falls
+  back to the shipped encoder, found through `ASTERISM_BUNDLED_MODELS` or
+  `bundled-models/` beside the executable. Placing the prepared package into the
+  desktop bundle (and pointing the variable at the resource directory) is the
+  packaging side's step; the recipe that produces the package is in `model-lab`,
+  revision-pinned by commit so what `prepare` fetches cannot drift under the
+  digests it records.
+
 - **The promoted head scores** (#132, the scoring side phase 2 promised). At
   startup, beside the encoder, the process reads the `heads/current` pointer and
   binds the promoted head — after verifying it: the artifact must carry the
