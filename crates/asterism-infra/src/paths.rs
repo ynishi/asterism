@@ -469,21 +469,6 @@ pub fn heads_dir() -> Result<PathBuf, DomainError> {
     Ok(dir)
 }
 
-/// Returns (creating on demand) the staging area a model install
-/// (#126) fills before its one rename into [`models_dir`].
-///
-/// Beside `models/`, never inside it: the binder counts every
-/// `models/` subdirectory holding a manifest, so an in-progress (or
-/// crashed) install staged there would read as a second package and
-/// turn the feature off. A sibling under the same profile home keeps
-/// the final rename on one filesystem.
-pub fn models_staging_dir() -> Result<PathBuf, DomainError> {
-    let dir = asterism_home()?.join("models-staging");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| DomainError::Infra(anyhow::anyhow!("cannot create model staging dir: {e}")))?;
-    Ok(dir)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,4 +22,3 @@ pub mod encoder;
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;
 pub mod package;
-pub mod registry;

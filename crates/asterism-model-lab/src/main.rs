@@ -5,8 +5,9 @@
 //! how a package comes to exist and how it earns its place: download
 //! the towers from their official source, pin their digests into the
 //! manifest, verify the package exactly the way the app will read it,
-//! qualify it against the fixture set, and author the registry entry a
-//! future in-app fetch flow consumes.
+//! and qualify it against the fixture set. (A `registry` verb once
+//! authored a distribution entry here; #132 retired that flow — the
+//! encoder ships with the app, and what travels is the trained head.)
 //!
 //! Deliberately a separate binary in the `asterism-import` category —
 //! the actor is the provider, not the user, and nothing in the app's
@@ -32,7 +33,6 @@ use asterism_vision::encoder::Encoder;
 use asterism_vision::fixtures::eval::{EvalConfig, run as run_eval};
 use asterism_vision::fixtures::scene::noise_image;
 use asterism_vision::package::{MANIFEST_FILE, ModelPackage, PackageFile, PackageManifest};
-use asterism_vision::registry::{ENTRY_SCHEMA_V1, RegistryEntry, RegistryFile};
 
 /// One supported model: where its files officially live and what the
 /// manifest should say about them. Compiled in on purpose — a recipe
@@ -120,7 +120,7 @@ fn recipe(model_id: &str) -> Result<&'static Recipe> {
 #[command(
     name = "asterism-model-lab",
     version,
-    about = "Provider-side model preparation: prepare, verify, qualify, registry"
+    about = "Provider-side model preparation: prepare, verify, qualify"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -158,17 +158,6 @@ enum Command {
         #[arg(long, default_value_t = 24)]
         bases: usize,
     },
-    /// Author the registry entry for a prepared package — the artifact
-    /// a future in-app fetch flow consumes. Reads the manifest, joins
-    /// the recipe's official URLs, and embeds a qualification report
-    /// when one is given.
-    Registry {
-        /// Package directory.
-        dir: PathBuf,
-        /// A `qualify` output file to embed.
-        #[arg(long)]
-        qualification: Option<PathBuf>,
-    },
 }
 
 #[tokio::main]
@@ -177,7 +166,6 @@ async fn main() -> Result<()> {
         Command::Prepare { model_id, out } => prepare(&model_id, out).await,
         Command::Verify { dir } => verify(&dir),
         Command::Qualify { dir, seed, bases } => qualify(&dir, seed, bases),
-        Command::Registry { dir, qualification } => registry(&dir, qualification.as_deref()),
     }
 }
 
@@ -267,47 +255,6 @@ fn qualify(dir: &Path, seed: u64, bases: usize) -> Result<()> {
     Ok(())
 }
 
-fn registry(dir: &Path, qualification: Option<&Path>) -> Result<()> {
-    let package = ModelPackage::open(dir)?;
-    let manifest = package.manifest();
-    // A registry entry exists so a fetch flow can download the files;
-    // an entry with no URLs cannot do its one job, so an unknown model
-    // is refused here the same way `prepare` refuses it.
-    let recipe = recipe(&manifest.model_id)?;
-    let qualification: Option<serde_json::Value> = match qualification {
-        Some(path) => Some(
-            serde_json::from_str(
-                &std::fs::read_to_string(path)
-                    .with_context(|| format!("cannot read {}", path.display()))?,
-            )
-            .with_context(|| format!("{} is not a qualification report", path.display()))?,
-        ),
-        None => None,
-    };
-    // The typed entry the app's fetch flow parses back
-    // (`asterism_vision::registry::RegistryEntry::parse`) — authored
-    // through the same type so the two sides cannot drift.
-    let files = |file: &PackageFile, url: &str| RegistryFile {
-        path: file.path.clone(),
-        sha256: file.sha256.clone(),
-        url: url.to_string(),
-    };
-    let entry = RegistryEntry {
-        schema: ENTRY_SCHEMA_V1.to_string(),
-        model_id: manifest.model_id.clone(),
-        dim: manifest.dim,
-        preprocess_ver: manifest.preprocess_ver,
-        license: manifest.license.clone(),
-        source_url: manifest.source_url.clone(),
-        image_model: files(&manifest.image_model, recipe.files[0].0),
-        text_model: files(&manifest.text_model, recipe.files[1].0),
-        tokenizer: files(&manifest.tokenizer, recipe.files[2].0),
-        qualification,
-    };
-    println!("{}", serde_json::to_string_pretty(&entry)?);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,15 +286,18 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_the_four_verbs() {
+    fn cli_parses_the_three_verbs_and_no_longer_the_retired_one() {
         use clap::Parser;
         for args in [
             vec!["asterism-model-lab", "prepare", "siglip2-base-patch16-256"],
             vec!["asterism-model-lab", "verify", "/tmp/p"],
             vec!["asterism-model-lab", "qualify", "/tmp/p", "--bases", "8"],
-            vec!["asterism-model-lab", "registry", "/tmp/p"],
         ] {
             Cli::try_parse_from(args).expect("parse");
         }
+        // `registry` authored the fetch flow's entry; #132 retired
+        // both sides together, so the verb refusing is part of the
+        // retirement.
+        assert!(Cli::try_parse_from(["asterism-model-lab", "registry", "/tmp/p"]).is_err());
     }
 }

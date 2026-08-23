@@ -67,6 +67,29 @@ and this project adheres to
 
 ### Fixed
 
+- **A landing says which work it came out of, and now the schema checks it**
+  (#119). `change_point` names four things and only `line_id` was a key:
+  `from_work`, `by_node` and `parent_id` were bare `BLOB`s. Migration V102
+  rebuilds the table with `from_work` keyed to `pursuit` — composite, on
+  `(line_id, from_work)`, so the work has to be on _this_ line rather than
+  merely exist somewhere — and `by_node` keyed to `pursuit_node`.
+
+  These two were the references nothing checked at any level. A parent the line
+  never had is refused inside the write and again by the read; `from_work` and
+  `by_node` were handed straight through, so a row naming work that does not
+  exist came back looking like a landing out of nowhere.
+
+  `parent_id` stays bare, which is this issue's question answered rather than
+  carried again. A parent is either the genesis or a change point, and the
+  genesis is columns on `line` rather than a row — giving it a row to point at
+  means one whose `from_work` and `by_node` are both NULL, costing those two
+  columns their `NOT NULL` for every real row, to duplicate a check two layers
+  already make. `pursuit.base_id` and `pursuit_node.parent_id` are the same
+  shape and stay bare for the same reason.
+
+  A database whose rows the new keys would not hold does not migrate: the step
+  asks `foreign_key_check` before it lands and takes the rebuild back with it.
+
 - **Nine refusals answered with the wrong status.** Three of them —
   `this line is archived`, `archive it first`, and work still open against a
   line being dropped — each name a state change after which the identical
@@ -294,6 +317,20 @@ and this project adheres to
   and outside the forge, so what governs putting content on one is who may write
   to that line — and if an owner ever had to be recorded rather than an author,
   it would be an `Actor` on the entry, resolved through the same contract.
+
+### Removed
+
+- **The model-fetch prototype** (#132 phase 4, closing what #126 opened). The
+  app no longer downloads encoders: `POST /asterism/models/fetch`, the
+  `ModelFetch` job, the registry-entry types and staged installer in
+  `asterism-vision`, the `models-staging/` path, and `model-lab`'s `registry`
+  verb are gone, and `reqwest` leaves `asterism-infra` with them. The redesign
+  made the flow pointless twice over — the encoder becomes app infrastructure
+  (bundled, phase 0) and the only thing that travels is the trained head,
+  kilobytes on the instance's existing store. `model-lab` keeps
+  `prepare/verify/qualify`: the provider still produces and qualifies the
+  bundled encoder. The instance's registry route (#127) stays, awaiting its
+  phase-3 repurposing as the head pointer.
 
 ### Added
 

@@ -428,11 +428,6 @@
       "docs": "Recovers `material.meta_text` for the library that predates the\ncolumn — [`JobKind::MaterialText`](asterism_core::domain::job::JobKind::MaterialText).\n\nBatch only. The ingest path fills this column as a side effect of\nhashing, so the per-asset form would have no caller; what needs a\nwalk is the set that was already on disk when the column arrived.\n\n# What each row costs, and why the set shrinks\n\nA row leaves the set as soon as anything is written to it, and\nsomething is written for every row the walk can *read* — `{}` when\nthe bytes carry no words is an answer, not a gap. The rows that stay\nare the ones nothing looked at: a format this recovery does not\nread, a locator with no file behind it, a file over the walk ceiling\nor gone from disk. Those are `NULL` because that is true of them,\nand they cost one page scan on the next startup rather than a\nre-read.\n\n# It re-composes what it recovers\n\nWords on a row are not yet words in a document. A row that gained\ntext here has a search document composed before that text existed,\nso the asset is queued for re-composition — but only when something\nwas actually found, because a walk over a library of text-free\npictures would otherwise enqueue one no-op job per picture."
     },
     {
-      "path": "asterism_infra::jobs::handlers::model_fetch",
-      "kind": "function",
-      "docs": "Downloads and installs the model package a registry entry (#126)\ndescribes.\n\nPayload: `{ \"url\": \"<entry url>\" }` or `{ \"entry\": { … } }`,\nexactly one. The inline form exists because the instance's registry\nroute sits behind its session gate — a client that already holds a\nsession fetches the entry itself and hands the body over, rather\nthan this job growing credentials in a persisted queue row.\n\nThe entry is the trust anchor: every fetched byte is verified\nagainst its digests before it lands, and the finished directory\nmust pass the same reader the binder uses\n(`asterism_vision::registry`'s staging owns both halves; this\nhandler owns only the network). Resumable rather than retried, the\npipeline's rule: a re-run keeps every staged file whose digest\nverifies and downloads only the rest. The final rename installs the\npackage as a **replacement** — other packages are retired, since\nthe binder refuses a directory holding two — and binding stays a\nrestart (#112's bind-once), which is what the completion message\nsays.\n\nThis download loop and `model-lab prepare`'s are deliberately two:\nthey point opposite ways along the trust chain. `prepare` fetches\nfrom the official source and **pins** what it got — the digests are\nits output; this loop fetches from wherever the entry says and\n**verifies** against those pins — the digests are its input. A\nshared loop would need a \"pin or verify?\" switch, which is exactly\nthe confusion the split exists to prevent."
-    },
-    {
       "path": "asterism_infra::jobs::handlers::observation_sweep",
       "kind": "function",
       "docs": "Expires observations past their stream's declared retention.\nPayload is empty (`{}`) — the windows come from `STREAM_REGISTRY`,\nnever from the payload, so a queued job cannot sweep on a policy\nthat has since changed.\n\nChain-enqueues while a page comes back full. Unlike `trash_purge`\nthis needs no \"made progress\" guard: a full page here means rows\nwere deleted, so the backlog strictly shrinks and the chain\nterminates."
@@ -676,11 +671,6 @@
       "path": "asterism_infra::paths::models_dir",
       "kind": "function",
       "docs": "Returns (creating on demand) the profile-local model-package root\n(#112): one subdirectory per installed package\n(`<asterism_home>/models/<model_id>/`).\n\nProfile-local like the Tantivy index and the preview renditions,\nnot shared across profiles: `$ASTERISM_HOME` must sandbox\neverything a profile touches, or a bench run reads the weights the\nuser's real library trusts. Sharing bytes between profiles is a\nsymlink the person makes, not a path this function invents."
-    },
-    {
-      "path": "asterism_infra::paths::models_staging_dir",
-      "kind": "function",
-      "docs": "Returns (creating on demand) the staging area a model install\n(#126) fills before its one rename into [`models_dir`].\n\nBeside `models/`, never inside it: the binder counts every\n`models/` subdirectory holding a manifest, so an in-progress (or\ncrashed) install staged there would read as a second package and\nturn the feature off. A sibling under the same profile home keeps\nthe final rename on one filesystem."
     },
     {
       "path": "asterism_infra::paths::tantivy_index_dir",

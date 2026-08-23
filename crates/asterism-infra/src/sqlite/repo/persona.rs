@@ -640,12 +640,34 @@ mod delete_order_tests {
                          0, ?3, 'user', 0, ?3, 'user')",
                 params![line, genesis, actor],
             )?;
+            // The work the landing came out of, and the ending that
+            // decided it. Both are keys on `change_point`, so a point
+            // written by hand needs them in place first — the order a
+            // close writes them in.
+            let work = Uuid::now_v7();
+            let open_node = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO pursuit \
+                     (id, line_id, parent_id, open_node, base_id, title, note, \
+                      open_at, open_by, open_kind, created_at, created_by, created_kind, \
+                      updated_at, updated_by, updated_kind) \
+                 VALUES (?1, ?2, NULL, ?3, ?4, NULL, NULL, 0, ?5, 'user', \
+                         0, ?5, 'user', 0, ?5, 'user')",
+                params![work, line, open_node, genesis, actor],
+            )?;
+            let ending = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO pursuit_node \
+                     (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+                 VALUES (?1, ?2, ?3, 'close', 'satisfied', NULL, 0, ?4, 'user')",
+                params![ending, work, open_node, actor],
+            )?;
             let point = Uuid::now_v7();
             conn.execute(
                 "INSERT INTO change_point \
                      (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
-                params![point, line, genesis, Uuid::now_v7(), Uuid::now_v7(), actor],
+                params![point, line, genesis, work, ending, actor],
             )?;
             conn.execute(
                 "INSERT INTO change_row (point_id, entry_id, existence, content, name) \
