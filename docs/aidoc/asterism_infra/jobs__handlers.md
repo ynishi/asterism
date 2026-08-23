@@ -21,6 +21,7 @@ for later modalities.
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `material_text` — Recovers `material.meta_text` for the library that predates the
+- `model_fetch` — Downloads and installs the model package a registry entry (#126)
 - `observation_sweep` — Expires observations past their stream's declared retention.
 - `preview_gen` — Transcodes a webview-unplayable video into its preview rendition
 - `query_group_refresh` — Re-evaluates every Query Group under one persona. Payload:

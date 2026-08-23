@@ -520,6 +520,10 @@ async fn handle_asterism_job(
                 true,
             ),
         },
+        // Deliberately not gated on the encoder cell, unlike the three
+        // visual jobs above: installing the first model is this job's
+        // whole point, and there is nothing bound to consult.
+        Ok(JobKind::ModelFetch) => (handlers::model_fetch(&env, &job.payload).await, false),
         Ok(JobKind::VisualTagSuggest) => match env.deps.visual_encoder.get() {
             Some(_) => (
                 handlers::visual_tag_suggest(&env, &job.payload).await,

@@ -20,4 +20,5 @@ corpus, because nothing outside the system consumes it.
 ## Modules
 
 - [`package`](package.md): The model package: the data contract between model *preparation*
+- [`registry`](registry.md): The model registry entry (#126): the fetch half of the data
 

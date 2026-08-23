@@ -313,6 +313,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         )
         // Which visual model this process bound, if any (#112).
         .route("/asterism/models/status", get(visual_model_status))
+        // Install the package a registry entry describes (#126).
+        .route("/asterism/models/fetch", post(fetch_visual_model))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
         // on the asset row.
@@ -2893,6 +2895,51 @@ async fn reject_tag_suggestion(
 /// bound, if any (#112). All-null when the process runs without one.
 async fn visual_model_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<VisualModelStatusDto> {
     Ok(Json(ctx.asset_service.visual_model_status().await))
+}
+
+/// Body of `POST /asterism/models/fetch` — a registry entry by
+/// reference or by value, exactly one.
+#[derive(serde::Deserialize)]
+struct ModelFetchRequest {
+    /// Where the entry lives (the instance's registry route, or
+    /// wherever the provider put it).
+    #[serde(default)]
+    url: Option<String>,
+    /// The entry itself — for a caller that already fetched it (the
+    /// instance's route sits behind its own session, and this server
+    /// holds no such credential).
+    #[serde(default)]
+    entry: Option<serde_json::Value>,
+}
+
+/// `POST /asterism/models/fetch` — enqueues a `ModelFetch` install
+/// (#126). The shape is validated here so a caller hears the refusal
+/// at request time rather than as a failed job run; everything deeper
+/// — entry schema, digests, the replacement — is the handler's, where
+/// the entry's own verification lives. Installation does not bind:
+/// the completion message says to restart (#112's bind-once).
+async fn fetch_visual_model(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(body): Json<ModelFetchRequest>,
+) -> ApiResult<serde_json::Value> {
+    let payload = match (body.url, body.entry) {
+        (Some(url), None) => serde_json::json!({ "url": url }),
+        (None, Some(entry)) => serde_json::json!({ "entry": entry }),
+        (None, None) => {
+            return Err(DomainError::Validation("name either url or entry".into()).into());
+        }
+        (Some(_), Some(_)) => {
+            return Err(DomainError::Validation(
+                "url and entry are different requests; name one".into(),
+            )
+            .into());
+        }
+    };
+    let task_id = ctx.asset_service.fetch_model(payload).await?;
+    Ok(Json(serde_json::json!({
+        "enqueued": true,
+        "task_id": task_id,
+    })))
 }
 
 /// `POST /asterism/assets/{id}/comments` — appends one comment.

@@ -4894,6 +4894,16 @@ impl AssetService {
         Ok(crate::application::mapping::tag_to_dto(&tag))
     }
 
+    /// Enqueues the install of the model package a registry entry
+    /// describes (#126). The payload travels to the `model_fetch`
+    /// handler as it stands (`{"url": …}` or `{"entry": …}` — the
+    /// transport validated the shape); returns the engine's task id.
+    /// Installation does not bind: the caller restarts to bind (#112's
+    /// bind-once), which the job's completion message also says.
+    pub async fn fetch_model(&self, payload: serde_json::Value) -> Result<String, DomainError> {
+        self.jobs.enqueue(JobKind::ModelFetch, payload).await
+    }
+
     /// The visual model this process has bound, if any (#112) — the
     /// status the UI's model panel reads. All-`None` covers every
     /// no-model shape (feature off, no package, failed bind) because
