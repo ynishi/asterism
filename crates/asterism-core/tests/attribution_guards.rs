@@ -548,6 +548,15 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
          somebody's behalf (rule 4)",
     ),
     (
+        "asset_service::fetch_model",
+        "enqueues the install of the model package a registry entry \
+         describes (#126); the package is profile infrastructure, and \
+         nothing the install writes carries an author. The rows the \
+         model later produces are derived state keyed by ModelIdentity \
+         — attributed to the model, never to whoever triggered the \
+         install (rule 4)",
+    ),
+    (
         "asset_service::remeasure_dims",
         "enqueues a re-read of the named artefacts; pixel dimensions are \
          derived from the bytes. A person triggers it, but what lands is \
