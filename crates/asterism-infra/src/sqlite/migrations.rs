@@ -7463,6 +7463,25 @@ CREATE TABLE forge_thread_revision (
 /// out of nowhere. That is the gap with no reader behind it, so it is
 /// the one worth a key.
 ///
+/// **One of the two is composite, and the asymmetry is the point.**
+/// `(line_id, from_work)` says the work is on *this* line, not merely
+/// that the id names a pursuit somewhere: `Closings::commit` takes the
+/// line and the closing separately, `land` checks each parent against
+/// its own log, and nothing asks whether the two logs belong together.
+/// A UNIQUE index on `pursuit(line_id, id)` — trivially unique behind
+/// the primary key — is what the key points at.
+///
+/// `by_node` is keyed on existence alone, because the pair it would
+/// have been keyed to is fixed by construction: `land` builds the
+/// ending and the change point from one `PursuitId`, so the row it
+/// writes cannot name an ending of other work. Making it composite
+/// costs more than it buys — the parent side needs a UNIQUE index on
+/// `pursuit_node(pursuit_id, id)`, whose violations SQLite reports
+/// under a column list `is_unique_violation` does not know, which
+/// turns "this work has already ended" into an infrastructure error.
+/// A key that breaks a refusal to restate a guarantee the writer
+/// already gives is the wrong trade.
+///
 /// **`parent_id` stays bare, and this is the answer to whether it
 /// should.** A parent is either the genesis or a change point; the
 /// genesis is columns on `line` rather than a row, because it carries
@@ -7482,17 +7501,26 @@ CREATE TABLE forge_thread_revision (
 /// one of them already names a pursuit and a node that exist, which is
 /// what `foreign_key_check` is asked to confirm before the step is
 /// allowed to land.
+///
+/// V96's three indexes come back, and a fourth arrives with the second
+/// key: `RESTRICT` asks the child side on every delete of a parent, so
+/// `by_node` is indexed the way `from_work` already was, and a drop
+/// walking either does not scan the table.
 const V102_FORGE_NODE_KEYS: &str = r#"
+CREATE UNIQUE INDEX idx_pursuit_line_id ON pursuit(line_id, id);
+
 CREATE TABLE change_point_v102 (
     id        BLOB PRIMARY KEY,
     line_id   BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
     parent_id BLOB NOT NULL,
-    from_work BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    from_work BLOB NOT NULL,
     by_node   BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
     at        INTEGER NOT NULL,
     actor_id  BLOB NOT NULL,
     actor_kind TEXT NOT NULL
-        CHECK (actor_kind IN ('user', 'system'))
+        CHECK (actor_kind IN ('user', 'system')),
+    FOREIGN KEY (line_id, from_work)
+        REFERENCES pursuit(line_id, id) ON DELETE RESTRICT
 ) STRICT;
 
 INSERT INTO change_point_v102
@@ -15165,6 +15193,10 @@ mod tests {
                 && indexes.contains(&"idx_change_point_from".to_string()),
             "every index the rebuild dropped comes back: {indexes:?}"
         );
+        assert!(
+            indexes.contains(&"idx_change_point_by".to_string()),
+            "and the child side of the second key is indexed: {indexes:?}"
+        );
 
         // The fork rule rides on one of them, so it is asked rather
         // than assumed from the name being present.
@@ -15192,6 +15224,30 @@ mod tests {
             params![Uuid::now_v7(), line, point, work, Uuid::now_v7(), actor],
         );
         assert!(undecided.is_err(), "and an ending that decided it");
+
+        // Existing is not the same as belonging, which is what the
+        // composite half of the key is for. A second line with work of
+        // its own: the pursuit exists, and it still cannot be built
+        // into a landing on this line.
+        let (elsewhere_line, _, elsewhere_work, elsewhere_end, _, _) = seed_a_landing(&conn);
+        assert_ne!(elsewhere_line, line, "two lines, two logs");
+        let borrowed_work = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 10, ?6, 'user')",
+            params![
+                Uuid::now_v7(),
+                line,
+                point,
+                elsewhere_work,
+                elsewhere_end,
+                actor
+            ],
+        );
+        assert!(
+            borrowed_work.is_err(),
+            "another line's work does not land here"
+        );
     }
 
     /// A database whose landing names work that is not there does not

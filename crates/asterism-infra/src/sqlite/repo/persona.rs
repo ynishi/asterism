@@ -641,8 +641,8 @@ mod delete_order_tests {
                 params![line, genesis, actor],
             )?;
             // The work the landing came out of, and the ending that
-            // decided it. Both are keys on `change_point`, so a hand
-            // -written point needs them in place first — the order a
+            // decided it. Both are keys on `change_point`, so a point
+            // written by hand needs them in place first — the order a
             // close writes them in.
             let work = Uuid::now_v7();
             let open_node = Uuid::now_v7();
