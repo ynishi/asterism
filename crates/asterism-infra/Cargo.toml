@@ -96,24 +96,18 @@ x509-parser = { workspace = true }
 # until the provenance writer's own temporary was found to be a
 # deterministic sibling opened with neither.
 tempfile = "3"
-# The model-use crate (#112). Always linked for its light half — the
-# package/registry data contract the `model_fetch` handler installs
-# through (#126) — while the ONNX encoder stays behind the `vision`
-# feature below, so a default workspace build still never downloads or
-# links onnxruntime.
-asterism-vision = { path = "../asterism-vision" }
-# The `model_fetch` handler's download half (#126): the entry names
-# where each file lives, this fetches the bytes, and
-# `asterism-vision`'s staging verifies them against the entry's
-# digests before they land. The workspace line, for the reason it is a
-# workspace line (one TLS backend, one linked copy).
-reqwest = { workspace = true }
+# The model-use encoder (#112), behind the `vision` feature so that a
+# default workspace build never downloads or links onnxruntime — only
+# a binary that intends to bind a model turns it on. (It was briefly a
+# plain dependency while the retired fetch flow (#126→#132) needed its
+# registry types; those left with the flow.)
+asterism-vision = { path = "../asterism-vision", features = ["onnx"], optional = true }
 
 [features]
 # ONNX encoder path (#112): the `vision::OrtVisualEncoder` adapter that
 # lets the composition root bind a model package into the job engine's
 # encoder cell.
-vision = ["asterism-vision/onnx"]
+vision = ["dep:asterism-vision"]
 
 [dev-dependencies]
 tempfile = "3"

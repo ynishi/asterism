@@ -329,7 +329,6 @@
 
 - [asterism-vision overview](asterism_vision/index.md): # asterism-vision — model *use* for visual features (#112)
 - [asterism-vision::package](asterism_vision/package.md): The model package: the data contract between model *preparation*
-- [asterism-vision::registry](asterism_vision/registry.md): The model registry entry (#126): the fetch half of the data
 
 ## teams-contract 0.0.0
 

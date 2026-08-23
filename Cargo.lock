@@ -591,7 +591,6 @@ dependencies = [
  "pngmeta",
  "rayon",
  "rcgen",
- "reqwest 0.12.28",
  "rkyv 0.7.46",
  "rusqlite",
  "rusqlite-isle",
