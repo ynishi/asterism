@@ -295,6 +295,20 @@ and this project adheres to
   to that line — and if an owner ever had to be recorded rather than an author,
   it would be an `Actor` on the entry, resolved through the same contract.
 
+### Removed
+
+- **The model-fetch prototype** (#132 phase 4, closing what #126 opened). The
+  app no longer downloads encoders: `POST /asterism/models/fetch`, the
+  `ModelFetch` job, the registry-entry types and staged installer in
+  `asterism-vision`, the `models-staging/` path, and `model-lab`'s `registry`
+  verb are gone, and `reqwest` leaves `asterism-infra` with them. The redesign
+  made the flow pointless twice over — the encoder becomes app infrastructure
+  (bundled, phase 0) and the only thing that travels is the trained head,
+  kilobytes on the instance's existing store. `model-lab` keeps
+  `prepare/verify/qualify`: the provider still produces and qualifies the
+  bundled encoder. The instance's registry route (#127) stays, awaiting its
+  phase-3 repurposing as the head pointer.
+
 ### Added
 
 - **The promoted head scores** (#132, the scoring side phase 2 promised). At
