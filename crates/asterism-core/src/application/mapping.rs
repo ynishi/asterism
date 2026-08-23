@@ -1459,6 +1459,47 @@ pub fn forge_anchored(
     entry: Option<&str>,
     change_point: Option<&str>,
 ) -> Result<Anchored, DomainError> {
+    // An id the kind has no use for is refused rather than ignored.
+    //
+    // Over HTTP the four `about` routes make a wrong combination
+    // unwritable — there is no place in
+    // `/pursuits/{id}/rounds/{node}/threads` to put an entry. IPC has
+    // no path, so the same request arrives as a kind plus five
+    // optionals, and ignoring the extras would answer about the round
+    // for a caller that asked about an entry. That is the failure the
+    // four routes exist to prevent, so it is refused here instead.
+    let unused = |named: &'static str, value: Option<&str>| -> Result<(), DomainError> {
+        match value {
+            Some(_) => Err(DomainError::Validation(format!(
+                "an anchor of kind {kind:?} has no {named}, and one was given"
+            ))),
+            None => Ok(()),
+        }
+    };
+    match kind {
+        "pursuit" => {
+            unused("round", node)?;
+            unused("entry", entry)?;
+            unused("line", line)?;
+            unused("change point", change_point)?;
+        }
+        "round" => {
+            unused("entry", entry)?;
+            unused("line", line)?;
+            unused("change point", change_point)?;
+        }
+        "entry" => {
+            unused("line", line)?;
+            unused("change point", change_point)?;
+        }
+        "change" => {
+            unused("work", pursuit)?;
+            unused("round", node)?;
+            unused("entry", entry)?;
+        }
+        _ => {}
+    }
+
     fn needed<'a>(
         value: Option<&'a str>,
         kind: &str,
@@ -2038,5 +2079,40 @@ mod tests {
             dispatch_to_dto(&dispatch_with_handle(Some(serde_json::Value::Null))).handle_json,
             None
         );
+    }
+
+    /// An anchor built from a kind plus loose ids refuses an id its
+    /// kind has no use for, rather than ignoring it.
+    ///
+    /// This is what the four `about` routes get from their paths for
+    /// free: there is nowhere in
+    /// `/pursuits/{id}/rounds/{node}/threads` to put an entry id. A
+    /// caller with no path says the same wrong thing by passing one,
+    /// and answering about the round would answer a question nobody
+    /// asked.
+    #[test]
+    fn an_anchor_refuses_an_id_its_kind_has_no_use_for() {
+        let pursuit = PursuitId::new().to_string();
+        let node = uuid::Uuid::now_v7().to_string();
+        let entry = uuid::Uuid::now_v7().to_string();
+
+        let refused = forge_anchored(
+            "round",
+            Some(&pursuit),
+            None,
+            Some(&node),
+            Some(&entry),
+            None,
+        )
+        .expect_err("a round has no entry");
+        assert!(
+            matches!(&refused, DomainError::Validation(said) if said.contains("has no entry")),
+            "{refused}"
+        );
+
+        // And the combination that kind does want still resolves.
+        let anchor = forge_anchored("round", Some(&pursuit), None, Some(&node), None, None)
+            .expect("a round names its work and its node");
+        assert!(matches!(anchor, Anchored::Round(..)), "{anchor:?}");
     }
 }

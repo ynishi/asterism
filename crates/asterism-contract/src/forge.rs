@@ -184,7 +184,9 @@ pub struct OpenForgeLineCommand {
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct RenameForgeLineCommand {
     /// Target line id (UUID hyphenated). Taken from the path over
-    /// HTTP; carried here so the same command serves every surface.
+    /// HTTP, and from the command's own argument over IPC — no
+    /// surface reads it from this field, which is why it defaults.
+    /// It stays so that one type describes one verb's whole input.
     #[serde(default)]
     pub line_id: String,
     /// What to call it now.
