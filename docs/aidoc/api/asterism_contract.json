@@ -908,9 +908,19 @@
       "docs": "The forge's wire shapes — a line, what is on it, and what a caller\nasks it to do.\n\nA topic module rather than rows in [`command`](crate::command) and\n[`dto`](crate::dto): the forge's vocabulary answers to a model of\nits own, and a reader of [`ForgeLineDto`] needs the types beside it\nmore than it needs the asset DTO two hundred lines up.\n\n# The model these are a projection of\n\nA line is a repository with one canonical history: a genesis and a\nchain of change points, each carrying a table keyed by entry and\naxis over three axes — existence, content, name. Nothing here holds\nwhat that history answers. [`ForgeLineDto`] carries the line's own\nfields and the id of its head; what is *on* the line is\n[`ForgeEntryStateDto`], folded on read, and the chain that produced\nit is [`ForgeLineHistoryDto`].\n\nTwo reads exist because both are real questions, and a screen wants\nthe fold. The history grows with the line and is for something\nshowing how a line got where it is."
     },
     {
+      "path": "asterism_contract::forge::AmendForgeMessageCommand",
+      "kind": "struct",
+      "docs": "Corrects something said. Nothing is overwritten."
+    },
+    {
       "path": "asterism_contract::forge::CloseForgePursuitCommand",
       "kind": "struct",
       "docs": "Ends a piece of work."
+    },
+    {
+      "path": "asterism_contract::forge::ForgeAnchorDto",
+      "kind": "struct",
+      "docs": "What a conversation is about.\n\nOne shape for four anchors, with the fields each needs and the rest\nabsent. `kind` says which, and which ids are present follows from\nit: `\"pursuit\"` fills `pursuit_id`, `\"round\"` fills `node_id`,\n`\"entry\"` fills `node_id` and `entry_id`, `\"change\"` fills\n`change_point_id`.\n\nA caller does not build one of these. An anchor is resolved from the\npath — the service reads the pursuit or the line and the model makes\nthe anchor — so this is a read shape only, and a wrong combination\nis not something a request can express."
     },
     {
       "path": "asterism_contract::forge::ForgeChangePointDto",
@@ -958,6 +968,11 @@
       "docs": "A line's whole history: where it began and every landing since.\n\nThe chain is the order. Nothing here carries a sequence number\nbeside it, and `changes` arrives walked from the genesis."
     },
     {
+      "path": "asterism_contract::forge::ForgeMessageDto",
+      "kind": "struct",
+      "docs": "One thing said, with every correction to it.\n\n`said` is what it says now and `first_said` is what it said when it\nwas written; they are equal until somebody corrects it. `revisions`\ncarries each correction in the order they were made, so a reader can\nshow the change rather than only its result."
+    },
+    {
       "path": "asterism_contract::forge::ForgeOpDto",
       "kind": "struct",
       "docs": "One operation of a round.\n\nA verb and its entry, unlike [`ForgeChangeRowDto`], which is the\nsame information after the model has folded it into what a landing\n*said*. Both exist because both are real: a caller writes verbs,\nand a line records statements."
@@ -978,6 +993,11 @@
       "docs": "What `resolve` did.\n\n**Both answers are ordinary, and both are 200.** A rule that leaves\na collision to a person writes nothing, which is an outcome rather\nthan a failure — the collision stays where somebody can see it. So\n`round` absent is the rule declining, not an error, and a caller\ndistinguishes the two by whether it is there.\n\n`collisions` is what is left either way, which is the question a\nscreen asks next in both cases: after a resolution, whether any\nremain; after a decline, what the person now has to settle."
     },
     {
+      "path": "asterism_contract::forge::ForgeRevisionDto",
+      "kind": "struct",
+      "docs": "One correction to something said."
+    },
+    {
       "path": "asterism_contract::forge::ForgeRoundDto",
       "kind": "struct",
       "docs": "One round of work — what it asks the line to say, and who asked.\n\nA round is a request rather than a landing. Nothing here is on the\nline: what the line says is [`ForgeEntryStateDto`], and what put it\nthere is [`ForgeChangePointDto`]."
@@ -986,6 +1006,11 @@
       "path": "asterism_contract::forge::ForgeStrategyDto",
       "kind": "struct",
       "docs": "A rule a line can be pointed at."
+    },
+    {
+      "path": "asterism_contract::forge::ForgeThreadDto",
+      "kind": "struct",
+      "docs": "A conversation, whole.\n\n**Every message and every correction.** Not the current text alone:\na correction the reader does not see is a sentence still attributed\nto somebody who withdrew it, and the model keeps both for that\nreason. Shaping this for the convenience of a screen that only\nrenders the latest would misreport what people said."
     },
     {
       "path": "asterism_contract::forge::OpenForgeLineCommand",
@@ -998,6 +1023,11 @@
       "docs": "Opens work against a line."
     },
     {
+      "path": "asterism_contract::forge::OpenForgeThreadCommand",
+      "kind": "struct",
+      "docs": "Opens a conversation about something in the forge.\n\nThe anchor is named by ids and `kind`, and resolved by the service\nrather than trusted: it reads the pursuit or the line and the model\nbuilds the anchor, so an entry a round never touched is refused\nrather than recorded."
+    },
+    {
       "path": "asterism_contract::forge::PushForgeRoundCommand",
       "kind": "struct",
       "docs": "Writes a round."
@@ -1006,6 +1036,16 @@
       "path": "asterism_contract::forge::RenameForgeLineCommand",
       "kind": "struct",
       "docs": "Renames a line. The name is the line's own description, so this is\nnot a landing and puts nothing on the chain."
+    },
+    {
+      "path": "asterism_contract::forge::RenameForgeThreadCommand",
+      "kind": "struct",
+      "docs": "Renames a conversation, or takes its name off.\n\n`title` absent means take it off, which is why it is not\n`skip_serializing_if`: an absent field and a field set to null have\nto mean the same thing here, and both mean \"no name\"."
+    },
+    {
+      "path": "asterism_contract::forge::SayInForgeThreadCommand",
+      "kind": "struct",
+      "docs": "Says something in a conversation."
     },
     {
       "path": "asterism_contract::forge::SetForgeLineStrategyCommand",

@@ -42,6 +42,7 @@ this crate.
 - [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [`fault`](fault.md): What storage did, in storage's own words.
 - [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the

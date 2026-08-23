@@ -203,6 +203,16 @@
       "docs": "Converts a domain [`EntityRef`] to its wire DTO."
     },
     {
+      "path": "asterism_core::application::mapping::forge_anchored",
+      "kind": "function",
+      "docs": "Reads which thing a conversation is about.\n\nThe ids a kind needs are required and the rest are ignored, so a\ncaller cannot describe a round anchor while handing over an entry.\nOver HTTP the kind is fixed by the route as well, and this is what\nanswers for the transports where it is not."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_body",
+      "kind": "function",
+      "docs": "Reads something somebody said, refusing an empty one."
+    },
+    {
       "path": "asterism_core::application::mapping::forge_collisions_to_dto",
       "kind": "function",
       "docs": "Converts what work still collides with to what a screen reads\nbefore offering to resolve it."
@@ -226,6 +236,16 @@
       "path": "asterism_core::application::mapping::forge_line_to_dto",
       "kind": "function",
       "docs": "Converts a `Line` to the summary a caller reads.\n\nThe head is derived from the chain rather than read off a column,\nwhich is why it is a projection rather than a field."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_message_id",
+      "kind": "function",
+      "docs": "Reads a message id off the wire."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_message_to_dto",
+      "kind": "function",
+      "docs": "Converts one message, with what it says now beside what it said\nfirst."
     },
     {
       "path": "asterism_core::application::mapping::forge_name",
@@ -253,6 +273,11 @@
       "docs": "Converts a piece of work to what a caller reads: how it opened,\nevery round, and how it ended if it has."
     },
     {
+      "path": "asterism_core::application::mapping::forge_revision_to_dto",
+      "kind": "function",
+      "docs": "Converts one correction."
+    },
+    {
       "path": "asterism_core::application::mapping::forge_round_to_dto",
       "kind": "function",
       "docs": "Converts one round to what a caller reads."
@@ -271,6 +296,16 @@
       "path": "asterism_core::application::mapping::forge_strategy_to_dto",
       "kind": "function",
       "docs": "Converts a rule's id and description to what a chooser reads."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_thread_id",
+      "kind": "function",
+      "docs": "Reads a thread id off the wire."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_thread_to_dto",
+      "kind": "function",
+      "docs": "Converts a conversation to what a caller reads: every message and\nevery correction to each."
     },
     {
       "path": "asterism_core::application::mapping::group_link_to_dto",
@@ -3085,7 +3120,7 @@
     {
       "path": "asterism_core::error",
       "kind": "module",
-      "docs": "`DomainError` — the innermost error type shared across every layer of\n`asterism-core`.\n\nOuter layers (the Tauri `UiError`, the HTTP `ApiError`, MCP tool errors)\nconvert from this enum. Infrastructure-level failures are collapsed into\n`Infra` so that domain vocabulary (`NotFound` / `Duplicate` / `Validation`\n/ `Conflict`) stays clean."
+      "docs": "`DomainError` — the innermost error type shared across every layer of\n`asterism-core`.\n\nOuter layers (the Tauri `UiError`, the HTTP `ApiError`, MCP tool errors)\nconvert from this enum. Infrastructure-level failures are collapsed into\n`Infra` so that domain vocabulary (`NotFound` / `Duplicate` / `Validation`\n/ `Conflict`) stays clean.\n\n# Which variant a refusal belongs to\n\nStated here because it was not stated anywhere, and the cost of that\nwas fifty-eight call sites each deciding for themselves — thirty-nine\nof them inside a SQLite repository, which is not a layer that can\nanswer an API question. The four definitions below are the rule.\n\nA repository does not apply them. `asterism-infra` has a\n`StoreFault` type of its own — seven cases naming what storage did,\nwith one hand-written conversion into this enum whose doc is the\ntable those seven land on. That crate is not published, so there is\nnothing to link; `cargo doc` and the source both have it under\n`asterism_infra::fault`.\n\n- **[`Validation`](DomainError::Validation)** — the request cannot be\n  satisfied as written, and that is decidable from the request plus\n  the identity of what it addressed. Nothing changes on its own. A\n  blank name; an outcome that is neither word; a directory moved\n  into itself; a reply naming a message of another conversation.\n- **[`NotFound`](DomainError::NotFound)** and its two named\n  siblings — what was addressed is not there.\n- **[`Conflict`](DomainError::Conflict)** — the request is\n  well-formed and *would* be satisfiable. What refuses it is the\n  current state, and that state is a thing that changes. A name\n  already taken; a lost optimistic lock; work somebody else already\n  ended; a precondition held by another row.\n- **[`Infra`](DomainError::Infra)** — the store handed back\n  something that could not have been written, or the machine\n  underneath failed. The caller is not involved.\n\nThe line between the first and the third is the one that gets drawn\nwrongly, and \"would a different request work\" is not it — a blank\nname passes that test and is plainly a `Validation`. Ask instead\nwhether *the state* is what refuses, and whether that state is\nsomething that changes."
     },
     {
       "path": "asterism_core::error::ConflictKind",
@@ -3095,7 +3130,7 @@
     {
       "path": "asterism_core::error::DomainError",
       "kind": "enum",
-      "docs": "Errors raised by the domain layer.\n\nConvention: `asterism-infra` converts adapter failures into\n`anyhow::Error` and passes them through `Infra`; application services\nreturn the specific domain variants directly."
+      "docs": "Errors raised by the domain layer.\n\nConvention: `asterism-infra` names what storage did in its own\nvocabulary and converts once, at one edge; application services\nreturn the specific domain variants directly. Which variant a\nrefusal belongs to is the module doc's four definitions."
     }
   ]
 }
