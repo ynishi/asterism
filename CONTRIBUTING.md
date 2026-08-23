@@ -136,6 +136,45 @@ Report what was actually run; "I did not verify X" is a usable report, a green
 claim resting on a recipe nobody ran is not. When a narrow run is what happened,
 say which packages it covered.
 
+## Documentation
+
+API detail lives in the rustdoc. `cargo doc` is where a reader goes for what a
+type is and what a function promises, and `docs/aidoc/` is generated from those
+same comments — regenerate it with `just aidoc` after changing a public API or a
+doc comment, and commit the diff. `aidoc-guard` fails on drift where it can run,
+and says out loud that nothing was checked where it cannot: it needs a nightly
+this workspace does not pin, so on most machines it exits 0 having looked at
+nothing. When two texts disagree the code wins, and after that the doc comment:
+a comment contradicting an issue is a finding about the issue.
+
+Four rules for writing that prose. `doc-reviewer` asks after the fact whether a
+passage is true, sited and singular; these are the same properties facing the
+person writing it.
+
+**State a rule once, where the thing it constrains is defined.** Everywhere
+else, link to that statement and write only what this site adds — why it is an
+instance of the rule, and what follows here. A second full statement is the copy
+nobody edits the day the rule moves; `00c9ca4` is the audit that went looking
+for them under one module, and its message sorts what it found by kind. Writing
+a rule out where a reader meets it is what makes these files readable; writing
+it out _twice_ is what goes stale.
+
+**Do not write the state of the tree where nothing maintains it.** "Not yet",
+"neither has one", "the only caller" are true when written and go false in
+silence — a doc saying a port has no transport is refuted the moment somebody
+routes it, and nothing tells the author. Keep the rule and cut the clause about
+today.
+
+**A number describing a list belongs in the file holding the list, or nowhere.**
+The list is the answer and the number is a copy of it. Point at the list
+instead.
+
+**A sentence recording that a rule changed stays.** It is a constraint written
+in the past tense, and it is what stands between the next reader and undoing the
+rule. The test is whether deleting it lets somebody repeat the mistake. If
+deleting it costs nothing it is a report on how a change went, and that belongs
+in the commit message.
+
 ## Preferred commit format
 
 ```text
@@ -201,8 +240,8 @@ change does what its issue asked; `pub-checker` answers what may be published;
 the code are still true, which is the only one of the three that owns prose. Its
 findings are advisory: a commit may land with all of them open, and only a claim
 quoted beside the code that contradicts it is a fix. A sentence recording that a
-rule changed is not a defect to any of them — it is a constraint written in the
-past tense, and deleting it lets the next reader undo the rule.
+rule changed is not a defect to any of them, for the reason
+[Documentation](#documentation) gives.
 
 That division has to be visible to the agent doing the work, not only true: the
 run that prompted writing it down had `reviewer` producing wording notes for a

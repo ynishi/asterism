@@ -101,11 +101,10 @@
 //!   not.
 //!
 //! The direction is what matters: the outside may name the forge, and
-//! the forge may not name the outside. #101 turns that into a crate
-//! graph, where the compiler holds it instead of a test. Until then the
-//! list above is the whole of the contract, and adding to it is a
-//! decision about what the lifted crate would have to carry rather
-//! than a note that something compiles.
+//! the forge may not name the outside. The list above is the whole of
+//! the contract, and adding to it is a decision about what the lifted
+//! crate would have to carry rather than a note that something
+//! compiles.
 //!
 //! # What is deliberately not here
 //!
