@@ -26,6 +26,41 @@
       "path": "asterism_vision::package::PackageManifest",
       "kind": "struct",
       "docs": "`manifest.json` — the identity half of the data contract."
+    },
+    {
+      "path": "asterism_vision::registry",
+      "kind": "module",
+      "docs": "The model registry entry (#126): the fetch half of the data\ncontract [`crate::package`] reads.\n\nA registry entry is what `asterism-model-lab registry` authors — a\npackage manifest joined with the download URL of every carried\nfile, plus the qualification report when one was embedded. The\ninstance re-serves it verbatim (it is a carrier, not an authority);\nthis module is where the bytes become typed again, on the only two\nsides that read them: the provider that authors an entry and the\napp that installs from one.\n\nThe entry is the trust anchor. Every downloaded byte is verified\nagainst the entry's digests before it lands ([`Staging::accept`]),\nand the finished directory must pass the same\n[`ModelPackage::open`] the binder uses ([`Staging::finalize`]) —\ntransport can corrupt or tamper, and either way the install fails\nrather than binds.\n\n## Where the pieces run\n\nEverything here is filesystem and hashing — deliberately no\nnetwork, so the whole install path is unit-testable with bytes made\nup on the spot. The download loop lives in the app's job handler\n(`model_fetch`), which feeds what it fetched through [`Staging`].\n\n## The staging directory is not under `models/`\n\nThe binder counts every `models/` subdirectory holding a\n`manifest.json` and refuses to bind when there is more than one. A\nstaging area inside `models/` would become a second package the\nmoment its manifest lands, and a crash between that write and the\nfinal rename would leave the profile ambiguous — feature off — for\nno reason a person can see. Staging therefore lives beside\n`models/`, and the last step is one rename in."
+    },
+    {
+      "path": "asterism_vision::registry::ENTRY_SCHEMA_V1",
+      "kind": "constant",
+      "docs": "The entry schema this crate authors and consumes."
+    },
+    {
+      "path": "asterism_vision::registry::RegistryEntry",
+      "kind": "struct",
+      "docs": "A registry entry — the manifest's identity fields, a URL per file,\nand the embedded qualification when the provider attached one."
+    },
+    {
+      "path": "asterism_vision::registry::RegistryFile",
+      "kind": "struct",
+      "docs": "One carried file: the manifest pair plus where its bytes live."
+    },
+    {
+      "path": "asterism_vision::registry::Staging",
+      "kind": "struct",
+      "docs": "An install in progress: a per-model directory under the staging\nroot, filled file by file and moved into `models/` whole.\n\nResumable by construction — the job pipeline has no retry policy,\nso a re-run must pick up where the last one stopped:\n[`Self::needs`] answers with the files whose staged bytes are\nmissing or fail their digest, and everything already landed is\nskipped rather than re-downloaded."
+    },
+    {
+      "path": "asterism_vision::registry::is_installed",
+      "kind": "function",
+      "docs": "Whether `models_dir` already holds this entry's package, byte-for-\nbyte: the manifest matches and every digest verifies through the\nreader. A directory that exists but does not verify answers `false`\n— the install replaces it rather than trusting its name."
+    },
+    {
+      "path": "asterism_vision::registry::retire_other_packages",
+      "kind": "function",
+      "docs": "Removes every package directory under `models_dir` other than\n`keep`, returning the names removed. This is what makes an install\na **replacement** (#126 decision 1): the binder refuses a directory\nholding two packages, so anything left beside the new one would\nturn the feature off."
     }
   ]
 }
