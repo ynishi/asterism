@@ -8,7 +8,68 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **The pursuit's nine verbs are on HTTP** (#121). Opening work against a line,
+  writing a round, letting the line's rule answer what it collides with, ending
+  it, and the four reads a screen needs beside those — all under
+  `/asterism/forge/`, on the conventions the line's verbs established: an act is
+  a path segment, the id comes from the path, and a write answers by reading its
+  subject back, so no caller is left holding a value it knows is stale.
+
+  Three things the issue left open are decided here. `resolve` answers 200
+  whether or not the rule wrote a round, because a rule that leaves a collision
+  to a person is an outcome rather than a failure; the body says which happened
+  and carries what is still colliding either way. A pursuit is one read rather
+  than the line's two, because it is an opening, a few rounds and at most one
+  close. And an operation names its entry even when it adds one, so that a round
+  which forks an entry and then fills the fork can name it twice.
+
+  No forge type reaches `bindings.ts` yet: no screen imports one, and a binding
+  written before the screen that shapes it is a guess.
+
 ### Fixed
+
+- **A conflict now says which kind it is, so a caller knows whether asking again
+  is worth anything** (#121). `DomainError::Conflict(String)` was every conflict
+  at once. Work that had already ended and a close that lost a race to a landing
+  reached the caller as the same thing with different prose — so a client could
+  retry all of them and loop forever on the ended one, or retry none and give up
+  on the race it would have won.
+
+  It carries a `ConflictKind` now, and the kind is what the caller does next:
+  `Raced` (something landed between the read and the write; the same request may
+  win next time), `Blocked` (the same request works once something else changes,
+  and the message says what), `Settled` (already decided; retrying is always
+  wrong) and `Clashes` (conflicts with something already there; a different
+  request works). Every conflict site in the codebase was sorted by the state it
+  describes, and a few messages were rewritten to match the kind they carry.
+
+  All three surfaces carry it as a `reason` token beside `kind` — HTTP, MCP, and
+  the desktop, whose `UiError` keeps the `{ kind, message }` shape it always had
+  and gains one field on conflicts. Every conflict is still a `409`: each really
+  is a clash with the current state, and the status was never the thing that
+  could separate them.
+
+- **A record the store should not have been holding no longer reads as the
+  caller's fault** (#121). Reading a line or a piece of work replays the rules
+  that writing enforced, so a row that could not have been written does not come
+  back — which is right, and which was arriving as though the caller had done
+  something. Giving conflicts a kind made that dangerous rather than merely
+  untidy: a forked chain would have told a client the read was a race and worth
+  trying again, about a row that reads back the same way forever.
+
+  Those refusals are now `ForgeError::Unwritable`, and they answer as
+  infrastructure. The refusal underneath travels with them, so the message still
+  names the invariant the row broke. Nine places in the SQLite adapter that
+  described a stored row and answered `Validation` — every one of their messages
+  begins "a stored" — answer the same way now, which is what that crate's own
+  convention already said they should.
+
+  Nothing a caller sees over SQLite changes: that adapter was already flattening
+  these into infrastructure errors, discarding the model's answer rather than
+  reading it. What changes is that the model says it, so the in-memory store and
+  any store written later say it too.
 
 - **The guard on the forge's boundary reads syntax instead of lines, and was
   blind to the half of its subject somebody would actually write** (#121).
