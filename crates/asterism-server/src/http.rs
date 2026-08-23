@@ -8,6 +8,61 @@
 //!
 //! The server is bound to loopback in v1 and does not authenticate
 //! requests.
+//!
+//! # What the three transports owe each other
+//!
+//! Stated here because it is one rule about three crates, and the two
+//! halves of it are not the same rule. `README.md` says it in one line
+//! under **API**; this is the long version, and the other two point at
+//! it rather than restating it.
+//!
+//! **HTTP and Tauri owe each other every verb a person invokes, and
+//! that is an obligation rather than a description of the tree.** A
+//! person using the app should not find a verb missing because it was
+//! added on the other side, so a verb landing here lands in
+//! `asterism-ui`'s `commands` too, in the same change.
+//!
+//! The tree does not meet it today, and the shortfall is one
+//! direction: every command has a route, and 34 routed handlers have
+//! no command. Nine of those are the same job under another name
+//! (`declare_asset_provenance` is `asset_declare_provenance`; the four
+//! `threads_about_*` reads are one `list_forge_threads_about`). Nine
+//! are what a person never invokes — the process's own controls
+//! (`health`, `shutdown_process`), byte-serving routes the app reaches
+//! through Tauri's asset protocol instead (`get_asset_file`,
+//! `put_thumb`), and diagnostics a socket client reads. **The
+//! remaining sixteen are the debt**: series-strategy CRUD, `rename_tag`
+//! / `delete_tag` / `merge_tags`, `rebuild_index`,
+//! `rescan_duplicates`, `organize_by_location`, `remeasure_dims`,
+//! `list_observations`, `list_streams`, `declare_asset_source_type`,
+//! `fetch_visual_model` and `get_setting`. They are unfinished work,
+//! not sanctioned differences, and the count above is the way to see
+//! whether that list is shrinking.
+//!
+//! A count taken the other way — commands that have a route — is 128
+//! of 137 before the forge's commands and cannot answer this question,
+//! because the direction that goes short is this one.
+//!
+//! Two differences in *shape* are by design. Attribution: these
+//! handlers build a context from command fields with
+//! [`asserted`](crate::attribution::asserted), while a Tauri command
+//! uses `AttributionContext::owner_surface()`, because the desktop's IPC
+//! *is* the owner's surface rather than a caller making a claim. And the
+//! id: a route carries it in the path and overwrites the body's copy,
+//! while a command takes it as its own argument and leaves the field on
+//! the command struct unread.
+//!
+//! **MCP is curated and owes nothing.** `crate::mcp` is a use-case
+//! vocabulary an agent reads through `tools/list`, not a projection of
+//! every route; its own module doc has the reasoning. A verb landing
+//! here does *not* land there, and adding one is a decision about what
+//! an agent should be offered.
+//!
+//! Nothing checks any of this. It is a rule a person applies while
+//! adding a route, which is why it is written here rather than only in
+//! `README.md`, and why "the forge already does it this way" is not
+//! evidence that a gap is deliberate. The sixteen above are what that
+//! reasoning costs when nobody counts.
 
 use std::sync::Arc;
 
@@ -77,7 +132,6 @@ use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
 use asterism_core::domain::observation::Stream;
 use asterism_core::domain::value::MimeType;
-use asterism_core::error::ConflictKind;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -128,17 +182,8 @@ impl IntoResponse for ApiError {
             }
             DomainError::Infra(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal"),
         };
-        let reason = match &self.0 {
-            DomainError::Conflict { kind, .. } => Some(kind.as_str()),
-            // A pack id is already registered: the caller has to name
-            // a different one, which is what `Clashes` means. Said
-            // here because the variant predates the kind and carries
-            // no room for one.
-            DomainError::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
-            _ => None,
-        };
         let mut body = serde_json::json!({ "kind": kind, "message": self.0.to_string() });
-        if let (Some(reason), Some(object)) = (reason, body.as_object_mut()) {
+        if let (Some(reason), Some(object)) = (self.0.reason(), body.as_object_mut()) {
             object.insert("reason".into(), serde_json::Value::from(reason));
         }
         (status, Json(body)).into_response()
@@ -3653,13 +3698,14 @@ async fn resolve_forge_pursuit(
 /// puts what it says on the line if it says anything.
 ///
 /// **A 409 from here is not always worth retrying, and the body says
-/// which kind it is.** Four refusals reach `Conflict`, and they want
-/// four different things from a caller. The `reason` token tells them
-/// apart:
+/// which kind it is.** Five refusals reach `Conflict`, and the `reason`
+/// token tells them apart:
 ///
-/// - `"blocked"` — the line moved under this work, so it collides.
-///   Resolve first, then this same close works. Retrying it alone
-///   loops.
+/// - `"blocked"` — something has to change first, and the message says
+///   what. Two arrive here: the line moved under this work and it
+///   collides, which resolving clears; or the line is archived, which
+///   reopening clears. Retrying alone loops on either, and the two want
+///   different actions, so the message is the part to read.
 /// - `"raced"` — the second decision inside the write lost to a
 ///   landing that arrived meanwhile. Retrying is reasonable and will
 ///   usually win.
@@ -3667,9 +3713,9 @@ async fn resolve_forge_pursuit(
 /// - `"clashes"` — the change would leave two entries under one name.
 ///   The caller has to ask for something different.
 ///
-/// All four are 409, because all four are a conflict with the current
-/// state; the status was never the thing that could separate them, and
-/// `reason` is what does.
+/// All of them are 409, because all of them are a conflict with the
+/// current state; the status was never the thing that could separate
+/// them, and `reason` is what does.
 async fn close_forge_pursuit(
     State(ctx): State<Arc<ServerCtx>>,
     Path(id): Path<String>,
@@ -3765,6 +3811,13 @@ async fn thread_now(ctx: &ServerCtx, id: &ThreadId) -> Result<Json<ForgeThreadDt
 /// a `404`, and an entry the round never touched is a `400` about the
 /// anchor — two different answers, which is what makes the distinction
 /// worth resolving here rather than trusting the caller's word for it.
+///
+/// **An id the kind has no use for is refused, not ignored.** Naming
+/// `"round"` while passing an entry id is a `400`, where it used to
+/// open a conversation about the round — an answer to a question the
+/// caller did not ask. The four `about` reads get this from their
+/// paths, which have nowhere to put the extra id; this route takes the
+/// anchor as a body, so the same check is made where it arrives.
 async fn open_forge_thread(
     State(ctx): State<Arc<ServerCtx>>,
     Json(command): Json<OpenForgeThreadCommand>,

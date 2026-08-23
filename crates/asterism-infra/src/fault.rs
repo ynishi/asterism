@@ -69,6 +69,17 @@ pub enum StoreFault {
     ///
     /// `entity` is the label a caller reads (`"session"`, `"line"`), and
     /// nothing branches on it.
+    ///
+    /// **Absence is asked before ownership, and this is where that
+    /// rule is stated.** A guard that asks "is there a row of mine
+    /// with this id" answers one verdict for two facts: the row is
+    /// somebody else's, and there is no such row. They are not the
+    /// same answer — one caller has a request to fix and the other
+    /// has somewhere else to look — so a repository whose guard joins
+    /// on the owner asks presence first and raises this, leaving the
+    /// mismatch to a `Validation` that says only that. Four guards do
+    /// it: `DirRepository::create` and `move_to`, and
+    /// `GroupRepository::set_dir` and `link`.
     #[error("{entity} not found: {id}")]
     Absent {
         /// Which kind of thing.

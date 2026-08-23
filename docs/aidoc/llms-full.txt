@@ -13298,6 +13298,61 @@ this router at `/mcp`).
 The server is bound to loopback in v1 and does not authenticate
 requests.
 
+# What the three transports owe each other
+
+Stated here because it is one rule about three crates, and the two
+halves of it are not the same rule. `README.md` says it in one line
+under **API**; this is the long version, and the other two point at
+it rather than restating it.
+
+**HTTP and Tauri owe each other every verb a person invokes, and
+that is an obligation rather than a description of the tree.** A
+person using the app should not find a verb missing because it was
+added on the other side, so a verb landing here lands in
+`asterism-ui`'s `commands` too, in the same change.
+
+The tree does not meet it today, and the shortfall is one
+direction: every command has a route, and 34 routed handlers have
+no command. Nine of those are the same job under another name
+(`declare_asset_provenance` is `asset_declare_provenance`; the four
+`threads_about_*` reads are one `list_forge_threads_about`). Nine
+are what a person never invokes — the process's own controls
+(`health`, `shutdown_process`), byte-serving routes the app reaches
+through Tauri's asset protocol instead (`get_asset_file`,
+`put_thumb`), and diagnostics a socket client reads. **The
+remaining sixteen are the debt**: series-strategy CRUD, `rename_tag`
+/ `delete_tag` / `merge_tags`, `rebuild_index`,
+`rescan_duplicates`, `organize_by_location`, `remeasure_dims`,
+`list_observations`, `list_streams`, `declare_asset_source_type`,
+`fetch_visual_model` and `get_setting`. They are unfinished work,
+not sanctioned differences, and the count above is the way to see
+whether that list is shrinking.
+
+A count taken the other way — commands that have a route — is 128
+of 137 before the forge's commands and cannot answer this question,
+because the direction that goes short is this one.
+
+Two differences in *shape* are by design. Attribution: these
+handlers build a context from command fields with
+[`asserted`](crate::attribution::asserted), while a Tauri command
+uses `AttributionContext::owner_surface()`, because the desktop's IPC
+*is* the owner's surface rather than a caller making a claim. And the
+id: a route carries it in the path and overwrites the body's copy,
+while a command takes it as its own argument and leaves the field on
+the command struct unread.
+
+**MCP is curated and owes nothing.** `crate::mcp` is a use-case
+vocabulary an agent reads through `tools/list`, not a projection of
+every route; its own module doc has the reasoning. A verb landing
+here does *not* land there, and adding one is a decision about what
+an agent should be offered.
+
+Nothing checks any of this. It is a rule a person applies while
+adding a route, which is why it is written here rather than only in
+`README.md`, and why "the forge already does it this way" is not
+evidence that a gap is deliberate. The sixteen above are what that
+reasoning costs when nobody counts.
+
 ## Functions
 
 - `record_webview_diag` — Re-emits one webview-origin diagnostic as a `tracing` event, which
@@ -13315,6 +13370,12 @@ actual entry points (search / list / get / add / lineage / comments /
 catalog / dispatch) and nothing that only exists to serve the grid's
 rendering loop. Anything not covered here is reachable over the HTTP
 API on the same port — `get_info` says so in `instructions`.
+
+Being curated is the half of the rule that applies here, and
+[`crate::http`]'s module doc is where all of it is written: HTTP and
+Tauri are mirrors and owe each other every verb, while this surface
+owes none and gains one only by somebody deciding an agent should be
+offered it.
 
 Input schemas come from the same `asterism-contract` types that back
 HTTP bodies and Tauri IPC (contract feature `json-schema`), so the
@@ -13479,6 +13540,16 @@ commands carry no attribution fields for it to read. The argument is
 required by the service signatures, so a new mutation cannot be added
 here without choosing.
 
+# This surface and the HTTP one are mirrors
+
+Not "mostly overlapping" — a verb on one belongs on the other, in the
+same change. `asterism-server`'s `http` module doc states the rule
+and the two differences that are by design: attribution, and where
+the id comes from.
+
+MCP is not part of that obligation. It is curated on purpose, which
+its own module doc explains.
+
 ## Functions
 
 - `accept_tag_suggestion` — Accepts one tag suggestion (#112): the ruling lands on the
@@ -13486,7 +13557,9 @@ here without choosing.
 - `add_asset` — Ingests an asset (entry point for the asset-add pipeline).
 - `add_asset_batch` — Ingests a batch of assets (bulk form of `add_asset`).
 - `add_asset_to_group` — Idempotent add of an asset to a Group.
+- `amend_forge_message` — Corrects something said.
 - `append_thread_message` — Appends one Message. UI-side callers pass `author_kind = "human"`.
+- `archive_forge_line` — Finished with. Takes no landing until it is reopened, and is the
 - `archive_persona` — Toggles a persona's archive flag.
 - `archive_thread` — Toggles the archived flag.
 - `asset_constellation` — Returns the fully-resolved hover-burst payload — each edge with
@@ -13501,6 +13574,7 @@ here without choosing.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -13522,6 +13596,7 @@ here without choosing.
 - `delete_thread_message` — Deletes one Message (misfire correction).
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
 - `detach_tag_batch` — Detaches one tag from many assets in one call.
+- `discard_forge_line` — Takes the line, its history and every piece of work against it.
 - `dispatch_run` — Live-source dispatch (`dispatch_run`): freezes a Group (query
 - `edit_asset_comment` — Rewrites the body of an existing comment (stamps `edited_at`).
 - `edit_chapter_mark` — Retitles a section and, unlike the mark face, may move it: the reason
@@ -13530,6 +13605,12 @@ here without choosing.
 - `get_asset_thumb` — Returns the cached JPEG bytes of a thumbnail for `asset_id` at
 - `get_asset_thumbs` — The same thing for a whole screenful: cached JPEG bytes for each of
 - `get_dispatch` — Fetches a dispatch job by id — used by the poll loop that drives
+- `get_forge_line` — The line and its whole history.
+- `get_forge_line_states` — What is on the line, folded from the chain.
+- `get_forge_pursuit` — The work, whole — one read rather than the line's two.
+- `get_forge_pursuit_behind` — The landings this work has not seen, oldest first.
+- `get_forge_pursuit_collisions` — What this work still asks for that the line has moved since.
+- `get_forge_thread` — The conversation, whole — every message and every correction to
 - `get_persona_profile` — Fetches the persona's identity signal (avatar / bio / role).
 - `get_persona_theme` — Fetches the persona's UI chrome (wallpaper reference). `None`
 - `get_session` — Fetches one Session by surrogate id (`None` when absent). Used
@@ -13550,6 +13631,11 @@ here without choosing.
 - `list_duplicate_groups` — Duplicate report — sets of live assets sharing a fingerprint on
 - `list_events` — Newest-first telemetry listing (kind / time-window filters). Feeds
 - `list_exporters` — Registered exporter slugs — the action bar renders one row per
+- `list_forge_lines` — Every line, without its history.
+- `list_forge_pursuit_children` — Work opened from this work.
+- `list_forge_pursuits_of_line` — Every piece of work against a line, open and ended alike.
+- `list_forge_strategies` — Every rule a line can be pointed at, built from the rules this
+- `list_forge_threads_about` — Conversations about one thing in the forge — the work as a whole,
 - `list_format_asset_counts` — Sidebar FORMAT facet counts (asset-model v4) — `(format, count)`
 - `list_group_links` — Every Group-in-Group connection in scope — the UI builds the
 - `list_groups` — Sidebar Groups section.
@@ -13570,6 +13656,9 @@ here without choosing.
 - `merge_groups` — Merges one manual group into another and deletes the source
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
+- `open_forge_line` — Opens a line.
+- `open_forge_pursuit` — Opens work against a line.
+- `open_forge_thread` — Opens a conversation about something in the forge.
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -13581,6 +13670,7 @@ here without choosing.
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
 - `purge_persona` — Permanently deletes an already-trashed persona and everything it
+- `push_forge_round` — Writes a round.
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
@@ -13592,19 +13682,25 @@ here without choosing.
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `rename_dir` — Renames a Dir.
+- `rename_forge_line` — Moves the line's own description. Not a landing: nothing goes on the
+- `rename_forge_thread` — Names the conversation, or takes its name off.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
+- `reopen_forge_line` — Takes it back out.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.
 - `reset_setting` — Clears one setting override and returns the value that now applies.
 - `resolve_duplicate_conflict` — Answers one duplicate question — `folded` (queues the fold onto
+- `resolve_forge_pursuit` — Lets the line's rule answer whatever this work collides with.
 - `restore_asset` — Returns a trashed asset to the live set.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
+- `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
 - `set_default_material_layer` — Chooses the band the panel shows, and the one a new mark lands in.
+- `set_forge_line_strategy` — Points the line at a different rule, from here on.
 - `set_persona_profile` — Upserts the persona's identity signal.
 - `set_persona_theme` — Sets (or clears) the wallpaper for a persona.
 - `set_setting` — Stores one setting override and returns the value that now applies.

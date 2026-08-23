@@ -7,6 +7,12 @@
 //! rendering loop. Anything not covered here is reachable over the HTTP
 //! API on the same port — `get_info` says so in `instructions`.
 //!
+//! Being curated is the half of the rule that applies here, and
+//! [`crate::http`]'s module doc is where all of it is written: HTTP and
+//! Tauri are mirrors and owe each other every verb, while this surface
+//! owes none and gains one only by somebody deciding an agent should be
+//! offered it.
+//!
 //! Input schemas come from the same `asterism-contract` types that back
 //! HTTP bodies and Tauri IPC (contract feature `json-schema`), so the
 //! three transports cannot drift on shape. Thin parameter structs exist
@@ -34,7 +40,6 @@ use asterism_contract::command::{
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
-use asterism_core::error::ConflictKind;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, ContentBlock, ListResourcesResult, PaginatedRequestParams,
@@ -80,13 +85,8 @@ fn domain_error(err: DomainError) -> CallToolResult {
         DomainError::DuplicatePersona(_) | DomainError::Conflict { .. } => "Conflict",
         DomainError::Infra(_) => "Internal",
     };
-    let reason = match &err {
-        DomainError::Conflict { kind, .. } => Some(kind.as_str()),
-        DomainError::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
-        _ => None,
-    };
     let mut body = serde_json::json!({ "kind": kind, "message": err.to_string() });
-    if let (Some(reason), Some(object)) = (reason, body.as_object_mut()) {
+    if let (Some(reason), Some(object)) = (err.reason(), body.as_object_mut()) {
         object.insert("reason".into(), serde_json::Value::from(reason));
     }
     CallToolResult::error(vec![ContentBlock::text(body.to_string())])

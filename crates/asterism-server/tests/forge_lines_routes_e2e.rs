@@ -354,14 +354,16 @@ async fn a_refused_verb_answers_with_the_status_its_refusal_means() {
     let (status, said) = call(&router, get(&format!("/asterism/forge/lines/{absent}"))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{said}");
 
-    // Dropping an open line is the model's own refusal, and it is 400
-    // rather than 409 on purpose. The division `ForgeError` draws is
-    // not "did the caller ask for something the state disallows" but
-    // "did the state move under them": `NotOnHead`, `NameTaken` and
-    // `Collides` are races and read as conflicts, and everything else
-    // is a caller who has to do something different. Nothing about
-    // reading again and retrying helps a line that was never
-    // archived — the caller has to archive it.
+    // Dropping an open line is a `409` with `reason: "blocked"`. What
+    // refuses it is the line's standing, which is state, and archiving
+    // it lets the identical request through.
+    //
+    // Neither nearby reading picks the kind. "Did the state move under
+    // them" is the test for `Raced`, not for a conflict at all — a
+    // conflict is state refusing, moved or not. And "retrying will
+    // never change that" is true here and does not make it a
+    // `Validation`: `Blocked` never promised that asking again works,
+    // only that a named change makes the same request work.
     let (status, line) = call(
         &router,
         post(
@@ -382,18 +384,28 @@ async fn a_refused_verb_answers_with_the_status_its_refusal_means() {
     .await;
     assert_eq!(
         status,
-        StatusCode::BAD_REQUEST,
-        "an open line is not droppable, and retrying will never change that: {said}"
+        StatusCode::CONFLICT,
+        "an open line is not droppable until it is archived: {said}"
     );
-    assert_eq!(said["kind"], "Validation");
+    assert_eq!(said["kind"], "Conflict");
+    assert_eq!(
+        said["reason"], "blocked",
+        "and the token says which kind of conflict, so a client is not \
+         left to guess whether asking again helps: {said}"
+    );
+    assert!(
+        said["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("archive it first")),
+        "a `blocked` refusal names the way through: {said}"
+    );
 
-    // No *single request* can produce a 409 here, which is why there
-    // is no 409 assertion in this file. `discard` reaches both of the
-    // line's races — a work list that moved, and a line reopened under
-    // a decided drop — and both answer `Conflict`, but raising either
-    // takes a second caller arriving between this one's read and its
-    // write. They are pinned where a test can arrange that: over the
-    // ports, in `asterism-infra`'s `forge_over_ports_e2e`.
+    // What one request still cannot produce here is a `raced` conflict.
+    // `discard` reaches both of the line's races — a work list that
+    // moved, and a line reopened under a decided drop — and raising
+    // either takes a second caller arriving between this one's read and
+    // its write. They are pinned where a test can arrange that: over
+    // the ports, in `asterism-infra`'s `forge_over_ports_e2e`.
 }
 
 /// The id in the path is the one that moves, even when the body names

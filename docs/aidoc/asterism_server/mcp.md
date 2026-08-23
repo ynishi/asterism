@@ -9,6 +9,12 @@ catalog / dispatch) and nothing that only exists to serve the grid's
 rendering loop. Anything not covered here is reachable over the HTTP
 API on the same port — `get_info` says so in `instructions`.
 
+Being curated is the half of the rule that applies here, and
+[`crate::http`]'s module doc is where all of it is written: HTTP and
+Tauri are mirrors and owe each other every verb, while this surface
+owes none and gains one only by somebody deciding an agent should be
+offered it.
+
 Input schemas come from the same `asterism-contract` types that back
 HTTP bodies and Tauri IPC (contract feature `json-schema`), so the
 three transports cannot drift on shape. Thin parameter structs exist

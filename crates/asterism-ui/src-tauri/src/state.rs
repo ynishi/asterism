@@ -77,6 +77,17 @@ pub struct AppState {
     /// the same rows via `ServerCtx::thread_service`, since both
     /// contexts share one `Arc<ThreadService>`.
     pub thread_service: Arc<ThreadService>,
+    /// A line of work in the forge: opening one, reading what is on it,
+    /// and its lifecycle.
+    pub line_service: Arc<asterism_core::application::forge::LineService>,
+    /// Work against a line: opening it, writing rounds, letting the
+    /// line's rule answer what it collides with, and ending it.
+    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
+    /// What was said about work. Named apart from
+    /// [`thread_service`](Self::thread_service) for the reason `CoreCtx`
+    /// names it apart: the forge's conversations hang off a forge node,
+    /// and the other ones hang off a card.
+    pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
     /// Read-only handle to the apalis job DB pool. Used by the
     /// `jobs_stats` Tauri command that drives the progress banner.
     pub jobs_pool: asterism_infra::jobs::SqlitePool,
@@ -155,6 +166,9 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         material_mark_service: core.material_mark_service,
         material_layer_service: core.material_layer_service,
         thread_service: core.thread_service,
+        line_service: core.line_service,
+        pursuit_service: core.pursuit_service,
+        forge_thread_service: core.forge_thread_service,
         jobs_pool: core.jobs_pool,
         telemetry: core.telemetry,
     };

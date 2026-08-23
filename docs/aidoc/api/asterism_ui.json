@@ -5,7 +5,7 @@
     {
       "path": "asterism_ui::commands",
       "kind": "module",
-      "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation here names its attribution channel explicitly —\n[`AttributionContext::owner_surface`]. This is the owner's own\noperation surface (the desktop app's IPC), so the owner-ness is a\nproperty of the surface rather than a guess about the caller, and the\ncommands carry no attribution fields for it to read. The argument is\nrequired by the service signatures, so a new mutation cannot be added\nhere without choosing."
+      "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation here names its attribution channel explicitly —\n[`AttributionContext::owner_surface`]. This is the owner's own\noperation surface (the desktop app's IPC), so the owner-ness is a\nproperty of the surface rather than a guess about the caller, and the\ncommands carry no attribution fields for it to read. The argument is\nrequired by the service signatures, so a new mutation cannot be added\nhere without choosing.\n\n# This surface and the HTTP one are mirrors\n\nNot \"mostly overlapping\" — a verb on one belongs on the other, in the\nsame change. `asterism-server`'s `http` module doc states the rule\nand the two differences that are by design: attribution, and where\nthe id comes from.\n\nMCP is not part of that obligation. It is curated on purpose, which\nits own module doc explains."
     },
     {
       "path": "asterism_ui::commands::accept_tag_suggestion",
@@ -33,9 +33,19 @@
       "docs": "Idempotent add of an asset to a Group."
     },
     {
+      "path": "asterism_ui::commands::amend_forge_message",
+      "kind": "function",
+      "docs": "Corrects something said.\n\n**Answers with the correction, not with the message as it now\nreads.** The model keeps both and the distinction is the model's:\nwhat was said first is still there, and an answer shaped as \"the\nmessage, updated\" would quietly be the shape that loses it."
+    },
+    {
       "path": "asterism_ui::commands::append_thread_message",
       "kind": "function",
       "docs": "Appends one Message. UI-side callers pass `author_kind = \"human\"`."
+    },
+    {
+      "path": "asterism_ui::commands::archive_forge_line",
+      "kind": "function",
+      "docs": "Finished with. Takes no landing until it is reopened, and is the\nonly state a drop can be reached from."
     },
     {
       "path": "asterism_ui::commands::archive_persona",
@@ -106,6 +116,11 @@
       "path": "asterism_ui::commands::batch_group_membership",
       "kind": "function",
       "docs": "Bulk attach / detach of asset↔group pairs. Returns\n`[attached, detached]` written-row counts."
+    },
+    {
+      "path": "asterism_ui::commands::close_forge_pursuit",
+      "kind": "function",
+      "docs": "Ends the work, and puts what it says on the line if it says\nanything.\n\n**A [`UiError::Conflict`] from here is not always worth retrying,\nand its `reason` says which kind it is:** `\"blocked\"` wants\nsomething done first and the message says what, `\"raced\"` will\nusually win on a retry, `\"settled\"` never helps, and `\"clashes\"` has\nto ask for something different. They are spelled out on\n`close_forge_pursuit` in `asterism-server`'s `http` module,\nincluding why `\"blocked\"` arrives for two different reasons."
     },
     {
       "path": "asterism_ui::commands::create_dir",
@@ -213,6 +228,11 @@
       "docs": "Detaches one tag from many assets in one call."
     },
     {
+      "path": "asterism_ui::commands::discard_forge_line",
+      "kind": "function",
+      "docs": "Takes the line, its history and every piece of work against it.\n\n**The answer is the point.** It names the assets the drop released,\nand after this write there is no record left to derive them from, so\na caller that ignores it has lost the only answer there will be."
+    },
+    {
       "path": "asterism_ui::commands::dispatch_run",
       "kind": "function",
       "docs": "Live-source dispatch (`dispatch_run`): freezes a Group (query\ngroups are refreshed first) or a volatile selection into a deduped\nSnapshot, stamps the provenance, and enqueues the run."
@@ -251,6 +271,36 @@
       "path": "asterism_ui::commands::get_dispatch",
       "kind": "function",
       "docs": "Fetches a dispatch job by id — used by the poll loop that drives\nthe progress badge."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_line",
+      "kind": "function",
+      "docs": "The line and its whole history.\n\nThis grows with the line. A surface showing what is *on* a line\nwants [`get_forge_line_states`] instead; this one is for showing how\nit got there."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_line_states",
+      "kind": "function",
+      "docs": "What is on the line, folded from the chain."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_pursuit",
+      "kind": "function",
+      "docs": "The work, whole — one read rather than the line's two."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_pursuit_behind",
+      "kind": "function",
+      "docs": "The landings this work has not seen, oldest first.\n\nHow far behind rather than what collides: a landing here may touch\nnothing this work asks for. A screen reads both — this one to say\nthe line has moved, [`get_forge_pursuit_collisions`] to say whether\nit matters."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_pursuit_collisions",
+      "kind": "function",
+      "docs": "What this work still asks for that the line has moved since.\n\nDerived from both logs on every call, so it cannot go stale. This is\nwhat a screen shows before offering [`resolve_forge_pursuit`]."
+    },
+    {
+      "path": "asterism_ui::commands::get_forge_thread",
+      "kind": "function",
+      "docs": "The conversation, whole — every message and every correction to\neach.\n\nA payload carrying only what each message says now would leave a\nwithdrawn sentence attributed to the person who withdrew it."
     },
     {
       "path": "asterism_ui::commands::get_persona_profile",
@@ -353,6 +403,31 @@
       "docs": "Registered exporter slugs — the action bar renders one row per\nentry. Empty vector means the current build shipped no exporters."
     },
     {
+      "path": "asterism_ui::commands::list_forge_lines",
+      "kind": "function",
+      "docs": "Every line, without its history."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_pursuit_children",
+      "kind": "function",
+      "docs": "Work opened from this work."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_pursuits_of_line",
+      "kind": "function",
+      "docs": "Every piece of work against a line, open and ended alike."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_strategies",
+      "kind": "function",
+      "docs": "Every rule a line can be pointed at, built from the rules this\ndeployment carries."
+    },
+    {
+      "path": "asterism_ui::commands::list_forge_threads_about",
+      "kind": "function",
+      "docs": "Conversations about one thing in the forge — the work as a whole,\none round of it, one entry as that round had it, or what landed on a\nline.\n\n**One command where HTTP has four routes.** There are four there\nbecause a path cannot express a wrong combination of ids, and that\nproperty is the route's rather than the question's: IPC has no path,\nso the combination has to be checked wherever it arrives. It is\nchecked here, by the same resolver [`open_forge_thread`] names its\nanchor through — which is the shape the forge already uses when\nthere is no path to lean on, and the shape [`list_threads`] uses for\nthe same job on the app-level Threads. `anchor_kind` says which ids\nare wanted: `\"pursuit\"` wants `pursuit_id`, `\"round\"` adds\n`node_id`, `\"entry\"` adds `entry_id` to that, and `\"change\"` wants\n`line_id` with `change_point_id`.\n\nBoth directions are refused, and the second is the one that matters:\na missing id is obvious, while an id the kind has no use for would\notherwise be ignored — `\"round\"` carrying an `entry_id` would answer\nabout the round for a caller that asked about the entry, which is\nexactly what the four routes exist to make impossible.\n\nMore than one conversation can hang off the same thing — two people\nstarting separate ones about a round is not a mistake to merge — so\nthis answers a list."
+    },
+    {
       "path": "asterism_ui::commands::list_format_asset_counts",
       "kind": "function",
       "docs": "Sidebar FORMAT facet counts (asset-model v4) — `(format, count)`\nper mime top-level type (`image` / `video` / `audio` / `text`) on\ntop-level assets' primary materials, optionally persona-scoped."
@@ -453,6 +528,21 @@
       "docs": "Files a Group under a Dir (`None` = back to the root)."
     },
     {
+      "path": "asterism_ui::commands::open_forge_line",
+      "kind": "function",
+      "docs": "Opens a line."
+    },
+    {
+      "path": "asterism_ui::commands::open_forge_pursuit",
+      "kind": "function",
+      "docs": "Opens work against a line.\n\nThe line is named in the command rather than as an argument, because\nthis is the one verb here that does not have a pursuit to name yet.\nA caller asking \"what work is against this line\" wants\n[`list_forge_pursuits_of_line`]."
+    },
+    {
+      "path": "asterism_ui::commands::open_forge_thread",
+      "kind": "function",
+      "docs": "Opens a conversation about something in the forge.\n\n**The anchor is resolved, not accepted.** The command names ids and\na kind; the service reads the pursuit or the line and the model\nbuilds the anchor from what it finds, so a pursuit nobody opened and\nan entry the round never touched are two different refusals."
+    },
+    {
       "path": "asterism_ui::commands::paste_image_import",
       "kind": "function",
       "docs": "Writes a clipboard-pasted image blob to\n`~/Pictures/Asterism/pasted/paste-<ts>.<ext>` and dispatches\n`add_asset` for it. The MIME-type hint picks the extension; the\ndownstream pipeline still sniffs the actual container so a\nslightly-wrong `image/webp` label does not stop cover_gen /\nthumb_gen from producing previews."
@@ -506,6 +596,11 @@
       "path": "asterism_ui::commands::purge_persona",
       "kind": "function",
       "docs": "Permanently deletes an already-trashed persona and everything it\nholds. Conflicts when the persona is still live."
+    },
+    {
+      "path": "asterism_ui::commands::push_forge_round",
+      "kind": "function",
+      "docs": "Writes a round.\n\nThe line is not read, which is what makes this the operation that\ncan run all day without touching anything anybody else is using.\nWhat it does check is that the content each operation names exists."
     },
     {
       "path": "asterism_ui::commands::random_assets",
@@ -563,6 +658,16 @@
       "docs": "Renames a Dir."
     },
     {
+      "path": "asterism_ui::commands::rename_forge_line",
+      "kind": "function",
+      "docs": "Moves the line's own description. Not a landing: nothing goes on the\nchain."
+    },
+    {
+      "path": "asterism_ui::commands::rename_forge_thread",
+      "kind": "function",
+      "docs": "Names the conversation, or takes its name off.\n\nA title is a label on the conversation rather than something said in\nit, so this writes no message. `title` absent takes the name off."
+    },
+    {
       "path": "asterism_ui::commands::rename_group",
       "kind": "function",
       "docs": "Renames a Group."
@@ -571,6 +676,11 @@
       "path": "asterism_ui::commands::rename_session",
       "kind": "function",
       "docs": "Renames a Session (title-only write). Passing `title: null`\nclears the title back to the untitled state — this is the sole\npath that expresses NULL because\n[`patch_session_metadata`] treats per-field `null` as \"leave\nunchanged\"."
+    },
+    {
+      "path": "asterism_ui::commands::reopen_forge_line",
+      "kind": "function",
+      "docs": "Takes it back out."
     },
     {
       "path": "asterism_ui::commands::reorder_group_assets",
@@ -598,6 +708,11 @@
       "docs": "Answers one duplicate question — `folded` (queues the fold onto\n`keeper_id`, which must be one of the pair) or `kept` (both rows\nstay). Refused when the row was already answered or when either\nside has since been folded away or trashed."
     },
     {
+      "path": "asterism_ui::commands::resolve_forge_pursuit",
+      "kind": "function",
+      "docs": "Lets the line's rule answer whatever this work collides with.\n\n**It succeeds whether or not a round was written, and the answer\nsays which.** A rule that leaves collisions to a person writes\nnothing; that is an outcome, not a failure, so `round` is absent\nrather than this being an error, and `collisions` carries what is\nleft either way."
+    },
+    {
       "path": "asterism_ui::commands::restore_asset",
       "kind": "function",
       "docs": "Returns a trashed asset to the live set."
@@ -613,6 +728,11 @@
       "docs": "Returns a trashed persona and the assets that went with it."
     },
     {
+      "path": "asterism_ui::commands::say_in_forge_thread",
+      "kind": "function",
+      "docs": "Says something.\n\nAnswers with the message it wrote. A reply naming a message of\nanother conversation is refused as invalid input: the caller\naddressed one conversation and named something that is not in it,\nwhich no change of state makes true."
+    },
+    {
       "path": "asterism_ui::commands::search_asset_ids",
       "kind": "function",
       "docs": "The same retrieval as `search_assets`, reduced to the rank order.\n\nFeeds the grid's `✦ Relevance` sort: the page itself comes from the\nexact (Query-side) read, and this only says which of those rows the\nretriever considers the better match. The ids are an ordering hint,\nnot a membership answer.\n\n**Not exposed over MCP on purpose.** An agent asking about relevance\nalready has `asset_search`, which hands back ranked cards; an\nids-only reply would only be useful to something that is already\npainting a grid it fetched by other means."
@@ -626,6 +746,11 @@
       "path": "asterism_ui::commands::set_default_material_layer",
       "kind": "function",
       "docs": "Chooses the band the panel shows, and the one a new mark lands in.\n\nReturns nothing: the flag moves off whichever band held it, so the\ncaller re-reads the asset's bands rather than patching one entry."
+    },
+    {
+      "path": "asterism_ui::commands::set_forge_line_strategy",
+      "kind": "function",
+      "docs": "Points the line at a different rule, from here on."
     },
     {
       "path": "asterism_ui::commands::set_persona_profile",

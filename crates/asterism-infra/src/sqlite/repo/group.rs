@@ -738,6 +738,16 @@ impl GroupRepository for SqliteGroupRepository {
                 // Guard: the target dir must belong to the same
                 // persona as the group. NULL (root) always passes.
                 if let Some(dir) = dir_uuid {
+                    // Presence first, then ownership; the rule is on
+                    // `StoreFault::Absent`.
+                    let present: bool = conn.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM dir WHERE id = ?1)",
+                        params![dir],
+                        |row| row.get(0),
+                    )?;
+                    if !present {
+                        return Ok(3);
+                    }
                     let same_persona: bool = conn.query_row(
                         "SELECT EXISTS (
                              SELECT 1 FROM dir
@@ -761,9 +771,12 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(infra_err)?;
         match verdict {
             1 => Err(DomainError::Validation(
-                "dir and group belong to different personas (or the dir does not exist)".into(),
+                "the dir and the group belong to different personas".into(),
             )),
             2 => Err(DomainError::not_found("group", id)),
+            3 => Err(
+                StoreFault::absent("dir", dir_id.map(DirId::to_string).unwrap_or_default()).into(),
+            ),
             _ => Ok(()),
         }
     }
@@ -780,10 +793,29 @@ impl GroupRepository for SqliteGroupRepository {
         let parent_uuid = *parent.as_uuid();
         let child_uuid = *child.as_uuid();
         let now_ms = datetime_to_ms(&now);
-        // 0 = ok, 1 = persona mismatch / missing group, 2 = cycle.
+        // 0 = ok, 1 = persona mismatch, 2 = cycle, 3 = query-rule
+        // cycle, 4 = the parent is not there, 5 = the child is not
+        // there. Told apart because "look somewhere else" is only
+        // useful with the id to look for; when both are missing the
+        // parent is named, since that is the one the caller reaches
+        // through.
         let verdict: u8 = self
             .isle
             .call(move |conn| {
+                // Presence first, then ownership; the rule is on
+                // `StoreFault::Absent`.
+                let mut present =
+                    conn.prepare("SELECT EXISTS (SELECT 1 FROM bucket WHERE id = ?1)")?;
+                let parent_there: bool =
+                    present.query_row(params![parent_uuid], |row| row.get(0))?;
+                if !parent_there {
+                    return Ok(4);
+                }
+                let child_there: bool = present.query_row(params![child_uuid], |row| row.get(0))?;
+                if !child_there {
+                    return Ok(5);
+                }
+                drop(present);
                 let same_persona: bool = conn.query_row(
                     "SELECT EXISTS (
                          SELECT 1 FROM bucket p, bucket c
@@ -847,8 +879,10 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(infra_err)?;
         match verdict {
             1 => Err(DomainError::Validation(
-                "groups belong to different personas (or one of them does not exist)".into(),
+                "groups belong to different personas".into(),
             )),
+            4 => Err(StoreFault::absent("group", parent).into()),
+            5 => Err(StoreFault::absent("group", child).into()),
             2 => Err(StoreFault::blocked_by(
                 "link rejected: it would make the groups contain each other (cycle)",
                 "unlink the opposing edge first, and the same link then works",

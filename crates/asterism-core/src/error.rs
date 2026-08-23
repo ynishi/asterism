@@ -178,15 +178,6 @@ impl ConflictKind {
             Self::Clashes => "clashes",
         }
     }
-
-    /// Is sending the same request again worth doing?
-    ///
-    /// The question a retry loop actually asks, answered here rather
-    /// than in each client. `Raced` yes, `Blocked` only after the
-    /// message's precondition is met, and the other two never.
-    pub fn worth_retrying(self) -> bool {
-        matches!(self, Self::Raced)
-    }
 }
 
 impl DomainError {
@@ -228,5 +219,78 @@ impl DomainError {
     /// See [`ConflictKind::Clashes`].
     pub fn clashes(message: impl Into<String>) -> Self {
         Self::conflict(ConflictKind::Clashes, message)
+    }
+
+    /// The token a caller branches on, or nothing.
+    ///
+    /// **Here rather than in each transport.** Every surface that
+    /// reports an error has to answer the same question — which of
+    /// these carries retry advice, and what is it. Answered once, the
+    /// three transports cannot disagree about a promise clients act on.
+    ///
+    /// The alternative was a helper in `asterism-server` that the
+    /// desktop would call. Nothing blocked it — `asterism-ui` already
+    /// depends on that crate — and it keeps a transport-facing word
+    /// out of the domain type. It was not taken because the answer is
+    /// read off the variant and its kind, both defined right here: a
+    /// helper elsewhere would match on this type to answer a question
+    /// about this type, and the two could then be edited apart. The
+    /// price of the choice made is the one to weigh against that:
+    /// `DomainError` now knows a token clients branch on.
+    ///
+    /// Only a conflict has one. A `404` and a `400` each want one thing
+    /// from a caller, so a token for them would be a field with a
+    /// single value; and an `Infra` is not the caller's business at
+    /// all. [`DuplicatePersona`](Self::DuplicatePersona) is the
+    /// exception that proves the shape: it is a uniqueness collision in
+    /// everything but representation, with nowhere of its own to carry
+    /// a kind, so it answers [`Clashes`](ConflictKind::Clashes) from
+    /// here.
+    pub fn reason(&self) -> Option<&'static str> {
+        match self {
+            Self::Conflict { kind, .. } => Some(kind.as_str()),
+            Self::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every refusal that carries retry advice, and every one that
+    /// does not.
+    ///
+    /// One assertion per variant, because this is what three
+    /// transports now read instead of each deciding. A variant added
+    /// without a row here is a variant whose token nobody chose.
+    #[test]
+    fn only_a_conflict_carries_a_reason() {
+        for (kind, token) in [
+            (ConflictKind::Raced, "raced"),
+            (ConflictKind::Blocked, "blocked"),
+            (ConflictKind::Settled, "settled"),
+            (ConflictKind::Clashes, "clashes"),
+        ] {
+            assert_eq!(DomainError::conflict(kind, "x").reason(), Some(token));
+        }
+
+        // The one that is a uniqueness collision without a kind to
+        // carry, and so has its answer spelled in `reason` rather than
+        // at the three call sites that used to spell it.
+        assert_eq!(
+            DomainError::DuplicatePersona(PackId::new("pack").expect("a literal slug")).reason(),
+            Some("clashes"),
+            "a pack id already registered is a value the caller has to change"
+        );
+
+        assert_eq!(DomainError::Validation("x".into()).reason(), None);
+        assert_eq!(DomainError::not_found("session", "s-1").reason(), None);
+        assert_eq!(
+            DomainError::Infra(anyhow::anyhow!("x")).reason(),
+            None,
+            "not the caller\'s business, so there is nothing to advise"
+        );
     }
 }

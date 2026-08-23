@@ -15,7 +15,6 @@
 //! reader is free to ignore.
 
 use asterism_core::DomainError;
-use asterism_core::error::ConflictKind;
 
 /// Error returned to the frontend from every Tauri command.
 #[derive(Debug, thiserror::Error, serde::Serialize)]
@@ -59,6 +58,26 @@ pub enum UiError {
 
 impl From<DomainError> for UiError {
     fn from(err: DomainError) -> Self {
+        // Asked before the value is taken apart, and asked of
+        // [`DomainError::reason`] rather than decided here: whether a
+        // refusal carries retry advice is one question, and this
+        // surface answering it separately from HTTP and MCP is what
+        // let the three drift. Carrying a token is also what makes a
+        // refusal a conflict, so the answer picks the variant too.
+        if let Some(reason) = err.reason() {
+            let message = match err {
+                DomainError::DuplicatePersona(pack) => {
+                    format!("persona already registered: {pack}")
+                }
+                DomainError::Conflict { message, .. } => message,
+                // Unreached today: only the two above answer a reason.
+                // Written as a value rather than a panic so that a
+                // variant gaining one later arrives with its own words
+                // instead of taking the app down.
+                other => other.to_string(),
+            };
+            return Self::Conflict { message, reason };
+        }
         match err {
             DomainError::PersonaNotFound(id) => Self::NotFound {
                 message: format!("persona {id}"),
@@ -69,21 +88,53 @@ impl From<DomainError> for UiError {
             DomainError::NotFound { entity, id } => Self::NotFound {
                 message: format!("{entity} {id}"),
             },
-            // The caller has to name a different pack, which is what
-            // `Clashes` means. Said here because the variant predates
-            // the kind and has nowhere to carry one.
-            DomainError::DuplicatePersona(pack) => Self::Conflict {
-                message: format!("persona already registered: {pack}"),
-                reason: ConflictKind::Clashes.as_str(),
-            },
             DomainError::Validation(message) => Self::Validation { message },
-            DomainError::Conflict { kind, message } => Self::Conflict {
-                message,
-                reason: kind.as_str(),
-            },
             DomainError::Infra(err) => Self::Internal {
                 message: err.to_string(),
             },
+            // Both are answered above, where the reason was read; the
+            // arm is here so that this match stays exhaustive by name
+            // and a new variant cannot slip through a catch-all.
+            conflict @ (DomainError::DuplicatePersona(_) | DomainError::Conflict { .. }) => {
+                Self::Internal {
+                    message: conflict.to_string(),
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both conflict shapes reach the frontend with the token
+    /// [`DomainError::reason`] gives them, and a refusal that carries
+    /// no token is not dressed as a conflict on the way out.
+    ///
+    /// The duplicate is the one worth pinning: it has no
+    /// `ConflictKind` of its own, so a surface deciding for itself is
+    /// how the three transports came to answer this separately.
+    #[test]
+    fn a_conflict_crosses_with_the_token_the_domain_gives_it() {
+        let pack = asterism_core::domain::value::PackId::new("pack").expect("a literal slug");
+        let duplicate = UiError::from(DomainError::DuplicatePersona(pack));
+        assert!(
+            matches!(&duplicate, UiError::Conflict { reason, message }
+                if *reason == "clashes" && message.contains("pack")),
+            "{duplicate}"
+        );
+
+        let blocked = UiError::from(DomainError::blocked("archive it first"));
+        assert!(
+            matches!(&blocked, UiError::Conflict { reason, .. } if *reason == "blocked"),
+            "{blocked}"
+        );
+
+        let malformed = UiError::from(DomainError::Validation("a name is not blank".into()));
+        assert!(
+            matches!(malformed, UiError::Validation { .. }),
+            "{malformed}"
+        );
     }
 }

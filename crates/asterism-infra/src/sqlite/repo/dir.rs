@@ -99,11 +99,22 @@ impl DirRepository for SqliteDirRepository {
         let parent_uuid = dir.parent_id.map(|p| *p.as_uuid());
         let name_owned = dir.name.clone();
         let now_ms = datetime_to_ms(&now);
-        // 0 = ok, 1 = parent missing / different persona.
+        // 0 = ok, 1 = the parent is another persona's, 4 = the parent
+        // is missing. Asked apart for the reason `move_to` asks them
+        // apart: one is the request being wrong and the other is the
+        // world, and they are not the same answer.
         let verdict: u8 = self
             .isle
             .call(move |conn| {
                 if let Some(parent) = parent_uuid {
+                    let present: bool = conn.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM dir WHERE id = ?1)",
+                        params![parent],
+                        |row| row.get(0),
+                    )?;
+                    if !present {
+                        return Ok(4);
+                    }
                     let parent_ok: bool = conn.query_row(
                         "SELECT EXISTS (
                              SELECT 1 FROM dir
@@ -125,9 +136,12 @@ impl DirRepository for SqliteDirRepository {
             })
             .await
             .map_err(|err| map_name_conflict(err, &dir.name))?;
+        if let (4, Some(parent)) = (verdict, dir.parent_id) {
+            return Err(StoreFault::absent("dir", parent).into());
+        }
         if verdict == 1 {
             return Err(DomainError::Validation(
-                "parent dir does not exist for this persona".into(),
+                "the parent dir belongs to another persona".into(),
             ));
         }
         Ok(dir)
@@ -183,12 +197,23 @@ impl DirRepository for SqliteDirRepository {
             return Err(StoreFault::Impossible("a dir cannot be moved into itself".into()).into());
         }
         let now_ms = datetime_to_ms(&now);
-        // 0 = ok, 1 = parent missing / different persona, 2 = cycle,
-        // 3 = missing dir.
+        // 0 = ok, 1 = the target parent is another persona's, 2 =
+        // cycle, 3 = the dir being moved is missing, 4 = the target
+        // parent is missing.
         let verdict: u8 = self
             .isle
             .call(move |conn| {
                 if let Some(parent) = parent_uuid {
+                    // Presence first, then ownership; the rule is on
+                    // `StoreFault::Absent`.
+                    let present: bool = conn.query_row(
+                        "SELECT EXISTS (SELECT 1 FROM dir WHERE id = ?1)",
+                        params![parent],
+                        |row| row.get(0),
+                    )?;
+                    if !present {
+                        return Ok(4);
+                    }
                     let parent_ok: bool = conn.query_row(
                         "SELECT EXISTS (
                              SELECT 1 FROM dir p
@@ -226,9 +251,16 @@ impl DirRepository for SqliteDirRepository {
             .await
             .map_err(|err| map_name_conflict(err, "(moved dir)"))?;
         match verdict {
+            // Present and somebody else's: the request is wrong, not
+            // the world. `GroupRepository::link` draws the same line.
             1 => Err(DomainError::Validation(
-                "target parent dir does not exist for this persona".into(),
+                "the target parent dir belongs to another persona".into(),
             )),
+            4 => Err(StoreFault::absent(
+                "dir",
+                new_parent.map(DirId::to_string).unwrap_or_default(),
+            )
+            .into()),
             2 => Err(StoreFault::blocked_by(
                 "move rejected: the target parent sits inside this dir's own subtree",
                 "move it out from under this dir first, and the same move then works",
@@ -343,6 +375,7 @@ mod tests {
     use crate::sqlite::open_and_migrate_in_memory;
     use crate::sqlite::repo::group::SqliteGroupRepository;
     use asterism_core::domain::repository::GroupRepository;
+    use asterism_core::domain::value::GroupId;
     use asterism_core::error::ConflictKind;
 
     async fn seed_persona(isle: &AsyncIsle) -> PersonaId {
@@ -452,6 +485,168 @@ mod tests {
         let a_row = listed.iter().find(|g| g.group.id == a.id).unwrap();
         assert_eq!(a_row.group.dir_id, Some(d.id));
         assert_eq!(groups.links(Some(&persona)).await.unwrap().len(), 2);
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// A parent that is not there, and one that is somebody else's,
+    /// are not the same answer: one caller has a request to fix and
+    /// the other has somewhere else to look. `create` and `move_to`
+    /// both ask them apart, and this asks both.
+    #[tokio::test]
+    async fn an_absent_parent_and_another_persona_s_parent_answer_differently() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteDirRepository::new(isle.clone());
+        let mine = seed_persona(&isle).await;
+        let theirs = seed_persona(&isle).await;
+        let now = Utc::now();
+
+        let ours = repo.create(mine, None, "ours".into(), now).await.unwrap();
+        let alien = repo
+            .create(theirs, None, "theirs".into(), now)
+            .await
+            .unwrap();
+
+        // Nobody made it.
+        let absent = DirId::new();
+        let refused = repo
+            .create(mine, Some(absent), "under nothing".into(), now)
+            .await
+            .expect_err("a parent nobody made");
+        assert!(
+            matches!(refused, DomainError::NotFound { entity: "dir", .. }),
+            "{refused}"
+        );
+
+        // It exists, and it is not this persona's.
+        let refused = repo
+            .create(mine, Some(alien.id), "under theirs".into(), now)
+            .await
+            .expect_err("a parent belonging to somebody else");
+        assert!(
+            matches!(refused, DomainError::Validation(_)),
+            "present and not yours is the request being wrong, not the \
+             world: {refused}"
+        );
+
+        // And `move_to` draws the same line.
+        let refused = repo
+            .move_to(&ours.id, Some(&absent), now)
+            .await
+            .expect_err("a target nobody made");
+        assert!(
+            matches!(refused, DomainError::NotFound { entity: "dir", .. }),
+            "{refused}"
+        );
+        let refused = repo
+            .move_to(&ours.id, Some(&alien.id), now)
+            .await
+            .expect_err("a target belonging to somebody else");
+        assert!(matches!(refused, DomainError::Validation(_)), "{refused}");
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The same line, drawn by `link`, where either of the two groups
+    /// may be the one that is not there.
+    #[tokio::test]
+    async fn linking_a_group_that_is_not_there_is_not_the_same_as_linking_across_personas() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let groups = SqliteGroupRepository::new(isle.clone());
+        let mine = seed_persona(&isle).await;
+        let theirs = seed_persona(&isle).await;
+        let now = Utc::now();
+
+        let parent = groups
+            .create(mine, "parent".into(), None, now)
+            .await
+            .unwrap();
+        let alien = groups
+            .create(theirs, "alien".into(), None, now)
+            .await
+            .unwrap();
+
+        // Which of the two is missing is named, because "look
+        // somewhere else" is only useful with the id to look for.
+        let absent_child = GroupId::new();
+        let refused = groups
+            .link(&parent.id, &absent_child, now)
+            .await
+            .expect_err("a child nobody made");
+        assert!(
+            matches!(
+                &refused,
+                DomainError::NotFound { entity: "group", id } if *id == absent_child.to_string()
+            ),
+            "{refused}"
+        );
+
+        let absent_parent = GroupId::new();
+        let refused = groups
+            .link(&absent_parent, &parent.id, now)
+            .await
+            .expect_err("a parent nobody made");
+        assert!(
+            matches!(
+                &refused,
+                DomainError::NotFound { entity: "group", id } if *id == absent_parent.to_string()
+            ),
+            "{refused}"
+        );
+
+        let refused = groups
+            .link(&parent.id, &alien.id, now)
+            .await
+            .expect_err("a child belonging to somebody else");
+        assert!(matches!(refused, DomainError::Validation(_)), "{refused}");
+
+        driver.shutdown().await.unwrap();
+    }
+
+    /// And the fourth site: filing a group under a dir.
+    ///
+    /// `set_dir` had the same fused verdict as its three siblings, so
+    /// a shelf nobody made and a shelf belonging to somebody else were
+    /// one sentence. Asked apart here, they answer the way they do in
+    /// `create`, `move_to` and `link`.
+    #[tokio::test]
+    async fn filing_a_group_under_a_dir_tells_absence_from_somebody_else_s() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let dirs = SqliteDirRepository::new(isle.clone());
+        let groups = SqliteGroupRepository::new(isle.clone());
+        let mine = seed_persona(&isle).await;
+        let theirs = seed_persona(&isle).await;
+        let now = Utc::now();
+
+        let group = groups.create(mine, "mine".into(), None, now).await.unwrap();
+        let alien = dirs
+            .create(theirs, None, "theirs".into(), now)
+            .await
+            .unwrap();
+
+        let absent = DirId::new();
+        let refused = groups
+            .set_dir(&group.id, Some(&absent), now)
+            .await
+            .expect_err("a shelf nobody made");
+        assert!(
+            matches!(refused, DomainError::NotFound { entity: "dir", .. }),
+            "{refused}"
+        );
+
+        let refused = groups
+            .set_dir(&group.id, Some(&alien.id), now)
+            .await
+            .expect_err("a shelf belonging to somebody else");
+        assert!(matches!(refused, DomainError::Validation(_)), "{refused}");
+
+        // Filing it where it belongs still works, so the extra
+        // question costs the good path nothing but a lookup.
+        let ours = dirs.create(mine, None, "ours".into(), now).await.unwrap();
+        groups
+            .set_dir(&group.id, Some(&ours.id), now)
+            .await
+            .unwrap();
 
         driver.shutdown().await.unwrap();
     }

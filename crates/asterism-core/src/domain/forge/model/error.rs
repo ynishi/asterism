@@ -192,7 +192,10 @@ pub enum ForgeError {
     /// Dropping takes the history that work was cut from, so what is
     /// left is a log against nothing. Ending the work first is not a
     /// formality — it is the record of what happened to it.
-    #[error("{0} pieces of work are still open against this line")]
+    #[error(
+        "{0} pieces of work are still open against this line; close them first, and the \
+         same drop then works"
+    )]
     WorkStillOpen(usize),
 
     /// The store handed back a record the model would not have
@@ -254,7 +257,9 @@ impl From<ForgeError> for DomainError {
     /// [`AlreadyClosed`](ForgeError::AlreadyClosed) and
     /// [`Collides`](ForgeError::Collides) are the state fighting
     /// back — the caller was not wrong, the line was somewhere else —
-    /// so they read as conflicts. The rest are malformed input.
+    /// so they read as conflicts, and so do the three standing
+    /// refusals below. What is left is malformed input, plus
+    /// [`Unwritable`](ForgeError::Unwritable), which is neither.
     ///
     /// **Which conflict is carried across, not flattened.** The four
     /// want four different things from a caller and the difference is
@@ -273,21 +278,20 @@ impl From<ForgeError> for DomainError {
     /// asked for. Retrying cannot change that, and the caller's move
     /// is to close the work as abandoned rather than to read again.
     ///
-    /// The three standing refusals read the same way and for the same
-    /// reason. [`Archived`](ForgeError::Archived) is not a race — the
-    /// line is not somewhere else, it is finished with, and reading
-    /// again will find it finished with again.
-    /// [`NotArchived`](ForgeError::NotArchived) and
-    /// [`WorkStillOpen`](ForgeError::WorkStillOpen) are the two steps
-    /// of dropping asked out of order. Each names what the caller has
-    /// to do next, and none of them is waiting.
+    /// **The three standing refusals are conflicts, and they say so
+    /// themselves.** [`Archived`](ForgeError::Archived) is "reopen it
+    /// before putting anything on it";
+    /// [`NotArchived`](ForgeError::NotArchived) is "archive it first";
+    /// [`WorkStillOpen`](ForgeError::WorkStillOpen) is work to end
+    /// before a line can be dropped. Each names a state change after
+    /// which the identical request goes through, which is
+    /// [`Blocked`](crate::error::ConflictKind::Blocked) exactly.
     ///
-    /// Those three now have a conflict kind that fits them —
-    /// [`Blocked`](crate::error::ConflictKind::Blocked) is "do this
-    /// first, then the same request works", which is what they say.
-    /// They are left as validations here because moving them would
-    /// change the status three routes answer with, which is a decision
-    /// about those routes rather than about this conversion.
+    /// Note what `Blocked` does *not* require: that the refusal clears
+    /// on its own. Nothing here is waiting, and none of these three
+    /// becomes true by being asked again — somebody archives the line,
+    /// reopens it, or ends the work, and then the same request goes
+    /// through. That is the test, and "is it waiting" is not.
     fn from(error: ForgeError) -> Self {
         let message = error.to_string();
         match error {
@@ -323,10 +327,12 @@ impl From<ForgeError> for DomainError {
             | ForgeError::WrongStrategy
             | ForgeError::UnknownChangePoint
             | ForgeError::Unsettled
-            | ForgeError::NothingToRecord
-            | ForgeError::Archived
-            | ForgeError::NotArchived
-            | ForgeError::WorkStillOpen(_) => DomainError::Validation(message),
+            | ForgeError::NothingToRecord => DomainError::Validation(message),
+            // The three standing refusals: each names a state change
+            // after which the same request works.
+            ForgeError::Archived | ForgeError::NotArchived | ForgeError::WorkStillOpen(_) => {
+                DomainError::blocked(message)
+            }
         }
     }
 }
@@ -365,10 +371,10 @@ mod tests {
             ),
             "{shared}"
         );
-        let DomainError::Conflict { kind, .. } = shared else {
-            unreachable!("asserted above")
-        };
-        assert!(kind.worth_retrying());
+        // And the token a caller actually reads says the same thing.
+        // The kind is internal; `reason` is the promise, so asserting
+        // only the kind would leave the wire free to disagree with it.
+        assert_eq!(shared.reason(), Some("raced"));
     }
 
     /// Work that has already ended is over, and the kind says so.
@@ -390,10 +396,7 @@ mod tests {
             ),
             "{shared}"
         );
-        let DomainError::Conflict { kind, .. } = shared else {
-            unreachable!("asserted above")
-        };
-        assert!(!kind.worth_retrying());
+        assert_eq!(shared.reason(), Some("settled"));
     }
 
     /// A record the store should not have been holding is not the
@@ -507,5 +510,38 @@ mod tests {
         let shared: DomainError = refusal.into();
 
         assert!(shared.to_string().contains(&message));
+    }
+
+    /// The three standing refusals, and what each says to do.
+    ///
+    /// Each names a state change after which the identical request
+    /// goes through, which is what `Blocked` means — and `Blocked`
+    /// promises the message names that change, so the promise is
+    /// checked here rather than trusted.
+    #[test]
+    fn the_three_standing_refusals_are_blocked_and_name_the_way_through() {
+        for (refusal, remedy) in [
+            (ForgeError::Archived, "reopen it"),
+            (ForgeError::NotArchived, "archive it first"),
+            (ForgeError::WorkStillOpen(2), "close them first"),
+        ] {
+            let shared: DomainError = refusal.into();
+            assert!(
+                matches!(
+                    shared,
+                    DomainError::Conflict {
+                        kind: ConflictKind::Blocked,
+                        ..
+                    }
+                ),
+                "each names a state change after which the same request \
+                 works: {shared}"
+            );
+            assert_eq!(shared.reason(), Some("blocked"));
+            assert!(
+                shared.to_string().contains(remedy),
+                "and the message says which change: {shared}"
+            );
+        }
     }
 }

@@ -9,6 +9,16 @@
 //! commands carry no attribution fields for it to read. The argument is
 //! required by the service signatures, so a new mutation cannot be added
 //! here without choosing.
+//!
+//! # This surface and the HTTP one are mirrors
+//!
+//! Not "mostly overlapping" — a verb on one belongs on the other, in the
+//! same change. `asterism-server`'s `http` module doc states the rule
+//! and the two differences that are by design: attribution, and where
+//! the id comes from.
+//!
+//! MCP is not part of that obligation. It is curated on purpose, which
+//! its own module doc explains.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
@@ -44,8 +54,24 @@ use asterism_contract::dto::{
     ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, RetrievedPageDto, SessionDto,
     SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto,
 };
+use asterism_contract::forge::{
+    AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
+    ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgePursuitDto,
+    ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand,
+    OpenForgePursuitCommand, OpenForgeThreadCommand, PushForgeRoundCommand, RenameForgeLineCommand,
+    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+};
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
+use asterism_core::application::mapping::{
+    forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
+    forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
+    forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
+    forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto,
+};
 use asterism_core::domain::attribution::AttributionContext;
+use asterism_core::domain::forge::model::pursuit::Intent;
+use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
 use tauri::State;
 
 use crate::error::UiError;
@@ -2102,4 +2128,557 @@ pub async fn delete_thread_message(
         .delete_message(command, &AttributionContext::owner_surface())
         .await?;
     Ok(())
+}
+
+// -----------------------------------------------------------------
+// The forge — a line
+//
+// The services take typed ids and IPC carries strings, so the parsing
+// is here, exactly as it is in the HTTP adapter: an id that is not a
+// UUID is malformed input and says so, rather than reaching a service
+// that would have to describe a shape it does not accept.
+//
+// Each verb takes its target as an argument of its own. The commands
+// in `asterism-contract` carry that id as a field too, and HTTP fills
+// the field in from the path because a path and a body can disagree.
+// There is no path here and nothing to disagree with, so the argument
+// is the whole answer and the field is left alone. Four verbs whose
+// entire input was the id and who is asking — archive, reopen and
+// discard on a line, and `resolve` on the pursuit side — take no
+// command struct at all: attribution comes from the surface, so
+// nothing would be left in it to read.
+// -----------------------------------------------------------------
+
+/// Reads a line back after a write, so the caller sees what it now is.
+///
+/// A write on a line answers with the line. `line_now` in
+/// `asterism-server`'s `http` module records why, and why `discard` is
+/// the one that answers with something else.
+async fn line_now(state: &AppState, id: &LineId) -> Result<ForgeLineDto, UiError> {
+    Ok(forge_line_to_dto(&state.line_service.get(id).await?))
+}
+
+/// Opens a line.
+#[tauri::command]
+pub async fn open_forge_line(
+    state: State<'_, AppState>,
+    command: OpenForgeLineCommand,
+) -> Result<ForgeLineDto, UiError> {
+    let line = state
+        .line_service
+        .open(
+            forge_name(command.name)?,
+            forge_strategy_id(command.strategy_id)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_line_to_dto(&line))
+}
+
+/// Every line, without its history.
+#[tauri::command]
+pub async fn list_forge_lines(state: State<'_, AppState>) -> Result<Vec<ForgeLineDto>, UiError> {
+    let lines = state.line_service.list().await?;
+    Ok(lines.iter().map(forge_line_to_dto).collect())
+}
+
+/// The line and its whole history.
+///
+/// This grows with the line. A surface showing what is *on* a line
+/// wants [`get_forge_line_states`] instead; this one is for showing how
+/// it got there.
+#[tauri::command]
+pub async fn get_forge_line(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<ForgeLineHistoryDto, UiError> {
+    let line = state
+        .line_service
+        .get(&forge_line_id(&line_id, "line id")?)
+        .await?;
+    Ok(forge_history_to_dto(&line))
+}
+
+/// What is on the line, folded from the chain.
+#[tauri::command]
+pub async fn get_forge_line_states(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<Vec<ForgeEntryStateDto>, UiError> {
+    let states = state
+        .line_service
+        .states(&forge_line_id(&line_id, "line id")?)
+        .await?;
+    Ok(forge_states_to_dto(&states))
+}
+
+/// Moves the line's own description. Not a landing: nothing goes on the
+/// chain.
+#[tauri::command]
+pub async fn rename_forge_line(
+    state: State<'_, AppState>,
+    line_id: String,
+    command: RenameForgeLineCommand,
+) -> Result<ForgeLineDto, UiError> {
+    let id = forge_line_id(&line_id, "line id")?;
+    state
+        .line_service
+        .rename(
+            &id,
+            &forge_name(command.name)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    line_now(&state, &id).await
+}
+
+/// Points the line at a different rule, from here on.
+#[tauri::command]
+pub async fn set_forge_line_strategy(
+    state: State<'_, AppState>,
+    line_id: String,
+    command: SetForgeLineStrategyCommand,
+) -> Result<ForgeLineDto, UiError> {
+    let id = forge_line_id(&line_id, "line id")?;
+    state
+        .line_service
+        .set_strategy(
+            &id,
+            &forge_strategy_id(command.strategy_id)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    line_now(&state, &id).await
+}
+
+/// Finished with. Takes no landing until it is reopened, and is the
+/// only state a drop can be reached from.
+#[tauri::command]
+pub async fn archive_forge_line(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<ForgeLineDto, UiError> {
+    let id = forge_line_id(&line_id, "line id")?;
+    state
+        .line_service
+        .archive(&id, &AttributionContext::owner_surface())
+        .await?;
+    line_now(&state, &id).await
+}
+
+/// Takes it back out.
+#[tauri::command]
+pub async fn reopen_forge_line(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<ForgeLineDto, UiError> {
+    let id = forge_line_id(&line_id, "line id")?;
+    state
+        .line_service
+        .reopen(&id, &AttributionContext::owner_surface())
+        .await?;
+    line_now(&state, &id).await
+}
+
+/// Takes the line, its history and every piece of work against it.
+///
+/// **The answer is the point.** It names the assets the drop released,
+/// and after this write there is no record left to derive them from, so
+/// a caller that ignores it has lost the only answer there will be.
+#[tauri::command]
+pub async fn discard_forge_line(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<ForgeDiscardedDto, UiError> {
+    let id = forge_line_id(&line_id, "line id")?;
+    let released = state
+        .line_service
+        .discard(&id, &AttributionContext::owner_surface())
+        .await?;
+    Ok(forge_discarded_to_dto(id, &released))
+}
+
+/// Every rule a line can be pointed at, built from the rules this
+/// deployment carries.
+#[tauri::command]
+pub async fn list_forge_strategies(
+    state: State<'_, AppState>,
+) -> Result<Vec<ForgeStrategyDto>, UiError> {
+    let rules = state.line_service.strategies().await;
+    Ok(rules
+        .iter()
+        .map(|(id, about)| forge_strategy_to_dto(id, about))
+        .collect())
+}
+
+// -----------------------------------------------------------------
+// The forge — work against a line
+// -----------------------------------------------------------------
+
+/// Reads work back after a write, so the caller sees what it now is.
+///
+/// `push` and `close` answer with the pursuit whole, and `resolve` does
+/// not; `pursuit_now` in `asterism-server`'s `http` module records why
+/// that is not an exception.
+async fn pursuit_now(state: &AppState, id: &PursuitId) -> Result<ForgePursuitDto, UiError> {
+    Ok(forge_pursuit_to_dto(&state.pursuit_service.get(id).await?))
+}
+
+/// Opens work against a line.
+///
+/// The line is named in the command rather than as an argument, because
+/// this is the one verb here that does not have a pursuit to name yet.
+/// A caller asking "what work is against this line" wants
+/// [`list_forge_pursuits_of_line`].
+#[tauri::command]
+pub async fn open_forge_pursuit(
+    state: State<'_, AppState>,
+    command: OpenForgePursuitCommand,
+) -> Result<ForgePursuitDto, UiError> {
+    let line = forge_line_id(&command.line_id, "line id")?;
+    let parent = command
+        .parent_id
+        .as_deref()
+        .map(|raw| forge_pursuit_id(raw, "pursuit id"))
+        .transpose()?;
+    let intent = Intent {
+        title: command.title.map(forge_name).transpose()?,
+        note: command.note,
+    };
+    let pursuit = state
+        .pursuit_service
+        .open(&line, parent, intent, &AttributionContext::owner_surface())
+        .await?;
+    Ok(forge_pursuit_to_dto(&pursuit))
+}
+
+/// The work, whole — one read rather than the line's two.
+#[tauri::command]
+pub async fn get_forge_pursuit(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+) -> Result<ForgePursuitDto, UiError> {
+    let id = forge_pursuit_id(&pursuit_id, "pursuit id")?;
+    pursuit_now(&state, &id).await
+}
+
+/// Writes a round.
+///
+/// The line is not read, which is what makes this the operation that
+/// can run all day without touching anything anybody else is using.
+/// What it does check is that the content each operation names exists.
+#[tauri::command]
+pub async fn push_forge_round(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+    command: PushForgeRoundCommand,
+) -> Result<ForgePursuitDto, UiError> {
+    let id = forge_pursuit_id(&pursuit_id, "pursuit id")?;
+    let ops = command
+        .ops
+        .iter()
+        .map(forge_op)
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .pursuit_service
+        .push(&id, ops, command.note, &AttributionContext::owner_surface())
+        .await?;
+    pursuit_now(&state, &id).await
+}
+
+/// Lets the line's rule answer whatever this work collides with.
+///
+/// **It succeeds whether or not a round was written, and the answer
+/// says which.** A rule that leaves collisions to a person writes
+/// nothing; that is an outcome, not a failure, so `round` is absent
+/// rather than this being an error, and `collisions` carries what is
+/// left either way.
+#[tauri::command]
+pub async fn resolve_forge_pursuit(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+) -> Result<ForgeResolvedDto, UiError> {
+    let id = forge_pursuit_id(&pursuit_id, "pursuit id")?;
+    let round = state
+        .pursuit_service
+        .resolve(&id, &AttributionContext::owner_surface())
+        .await?;
+    let collisions = state.pursuit_service.collisions(&id).await?;
+    Ok(ForgeResolvedDto {
+        round: round.as_ref().map(forge_round_to_dto),
+        collisions: forge_collisions_to_dto(&collisions),
+    })
+}
+
+/// Ends the work, and puts what it says on the line if it says
+/// anything.
+///
+/// **A [`UiError::Conflict`] from here is not always worth retrying,
+/// and its `reason` says which kind it is:** `"blocked"` wants
+/// something done first and the message says what, `"raced"` will
+/// usually win on a retry, `"settled"` never helps, and `"clashes"` has
+/// to ask for something different. They are spelled out on
+/// `close_forge_pursuit` in `asterism-server`'s `http` module,
+/// including why `"blocked"` arrives for two different reasons.
+#[tauri::command]
+pub async fn close_forge_pursuit(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+    command: CloseForgePursuitCommand,
+) -> Result<ForgePursuitDto, UiError> {
+    let id = forge_pursuit_id(&pursuit_id, "pursuit id")?;
+    let outcome = forge_outcome(&command.outcome)?;
+    state
+        .pursuit_service
+        .close(
+            &id,
+            outcome,
+            command.note,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    pursuit_now(&state, &id).await
+}
+
+/// What this work still asks for that the line has moved since.
+///
+/// Derived from both logs on every call, so it cannot go stale. This is
+/// what a screen shows before offering [`resolve_forge_pursuit`].
+#[tauri::command]
+pub async fn get_forge_pursuit_collisions(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+) -> Result<Vec<ForgeCollisionDto>, UiError> {
+    let found = state
+        .pursuit_service
+        .collisions(&forge_pursuit_id(&pursuit_id, "pursuit id")?)
+        .await?;
+    Ok(forge_collisions_to_dto(&found))
+}
+
+/// The landings this work has not seen, oldest first.
+///
+/// How far behind rather than what collides: a landing here may touch
+/// nothing this work asks for. A screen reads both — this one to say
+/// the line has moved, [`get_forge_pursuit_collisions`] to say whether
+/// it matters.
+#[tauri::command]
+pub async fn get_forge_pursuit_behind(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+) -> Result<Vec<String>, UiError> {
+    let behind = state
+        .pursuit_service
+        .behind(&forge_pursuit_id(&pursuit_id, "pursuit id")?)
+        .await?;
+    Ok(behind.iter().map(|id| id.to_string()).collect())
+}
+
+/// Work opened from this work.
+#[tauri::command]
+pub async fn list_forge_pursuit_children(
+    state: State<'_, AppState>,
+    pursuit_id: String,
+) -> Result<Vec<ForgePursuitDto>, UiError> {
+    let found = state
+        .pursuit_service
+        .children(&forge_pursuit_id(&pursuit_id, "pursuit id")?)
+        .await?;
+    Ok(found.iter().map(forge_pursuit_to_dto).collect())
+}
+
+/// Every piece of work against a line, open and ended alike.
+#[tauri::command]
+pub async fn list_forge_pursuits_of_line(
+    state: State<'_, AppState>,
+    line_id: String,
+) -> Result<Vec<ForgePursuitDto>, UiError> {
+    let found = state
+        .pursuit_service
+        .of_line(&forge_line_id(&line_id, "line id")?)
+        .await?;
+    Ok(found.iter().map(forge_pursuit_to_dto).collect())
+}
+
+// -----------------------------------------------------------------
+// The forge — what was said about work
+// -----------------------------------------------------------------
+
+/// Reads a conversation back after a write.
+///
+/// `say` and `amend` do not use this: what each of them wrote is the
+/// answer, which `thread_now` in `asterism-server`'s `http` module
+/// records as the point rather than an economy.
+async fn thread_now(state: &AppState, id: &ThreadId) -> Result<ForgeThreadDto, UiError> {
+    Ok(forge_thread_to_dto(
+        &state.forge_thread_service.get(id).await?,
+    ))
+}
+
+/// Opens a conversation about something in the forge.
+///
+/// **The anchor is resolved, not accepted.** The command names ids and
+/// a kind; the service reads the pursuit or the line and the model
+/// builds the anchor from what it finds, so a pursuit nobody opened and
+/// an entry the round never touched are two different refusals.
+#[tauri::command]
+pub async fn open_forge_thread(
+    state: State<'_, AppState>,
+    command: OpenForgeThreadCommand,
+) -> Result<ForgeThreadDto, UiError> {
+    let about = forge_anchored(
+        &command.anchor_kind,
+        command.pursuit_id.as_deref(),
+        command.line_id.as_deref(),
+        command.node_id.as_deref(),
+        command.entry_id.as_deref(),
+        command.change_point_id.as_deref(),
+    )?;
+    let title = command.title.map(forge_name).transpose()?;
+    let thread = state
+        .forge_thread_service
+        .open(
+            about,
+            title,
+            forge_body(command.said)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_thread_to_dto(&thread))
+}
+
+/// The conversation, whole — every message and every correction to
+/// each.
+///
+/// A payload carrying only what each message says now would leave a
+/// withdrawn sentence attributed to the person who withdrew it.
+#[tauri::command]
+pub async fn get_forge_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+) -> Result<ForgeThreadDto, UiError> {
+    let id = forge_thread_id(&thread_id, "thread id")?;
+    thread_now(&state, &id).await
+}
+
+/// Says something.
+///
+/// Answers with the message it wrote. A reply naming a message of
+/// another conversation is refused as invalid input: the caller
+/// addressed one conversation and named something that is not in it,
+/// which no change of state makes true.
+#[tauri::command]
+pub async fn say_in_forge_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+    command: SayInForgeThreadCommand,
+) -> Result<ForgeMessageDto, UiError> {
+    let id = forge_thread_id(&thread_id, "thread id")?;
+    let replying_to = command
+        .replying_to
+        .as_deref()
+        .map(|raw| forge_message_id(raw, "replying_to"))
+        .transpose()?;
+    let said = state
+        .forge_thread_service
+        .say(
+            &id,
+            replying_to,
+            forge_body(command.said)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_message_to_dto(&said))
+}
+
+/// Corrects something said.
+///
+/// **Answers with the correction, not with the message as it now
+/// reads.** The model keeps both and the distinction is the model's:
+/// what was said first is still there, and an answer shaped as "the
+/// message, updated" would quietly be the shape that loses it.
+#[tauri::command]
+pub async fn amend_forge_message(
+    state: State<'_, AppState>,
+    thread_id: String,
+    command: AmendForgeMessageCommand,
+) -> Result<ForgeRevisionDto, UiError> {
+    let id = forge_thread_id(&thread_id, "thread id")?;
+    let message = forge_message_id(&command.message_id, "message id")?;
+    let revision = state
+        .forge_thread_service
+        .amend(
+            &id,
+            &message,
+            forge_body(command.said)?,
+            &AttributionContext::owner_surface(),
+        )
+        .await?;
+    Ok(forge_revision_to_dto(&revision))
+}
+
+/// Names the conversation, or takes its name off.
+///
+/// A title is a label on the conversation rather than something said in
+/// it, so this writes no message. `title` absent takes the name off.
+#[tauri::command]
+pub async fn rename_forge_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+    command: RenameForgeThreadCommand,
+) -> Result<ForgeThreadDto, UiError> {
+    let id = forge_thread_id(&thread_id, "thread id")?;
+    let title = command.title.map(forge_name).transpose()?;
+    state
+        .forge_thread_service
+        .rename(&id, title.as_ref(), &AttributionContext::owner_surface())
+        .await?;
+    thread_now(&state, &id).await
+}
+
+/// Conversations about one thing in the forge — the work as a whole,
+/// one round of it, one entry as that round had it, or what landed on a
+/// line.
+///
+/// **One command where HTTP has four routes.** There are four there
+/// because a path cannot express a wrong combination of ids, and that
+/// property is the route's rather than the question's: IPC has no path,
+/// so the combination has to be checked wherever it arrives. It is
+/// checked here, by the same resolver [`open_forge_thread`] names its
+/// anchor through — which is the shape the forge already uses when
+/// there is no path to lean on, and the shape [`list_threads`] uses for
+/// the same job on the app-level Threads. `anchor_kind` says which ids
+/// are wanted: `"pursuit"` wants `pursuit_id`, `"round"` adds
+/// `node_id`, `"entry"` adds `entry_id` to that, and `"change"` wants
+/// `line_id` with `change_point_id`.
+///
+/// Both directions are refused, and the second is the one that matters:
+/// a missing id is obvious, while an id the kind has no use for would
+/// otherwise be ignored — `"round"` carrying an `entry_id` would answer
+/// about the round for a caller that asked about the entry, which is
+/// exactly what the four routes exist to make impossible.
+///
+/// More than one conversation can hang off the same thing — two people
+/// starting separate ones about a round is not a mistake to merge — so
+/// this answers a list.
+#[tauri::command]
+pub async fn list_forge_threads_about(
+    state: State<'_, AppState>,
+    anchor_kind: String,
+    pursuit_id: Option<String>,
+    line_id: Option<String>,
+    node_id: Option<String>,
+    entry_id: Option<String>,
+    change_point_id: Option<String>,
+) -> Result<Vec<ForgeThreadDto>, UiError> {
+    let about = forge_anchored(
+        &anchor_kind,
+        pursuit_id.as_deref(),
+        line_id.as_deref(),
+        node_id.as_deref(),
+        entry_id.as_deref(),
+        change_point_id.as_deref(),
+    )?;
+    let found = state.forge_thread_service.about(about).await?;
+    Ok(found.iter().map(forge_thread_to_dto).collect())
 }
