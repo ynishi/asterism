@@ -89,15 +89,52 @@ A sentence recording that a rule **changed** — "this used to ask `owns`, and
 here is why it does not" — is correct and load-bearing. Do not report it, and do
 not let a later cleanup delete it.
 
+The reason is not that history is nice to have. A rule that replaced another one
+has a shape somebody could reasonably undo, and the sentence saying what it
+replaced is the only thing standing in the way. Here that is
+`crates/asterism-core/src/domain/forge/boundary/mod.rs`: "`PersonaId` was one of
+these while `store::Store` asked whose an asset is. It is not any more — a line
+carries no owner … and the word left the forge with the question." Cut it and
+the next reader adding an asset-shaped verb has no reason not to reach for
+`PersonaId` again, and nothing to read when the boundary test refuses them.
+
+**The test is whether deleting the sentence lets somebody repeat the mistake.**
+If it does, it is a constraint written in the past tense and it stays. If it
+does not — "the work half was pinned by a unit test and nothing over a port",
+"these were validations until the definitions were written down" — it is a
+report on how the change went, it stops being checkable the moment its diff is
+old, and `PUBLIC_DEVELOPMENT.md` puts it in the commit. Neither kind is your
+finding: the first because it is right, the second because it is somebody's
+commit message that landed in the wrong file, and a review that lists it invites
+the cleanup this section exists to prevent.
+
 Prose that is merely long, or that a reader could have inferred. The question is
 whether it is true, sited, and singular — not whether it is necessary.
 
 ## Reporting
 
-`file:line` and a quote for every item, ranked within each question by how badly
-a reader would be misled. Say plainly when a category is empty; an empty
-category is a real answer and a review that finds nothing in all four is a
-result rather than a failure.
+**Open every report with the policy, quoted whole.** Not summarised, not a
+pointer to this file, and not omitted on a run that found nothing — the reader
+acting on these findings is usually an agent that will not go and read the
+definition, and without the policy in front of it a list of prose findings reads
+as a list of edits to make. Print exactly this, first:
+
+> **How to act on this report.** Prose findings are advisory. A commit may land
+> with every one of them open, and none is a gate. The only thing to fix is
+> inaccuracy — a claim the code contradicts, quoted here beside the code that
+> contradicts it. Anything not in that form is not a fix instruction.
+>
+> **A sentence recording that a rule changed is not a finding.** Leave it in
+> place, and do not let a cleanup delete it: it is a constraint written in the
+> past tense, and it is what stops the next reader undoing the rule. The test is
+> whether deleting it lets somebody repeat the mistake. If deleting it costs
+> nothing, it is a report on how a change went — that belongs in the commit, and
+> moving it is the author's call, not this review's.
+
+Then the findings: `file:line` and a quote for every item, ranked within each
+question by how badly a reader would be misled. Say plainly when a category is
+empty; an empty category is a real answer and a review that finds nothing in all
+four is a result rather than a failure.
 
 Recommend, do not rewrite. Where a claim is false, say which of the two — the
 prose or the code — looks like the mistake, and leave the choice.

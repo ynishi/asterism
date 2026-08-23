@@ -169,11 +169,12 @@ Refs #<issue>
 
 This repository ships its agent configuration in the open: pointer memory
 (`.claude/CLAUDE.md`), guard agents (`.claude/agents/`), permission settings
-that deny push/PR to agents outright, and a plugin worth installing:
+that deny push/PR to agents outright, and two plugins worth installing:
 
 ```text
 /plugin marketplace add ynishi/asterism
 /plugin install prose-shape@asterism
+/plugin install doc-review@asterism
 ```
 
 `prose-shape` is a hook, and it covers the one width nothing else can. A commit
@@ -188,10 +189,26 @@ agent, the loop that works is:
 
 ```text
 issue -> just worktree-new -> implement -> just check
-      -> reviewer agent on the diff -> commit
+      -> reviewer + pub-checker + doc-reviewer on the diff -> commit
       -> git fetch origin -> just pre-push
       -> write the PR body to a file -> hand over push/PR
 ```
+
+Three reviews run there and they do not overlap. `reviewer` answers whether the
+change does what its issue asked; `pub-checker` answers what may be published;
+`doc-reviewer` — the `doc-review` plugin — answers whether the comments beside
+the code are still true, which is the only one of the three that owns prose. Its
+findings are advisory: a commit may land with all of them open, and only a claim
+quoted beside the code that contradicts it is a fix. A sentence recording that a
+rule changed is not a defect to any of them — it is a constraint written in the
+past tense, and deleting it lets the next reader undo the rule.
+
+That division has to be visible to the agent doing the work, not only true: the
+run that prompted writing it down had `reviewer` producing wording notes for a
+prose review that was not installed, and an agent that read the list as work to
+do rewrote all nine of them — including ones whose whole content was the record
+of what a rule replaced. If `doc-review` is not installed on a machine, the
+answer is to say the prose was not reviewed.
 
 The `pre-push` at the end is the gate: it runs after the last commit, over the
 tree that is actually handed over. It is not `check` — it adds `branch-check`,
