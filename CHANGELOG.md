@@ -10,6 +10,40 @@ and this project adheres to
 
 ### Added
 
+- **The forge reaches the desktop.** Twenty-five Tauri commands covering the
+  forge's twenty-eight routes, with the three forge services reaching `AppState`
+  — twenty-five rather than twenty-eight because the four `about` reads collapse
+  into one, for the reason below. The forge's routes shipped over three pull
+  requests without a single command, because each of those issues listed "the
+  desktop" as out of scope and nothing added them up.
+
+  This closes the forge's share of a wider gap rather than the gap. Counted the
+  direction that goes short — routed handlers with no command of the same name —
+  the tree still has 34, of which nine are the same job under another name and
+  nine are things a person never invokes (process controls, byte-serving routes,
+  diagnostics). The other sixteen are verbs a person would reach for and cannot:
+  series-strategy CRUD, `rename_tag` / `delete_tag` / `merge_tags`,
+  `rebuild_index`, `rescan_duplicates`, `organize_by_location`,
+  `remeasure_dims`, `list_observations`, `list_streams`,
+  `declare_asset_source_type`, `fetch_visual_model` and `get_setting`.
+
+  Two differences from the routes are by design. Attribution comes from
+  `AttributionContext::owner_surface()` rather than from command fields, because
+  the desktop's IPC is the owner's surface rather than a caller making a claim.
+  And the id is an argument rather than a path segment, so the command struct's
+  own id field goes unread.
+
+  The four `about` reads are one command rather than four. Those exist as four
+  routes because a _path_ cannot express a wrong id combination — a property of
+  routes, not of the question — so over IPC the anchor arrives as a kind plus
+  optional ids and a wrong combination is refused at runtime rather than being
+  unwritable.
+
+  The rule itself is now in RustDoc, stated once in `asterism-server`'s `http`
+  module with the two other transports pointing at it — including the count
+  above, so the debt is visible where the rule is, and what MCP owes, which is
+  nothing: it is a curated vocabulary rather than a projection of the routes.
+
 - **The conversation's verbs are on HTTP** (#122). Opening a conversation about
   something in the forge, saying something in it, correcting what was said,
   naming it, and reading it back from any of the four things it can hang off —
@@ -32,6 +66,52 @@ and this project adheres to
   touched is a `400`.
 
 ### Fixed
+
+- **Nine refusals answered with the wrong status.** Three of them —
+  `this line is archived`, `archive it first`, and work still open against a
+  line being dropped — each name a state change after which the identical
+  request goes through, which is a `Blocked` conflict. They answered `400` and
+  now answer `409` with `reason: "blocked"`, on the two routes that reach them —
+  `close` for the archived line, `discard` for the other two, and each says in
+  its message what to change. Six more were the caller addressing something that
+  is not there — a parent dir when a dir is created, a target parent dir when
+  one is moved, a target dir when a group is filed, either group named in a
+  link, a change point on a line, and a round in a pursuit — and answer `404`
+  rather than `400`.
+
+  Four of those six needed their query split as well as their status changed. A
+  single verdict covered both "it belongs to another persona" and "it is not
+  there", so one caller had to fix a request while the other had to look
+  somewhere else, and both were handed the same sentence. Presence is asked
+  first at all four now, and the persona mismatch keeps `400` with a message
+  that says only that.
+
+  The three `Blocked` ones were left alone twice before this. First on the
+  argument that none of them is _waiting_ — true, and not what `Blocked` asks;
+  then because moving them changes the status two routes answer with, which is a
+  cost rather than a reason.
+
+- **`POST /asterism/forge/threads` refuses an id the anchor kind has no use
+  for.** Naming `"round"` while passing an entry id is now a `400`, where it
+  opened a conversation about the round — an answer to a question the caller did
+  not ask. The four `about` reads get this from their paths, which have nowhere
+  to put the extra id; this route takes the anchor in a body, and so does the
+  desktop's one `about` command, so the check is made where the anchor arrives.
+
+- **A conflict's retry token is decided in one place.** `DomainError::reason()`
+  answers which refusals carry retry advice and what it is; the HTTP, MCP and
+  desktop surfaces each used to answer it separately, which is three chances to
+  disagree about something a client acts on. `ConflictKind::worth_retrying` is
+  gone with it — it had no caller and could not get one, since every client of
+  this is TypeScript or an agent reading JSON.
+
+- **A pursuit the store could not have been given is now refused over a port,
+  not only in a unit test.** Reading work replays `Pursuit::push` and
+  `Pursuit::end` the way reading a line replays `History::record`; the line half
+  was pinned over a port and the work half was not, leaving "the way" a claim.
+  Dropping the marking makes a corrupt row answer `Conflict { Settled }` —
+  telling a caller that a row which could never have been written is already
+  decided.
 
 - **A repository no longer decides what a refusal means to a caller** (#122,
   carried from #121). `DomainError` has four shared variants and nothing said
