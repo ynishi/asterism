@@ -2402,6 +2402,44 @@ async fn an_asset_on_a_line_cannot_be_deleted_and_neither_can_its_persona() {
         "taking an entry off releases nothing; only dropping the line does"
     );
 
+    // And the way out. A hold nothing can release is not a hold, it is
+    // a leak: the bytes would be unreachable and undeletable for as
+    // long as the database exists. Dropping the line is that way, and
+    // the two refusals above have to become two writes that go
+    // through — the asset, and the persona whose cascade stopped at
+    // the same edge.
+    world.clock.set(3);
+    world.lines.archive(&line.id(), &who("ana")).await.unwrap();
+    let released = world
+        .lines
+        .discard(&line.id(), &who("ana"))
+        .await
+        .expect("archived, with no work against it");
+    assert!(
+        released.contains(&held),
+        "the drop answers with what it released: {released:?}"
+    );
+
+    let gone = isle
+        .call(move |conn| conn.execute("DELETE FROM asset WHERE id = ?1", rusqlite::params![asset]))
+        .await;
+    assert!(
+        gone.is_ok(),
+        "once the line is dropped nothing holds the bytes: {gone:?}"
+    );
+    let owner = isle
+        .call(move |conn| {
+            conn.execute(
+                "DELETE FROM persona WHERE id = ?1",
+                rusqlite::params![persona],
+            )
+        })
+        .await;
+    assert!(
+        owner.is_ok(),
+        "and the purge that was refused over it goes through: {owner:?}"
+    );
+
     driver.shutdown().await.unwrap();
 }
 
