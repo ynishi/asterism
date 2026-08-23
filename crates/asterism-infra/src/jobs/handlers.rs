@@ -410,7 +410,12 @@ pub async fn edge_rebuild(
 /// space runs high and compact for image-image pairs, so the floor
 /// sits in the gap between the related family and the unrelated one.
 /// Re-measure before reusing this number for any other model id: it
-/// is a property of the model, not of the feature.
+/// is a property of the model, not of the feature. Measured once
+/// more for the bundled `siglip2-base-patch16-256-q4v` (#132 phase
+/// 0): look-alikes 0.992, siblings 0.943, hard negatives 0.899,
+/// suggested floor 0.921 — the same gap in the same place, so this
+/// one constant serves both, unlike the tag floor
+/// ([`tag_score_floor`]), which quantization did move.
 const VISUAL_SCORE_FLOOR: f32 = 0.92;
 /// Bounded top set the visual rebuild materialises per asset.
 const VISUAL_TOP_K: usize = 8;
@@ -635,6 +640,29 @@ async fn enqueue_visual_rebuild(env: &JobEnv, asset_id: &AssetId) -> Result<(), 
 /// for any other model id.
 const TAG_SCORE_FLOOR: f32 = 0.12;
 
+/// The suggestion floor for the model actually bound — measured per
+/// model id, because quantization moves the whole cosine distribution
+/// and a floor tuned for one build of the weights misreads another.
+///
+/// Measured rows (fixture sweep, seed 42, 24 bases, EN+JA
+/// vocabulary):
+///
+/// - `siglip2-base-patch16-256` — [`TAG_SCORE_FLOOR`] (0.12), the
+///   original fp32 knee: 0.32 / 0.68 precision/recall.
+/// - `siglip2-base-patch16-256-q4v` — 0.10, the bundled encoder
+///   (#132 phase 0): 0.29 / 0.79 at its knee, one step lower because
+///   the quantized towers compress scores toward the origin.
+///
+/// A model id with no measured row falls back to the conservative
+/// fp32 floor — and earns its own row before it ships, the same
+/// re-measure rule the constant above has always carried.
+fn tag_score_floor(model_id: &str) -> f32 {
+    match model_id {
+        "siglip2-base-patch16-256-q4v" => 0.10,
+        _ => TAG_SCORE_FLOOR,
+    }
+}
+
 /// Proposes channel tags for one encoded image (#112, P3).
 ///
 /// `{ "asset_id": ... }` is chained from a completed encode;
@@ -709,8 +737,9 @@ fn current_head_ref(env: &JobEnv) -> TagHeadRef {
 /// a tag the head holds a trained row for scores as that row's
 /// acceptance probability (floor: even odds); every other tag scores
 /// zero-shot — cosine against the cached name vector (filled lazily
-/// for names the cache has not seen), floored at
-/// [`TAG_SCORE_FLOOR`]. Evidence above its floor lands, stale
+/// for names the cache has not seen), floored at the bound model's
+/// measured floor ([`tag_score_floor`]). Evidence above its floor
+/// lands, stale
 /// suggestions of other heads retire, and the vector is stamped
 /// under the current head.
 ///
@@ -778,7 +807,7 @@ async fn suggest_tags_for(
                     }
                 };
                 let score = cosine_normalized(&feature.vector, &vector);
-                (score, score >= TAG_SCORE_FLOOR)
+                (score, score >= tag_score_floor(&identity.model_id))
             };
         if clears_floor
             && env
@@ -3903,7 +3932,7 @@ pub async fn head_train(env: &JobEnv, _payload: &serde_json::Value) -> Result<St
         };
         let row = train_row(identity.dim as usize, &train)?;
         eval.absorb(evaluate_row(&row, &held, |vector| {
-            cosine_normalized(vector, text_vector) >= TAG_SCORE_FLOOR
+            cosine_normalized(vector, text_vector) >= tag_score_floor(&identity.model_id)
         }));
         rows.insert(tag_id.as_uuid().to_string(), row);
     }

@@ -1367,13 +1367,54 @@ pub async fn init_core_with(
     })
 }
 
-/// Binds the profile's model package into the encoder cell (#112).
+/// Package directories (a subdirectory holding a `manifest.json`)
+/// under one root — the shape both the profile override and the
+/// bundle are read with, so their rules cannot drift.
+#[cfg(feature = "vision")]
+fn packages_in(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let mut packages = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() && path.join("manifest.json").exists() {
+            packages.push(path);
+        }
+    }
+    Ok(packages)
+}
+
+/// Where the shipped encoder lives, if anywhere: the directory named
+/// by `ASTERISM_BUNDLED_MODELS` (the Tauri shell sets it to its
+/// resource directory), else `bundled-models/` beside the executable
+/// (the standalone server's convention). `None` — a dev build with
+/// neither — is the feature staying off, exactly as before the bundle
+/// existed.
+#[cfg(feature = "vision")]
+fn bundled_models_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("ASTERISM_BUNDLED_MODELS") {
+        let path = std::path::PathBuf::from(dir);
+        return path.is_dir().then_some(path);
+    }
+    let beside_exe = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join("bundled-models");
+    beside_exe.is_dir().then_some(beside_exe)
+}
+
+/// Binds the model package into the encoder cell (#112), profile
+/// first, bundle second (#132 phase 0).
 ///
-/// v1 policy: the profile-local `models/` directory either carries
-/// exactly one package — which is opened (digest-verified), loaded,
-/// and bound — or nothing is bound: zero packages is the feature
-/// staying off, and more than one is an ambiguity a person resolves
-/// by removing one, reported rather than guessed at. The cell is a
+/// The profile-local `models/` directory is the override: when it
+/// holds any package the bundle is not consulted at all — including
+/// the ambiguous case, because a person mid-way through arranging
+/// `models/` must not be silently answered by the bundled encoder.
+/// When `models/` is empty the app falls back to the encoder it
+/// shipped with, located by [`bundled_models_dir`].
+///
+/// Whichever directory answers, the rule is the same: exactly one
+/// package — opened digest-verified, loaded, bound — or nothing is
+/// bound, zero being the feature off and more than one an ambiguity a
+/// person resolves, reported rather than guessed at. The cell is a
 /// `OnceLock`, so a bind lasts the process: replacing a model is
 /// `clear_derived` plus a restart, the explicit bounded rebuild the
 /// issue requires, not a hot swap.
@@ -1390,19 +1431,20 @@ async fn bind_visual_model(
     use asterism_core::domain::job::JobKind;
 
     let models_dir = asterism_infra::paths::models_dir()?;
-    let mut packages = Vec::new();
-    for entry in std::fs::read_dir(&models_dir)? {
-        let path = entry?.path();
-        if path.is_dir() && path.join("manifest.json").exists() {
-            packages.push(path);
-        }
+    let mut packages = packages_in(&models_dir)?;
+    let mut source_dir = models_dir;
+    if packages.is_empty()
+        && let Some(bundled) = bundled_models_dir()
+    {
+        packages = packages_in(&bundled)?;
+        source_dir = bundled;
     }
     let [dir] = packages.as_slice() else {
         if packages.len() > 1 {
             tracing::warn!(
                 event = "diag.vision.ambiguous",
                 count = packages.len(),
-                dir = %models_dir.display(),
+                dir = %source_dir.display(),
                 "more than one model package present; none bound — remove all but one"
             );
         }
@@ -1462,6 +1504,23 @@ async fn bind_visual_model(
             .await?;
     }
     Ok(Some(model_id))
+}
+
+#[cfg(all(test, feature = "vision"))]
+mod bundled_models_tests {
+    use super::*;
+
+    #[test]
+    fn a_package_is_a_directory_holding_a_manifest_and_nothing_else_counts() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("pkg")).unwrap();
+        std::fs::write(root.path().join("pkg/manifest.json"), "{}").unwrap();
+        std::fs::create_dir_all(root.path().join("no-manifest")).unwrap();
+        std::fs::write(root.path().join("stray-file"), "x").unwrap();
+
+        let found = packages_in(root.path()).unwrap();
+        assert_eq!(found, vec![root.path().join("pkg")]);
+    }
 }
 
 #[cfg(test)]
