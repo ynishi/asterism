@@ -659,7 +659,7 @@ pub async fn visual_tag_suggest(
             .unsuggested(
                 &identity,
                 VisualFeatureKind::Semantic,
-                &TagHeadRef::zero_shot(),
+                &current_head_ref(env),
                 VISUAL_FEATURE_PAGE,
             )
             .await?;
@@ -693,22 +693,39 @@ pub async fn visual_tag_suggest(
     Ok(format!("{count} tag(s) suggested"))
 }
 
-/// One asset's proposal pass: cached tag vectors (filled lazily for
-/// names the cache has not seen), cosine against the stored vector,
-/// evidence above the floor, stale suggestions of other heads retired,
-/// stamp under the current head.
+/// The head this process scores under: the bound trained head's ref,
+/// or zero-shot while none is bound — one answer for the walk's page,
+/// the evidence rows, the retirement, and the stamp, so the four can
+/// never disagree about whose pass this was.
+fn current_head_ref(env: &JobEnv) -> TagHeadRef {
+    env.deps
+        .tag_head
+        .get()
+        .map(|bound| bound.head.clone())
+        .unwrap_or_else(TagHeadRef::zero_shot)
+}
+
+/// One asset's proposal pass, scored through the bound head (#132):
+/// a tag the head holds a trained row for scores as that row's
+/// acceptance probability (floor: even odds); every other tag scores
+/// zero-shot — cosine against the cached name vector (filled lazily
+/// for names the cache has not seen), floored at
+/// [`TAG_SCORE_FLOOR`]. Evidence above its floor lands, stale
+/// suggestions of other heads retire, and the vector is stamped
+/// under the current head.
 ///
-/// The head is [`TagHeadRef::zero_shot`] until a trained head exists
-/// (#132 phase 2): this pass IS the zero-shot head — the vocabulary
-/// matrix scored by cosine — and the plumbing it writes through is
-/// what lets a trained head take the same walk later.
+/// The two scores sit on different scales (a probability against a
+/// cosine) in one queue — the artifact's documented wart, carried
+/// here knowingly: within one tag the scale is consistent, and the
+/// queue sorts per asset.
 async fn suggest_tags_for(
     env: &JobEnv,
     encoder: &std::sync::Arc<dyn VisualEncoder>,
     asset_id: &AssetId,
 ) -> Result<usize, DomainError> {
     let identity = encoder.identity().clone();
-    let head = TagHeadRef::zero_shot();
+    let bound = env.deps.tag_head.get().cloned();
+    let head = current_head_ref(env);
     let Some(feature) = env
         .deps
         .visual_features
@@ -728,31 +745,42 @@ async fn suggest_tags_for(
     let now = chrono::Utc::now().timestamp_millis();
     let mut suggested = 0usize;
     for tag in &tags {
-        let vector = match cached.remove(&tag.id) {
-            Some(vector) => vector,
-            None => {
-                // Lazily encode the name the cache has not seen — a
-                // new Tag costs one text encode at its first pass, and
-                // a rename re-encodes because the rename deleted the
-                // row.
-                let enc = encoder.clone();
-                let name = tag.name.clone();
-                let _permit = VISUAL_ENCODE_SLOTS
-                    .acquire()
-                    .await
-                    .expect("semaphore never closed");
-                let vector = tokio::task::spawn_blocking(move || enc.encode_text(&name))
-                    .await
-                    .map_err(|e| DomainError::Validation(format!("encode task failed: {e}")))??;
-                env.deps
-                    .tag_vectors
-                    .set_tag_vector(&tag.id, &identity, &vector, now)
-                    .await?;
-                vector
-            }
-        };
-        let score = cosine_normalized(&feature.vector, &vector);
-        if score >= TAG_SCORE_FLOOR
+        let (score, clears_floor) =
+            if let Some(row) = bound.as_ref().and_then(|b| b.rows.get(&tag.id)) {
+                // A trained row needs no text vector at all — the tag's
+                // name mattered at training time, not here.
+                let score = row.score(&feature.vector);
+                (score, row.predicts_accept(&feature.vector))
+            } else {
+                let vector = match cached.remove(&tag.id) {
+                    Some(vector) => vector,
+                    None => {
+                        // Lazily encode the name the cache has not seen
+                        // — a new Tag costs one text encode at its
+                        // first pass, and a rename re-encodes because
+                        // the rename deleted the row.
+                        let enc = encoder.clone();
+                        let name = tag.name.clone();
+                        let _permit = VISUAL_ENCODE_SLOTS
+                            .acquire()
+                            .await
+                            .expect("semaphore never closed");
+                        let vector = tokio::task::spawn_blocking(move || enc.encode_text(&name))
+                            .await
+                            .map_err(|e| {
+                                DomainError::Validation(format!("encode task failed: {e}"))
+                            })??;
+                        env.deps
+                            .tag_vectors
+                            .set_tag_vector(&tag.id, &identity, &vector, now)
+                            .await?;
+                        vector
+                    }
+                };
+                let score = cosine_normalized(&feature.vector, &vector);
+                (score, score >= TAG_SCORE_FLOOR)
+            };
+        if clears_floor
             && env
                 .deps
                 .tag_evidence

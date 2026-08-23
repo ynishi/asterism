@@ -28,6 +28,7 @@ held-out win.
 ## Functions
 
 - `artifact_for` — Builds an artifact from a run's outputs, stamping the schema and
+- `bind_current` — Resolves the promoted head against the bound encoder — the scoring
 - `current_label` — The promoted label, if any. Absent (or dangling) means zero-shot.
 - `load_artifact` — Reads one label's artifact, verifying the schema tag and that the
 - `next_head_label` — The next unused label under `heads_root`, counting up from

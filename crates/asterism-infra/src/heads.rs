@@ -161,6 +161,60 @@ pub fn load_artifact(heads_root: &Path, label: &str) -> Result<TagHeadArtifact> 
     Ok(artifact)
 }
 
+/// Resolves the promoted head against the bound encoder — the scoring
+/// side's one read, at startup.
+///
+/// `Ok(None)` is the ordinary case: no pointer, zero-shot scores. An
+/// error is a pointer that exists but cannot be honoured — a dangling
+/// label, a corrupt artifact, an identity that is not the bound
+/// encoder's, a row whose width disagrees, a key that is not a tag id
+/// — and the caller's move is to warn and score zero-shot: a head
+/// that cannot be verified must not score, and startup must not fail
+/// over a file the person can delete.
+pub fn bind_current(
+    heads_root: &Path,
+    identity: &ModelIdentity,
+) -> Result<Option<asterism_core::domain::tag_head::BoundTagHead>> {
+    let Some(label) = current_label(heads_root)? else {
+        return Ok(None);
+    };
+    let artifact = load_artifact(heads_root, &label)?;
+    if artifact.model_id != identity.model_id
+        || artifact.dim != identity.dim
+        || artifact.preprocess_ver != identity.preprocess_ver
+    {
+        bail!(
+            "head {label} was trained under {}/{}d/p{}, the bound encoder is {}/{}d/p{} — \
+             a head scores only against the vectors it learned from",
+            artifact.model_id,
+            artifact.dim,
+            artifact.preprocess_ver,
+            identity.model_id,
+            identity.dim,
+            identity.preprocess_ver
+        );
+    }
+    let head = asterism_core::domain::visual::TagHeadRef::new(label.clone())
+        .map_err(|e| anyhow::anyhow!("{label:?} is not a usable head label: {e}"))?;
+    let mut rows = BTreeMap::new();
+    for (key, row) in artifact.rows {
+        let tag = uuid::Uuid::parse_str(&key)
+            .with_context(|| format!("head {label} keys a row by {key:?}, not a tag id"))?;
+        if row.weights.len() != identity.dim as usize {
+            bail!(
+                "head {label}'s row for {key} is {} wide, the encoder produces {}",
+                row.weights.len(),
+                identity.dim
+            );
+        }
+        rows.insert(asterism_core::domain::value::TagId::from_uuid(tag), row);
+    }
+    Ok(Some(asterism_core::domain::tag_head::BoundTagHead {
+        head,
+        rows,
+    }))
+}
+
 /// Builds an artifact from a run's outputs, stamping the schema and
 /// the identity fields from the encoder's.
 pub fn artifact_for(
@@ -288,5 +342,64 @@ mod tests {
         )
         .unwrap();
         assert!(load_artifact(root.path(), "head-v2").is_err());
+    }
+
+    #[test]
+    fn bind_current_honours_the_pointer_only_against_its_own_encoder() {
+        let root = tempfile::tempdir().unwrap();
+
+        // No pointer: the ordinary zero-shot answer, not an error.
+        assert!(bind_current(root.path(), &identity()).unwrap().is_none());
+
+        write_artifact(root.path(), &artifact("head-v1")).unwrap();
+        promote(root.path(), "head-v1").unwrap();
+        let bound = bind_current(root.path(), &identity()).unwrap().unwrap();
+        assert_eq!(bound.head.as_str(), "head-v1");
+        assert_eq!(bound.rows.len(), 1);
+        let tag = asterism_core::domain::value::TagId::from_uuid(
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        );
+        assert!(bound.rows.contains_key(&tag));
+
+        // A different encoder identity refuses the head instead of
+        // scoring vectors it never learned from.
+        let other = ModelIdentity {
+            model_id: "other-model".into(),
+            ..identity()
+        };
+        assert!(bind_current(root.path(), &other).is_err());
+
+        // A dangling pointer is an error too — the caller warns and
+        // scores zero-shot, and deleting the pointer heals it.
+        std::fs::write(root.path().join(CURRENT_FILE), "head-v9").unwrap();
+        assert!(bind_current(root.path(), &identity()).is_err());
+    }
+
+    #[test]
+    fn bind_current_refuses_rows_it_cannot_key_or_size() {
+        let root = tempfile::tempdir().unwrap();
+        let mut bad_key = artifact("head-v1");
+        bad_key.rows.insert(
+            "not-a-uuid".to_string(),
+            TrainedRow {
+                weights: vec![0.0; 3],
+                bias: 0.0,
+            },
+        );
+        write_artifact(root.path(), &bad_key).unwrap();
+        promote(root.path(), "head-v1").unwrap();
+        assert!(bind_current(root.path(), &identity()).is_err());
+
+        let mut bad_width = artifact("head-v2");
+        bad_width.rows.insert(
+            "00000000-0000-0000-0000-000000000002".to_string(),
+            TrainedRow {
+                weights: vec![0.0; 2],
+                bias: 0.0,
+            },
+        );
+        write_artifact(root.path(), &bad_width).unwrap();
+        promote(root.path(), "head-v2").unwrap();
+        assert!(bind_current(root.path(), &identity()).is_err());
     }
 }

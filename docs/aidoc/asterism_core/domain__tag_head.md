@@ -39,6 +39,7 @@ continues.
 
 ## Types
 
+- `BoundTagHead` — The promoted head as the scoring pass holds it: a label and the
 - `HeadEval` — The whole head's eval: the per-row outcomes summed. Promotion reads
 - `RowEval` — Held-out outcome of one tag's candidate row against the baseline,
 - `RulingExample` — One ruling as the trainer consumes it: the asset's cached vector

@@ -659,6 +659,10 @@ pub async fn init_core_with(
     // phase); the two visual jobs skip while it is unset.
     let visual_encoder_cell: Arc<OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>> =
         Arc::new(OnceLock::new());
+    // Empty until a promoted head verifies against the bound encoder
+    // (#132); unset, the zero-shot pass scores.
+    let tag_head_cell: Arc<OnceLock<Arc<asterism_core::domain::tag_head::BoundTagHead>>> =
+        Arc::new(OnceLock::new());
     let modalities = sqlite::repo::SqliteModalityRepository::new(isle.clone());
     let app_settings = Arc::new(sqlite::repo::SqliteAppSettingRepository::new(isle.clone()));
     let app_setting_service = Arc::new(AppSettingService::new(app_settings));
@@ -869,6 +873,7 @@ pub async fn init_core_with(
                     disclosure: disclosure_cell.clone(),
                     visual_features: visual_features.clone(),
                     visual_encoder: visual_encoder_cell.clone(),
+                    tag_head: tag_head_cell.clone(),
                     tag_evidence: sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone()),
                     tag_vectors: sqlite::repo::SqliteTagVectorRepository::new(isle.clone()),
                 },
@@ -892,7 +897,7 @@ pub async fn init_core_with(
     // A failed bind is reported and the app runs without the feature —
     // a corrupt package must not stop the library from opening.
     #[cfg(feature = "vision")]
-    match bind_visual_model(&visual_encoder_cell, job_queue_arc.clone()).await {
+    match bind_visual_model(&visual_encoder_cell, &tag_head_cell, job_queue_arc.clone()).await {
         Ok(Some(model_id)) => {
             tracing::info!(event = "diag.vision.bound", model_id = %model_id, "visual model bound");
         }
@@ -1379,6 +1384,7 @@ pub async fn init_core_with(
 #[cfg(feature = "vision")]
 async fn bind_visual_model(
     cell: &Arc<OnceLock<Arc<dyn asterism_core::domain::visual::VisualEncoder>>>,
+    head_cell: &Arc<OnceLock<Arc<asterism_core::domain::tag_head::BoundTagHead>>>,
     queue: Arc<dyn asterism_core::domain::repository::JobQueue>,
 ) -> anyhow::Result<Option<String>> {
     use asterism_core::domain::job::JobKind;
@@ -1409,13 +1415,50 @@ async fn bind_visual_model(
         asterism_infra::vision::OrtVisualEncoder::open_dir(&dir)
     })
     .await??;
-    let model_id = asterism_core::domain::visual::VisualEncoder::identity(&adapter)
-        .model_id
-        .clone();
+    let identity = asterism_core::domain::visual::VisualEncoder::identity(&adapter).clone();
+    let model_id = identity.model_id.clone();
     let _ = cell.set(Arc::new(adapter));
+    // The promoted head, if one verifies against this encoder (#132).
+    // A pointer that cannot be honoured is a warning, never a failed
+    // startup: the zero-shot pass scores, and deleting (or
+    // re-promoting) under `heads/` heals it.
+    match asterism_infra::paths::heads_dir()
+        .map_err(anyhow::Error::new)
+        .and_then(|dir| asterism_infra::heads::bind_current(&dir, &identity))
+    {
+        Ok(Some(bound)) => {
+            tracing::info!(
+                event = "diag.vision.head_bound",
+                head = %bound.head.as_str(),
+                rows = bound.rows.len(),
+                "trained tag head bound"
+            );
+            let _ = head_cell.set(Arc::new(bound));
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(
+                event = "diag.vision.head_bind_failed",
+                error = %err,
+                "promoted head not bound; zero-shot scores"
+            );
+        }
+    }
     if !queue.has_pending_batch(JobKind::VisualFeature).await? {
         queue
             .enqueue(JobKind::VisualFeature, serde_json::json!({ "batch": true }))
+            .await?;
+    }
+    // Seeded beside the encode walk since #132: the stamp is per-head,
+    // so a newly bound head re-offers the already-encoded library —
+    // without this seed, vectors stamped under the previous head would
+    // wait for a re-encode that never comes.
+    if !queue.has_pending_batch(JobKind::VisualTagSuggest).await? {
+        queue
+            .enqueue(
+                JobKind::VisualTagSuggest,
+                serde_json::json!({ "batch": true }),
+            )
             .await?;
     }
     Ok(Some(model_id))
