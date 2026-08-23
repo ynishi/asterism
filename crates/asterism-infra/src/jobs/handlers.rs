@@ -3921,6 +3921,128 @@ pub async fn model_fetch(env: &JobEnv, payload: &serde_json::Value) -> Result<St
     ))
 }
 
+// ---------------------------------------------------------------------
+// Head training (#132 phase 2).
+// ---------------------------------------------------------------------
+
+/// Trains the tag head from the person's rulings — the `HeadTrain`
+/// job. See `JobKind::HeadTrain` for the contract; the mechanics here
+/// are deliberately thin because the math lives in
+/// `asterism_core::domain::tag_head` (pure, tested) and the artifact
+/// in `crate::heads` (files, tested). What this handler owns is the
+/// corpus walk: rulings → cached vectors → per-tag examples, the
+/// baseline closure (the same cosine-and-floor rule the zero-shot
+/// pass applies), and the promotion verdict.
+pub async fn head_train(env: &JobEnv, _payload: &serde_json::Value) -> Result<String, DomainError> {
+    use asterism_core::domain::tag_head::{
+        HeadEval, RulingExample, evaluate_row, split_for_holdout, train_row,
+    };
+    use asterism_core::domain::visual::TagSuggestionDisposition;
+
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    let identity = encoder.identity().clone();
+    let rulings = env
+        .deps
+        .tag_evidence
+        .rulings_of_model(&identity.model_id)
+        .await?;
+    if rulings.is_empty() {
+        return Ok("head train: no rulings to learn from".into());
+    }
+    let rulings_used = rulings.len();
+
+    // The corpus walk: each ruling becomes (cached vector, verdict).
+    // A ruling whose asset lost its vector (trashed, re-encoded under
+    // another identity) drops out — the label survives in the row, and
+    // a later run picks it back up when a vector exists again.
+    let mut per_tag: std::collections::BTreeMap<
+        asterism_core::domain::value::TagId,
+        Vec<RulingExample>,
+    > = std::collections::BTreeMap::new();
+    for ruling in &rulings {
+        let Some(feature) = env
+            .deps
+            .visual_features
+            .feature_of(&ruling.asset_id, 0, &identity, VisualFeatureKind::Semantic)
+            .await?
+        else {
+            continue;
+        };
+        per_tag
+            .entry(ruling.tag_id)
+            .or_default()
+            .push(RulingExample {
+                vector: feature.vector,
+                accepted: ruling.disposition == TagSuggestionDisposition::Accepted,
+            });
+    }
+    let text_vectors: std::collections::HashMap<_, _> = env
+        .deps
+        .tag_vectors
+        .vectors(&identity)
+        .await?
+        .into_iter()
+        .collect();
+
+    let mut rows = std::collections::BTreeMap::new();
+    let mut eval = HeadEval::default();
+    let (mut thin, mut unbaselined) = (0usize, 0usize);
+    for (tag_id, examples) in per_tag {
+        // No cached text vector means no zero-shot baseline to beat —
+        // and a candidate that cannot be compared must not exist.
+        let Some(text_vector) = text_vectors.get(&tag_id) else {
+            unbaselined += 1;
+            continue;
+        };
+        let Ok((train, held)) = split_for_holdout(&examples) else {
+            thin += 1;
+            continue;
+        };
+        let row = train_row(identity.dim as usize, &train)?;
+        eval.absorb(evaluate_row(&row, &held, |vector| {
+            cosine_normalized(vector, text_vector) >= TAG_SCORE_FLOOR
+        }));
+        rows.insert(tag_id.as_uuid().to_string(), row);
+    }
+    if rows.is_empty() {
+        return Ok(format!(
+            "head train: nothing trainable — {thin} tag(s) below the ruling floor, \
+             {unbaselined} without a cached name vector, {rulings_used} ruling(s) total"
+        ));
+    }
+
+    let trained = rows.len();
+    let now = chrono::Utc::now().timestamp_millis();
+    let heads_root = crate::paths::heads_dir()?;
+    let won = eval.is_win();
+    let label = run_blocking(move || {
+        let label = crate::heads::next_head_label(&heads_root)?;
+        let artifact =
+            crate::heads::artifact_for(label.clone(), &identity, rows, eval, rulings_used, now);
+        crate::heads::write_artifact(&heads_root, &artifact)?;
+        if won {
+            crate::heads::promote(&heads_root, &label)?;
+        }
+        Ok(label)
+    })
+    .await?;
+    Ok(format!(
+        "{label}: {trained} tag(s) trained on {rulings_used} ruling(s); held-out {} — \
+         candidate {} vs zero-shot {}; {}",
+        eval.held_out,
+        eval.candidate_correct,
+        eval.baseline_correct,
+        if won {
+            "promoted — the pointer is set; scoring through it is the next branch, \
+             zero-shot still scores today"
+        } else {
+            "not promoted, zero-shot stands"
+        }
+    ))
+}
+
 /// `spawn_blocking` with the two error layers folded into the domain's
 /// one: a panicked closure and an install failure both surface as
 /// `Infra`.

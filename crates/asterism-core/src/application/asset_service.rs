@@ -4904,6 +4904,17 @@ impl AssetService {
         self.jobs.enqueue(JobKind::ModelFetch, payload).await
     }
 
+    /// Enqueues a tag-head training run (#132 phase 2) over whatever
+    /// rulings exist; returns the engine's task id. Promotion is the
+    /// job's own held-out verdict, recorded as the pointer the
+    /// scoring side (the follow-up branch) will read at startup —
+    /// this verb only asks for the attempt.
+    pub async fn train_head(&self) -> Result<String, DomainError> {
+        self.jobs
+            .enqueue(JobKind::HeadTrain, serde_json::json!({}))
+            .await
+    }
+
     /// The visual model this process has bound, if any (#112) — the
     /// status the UI's model panel reads. All-`None` covers every
     /// no-model shape (feature off, no package, failed bind) because

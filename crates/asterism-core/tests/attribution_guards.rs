@@ -557,6 +557,14 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
          install (rule 4)",
     ),
     (
+        "asset_service::train_head",
+        "enqueues a tag-head training run (#132); the head is derived \
+         state — its inputs are the rulings people already made (each \
+         one attributed where it was made) and cached vectors, and its \
+         rows are keyed by head ref, never by who asked for the \
+         attempt (rule 4)",
+    ),
+    (
         "asset_service::remeasure_dims",
         "enqueues a re-read of the named artefacts; pixel dimensions are \
          derived from the bytes. A person triggers it, but what lands is \

@@ -40,6 +40,44 @@ enum Ruled {
     Absent,
 }
 
+/// Promotes one stored row to the domain shape — shared by the
+/// per-asset and the whole-model reads, so a corrupt-row rule cannot
+/// drift between them.
+#[allow(clippy::too_many_arguments)]
+fn promote_row(
+    asset_id: AssetId,
+    tag: Uuid,
+    model_id: &str,
+    score: f64,
+    disposition: &str,
+    suggested_at: i64,
+    resolved_at: Option<i64>,
+    head: String,
+) -> Result<TagEvidence, DomainError> {
+    Ok(TagEvidence {
+        asset_id,
+        tag_id: TagId::from_uuid(tag),
+        model_id: model_id.to_string(),
+        // A blank head, like a disposition outside the three slugs
+        // below, is a row that could not have been written.
+        head: TagHeadRef::new(head).map_err(|_| {
+            StoreFault::CorruptRow("a stored tag_evidence row carries a blank head ref".to_string())
+        })?,
+        score: score as f32,
+        // A stored disposition outside the three slugs is a row that
+        // could not have been written, not a thing the caller asked
+        // for.
+        disposition: TagSuggestionDisposition::parse(disposition).map_err(|_| {
+            StoreFault::CorruptRow(format!(
+                "a stored tag_evidence row names a disposition this model \
+                 does not have: {disposition:?}"
+            ))
+        })?,
+        suggested_at_ms: suggested_at,
+        resolved_at_ms: resolved_at,
+    })
+}
+
 /// SQLite adapter for `TagEvidenceRepository` (uses a writer isle).
 #[derive(Clone)]
 pub struct SqliteTagEvidenceRepository {
@@ -152,33 +190,66 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
         rows.into_iter()
             .map(
                 |(tag, score, disposition, suggested_at, resolved_at, head)| {
-                    Ok(TagEvidence {
-                        asset_id: *asset_id,
-                        tag_id: TagId::from_uuid(tag),
-                        model_id: model_id.to_string(),
-                        // A blank head, like a disposition outside the
-                        // three slugs below, is a row that could not have
-                        // been written.
-                        head: TagHeadRef::new(head).map_err(|_| {
-                            StoreFault::CorruptRow(
-                                "a stored tag_evidence row carries a blank head ref".to_string(),
-                            )
-                        })?,
-                        score: score as f32,
-                        // A stored disposition outside the three slugs is a
-                        // row that could not have been written, not a thing
-                        // the caller asked for.
-                        disposition: TagSuggestionDisposition::parse(&disposition).map_err(
-                            |_| {
-                                StoreFault::CorruptRow(format!(
-                                    "a stored tag_evidence row names a disposition this model \
-                             does not have: {disposition:?}"
-                                ))
-                            },
-                        )?,
-                        suggested_at_ms: suggested_at,
-                        resolved_at_ms: resolved_at,
-                    })
+                    promote_row(
+                        *asset_id,
+                        tag,
+                        model_id,
+                        score,
+                        &disposition,
+                        suggested_at,
+                        resolved_at,
+                        head,
+                    )
+                },
+            )
+            .collect()
+    }
+
+    async fn rulings_of_model(&self, model_id: &str) -> Result<Vec<TagEvidence>, DomainError> {
+        let model = model_id.to_string();
+        type Row = (Uuid, Uuid, f64, String, i64, Option<i64>, String);
+        let rows: Vec<Row> = self
+            .isle
+            .call(move |conn| {
+                // Stable (asset, tag) order is part of the port's
+                // contract: the trainer's held-out split is a function
+                // of it (#132 phase 2).
+                let mut stmt = conn.prepare(
+                    "SELECT asset_id, tag_id, score, disposition, suggested_at, resolved_at, head
+                       FROM tag_evidence
+                      WHERE model_id = ?1 AND disposition <> 'suggested'
+                      ORDER BY asset_id, tag_id",
+                )?;
+                let rows = stmt
+                    .query_map(params![model], |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(
+                |(asset, tag, score, disposition, suggested_at, resolved_at, head)| {
+                    promote_row(
+                        AssetId::from_uuid(asset),
+                        tag,
+                        model_id,
+                        score,
+                        &disposition,
+                        suggested_at,
+                        resolved_at,
+                        head,
+                    )
                 },
             )
             .collect()
@@ -600,6 +671,42 @@ mod tests {
                 .unwrap(),
             0
         );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_trainers_corpus_is_ruled_rows_only_in_stable_order() {
+        let (isle, driver) = open_and_migrate_in_memory().await.unwrap();
+        let repo = SqliteTagEvidenceRepository::new(isle.clone());
+        let (asset, tag_a, tag_b) = seed_asset_and_tags(&isle).await;
+
+        repo.suggest_under_head(&asset, &tag_a, "m", &zs(), 0.4, 1)
+            .await
+            .unwrap();
+        repo.suggest_under_head(&asset, &tag_b, "m", &zs(), 0.3, 1)
+            .await
+            .unwrap();
+        repo.resolve(&asset, &tag_a, "m", TagSuggestionDisposition::Accepted, 2)
+            .await
+            .unwrap();
+        // tag_b stays merely suggested — not a label.
+
+        let corpus = repo.rulings_of_model("m").await.unwrap();
+        assert_eq!(corpus.len(), 1);
+        assert_eq!(corpus[0].tag_id, tag_a);
+        assert_eq!(corpus[0].disposition, TagSuggestionDisposition::Accepted);
+        assert_eq!(corpus[0].asset_id, asset);
+
+        // The order is stable across reads — the held-out split is a
+        // function of it (#132 phase 2).
+        repo.resolve(&asset, &tag_b, "m", TagSuggestionDisposition::Rejected, 3)
+            .await
+            .unwrap();
+        let first = repo.rulings_of_model("m").await.unwrap();
+        let second = repo.rulings_of_model("m").await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 2);
 
         driver.shutdown().await.unwrap();
     }

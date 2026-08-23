@@ -185,6 +185,7 @@ pub mod snapshot_hash;
 pub mod sort_eval;
 pub mod source_locator;
 pub mod tag;
+pub mod tag_head;
 pub mod thread;
 pub mod value;
 pub mod visual;
