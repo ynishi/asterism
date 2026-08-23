@@ -53,24 +53,28 @@ use asterism_contract::dto::{
     VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
-    CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto, ForgeEntryStateDto,
-    ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgePursuitActCommand,
-    ForgePursuitDto, ForgeResolvedDto, ForgeStrategyDto, OpenForgeLineCommand,
-    OpenForgePursuitCommand, PushForgeRoundCommand, RenameForgeLineCommand,
-    SetForgeLineStrategyCommand,
+    AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
+    ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
+    ForgePursuitActCommand, ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto,
+    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
+    PushForgeRoundCommand, RenameForgeLineCommand, RenameForgeThreadCommand,
+    SayInForgeThreadCommand, SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
     ListJobLogQuery, ListObservationsQuery, ListPerfQuery, RandomAssetsQuery, SearchAssetsQuery,
 };
 use asterism_core::DomainError;
+use asterism_core::application::forge::Anchored;
 use asterism_core::application::mapping::{
-    forge_collisions_to_dto, forge_discarded_to_dto, forge_history_to_dto, forge_line_id,
-    forge_line_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
-    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
+    forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
+    forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
+    forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
+    forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto,
 };
 use asterism_core::domain::forge::model::pursuit::Intent;
-use asterism_core::domain::forge::model::value::{LineId, PursuitId};
+use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
 use asterism_core::domain::observation::Stream;
 use asterism_core::domain::value::MimeType;
 use asterism_core::error::ConflictKind;
@@ -519,6 +523,45 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route(
             "/asterism/forge/pursuits/{id}/children",
             get(list_forge_pursuit_children),
+        )
+        // What was said about work. `about` is four routes rather than
+        // one taking a discriminator, because an anchor has four
+        // variants of three different arities: a single query-string
+        // form would need a different set of required parameters per
+        // value, and a router cannot refuse a wrong combination — a
+        // caller asking for a round while passing an entry id would get
+        // an answer about the wrong thing, or a 500. Each path below
+        // carries exactly the ids its anchor needs, so the wrong
+        // combination has nowhere to be written.
+        .route("/asterism/forge/threads", post(open_forge_thread))
+        .route("/asterism/forge/threads/{id}", get(get_forge_thread))
+        .route(
+            "/asterism/forge/threads/{id}/say",
+            post(say_in_forge_thread),
+        )
+        .route(
+            "/asterism/forge/threads/{id}/amend",
+            post(amend_forge_message),
+        )
+        .route(
+            "/asterism/forge/threads/{id}/rename",
+            post(rename_forge_thread),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/threads",
+            get(threads_about_pursuit),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/rounds/{node}/threads",
+            get(threads_about_round),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/rounds/{node}/entries/{entry}/threads",
+            get(threads_about_entry),
+        )
+        .route(
+            "/asterism/forge/lines/{id}/points/{point}/threads",
+            get(threads_about_change),
         )
         .with_state(ctx)
 }
@@ -3625,4 +3668,197 @@ async fn list_forge_pursuits_of_line(
 ) -> ApiResult<Vec<ForgePursuitDto>> {
     let found = ctx.pursuit_service.of_line(&line_id(&id)?).await?;
     Ok(Json(found.iter().map(forge_pursuit_to_dto).collect()))
+}
+
+// -------------------------------------------------------------------
+// The forge — what was said about work
+// -------------------------------------------------------------------
+
+/// Reads a thread id out of the path.
+fn thread_id(raw: &str) -> Result<ThreadId, ApiError> {
+    Ok(forge_thread_id(raw, "thread id")?)
+}
+
+/// Reads a conversation back after a write.
+///
+/// The same reason the line's and the pursuit's writes read their
+/// subject back — see [`line_now`] — with one difference worth stating:
+/// `say` and `amend` do *not* use this. What each of them wrote is the
+/// answer, and saying so is the point rather than an economy.
+async fn thread_now(ctx: &ServerCtx, id: &ThreadId) -> Result<Json<ForgeThreadDto>, ApiError> {
+    Ok(Json(forge_thread_to_dto(
+        &ctx.forge_thread_service.get(id).await?,
+    )))
+}
+
+/// `POST /asterism/forge/threads` — opens a conversation about
+/// something in the forge.
+///
+/// **The anchor is resolved, not accepted.** The command names ids and
+/// a kind; the service reads the pursuit or the line and the model
+/// builds the anchor from what it finds. So a pursuit nobody opened is
+/// a `404`, and an entry the round never touched is a `400` about the
+/// anchor — two different answers, which is what makes the distinction
+/// worth resolving here rather than trusting the caller's word for it.
+async fn open_forge_thread(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<OpenForgeThreadCommand>,
+) -> ApiResult<ForgeThreadDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let about = forge_anchored(
+        &command.anchor_kind,
+        command.pursuit_id.as_deref(),
+        command.line_id.as_deref(),
+        command.node_id.as_deref(),
+        command.entry_id.as_deref(),
+        command.change_point_id.as_deref(),
+    )?;
+    let title = command.title.map(forge_name).transpose()?;
+    let thread = ctx
+        .forge_thread_service
+        .open(about, title, forge_body(command.said)?, &attribution)
+        .await?;
+    Ok(Json(forge_thread_to_dto(&thread)))
+}
+
+/// `GET /asterism/forge/threads/{id}` — the conversation, whole.
+///
+/// Every message and every correction to each. A payload carrying only
+/// what each message says now would leave a withdrawn sentence
+/// attributed to the person who withdrew it.
+async fn get_forge_thread(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<ForgeThreadDto> {
+    thread_now(&ctx, &thread_id(&id)?).await
+}
+
+/// `POST /asterism/forge/threads/{id}/say` — says something.
+///
+/// Answers with the message it wrote. A reply naming a message of
+/// another conversation is a `400`: the caller addressed one thread and
+/// named something that is not in it, which no change of state makes
+/// true.
+async fn say_in_forge_thread(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<SayInForgeThreadCommand>,
+) -> ApiResult<ForgeMessageDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = thread_id(&id)?;
+    let replying_to = command
+        .replying_to
+        .as_deref()
+        .map(|raw| forge_message_id(raw, "replying_to"))
+        .transpose()?;
+    let said = ctx
+        .forge_thread_service
+        .say(&id, replying_to, forge_body(command.said)?, &attribution)
+        .await?;
+    Ok(Json(forge_message_to_dto(&said)))
+}
+
+/// `POST /asterism/forge/threads/{id}/amend` — corrects something said.
+///
+/// **Answers with the correction, not with the message as it now
+/// reads.** The model keeps both and the distinction is the model's:
+/// what was said first is still there, and a response shaped as "the
+/// message, updated" would quietly be the shape that loses it.
+async fn amend_forge_message(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<AmendForgeMessageCommand>,
+) -> ApiResult<ForgeRevisionDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = thread_id(&id)?;
+    let message = forge_message_id(&command.message_id, "message id")?;
+    let revision = ctx
+        .forge_thread_service
+        .amend(&id, &message, forge_body(command.said)?, &attribution)
+        .await?;
+    Ok(Json(forge_revision_to_dto(&revision)))
+}
+
+/// `POST /asterism/forge/threads/{id}/rename` — names the conversation,
+/// or takes its name off.
+///
+/// A title is a label on the conversation rather than something said in
+/// it, so this writes no message. `title` absent takes the name off.
+async fn rename_forge_thread(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<RenameForgeThreadCommand>,
+) -> ApiResult<ForgeThreadDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = thread_id(&id)?;
+    let title = command.title.map(forge_name).transpose()?;
+    ctx.forge_thread_service
+        .rename(&id, title.as_ref(), &attribution)
+        .await?;
+    thread_now(&ctx, &id).await
+}
+
+/// Answers one of the four `about` routes.
+///
+/// More than one conversation can hang off the same thing — two people
+/// starting separate ones about a round is not a mistake to merge — so
+/// every one of these answers a list.
+async fn threads_about(ctx: &ServerCtx, about: Anchored) -> ApiResult<Vec<ForgeThreadDto>> {
+    let found = ctx.forge_thread_service.about(about).await?;
+    Ok(Json(found.iter().map(forge_thread_to_dto).collect()))
+}
+
+/// `GET /asterism/forge/pursuits/{id}/threads` — about the work as a
+/// whole.
+async fn threads_about_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgeThreadDto>> {
+    threads_about(&ctx, Anchored::Pursuit(pursuit_id(&id)?)).await
+}
+
+/// `GET /asterism/forge/pursuits/{id}/rounds/{node}/threads` — about
+/// one round of it.
+async fn threads_about_round(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, node)): Path<(String, String)>,
+) -> ApiResult<Vec<ForgeThreadDto>> {
+    let about = forge_anchored("round", Some(&id), None, Some(&node), None, None)?;
+    threads_about(&ctx, about).await
+}
+
+/// `GET /asterism/forge/pursuits/{id}/rounds/{node}/entries/{entry}/threads`
+/// — about one entry, as that round had it.
+async fn threads_about_entry(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, node, entry)): Path<(String, String, String)>,
+) -> ApiResult<Vec<ForgeThreadDto>> {
+    let about = forge_anchored("entry", Some(&id), None, Some(&node), Some(&entry), None)?;
+    threads_about(&ctx, about).await
+}
+
+/// `GET /asterism/forge/lines/{id}/points/{point}/threads` — about what
+/// landed on the line.
+async fn threads_about_change(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path((id, point)): Path<(String, String)>,
+) -> ApiResult<Vec<ForgeThreadDto>> {
+    let about = forge_anchored("change", None, Some(&id), None, None, Some(&point))?;
+    threads_about(&ctx, about).await
 }

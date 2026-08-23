@@ -13,15 +13,16 @@ use asterism_contract::dto::{
     SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
 };
 use asterism_contract::forge::{
-    ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto, ForgeDiscardedDto,
-    ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeOpDto, ForgePursuitDto,
-    ForgeRoundDto, ForgeStrategyDto,
+    ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
+    ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
+    ForgeOpDto, ForgePursuitDto, ForgeRevisionDto, ForgeRoundDto, ForgeStrategyDto, ForgeThreadDto,
 };
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
+use crate::application::forge::Anchored;
 use crate::domain::app_setting::EffectiveSetting;
 use crate::domain::asset::{Asset, AssetCard, AssetQuery, TrashFilter, UNCLASSIFIED_MODALITY};
 use crate::domain::asset_comment::AssetComment;
@@ -38,8 +39,16 @@ use crate::domain::forge::model::op::{Op, OpKind};
 use crate::domain::forge::model::pursuit::{Close, Outcome, Pursuit, Round};
 use crate::domain::forge::model::strategy::About;
 use crate::domain::forge::model::table::EntryStates;
+// Aliased because `domain::thread` has a `Message` and a `Thread` of
+// its own, and they are different things: those hang off a card, these
+// hang off a forge node. The same distinction `CoreCtx` draws by
+// naming one service `forge_thread_service`.
+use crate::domain::forge::model::thread::{
+    Anchor, Body, Message as ForgeMessage, Revision, Thread as ForgeThread,
+};
 use crate::domain::forge::model::value::{
-    Content, EntryId, Existence, LineId, Name, PursuitId, StrategyId,
+    ChangePointId, Content, EntryId, Existence, LineId, MessageId as ForgeMessageId, Name, NodeId,
+    PursuitId, StrategyId, ThreadId as ForgeThreadId,
 };
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
@@ -1417,6 +1426,148 @@ pub fn forge_collisions_to_dto(found: &[Collision]) -> Vec<ForgeCollisionDto> {
             moved_in_id: collision.moved_in.to_string(),
         })
         .collect()
+}
+
+// ---- What was said about work ----------------------------------
+
+/// Reads a thread id off the wire.
+pub fn forge_thread_id(raw: &str, field: &str) -> Result<ForgeThreadId, DomainError> {
+    Ok(ForgeThreadId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Reads a message id off the wire.
+pub fn forge_message_id(raw: &str, field: &str) -> Result<ForgeMessageId, DomainError> {
+    Ok(ForgeMessageId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Reads something somebody said, refusing an empty one.
+pub fn forge_body(raw: impl Into<String>) -> Result<Body, DomainError> {
+    Body::new(raw).map_err(DomainError::from)
+}
+
+/// Reads which thing a conversation is about.
+///
+/// The ids a kind needs are required and the rest are ignored, so a
+/// caller cannot describe a round anchor while handing over an entry.
+/// Over HTTP the kind is fixed by the route as well, and this is what
+/// answers for the transports where it is not.
+pub fn forge_anchored(
+    kind: &str,
+    pursuit: Option<&str>,
+    line: Option<&str>,
+    node: Option<&str>,
+    entry: Option<&str>,
+    change_point: Option<&str>,
+) -> Result<Anchored, DomainError> {
+    fn needed<'a>(
+        value: Option<&'a str>,
+        kind: &str,
+        field: &'static str,
+    ) -> Result<&'a str, DomainError> {
+        value.ok_or_else(|| {
+            DomainError::Validation(format!("an anchor of kind {kind:?} names its {field}"))
+        })
+    }
+
+    Ok(match kind {
+        "pursuit" => Anchored::Pursuit(forge_pursuit_id(
+            needed(pursuit, kind, "pursuit")?,
+            "pursuit id",
+        )?),
+        "round" => Anchored::Round(
+            forge_pursuit_id(needed(pursuit, kind, "pursuit")?, "pursuit id")?,
+            NodeId::from_uuid(parse_uuid(needed(node, kind, "round")?, "node id")?),
+        ),
+        "entry" => Anchored::Entry(
+            forge_pursuit_id(needed(pursuit, kind, "pursuit")?, "pursuit id")?,
+            NodeId::from_uuid(parse_uuid(needed(node, kind, "round")?, "node id")?),
+            EntryId::from_uuid(parse_uuid(needed(entry, kind, "entry")?, "entry id")?),
+        ),
+        "change" => Anchored::Change(
+            forge_line_id(needed(line, kind, "line")?, "line id")?,
+            ChangePointId::from_uuid(parse_uuid(
+                needed(change_point, kind, "change point")?,
+                "change point id",
+            )?),
+        ),
+        other => {
+            return Err(DomainError::Validation(format!(
+                "an anchor is \"pursuit\", \"round\", \"entry\" or \"change\", not {other:?}"
+            )));
+        }
+    })
+}
+
+/// Converts a conversation to what a caller reads: every message and
+/// every correction to each.
+pub fn forge_thread_to_dto(thread: &ForgeThread) -> ForgeThreadDto {
+    ForgeThreadDto {
+        id: thread.id().to_string(),
+        anchor: forge_anchor_to_dto(thread.anchor()),
+        title: thread.title().map(|name| name.as_str().to_string()),
+        messages: thread.messages().iter().map(forge_message_to_dto).collect(),
+    }
+}
+
+fn forge_anchor_to_dto(anchor: Anchor) -> ForgeAnchorDto {
+    let mut dto = ForgeAnchorDto {
+        kind: String::new(),
+        pursuit_id: None,
+        node_id: None,
+        entry_id: None,
+        change_point_id: None,
+    };
+    match anchor {
+        Anchor::Pursuit(id) => {
+            dto.kind = "pursuit".to_string();
+            dto.pursuit_id = Some(id.to_string());
+        }
+        Anchor::Round(node) => {
+            dto.kind = "round".to_string();
+            dto.node_id = Some(node.to_string());
+        }
+        Anchor::Entry { round, entry } => {
+            dto.kind = "entry".to_string();
+            dto.node_id = Some(round.to_string());
+            dto.entry_id = Some(entry.to_string());
+        }
+        Anchor::Change(point) => {
+            dto.kind = "change".to_string();
+            dto.change_point_id = Some(point.to_string());
+        }
+    }
+    dto
+}
+
+/// Converts one message, with what it says now beside what it said
+/// first.
+pub fn forge_message_to_dto(message: &ForgeMessage) -> ForgeMessageDto {
+    let (actor_kind, actor_id) = actor_to_columns(message.act().by());
+    ForgeMessageDto {
+        id: message.id().to_string(),
+        parent_id: message.parent().map(|id| id.to_string()),
+        said: message.body().as_str().to_string(),
+        first_said: message.said().as_str().to_string(),
+        at_ms: message.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+        revisions: message
+            .revisions()
+            .iter()
+            .map(forge_revision_to_dto)
+            .collect(),
+    }
+}
+
+/// Converts one correction.
+pub fn forge_revision_to_dto(revision: &Revision) -> ForgeRevisionDto {
+    let (actor_kind, actor_id) = actor_to_columns(revision.act().by());
+    ForgeRevisionDto {
+        said: revision.body().as_str().to_string(),
+        at_ms: revision.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+    }
 }
 
 #[cfg(test)]

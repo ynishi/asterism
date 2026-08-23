@@ -489,3 +489,207 @@ pub struct ForgePursuitActCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -------------------------------------------------------------------
+// What was said about work — a conversation and what is in it.
+// -------------------------------------------------------------------
+
+/// A conversation, whole.
+///
+/// **Every message and every correction.** Not the current text alone:
+/// a correction the reader does not see is a sentence still attributed
+/// to somebody who withdrew it, and the model keeps both for that
+/// reason. Shaping this for the convenience of a screen that only
+/// renders the latest would misreport what people said.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeThreadDto {
+    /// Thread id (UUID hyphenated).
+    pub id: String,
+    /// What the conversation hangs off.
+    pub anchor: ForgeAnchorDto,
+    /// A name for it, when it was given one.
+    pub title: Option<String>,
+    /// Everything said, oldest first.
+    pub messages: Vec<ForgeMessageDto>,
+}
+
+/// What a conversation is about.
+///
+/// One shape for four anchors, with the fields each needs and the rest
+/// absent. `kind` says which, and which ids are present follows from
+/// it: `"pursuit"` fills `pursuit_id`, `"round"` fills `node_id`,
+/// `"entry"` fills `node_id` and `entry_id`, `"change"` fills
+/// `change_point_id`.
+///
+/// A caller does not build one of these. An anchor is resolved from the
+/// path — the service reads the pursuit or the line and the model makes
+/// the anchor — so this is a read shape only, and a wrong combination
+/// is not something a request can express.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeAnchorDto {
+    /// `"pursuit"`, `"round"`, `"entry"` or `"change"`.
+    pub kind: String,
+    /// The work, for `"pursuit"`.
+    pub pursuit_id: Option<String>,
+    /// The round, for `"round"` and `"entry"` (UUID hyphenated).
+    pub node_id: Option<String>,
+    /// The entry that round touched, for `"entry"` (UUID hyphenated).
+    pub entry_id: Option<String>,
+    /// What landed, for `"change"` (UUID hyphenated).
+    pub change_point_id: Option<String>,
+}
+
+/// One thing said, with every correction to it.
+///
+/// `said` is what it says now and `first_said` is what it said when it
+/// was written; they are equal until somebody corrects it. `revisions`
+/// carries each correction in the order they were made, so a reader can
+/// show the change rather than only its result.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeMessageDto {
+    /// Message id (UUID hyphenated).
+    pub id: String,
+    /// What it replies to, when it replies to something (UUID
+    /// hyphenated).
+    pub parent_id: Option<String>,
+    /// What it says now — the last correction, or the original when
+    /// there has been none.
+    pub said: String,
+    /// What it said when it was written.
+    pub first_said: String,
+    /// When it was written (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub actor_kind: String,
+    /// Who wrote it (UUID hyphenated).
+    pub actor_id: String,
+    /// Every correction, oldest first.
+    pub revisions: Vec<ForgeRevisionDto>,
+}
+
+/// One correction to something said.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeRevisionDto {
+    /// What it says from here on.
+    pub said: String,
+    /// When it was corrected (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub actor_kind: String,
+    /// Who corrected it (UUID hyphenated).
+    pub actor_id: String,
+}
+
+/// Opens a conversation about something in the forge.
+///
+/// The anchor is named by ids and `kind`, and resolved by the service
+/// rather than trusted: it reads the pursuit or the line and the model
+/// builds the anchor, so an entry a round never touched is refused
+/// rather than recorded.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OpenForgeThreadCommand {
+    /// `"pursuit"`, `"round"`, `"entry"` or `"change"`.
+    pub anchor_kind: String,
+    /// The work this is about (UUID hyphenated). Required for every
+    /// kind but `"change"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pursuit_id: Option<String>,
+    /// The line, for `"change"` (UUID hyphenated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_id: Option<String>,
+    /// The round, for `"round"` and `"entry"` (UUID hyphenated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    /// The entry, for `"entry"` (UUID hyphenated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<String>,
+    /// What landed, for `"change"` (UUID hyphenated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_point_id: Option<String>,
+    /// A name for the conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The first thing said. A conversation is what was said in it, so
+    /// there is no opening one empty.
+    pub said: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Says something in a conversation.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct SayInForgeThreadCommand {
+    /// Target thread id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub thread_id: String,
+    /// What this answers, when it answers something (UUID hyphenated).
+    /// A message of another conversation is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replying_to: Option<String>,
+    /// What is being said.
+    pub said: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Corrects something said. Nothing is overwritten.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AmendForgeMessageCommand {
+    /// Target thread id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub thread_id: String,
+    /// Which message to correct (UUID hyphenated).
+    pub message_id: String,
+    /// What it says from here on.
+    pub said: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Renames a conversation, or takes its name off.
+///
+/// `title` absent means take it off, which is why it is not
+/// `skip_serializing_if`: an absent field and a field set to null have
+/// to mean the same thing here, and both mean "no name".
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RenameForgeThreadCommand {
+    /// Target thread id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub thread_id: String,
+    /// The new name, or absent to take the name off.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}

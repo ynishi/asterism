@@ -79,6 +79,12 @@ pub struct ServerCtx {
     /// ports — a close writes to both logs at once, which is why they
     /// share an adapter rather than each holding one.
     pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
+    /// What was said about work: a remark on a round, a question about
+    /// one entry it touched, a review of what landed. Named apart from
+    /// [`thread_service`](Self::thread_service) for the reason
+    /// `CoreCtx` names it apart — the forge's conversations hang off a
+    /// forge node, and the other ones hang off a card.
+    pub forge_thread_service: Arc<asterism_core::application::forge::ThreadService>,
     /// Registered exporters — surfaces which backends the server can
     /// dispatch to.
     pub exporter_registry: ExporterRegistry,
@@ -130,6 +136,7 @@ impl ServerCtx {
             thread_service: core.thread_service.clone(),
             line_service: core.line_service.clone(),
             pursuit_service: core.pursuit_service.clone(),
+            forge_thread_service: core.forge_thread_service.clone(),
             exporter_registry: core.exporter_registry.clone(),
             jobs_pool: core.jobs_pool.clone(),
             telemetry: core.telemetry.clone(),
