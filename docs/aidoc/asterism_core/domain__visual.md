@@ -24,6 +24,7 @@ buffer rather than an image type).
 
 - `ModelIdentity` — The derivation identity of everything one model configuration
 - `TagEvidence` — One scored tag suggestion with its full derivation identity.
+- `TagHeadRef` — Which scoring head proposed a suggestion (#132, the identity
 - `TagSuggestionDisposition` — Where one tag suggestion stands between the model and the person.
 - `VisualFeature` — One stored feature vector and its full derivation identity.
 - `VisualFeatureKind` — What kind of feature a stored vector is.
