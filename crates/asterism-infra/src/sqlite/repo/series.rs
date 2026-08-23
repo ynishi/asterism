@@ -22,6 +22,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
 /// SQLite adapter for `SeriesRepository` (uses a writer isle).
@@ -77,6 +78,15 @@ impl StrategyRow {
 
     fn into_domain(self) -> Result<Strategy, DomainError> {
         let id = self.id;
+        // A token no decoder here is spelled with is an unreadable row,
+        // the same judgement `paths_from_json` below already makes: the
+        // caller asked nothing and no other request avoids it.
+        let decode = Decode::parse(&self.decode).map_err(|_| {
+            StoreFault::CorruptRow(format!(
+                "series_strategy {id} names a decoder this model does not have: {:?}",
+                self.decode
+            ))
+        })?;
         Ok(Strategy {
             id: StrategyId::from_uuid(id),
             name: self.name,
@@ -85,7 +95,7 @@ impl StrategyRow {
             // makes ` IMAGE/PNG; charset=binary ` and `image/png` the
             // one format they are — the normalisation `claims` relies on.
             applies_to: MimeType::parse(&self.applies_to),
-            decode: Decode::parse(&self.decode)?,
+            decode,
             include: paths_from_json(&self.include, "include", id)?,
             exclude: paths_from_json(&self.exclude, "exclude", id)?,
         })
@@ -272,7 +282,7 @@ impl SeriesRepository for SqliteSeriesRepository {
                 // the caller re-registered one it already holds.
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::clashes(format!("strategy {id} is already registered"))
+                    StoreFault::taken("a strategy id", id).into()
                 } else {
                     infra_err(err)
                 }

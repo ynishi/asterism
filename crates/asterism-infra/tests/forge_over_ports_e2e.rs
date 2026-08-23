@@ -1101,14 +1101,15 @@ async fn a_reply_to_another_conversation_is_refused(world: &World) {
         Act::new(at(3), Actor::User(ActorId::new())),
     );
     let refused = Threads::say(&*world.threads_port, &mine.id(), &stray).await;
+    // A `Validation`, and the same one `Thread::say` gives — which is
+    // what the port's doc claims and, until this was fixed, was not
+    // true: this answered `Conflict` while the model answered
+    // `Validation`, so one situation had two statuses depending on
+    // which door it came through. Nothing here is contended. The
+    // caller addressed one conversation and named a message of
+    // another, and no row could change to make that hold.
     assert!(
-        matches!(
-            refused,
-            Err(DomainError::Conflict {
-                kind: ConflictKind::Clashes,
-                ..
-            })
-        ),
+        matches!(refused, Err(DomainError::Validation(_))),
         "a reply belongs to one conversation, and asking again with \
          the same pair never changes that: {refused:?}"
     );

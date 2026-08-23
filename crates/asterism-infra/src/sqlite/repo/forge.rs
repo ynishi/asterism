@@ -63,6 +63,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::forge::rows::{
     self, ActRow, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
     ThreadMessageRow, ThreadRevisionRow, ThreadRow,
@@ -913,14 +914,16 @@ impl Lines for SqliteForge {
 
         dropped.map_err(|refusal| match refusal {
             DropRefusal::NoSuchLine => DomainError::not_found("line", id),
-            DropRefusal::Reopened => DomainError::raced(format!(
+            DropRefusal::Reopened => StoreFault::StaleWrite(format!(
                 "line {id} is out of the archive again, and a drop is decided against an \
                  archived line"
-            )),
-            DropRefusal::WorkOpenedSince { opened } => DomainError::raced(format!(
+            ))
+            .into(),
+            DropRefusal::WorkOpenedSince { opened } => StoreFault::StaleWrite(format!(
                 "{opened} pieces of work have been opened on line {id} since this drop was \
                  decided, and what it releases was decided without them"
-            )),
+            ))
+            .into(),
             DropRefusal::WorkOfAnotherLine { elsewhere } => DomainError::Validation(format!(
                 "this drop of line {id} names {elsewhere} pieces of work that are not against \
                  it, and what another line holds is not this drop's to release"
@@ -1143,8 +1146,15 @@ impl Threads for SqliteForge {
             .await
             .map_err(infra_err)?;
 
+        // Not a conflict, and this is the case that showed the old
+        // classification was guesswork: the caller addressed one thread
+        // and named a message of another. Nothing is contended, nothing
+        // raced, and no row could change to make it hold — the request
+        // describes something that is not this thread. `Thread::say`
+        // refuses it as a `Validation` and this is the same refusal,
+        // which the port's own doc says.
         said.map_err(|parent| {
-            DomainError::clashes(format!("message {parent} is not in thread {thread}"))
+            StoreFault::Impossible(format!("message {parent} is not in thread {thread}")).into()
         })
     }
 
@@ -1190,7 +1200,7 @@ impl Threads for SqliteForge {
             .map_err(infra_err)?;
 
         amended.map_err(|()| {
-            DomainError::clashes(format!("message {message} is not in thread {thread}"))
+            StoreFault::Impossible(format!("message {message} is not in thread {thread}")).into()
         })
     }
 
@@ -1381,9 +1391,10 @@ impl Pursuits for SqliteForge {
             .map_err(infra_err)?;
 
         landed.map_err(|refusal| match refusal {
-            PushRefusal::Forked => DomainError::raced(format!(
+            PushRefusal::Forked => StoreFault::StaleWrite(format!(
                 "work {id} has moved: this round sits on {on}, and something is already there"
-            )),
+            ))
+            .into(),
             PushRefusal::NotThisPursuit => DomainError::Validation(format!(
                 "this round sits on {on}, which is not a node of work {id}"
             )),
@@ -1484,17 +1495,20 @@ impl Closings for SqliteForge {
             // against the logs this transaction was holding still. A
             // line that moved anyway is a line something wrote to
             // without taking the write lock.
-            Refusal::LineMoved => DomainError::raced(format!(
+            Refusal::LineMoved => StoreFault::StaleWrite(format!(
                 "line {line} moved under a close decided against it inside the write"
-            )),
-            Refusal::WorkForked => DomainError::raced(format!(
+            ))
+            .into(),
+            Refusal::WorkForked => StoreFault::StaleWrite(format!(
                 "work {pursuit} moved under a close decided against it inside the write"
-            )),
+            ))
+            .into(),
             // The one the message itself already says is not worth
             // asking again: reading it again finds the same ending.
-            Refusal::WorkAlreadyEnded => DomainError::settled(format!(
+            Refusal::WorkAlreadyEnded => StoreFault::AlreadyDecided(format!(
                 "work {pursuit} has already ended; reading it again will find the same ending"
-            )),
+            ))
+            .into(),
             Refusal::Answered(refused) => refused,
         })
     }

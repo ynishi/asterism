@@ -109,6 +109,14 @@ vision = ["dep:asterism-vision"]
 
 [dev-dependencies]
 tempfile = "3"
+
+# Read by `tests/store_fault_is_the_only_door.rs`, which asks which
+# items in this crate are test-only. Cutting a file at its first
+# `#[cfg(test)]` answers that wrongly here — several files put a
+# `#[cfg(test)] const` near the top, and everything after it stops
+# being read. `asterism-core`'s `forge_boundary.rs` took the same
+# dependency for the same reason.
+syn = { version = "2", features = ["full", "visit", "parsing"] }
 # Fixture builder for the PNG-shaped test corpus used by the walker /
 # fingerprint / job-handler tests. Same rationale as the sibling dev-dep
 # in `asterism-importer-sdk`: building PNGs by hand is the chunk-boundary

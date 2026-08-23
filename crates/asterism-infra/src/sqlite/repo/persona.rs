@@ -10,6 +10,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
 /// Primitive row built inside the isle closure; promotion to the domain
@@ -381,16 +382,29 @@ impl PersonaRepository for SqlitePersonaRepository {
             .map_err(infra_err)?;
         match verdict {
             Verdict::Gone => Ok(()),
-            Verdict::Live => Err(DomainError::blocked(format!(
-                "persona {id} is still live; trash it before purging"
-            ))),
-            Verdict::Held { held, lines } => Err(DomainError::blocked(format!(
-                "persona {id} has {held} asset(s) the forge is holding, on {}. \
-                 A line holds what it has ever named, and releases it when the line \
-                 itself is dropped — taking an entry off does not, because bringing \
-                 it back needs the content to still be there",
-                describe(&lines)
-            ))),
+            Verdict::Live => Err(StoreFault::blocked_by(
+                format!("persona {id} is still live"),
+                "trash it before purging",
+            )
+            .into()),
+            Verdict::Held { held, lines } => Err(StoreFault::blocked_by(
+                format!(
+                    "persona {id} has {held} asset(s) the forge is holding, on {}. \
+                     A line holds what it has ever named, and releases it when the line \
+                     itself is dropped — taking an entry off does not, because bringing \
+                     it back needs the content to still be there",
+                    describe(&lines)
+                ),
+                // Three steps rather than one, and named as three:
+                // a drop is decided against an archived line, and an
+                // archived line refuses while work is open against it.
+                // "Drop those lines" is one verb for a sequence the
+                // caller has to walk, and a remedy that understates
+                // what it costs is a remedy that fails once.
+                "end the work against those lines, archive them and drop them, \
+                 and the same purge then works",
+            )
+            .into()),
         }
     }
 }

@@ -44,6 +44,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::infra_err;
 use crate::sqlite::repo::asset::MEMBER_POPULATION;
 
@@ -433,20 +434,35 @@ impl SessionRepository for SqliteSessionRepository {
             DeleteOutcome::Deleted => Ok(()),
             DeleteOutcome::NotFound => Err(DomainError::not_found("session", &id_for_err)),
             DeleteOutcome::HasAssets(count, trashed) if trashed == count => {
-                Err(DomainError::blocked(format!(
-                    "session {id_for_err} looks empty because all {count} of its \
-                     asset(s) are in the trash; restore or purge them first"
-                )))
+                Err(StoreFault::blocked_by(
+                    format!(
+                        "session {id_for_err} looks empty because all {count} of its \
+                         asset(s) are in the trash"
+                    ),
+                    "restore or purge them first",
+                )
+                .into())
             }
-            DeleteOutcome::HasAssets(count, 0) => Err(DomainError::blocked(format!(
-                "session {id_for_err} still has {count} attached asset(s); \
-                 detach them first"
-            ))),
-            DeleteOutcome::HasAssets(count, trashed) => Err(DomainError::blocked(format!(
-                "session {id_for_err} still has {count} attached asset(s) \
-                 ({trashed} of them in the trash); detach them first, and \
-                 restore or purge the trashed ones"
-            ))),
+            // "Purge", not "detach". Membership is `asset.container_id`
+            // and nothing on the surface clears it — an asset leaves a
+            // session by ceasing to exist. Trashing is not enough
+            // either, which the branch above says in its own words: a
+            // trashed member still holds the session. A remedy this
+            // crate now promises is reachable has to name the thing a
+            // caller can actually reach.
+            DeleteOutcome::HasAssets(count, 0) => Err(StoreFault::blocked_by(
+                format!("session {id_for_err} still has {count} attached asset(s)"),
+                "purge them first — trashing alone leaves them attached",
+            )
+            .into()),
+            DeleteOutcome::HasAssets(count, trashed) => Err(StoreFault::blocked_by(
+                format!(
+                    "session {id_for_err} still has {count} attached asset(s) \
+                     ({trashed} of them in the trash)"
+                ),
+                "purge them first — the trashed ones are still attached",
+            )
+            .into()),
         }
     }
 

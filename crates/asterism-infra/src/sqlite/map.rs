@@ -2,9 +2,15 @@
 //!
 //! Convention: inside an isle closure we handle only `rusqlite` primitives
 //! (`Result<_, rusqlite::Error>`). Promoting rows into domain types
-//! (including validation) happens **outside** the closure. Corrupted
-//! rows and unknown slugs surface as `DomainError::Infra` /
-//! `DomainError::Validation` for the caller.
+//! (including validation) happens **outside** the closure.
+//!
+//! A corrupted row — including a slug this build has no name for —
+//! surfaces as `DomainError::Infra`. It reads as the caller's fault
+//! nowhere: the request was fine and the row was not, and no different
+//! request avoids it. This said "`Infra` / `Validation`" and left the
+//! choice open, which is how three decode failures came to answer
+//! `400`. [`crate::fault`] is where that is decided now, and
+//! `StoreFault::CorruptRow` is the case these reach for.
 
 use asterism_core::error::DomainError;
 use chrono::{DateTime, Utc};
