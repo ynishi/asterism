@@ -188,7 +188,7 @@ impl DisclosureService {
                     MeasurementStatus::Pending | MeasurementStatus::Failed
                 ) =>
             {
-                return Err(DomainError::Conflict(format!(
+                return Err(DomainError::blocked(format!(
                     "asset {asset_id} has not had its metadata fingerprinted yet: \
                      a disclosure built now would read \"nothing established\" \
                      out of a question that has not been asked"

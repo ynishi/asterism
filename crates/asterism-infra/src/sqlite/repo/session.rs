@@ -433,18 +433,19 @@ impl SessionRepository for SqliteSessionRepository {
             DeleteOutcome::Deleted => Ok(()),
             DeleteOutcome::NotFound => Err(DomainError::not_found("session", &id_for_err)),
             DeleteOutcome::HasAssets(count, trashed) if trashed == count => {
-                Err(DomainError::Conflict(format!(
+                Err(DomainError::blocked(format!(
                     "session {id_for_err} looks empty because all {count} of its \
                      asset(s) are in the trash; restore or purge them first"
                 )))
             }
-            DeleteOutcome::HasAssets(count, 0) => Err(DomainError::Conflict(format!(
+            DeleteOutcome::HasAssets(count, 0) => Err(DomainError::blocked(format!(
                 "session {id_for_err} still has {count} attached asset(s); \
-                 delete refused"
+                 detach them first"
             ))),
-            DeleteOutcome::HasAssets(count, trashed) => Err(DomainError::Conflict(format!(
+            DeleteOutcome::HasAssets(count, trashed) => Err(DomainError::blocked(format!(
                 "session {id_for_err} still has {count} attached asset(s) \
-                 ({trashed} of them in the trash); delete refused"
+                 ({trashed} of them in the trash); detach them first, and \
+                 restore or purge the trashed ones"
             ))),
         }
     }
@@ -483,6 +484,7 @@ enum DeleteOutcome {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
+    use asterism_core::error::ConflictKind;
 
     async fn seed_persona(isle: &AsyncIsle) -> PersonaId {
         let id = Uuid::now_v7();
@@ -843,7 +845,13 @@ mod tests {
 
         let err = repo.delete_if_empty(&session.id).await;
         assert!(
-            matches!(err, Err(DomainError::Conflict(_))),
+            matches!(
+                err,
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                })
+            ),
             "delete must be refused while a member points at the composite"
         );
         assert!(repo.find_by_id(&session.id).await.unwrap().is_some());
@@ -863,9 +871,9 @@ mod tests {
         .await
         .unwrap();
         match repo.delete_if_empty(&session.id).await {
-            Err(DomainError::Conflict(msg)) => assert!(
-                msg.contains("looks empty") && msg.contains("trash"),
-                "the refusal must name the trash, got: {msg}"
+            Err(DomainError::Conflict { message, .. }) => assert!(
+                message.contains("looks empty") && message.contains("trash"),
+                "the refusal must name the trash, got: {message}"
             ),
             other => panic!("expected a Conflict naming the trash, got {other:?}"),
         }

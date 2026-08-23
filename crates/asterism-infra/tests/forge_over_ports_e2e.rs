@@ -53,7 +53,7 @@ use asterism_core::domain::forge::pursuits::Pursuits;
 use asterism_core::domain::forge::strategies::{Builtin, MainlineFirst};
 use asterism_core::domain::forge::threads::Threads;
 use asterism_core::domain::value::{AssetId, PersonaId};
-use asterism_core::error::DomainError;
+use asterism_core::error::{ConflictKind, DomainError};
 use asterism_infra::memory::forge::{HoldsEverything, MemoryActors, MemoryForge};
 use asterism_infra::sqlite::open_and_migrate_in_memory;
 use asterism_infra::sqlite::repo::SqliteForge;
@@ -133,7 +133,7 @@ struct Refuses;
 
 impl Deciding for Refuses {
     fn close(&self, _line: &Line, _pursuit: &Pursuit) -> Result<Closing, DomainError> {
-        Err(DomainError::Conflict("this caller decides once".into()))
+        Err(DomainError::settled("this caller decides once"))
     }
 }
 
@@ -424,8 +424,15 @@ async fn a_line_four_people(world: &World) {
         .close(&boros_work.id(), Outcome::Satisfied, None, &boro)
         .await;
     assert!(
-        matches!(refused, Err(DomainError::Conflict(_))),
-        "a collision refuses the close: {refused:?}"
+        matches!(
+            refused,
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Blocked,
+                ..
+            })
+        ),
+        "a collision refuses the close, and resolving it is the way \
+         through rather than asking again: {refused:?}"
     );
 
     // ---- The line's rule resolves it, the first time. -------------
@@ -1095,8 +1102,15 @@ async fn a_reply_to_another_conversation_is_refused(world: &World) {
     );
     let refused = Threads::say(&*world.threads_port, &mine.id(), &stray).await;
     assert!(
-        matches!(refused, Err(DomainError::Conflict(_))),
-        "a reply belongs to one conversation: {refused:?}"
+        matches!(
+            refused,
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Clashes,
+                ..
+            })
+        ),
+        "a reply belongs to one conversation, and asking again with \
+         the same pair never changes that: {refused:?}"
     );
     assert_eq!(
         world.said.get(&mine.id()).await.unwrap().messages().len(),
@@ -1501,7 +1515,13 @@ async fn a_drop_that_does_not_cover_the_work_is_refused(world: &World) {
         .await
         .expect_err("the work against this line is not the work this drop covers");
     assert!(
-        matches!(refused, DomainError::Conflict(_)),
+        matches!(
+            refused,
+            DomainError::Conflict {
+                kind: ConflictKind::Raced,
+                ..
+            }
+        ),
         "a list that has moved is a race, not malformed input: {refused:?}"
     );
 
@@ -1638,7 +1658,13 @@ async fn a_drop_of_a_line_reopened_under_it_is_refused(world: &World) {
         .await
         .expect_err("a drop is decided against an archived line, and this one is open");
     assert!(
-        matches!(refused, DomainError::Conflict(_)),
+        matches!(
+            refused,
+            DomainError::Conflict {
+                kind: ConflictKind::Raced,
+                ..
+            }
+        ),
         "a standing that moved is a race, not malformed input: {refused:?}"
     );
 
@@ -1831,7 +1857,7 @@ async fn a_stale_aim_nobody_decides_again_writes_nothing(world: &World) {
     )
     .await;
     assert!(
-        matches!(refused, Err(DomainError::Conflict(_))),
+        matches!(refused, Err(DomainError::Conflict { .. })),
         "a close only lands on a parent nothing has taken: {refused:?}"
     );
 
@@ -1921,8 +1947,20 @@ async fn a_line_the_store_could_not_have_been_given_does_not_come_back() {
 
     let refused = Lines::get(&*world.lines_port, &line.id()).await;
     assert!(
-        matches!(refused, Err(DomainError::Conflict(_))),
+        matches!(refused, Err(DomainError::Infra(_))),
         "the store cannot argue the model out of its own rule: {refused:?}"
+    );
+    // And it is not offered to the caller as anything it did. This
+    // test's own name says the store could not have been given the
+    // row; a `Conflict` would have said the caller collided with
+    // something, and the kinds would then have told it whether to ask
+    // again — about a row that will read back the same way forever.
+    let Err(refused) = refused else {
+        unreachable!("asserted above")
+    };
+    assert!(
+        refused.to_string().contains("could not have been written"),
+        "the refusal says whose fault it is: {refused}"
     );
 }
 

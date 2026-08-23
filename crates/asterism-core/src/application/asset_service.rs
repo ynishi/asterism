@@ -1074,7 +1074,7 @@ impl AssetService {
         // gone — and would be silently destroyed by the retention sweep's
         // persona cascade. Refuse instead: restore the persona first.
         if persona.trashed_at.is_some() {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::blocked(format!(
                 "persona {persona_id} is in the trash; restore it before adding assets"
             )));
         }
@@ -1881,7 +1881,7 @@ impl AssetService {
         if let Some(persona) = self.personas.find(&asset.persona_id).await?
             && persona.trashed_at.is_some()
         {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::blocked(format!(
                 "persona {} is in the trash; restore the persona to bring its assets back",
                 asset.persona_id
             )));
@@ -3028,7 +3028,7 @@ impl AssetService {
             .ok_or_else(|| DomainError::not_found("duplicate conflict", &command.conflict_id))?;
 
         if let Some(answer) = conflict.resolution {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::settled(format!(
                 "duplicate conflict {} was already resolved as {}",
                 command.conflict_id,
                 answer.as_str()
@@ -3048,13 +3048,13 @@ impl AssetService {
                 .await?
                 .ok_or(DomainError::AssetNotFound(side))?;
             if asset.folded_into.is_some() {
-                return Err(DomainError::Conflict(format!(
+                return Err(DomainError::settled(format!(
                     "the {which} of this conflict ({side}) has been folded away — \
                      there is nothing left to compare"
                 )));
             }
             if asset.trashed_at.is_some() {
-                return Err(DomainError::Conflict(format!(
+                return Err(DomainError::blocked(format!(
                     "the {which} of this conflict ({side}) is in the trash — \
                      restore it to answer the question"
                 )));
@@ -3092,7 +3092,7 @@ impl AssetService {
         {
             // The row was open a moment ago, so this is the other
             // panel winning the race rather than a bad id.
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::settled(format!(
                 "duplicate conflict {} was answered by somebody else while this answer \
                  was being made",
                 command.conflict_id
@@ -4025,7 +4025,7 @@ impl AssetService {
             .local_path()
             .map(std::path::Path::to_path_buf)
             .ok_or_else(|| {
-                DomainError::Conflict(format!(
+                DomainError::clashes(format!(
                     "asset original is not a local file (locator kind): {}",
                     locator.to_display()
                 ))
@@ -5140,10 +5140,13 @@ impl AssetService {
             .rename(&tag_id, name)
             .await
             .map_err(|err| match err {
-                DomainError::Conflict(fact) => DomainError::Conflict(format!(
-                    "{fact} — rename does not merge; fold the two channels together \
-                     with the tag merge command (POST /asterism/tags/merge)"
-                )),
+                DomainError::Conflict { kind, message } => DomainError::conflict(
+                    kind,
+                    format!(
+                        "{message} — rename does not merge; fold the two channels \
+                         together with the tag merge command (POST /asterism/tags/merge)"
+                    ),
+                ),
                 other => other,
             })?;
         Ok(crate::application::mapping::tag_to_dto(&tag))

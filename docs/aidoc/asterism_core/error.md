@@ -10,5 +10,6 @@ convert from this enum. Infrastructure-level failures are collapsed into
 
 ## Types
 
+- `ConflictKind` — What a caller can do about a [`Conflict`](DomainError::Conflict).
 - `DomainError` — Errors raised by the domain layer.
 

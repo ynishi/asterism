@@ -25,6 +25,25 @@ use asterism_core::domain::forge::model::value::{
 use asterism_core::error::DomainError;
 use chrono::{DateTime, Utc};
 
+/// A row this adapter cannot make sense of.
+///
+/// **Corrupt storage, not a bad request.** Every message handed to this
+/// begins "a stored", which is the test for whether it belongs here:
+/// the caller asked to read, its request was fine, and what came back
+/// could not have been written. `sqlite::map`'s module doc states the
+/// same convention for the rest of this crate — corrupted rows surface
+/// as `Infra` — and these were answering `Validation`, which told a
+/// caller to fix a request that had nothing wrong with it.
+///
+/// The domain's half of this is
+/// [`ForgeError::Unwritable`](asterism_core::domain::forge::model::error::ForgeError::Unwritable),
+/// which says it for the rules `restore` replays. This says it for the
+/// rows that never reach `restore` because they cannot be assembled
+/// into the types it takes.
+fn corrupt(said: String) -> DomainError {
+    DomainError::Infra(anyhow::anyhow!(said))
+}
+
 /// An act, flattened the way a row carries one: a stamp, a handle, and
 /// which kind of actor the handle names.
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +79,7 @@ impl ActRow {
             "user" => Actor::User(self.actor),
             "system" => Actor::System(self.actor),
             other => {
-                return Err(DomainError::Validation(format!(
+                return Err(corrupt(format!(
                     "a stored act names an actor kind this model does not have: {other}"
                 )));
             }
@@ -594,9 +613,7 @@ pub fn read_pursuit(
             }
             "close" => {
                 let outcome = node.outcome.ok_or_else(|| {
-                    DomainError::Validation(
-                        "a stored ending does not say how the work ended".into(),
-                    )
+                    corrupt("a stored ending does not say how the work ended".into())
                 })?;
                 built.push(restore::Node::Close(restore::close(
                     node.id,
@@ -607,7 +624,7 @@ pub fn read_pursuit(
                 )));
             }
             other => {
-                return Err(DomainError::Validation(format!(
+                return Err(corrupt(format!(
                     "a stored pursuit names a node kind this model does not have: {other}"
                 )));
             }
@@ -651,7 +668,7 @@ fn chain<'a>(
         std::collections::HashMap::new();
     for node in nodes.iter().filter(|node| node.pursuit == head.id) {
         if by_parent.insert(node.parent, node).is_some() {
-            return Err(DomainError::Validation(format!(
+            return Err(corrupt(format!(
                 "pursuit {} has two nodes on one parent, which is a log that forked",
                 head.id
             )));
@@ -666,7 +683,7 @@ fn chain<'a>(
         ordered.push(node);
     }
     if !by_parent.is_empty() {
-        return Err(DomainError::Validation(format!(
+        return Err(corrupt(format!(
             "pursuit {} has {} nodes the walk from its opening cannot reach",
             head.id,
             by_parent.len()
@@ -678,9 +695,7 @@ fn chain<'a>(
 /// One operation, from the verb and the two payload columns that
 /// travel with it.
 fn read_op(row: &PursuitOpRow) -> Result<Op, DomainError> {
-    let missing = |what: &str| {
-        DomainError::Validation(format!("a stored `{}` operation has no {what}", row.verb))
-    };
+    let missing = |what: &str| corrupt(format!("a stored `{}` operation has no {what}", row.verb));
     Ok(match row.verb {
         "add" => Op::add_to(
             row.entry,
@@ -691,7 +706,7 @@ fn read_op(row: &PursuitOpRow) -> Result<Op, DomainError> {
         "rename" => Op::rename(row.entry, row.name.clone().ok_or_else(|| missing("name"))?),
         "remove" => Op::remove(row.entry),
         other => {
-            return Err(DomainError::Validation(format!(
+            return Err(corrupt(format!(
                 "a stored operation names a verb this model does not have: {other}"
             )));
         }
@@ -756,7 +771,7 @@ pub fn read_thread(
 fn read_anchor(head: &ThreadRow) -> Result<Anchor, DomainError> {
     /// What a stored anchor promised and did not carry.
     fn missing(kind: &str, column: &str) -> DomainError {
-        DomainError::Validation(format!(
+        corrupt(format!(
             "a stored thread anchored to a {kind} does not say which: `{column}` is empty"
         ))
     }
@@ -778,7 +793,7 @@ fn read_anchor(head: &ThreadRow) -> Result<Anchor, DomainError> {
                 missing("change point", "anchor_change_point")
             })?))
         }
-        other => Err(DomainError::Validation(format!(
+        other => Err(corrupt(format!(
             "a stored thread hangs off a kind of thing this model does not have: {other}"
         ))),
     }

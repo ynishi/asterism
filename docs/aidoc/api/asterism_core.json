@@ -120,7 +120,7 @@
     {
       "path": "asterism_core::application::forge::pursuit_service",
       "kind": "module",
-      "docs": "Work use cases — opening a line of work, writing rounds, looking at\nwhat the line did, and ending it.\n\n```text\n  open      reads the line's head, writes the pursuit\n  push      writes the pursuit. does not read the line\n  resolve   reads the line, writes the pursuit\n  close     reads both, writes both — the only one\n\n  collisions / behind    read both, write nothing\n```\n\nFour verbs and two questions, and only one of them touches a line's\nhistory. That asymmetry is the point of the design rather than an\naccident of it: the operation that happens most often, writing a\nround, never reads the line at all, so two people working against\none line do not contend until one of them finishes.\n\n# What this service is allowed to decide\n\nNothing. It loads what the model needs, calls it, and writes back\nwhat came out. Every refusal in here comes from the model or from a\nport."
+      "docs": "Work use cases — opening a line of work, writing rounds, looking at\nwhat the line did, and ending it.\n\n```text\n  open      reads the line's head, writes the pursuit\n  push      writes the pursuit. does not read the line\n  resolve   reads the line, writes the pursuit\n  close     reads both, writes both — the only one\n\n  collisions / behind    read both, write nothing\n```\n\nFour verbs and two questions, and only one of them touches a line's\nhistory. That asymmetry is the point of the design rather than an\naccident of it: the operation that happens most often, writing a\nround, never reads the line at all, so two people working against\none line do not contend until one of them finishes.\n\n# What this service is allowed to decide\n\nNothing. It loads what the model needs, calls it, and writes back\nwhat came out. Every refusal in here comes from the model or from a\nport — including the one this file words itself, which turns a\nboundary's \"no\" about content into the refusal a caller reads,\nbecause the boundary answers whether and only the caller can be\ntold why."
     },
     {
       "path": "asterism_core::application::forge::pursuit_service::PursuitService",
@@ -203,6 +203,11 @@
       "docs": "Converts a domain [`EntityRef`] to its wire DTO."
     },
     {
+      "path": "asterism_core::application::mapping::forge_collisions_to_dto",
+      "kind": "function",
+      "docs": "Converts what work still collides with to what a screen reads\nbefore offering to resolve it."
+    },
+    {
       "path": "asterism_core::application::mapping::forge_discarded_to_dto",
       "kind": "function",
       "docs": "Converts what a drop released.\n\nThe set is `Content`, and `Content` wraps an asset id — so this is\nwhere the forge's one reference into the layer below is spelled in\nthat layer's vocabulary, for a caller that has to act on it."
@@ -226,6 +231,31 @@
       "path": "asterism_core::application::mapping::forge_name",
       "kind": "function",
       "docs": "Reads a name off the wire, refusing a blank one."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_op",
+      "kind": "function",
+      "docs": "Reads one operation off the wire.\n\nThe entry id is always the caller's, including for an add. What\neach verb requires is stated here rather than left to the model,\nbecause the model takes the pieces already parsed — a `\"replace\"`\narriving with no content has no shape to be refused by, only a\nmissing argument."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_outcome",
+      "kind": "function",
+      "docs": "Reads how a caller says work ended.\n\nTwo words and nothing else. A third would be a third outcome, and\nwhat an outcome means is the model's to say — so an unrecognised\none is refused here rather than defaulted to either."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_pursuit_id",
+      "kind": "function",
+      "docs": "Reads a pursuit id off the wire."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_pursuit_to_dto",
+      "kind": "function",
+      "docs": "Converts a piece of work to what a caller reads: how it opened,\nevery round, and how it ended if it has."
+    },
+    {
+      "path": "asterism_core::application::mapping::forge_round_to_dto",
+      "kind": "function",
+      "docs": "Converts one round to what a caller reads."
     },
     {
       "path": "asterism_core::application::mapping::forge_states_to_dto",
@@ -1630,7 +1660,7 @@
     {
       "path": "asterism_core::domain::forge::model::restore::line",
       "kind": "function",
-      "docs": "A whole line, from its genesis and the change points on it.\n\n`points` may arrive in any order: each carries its parent, so the\nchain is walked from the genesis and recorded in that order.\n\n# Refusals\n\n- [`NotOnHead`](ForgeError::NotOnHead) — the points do not form one\n  chain from this genesis. A parent naming a node that is not here,\n  two points claiming the same parent, or a cycle all arrive as\n  this: what is left over is not reachable, and a history is not\n  something to assemble out of the reachable part.\n- [`NameTaken`](ForgeError::NameTaken) — somewhere along the chain,\n  a change point would leave two live entries under one name. The\n  line could not have been written that way and is not read back\n  that way either."
+      "docs": "A whole line, from its genesis and the change points on it.\n\n`points` may arrive in any order: each carries its parent, so the\nchain is walked from the genesis and recorded in that order.\n\n# Refusals\n\nEvery one of them arrives inside\n[`Unwritable`](ForgeError::Unwritable), which is what says the row\nis the store's doing and not the caller's — the variants below are\nwhat it carries.\n\n- [`NotOnHead`](ForgeError::NotOnHead) — the points do not form one\n  chain from this genesis. A parent naming a node that is not here,\n  two points claiming the same parent, or a cycle all arrive as\n  this: what is left over is not reachable, and a history is not\n  something to assemble out of the reachable part.\n- [`NameTaken`](ForgeError::NameTaken) — somewhere along the chain,\n  a change point would leave two live entries under one name. The\n  line could not have been written that way and is not read back\n  that way either."
     },
     {
       "path": "asterism_core::domain::forge::model::restore::message",
@@ -1650,17 +1680,17 @@
     {
       "path": "asterism_core::domain::forge::model::restore::pursuit",
       "kind": "function",
-      "docs": "A whole pursuit, from the node it opened at and what followed.\n\n`nodes` are in the log's own order — a pursuit is a line, not a\ntree, and a store that kept them shuffled is telling this function\nsomething untrue rather than something it should sort out.\n\n# Refusals\n\n- [`NotOnHead`](ForgeError::NotOnHead) — a node does not sit on the\n  one before it.\n- [`AlreadyClosed`](ForgeError::AlreadyClosed) — something follows\n  the ending. Work ends once, and a log that says otherwise is not\n  read back into one that could."
+      "docs": "A whole pursuit, from the node it opened at and what followed.\n\n`nodes` are in the log's own order — a pursuit is a line, not a\ntree, and a store that kept them shuffled is telling this function\nsomething untrue rather than something it should sort out.\n\n# Refusals\n\nBoth arrive inside [`Unwritable`](ForgeError::Unwritable), as\n[`line`]'s do and for the same reason.\n\n- [`NotOnHead`](ForgeError::NotOnHead) — a node does not sit on the\n  one before it.\n- [`AlreadyClosed`](ForgeError::AlreadyClosed) — something follows\n  the ending. Work ends once, and a log that says otherwise is not\n  read back into one that could."
     },
     {
       "path": "asterism_core::domain::forge::model::restore::round",
       "kind": "function",
-      "docs": "One round, as it was kept.\n\nRefuses one carrying no operations, for the reason\n[`Round::new`](crate::domain::forge::model::pursuit::Round::new)\ndoes."
+      "docs": "One round, as it was kept.\n\nRefuses one carrying no operations, for the reason\n[`Round::new`](crate::domain::forge::model::pursuit::Round::new)\ndoes — and as the store's fault, because a round with no operations\nis not something any caller asked for here."
     },
     {
       "path": "asterism_core::domain::forge::model::restore::thread",
       "kind": "function",
-      "docs": "A whole conversation, from what it hangs off and what was said.\n\n`messages` are in the order a store kept them, which is the order\nthey were said in, and it is kept — with one exception. A reply the\norder given puts *before* the message it answers is moved to just\nafter it, because a conversation cannot be read back in an order\nthat has an answer preceding its question. Nothing else moves; this\nis not a threading pass, and a conversation whose clock behaved\ncomes back exactly as it was given. See the module docs on\n[`thread`](super::thread) for what orders what.\n\nThat exception is what keeps a clock that stepped backwards from\nmaking a conversation unreadable rather than merely odd.\n\n# Refusals\n\n- [`NotInThatThread`](ForgeError::NotInThatThread) — a message\n  replies to one this thread does not hold. Handed back through\n  [`Thread::say`], so a stored reply meets the refusal a fresh one\n  meets. Replies that answer each other in a circle are held to the\n  same refusal: none of them can be put after its parent, so they\n  arrive as they were given and the first one meets it.\n- [`EmptyThread`](ForgeError::EmptyThread) — nothing was said. A\n  thread with no messages is somebody having opened a conversation\n  and said nothing, which [`Thread::open`] refuses to make and this\n  refuses to read back."
+      "docs": "A whole conversation, from what it hangs off and what was said.\n\n`messages` are in the order a store kept them, which is the order\nthey were said in, and it is kept — with one exception. A reply the\norder given puts *before* the message it answers is moved to just\nafter it, because a conversation cannot be read back in an order\nthat has an answer preceding its question. Nothing else moves; this\nis not a threading pass, and a conversation whose clock behaved\ncomes back exactly as it was given. See the module docs on\n[`thread`](super::thread) for what orders what.\n\nThat exception is what keeps a clock that stepped backwards from\nmaking a conversation unreadable rather than merely odd.\n\n# Refusals\n\nBoth arrive inside [`Unwritable`](ForgeError::Unwritable), as\n[`line`]'s and [`pursuit`]'s do and for the same reason.\n\n- [`NotInThatThread`](ForgeError::NotInThatThread) — a message\n  replies to one this thread does not hold. Handed back through\n  [`Thread::say`], so a stored reply meets the refusal a fresh one\n  meets. Replies that answer each other in a circle are held to the\n  same refusal: none of them can be put after its parent, so they\n  arrive as they were given and the first one meets it.\n- [`EmptyThread`](ForgeError::EmptyThread) — nothing was said. A\n  thread with no messages is somebody having opened a conversation\n  and said nothing, which [`Thread::open`] refuses to make and this\n  refuses to read back."
     },
     {
       "path": "asterism_core::domain::forge::model::strategy",
@@ -3056,6 +3086,11 @@
       "path": "asterism_core::error",
       "kind": "module",
       "docs": "`DomainError` — the innermost error type shared across every layer of\n`asterism-core`.\n\nOuter layers (the Tauri `UiError`, the HTTP `ApiError`, MCP tool errors)\nconvert from this enum. Infrastructure-level failures are collapsed into\n`Infra` so that domain vocabulary (`NotFound` / `Duplicate` / `Validation`\n/ `Conflict`) stays clean."
+    },
+    {
+      "path": "asterism_core::error::ConflictKind",
+      "kind": "enum",
+      "docs": "What a caller can do about a [`Conflict`](DomainError::Conflict).\n\nFour answers, because there are four things a caller can do and no\nfifth: send it again, do something else first, give up, or ask for\nsomething different. Sorting a refusal into one of them is a\ndecision made where the state is known — the layer above cannot\nrecover it from a sentence, and the layer above is where the retry\nloop lives.\n\nWhere the state is known is usually where the refusal is raised,\nand not always: the forge raises one variant from two places, a\nwrite losing a race and a read finding a row that could not have\nbeen written, and it is\n[`ForgeError::Unwritable`](crate::domain::forge::model::error::ForgeError::Unwritable)\nthat lets the conversion tell those apart rather than the raise\nsite.\n\nThis is not a status code by another name. Every one of these is a\n`409` over HTTP, because every one of them is a conflict with the\ncurrent state; what differs is what happens next, which a status\ncode has never been able to say.\n\n# Choosing one\n\n**The kind follows from the state, and the message then has to\nmatch it.** Not the other way round: an earlier draft of this said\na refusal is `Blocked` only when its message already names the way\nthrough, which reads as a rule but is not one — it keys a promise a\nclient depends on to how somebody happened to word a sentence, so\nimproving a message would silently change the contract, and letting\none rot would silently break it. The wording is the part that can\nbe wrong and fixed. So: ask whether the same request works once\nsomething else changes. If it does, it is `Blocked`, and a message\nthat does not say what to change is a message to fix."
     },
     {
       "path": "asterism_core::error::DomainError",

@@ -20,7 +20,10 @@
 //!
 //! Nothing. It loads what the model needs, calls it, and writes back
 //! what came out. Every refusal in here comes from the model or from a
-//! port.
+//! port — including the one this file words itself, which turns a
+//! boundary's "no" about content into the refusal a caller reads,
+//! because the boundary answers whether and only the caller can be
+//! told why.
 
 use std::sync::Arc;
 
@@ -148,20 +151,7 @@ impl PursuitService {
         note: Option<String>,
         by: &AttributionContext,
     ) -> Result<Round, DomainError> {
-        for op in &ops {
-            // Only the two verbs that put content on a line name any:
-            // a rename moves a name and a removal moves nothing, so
-            // there is nothing to ask about either.
-            let content = match op.kind() {
-                OpKind::Add { content, .. } | OpKind::Replace { content } => *content,
-                OpKind::Rename { .. } | OpKind::Remove => continue,
-            };
-            if !self.store.real(&content).await? {
-                return Err(DomainError::Validation(
-                    "an operation points at content that does not exist".into(),
-                ));
-            }
-        }
+        self.content_is_real(&ops).await?;
 
         let pursuit = self.get(id).await?;
         let round = Round::new(pursuit.head(), ops, note, self.act(by).await?)?;
@@ -178,6 +168,11 @@ impl PursuitService {
     /// Nothing about the line is written. Resolving is work deciding
     /// something, and what it decides goes in the pursuit like any
     /// other decision.
+    ///
+    /// What the rule writes is held to what a person is held to: the
+    /// content each operation points at has to be real, and a rule
+    /// that names content nothing holds is refused with the round
+    /// unwritten and the collision left standing.
     pub async fn resolve(
         &self,
         id: &PursuitId,
@@ -191,6 +186,14 @@ impl PursuitService {
         let Some(round) = react(&line, &pursuit, rule, server, self.act(by).await?)? else {
             return Ok(None);
         };
+
+        // The same question a person's round is asked. A rule is code
+        // this deployment carries rather than code this model owns —
+        // the five built in reuse content the divergence already
+        // named, but the trait is open, and a rule that minted a
+        // reference would otherwise put it in the log with the store
+        // never asked.
+        self.content_is_real(round.ops()).await?;
 
         self.pursuits.push(id, round.parent(), &round).await?;
         Ok(Some(round))
@@ -278,6 +281,32 @@ impl PursuitService {
             .collect())
     }
 
+    /// Refuses a round naming content the layer below does not have.
+    ///
+    /// Both writers of a round come through here — a person's `push`
+    /// and a rule's `resolve` — because a rule is code this deployment
+    /// carries rather than code this model owns, and the check that
+    /// only one of them ran would be a check a `Strategies`
+    /// implementation could walk around.
+    ///
+    /// Only the two verbs that put content on a line name any: a
+    /// rename moves a name and a removal moves nothing, so there is
+    /// nothing to ask about either.
+    async fn content_is_real(&self, ops: &[Op]) -> Result<(), DomainError> {
+        for op in ops {
+            let content = match op.kind() {
+                OpKind::Add { content, .. } | OpKind::Replace { content } => *content,
+                OpKind::Rename { .. } | OpKind::Remove => continue,
+            };
+            if !self.store.real(&content).await? {
+                return Err(DomainError::Validation(
+                    "an operation points at content that does not exist".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     async fn line(&self, id: &LineId) -> Result<Line, DomainError> {
         self.lines
             .get(id)
@@ -325,7 +354,7 @@ mod tests {
     use crate::domain::forge::boundary::Store;
     use crate::domain::forge::model::closing::Closing;
     use crate::domain::forge::model::line::Standing;
-    use crate::domain::forge::model::strategy::Strategy;
+    use crate::domain::forge::model::strategy::{About, Divergence, Strategy};
     use crate::domain::forge::model::value::{ActorId, Content, EntryId, Name, NodeId, StrategyId};
     use crate::domain::forge::strategies::{Builtin, MainlineFirst};
     use crate::domain::value::AssetId;
@@ -508,7 +537,7 @@ mod tests {
                 .pursuit(id)
                 .ok_or_else(|| DomainError::not_found("pursuit", id))?;
             if work.head() != on {
-                return Err(DomainError::Conflict("the pursuit moved".into()));
+                return Err(DomainError::raced("the pursuit moved"));
             }
             work.push(round.clone())?;
             self.put(work);
@@ -561,7 +590,7 @@ mod tests {
             };
 
             if self.adamant {
-                return Err(DomainError::Conflict("this store keeps nothing".into()));
+                return Err(DomainError::raced("this store keeps nothing"));
             }
 
             closing.apply(&mut held, &mut work)?;
@@ -864,7 +893,7 @@ mod tests {
             .close(&pursuit.id(), Outcome::Satisfied, None, &by())
             .await;
 
-        assert!(matches!(refused, Err(DomainError::Conflict(_))));
+        assert!(matches!(refused, Err(DomainError::Conflict { .. })));
         assert_eq!(
             *world.calls.lock().unwrap(),
             1,
@@ -969,7 +998,7 @@ mod tests {
         assert!(matches!(
             work.close(&mine.id(), Outcome::Satisfied, None, &by())
                 .await,
-            Err(DomainError::Validation(_)) | Err(DomainError::Conflict(_))
+            Err(DomainError::Validation(_)) | Err(DomainError::Conflict { .. })
         ));
 
         // The line's rule writes what a person would have written:
@@ -999,5 +1028,139 @@ mod tests {
         let states = world.line(&line.id()).unwrap().states();
         assert_eq!(states.len(), 2);
         assert_eq!(states[&entry].content, Some(theirs_content));
+    }
+
+    /// A round a rule writes is asked the same question a round a
+    /// person writes is asked.
+    ///
+    /// `resolve` used to hand what `react` produced straight to the
+    /// port, so the content a rule named went into the log with the
+    /// store never asked. The five rules that ship reuse content the
+    /// divergence already named, which is why nothing had gone wrong
+    /// — but the trait is open, and a rule this deployment carries is
+    /// not code this model owns.
+    #[tokio::test]
+    async fn a_round_a_rule_writes_meets_the_check_a_person_s_round_meets() {
+        /// Mainline-first, plus one operation naming content nobody
+        /// minted. The first three settle the collision, so the round
+        /// reaches the check rather than being refused before it.
+        struct MintsContent(Content);
+
+        impl Strategy for MintsContent {
+            fn id(&self) -> StrategyId {
+                MainlineFirst.id()
+            }
+
+            fn about(&self) -> About {
+                MainlineFirst.about()
+            }
+
+            fn resolve(
+                &self,
+                at: &Divergence<'_>,
+            ) -> Result<Vec<Op>, crate::domain::forge::model::strategy::StrategyError> {
+                let mut ops = MainlineFirst.resolve(at)?;
+                ops.push(Op::add(self.0, name("out of nowhere")));
+                Ok(ops)
+            }
+        }
+
+        struct OnlyThisRule(MintsContent);
+
+        impl Strategies for OnlyThisRule {
+            fn get(&self, id: &StrategyId) -> Option<&dyn Strategy> {
+                (*id == self.0.id()).then_some(&self.0 as &dyn Strategy)
+            }
+
+            fn all(&self) -> Vec<&dyn Strategy> {
+                vec![&self.0]
+            }
+        }
+
+        /// Says yes to everything except the one thing the rule mints.
+        struct AllButMinted(Content);
+
+        #[async_trait]
+        impl Store for AllButMinted {
+            async fn exists(&self, asset: &AssetId) -> Result<bool, DomainError> {
+                Ok(asset.as_uuid() != self.0.as_uuid())
+            }
+        }
+
+        let minted = Content::from_uuid(Uuid::now_v7());
+        let world = World::new();
+        let clock: Arc<dyn Clock> = Arc::new(Fixed(at(0)));
+        let rules = Arc::new(OnlyThisRule(MintsContent(minted)));
+        let lines = LineService::new(
+            Arc::new(world.clone()),
+            Arc::new(world.clone()),
+            rules.clone(),
+            Arc::new(world.clone()),
+            clock.clone(),
+        );
+        let work = PursuitService::new(
+            Arc::new(world.clone()),
+            Arc::new(world.clone()),
+            Arc::new(world.clone()),
+            rules,
+            StoreClient::new(Arc::new(AllButMinted(minted))),
+            Arc::new(world.clone()),
+            clock,
+        );
+
+        let line = lines
+            .open(name("ROOT"), MainlineFirst.id(), &by())
+            .await
+            .unwrap();
+        let entry = EntryId::new();
+
+        // Two pieces of work on one entry, and the second lands first.
+        let mine = work
+            .open(&line.id(), None, Intent::default(), &by())
+            .await
+            .unwrap();
+        work.push(
+            &mine.id(),
+            vec![Op::add_to(entry, content(), name("cut-01"))],
+            None,
+            &by(),
+        )
+        .await
+        .unwrap();
+        let theirs = work
+            .open(&line.id(), None, Intent::default(), &by())
+            .await
+            .unwrap();
+        work.push(
+            &theirs.id(),
+            vec![Op::add_to(entry, content(), name("cut-01"))],
+            None,
+            &by(),
+        )
+        .await
+        .unwrap();
+        work.close(&theirs.id(), Outcome::Satisfied, None, &by())
+            .await
+            .unwrap();
+        assert!(!work.collisions(&mine.id()).await.unwrap().is_empty());
+
+        // The message, not just the variant. Six other refusals in
+        // `resolve` arrive as `Validation` too, and the state this
+        // leaves behind is the state they all leave behind — so a
+        // check on the variant would pass for a round refused before
+        // it ever reached the content, which is the thing this test
+        // is here to tell apart.
+        let refused = work.resolve(&mine.id(), &by()).await;
+        let err = refused.expect_err("the rule named content nothing holds");
+        assert!(
+            matches!(&err, DomainError::Validation(m) if m.contains("does not exist")),
+            "refused for the content rather than for anything else: {err}"
+        );
+
+        // And nothing was written: a refused resolution leaves the
+        // work exactly as it was, still colliding.
+        let after = work.get(&mine.id()).await.unwrap();
+        assert_eq!(after.rounds().len(), 1);
+        assert!(!work.collisions(&mine.id()).await.unwrap().is_empty());
     }
 }

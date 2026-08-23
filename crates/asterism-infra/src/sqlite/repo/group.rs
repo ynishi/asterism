@@ -145,7 +145,7 @@ impl GroupRepository for SqliteGroupRepository {
                 // useful message.
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::Conflict(format!(
+                    DomainError::clashes(format!(
                         "a group named {:?} already exists for this persona",
                         group.name
                     ))
@@ -248,7 +248,7 @@ impl GroupRepository for SqliteGroupRepository {
             .await
             .map_err(infra_err)?;
         if verdict == 1 {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::blocked(format!(
                 "group {id} is still live; trash it before purging"
             )));
         }
@@ -699,7 +699,7 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(|err| {
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::Conflict(format!(
+                    DomainError::clashes(format!(
                         "a group named {trimmed:?} already exists for this persona"
                     ))
                 } else {
@@ -765,9 +765,7 @@ impl GroupRepository for SqliteGroupRepository {
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
         if parent == child {
-            return Err(DomainError::Conflict(
-                "a group cannot contain itself".into(),
-            ));
+            return Err(DomainError::clashes("a group cannot contain itself"));
         }
         let parent_uuid = *parent.as_uuid();
         let child_uuid = *child.as_uuid();
@@ -841,13 +839,14 @@ impl GroupRepository for SqliteGroupRepository {
             1 => Err(DomainError::Validation(
                 "groups belong to different personas (or one of them does not exist)".into(),
             )),
-            2 => Err(DomainError::Conflict(
-                "link rejected: it would make the groups contain each other (cycle)".into(),
+            2 => Err(DomainError::blocked(
+                "link rejected: it would make the groups contain each other (cycle); unlink \
+                 the opposing edge first, and the same link then works",
             )),
-            3 => Err(DomainError::Conflict(
+            3 => Err(DomainError::blocked(
                 "link rejected: it would close a dependency cycle through a \
-                 query group's references"
-                    .into(),
+                 query group's references; break the cycle at one of its other \
+                 edges first, and the same link then works",
             )),
             _ => Ok(()),
         }
@@ -949,6 +948,7 @@ impl GroupRepository for SqliteGroupRepository {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
+    use asterism_core::error::ConflictKind;
 
     /// Persona row seeded directly — this repo does not own persona
     /// writes, but bucket / asset FKs need one.
@@ -1113,7 +1113,13 @@ mod tests {
         // reachable only through the trash.
         let refused = repo.purge(&group.id).await;
         assert!(
-            matches!(refused, Err(DomainError::Conflict(_))),
+            matches!(
+                refused,
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                })
+            ),
             "purging a live group must conflict, got {refused:?}"
         );
         assert_eq!(

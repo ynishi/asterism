@@ -124,8 +124,9 @@ impl ModalityService {
         let slug = Modality::new(command.slug)?;
         let count = self.repo.asset_count(&slug).await?;
         if count > 0 {
-            return Err(DomainError::Conflict(format!(
-                "modality {slug} still has {count} asset(s); hide it instead of deleting"
+            return Err(DomainError::blocked(format!(
+                "modality {slug} still has {count} asset(s); move them off it first, or hide \
+                 it instead of deleting"
             )));
         }
         self.repo.delete(&slug).await

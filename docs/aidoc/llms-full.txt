@@ -391,15 +391,25 @@ showing how a line got where it is.
 
 ## Types
 
+- `CloseForgePursuitCommand` — Ends a piece of work.
 - `ForgeChangePointDto` — One node of a line's history.
 - `ForgeChangeRowDto` — What one landing said about one entry.
+- `ForgeCloseDto` — How a piece of work ended.
+- `ForgeCollisionDto` — One axis of one entry that this work asks to move and the line has
 - `ForgeDiscardedDto` — What dropping a line released.
 - `ForgeEntryStateDto` — Where one entry stands on a line, folded from the whole chain.
 - `ForgeLineActCommand` — Archives a line, reopens one, or drops one — the three verbs whose
 - `ForgeLineDto` — A line, without what is on it.
 - `ForgeLineHistoryDto` — A line's whole history: where it began and every landing since.
+- `ForgeOpDto` — One operation of a round.
+- `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
+- `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
+- `ForgeResolvedDto` — What `resolve` did.
+- `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
 - `ForgeStrategyDto` — A rule a line can be pointed at.
 - `OpenForgeLineCommand` — Opens a line.
+- `OpenForgePursuitCommand` — Opens work against a line.
+- `PushForgeRoundCommand` — Writes a round.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 
@@ -1147,7 +1157,10 @@ one line do not contend until one of them finishes.
 
 Nothing. It loads what the model needs, calls it, and writes back
 what came out. Every refusal in here comes from the model or from a
-port.
+port — including the one this file words itself, which turns a
+boundary's "no" about content into the refusal a caller reads,
+because the boundary answers whether and only the caller can be
+told why.
 
 ## Types
 
@@ -1222,11 +1235,17 @@ so on) live in `asterism-contract`'s crate docs.
 - `edge_to_dto` — Converts a `ConstellationEdge` to an `EdgeDto`.
 - `effective_setting_to_dto` — Converts a resolved setting to its wire DTO, projecting the whole
 - `entity_ref_to_dto` — Converts a domain [`EntityRef`] to its wire DTO.
+- `forge_collisions_to_dto` — Converts what work still collides with to what a screen reads
 - `forge_discarded_to_dto` — Converts what a drop released.
 - `forge_history_to_dto` — Converts a line and its whole chain, in the chain's order.
 - `forge_line_id` — Reads a line id off the wire.
 - `forge_line_to_dto` — Converts a `Line` to the summary a caller reads.
 - `forge_name` — Reads a name off the wire, refusing a blank one.
+- `forge_op` — Reads one operation off the wire.
+- `forge_outcome` — Reads how a caller says work ended.
+- `forge_pursuit_id` — Reads a pursuit id off the wire.
+- `forge_pursuit_to_dto` — Converts a piece of work to what a caller reads: how it opened,
+- `forge_round_to_dto` — Converts one round to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
 - `forge_strategy_id` — Reads a strategy id off the wire.
 - `forge_strategy_to_dto` — Converts a rule's id and description to what a chooser reads.
@@ -7355,6 +7374,7 @@ convert from this enum. Infrastructure-level failures are collapsed into
 
 ## Types
 
+- `ConflictKind` — What a caller can do about a [`Conflict`](DomainError::Conflict).
 - `DomainError` — Errors raised by the domain layer.
 
 
@@ -13389,6 +13409,15 @@ Tauri commands must return `Result<T, E>` where `E: Serialize`
 (`anyhow` will not do). We use a `serde` tagged enum
 (`{ kind, message }`) so the TypeScript side can pattern-match on the
 variant.
+
+Internally tagged with named fields rather than
+`content = "message"` around a tuple, and the reason is one field
+on one variant: a conflict carries `reason` beside its message, and
+a variant holding two things cannot be a tuple behind a `content`
+key without nesting them. What crosses the wire is unchanged for
+every other variant — `{ kind, message }`, read that way in
+`src/lib/mutate.ts` — and a conflict is that plus one field a
+reader is free to ignore.
 
 ## Types
 

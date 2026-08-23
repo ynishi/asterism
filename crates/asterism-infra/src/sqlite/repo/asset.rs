@@ -3560,7 +3560,7 @@ impl AssetRepository for SqliteAssetRepository {
             .await
             .map_err(infra_err)?;
         if verdict == 1 {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::blocked(format!(
                 "asset {id} is still live; trash it before purging"
             )));
         }

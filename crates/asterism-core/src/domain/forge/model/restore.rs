@@ -99,6 +99,11 @@ pub fn change_point(
 ///
 /// # Refusals
 ///
+/// Every one of them arrives inside
+/// [`Unwritable`](ForgeError::Unwritable), which is what says the row
+/// is the store's doing and not the caller's — the variants below are
+/// what it carries.
+///
 /// - [`NotOnHead`](ForgeError::NotOnHead) — the points do not form one
 ///   chain from this genesis. A parent naming a node that is not here,
 ///   two points claiming the same parent, or a cycle all arrive as
@@ -124,8 +129,10 @@ pub fn line(
     // archived line's history is exactly what this is putting back.
     // Reading is not moving.
     let mut history = History::restored(genesis);
-    for point in chain(history.head(), points)? {
-        history.record(point)?;
+    for point in chain(history.head(), points).map_err(ForgeError::unwritable)? {
+        history
+            .record(point)
+            .map_err(|refusal| refusal.unwritable())?;
     }
     Ok(Line::restored(id, name, strategy, standing, history, meta))
 }
@@ -139,7 +146,8 @@ pub fn open(id: NodeId, base: ChangePointId, intent: Intent, act: Act) -> Open {
 ///
 /// Refuses one carrying no operations, for the reason
 /// [`Round::new`](crate::domain::forge::model::pursuit::Round::new)
-/// does.
+/// does — and as the store's fault, because a round with no operations
+/// is not something any caller asked for here.
 pub fn round(
     id: NodeId,
     parent: NodeId,
@@ -147,7 +155,7 @@ pub fn round(
     note: Option<String>,
     act: Act,
 ) -> Result<Round, ForgeError> {
-    Round::restored(id, parent, ops, note, act)
+    Round::restored(id, parent, ops, note, act).map_err(ForgeError::unwritable)
 }
 
 /// The node work ended at.
@@ -178,6 +186,9 @@ pub enum Node {
 ///
 /// # Refusals
 ///
+/// Both arrive inside [`Unwritable`](ForgeError::Unwritable), as
+/// [`line`]'s do and for the same reason.
+///
 /// - [`NotOnHead`](ForgeError::NotOnHead) — a node does not sit on the
 ///   one before it.
 /// - [`AlreadyClosed`](ForgeError::AlreadyClosed) — something follows
@@ -194,8 +205,8 @@ pub fn pursuit(
     let mut work = Pursuit::restored(id, of, parent, open, meta);
     for node in nodes {
         match node {
-            Node::Round(round) => work.push(round)?,
-            Node::Close(close) => work.end(close)?,
+            Node::Round(round) => work.push(round).map_err(ForgeError::unwritable)?,
+            Node::Close(close) => work.end(close).map_err(ForgeError::unwritable)?,
         }
     }
     Ok(work)
@@ -228,6 +239,9 @@ pub fn message(
 ///
 /// # Refusals
 ///
+/// Both arrive inside [`Unwritable`](ForgeError::Unwritable), as
+/// [`line`]'s and [`pursuit`]'s do and for the same reason.
+///
 /// - [`NotInThatThread`](ForgeError::NotInThatThread) — a message
 ///   replies to one this thread does not hold. Handed back through
 ///   [`Thread::say`], so a stored reply meets the refusal a fresh one
@@ -245,11 +259,11 @@ pub fn thread(
     messages: Vec<Message>,
 ) -> Result<Thread, ForgeError> {
     if messages.is_empty() {
-        return Err(ForgeError::EmptyThread);
+        return Err(ForgeError::EmptyThread.unwritable());
     }
     let mut held = Thread::restored(id, anchor, title);
     for message in replies_after_parents(messages) {
-        held.say(message)?;
+        held.say(message).map_err(ForgeError::unwritable)?;
     }
     Ok(held)
 }
@@ -481,7 +495,10 @@ mod tests {
             ),
             points,
         );
-        assert!(matches!(refused, Err(ForgeError::NotOnHead)), "{refused:?}");
+        assert!(
+            matches!(refused, Err(ForgeError::Unwritable(ref inner)) if **inner == ForgeError::NotOnHead),
+            "the store's fault, and which rule it broke: {refused:?}"
+        );
     }
 
     #[test]
@@ -516,8 +533,12 @@ mod tests {
             vec![forged],
         );
         assert!(
-            matches!(refused, Err(ForgeError::NameTaken(_))),
-            "the store cannot argue the model out of its own rule: {refused:?}"
+            matches!(
+                refused,
+                Err(ForgeError::Unwritable(ref inner)) if matches!(**inner, ForgeError::NameTaken(_))
+            ),
+            "the store cannot argue the model out of its own rule, and the \
+             refusal says whose fault it is: {refused:?}"
         );
 
         // And the line it was built from is untouched by the attempt.
@@ -608,17 +629,17 @@ mod tests {
             vec![Node::Close(ending), Node::Round(after)],
         );
         assert!(
-            matches!(refused, Err(ForgeError::AlreadyClosed)),
-            "{refused:?}"
+            matches!(refused, Err(ForgeError::Unwritable(ref inner)) if **inner == ForgeError::AlreadyClosed),
+            "the store's fault, and which rule it broke: {refused:?}"
         );
     }
 
     #[test]
-    fn a_stored_pass_carrying_nothing_is_refused() {
+    fn a_stored_round_carrying_nothing_is_the_stores_fault() {
         let refused = round(NodeId::new(), NodeId::new(), Vec::new(), None, act(1));
         assert!(
-            matches!(refused, Err(ForgeError::EmptyRound)),
-            "{refused:?}"
+            matches!(refused, Err(ForgeError::Unwritable(ref inner)) if **inner == ForgeError::EmptyRound),
+            "the store's fault, and which rule it broke: {refused:?}"
         );
     }
 
@@ -758,8 +779,8 @@ mod tests {
             ],
         );
         assert!(
-            matches!(refused, Err(ForgeError::NotInThatThread)),
-            "{refused:?}"
+            matches!(refused, Err(ForgeError::Unwritable(ref inner)) if **inner == ForgeError::NotInThatThread),
+            "the store's fault, and which rule it broke: {refused:?}"
         );
     }
 
@@ -774,8 +795,8 @@ mod tests {
             Vec::new(),
         );
         assert!(
-            matches!(refused, Err(ForgeError::EmptyThread)),
-            "{refused:?}"
+            matches!(refused, Err(ForgeError::Unwritable(ref inner)) if **inner == ForgeError::EmptyThread),
+            "the store's fault, and which rule it broke: {refused:?}"
         );
     }
 }
