@@ -189,7 +189,8 @@ agent, the loop that works is:
 
 ```text
 issue -> just worktree-new -> implement -> just check
-      -> reviewer + pub-checker + doc-reviewer on the diff -> commit
+      -> reviewer on the issue, pub-checker + doc-reviewer on the diff
+      -> commit
       -> git fetch origin -> just pre-push
       -> write the PR body to a file -> hand over push/PR
 ```
