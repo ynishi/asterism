@@ -13543,6 +13543,7 @@ its own (#83 §1).
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
+- `ModelRegistryPublishedDto` — The receipt of `PUT /teams/models/registry` (#126) — the envelope
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
@@ -13592,6 +13593,7 @@ the teams plane and the local app spell a byte fingerprint one way.
 - [`domain`](domain.md): Domain types and invariants of the teams plane — everything here is
 - [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [`domain::model_registry`](domain__model_registry.md): `model_registry` — the instance's carriage of a qualified model's
 - [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
@@ -13700,6 +13702,40 @@ Two things this module deliberately does **not** do:
 - `TEAM_CREATED` — A team came into existence.
 - `TEAM_DELETED` — A team was deleted (owner, or the operator — ledger-stamped).
 - `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
+
+
+<!-- teams_core/domain__model_registry.md -->
+# teams-core::domain::model_registry
+
+`model_registry` — the instance's carriage of a qualified model's
+registry entry (#126).
+
+The entry (`asterism-model-registry-entry-v1`) is authored by the
+provider's tooling (`asterism-model-lab registry`) and consumed by
+the member app's fetch flow. Between the two, the instance is a
+carrier, not an authority (#126 decision 2): it stores and re-serves
+the provider's bytes **verbatim**, and this module deliberately
+types no field of the entry's body — no digests, no URLs, no
+qualification report. Parsing those here would grow the hosted
+plane a reading of the model contract that #83 §4's dependency rule
+keeps out (`teams-*` → `asterism-core` only; the entry's typed home
+is beside `ModelPackage`, on the app side of the split).
+
+What *is* validated is the envelope — the part the instance answers
+for as a carrier: the bytes are one JSON object, the `schema` field
+names the one version this instance knows how to carry, and
+`model_id` is a non-empty string the storage layer can key history
+by. A carrier that accepted arbitrary bytes would serve members
+something their fetch flow cannot consume, and could not say which
+model superseded which.
+
+## Types
+
+- `ModelRegistryEntry` — A validated registry entry: the provider's bytes, verbatim, plus
+
+## Constants
+
+- `ENTRY_SCHEMA_V1` — The one entry schema this plane carries. A future `-v2` is a new
 
 
 <!-- teams_core/domain__store.md -->
@@ -14323,11 +14359,14 @@ Every public state-changing method here opens one transaction,
 applies the state change **and** appends the corresponding ledger
 event, and commits or rolls back the two together. There is no
 public method that writes state without appending, and none that
-appends without a state change. The one documented exception is
-[`SqliteTeamsRepository::record_locator`]: locators are
-private-space, and private-space operations never land in any
-team's ledger (#83 §2 — the ledger's scope is the team boundary),
-which is also why the v0 kind registry has no locator kind.
+appends without a state change. The documented exceptions are the
+writes outside the ledger's scope, which #83 §2 fixes at the team
+boundary: [`SqliteTeamsRepository::record_locator`] (locators are
+private-space, which is also why the v0 kind registry has no
+locator kind) and
+[`SqliteTeamsRepository::publish_model_entry`] (the model registry
+is instance-scope — #126 — and carries its history in its own
+superseded rows).
 
 ## Where the domain runs
 
@@ -14413,6 +14452,8 @@ slice).
 | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
 | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
 | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
+| PUT | `/teams/models/registry` | the operator only — instance scope (#126), no team gate |
+| GET | `/teams/models/registry` | any authenticated account — the live entry's bytes, verbatim |
 
 ## The gate (#83 §5: every route, no exceptions)
 

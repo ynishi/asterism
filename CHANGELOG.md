@@ -149,6 +149,32 @@ and this project adheres to
 
 ### Added
 
+- **The instance carries the model registry entry** (#126, the first serving
+  step). A model package reaches a machine today by a person placing it, which
+  on a shared instance leaves "everyone runs the same qualified model" an
+  operational hope — while `ModelIdentity` keys every stored vector and tag
+  suggestion, so two members on different models produce derived rows their
+  shared mainline cannot compare. The operator now publishes the
+  provider-authored entry (`asterism-model-registry-entry-v1`, out of
+  `asterism-model-lab registry`) with `PUT /teams/models/registry`, and any
+  authenticated account reads it back with `GET` — the first instance-scoped
+  routes, outside the team gate because there is no team to gate on.
+
+  The bytes come back verbatim. The entry is the member app's trust anchor — its
+  fetch flow verifies every downloaded byte against the entry's digests — and
+  the instance is transport, not an authority: the domain validates only the
+  envelope (one JSON object, the `-v1` schema tag, a non-empty `model_id`),
+  because typing the body here would grow the hosted plane a reading of the
+  model contract that the #83 dependency rule keeps out.
+
+  Publishing supersedes the live entry in the same transaction — one active
+  model per instance is the distribution invariant, and the schema holds it with
+  a unique index over a constant expression, since a unique index on the
+  nullable column would not (SQLite treats NULLs as distinct). Superseded rows
+  are kept, stamped: the rollback question #126 leaves open stays answerable. No
+  ledger append — the ledger's streams are per-team, and instance-scope audit is
+  a deliberate deferral, recorded in the migration rather than drifted into.
+
 - **A line of work is reachable over HTTP** (#120). The forge's verbs were
   callable from inside the process and nowhere else. Under
   `/asterism/forge/lines` a caller can now open a line, list them, read one

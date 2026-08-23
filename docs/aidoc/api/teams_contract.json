@@ -68,6 +68,11 @@
       "docs": "The team's marked-for-purge set\n(`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or\noperator, the mark's own authority).\n\nThis is the read surface the grace-visibility boundary (#83 §3\n[Grace visibility]) *grants*: the mark hides a link from the\nnormal reads, but inside the team it is sayable state — and whoever\nmay mark must be able to see what is marked, or unmark is a verb\naimed blind."
     },
     {
+      "path": "teams_contract::dto::ModelRegistryPublishedDto",
+      "kind": "struct",
+      "docs": "The receipt of `PUT /teams/models/registry` (#126) — the envelope\nfacts the instance validated, never the entry body, which the\ncarrier does not read.\n\nNo [`LedgerEventDto`] here, unlike every team-scoped mutation: the\nregistry is instance-scope, outside the ledger's per-team streams\n(#83 §2); its history is the storage's own superseded rows."
+    },
+    {
       "path": "teams_contract::dto::PurgeReclaimedDto",
       "kind": "struct",
       "docs": "The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).\n\nMark and unmark answer with their [`LedgerEventDto`] alone (the\nreceipt convention); reclaim gets a shape of its own because one\ncall removes many links and triggers the zero-link sweep behind it."

@@ -9,11 +9,14 @@ Every public state-changing method here opens one transaction,
 applies the state change **and** appends the corresponding ledger
 event, and commits or rolls back the two together. There is no
 public method that writes state without appending, and none that
-appends without a state change. The one documented exception is
-[`SqliteTeamsRepository::record_locator`]: locators are
-private-space, and private-space operations never land in any
-team's ledger (#83 §2 — the ledger's scope is the team boundary),
-which is also why the v0 kind registry has no locator kind.
+appends without a state change. The documented exceptions are the
+writes outside the ledger's scope, which #83 §2 fixes at the team
+boundary: [`SqliteTeamsRepository::record_locator`] (locators are
+private-space, which is also why the v0 kind registry has no
+locator kind) and
+[`SqliteTeamsRepository::publish_model_entry`] (the model registry
+is instance-scope — #126 — and carries its history in its own
+superseded rows).
 
 ## Where the domain runs
 

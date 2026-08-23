@@ -190,9 +190,52 @@ CREATE INDEX idx_team_blob_link_marked
     WHERE purge_marked_at IS NOT NULL;
 "#;
 
+/// Version 3 → 4: the model registry (#126, the first serving step) —
+/// the instance's carriage of the provider-authored entry.
+///
+/// - **Instance scope, so no `team_id`** — the one-active-model rule
+///   is per instance (#126 decision 1), and this is the first state
+///   table keyed to neither a team nor a user. Instance scope puts it
+///   outside the ledger's reach (#83 §2: the ledger's streams are
+///   per-team);
+///   publish/supersede history lives in this table's own rows instead,
+///   which is a deliberate deferral of instance-scope audit, not a
+///   drift into it.
+/// - **`entry` is the provider's bytes verbatim** (#126 decision 2 —
+///   the instance is a carrier); `model_id` is lifted by the domain's
+///   envelope validation purely so history is readable by model.
+/// - **At most one live row**, enforced by a unique index over a
+///   constant expression filtered to `superseded_at IS NULL` — the
+///   partial-index shape V3 established, made unique. (An index on the
+///   column itself would not do it: SQLite treats NULLs as distinct in
+///   unique indexes.) Publishing supersedes in the same transaction,
+///   so the constraint is belt and braces, never the mechanism.
+/// - **Superseded rows are kept**, `superseded_at` stamped — the
+///   rollback question #126 leaves open stays answerable; how long to
+///   keep them is decided when someone needs to trim, not silently
+///   here.
+const V4_MODEL_REGISTRY: &str = r#"
+CREATE TABLE model_registry_entry (
+    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id      TEXT    NOT NULL,
+    entry         TEXT    NOT NULL,
+    published_at  INTEGER NOT NULL,
+    superseded_at INTEGER
+) STRICT;
+
+CREATE UNIQUE INDEX idx_model_registry_one_live
+    ON model_registry_entry((1))
+    WHERE superseded_at IS NULL;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
-const MIGRATIONS: &[&str] = &[V1_INITIAL_SCHEMA, V2_AUTH_TABLES, V3_PURGE_MARK];
+const MIGRATIONS: &[&str] = &[
+    V1_INITIAL_SCHEMA,
+    V2_AUTH_TABLES,
+    V3_PURGE_MARK,
+    V4_MODEL_REGISTRY,
+];
 
 /// Latest schema version (`MIGRATIONS.len()`).
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

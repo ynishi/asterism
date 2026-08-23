@@ -158,6 +158,21 @@
       "docs": "Whether `kind` is one this build of the plane writes. Shape and\nregistration are separate questions on purpose: a reader must\naccept well-formed kinds it does not know (a stream written by a\nnewer build, `forge.*` after #63), a *writer* asks this before\nappending."
     },
     {
+      "path": "teams_core::domain::model_registry",
+      "kind": "module",
+      "docs": "`model_registry` — the instance's carriage of a qualified model's\nregistry entry (#126).\n\nThe entry (`asterism-model-registry-entry-v1`) is authored by the\nprovider's tooling (`asterism-model-lab registry`) and consumed by\nthe member app's fetch flow. Between the two, the instance is a\ncarrier, not an authority (#126 decision 2): it stores and re-serves\nthe provider's bytes **verbatim**, and this module deliberately\ntypes no field of the entry's body — no digests, no URLs, no\nqualification report. Parsing those here would grow the hosted\nplane a reading of the model contract that #83 §4's dependency rule\nkeeps out (`teams-*` → `asterism-core` only; the entry's typed home\nis beside `ModelPackage`, on the app side of the split).\n\nWhat *is* validated is the envelope — the part the instance answers\nfor as a carrier: the bytes are one JSON object, the `schema` field\nnames the one version this instance knows how to carry, and\n`model_id` is a non-empty string the storage layer can key history\nby. A carrier that accepted arbitrary bytes would serve members\nsomething their fetch flow cannot consume, and could not say which\nmodel superseded which."
+    },
+    {
+      "path": "teams_core::domain::model_registry::ENTRY_SCHEMA_V1",
+      "kind": "constant",
+      "docs": "The one entry schema this plane carries. A future `-v2` is a new\nconstant and an explicit decision, not a silent pass-through."
+    },
+    {
+      "path": "teams_core::domain::model_registry::ModelRegistryEntry",
+      "kind": "struct",
+      "docs": "A validated registry entry: the provider's bytes, verbatim, plus\nthe two envelope facts the instance keys carriage by.\n\nThe raw text is the value. Serving anything else — a re-serialized,\nkey-reordered, whitespace-normalized rendering — would mean the\nbytes a member verifies against are bytes the provider never\nauthored, for no gain."
+    },
+    {
       "path": "teams_core::domain::store",
       "kind": "module",
       "docs": "`store` — the team-side view of instance-owned blobs, and the\ndeclared-digest contract (#83 §3).\n\nThe store proper is a global CAS the instance owns; what this\nmodule types is the layer everything consults instead of bytes:\n\n- [`TeamBlobLink`] — the visibility AND dedupe boundary. A digest\n  \"exists\" for a caller iff a link row sits in a team they belong\n  to; purge scope is a team's links, never the CAS directly.\n- [`Locator`] — a *private* link to content the instance does not\n  hold: a uri, and at most a digest **hint** from the last\n  sighting. The instance guarantees nothing about it.\n- The promotion verification rule — [`verify_declared_digest`],\n  whose two outcomes are the whole point of this module.\n\n# Digest notation is `asterism-core`'s, reused as-is\n\nEvery digest here is the `sha256:`-prefixed storage form defined by\n`asterism_core::domain::content_hash` (and the contract crate under\nit). [`parse_digest`] delegates to that parser rather than\nre-spelling the grammar — one notation, one set of shape rules,\nacross the local app and the teams plane (#83 §3: \"core digest\nreused, `sha256:` prefix kept; strip only at the path-mapping\nedge\")."
