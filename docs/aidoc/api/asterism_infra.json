@@ -1100,7 +1100,7 @@
     {
       "path": "asterism_infra::sqlite::repo::tag_evidence",
       "kind": "module",
-      "docs": "SQLite adapters for `TagEvidenceRepository` and\n`TagVectorRepository` (#112, P3).\n\nThe evidence adapter's one load-bearing statement is the\n`INSERT OR IGNORE` in [`suggest_if_absent`]: the primary key\n`(asset, tag, model)` is what keeps a rerun of the suggestion job\nfrom touching a person's ruling or an earlier score — the guarantee\nis structural, not a handler branch.\n\n[`suggest_if_absent`]: SqliteTagEvidenceRepository::suggest_if_absent"
+      "docs": "SQLite adapters for `TagEvidenceRepository` and\n`TagVectorRepository` (#112, P3).\n\nThe evidence adapter's one load-bearing statement is the upsert in\n[`suggest_under_head`]: the primary key `(asset, tag, model)` plus\nthe update's `WHERE disposition = 'suggested' AND head <> excluded`\nis what keeps a rerun of the suggestion job from touching a\nperson's ruling — or a same-head rerun from moving a score — while\nletting a *new* head replace an unruled suggestion (#132). The\nguarantee is structural, not a handler branch.\n\n[`suggest_under_head`]: SqliteTagEvidenceRepository::suggest_under_head"
     },
     {
       "path": "asterism_infra::sqlite::repo::tag_evidence::SqliteTagEvidenceRepository",
