@@ -49,27 +49,62 @@ struct Recipe {
     files: [(&'static str, &'static str); 3],
 }
 
-const RECIPES: &[Recipe] = &[Recipe {
-    model_id: "siglip2-base-patch16-256",
-    dim: 768,
-    preprocess_ver: 1,
-    license: "apache-2.0",
-    source_url: "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX",
-    files: [
-        (
-            "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/onnx/vision_model.onnx",
-            "vision_model.onnx",
-        ),
-        (
-            "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/onnx/text_model.onnx",
-            "text_model.onnx",
-        ),
-        (
-            "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/tokenizer.json",
-            "tokenizer.json",
-        ),
-    ],
-}];
+const RECIPES: &[Recipe] = &[
+    // The bundled encoder (#132 phase 0): the current model with a
+    // q4f16 vision tower over an int8 text tower — ~372 MB against
+    // the fp32 pair's ~1.5 GB. Chosen by the fixture qualification
+    // (seed 42, 24 bases): at its floor of 0.10 it holds precision
+    // 0.29 / recall 0.79 against the fp32 recording of 0.32 / 0.68
+    // at 0.12, Japanese matching intact. Two candidates measured and
+    // rejected on the same fixture: the all-int8 pair (recall 0.59
+    // at the same floor, 40 MB more) and SigLIP v1 224/int8
+    // (Japanese zero, English recall 0.11 — its 32k vocabulary
+    // against this family's 256k). URLs pin the repo revision by
+    // commit, so what `prepare` fetches cannot drift under the
+    // digests it records.
+    Recipe {
+        model_id: "siglip2-base-patch16-256-q4v",
+        dim: 768,
+        preprocess_ver: 1,
+        license: "apache-2.0",
+        source_url: "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX",
+        files: [
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/d1114256522a37ffa257a0a58017348ab0058db2/onnx/vision_model_q4f16.onnx",
+                "vision_model.onnx",
+            ),
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/d1114256522a37ffa257a0a58017348ab0058db2/onnx/text_model_int8.onnx",
+                "text_model.onnx",
+            ),
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/d1114256522a37ffa257a0a58017348ab0058db2/tokenizer.json",
+                "tokenizer.json",
+            ),
+        ],
+    },
+    Recipe {
+        model_id: "siglip2-base-patch16-256",
+        dim: 768,
+        preprocess_ver: 1,
+        license: "apache-2.0",
+        source_url: "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX",
+        files: [
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/onnx/vision_model.onnx",
+                "vision_model.onnx",
+            ),
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/onnx/text_model.onnx",
+                "text_model.onnx",
+            ),
+            (
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-256-ONNX/resolve/main/tokenizer.json",
+                "tokenizer.json",
+            ),
+        ],
+    },
+];
 
 fn recipe(model_id: &str) -> Result<&'static Recipe> {
     RECIPES
