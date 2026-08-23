@@ -7446,6 +7446,121 @@ CREATE TABLE forge_thread_revision (
 ) STRICT;
 "#;
 
+/// V102 — a change point's two cross-references become keys (#119).
+///
+/// `change_point` names four things and the schema checked one of
+/// them. `line_id` was a key from the start; `from_work` (the pursuit
+/// the landing came out of), `by_node` (the close that decided it) and
+/// `parent_id` (the point it sits on) were bare `BLOB`s. Two of those
+/// three can point at a table, and this makes them do it.
+///
+/// **What the keys buy is a check nothing else makes.** A parent that
+/// the line never had is refused twice already — `line_has_node` asks
+/// inside the write, and `restore::chain` refuses a history with a
+/// hole on the way out. Nothing asks anything about `from_work` or
+/// `by_node`: the read hands both through into the model, and a row
+/// naming work that does not exist comes back looking like a landing
+/// out of nowhere. That is the gap with no reader behind it, so it is
+/// the one worth a key.
+///
+/// **One of the two is composite, and the asymmetry is the point.**
+/// `(line_id, from_work)` says the work is on *this* line, not merely
+/// that the id names a pursuit somewhere: `Closings::commit` takes the
+/// line and the closing separately, `land` checks each parent against
+/// its own log, and nothing asks whether the two logs belong together.
+/// A UNIQUE index on `pursuit(line_id, id)` — trivially unique behind
+/// the primary key — is what the key points at.
+///
+/// `by_node` is keyed on existence alone, because the pair it would
+/// have been keyed to is fixed by construction: `land` builds the
+/// ending and the change point from one `PursuitId`, so the row it
+/// writes cannot name an ending of other work. Making it composite
+/// costs more than it buys — the parent side needs a UNIQUE index on
+/// `pursuit_node(pursuit_id, id)`, whose violations SQLite reports
+/// under a column list `is_unique_violation` does not know, which
+/// turns "this work has already ended" into an infrastructure error.
+/// A key that breaks a refusal to restate a guarantee the writer
+/// already gives is the wrong trade.
+///
+/// **`parent_id` stays bare, and this is the answer to whether it
+/// should.** A parent is either the genesis or a change point; the
+/// genesis is columns on `line` rather than a row, because it carries
+/// no work and no node — the shape the model refuses to have as a
+/// type. A key would need a `change_point` row for it, whose
+/// `from_work` and `by_node` would both be NULL, which costs those two
+/// columns their `NOT NULL` for every real row. Trading a constraint
+/// that holds everywhere for one the reader already enforces is the
+/// wrong way round. `pursuit.base_id` and `pursuit_node.parent_id` are
+/// the same shape one table over, and stay bare for the same reason.
+///
+/// A rebuild rather than an `ALTER`, since SQLite adds no key to an
+/// existing table, and an `App` step because `foreign_keys` has to be
+/// off while the old table goes: `change_row` and `forge_thread` both
+/// point at `change_point`, and a drop with enforcement on is a delete
+/// their rows would refuse. Existing rows are copied unchanged — every
+/// one of them already names a pursuit and a node that exist, which is
+/// what `foreign_key_check` is asked to confirm before the step is
+/// allowed to land.
+///
+/// V96's three indexes come back, and a fourth arrives with the second
+/// key: `RESTRICT` asks the child side on every delete of a parent, so
+/// `by_node` is indexed the way `from_work` already was, and a drop
+/// walking either does not scan the table.
+const V102_FORGE_NODE_KEYS: &str = r#"
+CREATE UNIQUE INDEX idx_pursuit_line_id ON pursuit(line_id, id);
+
+CREATE TABLE change_point_v102 (
+    id        BLOB PRIMARY KEY,
+    line_id   BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id BLOB NOT NULL,
+    from_work BLOB NOT NULL,
+    by_node   BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
+    at        INTEGER NOT NULL,
+    actor_id  BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system')),
+    FOREIGN KEY (line_id, from_work)
+        REFERENCES pursuit(line_id, id) ON DELETE RESTRICT
+) STRICT;
+
+INSERT INTO change_point_v102
+       (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind)
+SELECT id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind
+  FROM change_point;
+
+DROP TABLE change_point;
+ALTER TABLE change_point_v102 RENAME TO change_point;
+
+CREATE UNIQUE INDEX idx_change_point_on_parent
+    ON change_point(line_id, parent_id);
+CREATE INDEX idx_change_point_line ON change_point(line_id);
+CREATE INDEX idx_change_point_from ON change_point(from_work);
+CREATE INDEX idx_change_point_by ON change_point(by_node);
+"#;
+
+/// Applies [`V102_FORGE_NODE_KEYS`] and refuses to land on rows the new
+/// keys do not hold.
+///
+/// The check is the point of doing this as an `App` step rather than
+/// SQL alone: enforcement is off while the table is rebuilt, so a row
+/// that names work nobody has would be copied across in silence and
+/// only surface at some later write. `foreign_key_check` asks the
+/// question once, here, while the transaction can still be rolled
+/// back.
+fn v102_forge_node_keys(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+    tx.execute_batch(V102_FORGE_NODE_KEYS)?;
+
+    let mut stmt = tx.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+            Some("v102: foreign_key_check reported violations after the rebuild".into()),
+        ));
+    }
+    Ok(())
+}
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7550,6 +7665,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V99_VISUAL_FEATURE),
     Step::Sql(V100_TAG_EVIDENCE),
     Step::Sql(V101_TAG_HEAD_REF),
+    Step::App(v102_forge_node_keys),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -14848,6 +14964,52 @@ mod tests {
         );
         assert!(unknown.is_err(), "dropped is absence, not a standing");
 
+        // What a landing comes out of. A change point names the work
+        // and the ending that decided it, and since V102 both are keys
+        // — so the rows have to be here before the point that names
+        // them, which is the order a close writes them in anyway.
+        let landing_work = Uuid::now_v7();
+        let landing_open = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit \
+                 (id, line_id, parent_id, open_node, base_id, title, note, \
+                  open_at, open_by, open_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, ?2, NULL, ?3, ?4, NULL, NULL, 0, ?5, 'user', \
+                     0, ?5, 'user', 0, ?5, 'user')",
+            params![landing_work, line, landing_open, genesis, actor],
+        )
+        .unwrap();
+        let landing_close = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_node \
+                 (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, 'close', 'satisfied', NULL, 0, ?4, 'user')",
+            params![landing_close, landing_work, landing_open, actor],
+        )
+        .unwrap();
+
+        // A change point naming work nobody opened is refused by the
+        // schema now, rather than read back as a landing out of
+        // nowhere.
+        let unowned = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
+            params![
+                Uuid::now_v7(),
+                line,
+                genesis,
+                Uuid::now_v7(),
+                landing_close,
+                actor
+            ],
+        );
+        assert!(
+            unowned.is_err(),
+            "a landing has work behind it, and the key is what says so"
+        );
+
         // One change point on the genesis.
         let first = Uuid::now_v7();
         let point = |id: Uuid, parent: Uuid| {
@@ -14855,7 +15017,7 @@ mod tests {
                 "INSERT INTO change_point \
                      (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
                  VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'user')",
-                params![id, line, parent, Uuid::now_v7(), Uuid::now_v7(), actor],
+                params![id, line, parent, landing_work, landing_close, actor],
             )
         };
         point(first, genesis).unwrap();
@@ -14968,5 +15130,220 @@ mod tests {
             op(3, "rename", Some(asset), Some("two")).is_err(),
             "a rename moves a name and nothing else"
         );
+    }
+
+    /// A change point's row survives the rebuild, its indexes come back
+    /// with it, and the two new keys hold afterwards.
+    ///
+    /// Seeded at 101 with a landing whose every column is
+    /// distinguishable, because a rebuild's risk is not failing — it is
+    /// an `INSERT … SELECT` that lands `from_work` in `by_node` and
+    /// says nothing. The indexes are asserted by name because
+    /// `DROP TABLE` takes every one of them with it, and a recreate
+    /// somebody forgot costs a scan per read with nothing to notice.
+    #[test]
+    fn v102_keys_a_change_points_work_and_ending_and_keeps_the_row() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 101).unwrap();
+        let (line, genesis, work, ending, point, actor) = seed_a_landing(&conn);
+
+        migrate(&mut conn).unwrap();
+
+        let (kept_line, kept_parent, kept_work, kept_node, kept_at, kept_actor): (
+            Uuid,
+            Uuid,
+            Uuid,
+            Uuid,
+            i64,
+            Uuid,
+        ) = conn
+            .query_row(
+                "SELECT line_id, parent_id, from_work, by_node, at, actor_id \
+                   FROM change_point WHERE id = ?1",
+                params![point],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("the landing is still there");
+        assert_eq!(kept_line, line);
+        assert_eq!(kept_parent, genesis);
+        assert_eq!(kept_work, work, "the work it came out of, not the ending");
+        assert_eq!(kept_node, ending, "the ending that decided it");
+        assert_eq!(kept_at, 7, "and the stamp beside them");
+        assert_eq!(kept_actor, actor);
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'change_point' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            indexes.contains(&"idx_change_point_on_parent".to_string())
+                && indexes.contains(&"idx_change_point_line".to_string())
+                && indexes.contains(&"idx_change_point_from".to_string()),
+            "every index the rebuild dropped comes back: {indexes:?}"
+        );
+        assert!(
+            indexes.contains(&"idx_change_point_by".to_string()),
+            "and the child side of the second key is indexed: {indexes:?}"
+        );
+
+        // The fork rule rides on one of them, so it is asked rather
+        // than assumed from the name being present.
+        let forked = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 8, ?6, 'user')",
+            params![Uuid::now_v7(), line, genesis, work, ending, actor],
+        );
+        assert!(forked.is_err(), "two points on one parent is still a fork");
+
+        // And what the keys are for: work nobody opened, and an ending
+        // nobody wrote.
+        let unowned = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 9, ?6, 'user')",
+            params![Uuid::now_v7(), line, point, Uuid::now_v7(), ending, actor],
+        );
+        assert!(unowned.is_err(), "a landing has work behind it");
+        let undecided = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 9, ?6, 'user')",
+            params![Uuid::now_v7(), line, point, work, Uuid::now_v7(), actor],
+        );
+        assert!(undecided.is_err(), "and an ending that decided it");
+
+        // Existing is not the same as belonging, which is what the
+        // composite half of the key is for. A second line with work of
+        // its own: the pursuit exists, and it still cannot be built
+        // into a landing on this line.
+        let (elsewhere_line, _, elsewhere_work, elsewhere_end, _, _) = seed_a_landing(&conn);
+        assert_ne!(elsewhere_line, line, "two lines, two logs");
+        let borrowed_work = conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 10, ?6, 'user')",
+            params![
+                Uuid::now_v7(),
+                line,
+                point,
+                elsewhere_work,
+                elsewhere_end,
+                actor
+            ],
+        );
+        assert!(
+            borrowed_work.is_err(),
+            "another line's work does not land here"
+        );
+    }
+
+    /// A database whose landing names work that is not there does not
+    /// migrate.
+    ///
+    /// Enforcement is off while the table is rebuilt, so without the
+    /// `foreign_key_check` the bad row would be copied across in
+    /// silence and surface at some later write, on a database that had
+    /// already reported itself upgraded. The step refuses instead, and
+    /// the transaction takes the rebuild back with it.
+    #[test]
+    fn v102_refuses_a_database_the_new_keys_would_not_hold() {
+        let mut conn = test_conn();
+        migrate_to(&mut conn, 101).unwrap();
+        let (line, genesis, _work, ending, _point, actor) = seed_a_landing(&conn);
+        conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 8, ?6, 'user')",
+            params![
+                Uuid::now_v7(),
+                line,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+                ending,
+                actor
+            ],
+        )
+        .expect("bare BLOBs took anything before V102");
+
+        let refused = migrate(&mut conn);
+        assert!(
+            refused.is_err(),
+            "a rebuild that keeps a row the new keys refuse is not an upgrade"
+        );
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 101, "and the database stays where it was");
+        let genesis_still: Uuid = conn
+            .query_row(
+                "SELECT genesis_id FROM line WHERE id = ?1",
+                params![line],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(genesis_still, genesis, "with everything it had");
+    }
+
+    /// A line, the work against it, the ending that closed the work,
+    /// and the change point that landing wrote — the smallest shape
+    /// V102's keys have anything to say about.
+    ///
+    /// Returns `(line, genesis, work, ending, point, actor)`.
+    fn seed_a_landing(conn: &Connection) -> (Uuid, Uuid, Uuid, Uuid, Uuid, Uuid) {
+        let line = Uuid::now_v7();
+        let genesis = Uuid::now_v7();
+        let actor = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO line \
+                 (id, name, strategy, standing, genesis_id, genesis_at, genesis_by, \
+                  genesis_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, 'ROOT', 'by-hand', 'open', ?2, 0, ?3, 'user', \
+                     0, ?3, 'user', 0, ?3, 'user')",
+            params![line, genesis, actor],
+        )
+        .unwrap();
+        let work = Uuid::now_v7();
+        let open_node = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit \
+                 (id, line_id, parent_id, open_node, base_id, title, note, \
+                  open_at, open_by, open_kind, created_at, created_by, created_kind, \
+                  updated_at, updated_by, updated_kind) \
+             VALUES (?1, ?2, NULL, ?3, ?4, NULL, NULL, 0, ?5, 'user', \
+                     0, ?5, 'user', 0, ?5, 'user')",
+            params![work, line, open_node, genesis, actor],
+        )
+        .unwrap();
+        let ending = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO pursuit_node \
+                 (id, pursuit_id, parent_id, kind, outcome, note, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, 'close', 'satisfied', NULL, 0, ?4, 'user')",
+            params![ending, work, open_node, actor],
+        )
+        .unwrap();
+        let point = Uuid::now_v7();
+        conn.execute(
+            "INSERT INTO change_point \
+                 (id, line_id, parent_id, from_work, by_node, at, actor_id, actor_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 7, ?6, 'user')",
+            params![point, line, genesis, work, ending, actor],
+        )
+        .unwrap();
+        (line, genesis, work, ending, point, actor)
     }
 }
