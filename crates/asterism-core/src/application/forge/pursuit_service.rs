@@ -537,7 +537,7 @@ mod tests {
                 .pursuit(id)
                 .ok_or_else(|| DomainError::not_found("pursuit", id))?;
             if work.head() != on {
-                return Err(DomainError::Conflict("the pursuit moved".into()));
+                return Err(DomainError::raced("the pursuit moved"));
             }
             work.push(round.clone())?;
             self.put(work);
@@ -590,7 +590,7 @@ mod tests {
             };
 
             if self.adamant {
-                return Err(DomainError::Conflict("this store keeps nothing".into()));
+                return Err(DomainError::raced("this store keeps nothing"));
             }
 
             closing.apply(&mut held, &mut work)?;
@@ -893,7 +893,7 @@ mod tests {
             .close(&pursuit.id(), Outcome::Satisfied, None, &by())
             .await;
 
-        assert!(matches!(refused, Err(DomainError::Conflict(_))));
+        assert!(matches!(refused, Err(DomainError::Conflict { .. })));
         assert_eq!(
             *world.calls.lock().unwrap(),
             1,
@@ -998,7 +998,7 @@ mod tests {
         assert!(matches!(
             work.close(&mine.id(), Outcome::Satisfied, None, &by())
                 .await,
-            Err(DomainError::Validation(_)) | Err(DomainError::Conflict(_))
+            Err(DomainError::Validation(_)) | Err(DomainError::Conflict { .. })
         ));
 
         // The line's rule writes what a person would have written:

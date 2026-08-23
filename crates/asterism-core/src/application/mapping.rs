@@ -13,8 +13,9 @@ use asterism_contract::dto::{
     SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
 };
 use asterism_contract::forge::{
-    ForgeChangePointDto, ForgeChangeRowDto, ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineDto,
-    ForgeLineHistoryDto, ForgeStrategyDto,
+    ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto, ForgeDiscardedDto,
+    ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeOpDto, ForgePursuitDto,
+    ForgeRoundDto, ForgeStrategyDto,
 };
 use asterism_contract::query::ListAssetsQuery;
 use chrono::{DateTime, Utc};
@@ -30,11 +31,16 @@ use crate::domain::dir::Dir;
 use crate::domain::dispatch::{DispatchJob, DispatchState};
 use crate::domain::edge::ConstellationEdge;
 use crate::domain::forge::model::act::Actor;
+use crate::domain::forge::model::change::{Axis, Collision};
 use crate::domain::forge::model::history::ChangePoint;
 use crate::domain::forge::model::line::{Line, Standing};
+use crate::domain::forge::model::op::{Op, OpKind};
+use crate::domain::forge::model::pursuit::{Close, Outcome, Pursuit, Round};
 use crate::domain::forge::model::strategy::About;
 use crate::domain::forge::model::table::EntryStates;
-use crate::domain::forge::model::value::{Content, Existence, LineId, Name, StrategyId};
+use crate::domain::forge::model::value::{
+    Content, EntryId, Existence, LineId, Name, PursuitId, StrategyId,
+};
 use crate::domain::group::{Group, GroupLink, GroupSummary};
 use crate::domain::material_layer::{LayerRole, MaterialLayer};
 use crate::domain::material_mark::{MaterialAnchor, MaterialMark};
@@ -1262,6 +1268,155 @@ pub fn forge_discarded_to_dto(line: LineId, released: &BTreeSet<Content>) -> For
         line_id: line.to_string(),
         released_asset_ids: released.iter().map(|c| c.as_uuid().to_string()).collect(),
     }
+}
+
+// ---- Work against a line ---------------------------------------
+
+/// Reads a pursuit id off the wire.
+pub fn forge_pursuit_id(raw: &str, field: &str) -> Result<PursuitId, DomainError> {
+    Ok(PursuitId::from_uuid(parse_uuid(raw, field)?))
+}
+
+/// Reads how a caller says work ended.
+///
+/// Two words and nothing else. A third would be a third outcome, and
+/// what an outcome means is the model's to say — so an unrecognised
+/// one is refused here rather than defaulted to either.
+pub fn forge_outcome(raw: &str) -> Result<Outcome, DomainError> {
+    match raw {
+        "satisfied" => Ok(Outcome::Satisfied),
+        "abandoned" => Ok(Outcome::Abandoned),
+        other => Err(DomainError::Validation(format!(
+            "outcome is \"satisfied\" or \"abandoned\", not {other:?}"
+        ))),
+    }
+}
+
+/// Reads one operation off the wire.
+///
+/// The entry id is always the caller's, including for an add. What
+/// each verb requires is stated here rather than left to the model,
+/// because the model takes the pieces already parsed — a `"replace"`
+/// arriving with no content has no shape to be refused by, only a
+/// missing argument.
+pub fn forge_op(dto: &ForgeOpDto) -> Result<Op, DomainError> {
+    let entry = EntryId::from_uuid(parse_uuid(&dto.entry_id, "entry id")?);
+    let content = |kind: &str| -> Result<Content, DomainError> {
+        let raw = dto.content_asset_id.as_deref().ok_or_else(|| {
+            DomainError::Validation(format!(
+                "a {kind:?} operation names the content it puts there"
+            ))
+        })?;
+        Ok(Content::of(AssetId::from_uuid(parse_uuid(
+            raw,
+            "content asset id",
+        )?)))
+    };
+    let name = |kind: &str| -> Result<Name, DomainError> {
+        let raw = dto.name.as_deref().ok_or_else(|| {
+            DomainError::Validation(format!(
+                "a {kind:?} operation names what the entry answers to"
+            ))
+        })?;
+        forge_name(raw)
+    };
+
+    match dto.kind.as_str() {
+        "add" => Ok(Op::add_to(entry, content("add")?, name("add")?)),
+        "replace" => Ok(Op::replace(entry, content("replace")?)),
+        "rename" => Ok(Op::rename(entry, name("rename")?)),
+        "remove" => Ok(Op::remove(entry)),
+        other => Err(DomainError::Validation(format!(
+            "an operation is \"add\", \"replace\", \"rename\" or \"remove\", not {other:?}"
+        ))),
+    }
+}
+
+/// Converts a piece of work to what a caller reads: how it opened,
+/// every round, and how it ended if it has.
+pub fn forge_pursuit_to_dto(pursuit: &Pursuit) -> ForgePursuitDto {
+    let opening = pursuit.opening();
+    let (opened_by_kind, opened_by_id) = actor_to_columns(opening.act().by());
+    ForgePursuitDto {
+        id: pursuit.id().to_string(),
+        line_id: pursuit.of().to_string(),
+        parent_id: pursuit.parent().map(|id| id.to_string()),
+        base_id: pursuit.base().to_string(),
+        head_id: pursuit.head().to_string(),
+        title: opening
+            .intent()
+            .title
+            .as_ref()
+            .map(|name| name.as_str().to_string()),
+        note: opening.intent().note.clone(),
+        opened_at_ms: opening.act().at().timestamp_millis(),
+        opened_by_kind,
+        opened_by_id,
+        rounds: pursuit.rounds().iter().map(forge_round_to_dto).collect(),
+        close: pursuit.close().map(forge_close_to_dto),
+    }
+}
+
+/// Converts one round to what a caller reads.
+pub fn forge_round_to_dto(round: &Round) -> ForgeRoundDto {
+    let (actor_kind, actor_id) = actor_to_columns(round.act().by());
+    ForgeRoundDto {
+        id: round.id().to_string(),
+        parent_id: round.parent().to_string(),
+        at_ms: round.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+        note: round.note().map(str::to_string),
+        ops: round.ops().iter().map(forge_op_to_dto).collect(),
+    }
+}
+
+fn forge_op_to_dto(op: &Op) -> ForgeOpDto {
+    let (kind, content, name) = match op.kind() {
+        OpKind::Add { content, name } => ("add", Some(*content), Some(name.clone())),
+        OpKind::Replace { content } => ("replace", Some(*content), None),
+        OpKind::Rename { name } => ("rename", None, Some(name.clone())),
+        OpKind::Remove => ("remove", None, None),
+    };
+    ForgeOpDto {
+        entry_id: op.entry().to_string(),
+        kind: kind.to_string(),
+        content_asset_id: content.map(|content| content.asset().to_string()),
+        name: name.map(|name| name.as_str().to_string()),
+    }
+}
+
+fn forge_close_to_dto(close: &Close) -> ForgeCloseDto {
+    let (actor_kind, actor_id) = actor_to_columns(close.act().by());
+    ForgeCloseDto {
+        id: close.id().to_string(),
+        parent_id: close.parent().to_string(),
+        outcome: match close.outcome() {
+            Outcome::Satisfied => "satisfied".to_string(),
+            Outcome::Abandoned => "abandoned".to_string(),
+        },
+        note: close.note().map(str::to_string),
+        at_ms: close.act().at().timestamp_millis(),
+        actor_kind,
+        actor_id,
+    }
+}
+
+/// Converts what work still collides with to what a screen reads
+/// before offering to resolve it.
+pub fn forge_collisions_to_dto(found: &[Collision]) -> Vec<ForgeCollisionDto> {
+    found
+        .iter()
+        .map(|collision| ForgeCollisionDto {
+            entry_id: collision.entry.to_string(),
+            axis: match collision.axis {
+                Axis::Existence => "existence".to_string(),
+                Axis::Content => "content".to_string(),
+                Axis::Name => "name".to_string(),
+            },
+            moved_in_id: collision.moved_in.to_string(),
+        })
+        .collect()
 }
 
 #[cfg(test)]

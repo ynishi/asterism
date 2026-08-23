@@ -913,11 +913,11 @@ impl Lines for SqliteForge {
 
         dropped.map_err(|refusal| match refusal {
             DropRefusal::NoSuchLine => DomainError::not_found("line", id),
-            DropRefusal::Reopened => DomainError::Conflict(format!(
+            DropRefusal::Reopened => DomainError::raced(format!(
                 "line {id} is out of the archive again, and a drop is decided against an \
                  archived line"
             )),
-            DropRefusal::WorkOpenedSince { opened } => DomainError::Conflict(format!(
+            DropRefusal::WorkOpenedSince { opened } => DomainError::raced(format!(
                 "{opened} pieces of work have been opened on line {id} since this drop was \
                  decided, and what it releases was decided without them"
             )),
@@ -1144,7 +1144,7 @@ impl Threads for SqliteForge {
             .map_err(infra_err)?;
 
         said.map_err(|parent| {
-            DomainError::Conflict(format!("message {parent} is not in thread {thread}"))
+            DomainError::clashes(format!("message {parent} is not in thread {thread}"))
         })
     }
 
@@ -1190,7 +1190,7 @@ impl Threads for SqliteForge {
             .map_err(infra_err)?;
 
         amended.map_err(|()| {
-            DomainError::Conflict(format!("message {message} is not in thread {thread}"))
+            DomainError::clashes(format!("message {message} is not in thread {thread}"))
         })
     }
 
@@ -1381,7 +1381,7 @@ impl Pursuits for SqliteForge {
             .map_err(infra_err)?;
 
         landed.map_err(|refusal| match refusal {
-            PushRefusal::Forked => DomainError::Conflict(format!(
+            PushRefusal::Forked => DomainError::raced(format!(
                 "work {id} has moved: this round sits on {on}, and something is already there"
             )),
             PushRefusal::NotThisPursuit => DomainError::Validation(format!(
@@ -1484,13 +1484,15 @@ impl Closings for SqliteForge {
             // against the logs this transaction was holding still. A
             // line that moved anyway is a line something wrote to
             // without taking the write lock.
-            Refusal::LineMoved => DomainError::Conflict(format!(
+            Refusal::LineMoved => DomainError::raced(format!(
                 "line {line} moved under a close decided against it inside the write"
             )),
-            Refusal::WorkForked => DomainError::Conflict(format!(
+            Refusal::WorkForked => DomainError::raced(format!(
                 "work {pursuit} moved under a close decided against it inside the write"
             )),
-            Refusal::WorkAlreadyEnded => DomainError::Conflict(format!(
+            // The one the message itself already says is not worth
+            // asking again: reading it again finds the same ending.
+            Refusal::WorkAlreadyEnded => DomainError::settled(format!(
                 "work {pursuit} has already ended; reading it again will find the same ending"
             )),
             Refusal::Answered(refused) => refused,

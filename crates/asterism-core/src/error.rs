@@ -52,15 +52,104 @@ pub enum DomainError {
     #[error("validation error: {0}")]
     Validation(String),
 
-    /// State conflict against the persistence layer (unique-constraint
-    /// violation, optimistic-lock race, and so on).
-    #[error("conflict: {0}")]
-    Conflict(String),
+    /// The state fought back: a unique constraint, a race, a
+    /// precondition, an ending that already happened.
+    ///
+    /// **The kind is the point, and it is not a label.** Unlike
+    /// [`NotFound::entity`](Self::NotFound), which only feeds the
+    /// message, [`kind`](ConflictKind) is there precisely so a caller
+    /// can branch on it — a client that retries every conflict loops
+    /// forever on half of them, and one that retries none gives up on
+    /// races it would win. Build these with [`Self::raced`],
+    /// [`Self::blocked`], [`Self::settled`] or [`Self::clashes`].
+    #[error("conflict: {message}")]
+    Conflict {
+        /// What the caller can do about it.
+        kind: ConflictKind,
+        /// What happened, for a person to read.
+        message: String,
+    },
 
     /// Failure originating from infrastructure (SQLite, filesystem, MCP
     /// client, etc.).
     #[error("infrastructure error: {0}")]
     Infra(#[from] anyhow::Error),
+}
+
+/// What a caller can do about a [`Conflict`](DomainError::Conflict).
+///
+/// Four answers, because there are four things a caller can do and no
+/// fifth: send it again, do something else first, give up, or ask for
+/// something different. Sorting a refusal into one of them is a
+/// decision made where the state is known — the layer above cannot
+/// recover it from a sentence, and the layer above is where the retry
+/// loop lives.
+///
+/// Where the state is known is usually where the refusal is raised,
+/// and not always: the forge raises one variant from two places, a
+/// write losing a race and a read finding a row that could not have
+/// been written, and it is
+/// [`ForgeError::Unwritable`](crate::domain::forge::model::error::ForgeError::Unwritable)
+/// that lets the conversion tell those apart rather than the raise
+/// site.
+///
+/// This is not a status code by another name. Every one of these is a
+/// `409` over HTTP, because every one of them is a conflict with the
+/// current state; what differs is what happens next, which a status
+/// code has never been able to say.
+///
+/// # Choosing one
+///
+/// **The kind follows from the state, and the message then has to
+/// match it.** Not the other way round: an earlier draft of this said
+/// a refusal is `Blocked` only when its message already names the way
+/// through, which reads as a rule but is not one — it keys a promise a
+/// client depends on to how somebody happened to word a sentence, so
+/// improving a message would silently change the contract, and letting
+/// one rot would silently break it. The wording is the part that can
+/// be wrong and fixed. So: ask whether the same request works once
+/// something else changes. If it does, it is `Blocked`, and a message
+/// that does not say what to change is a message to fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictKind {
+    /// Something landed between the read and the write. The same
+    /// request may well win next time, and retrying is reasonable.
+    Raced,
+    /// The same request works once something else changes, and the
+    /// message is required to say what.
+    Blocked,
+    /// It is already decided, and no amount of asking changes that.
+    /// Retrying is always wrong.
+    Settled,
+    /// What the request asks for conflicts with something that is
+    /// already there. The same request never works; a different one
+    /// does.
+    Clashes,
+}
+
+impl ConflictKind {
+    /// A stable token for the wire.
+    ///
+    /// Named separately from the `Debug` rendering because this one is
+    /// a promise: a client branches on it, so it changes only when the
+    /// meaning does.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Raced => "raced",
+            Self::Blocked => "blocked",
+            Self::Settled => "settled",
+            Self::Clashes => "clashes",
+        }
+    }
+
+    /// Is sending the same request again worth doing?
+    ///
+    /// The question a retry loop actually asks, answered here rather
+    /// than in each client. `Raced` yes, `Blocked` only after the
+    /// message's precondition is met, and the other two never.
+    pub fn worth_retrying(self) -> bool {
+        matches!(self, Self::Raced)
+    }
 }
 
 impl DomainError {
@@ -71,5 +160,36 @@ impl DomainError {
             entity,
             id: id.to_string(),
         }
+    }
+
+    /// A conflict of the given kind.
+    pub fn conflict(kind: ConflictKind, message: impl Into<String>) -> Self {
+        Self::Conflict {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    /// Something landed between the read and the write.
+    /// See [`ConflictKind::Raced`].
+    pub fn raced(message: impl Into<String>) -> Self {
+        Self::conflict(ConflictKind::Raced, message)
+    }
+
+    /// A precondition the message names is not met.
+    /// See [`ConflictKind::Blocked`].
+    pub fn blocked(message: impl Into<String>) -> Self {
+        Self::conflict(ConflictKind::Blocked, message)
+    }
+
+    /// Already decided. See [`ConflictKind::Settled`].
+    pub fn settled(message: impl Into<String>) -> Self {
+        Self::conflict(ConflictKind::Settled, message)
+    }
+
+    /// Conflicts with something already there.
+    /// See [`ConflictKind::Clashes`].
+    pub fn clashes(message: impl Into<String>) -> Self {
+        Self::conflict(ConflictKind::Clashes, message)
     }
 }

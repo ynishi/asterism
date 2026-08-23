@@ -63,7 +63,7 @@ impl DirRow {
 fn map_name_conflict(err: rusqlite_isle::IsleError, name: &str) -> DomainError {
     let msg = err.to_string();
     if msg.contains("UNIQUE") || msg.contains("unique") {
-        DomainError::Conflict(format!("a dir named {name:?} already exists at this level"))
+        DomainError::clashes(format!("a dir named {name:?} already exists at this level"))
     } else {
         infra_err(err)
     }
@@ -179,9 +179,7 @@ impl DirRepository for SqliteDirRepository {
         let uuid = *id.as_uuid();
         let parent_uuid = new_parent.map(|p| *p.as_uuid());
         if parent_uuid == Some(uuid) {
-            return Err(DomainError::Conflict(
-                "a dir cannot be moved into itself".into(),
-            ));
+            return Err(DomainError::clashes("a dir cannot be moved into itself"));
         }
         let now_ms = datetime_to_ms(&now);
         // 0 = ok, 1 = parent missing / different persona, 2 = cycle,
@@ -230,8 +228,9 @@ impl DirRepository for SqliteDirRepository {
             1 => Err(DomainError::Validation(
                 "target parent dir does not exist for this persona".into(),
             )),
-            2 => Err(DomainError::Conflict(
-                "move rejected: the target parent sits inside this dir's own subtree".into(),
+            2 => Err(DomainError::blocked(
+                "move rejected: the target parent sits inside this dir's own subtree; move it \
+                 out from under this dir first, and the same move then works",
             )),
             3 => Err(DomainError::not_found("dir", id)),
             _ => Ok(()),
@@ -274,14 +273,13 @@ impl DirRepository for SqliteDirRepository {
             .await
             .map_err(infra_err)?;
         match verdict {
-            1 => Err(DomainError::Conflict(
-                "dir is not empty — move or delete its contents first".into(),
+            1 => Err(DomainError::blocked(
+                "dir is not empty — move or delete its contents first",
             )),
             2 => Err(DomainError::not_found("dir", id)),
-            3 => Err(DomainError::Conflict(
+            3 => Err(DomainError::blocked(
                 "dir looks empty because it holds Group(s) belonging to a persona \
-                 in the trash; restore or purge that persona first"
-                    .into(),
+                 in the trash; restore or purge that persona first",
             )),
             _ => Ok(()),
         }
@@ -339,6 +337,7 @@ mod tests {
     use crate::sqlite::open_and_migrate_in_memory;
     use crate::sqlite::repo::group::SqliteGroupRepository;
     use asterism_core::domain::repository::GroupRepository;
+    use asterism_core::error::ConflictKind;
 
     async fn seed_persona(isle: &AsyncIsle) -> PersonaId {
         let persona = PersonaId::new();
@@ -372,20 +371,26 @@ mod tests {
         // Sibling name collision at the root level.
         assert!(matches!(
             repo.create(persona, None, "art".into(), now).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Clashes,
+                ..
+            })
         ));
 
         // Moving the root under its own child must be rejected.
         assert!(matches!(
             repo.move_to(&root.id, Some(&child.id), now).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict { .. })
         ));
 
         // Deleting a non-empty dir must be rejected; emptying it
         // first makes the delete pass.
         assert!(matches!(
             repo.delete(&root.id).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Blocked,
+                ..
+            })
         ));
         repo.delete(&child.id).await.unwrap();
         repo.delete(&root.id).await.unwrap();
@@ -414,11 +419,11 @@ mod tests {
         // Self-link and transitive cycle are rejected.
         assert!(matches!(
             groups.link(&a.id, &a.id, now).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict { .. })
         ));
         assert!(matches!(
             groups.link(&c.id, &a.id, now).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict { .. })
         ));
 
         let links = groups.links(Some(&persona)).await.unwrap();

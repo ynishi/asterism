@@ -272,7 +272,7 @@ impl SeriesRepository for SqliteSeriesRepository {
                 // the caller re-registered one it already holds.
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::Conflict(format!("strategy {id} is already registered"))
+                    DomainError::clashes(format!("strategy {id} is already registered"))
                 } else {
                     infra_err(err)
                 }
@@ -525,6 +525,7 @@ impl SeriesRepository for SqliteSeriesRepository {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
+    use asterism_core::error::ConflictKind;
 
     /// The rule V73 seeds, addressed by the id the migration froze.
     const VDSL_STRATEGY_ID: &str = "019fe8f8-1400-7000-8000-000000000001";
@@ -831,7 +832,10 @@ mod tests {
         // rather than a second rule.
         assert!(matches!(
             repo.create_strategy(&card, at()).await,
-            Err(DomainError::Conflict(_))
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Clashes,
+                ..
+            })
         ));
         // …and a rule arriving over the port is not a system row,
         // whatever it calls itself.

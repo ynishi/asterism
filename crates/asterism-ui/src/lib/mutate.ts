@@ -44,16 +44,23 @@ import { undoToastCatalog } from "./stores/undo-toast.svelte";
  * value rather than as a return type.
  *
  * `kind` is read for exactly one variant, and it has to be. `UiError`
- * is `#[serde(tag = "kind", content = "message")]`, so what crosses the
- * wire is the *inner* string — the `#[error("not found: {0}")]` prefix
- * that makes it a sentence stays on the Rust side. For `NotFound` that
- * inner string is `format!("asset {id}")`, which would otherwise reach
- * the user as a bare id under "Could not delete this comment." The
- * other three carry their own prose (`Conflict` is "dir is not empty —
- * move or delete its contents first"), so prefixing them would only
- * add a word the sentence already implies.
+ * is `#[serde(tag = "kind")]` over struct variants, so `message` is a
+ * field beside `kind` and what crosses the wire is that field alone —
+ * the `#[error("not found: {message}")]` prefix that makes it a
+ * sentence stays on the Rust side. For `NotFound` that field is
+ * `format!("asset {id}")`, which would otherwise reach the user as a
+ * bare id under "Could not delete this comment." The other three carry
+ * their own prose (`Conflict` is "dir is not empty — move or delete its
+ * contents first"), so prefixing them would only add a word the
+ * sentence already implies.
  *
- * "could not be found", not "no longer exists". `error.rs:14-16` is
+ * A `Conflict` carries one field more, `reason`, saying whether asking
+ * again is worth anything. Nothing here reads it: this function turns a
+ * rejection into a sentence for a person, and retry advice is for
+ * whatever decides to retry. It is named so that the extra key is not
+ * read as something that got lost.
+ *
+ * "could not be found", not "no longer exists". `error.rs` is
  * explicit that a restricted asset is hidden behind this same variant —
  * *"they surface as 'not found' for viewers outside their sharing
  * list"* — so the row may be perfectly intact and simply not this

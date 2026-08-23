@@ -134,8 +134,8 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
             .await
             .map_err(infra_err)?;
         if n == 0 {
-            return Err(DomainError::Conflict(
-                "no open suggestion to rule on — it is absent or already ruled".into(),
+            return Err(DomainError::settled(
+                "no open suggestion to rule on — it is absent or already ruled",
             ));
         }
         Ok(())
@@ -247,6 +247,7 @@ impl TagVectorRepository for SqliteTagVectorRepository {
 mod tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
+    use asterism_core::error::ConflictKind;
 
     async fn seed_asset_and_tags(isle: &AsyncIsle) -> (AssetId, TagId, TagId) {
         let persona = Uuid::now_v7();
@@ -339,7 +340,16 @@ mod tests {
             .resolve(&asset, &tag_a, "m", TagSuggestionDisposition::Rejected, 4)
             .await
             .unwrap_err();
-        assert!(matches!(err, DomainError::Conflict(_)), "{err}");
+        assert!(
+            matches!(
+                err,
+                DomainError::Conflict {
+                    kind: ConflictKind::Settled,
+                    ..
+                }
+            ),
+            "{err}"
+        );
 
         // A different model has its own namespace.
         assert!(

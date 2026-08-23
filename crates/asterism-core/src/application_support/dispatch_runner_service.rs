@@ -249,7 +249,7 @@ impl DispatchRunnerService {
         if let Some(persona) = self.personas.find(&job.persona_id).await?
             && persona.trashed_at.is_some()
         {
-            return Err(DomainError::Conflict(format!(
+            return Err(DomainError::blocked(format!(
                 "persona {} is in the trash; restore it before reifying dispatch {id}",
                 job.persona_id
             )));

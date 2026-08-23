@@ -242,3 +242,250 @@ pub struct ForgeLineActCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_ai: Option<String>,
 }
+
+// -------------------------------------------------------------------
+// Work against a line — a pursuit, its rounds, and what it collides
+// with.
+// -------------------------------------------------------------------
+
+/// A piece of work against a line, whole: how it opened, every round
+/// it wrote, and how it ended if it has.
+///
+/// The log is the order. Nothing carries a sequence number, and
+/// `rounds` arrives in the order the chain holds them — each round
+/// naming the node before it in `parent_id`.
+///
+/// There is no separate "summary" shape. A pursuit is small (an
+/// opening, a handful of rounds, at most one close) and a screen that
+/// lists work wants the intent and the outcome, which are here. The
+/// line's history is the read that needed splitting; this one does
+/// not.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgePursuitDto {
+    /// Pursuit id (UUID hyphenated).
+    pub id: String,
+    /// The line this work is against (UUID hyphenated).
+    pub line_id: String,
+    /// The work this was opened from, when it was opened from another
+    /// (UUID hyphenated).
+    pub parent_id: Option<String>,
+    /// The change point this work was cut from (UUID hyphenated).
+    pub base_id: String,
+    /// The node the log currently ends at (UUID hyphenated). The
+    /// opening when nothing has been written yet.
+    pub head_id: String,
+    /// A short name for the work, when it was given one.
+    pub title: Option<String>,
+    /// Anything else said about why the work was opened.
+    pub note: Option<String>,
+    /// When it was opened (unix epoch ms).
+    pub opened_at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub opened_by_kind: String,
+    /// Who opened it (UUID hyphenated).
+    pub opened_by_id: String,
+    /// Every round, oldest first.
+    pub rounds: Vec<ForgeRoundDto>,
+    /// How it ended, absent while it is still open.
+    pub close: Option<ForgeCloseDto>,
+}
+
+/// One round of work — what it asks the line to say, and who asked.
+///
+/// A round is a request rather than a landing. Nothing here is on the
+/// line: what the line says is [`ForgeEntryStateDto`], and what put it
+/// there is [`ForgeChangePointDto`].
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeRoundDto {
+    /// Round id (UUID hyphenated).
+    pub id: String,
+    /// The node before it in the log (UUID hyphenated).
+    pub parent_id: String,
+    /// When it was written (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"` — a round a rule wrote is the system's.
+    pub actor_kind: String,
+    /// Who wrote it (UUID hyphenated).
+    pub actor_id: String,
+    /// Anything said about the round.
+    pub note: Option<String>,
+    /// What it asks for, one per operation.
+    pub ops: Vec<ForgeOpDto>,
+}
+
+/// One operation of a round.
+///
+/// A verb and its entry, unlike [`ForgeChangeRowDto`], which is the
+/// same information after the model has folded it into what a landing
+/// *said*. Both exist because both are real: a caller writes verbs,
+/// and a line records statements.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeOpDto {
+    /// The entry this operates on (UUID hyphenated).
+    ///
+    /// **Required, including for `"add"`.** The model can mint one,
+    /// and this does not use that: a round that forks an entry and
+    /// then fills the fork has to name it twice, so the id must exist
+    /// before the round is sent. It also means a caller knows what it
+    /// created without reading the response back.
+    pub entry_id: String,
+    /// `"add"`, `"replace"`, `"rename"` or `"remove"`.
+    pub kind: String,
+    /// The content it puts there, for `"add"` and `"replace"` (an
+    /// asset id, UUID hyphenated).
+    pub content_asset_id: Option<String>,
+    /// The name it gives, for `"add"` and `"rename"`.
+    pub name: Option<String>,
+}
+
+/// How a piece of work ended.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeCloseDto {
+    /// Close id (UUID hyphenated).
+    pub id: String,
+    /// The node before it in the log (UUID hyphenated).
+    pub parent_id: String,
+    /// `"satisfied"` or `"abandoned"`.
+    pub outcome: String,
+    /// Anything said about the ending.
+    pub note: Option<String>,
+    /// When it ended (unix epoch ms).
+    pub at_ms: i64,
+    /// `"user"` or `"system"`.
+    pub actor_kind: String,
+    /// Who ended it (UUID hyphenated).
+    pub actor_id: String,
+}
+
+/// One axis of one entry that this work asks to move and the line has
+/// already moved.
+///
+/// Derived on every read from the two logs, so it cannot go stale and
+/// there is no flag for anybody to clear. What clears a collision is
+/// the work asking for something else.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeCollisionDto {
+    /// The entry both moved (UUID hyphenated).
+    pub entry_id: String,
+    /// `"existence"`, `"content"` or `"name"` — the axis both moved.
+    pub axis: String,
+    /// The change point that moved it, which this work has not seen
+    /// (UUID hyphenated).
+    pub moved_in_id: String,
+}
+
+/// What `resolve` did.
+///
+/// **Both answers are ordinary, and both are 200.** A rule that leaves
+/// a collision to a person writes nothing, which is an outcome rather
+/// than a failure — the collision stays where somebody can see it. So
+/// `round` absent is the rule declining, not an error, and a caller
+/// distinguishes the two by whether it is there.
+///
+/// `collisions` is what is left either way, which is the question a
+/// screen asks next in both cases: after a resolution, whether any
+/// remain; after a decline, what the person now has to settle.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgeResolvedDto {
+    /// The round the rule wrote, absent when it wrote nothing.
+    pub round: Option<ForgeRoundDto>,
+    /// What this work still collides with, after whatever was written.
+    pub collisions: Vec<ForgeCollisionDto>,
+}
+
+/// Opens work against a line.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OpenForgePursuitCommand {
+    /// The line to work against (UUID hyphenated).
+    pub line_id: String,
+    /// The work this is opened from, when it is opened from another
+    /// (UUID hyphenated).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// A short name for the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Anything else worth saying about why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Writes a round.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PushForgeRoundCommand {
+    /// Target pursuit id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub pursuit_id: String,
+    /// What the round asks for. At least one — a round that says
+    /// nothing is refused.
+    pub ops: Vec<ForgeOpDto>,
+    /// Anything worth saying about the round.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Ends a piece of work.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct CloseForgePursuitCommand {
+    /// Target pursuit id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub pursuit_id: String,
+    /// `"satisfied"` or `"abandoned"`. Satisfied puts what the work
+    /// says on the line; abandoned puts nothing there and leaves
+    /// everything the work wrote readable.
+    pub outcome: String,
+    /// Anything worth saying about the ending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}
+
+/// Asks the line's rule to answer whatever this work collides with.
+///
+/// One command rather than a second empty one beside `close`: resolve
+/// takes nothing but who is asking, and the pursuit comes from the
+/// path.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ForgePursuitActCommand {
+    /// Target pursuit id (UUID hyphenated). Taken from the path over
+    /// HTTP.
+    #[serde(default)]
+    pub pursuit_id: String,
+    /// See [`OpenForgeLineCommand::author_kind`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<String>,
+    /// See [`OpenForgeLineCommand::author_subject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_subject: Option<String>,
+    /// See [`OpenForgeLineCommand::operator_ai`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_ai: Option<String>,
+}

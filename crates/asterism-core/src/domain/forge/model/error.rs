@@ -163,7 +163,8 @@ pub enum ForgeError {
     /// Carries them so a caller can say which, rather than sending
     /// anybody back to recompute what the refusal already knew.
     #[error(
-        "{} axes this work asks for moved on the line after the work was cut from it",
+        "{} axes this work asks for moved on the line after the work was cut from it — resolve \
+         it, by the line's rule or by hand, and the same close then lands",
         .0.len()
     )]
     Collides(Vec<Collision>),
@@ -193,16 +194,78 @@ pub enum ForgeError {
     /// formality — it is the record of what happened to it.
     #[error("{0} pieces of work are still open against this line")]
     WorkStillOpen(usize),
+
+    /// The store handed back a record the model would not have
+    /// written, and [`restore`](crate::domain::forge::model::restore)
+    /// says which rule it breaks.
+    ///
+    /// **The test is whether the refusal describes a row the store
+    /// handed back**, not whether the rule it breaks came from the
+    /// write path. Both kinds are here: `restore::line` and
+    /// `restore::pursuit` replay `History::record`, `Pursuit::push`
+    /// and `Pursuit::end`, which are the write path's own; `chain` and
+    /// the empty-thread guard are rules `restore` states itself and
+    /// nothing else has. All of them answer the same question — could
+    /// this have been written — so all of them are marked.
+    ///
+    /// Nothing a caller did causes this. It asked to read, and there
+    /// is no state for it to be in conflict with — so it reads as
+    /// infrastructure, and the request that finds it fails with a
+    /// `500` rather than being told to try again. The inner refusal
+    /// travels along because it says exactly which invariant the row
+    /// broke, which is the first thing anybody looking at the row
+    /// wants to know.
+    ///
+    /// Marked at the boundary rather than by splitting the variants
+    /// underneath. The two refusals noticed first were `NotOnHead` and
+    /// `NameTaken`, both of which the write path raises too; splitting
+    /// them would have left `AlreadyClosed`, which arrives the same
+    /// way, and every rule these functions learn later. A boundary
+    /// covers the ones nobody has written yet.
+    ///
+    /// The rows that never reach `restore` — because they cannot be
+    /// assembled into the types it takes — are the adapter's to answer
+    /// for, and `forge::rows` answers them the same way.
+    #[error("this record could not have been written: {0}")]
+    Unwritable(Box<ForgeError>),
+}
+
+impl ForgeError {
+    /// Marks a refusal as the store's rather than the caller's.
+    ///
+    /// Used by [`restore`](crate::domain::forge::model::restore) around
+    /// every replay of a write-path rule. Already-marked refusals pass
+    /// through unchanged, so a nested restore does not report a record
+    /// that could not have been written that could not have been
+    /// written.
+    pub fn unwritable(self) -> Self {
+        match self {
+            already @ Self::Unwritable(_) => already,
+            refusal => Self::Unwritable(Box::new(refusal)),
+        }
+    }
 }
 
 impl From<ForgeError> for DomainError {
     /// Reads a refusal in the shared vocabulary.
     ///
     /// [`NotOnHead`](ForgeError::NotOnHead),
-    /// [`NameTaken`](ForgeError::NameTaken) and
+    /// [`NameTaken`](ForgeError::NameTaken),
+    /// [`AlreadyClosed`](ForgeError::AlreadyClosed) and
     /// [`Collides`](ForgeError::Collides) are the state fighting
     /// back — the caller was not wrong, the line was somewhere else —
     /// so they read as conflicts. The rest are malformed input.
+    ///
+    /// **Which conflict is carried across, not flattened.** The four
+    /// want four different things from a caller and the difference is
+    /// only knowable here, where the refusal is raised: `NotOnHead` is
+    /// a landing that arrived mid-write and the same close may win
+    /// next time; `Collides` needs the work resolved first and then
+    /// the same close works; `AlreadyClosed` is over; `NameTaken`
+    /// needs a different name. A single `Conflict(String)` made all
+    /// four one thing, and a client reading it could only retry
+    /// everything — which loops on two of them — or nothing, which
+    /// gives up on the one race it would win.
     ///
     /// [`NothingToRecord`](ForgeError::NothingToRecord) is the one
     /// worth arguing about, and it reads as validation: the line is
@@ -218,13 +281,32 @@ impl From<ForgeError> for DomainError {
     /// [`WorkStillOpen`](ForgeError::WorkStillOpen) are the two steps
     /// of dropping asked out of order. Each names what the caller has
     /// to do next, and none of them is waiting.
+    ///
+    /// Those three now have a conflict kind that fits them —
+    /// [`Blocked`](crate::error::ConflictKind::Blocked) is "do this
+    /// first, then the same request works", which is what they say.
+    /// They are left as validations here because moving them would
+    /// change the status three routes answer with, which is a decision
+    /// about those routes rather than about this conversion.
     fn from(error: ForgeError) -> Self {
         let message = error.to_string();
         match error {
-            ForgeError::NotOnHead
-            | ForgeError::NameTaken(_)
-            | ForgeError::AlreadyClosed
-            | ForgeError::Collides(_) => DomainError::Conflict(message),
+            // Not the caller's doing, and not a conflict with
+            // anything: it asked to read, and what came back could not
+            // have been written. Nothing it does differently helps,
+            // which is why this is the one refusal here that is
+            // neither a conflict nor a validation.
+            ForgeError::Unwritable(_) => DomainError::Infra(anyhow::anyhow!(message)),
+            // A landing arrived while this write was deciding. Read
+            // again and the same close may well go through.
+            ForgeError::NotOnHead => DomainError::raced(message),
+            // The line moved under this work. Resolving it is the
+            // thing to do first, and then this same close works.
+            ForgeError::Collides(_) => DomainError::blocked(message),
+            // Over. Asking again finds it over again.
+            ForgeError::AlreadyClosed => DomainError::settled(message),
+            // Two entries cannot answer to one name. Another name can.
+            ForgeError::NameTaken(_) => DomainError::clashes(message),
             ForgeError::BlankName
             | ForgeError::EmptyRow
             | ForgeError::RemovalMovesAnotherAxis
@@ -253,11 +335,141 @@ impl From<ForgeError> for DomainError {
 mod tests {
     use super::*;
 
+    // Named here rather than beside `DomainError` above, because the
+    // forge's production code never names it: the four constructors
+    // on `DomainError` say which kind, and only a test asserting on
+    // one has to spell the type. `forge_boundary.rs` reads that
+    // difference — a `use` inside `#[cfg(test)]` is not what the
+    // forge depends on — which is why this does not want a line on
+    // the shared vocabulary.
+    use crate::error::ConflictKind;
+
+    /// A line that moved under the caller is a race, and the kind
+    /// says so.
+    ///
+    /// The variant alone is not the assertion worth making: all four
+    /// of the forge's conflicts are `Conflict`, and what a caller does
+    /// about this one — read again and send the same close — is true
+    /// of only this one.
     #[test]
-    fn a_line_that_moved_under_the_caller_reads_as_a_conflict() {
+    fn a_line_that_moved_under_the_caller_reads_as_a_race_worth_retrying() {
         let shared: DomainError = ForgeError::NotOnHead.into();
 
-        assert!(matches!(shared, DomainError::Conflict(_)));
+        assert!(
+            matches!(
+                shared,
+                DomainError::Conflict {
+                    kind: ConflictKind::Raced,
+                    ..
+                }
+            ),
+            "{shared}"
+        );
+        let DomainError::Conflict { kind, .. } = shared else {
+            unreachable!("asserted above")
+        };
+        assert!(kind.worth_retrying());
+    }
+
+    /// Work that has already ended is over, and the kind says so.
+    ///
+    /// The pair to the test above, and the reason the kind exists:
+    /// these two are one variant and opposite advice. A client that
+    /// retried both would loop here forever.
+    #[test]
+    fn work_that_has_already_ended_reads_as_settled_and_is_not_worth_retrying() {
+        let shared: DomainError = ForgeError::AlreadyClosed.into();
+
+        assert!(
+            matches!(
+                shared,
+                DomainError::Conflict {
+                    kind: ConflictKind::Settled,
+                    ..
+                }
+            ),
+            "{shared}"
+        );
+        let DomainError::Conflict { kind, .. } = shared else {
+            unreachable!("asserted above")
+        };
+        assert!(!kind.worth_retrying());
+    }
+
+    /// A record the store should not have been holding is not the
+    /// caller's conflict with anything.
+    ///
+    /// This is the case the kinds made dangerous. `NotOnHead` is a
+    /// race on the write path and a forked chain on the read path, and
+    /// one variant cannot be both. It went unnoticed because the
+    /// SQLite adapter flattens every restore refusal into `Infra`
+    /// before a caller sees it, so the model's answer was being
+    /// discarded rather than read — right by accident, and only over
+    /// one of the two stores. Saying it here is what makes it true of
+    /// both, and of any store written later.
+    ///
+    /// A read has no state to conflict with; the row simply could not
+    /// have been written, so it is not a conflict at any kind.
+    #[test]
+    fn a_record_that_could_not_have_been_written_is_not_a_conflict() {
+        let shared: DomainError = ForgeError::NotOnHead.unwritable().into();
+
+        assert!(
+            matches!(shared, DomainError::Infra(_)),
+            "the store handed back something impossible, and no retry \
+             advice fits that: {shared}"
+        );
+        assert!(
+            shared.to_string().contains("could not have been written"),
+            "and it says so: {shared}"
+        );
+
+        // The same variant, unwrapped, is still the write path's race.
+        // One is the caller's to act on and one is not, which is the
+        // whole distinction this carries.
+        let raced: DomainError = ForgeError::NotOnHead.into();
+        assert!(matches!(
+            raced,
+            DomainError::Conflict {
+                kind: ConflictKind::Raced,
+                ..
+            }
+        ));
+    }
+
+    /// Marking twice does not nest.
+    #[test]
+    fn a_refusal_already_the_stores_fault_is_not_wrapped_again() {
+        let once = ForgeError::AlreadyClosed.unwritable();
+        let twice = once.clone().unwritable();
+
+        assert_eq!(once, twice);
+        assert_eq!(
+            twice
+                .to_string()
+                .matches("could not have been written")
+                .count(),
+            1,
+            "{twice}"
+        );
+    }
+
+    /// A collision is not a race: the same close works, but only
+    /// after the work is resolved.
+    #[test]
+    fn a_collision_reads_as_blocked_rather_than_raced() {
+        let shared: DomainError = ForgeError::Collides(Vec::new()).into();
+
+        assert!(
+            matches!(
+                shared,
+                DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                }
+            ),
+            "{shared}"
+        );
     }
 
     #[test]
@@ -272,7 +484,16 @@ mod tests {
         let taken = Name::new("key visual").unwrap();
         let shared: DomainError = ForgeError::NameTaken(taken.clone()).into();
 
-        assert!(matches!(shared, DomainError::Conflict(_)), "{shared}");
+        assert!(
+            matches!(
+                shared,
+                DomainError::Conflict {
+                    kind: ConflictKind::Clashes,
+                    ..
+                }
+            ),
+            "{shared}"
+        );
         assert!(
             shared.to_string().contains(taken.as_str()),
             "the name a caller has to change is in the message: {shared}"

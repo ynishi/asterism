@@ -53,8 +53,11 @@ use asterism_contract::dto::{
     VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
-    ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto,
-    ForgeStrategyDto, OpenForgeLineCommand, RenameForgeLineCommand, SetForgeLineStrategyCommand,
+    CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto, ForgeEntryStateDto,
+    ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgePursuitActCommand,
+    ForgePursuitDto, ForgeResolvedDto, ForgeStrategyDto, OpenForgeLineCommand,
+    OpenForgePursuitCommand, PushForgeRoundCommand, RenameForgeLineCommand,
+    SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     DiagLevel, GetAssetDetailQuery, ListAssetsQuery, ListDiagQuery, ListEventsQuery,
@@ -62,12 +65,15 @@ use asterism_contract::query::{
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
-    forge_discarded_to_dto, forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_name,
-    forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
+    forge_collisions_to_dto, forge_discarded_to_dto, forge_history_to_dto, forge_line_id,
+    forge_line_to_dto, forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
+    forge_round_to_dto, forge_states_to_dto, forge_strategy_id, forge_strategy_to_dto,
 };
-use asterism_core::domain::forge::model::value::LineId;
+use asterism_core::domain::forge::model::pursuit::Intent;
+use asterism_core::domain::forge::model::value::{LineId, PursuitId};
 use asterism_core::domain::observation::Stream;
 use asterism_core::domain::value::MimeType;
+use asterism_core::error::ConflictKind;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -91,22 +97,47 @@ impl From<DomainError> for ApiError {
 }
 
 impl IntoResponse for ApiError {
+    /// **`reason` is on a conflict and nowhere else, and it is there
+    /// because the status cannot say what the caller should do.**
+    ///
+    /// Every conflict is a 409: each one really is a clash with the
+    /// current state, and splitting them across statuses would say
+    /// something untrue about the ones that got the other code. What
+    /// differs is what happens next — send it again, do something
+    /// first, give up, ask for something different — and a client that
+    /// cannot tell those apart either retries everything, and loops on
+    /// the terminal ones, or retries nothing, and abandons the races it
+    /// would win. So the kind rides in the body, as a token
+    /// [`ConflictKind::as_str`] promises to keep stable.
+    ///
+    /// The other kinds carry no `reason`: a 404 and a 400 each want one
+    /// thing from a caller, and inventing a token for them would be a
+    /// field nobody can branch on.
     fn into_response(self) -> Response {
         let (status, kind) = match &self.0 {
             DomainError::PersonaNotFound(_)
             | DomainError::AssetNotFound(_)
             | DomainError::NotFound { .. } => (StatusCode::NOT_FOUND, "NotFound"),
             DomainError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation"),
-            DomainError::DuplicatePersona(_) | DomainError::Conflict(_) => {
+            DomainError::DuplicatePersona(_) | DomainError::Conflict { .. } => {
                 (StatusCode::CONFLICT, "Conflict")
             }
             DomainError::Infra(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal"),
         };
-        (
-            status,
-            Json(serde_json::json!({ "kind": kind, "message": self.0.to_string() })),
-        )
-            .into_response()
+        let reason = match &self.0 {
+            DomainError::Conflict { kind, .. } => Some(kind.as_str()),
+            // A pack id is already registered: the caller has to name
+            // a different one, which is what `Clashes` means. Said
+            // here because the variant predates the kind and carries
+            // no room for one.
+            DomainError::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
+            _ => None,
+        };
+        let mut body = serde_json::json!({ "kind": kind, "message": self.0.to_string() });
+        if let (Some(reason), Some(object)) = (reason, body.as_object_mut()) {
+            object.insert("reason".into(), serde_json::Value::from(reason));
+        }
+        (status, Json(body)).into_response()
     }
 }
 
@@ -458,6 +489,37 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
             post(discard_forge_line),
         )
         .route("/asterism/forge/strategies", get(list_forge_strategies))
+        // Work against a line. `of_line` hangs off the line rather
+        // than off a query parameter: the path already carries the id
+        // the question is about, and a caller cannot then express a
+        // pairing that has no answer.
+        .route(
+            "/asterism/forge/lines/{id}/pursuits",
+            get(list_forge_pursuits_of_line),
+        )
+        .route("/asterism/forge/pursuits", post(open_forge_pursuit))
+        .route("/asterism/forge/pursuits/{id}", get(get_forge_pursuit))
+        .route("/asterism/forge/pursuits/{id}/push", post(push_forge_round))
+        .route(
+            "/asterism/forge/pursuits/{id}/resolve",
+            post(resolve_forge_pursuit),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/close",
+            post(close_forge_pursuit),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/collisions",
+            get(get_forge_pursuit_collisions),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/behind",
+            get(get_forge_pursuit_behind),
+        )
+        .route(
+            "/asterism/forge/pursuits/{id}/children",
+            get(list_forge_pursuit_children),
+        )
         .with_state(ctx)
 }
 
@@ -2412,7 +2474,7 @@ async fn get_asset_file(
         ))
     })?;
     if !meta.is_file() {
-        return Err(DomainError::Conflict(format!(
+        return Err(DomainError::clashes(format!(
             "asset original is not a regular file: {}",
             original.locator
         ))
@@ -3350,4 +3412,217 @@ async fn list_forge_strategies(
             .map(|(id, about)| forge_strategy_to_dto(id, about))
             .collect(),
     ))
+}
+
+// -------------------------------------------------------------------
+// The forge — work against a line
+// -------------------------------------------------------------------
+
+/// Reads a pursuit id out of the path.
+fn pursuit_id(raw: &str) -> Result<PursuitId, ApiError> {
+    Ok(forge_pursuit_id(raw, "pursuit id")?)
+}
+
+/// Reads work back after a write, so the caller sees what it now is.
+///
+/// The line's half of this surface answers a write with the line, for
+/// the reason written at [`line_now`]. Work is the same question with
+/// one more part to it: the service's `push` does hand back the round
+/// it wrote, but a round on its own says neither where the log now
+/// ends nor what else is on it, and `close` hands back nothing at all.
+/// So `push` and `close` answer with the pursuit whole.
+///
+/// `resolve` is the one write here that does not, and it is not an
+/// exception to this: what a caller needs after a resolution is
+/// whether anything is still colliding, which is a different question
+/// from what the log holds. Its own shape carries that.
+async fn pursuit_now(ctx: &ServerCtx, id: &PursuitId) -> Result<Json<ForgePursuitDto>, ApiError> {
+    Ok(Json(forge_pursuit_to_dto(
+        &ctx.pursuit_service.get(id).await?,
+    )))
+}
+
+/// `POST /asterism/forge/pursuits` — opens work against a line.
+///
+/// The line is in the body rather than the path, because this is the
+/// one verb here that does not have a pursuit to name yet. A caller
+/// asking "what work is against this line" uses
+/// `GET /asterism/forge/lines/{id}/pursuits`, which does hang off the
+/// line.
+async fn open_forge_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(command): Json<OpenForgePursuitCommand>,
+) -> ApiResult<ForgePursuitDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let line = line_id(&command.line_id)?;
+    let parent = command.parent_id.as_deref().map(pursuit_id).transpose()?;
+    let intent = Intent {
+        title: command.title.map(forge_name).transpose()?,
+        note: command.note,
+    };
+    let pursuit = ctx
+        .pursuit_service
+        .open(&line, parent, intent, &attribution)
+        .await?;
+    Ok(Json(forge_pursuit_to_dto(&pursuit)))
+}
+
+/// `GET /asterism/forge/pursuits/{id}` — the work, whole.
+///
+/// One read rather than the line's two. A line's history grows without
+/// bound and a screen wants the fold, so `GET /lines/{id}` and
+/// `/states` are separate questions; a pursuit is an opening, a
+/// handful of rounds and at most one close, and splitting it would buy
+/// a second request for nothing.
+async fn get_forge_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<ForgePursuitDto> {
+    pursuit_now(&ctx, &pursuit_id(&id)?).await
+}
+
+/// `POST /asterism/forge/pursuits/{id}/push` — writes a round.
+///
+/// The line is not read, which is what makes this the operation that
+/// can run all day without touching anything anybody else is using.
+/// What it does check is that the content each operation names exists.
+async fn push_forge_round(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<PushForgeRoundCommand>,
+) -> ApiResult<ForgePursuitDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = pursuit_id(&id)?;
+    let ops = command
+        .ops
+        .iter()
+        .map(forge_op)
+        .collect::<Result<Vec<_>, _>>()?;
+    ctx.pursuit_service
+        .push(&id, ops, command.note, &attribution)
+        .await?;
+    pursuit_now(&ctx, &id).await
+}
+
+/// `POST /asterism/forge/pursuits/{id}/resolve` — lets the line's rule
+/// answer whatever this work collides with.
+///
+/// **200 whether or not a round was written, and the body says
+/// which.** A rule that leaves collisions to a person writes nothing;
+/// that is an outcome, not a failure, and the collision is still there
+/// to be read. So `round` is absent rather than the response being a
+/// 204 or an error, and `collisions` carries what is left either way —
+/// after a resolution, whatever still stands; after a decline, what
+/// the person now has to settle by hand.
+async fn resolve_forge_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<ForgePursuitActCommand>,
+) -> ApiResult<ForgeResolvedDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = pursuit_id(&id)?;
+    let round = ctx.pursuit_service.resolve(&id, &attribution).await?;
+    let collisions = ctx.pursuit_service.collisions(&id).await?;
+    Ok(Json(ForgeResolvedDto {
+        round: round.as_ref().map(forge_round_to_dto),
+        collisions: forge_collisions_to_dto(&collisions),
+    }))
+}
+
+/// `POST /asterism/forge/pursuits/{id}/close` — ends the work, and
+/// puts what it says on the line if it says anything.
+///
+/// **A 409 from here is not always worth retrying, and the body says
+/// which kind it is.** Four refusals reach `Conflict`, and they want
+/// four different things from a caller. The `reason` token tells them
+/// apart:
+///
+/// - `"blocked"` — the line moved under this work, so it collides.
+///   Resolve first, then this same close works. Retrying it alone
+///   loops.
+/// - `"raced"` — the second decision inside the write lost to a
+///   landing that arrived meanwhile. Retrying is reasonable and will
+///   usually win.
+/// - `"settled"` — the work has already ended. Retrying never helps.
+/// - `"clashes"` — the change would leave two entries under one name.
+///   The caller has to ask for something different.
+///
+/// All four are 409, because all four are a conflict with the current
+/// state; the status was never the thing that could separate them, and
+/// `reason` is what does.
+async fn close_forge_pursuit(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Json(command): Json<CloseForgePursuitCommand>,
+) -> ApiResult<ForgePursuitDto> {
+    let attribution = asserted(
+        command.author_kind.as_deref(),
+        command.author_subject.as_deref(),
+        command.operator_ai.as_deref(),
+    )?;
+    let id = pursuit_id(&id)?;
+    let outcome = forge_outcome(&command.outcome)?;
+    ctx.pursuit_service
+        .close(&id, outcome, command.note, &attribution)
+        .await?;
+    pursuit_now(&ctx, &id).await
+}
+
+/// `GET /asterism/forge/pursuits/{id}/collisions` — what this work
+/// still asks for that the line has moved since.
+///
+/// Derived from both logs on every call, so it cannot go stale. This
+/// is what a screen shows before offering `resolve`.
+async fn get_forge_pursuit_collisions(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgeCollisionDto>> {
+    let found = ctx.pursuit_service.collisions(&pursuit_id(&id)?).await?;
+    Ok(Json(forge_collisions_to_dto(&found)))
+}
+
+/// `GET /asterism/forge/pursuits/{id}/behind` — the landings this work
+/// has not seen, oldest first.
+///
+/// How far behind rather than what collides: a landing here may touch
+/// nothing this work asks for. A screen reads both — this one to say
+/// the line has moved, `collisions` to say whether it matters.
+async fn get_forge_pursuit_behind(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<String>> {
+    let behind = ctx.pursuit_service.behind(&pursuit_id(&id)?).await?;
+    Ok(Json(behind.iter().map(|id| id.to_string()).collect()))
+}
+
+/// `GET /asterism/forge/pursuits/{id}/children` — work opened from
+/// this work.
+async fn list_forge_pursuit_children(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgePursuitDto>> {
+    let found = ctx.pursuit_service.children(&pursuit_id(&id)?).await?;
+    Ok(Json(found.iter().map(forge_pursuit_to_dto).collect()))
+}
+
+/// `GET /asterism/forge/lines/{id}/pursuits` — every piece of work
+/// against a line, open and ended alike.
+async fn list_forge_pursuits_of_line(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+) -> ApiResult<Vec<ForgePursuitDto>> {
+    let found = ctx.pursuit_service.of_line(&line_id(&id)?).await?;
+    Ok(Json(found.iter().map(forge_pursuit_to_dto).collect()))
 }

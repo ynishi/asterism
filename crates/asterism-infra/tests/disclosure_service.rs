@@ -28,7 +28,7 @@ use asterism_core::domain::repository::{
     AssetRepository, EdgeRepository, MaterialFingerprint, PersonaRepository,
 };
 use asterism_core::domain::value::{AssetId, Modality, PersonaId, SourceKind, SourceRef};
-use asterism_core::error::DomainError;
+use asterism_core::error::{ConflictKind, DomainError};
 use asterism_disclosure_format::embed;
 use asterism_infra::disclosure::DisclosureWriter;
 use asterism_infra::generator_params::StoredParamExtractor;
@@ -311,8 +311,15 @@ async fn an_asset_racing_its_fingerprint_is_refused_not_silently_unmarked() {
 
     let err = fx.service.record_for(&asset, None).await.unwrap_err();
     assert!(
-        matches!(err, DomainError::Conflict(_)),
-        "not-yet-measured is a state conflict, not a missing row: {err:?}"
+        matches!(
+            err,
+            DomainError::Conflict {
+                kind: ConflictKind::Blocked,
+                ..
+            }
+        ),
+        "not-yet-measured is a state conflict, not a missing row — and \
+         fingerprinting it is the way through: {err:?}"
     );
     fx.close().await;
 }

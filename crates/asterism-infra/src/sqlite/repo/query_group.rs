@@ -417,7 +417,7 @@ impl QueryGroupRepository for SqliteQueryGroupRepository {
             .map_err(|err| {
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::Conflict(format!(
+                    DomainError::clashes(format!(
                         "a group named {:?} already exists for this persona",
                         group.name
                     ))
@@ -1036,7 +1036,10 @@ mod tests {
             .await;
         assert!(matches!(
             dup,
-            Err(asterism_core::error::DomainError::Conflict(_))
+            Err(asterism_core::error::DomainError::Conflict {
+                kind: asterism_core::error::ConflictKind::Clashes,
+                ..
+            })
         ));
         driver.shutdown().await.unwrap();
     }

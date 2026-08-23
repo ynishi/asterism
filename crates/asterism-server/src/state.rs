@@ -73,6 +73,12 @@ pub struct ServerCtx {
     /// for why the forge's conversations carry a prefix and this does
     /// not.
     pub line_service: Arc<asterism_core::application::forge::LineService>,
+    /// Work against a line: opening it, writing rounds, letting the
+    /// line's rule answer what it collides with, and ending it. Built
+    /// in `core_init` beside the line's service and over the same
+    /// ports — a close writes to both logs at once, which is why they
+    /// share an adapter rather than each holding one.
+    pub pursuit_service: Arc<asterism_core::application::forge::PursuitService>,
     /// Registered exporters — surfaces which backends the server can
     /// dispatch to.
     pub exporter_registry: ExporterRegistry,
@@ -123,6 +129,7 @@ impl ServerCtx {
             material_layer_service: core.material_layer_service.clone(),
             thread_service: core.thread_service.clone(),
             line_service: core.line_service.clone(),
+            pursuit_service: core.pursuit_service.clone(),
             exporter_registry: core.exporter_registry.clone(),
             jobs_pool: core.jobs_pool.clone(),
             telemetry: core.telemetry.clone(),

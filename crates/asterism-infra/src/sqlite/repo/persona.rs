@@ -381,10 +381,10 @@ impl PersonaRepository for SqlitePersonaRepository {
             .map_err(infra_err)?;
         match verdict {
             Verdict::Gone => Ok(()),
-            Verdict::Live => Err(DomainError::Conflict(format!(
+            Verdict::Live => Err(DomainError::blocked(format!(
                 "persona {id} is still live; trash it before purging"
             ))),
-            Verdict::Held { held, lines } => Err(DomainError::Conflict(format!(
+            Verdict::Held { held, lines } => Err(DomainError::blocked(format!(
                 "persona {id} has {held} asset(s) the forge is holding, on {}. \
                  A line holds what it has ever named, and releases it when the line \
                  itself is dropped — taking an entry off does not, because bringing \
@@ -426,6 +426,7 @@ mod delete_order_tests {
     use super::*;
     use crate::sqlite::open_and_migrate_in_memory;
     use asterism_core::domain::repository::PersonaRepository;
+    use asterism_core::error::ConflictKind;
 
     /// A persona carrying a snapshot that is referenced by both a
     /// `dispatch_job` (RESTRICT) and a `bucket.origin_snapshot_id`
@@ -545,7 +546,13 @@ mod delete_order_tests {
         // Purge is trash-gated now, so the ordered-cleanup path is only
         // reachable through the trash.
         assert!(
-            matches!(repo.purge(&id).await, Err(DomainError::Conflict(_))),
+            matches!(
+                repo.purge(&id).await,
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                })
+            ),
             "a live persona must not be purgeable"
         );
         repo.trash(&id, chrono::Utc::now()).await.unwrap();
@@ -640,7 +647,7 @@ mod delete_order_tests {
         repo.trash(&id, chrono::Utc::now()).await.unwrap();
 
         let refused = repo.purge(&id).await.expect_err("the forge is holding one");
-        let DomainError::Conflict(said) = &refused else {
+        let DomainError::Conflict { message: said, .. } = &refused else {
             panic!("a held asset is the state fighting back: {refused:?}");
         };
         assert!(

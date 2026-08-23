@@ -167,7 +167,7 @@ impl ModalityRepository for SqliteModalityRepository {
                 // HTTP boundary returns 409 (mirrors the group adapter).
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::Conflict(format!("modality {slug_for_err:?} already exists"))
+                    DomainError::clashes(format!("modality {slug_for_err:?} already exists"))
                 } else {
                     infra_err(err)
                 }
@@ -254,6 +254,7 @@ mod tests {
     };
     use asterism_core::application::ModalityService;
     use asterism_core::domain::attribution::AttributionContext;
+    use asterism_core::error::ConflictKind;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -410,7 +411,13 @@ mod tests {
 
         // Duplicate create → Conflict (409).
         let dup = repo.create(&def).await;
-        assert!(matches!(dup, Err(DomainError::Conflict(_))));
+        assert!(matches!(
+            dup,
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Clashes,
+                ..
+            })
+        ));
 
         let found = repo.find(&def.slug).await.unwrap().unwrap();
         assert_eq!(found, def);
@@ -471,7 +478,13 @@ mod tests {
             )
             .await;
         assert!(
-            matches!(err, Err(DomainError::Conflict(_))),
+            matches!(
+                err,
+                Err(DomainError::Conflict {
+                    kind: ConflictKind::Blocked,
+                    ..
+                })
+            ),
             "delete must be refused while an asset carries the slug"
         );
         // Still present.

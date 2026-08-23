@@ -61,7 +61,7 @@ impl Refusal {
         match self {
             Self::Missing(id) => DomainError::not_found("tag", TagId::from_uuid(id)),
             Self::NameTaken(name) => {
-                DomainError::Conflict(format!("another tag is already named {name:?}"))
+                DomainError::clashes(format!("another tag is already named {name:?}"))
             }
         }
     }

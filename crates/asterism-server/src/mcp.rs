@@ -34,6 +34,7 @@ use asterism_contract::command::{
 };
 use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
 use asterism_core::DomainError;
+use asterism_core::error::ConflictKind;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, ContentBlock, ListResourcesResult, PaginatedRequestParams,
@@ -66,16 +67,28 @@ fn ok_json<S: serde::Serialize>(value: &S) -> Result<CallToolResult, McpError> {
 
 /// Maps a [`DomainError`] onto a failed tool result carrying the same
 /// `{kind, message}` JSON the HTTP boundary returns for the same error.
+///
+/// A conflict carries `reason` here too, and this is the surface where
+/// it matters most: what reads these is an agent, which will retry
+/// unless something tells it not to. `"settled"` is that something.
 fn domain_error(err: DomainError) -> CallToolResult {
     let kind = match &err {
         DomainError::PersonaNotFound(_)
         | DomainError::AssetNotFound(_)
         | DomainError::NotFound { .. } => "NotFound",
         DomainError::Validation(_) => "Validation",
-        DomainError::DuplicatePersona(_) | DomainError::Conflict(_) => "Conflict",
+        DomainError::DuplicatePersona(_) | DomainError::Conflict { .. } => "Conflict",
         DomainError::Infra(_) => "Internal",
     };
-    let body = serde_json::json!({ "kind": kind, "message": err.to_string() });
+    let reason = match &err {
+        DomainError::Conflict { kind, .. } => Some(kind.as_str()),
+        DomainError::DuplicatePersona(_) => Some(ConflictKind::Clashes.as_str()),
+        _ => None,
+    };
+    let mut body = serde_json::json!({ "kind": kind, "message": err.to_string() });
+    if let (Some(reason), Some(object)) = (reason, body.as_object_mut()) {
+        object.insert("reason".into(), serde_json::Value::from(reason));
+    }
     CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }
 
