@@ -526,10 +526,6 @@ async fn handle_asterism_job(
                 true,
             ),
         },
-        // Deliberately not gated on the encoder cell, unlike the three
-        // visual jobs above: installing the first model is this job's
-        // whole point, and there is nothing bound to consult.
-        Ok(JobKind::ModelFetch) => (handlers::model_fetch(&env, &job.payload).await, false),
         // Gated like the visual jobs: the trainer's corpus is the
         // vectors and rulings under the bound encoder's identity.
         Ok(JobKind::HeadTrain) => match env.deps.visual_encoder.get() {

@@ -4894,16 +4894,6 @@ impl AssetService {
         Ok(crate::application::mapping::tag_to_dto(&tag))
     }
 
-    /// Enqueues the install of the model package a registry entry
-    /// describes (#126). The payload travels to the `model_fetch`
-    /// handler as it stands (`{"url": …}` or `{"entry": …}` — the
-    /// transport validated the shape); returns the engine's task id.
-    /// Installation does not bind: the caller restarts to bind (#112's
-    /// bind-once), which the job's completion message also says.
-    pub async fn fetch_model(&self, payload: serde_json::Value) -> Result<String, DomainError> {
-        self.jobs.enqueue(JobKind::ModelFetch, payload).await
-    }
-
     /// Enqueues a tag-head training run (#132 phase 2) over whatever
     /// rulings exist; returns the engine's task id. Promotion is the
     /// job's own held-out verdict, recorded as the pointer the

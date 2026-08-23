@@ -3823,133 +3823,6 @@ pub async fn query_group_refresh(
 }
 
 // ---------------------------------------------------------------------
-// Model install (#126).
-// ---------------------------------------------------------------------
-
-/// Downloads and installs the model package a registry entry (#126)
-/// describes.
-///
-/// Payload: `{ "url": "<entry url>" }` or `{ "entry": { … } }`,
-/// exactly one. The inline form exists because the instance's registry
-/// route sits behind its session gate — a client that already holds a
-/// session fetches the entry itself and hands the body over, rather
-/// than this job growing credentials in a persisted queue row.
-///
-/// The entry is the trust anchor: every fetched byte is verified
-/// against its digests before it lands, and the finished directory
-/// must pass the same reader the binder uses
-/// (`asterism_vision::registry`'s staging owns both halves; this
-/// handler owns only the network). Resumable rather than retried, the
-/// pipeline's rule: a re-run keeps every staged file whose digest
-/// verifies and downloads only the rest. The final rename installs the
-/// package as a **replacement** — other packages are retired, since
-/// the binder refuses a directory holding two — and binding stays a
-/// restart (#112's bind-once), which is what the completion message
-/// says.
-///
-/// This download loop and `model-lab prepare`'s are deliberately two:
-/// they point opposite ways along the trust chain. `prepare` fetches
-/// from the official source and **pins** what it got — the digests are
-/// its output; this loop fetches from wherever the entry says and
-/// **verifies** against those pins — the digests are its input. A
-/// shared loop would need a "pin or verify?" switch, which is exactly
-/// the confusion the split exists to prevent.
-pub async fn model_fetch(env: &JobEnv, payload: &serde_json::Value) -> Result<String, DomainError> {
-    use asterism_vision::registry::{RegistryEntry, Staging, is_installed, retire_other_packages};
-
-    let entry = match (payload.get("url"), payload.get("entry")) {
-        (Some(url), None) => {
-            let url = url.as_str().ok_or_else(|| {
-                DomainError::Validation("model_fetch: \"url\" must be a string".into())
-            })?;
-            let raw = reqwest::get(url)
-                .await
-                .and_then(reqwest::Response::error_for_status)
-                .map_err(|e| anyhow::anyhow!("cannot fetch the registry entry from {url}: {e}"))?
-                .text()
-                .await
-                .map_err(|e| anyhow::anyhow!("cannot read the registry entry from {url}: {e}"))?;
-            RegistryEntry::parse(&raw)?
-        }
-        (None, Some(inline)) => RegistryEntry::parse(&inline.to_string())?,
-        _ => {
-            return Err(DomainError::Validation(
-                "model_fetch takes \"url\" or \"entry\", exactly one".into(),
-            ));
-        }
-    };
-    let model_id = entry.model_id.clone();
-    let models_dir = crate::paths::models_dir()?;
-    let staging_root = crate::paths::models_staging_dir()?;
-
-    // Already installed byte-for-byte: nothing to fetch. Stray
-    // packages are still retired, so a directory the binder refused as
-    // ambiguous is healed by re-running the install.
-    let (already, entry) = {
-        let models_dir = models_dir.clone();
-        run_blocking(move || {
-            let already = is_installed(&models_dir, &entry)?;
-            Ok((already, entry))
-        })
-        .await?
-    };
-    if already {
-        let retired = {
-            let models_dir = models_dir.clone();
-            let keep = model_id.clone();
-            run_blocking(move || retire_other_packages(&models_dir, &keep)).await?
-        };
-        return Ok(match retired.len() {
-            0 => format!("model {model_id} already installed; restart binds it"),
-            n => format!(
-                "model {model_id} already installed, {n} other package(s) retired; \
-                 restart binds it"
-            ),
-        });
-    }
-
-    // Digest checks read and hash whole weight files — off the async
-    // runtime, like every other blocking open in this file.
-    let total = entry.files().len();
-    let (staging, needs) = run_blocking(move || {
-        let staging = Staging::begin(&staging_root, &entry)?;
-        let needs = staging.needs()?;
-        Ok((staging, needs))
-    })
-    .await?;
-    let (fetched, resumed) = (needs.len(), total - needs.len());
-    let mut staging = staging;
-    for file in needs {
-        let _ = env
-            .deps
-            .emitter
-            .broadcast(
-                "models:fetch",
-                serde_json::json!({ "model_id": model_id, "file": file.path }),
-            )
-            .await;
-        let bytes = reqwest::get(&file.url)
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|e| anyhow::anyhow!("cannot fetch {} from {}: {e}", file.path, file.url))?
-            .bytes()
-            .await
-            .map_err(|e| anyhow::anyhow!("cannot read the body of {}: {e}", file.url))?;
-        staging = run_blocking(move || {
-            staging.accept(&file, &bytes)?;
-            Ok(staging)
-        })
-        .await?;
-    }
-    let target = run_blocking(move || staging.finalize(&models_dir)).await?;
-    Ok(format!(
-        "model {model_id} installed at {} ({fetched} fetched, {resumed} already staged); \
-         restart binds it — swapping models stays clear_derived plus restart",
-        target.display()
-    ))
-}
-
-// ---------------------------------------------------------------------
 // Head training (#132 phase 2).
 // ---------------------------------------------------------------------
 
@@ -4072,14 +3945,14 @@ pub async fn head_train(env: &JobEnv, _payload: &serde_json::Value) -> Result<St
 }
 
 /// `spawn_blocking` with the two error layers folded into the domain's
-/// one: a panicked closure and an install failure both surface as
-/// `Infra`.
+/// one: a panicked closure and a failed filesystem step both surface
+/// as `Infra`.
 async fn run_blocking<T: Send + 'static>(
     f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
 ) -> Result<T, DomainError> {
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|e| DomainError::Infra(anyhow::anyhow!("blocking install step panicked: {e}")))?
+        .map_err(|e| DomainError::Infra(anyhow::anyhow!("blocking step panicked: {e}")))?
         .map_err(DomainError::Infra)
 }
 
