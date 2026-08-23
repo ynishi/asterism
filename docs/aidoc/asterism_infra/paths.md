@@ -43,7 +43,6 @@ command pointing a development build at durable dogfood data.
 - `default_db_path` — Returns the default SQLite database path (`<asterism_home>/asterism.db`).
 - `heads_dir` — Returns (creating on demand) the profile-local trained-head root
 - `models_dir` — Returns (creating on demand) the profile-local model-package root
-- `models_staging_dir` — Returns (creating on demand) the staging area a model install
 - `tantivy_index_dir` — Returns (creating on demand) the profile-local Tantivy index directory.
 
 ## Types

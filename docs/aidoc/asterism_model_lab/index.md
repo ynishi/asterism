@@ -7,8 +7,9 @@ package (`asterism-vision` reads it, digest-verified); this tool is
 how a package comes to exist and how it earns its place: download
 the towers from their official source, pin their digests into the
 manifest, verify the package exactly the way the app will read it,
-qualify it against the fixture set, and author the registry entry a
-future in-app fetch flow consumes.
+and qualify it against the fixture set. (A `registry` verb once
+authored a distribution entry here; #132 retired that flow — the
+encoder ships with the app, and what travels is the trained head.)
 
 Deliberately a separate binary in the `asterism-import` category —
 the actor is the provider, not the user, and nothing in the app's

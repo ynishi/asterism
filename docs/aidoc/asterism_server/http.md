@@ -33,11 +33,11 @@ are what a person never invokes — the process's own controls
 (`health`, `shutdown_process`), byte-serving routes the app reaches
 through Tauri's asset protocol instead (`get_asset_file`,
 `put_thumb`), and diagnostics a socket client reads. **The
-remaining sixteen are the debt**: series-strategy CRUD, `rename_tag`
+remaining fifteen are the debt**: series-strategy CRUD, `rename_tag`
 / `delete_tag` / `merge_tags`, `rebuild_index`,
 `rescan_duplicates`, `organize_by_location`, `remeasure_dims`,
-`list_observations`, `list_streams`, `declare_asset_source_type`,
-`fetch_visual_model` and `get_setting`. They are unfinished work,
+`list_observations`, `list_streams`, `declare_asset_source_type`
+and `get_setting`. They are unfinished work,
 not sanctioned differences, and the count above is the way to see
 whether that list is shrinking.
 
