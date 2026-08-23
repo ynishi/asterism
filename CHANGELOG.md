@@ -217,6 +217,28 @@ and this project adheres to
 
 ### Added
 
+- **The tag head trains on the person's own rulings** (#132 phase 2, the tune).
+  Every accepted or rejected suggestion is a labeled example, and the new
+  `HeadTrain` job (`POST /asterism/heads/train`) turns them into a head: per-tag
+  logistic rows over the assets' **cached** vectors — CPU seconds, never a
+  re-encode. No ML crate came with it: one row is a small convex problem, and
+  the trainer is a page of plain, tested arithmetic in the domain.
+
+  Nothing is promoted on faith. A tag trains only with enough rulings on both
+  sides; each trainable tag holds out part of its rulings (deterministically —
+  the split is a function of stable ruling order, so reruns reproduce it); the
+  candidate and the zero-shot baseline are scored on the same held-out set; and
+  the run promotes only on a strict win — a tie is churn with nothing bought. A
+  losing run still writes its artifact and eval, because "zero-shot is still
+  better" is a result, not a failure.
+
+  Artifacts are immutable under ordinal labels (`heads/head-v1/…`), kilobytes
+  each since only trained rows are stored, and promotion is one pointer file —
+  which also makes rollback a promotion of an older label. The scoring side that
+  reads the pointer (once, at startup — the encoder's bind-once rule) is the
+  follow-up branch: until it lands, promotion records the verdict and the
+  zero-shot pass still scores everything.
+
 - **Suggestions know which head proposed them** (#132 phase 1, the identity
   split). The encoder's identity keys the vectors; the head keys what was made
   of them. `tag_evidence` rows and the walk stamp now carry a head ref — today

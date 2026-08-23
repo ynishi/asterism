@@ -2704,6 +2704,13 @@ pub trait TagEvidenceRepository: Send + Sync {
         model_id: &str,
     ) -> Result<Vec<TagEvidence>, DomainError>;
 
+    /// Every **ruled** row (`accepted` / `rejected`) under one model,
+    /// in stable `(asset, tag)` order — the trainer's labeled corpus
+    /// (#132 phase 2). Stable order is part of the contract: the
+    /// held-out split is a function of it, so a rerun over unchanged
+    /// rulings reproduces the same split.
+    async fn rulings_of_model(&self, model_id: &str) -> Result<Vec<TagEvidence>, DomainError>;
+
     /// Records a person's ruling on a `suggested` row.
     ///
     /// A row that is already ruled is a `Conflict` — re-ruling is

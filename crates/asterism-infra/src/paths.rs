@@ -456,6 +456,19 @@ pub fn models_dir() -> Result<PathBuf, DomainError> {
     Ok(dir)
 }
 
+/// Returns (creating on demand) the profile-local trained-head root
+/// (#132 phase 2): one subdirectory per trained head
+/// (`<asterism_home>/heads/<label>/`), plus the `current` pointer file
+/// promotion writes. Profile-local for the same reason as
+/// [`models_dir`]: a head is trained on one profile's rulings, and a
+/// bench profile must not read — or win over — the real library's.
+pub fn heads_dir() -> Result<PathBuf, DomainError> {
+    let dir = asterism_home()?.join("heads");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| DomainError::Infra(anyhow::anyhow!("cannot create heads dir: {e}")))?;
+    Ok(dir)
+}
+
 /// Returns (creating on demand) the staging area a model install
 /// (#126) fills before its one rename into [`models_dir`].
 ///

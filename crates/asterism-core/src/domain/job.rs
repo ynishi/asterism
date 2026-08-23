@@ -440,6 +440,24 @@ pub enum JobKind {
     /// explicit `clear_derived`-plus-restart path, not a side effect
     /// of this job.
     ModelFetch,
+    /// Trains the tag head from the person's own rulings (#132 phase
+    /// 2): every accepted / rejected suggestion is a labeled example,
+    /// the asset's **cached** vector is the input, and the output is a
+    /// per-tag logistic row — CPU seconds, never a re-encode.
+    ///
+    /// Payload: `{}`. The corpus is whatever rulings exist under the
+    /// bound encoder's identity; there is nothing to scope.
+    ///
+    /// Nothing is promoted on faith: each trainable tag holds out part
+    /// of its rulings, the candidate and the zero-shot baseline are
+    /// scored on the same held-out set, and the run promotes only on a
+    /// strict win — a losing run still writes its artifact and report,
+    /// because "zero-shot is still better" is a result, not a failure.
+    /// Promotion is a pointer move. The scoring side — the follow-up
+    /// branch — will read it once at startup, the encoder's bind-once
+    /// rule; until that lands the pointer records the verdict and the
+    /// zero-shot pass keeps scoring.
+    HeadTrain,
 }
 
 impl JobKind {
@@ -471,6 +489,7 @@ impl JobKind {
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
             Self::ModelFetch => "model_fetch",
+            Self::HeadTrain => "head_train",
         }
     }
 
@@ -502,6 +521,7 @@ impl JobKind {
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),
             "model_fetch" => Ok(Self::ModelFetch),
+            "head_train" => Ok(Self::HeadTrain),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

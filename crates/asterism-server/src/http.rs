@@ -315,6 +315,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/asterism/models/status", get(visual_model_status))
         // Install the package a registry entry describes (#126).
         .route("/asterism/models/fetch", post(fetch_visual_model))
+        // Train the tag head from the person's rulings (#132).
+        .route("/asterism/heads/train", post(train_tag_head))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
         // on the asset row.
@@ -2936,6 +2938,22 @@ async fn fetch_visual_model(
         }
     };
     let task_id = ctx.asset_service.fetch_model(payload).await?;
+    Ok(Json(serde_json::json!({
+        "enqueued": true,
+        "task_id": task_id,
+    })))
+}
+
+/// `POST /asterism/heads/train` — enqueues a `HeadTrain` run (#132).
+///
+/// No body: the corpus is whatever rulings exist under the bound
+/// encoder, so there is nothing to scope — the `rescan_duplicates`
+/// shape. The job's completion message carries the held-out verdict
+/// and whether promotion happened; scoring through a promoted head
+/// is the follow-up branch, and the zero-shot pass scores until it
+/// lands.
+async fn train_tag_head(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<serde_json::Value> {
+    let task_id = ctx.asset_service.train_head().await?;
     Ok(Json(serde_json::json!({
         "enqueued": true,
         "task_id": task_id,

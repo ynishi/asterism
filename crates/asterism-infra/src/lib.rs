@@ -43,6 +43,7 @@ pub mod fault;
 pub(crate) mod fingerprint;
 pub mod forge;
 pub mod generator_params;
+pub mod heads;
 pub mod jobs;
 pub mod memory;
 pub mod observe;
