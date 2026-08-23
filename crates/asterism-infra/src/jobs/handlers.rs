@@ -30,7 +30,7 @@ use asterism_core::domain::value::{
     AssetId, AssetRole, CoverTemplate, CoverText, Keyword, MimeType, StrategyId,
 };
 use asterism_core::domain::visual::{
-    VisualEncoder, VisualFeature, VisualFeatureKind, cosine_normalized,
+    TagHeadRef, VisualEncoder, VisualFeature, VisualFeatureKind, cosine_normalized,
 };
 use asterism_core::error::DomainError;
 
@@ -656,7 +656,12 @@ pub async fn visual_tag_suggest(
         let page = env
             .deps
             .visual_features
-            .unsuggested(&identity, VisualFeatureKind::Semantic, VISUAL_FEATURE_PAGE)
+            .unsuggested(
+                &identity,
+                VisualFeatureKind::Semantic,
+                &TagHeadRef::zero_shot(),
+                VISUAL_FEATURE_PAGE,
+            )
             .await?;
         if page.is_empty() {
             return Ok("tag-suggest backfill: nothing left".into());
@@ -690,13 +695,20 @@ pub async fn visual_tag_suggest(
 
 /// One asset's proposal pass: cached tag vectors (filled lazily for
 /// names the cache has not seen), cosine against the stored vector,
-/// evidence above the floor, stamp.
+/// evidence above the floor, stale suggestions of other heads retired,
+/// stamp under the current head.
+///
+/// The head is [`TagHeadRef::zero_shot`] until a trained head exists
+/// (#132 phase 2): this pass IS the zero-shot head — the vocabulary
+/// matrix scored by cosine — and the plumbing it writes through is
+/// what lets a trained head take the same walk later.
 async fn suggest_tags_for(
     env: &JobEnv,
     encoder: &std::sync::Arc<dyn VisualEncoder>,
     asset_id: &AssetId,
 ) -> Result<usize, DomainError> {
     let identity = encoder.identity().clone();
+    let head = TagHeadRef::zero_shot();
     let Some(feature) = env
         .deps
         .visual_features
@@ -744,15 +756,29 @@ async fn suggest_tags_for(
             && env
                 .deps
                 .tag_evidence
-                .suggest_if_absent(asset_id, &tag.id, &identity.model_id, score, now)
+                .suggest_under_head(asset_id, &tag.id, &identity.model_id, &head, score, now)
                 .await?
         {
             suggested += 1;
         }
     }
+    // What a superseded head proposed and this pass did not re-affirm
+    // leaves the queue; rulings are out of this call's reach on the
+    // port itself.
+    env.deps
+        .tag_evidence
+        .retire_stale_suggestions(asset_id, &identity.model_id, &head)
+        .await?;
     env.deps
         .visual_features
-        .stamp_tag_suggested(asset_id, 0, &identity, VisualFeatureKind::Semantic, now)
+        .stamp_tag_suggested(
+            asset_id,
+            0,
+            &identity,
+            VisualFeatureKind::Semantic,
+            &head,
+            now,
+        )
         .await?;
     Ok(suggested)
 }
