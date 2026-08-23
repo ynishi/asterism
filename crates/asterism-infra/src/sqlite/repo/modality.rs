@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::infra_err;
 
 /// Primitive row built inside the isle closure; promotion to the domain
@@ -163,11 +164,12 @@ impl ModalityRepository for SqliteModalityRepository {
             })
             .await
             .map_err(|err| {
-                // Primary-key violation → domain-level Conflict so the
-                // HTTP boundary returns 409 (mirrors the group adapter).
+                // Primary-key violation: the slug is spoken for, which
+                // the conversion turns into the 409 the HTTP boundary
+                // returns (mirrors the group adapter).
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::clashes(format!("modality {slug_for_err:?} already exists"))
+                    StoreFault::taken("a modality slug", format!("{slug_for_err:?}")).into()
                 } else {
                     infra_err(err)
                 }

@@ -54,13 +54,29 @@ pub trait Threads: Send + Sync {
 
     /// Adds something said.
     ///
-    /// Returns [`Conflict`](DomainError::Conflict) if the message it
+    /// Returns [`Validation`](DomainError::Validation) if the message it
     /// replies to is not in this thread — the same refusal the model
     /// makes, restated here because the model judged the thread as it
     /// was read.
+    ///
+    /// **The same refusal means the same answer.** This said `Conflict`
+    /// while the model said `Validation`, so one situation answered 409
+    /// through the port and 400 through the service, and the sentence
+    /// above claiming they were the same refusal was the evidence that
+    /// one of them was wrong. Nothing here is contended: the caller
+    /// addressed one conversation and named a message of another, which
+    /// no row could change to make true.
     async fn say(&self, thread: &ThreadId, message: &Message) -> Result<(), DomainError>;
 
     /// Records a correction to something said.
+    ///
+    /// Returns [`Validation`](DomainError::Validation) if the message
+    /// being corrected is not in this thread, on the same reading as
+    /// [`say`](Self::say): the caller addressed one conversation and
+    /// named something that is not in it, which no row could change.
+    /// This answered `Conflict` too, and is the half that had no doc
+    /// saying so — a correction is not a reply, and a sentence about
+    /// replies would not have covered it.
     async fn amend(
         &self,
         thread: &ThreadId,

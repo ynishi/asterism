@@ -13,6 +13,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::infra_err;
 
 /// Bind-parameter tuple of one edge insert, in column order.
@@ -47,7 +48,7 @@ impl EdgeRow {
             id: EdgeId::from_uuid(self.id),
             from: AssetId::from_uuid(self.from_asset),
             to: AssetId::from_uuid(self.to_asset),
-            kind: EdgeKind::parse(&self.kind)?,
+            kind: StoreFault::parsed("edge kind", EdgeKind::parse(&self.kind))?,
             label: self.label,
             weight: self.weight.map(|w| w as f32),
         })

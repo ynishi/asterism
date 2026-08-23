@@ -42,6 +42,7 @@ use rusqlite_isle::AsyncIsle;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{
     datetime_to_ms, infra_err, json_to_strings, ms_to_datetime, opt_u32, opt_u64, strings_to_json,
 };
@@ -1680,13 +1681,14 @@ impl AssetRow {
             .map_err(|e| DomainError::Infra(anyhow::anyhow!("corrupt palette JSON: {e}")))?;
         asset.extra = extra;
         asset.trashed_at = self.trashed_at.map(ms_to_datetime).transpose()?;
-        asset.role = AssetRole::parse(&self.role)?;
+        asset.role = StoreFault::parsed("asset role", AssetRole::parse(&self.role))?;
         asset.folded_into = self.folded_into.map(AssetId::from_uuid);
         // Rejected rather than degraded to `Auto`, like `role`: a slug
         // outside the closed set can only come from a hand-edited row,
         // and silently reading it as "unruled" would un-do somebody's
         // `keep`.
-        asset.fold_policy = FoldPolicy::parse(&self.fold_policy)?;
+        asset.fold_policy =
+            StoreFault::parsed("fold policy", FoldPolicy::parse(&self.fold_policy))?;
         // Absence survives as absence: `None` is "nobody declared", and
         // mapping it to `Ask` here would invent the request the column
         // exists to keep distinguishable. A present slug outside the
@@ -1795,13 +1797,22 @@ impl MaterialRow {
             // The status set is closed, and a spelling this build does
             // not name is refused rather than degraded — `role` and
             // `on_duplicate` state the rule.
-            content_hash_status: MeasurementStatus::parse(&self.content_hash_status)?,
+            content_hash_status: StoreFault::parsed(
+                "content hash status",
+                MeasurementStatus::parse(&self.content_hash_status),
+            )?,
             content_hash_reason: self.content_hash_reason,
             content_region_hash: self.content_region_hash,
-            content_region_hash_status: MeasurementStatus::parse(&self.content_region_hash_status)?,
+            content_region_hash_status: StoreFault::parsed(
+                "content region hash status",
+                MeasurementStatus::parse(&self.content_region_hash_status),
+            )?,
             content_region_hash_reason: self.content_region_hash_reason,
             meta_hash: self.meta_hash,
-            meta_hash_status: MeasurementStatus::parse(&self.meta_hash_status)?,
+            meta_hash_status: StoreFault::parsed(
+                "meta hash status",
+                MeasurementStatus::parse(&self.meta_hash_status),
+            )?,
             meta_hash_reason: self.meta_hash_reason,
             meta_kv: self.meta_kv,
             meta_text: self.meta_text,
@@ -1879,13 +1890,15 @@ impl ConflictRow {
             persona_id: PersonaId::from_uuid(self.persona_id),
             newcomer: AssetId::from_uuid(self.newcomer_id),
             incumbent: AssetId::from_uuid(self.incumbent_id),
-            axis: DuplicateAxis::parse(&self.axis)?,
+            axis: StoreFault::parsed("duplicate axis", DuplicateAxis::parse(&self.axis))?,
             content_hash: self.content_hash,
-            fold_exclusion: self
-                .fold_exclusion
-                .as_deref()
-                .map(FoldExclusion::parse)
-                .transpose()?,
+            fold_exclusion: StoreFault::parsed(
+                "fold exclusion",
+                self.fold_exclusion
+                    .as_deref()
+                    .map(FoldExclusion::parse)
+                    .transpose(),
+            )?,
             detected_at: ms_to_datetime(self.detected_at)?,
             resolved_at: self.resolved_at.map(ms_to_datetime).transpose()?,
             resolution: self
@@ -2030,7 +2043,7 @@ impl CardRow {
                 .map_err(|e| DomainError::Infra(anyhow::anyhow!("corrupt palette JSON: {e}")))?,
             has_note: self.has_note != 0,
             has_thread: self.has_thread != 0,
-            role: AssetRole::parse(&self.role)?,
+            role: StoreFault::parsed("asset role", AssetRole::parse(&self.role))?,
             title: self.title,
             member_count: self.member_count.max(0) as u64,
             // Same reader the entity path uses (`AssetRow::into_asset`),
@@ -2191,7 +2204,7 @@ impl IndexRow {
             // a bad value was stored. Refusing it keeps a wrapped count
             // from being presented as a real one.
             pixel_count: opt_u64(self.pixel_count, "pixel_count")?,
-            role: AssetRole::parse(&self.role)?,
+            role: StoreFault::parsed("asset role", AssetRole::parse(&self.role))?,
         })
     }
 }
@@ -3560,9 +3573,11 @@ impl AssetRepository for SqliteAssetRepository {
             .await
             .map_err(infra_err)?;
         if verdict == 1 {
-            return Err(DomainError::blocked(format!(
-                "asset {id} is still live; trash it before purging"
-            )));
+            return Err(StoreFault::blocked_by(
+                format!("asset {id} is still live"),
+                "trash it before purging",
+            )
+            .into());
         }
         Ok(())
     }
@@ -4855,7 +4870,7 @@ impl AssetRepository for SqliteAssetRepository {
             .map_err(infra_err)?;
         let axis = |(status, digest, reason): (String, Option<String>, Option<String>)| -> Result<Measurement, DomainError> {
             Ok(Measurement {
-                status: MeasurementStatus::parse(&status)?,
+                status: StoreFault::parsed("measurement status", MeasurementStatus::parse(&status))?,
                 digest,
                 reason,
             })

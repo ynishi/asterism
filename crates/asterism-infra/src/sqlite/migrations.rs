@@ -697,9 +697,9 @@ CREATE INDEX idx_asset_comment_asset
 ///   contract layer, so growing the DTO does not require a schema
 ///   change.
 /// - `(persona_id, name)` UNIQUE — the sidebar shows one row per
-///   name; duplicate names surface as `DomainError::Conflict`
-///   (`409 Conflict` on the HTTP boundary) via the same
-///   pattern-match the Group adapter uses.
+///   name; the adapter raises [`StoreFault::UniqueViolation`] when it
+///   is hit, and what a caller is told is [`crate::fault`]'s table
+///   rather than anything stated here.
 /// - `position` orders siblings within a persona for stable sidebar
 ///   rendering; the covering index is scoped to the persona because
 ///   every sidebar query filters by it.

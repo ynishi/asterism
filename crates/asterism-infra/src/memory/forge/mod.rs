@@ -52,6 +52,7 @@ use asterism_core::domain::value::AssetId;
 use asterism_core::error::DomainError;
 use async_trait::async_trait;
 
+use crate::fault::StoreFault;
 use crate::forge::rows::{
     self, ChangePointRow, ChangeRowRow, LineRow, PursuitNodeRow, PursuitOpRow, PursuitRow,
     ThreadMessageRow, ThreadRevisionRow, ThreadRow,
@@ -256,10 +257,7 @@ impl Lines for MemoryForge {
         let head = rows::take_new_line_apart(line);
         self.with(|tables| {
             if tables.lines.iter().any(|row| row.id == head.id) {
-                return Err(DomainError::clashes(format!(
-                    "line {} is already open",
-                    head.id
-                )));
+                return Err(StoreFault::taken("a line id", head.id).into());
             }
             tables.lines.push(head);
             Ok(())
@@ -349,10 +347,11 @@ impl Lines for MemoryForge {
             // the archive in between is the race `covering` exists to
             // distrust, one field over.
             if line.standing != Standing::Archived {
-                return Err(DomainError::raced(format!(
+                return Err(StoreFault::StaleWrite(format!(
                     "line {id} is out of the archive again, and a drop is decided against an \
                      archived line"
-                )));
+                ))
+                .into());
             }
 
             // The second: the work against this line has to be the
@@ -381,10 +380,11 @@ impl Lines for MemoryForge {
             }
             let opened = against.difference(&named).count();
             if opened > 0 {
-                return Err(DomainError::raced(format!(
+                return Err(StoreFault::StaleWrite(format!(
                     "{opened} pieces of work have been opened on line {id} since this drop was \
                      decided, and what it releases was decided without them"
-                )));
+                ))
+                .into());
             }
 
             // What was said about any of it goes too, and it goes
@@ -452,10 +452,7 @@ impl Pursuits for MemoryForge {
         let (head, nodes, ops) = rows::take_pursuit_apart(pursuit);
         self.with(|tables| {
             if tables.pursuits.iter().any(|row| row.id == head.id) {
-                return Err(DomainError::clashes(format!(
-                    "work {} is already open",
-                    head.id
-                )));
+                return Err(StoreFault::taken("a pursuit id", head.id).into());
             }
             tables.pursuits.push(head);
             tables.pursuit_nodes.extend(nodes);
@@ -495,9 +492,10 @@ impl Pursuits for MemoryForge {
             let at =
                 Self::pursuit_head(tables, id).ok_or_else(|| DomainError::not_found("work", id))?;
             if at != on {
-                return Err(DomainError::raced(format!(
+                return Err(StoreFault::StaleWrite(format!(
                     "work {id} has moved: this round sits on {on}, and the log ends at {at}"
-                )));
+                ))
+                .into());
             }
             let (node, ops) = rows::take_round_apart(*id, round);
             tables.pursuit_nodes.push(node);
@@ -534,10 +532,11 @@ impl Closings for MemoryForge {
                     .ok_or_else(|| DomainError::not_found("work", pursuit))?;
                 decided = again.close(&held, &work)?;
                 if Self::taken(tables, line, pursuit, &decided) {
-                    return Err(DomainError::raced(format!(
+                    return Err(StoreFault::StaleWrite(format!(
                         "an ending decided against line {line} as this write finds it still \
                          names a parent something has taken"
-                    )));
+                    ))
+                    .into());
                 }
                 &decided
             } else {
@@ -570,10 +569,7 @@ impl Threads for MemoryForge {
         let (head, messages, revisions) = rows::take_thread_apart(thread);
         self.with(|tables| {
             if tables.threads.iter().any(|row| row.id == head.id) {
-                return Err(DomainError::clashes(format!(
-                    "thread {} is already open",
-                    head.id
-                )));
+                return Err(StoreFault::taken("a thread id", head.id).into());
             }
             tables.threads.push(head);
             tables.thread_messages.extend(messages);
@@ -626,9 +622,10 @@ impl Threads for MemoryForge {
                     .iter()
                     .any(|held| held.thread == *thread && held.id == parent)
             {
-                return Err(DomainError::clashes(format!(
+                return Err(StoreFault::Impossible(format!(
                     "message {parent} is not in thread {thread}"
-                )));
+                ))
+                .into());
             }
             tables.thread_messages.push(row);
             Ok(())
@@ -647,9 +644,10 @@ impl Threads for MemoryForge {
                 .iter()
                 .any(|held| held.thread == *thread && held.id == *message)
             {
-                return Err(DomainError::clashes(format!(
+                return Err(StoreFault::Impossible(format!(
                     "message {message} is not in thread {thread}"
-                )));
+                ))
+                .into());
             }
             // Its place among that message's corrections, which is the
             // count of the ones already there — appended, never

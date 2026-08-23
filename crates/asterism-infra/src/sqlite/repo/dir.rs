@@ -16,6 +16,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
 /// Raw row shape used inside the isle closure.
@@ -63,7 +64,7 @@ impl DirRow {
 fn map_name_conflict(err: rusqlite_isle::IsleError, name: &str) -> DomainError {
     let msg = err.to_string();
     if msg.contains("UNIQUE") || msg.contains("unique") {
-        DomainError::clashes(format!("a dir named {name:?} already exists at this level"))
+        StoreFault::taken("a dir name at this level", format!("{name:?}")).into()
     } else {
         infra_err(err)
     }
@@ -179,7 +180,7 @@ impl DirRepository for SqliteDirRepository {
         let uuid = *id.as_uuid();
         let parent_uuid = new_parent.map(|p| *p.as_uuid());
         if parent_uuid == Some(uuid) {
-            return Err(DomainError::clashes("a dir cannot be moved into itself"));
+            return Err(StoreFault::Impossible("a dir cannot be moved into itself".into()).into());
         }
         let now_ms = datetime_to_ms(&now);
         // 0 = ok, 1 = parent missing / different persona, 2 = cycle,
@@ -228,10 +229,11 @@ impl DirRepository for SqliteDirRepository {
             1 => Err(DomainError::Validation(
                 "target parent dir does not exist for this persona".into(),
             )),
-            2 => Err(DomainError::blocked(
-                "move rejected: the target parent sits inside this dir's own subtree; move it \
-                 out from under this dir first, and the same move then works",
-            )),
+            2 => Err(StoreFault::blocked_by(
+                "move rejected: the target parent sits inside this dir's own subtree",
+                "move it out from under this dir first, and the same move then works",
+            )
+            .into()),
             3 => Err(DomainError::not_found("dir", id)),
             _ => Ok(()),
         }
@@ -273,14 +275,18 @@ impl DirRepository for SqliteDirRepository {
             .await
             .map_err(infra_err)?;
         match verdict {
-            1 => Err(DomainError::blocked(
-                "dir is not empty — move or delete its contents first",
-            )),
+            1 => Err(StoreFault::blocked_by(
+                "dir is not empty",
+                "move or delete its contents first",
+            )
+            .into()),
             2 => Err(DomainError::not_found("dir", id)),
-            3 => Err(DomainError::blocked(
+            3 => Err(StoreFault::blocked_by(
                 "dir looks empty because it holds Group(s) belonging to a persona \
-                 in the trash; restore or purge that persona first",
-            )),
+                 in the trash",
+                "restore or purge that persona first",
+            )
+            .into()),
             _ => Ok(()),
         }
     }
@@ -416,14 +422,20 @@ mod tests {
         // Idempotent re-link.
         groups.link(&a.id, &b.id, now).await.unwrap();
 
-        // Self-link and transitive cycle are rejected.
+        // Self-link and transitive cycle are both rejected, and not with
+        // the same answer: a group containing itself can never hold, so
+        // it is the request that is wrong, while the transitive cycle is
+        // another edge standing in the way and goes once that edge does.
         assert!(matches!(
             groups.link(&a.id, &a.id, now).await,
-            Err(DomainError::Conflict { .. })
+            Err(DomainError::Validation(_))
         ));
         assert!(matches!(
             groups.link(&c.id, &a.id, now).await,
-            Err(DomainError::Conflict { .. })
+            Err(DomainError::Conflict {
+                kind: ConflictKind::Blocked,
+                ..
+            })
         ));
 
         let links = groups.links(Some(&persona)).await.unwrap();

@@ -237,6 +237,7 @@
 - [asterism-infra::disclosure](asterism_infra/disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [asterism-infra::dispatch](asterism_infra/dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [asterism-infra::dispatch::runtime](asterism_infra/dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [asterism-infra::fault](asterism_infra/fault.md): What storage did, in storage's own words.
 - [asterism-infra::forge](asterism_infra/forge.md): What every forge store keeps, whatever it keeps it in.
 - [asterism-infra::forge::rows](asterism_infra/forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [asterism-infra::generator_params](asterism_infra/generator_params.md): Reading generator parameters out of stored metadata rows — the

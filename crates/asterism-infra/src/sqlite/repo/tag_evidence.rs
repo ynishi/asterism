@@ -18,8 +18,23 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::infra_err;
 use crate::sqlite::repo::visual::{blob_to_vector, vector_to_blob};
+
+/// What ruling on a suggestion found, inside the one call that tried.
+///
+/// The update matching nothing has two causes and they are not the
+/// same answer, so the query that tells them apart runs where it can
+/// still see the transaction rather than being reconstructed after it.
+enum Ruled {
+    /// The suggestion was open and now is not.
+    Done,
+    /// It is here and somebody already ruled on it.
+    Already,
+    /// There is no such suggestion.
+    Absent,
+}
 
 /// SQLite adapter for `TagEvidenceRepository` (uses a writer isle).
 #[derive(Clone)]
@@ -94,7 +109,15 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
                     tag_id: TagId::from_uuid(tag),
                     model_id: model_id.to_string(),
                     score: score as f32,
-                    disposition: TagSuggestionDisposition::parse(&disposition)?,
+                    // A stored disposition outside the three slugs is a
+                    // row that could not have been written, not a thing
+                    // the caller asked for.
+                    disposition: TagSuggestionDisposition::parse(&disposition).map_err(|_| {
+                        StoreFault::CorruptRow(format!(
+                            "a stored tag_evidence row names a disposition this model \
+                             does not have: {disposition:?}"
+                        ))
+                    })?,
                     suggested_at_ms: suggested_at,
                     resolved_at_ms: resolved_at,
                 })
@@ -117,9 +140,17 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
         }
         let asset = *asset_id.as_uuid();
         let tag = *tag_id.as_uuid();
+        let named = model_id.to_string();
         let model_id = model_id.to_string();
         let slug = disposition.as_str();
-        let n = self
+        // The update alone cannot say why it matched nothing, and the
+        // two reasons want opposite answers: a suggestion nobody made
+        // is a `404`, one already ruled on is a `409` that will never
+        // become anything else. Asking inside the same call rather
+        // than reporting "absent or already ruled" and leaving a
+        // caller to guess which — the extra read costs one statement
+        // and only on the path that is already failing.
+        let ruled = self
             .isle
             .call(move |conn| {
                 let n = conn.execute(
@@ -129,16 +160,34 @@ impl TagEvidenceRepository for SqliteTagEvidenceRepository {
                         AND disposition = 'suggested'",
                     params![slug, at_ms, asset, tag, model_id],
                 )?;
-                Ok(n)
+                if n > 0 {
+                    return Ok(Ruled::Done);
+                }
+                let held: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM tag_evidence
+                      WHERE asset_id = ?1 AND tag_id = ?2 AND model_id = ?3",
+                    params![asset, tag, model_id],
+                    |row| row.get(0),
+                )?;
+                Ok(if held > 0 {
+                    Ruled::Already
+                } else {
+                    Ruled::Absent
+                })
             })
             .await
             .map_err(infra_err)?;
-        if n == 0 {
-            return Err(DomainError::settled(
-                "no open suggestion to rule on — it is absent or already ruled",
-            ));
+
+        match ruled {
+            Ruled::Done => Ok(()),
+            Ruled::Already => Err(StoreFault::AlreadyDecided(
+                "that suggestion has already been ruled on".into(),
+            )
+            .into()),
+            Ruled::Absent => {
+                Err(StoreFault::absent("tag suggestion", format!("{asset}/{tag}/{named}")).into())
+            }
         }
-        Ok(())
     }
 
     async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError> {

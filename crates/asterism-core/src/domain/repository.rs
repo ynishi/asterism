@@ -2372,9 +2372,15 @@ pub trait GroupRepository: Send + Sync {
     ) -> Result<(), DomainError>;
 
     /// Connects `child` into `parent` (idempotent). Fails with
-    /// `Validation` when the two groups belong to different personas
-    /// and with `Conflict` when the link would close a cycle —
-    /// including the degenerate `parent == child` case.
+    /// `Validation` when the two groups belong to different personas,
+    /// and with `Conflict` when the link would close a cycle through
+    /// another group — unlinking the opposing edge lets the same link
+    /// through, which is what makes it a conflict.
+    ///
+    /// The degenerate `parent == child` case is a `Validation`, not
+    /// that conflict. Nothing anywhere can change to let a group
+    /// contain itself, so there is no state fighting the request; the
+    /// request is simply not one that holds.
     async fn link(
         &self,
         parent: &GroupId,
@@ -2426,9 +2432,12 @@ pub trait DirRepository: Send + Sync {
     ) -> Result<Dir, DomainError>;
 
     /// Re-parents a dir (`None` = to the root). Fails with `Conflict`
-    /// when the move would put the dir inside its own subtree (cycle)
-    /// or collide with a sibling name, and with `Validation` when the
-    /// target parent belongs to a different persona.
+    /// when the move would put the dir inside its own subtree, or
+    /// collide with a sibling name — moving the target out, or picking
+    /// another name, lets the same move through. Fails with
+    /// `Validation` when the target parent belongs to a different
+    /// persona, and when the dir is moved into itself: no state change
+    /// makes a dir its own parent.
     async fn move_to(
         &self,
         id: &DirId,
@@ -2667,9 +2676,14 @@ pub trait TagEvidenceRepository: Send + Sync {
         model_id: &str,
     ) -> Result<Vec<TagEvidence>, DomainError>;
 
-    /// Records a person's ruling on a `suggested` row. Refuses a row
-    /// that does not exist or is already ruled — re-ruling is a
-    /// conflict to surface, not a write to absorb.
+    /// Records a person's ruling on a `suggested` row.
+    ///
+    /// A row that is already ruled is a `Conflict` — re-ruling is
+    /// something to surface, not a write to absorb. A row that does not
+    /// exist is a `NotFound`, and the two were one answer until the
+    /// adapter asked which it had: the update matched nothing either
+    /// way, and reporting "absent or already ruled" left a caller to
+    /// guess between an answer it could act on and one it could not.
     async fn resolve(
         &self,
         asset_id: &AssetId,

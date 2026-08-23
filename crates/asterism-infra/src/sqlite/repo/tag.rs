@@ -9,6 +9,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::infra_err;
 
 /// Primitive row built inside the isle closure.
@@ -59,10 +60,8 @@ enum Refusal {
 impl Refusal {
     fn into_domain(self) -> DomainError {
         match self {
-            Self::Missing(id) => DomainError::not_found("tag", TagId::from_uuid(id)),
-            Self::NameTaken(name) => {
-                DomainError::clashes(format!("another tag is already named {name:?}"))
-            }
+            Self::Missing(id) => StoreFault::absent("tag", TagId::from_uuid(id)).into(),
+            Self::NameTaken(name) => StoreFault::taken("a tag name", format!("{name:?}")).into(),
         }
     }
 }

@@ -29,6 +29,7 @@ use rusqlite::types::Value;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, json_to_strings};
 use crate::sqlite::repo::asset::QueryParts;
 
@@ -417,10 +418,8 @@ impl QueryGroupRepository for SqliteQueryGroupRepository {
             .map_err(|err| {
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::clashes(format!(
-                        "a group named {:?} already exists for this persona",
-                        group.name
-                    ))
+                    StoreFault::taken("a group name for this persona", format!("{:?}", group.name))
+                        .into()
                 } else {
                     infra_err(err)
                 }
@@ -474,6 +473,16 @@ impl QueryGroupRepository for SqliteQueryGroupRepository {
                 // (review F3).
                 graph.insert(target, new_refs.clone());
                 for r in &new_refs {
+                    // Self-reference before the cycle check, because
+                    // `reaches` returns true on its first pop when the
+                    // two are equal and the two want opposite answers.
+                    // A cycle through another group clears when that
+                    // group's rule changes; a rule naming itself has no
+                    // other edge to break, so telling a caller to break
+                    // one is advice it cannot act on.
+                    if r == &target {
+                        return Ok(3);
+                    }
                     if reaches(&graph, r, &target) {
                         return Ok(2);
                     }
@@ -489,11 +498,34 @@ impl QueryGroupRepository for SqliteQueryGroupRepository {
             .map_err(infra_err)?;
         match verdict {
             1 => Err(DomainError::not_found("query group", bucket_id)),
-            2 => Err(DomainError::Validation(
+            // The same refusal `GroupRepository::link` gives for the
+            // same cycle, so it gives the same answer. It said
+            // `Validation` while that one said `Conflict`, which is
+            // one situation with two statuses depending on which verb
+            // reached it — the shape this whole change exists to
+            // remove. Another group's rule changing lets this same
+            // rule through, so it is a precondition rather than a
+            // request that cannot hold.
+            2 => Err(StoreFault::blocked_by(
                 "query reference cycle: the new rule reaches back to this group \
-                 (a cyclic rule would make refresh a mutual-trigger loop)"
+                 (a cyclic rule would make refresh a mutual-trigger loop)",
+                "break the cycle at one of its other references first, and the \
+                 same rule then takes",
+            )
+            .into()),
+            // The degenerate one, and it is not the same refusal: no
+            // row anywhere can change to let a group's rule name the
+            // group. `GroupRepository::link` and `DirRepository::move_to`
+            // both short-circuit their self-reference before the SQL
+            // and answer this way; this one reached the cycle check
+            // instead, and was telling a caller to break an edge that
+            // does not exist.
+            3 => Err(StoreFault::Impossible(
+                "a query group's rule cannot name the group itself (its refresh \
+                 would trigger its own refresh)"
                     .into(),
-            )),
+            )
+            .into()),
             _ => Ok(()),
         }
     }

@@ -16,6 +16,7 @@ use rusqlite::params;
 use rusqlite_isle::AsyncIsle;
 use uuid::Uuid;
 
+use crate::fault::StoreFault;
 use crate::sqlite::map::{datetime_to_ms, infra_err, ms_to_datetime};
 
 /// Raw row shape used inside the isle closure.
@@ -62,13 +63,23 @@ impl GroupRow {
     }
 
     fn into_domain(self) -> Result<Group, DomainError> {
+        // The `kind` column is written by this crate against a CHECK
+        // constraint, so a token the model does not have is a row that
+        // could not have been written — not something the caller asked
+        // for and not something a different request avoids.
+        let kind = GroupKind::parse(&self.kind).map_err(|_| {
+            StoreFault::CorruptRow(format!(
+                "a stored group row names a kind this model does not have: {:?}",
+                self.kind
+            ))
+        })?;
         Ok(Group {
             id: GroupId::from_uuid(self.id),
             persona_id: PersonaId::from_uuid(self.persona_id),
             name: self.name,
             description: self.description,
             dir_id: self.dir_id.map(DirId::from_uuid),
-            kind: GroupKind::parse(&self.kind)?,
+            kind,
             query_json: self.query_json,
             origin_snapshot_id: self.origin_snapshot_id.map(SnapshotId::from_uuid),
             last_refresh_at: self.last_refresh_at_ms.map(ms_to_datetime).transpose()?,
@@ -139,16 +150,14 @@ impl GroupRepository for SqliteGroupRepository {
             })
             .await
             .map_err(|err| {
-                // Map the unique-index violation on
-                // `(persona_id, name)` to a domain-level Conflict so
-                // the HTTP / Tauri layer can return 409 with a
-                // useful message.
+                // Name what storage did with the unique index on
+                // `(persona_id, name)`; the conversion decides that a
+                // taken value is what the HTTP / Tauri layer returns
+                // 409 for.
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::clashes(format!(
-                        "a group named {:?} already exists for this persona",
-                        group.name
-                    ))
+                    StoreFault::taken("a group name for this persona", format!("{:?}", group.name))
+                        .into()
                 } else {
                     infra_err(err)
                 }
@@ -248,9 +257,11 @@ impl GroupRepository for SqliteGroupRepository {
             .await
             .map_err(infra_err)?;
         if verdict == 1 {
-            return Err(DomainError::blocked(format!(
-                "group {id} is still live; trash it before purging"
-            )));
+            return Err(StoreFault::blocked_by(
+                format!("group {id} is still live"),
+                "trash it before purging",
+            )
+            .into());
         }
         Ok(())
     }
@@ -699,9 +710,8 @@ impl GroupRepository for SqliteGroupRepository {
             .map_err(|err| {
                 let msg = err.to_string();
                 if msg.contains("UNIQUE") || msg.contains("unique") {
-                    DomainError::clashes(format!(
-                        "a group named {trimmed:?} already exists for this persona"
-                    ))
+                    StoreFault::taken("a group name for this persona", format!("{trimmed:?}"))
+                        .into()
                 } else {
                     infra_err(err)
                 }
@@ -765,7 +775,7 @@ impl GroupRepository for SqliteGroupRepository {
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
         if parent == child {
-            return Err(DomainError::clashes("a group cannot contain itself"));
+            return Err(StoreFault::Impossible("a group cannot contain itself".into()).into());
         }
         let parent_uuid = *parent.as_uuid();
         let child_uuid = *child.as_uuid();
@@ -839,15 +849,17 @@ impl GroupRepository for SqliteGroupRepository {
             1 => Err(DomainError::Validation(
                 "groups belong to different personas (or one of them does not exist)".into(),
             )),
-            2 => Err(DomainError::blocked(
-                "link rejected: it would make the groups contain each other (cycle); unlink \
-                 the opposing edge first, and the same link then works",
-            )),
-            3 => Err(DomainError::blocked(
+            2 => Err(StoreFault::blocked_by(
+                "link rejected: it would make the groups contain each other (cycle)",
+                "unlink the opposing edge first, and the same link then works",
+            )
+            .into()),
+            3 => Err(StoreFault::blocked_by(
                 "link rejected: it would close a dependency cycle through a \
-                 query group's references; break the cycle at one of its other \
-                 edges first, and the same link then works",
-            )),
+                 query group's references",
+                "break the cycle at one of its other edges first, and the same link then works",
+            )
+            .into()),
             _ => Ok(()),
         }
     }

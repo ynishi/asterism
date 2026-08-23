@@ -23,6 +23,8 @@ use asterism_core::domain::forge::model::value::{
     PursuitId, StrategyId, ThreadId,
 };
 use asterism_core::error::DomainError;
+
+use crate::fault::StoreFault;
 use chrono::{DateTime, Utc};
 
 /// A row this adapter cannot make sense of.
@@ -30,18 +32,20 @@ use chrono::{DateTime, Utc};
 /// **Corrupt storage, not a bad request.** Every message handed to this
 /// begins "a stored", which is the test for whether it belongs here:
 /// the caller asked to read, its request was fine, and what came back
-/// could not have been written. `sqlite::map`'s module doc states the
-/// same convention for the rest of this crate — corrupted rows surface
-/// as `Infra` — and these were answering `Validation`, which told a
-/// caller to fix a request that had nothing wrong with it.
+/// could not have been written.
 ///
-/// The domain's half of this is
+/// A name for [`StoreFault::CorruptRow`] rather than a second way of
+/// saying it — what it means to a caller is decided in
+/// [`crate::fault`]'s table with every other storage fault, and this is
+/// only here because nine call sites in this file read better for it.
+///
+/// The domain's half is
 /// [`ForgeError::Unwritable`](asterism_core::domain::forge::model::error::ForgeError::Unwritable),
 /// which says it for the rules `restore` replays. This says it for the
 /// rows that never reach `restore` because they cannot be assembled
 /// into the types it takes.
 fn corrupt(said: String) -> DomainError {
-    DomainError::Infra(anyhow::anyhow!(said))
+    StoreFault::CorruptRow(said).into()
 }
 
 /// An act, flattened the way a row carries one: a stamp, a handle, and

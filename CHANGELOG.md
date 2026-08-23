@@ -10,6 +10,74 @@ and this project adheres to
 
 ### Added
 
+- **The conversation's verbs are on HTTP** (#122). Opening a conversation about
+  something in the forge, saying something in it, correcting what was said,
+  naming it, and reading it back from any of the four things it can hang off —
+  nine routes, on the conventions the line's and the pursuit's verbs
+  established.
+
+  `about` is four routes rather than one taking a discriminator, because an
+  anchor has four variants of three different arities: one query-string form
+  would need a different set of required parameters per value, and no router
+  refuses a wrong combination. Four paths, each carrying exactly the ids its
+  anchor needs, leave the wrong combination nowhere to be written.
+
+  `get` answers with every message and every correction, not with what each
+  message says now — a correction the reader does not see leaves a withdrawn
+  sentence attributed to whoever withdrew it. `amend` answers with the
+  correction it appended rather than the message as it now reads, which is the
+  same distinction from the other side. And an anchor is resolved rather than
+  accepted: the service reads the pursuit or the line and the model builds the
+  anchor, so work nobody opened is a `404` while an entry the round never
+  touched is a `400`.
+
+### Fixed
+
+- **A repository no longer decides what a refusal means to a caller** (#122,
+  carried from #121). `DomainError` has four shared variants and nothing said
+  which one a refusal belongs to, so the choice was made at each of the 58 sites
+  that raised a `Conflict` — 39 of them inside `asterism-infra`, where a SQLite
+  repository was answering an API question. #121 did not cause this; giving
+  `Conflict` a kind turned a vague `409` into advice a client acts on, and made
+  the wrong answers reachable.
+
+  The four definitions are now written into `DomainError`'s module doc, and
+  `asterism-infra` has its own vocabulary for what storage did — `Absent`,
+  `CorruptRow`, `UniqueViolation`, `PreconditionUnmet`, `StaleWrite`,
+  `AlreadyDecided`, `Impossible` — with one hand-written conversion whose
+  RustDoc is the table a new refusal is settled against. A test refuses any
+  repository that names a `Conflict` variant directly, so the conversion stays
+  the only door.
+
+  Twenty-one answers change, and each is a contract change:
+
+  - A **reply** naming a message of another conversation: `409` → `400`.
+  - **Correcting** a message of another conversation: `409` → `400`. The same
+    reading, and a separate verb — a sentence about replies does not cover it.
+  - A directory **moved into itself**: `409` → `400`.
+  - A group **containing itself**: `409` → `400`.
+  - **Every stored value that will not decode**: `400` → `500`. Fourteen sites —
+    a group kind, a decoder token, a tag-evidence disposition, an asset role
+    (three sites), a fold policy, four measurement statuses, a duplicate axis, a
+    fold exclusion and an edge kind. The same `parse` serves a caller's argument
+    and a column, and only the caller's argument is the caller's to fix; the
+    column side had been inheriting the request side's answer. One of these sat
+    three lines below a corrupt-blob check that already answered `500`.
+  - A **query group's rule naming the group itself**: `409` → `400`. It had been
+    taking the cycle branch, which told the caller to break the cycle at one of
+    its other references — there are none.
+  - A **query reference cycle** reached through `set_query_json`: `400` → `409`.
+    The same cycle reached through `link` already answered `409`, which is the
+    one-situation-two-answers this change exists to remove.
+  - **Ruling on a tag suggestion that does not exist**: `409` → `404`. One
+    refusal had covered both "absent" and "already ruled" because the update
+    could not tell them apart; it asks now, and "already ruled" stays `409`.
+
+  The first four and the query-group one are requests nothing contends with: the
+  caller addressed one thing and described another, and no state change makes
+  that hold. The decode failures are the opposite — the request was fine and the
+  row was not.
+
 - **The pursuit's nine verbs are on HTTP** (#121). Opening work against a line,
   writing a round, letting the line's rule answer what it collides with, ending
   it, and the four reads a screen needs beside those — all under

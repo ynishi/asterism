@@ -391,7 +391,9 @@ showing how a line got where it is.
 
 ## Types
 
+- `AmendForgeMessageCommand` — Corrects something said. Nothing is overwritten.
 - `CloseForgePursuitCommand` — Ends a piece of work.
+- `ForgeAnchorDto` — What a conversation is about.
 - `ForgeChangePointDto` — One node of a line's history.
 - `ForgeChangeRowDto` — What one landing said about one entry.
 - `ForgeCloseDto` — How a piece of work ended.
@@ -401,16 +403,22 @@ showing how a line got where it is.
 - `ForgeLineActCommand` — Archives a line, reopens one, or drops one — the three verbs whose
 - `ForgeLineDto` — A line, without what is on it.
 - `ForgeLineHistoryDto` — A line's whole history: where it began and every landing since.
+- `ForgeMessageDto` — One thing said, with every correction to it.
 - `ForgeOpDto` — One operation of a round.
 - `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
 - `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
 - `ForgeResolvedDto` — What `resolve` did.
+- `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
 - `ForgeStrategyDto` — A rule a line can be pointed at.
+- `ForgeThreadDto` — A conversation, whole.
 - `OpenForgeLineCommand` — Opens a line.
 - `OpenForgePursuitCommand` — Opens work against a line.
+- `OpenForgeThreadCommand` — Opens a conversation about something in the forge.
 - `PushForgeRoundCommand` — Writes a round.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
+- `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
+- `SayInForgeThreadCommand` — Says something in a conversation.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 
 
@@ -1235,20 +1243,27 @@ so on) live in `asterism-contract`'s crate docs.
 - `edge_to_dto` — Converts a `ConstellationEdge` to an `EdgeDto`.
 - `effective_setting_to_dto` — Converts a resolved setting to its wire DTO, projecting the whole
 - `entity_ref_to_dto` — Converts a domain [`EntityRef`] to its wire DTO.
+- `forge_anchored` — Reads which thing a conversation is about.
+- `forge_body` — Reads something somebody said, refusing an empty one.
 - `forge_collisions_to_dto` — Converts what work still collides with to what a screen reads
 - `forge_discarded_to_dto` — Converts what a drop released.
 - `forge_history_to_dto` — Converts a line and its whole chain, in the chain's order.
 - `forge_line_id` — Reads a line id off the wire.
 - `forge_line_to_dto` — Converts a `Line` to the summary a caller reads.
+- `forge_message_id` — Reads a message id off the wire.
+- `forge_message_to_dto` — Converts one message, with what it says now beside what it said
 - `forge_name` — Reads a name off the wire, refusing a blank one.
 - `forge_op` — Reads one operation off the wire.
 - `forge_outcome` — Reads how a caller says work ended.
 - `forge_pursuit_id` — Reads a pursuit id off the wire.
 - `forge_pursuit_to_dto` — Converts a piece of work to what a caller reads: how it opened,
+- `forge_revision_to_dto` — Converts one correction.
 - `forge_round_to_dto` — Converts one round to what a caller reads.
 - `forge_states_to_dto` — Converts the fold of a line's chain to what is on it.
 - `forge_strategy_id` — Reads a strategy id off the wire.
 - `forge_strategy_to_dto` — Converts a rule's id and description to what a chooser reads.
+- `forge_thread_id` — Reads a thread id off the wire.
+- `forge_thread_to_dto` — Converts a conversation to what a caller reads: every message and
 - `group_link_to_dto` — Converts a `GroupLink` to its wire DTO.
 - `group_summary_to_dto` — Converts a `GroupSummary` to its wire DTO.
 - `group_to_dto` — Converts a `Group` to its wire DTO.
@@ -7372,6 +7387,42 @@ convert from this enum. Infrastructure-level failures are collapsed into
 `Infra` so that domain vocabulary (`NotFound` / `Duplicate` / `Validation`
 / `Conflict`) stays clean.
 
+# Which variant a refusal belongs to
+
+Stated here because it was not stated anywhere, and the cost of that
+was fifty-eight call sites each deciding for themselves — thirty-nine
+of them inside a SQLite repository, which is not a layer that can
+answer an API question. The four definitions below are the rule.
+
+A repository does not apply them. `asterism-infra` has a
+`StoreFault` type of its own — seven cases naming what storage did,
+with one hand-written conversion into this enum whose doc is the
+table those seven land on. That crate is not published, so there is
+nothing to link; `cargo doc` and the source both have it under
+`asterism_infra::fault`.
+
+- **[`Validation`](DomainError::Validation)** — the request cannot be
+  satisfied as written, and that is decidable from the request plus
+  the identity of what it addressed. Nothing changes on its own. A
+  blank name; an outcome that is neither word; a directory moved
+  into itself; a reply naming a message of another conversation.
+- **[`NotFound`](DomainError::NotFound)** and its two named
+  siblings — what was addressed is not there.
+- **[`Conflict`](DomainError::Conflict)** — the request is
+  well-formed and *would* be satisfiable. What refuses it is the
+  current state, and that state is a thing that changes. A name
+  already taken; a lost optimistic lock; work somebody else already
+  ended; a precondition held by another row.
+- **[`Infra`](DomainError::Infra)** — the store handed back
+  something that could not have been written, or the machine
+  underneath failed. The caller is not involved.
+
+The line between the first and the third is the one that gets drawn
+wrongly, and "would a different request work" is not it — a blank
+name passes that test and is plainly a `Validation`. Ask instead
+whether *the state* is what refuses, and whether that state is
+something that changes.
+
 ## Types
 
 - `ConflictKind` — What a caller can do about a [`Conflict`](DomainError::Conflict).
@@ -10320,6 +10371,7 @@ this crate.
 - [`disclosure`](disclosure.md): Writing a [`DisclosureRecord`] into a file that already exists.
 - [`dispatch`](dispatch.md): Outbound-dispatch runtime — `ExporterRegistry` plus the apalis
 - [`dispatch::runtime`](dispatch__runtime.md): `DispatchRun` handler + `ExporterRegistry`.
+- [`fault`](fault.md): What storage did, in storage's own words.
 - [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
@@ -10518,6 +10570,58 @@ specific backend.
 ## Traits
 
 - `ReEnqueue` — Small port around "put this dispatch id back on the queue for
+
+
+<!-- asterism_infra/fault.md -->
+# asterism-infra::fault
+
+What storage did, in storage's own words.
+
+A repository knows what the database answered: a unique index
+rejected the row, a predicate matched nothing, a row would not
+decode. It does not know whether the caller should try again, which
+is what [`DomainError::Conflict`]'s kind promises — and that promise
+is the reason this module exists.
+
+# What went wrong without it
+
+`DomainError`'s four shared variants had no written rule for which
+one a refusal belonged to, so the choice was made at every call site
+that raised one: fifty-eight of them, thirty-nine inside this crate.
+A SQLite repository was answering an API question. Several answers
+were wrong, and the wrongness only became visible when `ConflictKind`
+turned "some vague 409" into advice a client acts on.
+
+# The shape
+
+```text
+  repository ──► StoreFault ──► DomainError ──► 400 / 404 / 409 / 500
+                      │              │
+        what storage ─┘              └─ what it means, decided once,
+        did. Seven cases,               in the `From` impl below and
+        no judgement.                   nowhere else.
+```
+
+Each case has exactly one destination, so the mapping is a table
+rather than an argument. That is deliberate: the repository picks by
+what happened, which it can see, and the meaning is written down in
+one place a reviewer can read in full before adding the next
+refusal. `asterism-core`'s `error` module doc holds the four
+definitions this table implements; `domain::forge::model::error` is
+the same structure one layer up, where the forge's own vocabulary
+meets the shared one at a single hand-written edge.
+
+# Why the conversion is written out
+
+`thiserror`'s `#[from]` derives a conversion that carries a value
+across unchanged. This one reads which case it has and picks a
+different destination for each, which no derive expresses — and
+that is the point rather than a limitation. The mapping *is* the
+specification, so it wants to be read, not generated.
+
+## Types
+
+- `StoreFault` — A refusal in storage's vocabulary.
 
 
 <!-- asterism_infra/forge.md -->
@@ -12178,9 +12282,15 @@ Row ↔ domain conversion helpers.
 
 Convention: inside an isle closure we handle only `rusqlite` primitives
 (`Result<_, rusqlite::Error>`). Promoting rows into domain types
-(including validation) happens **outside** the closure. Corrupted
-rows and unknown slugs surface as `DomainError::Infra` /
-`DomainError::Validation` for the caller.
+(including validation) happens **outside** the closure.
+
+A corrupted row — including a slug this build has no name for —
+surfaces as `DomainError::Infra`. It reads as the caller's fault
+nowhere: the request was fine and the row was not, and no different
+request avoids it. This said "`Infra` / `Validation`" and left the
+choice open, which is how three decode failures came to answer
+`400`. [`crate::fault`] is where that is decided now, and
+`StoreFault::CorruptRow` is the case these reach for.
 
 ## Functions
 

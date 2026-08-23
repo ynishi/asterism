@@ -24,7 +24,9 @@ showing how a line got where it is.
 
 ## Types
 
+- `AmendForgeMessageCommand` — Corrects something said. Nothing is overwritten.
 - `CloseForgePursuitCommand` — Ends a piece of work.
+- `ForgeAnchorDto` — What a conversation is about.
 - `ForgeChangePointDto` — One node of a line's history.
 - `ForgeChangeRowDto` — What one landing said about one entry.
 - `ForgeCloseDto` — How a piece of work ended.
@@ -34,15 +36,21 @@ showing how a line got where it is.
 - `ForgeLineActCommand` — Archives a line, reopens one, or drops one — the three verbs whose
 - `ForgeLineDto` — A line, without what is on it.
 - `ForgeLineHistoryDto` — A line's whole history: where it began and every landing since.
+- `ForgeMessageDto` — One thing said, with every correction to it.
 - `ForgeOpDto` — One operation of a round.
 - `ForgePursuitActCommand` — Asks the line's rule to answer whatever this work collides with.
 - `ForgePursuitDto` — A piece of work against a line, whole: how it opened, every round
 - `ForgeResolvedDto` — What `resolve` did.
+- `ForgeRevisionDto` — One correction to something said.
 - `ForgeRoundDto` — One round of work — what it asks the line to say, and who asked.
 - `ForgeStrategyDto` — A rule a line can be pointed at.
+- `ForgeThreadDto` — A conversation, whole.
 - `OpenForgeLineCommand` — Opens a line.
 - `OpenForgePursuitCommand` — Opens work against a line.
+- `OpenForgeThreadCommand` — Opens a conversation about something in the forge.
 - `PushForgeRoundCommand` — Writes a round.
 - `RenameForgeLineCommand` — Renames a line. The name is the line's own description, so this is
+- `RenameForgeThreadCommand` — Renames a conversation, or takes its name off.
+- `SayInForgeThreadCommand` — Says something in a conversation.
 - `SetForgeLineStrategyCommand` — Points a line at a different rule.
 
