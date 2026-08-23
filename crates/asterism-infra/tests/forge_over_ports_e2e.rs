@@ -2420,13 +2420,14 @@ async fn an_asset_on_a_line_cannot_be_deleted_and_neither_can_its_persona() {
         "the drop answers with what it released: {released:?}"
     );
 
+    // Rows affected rather than `is_ok`: `execute` answers `Ok(0)` for
+    // a statement that matched nothing, so a delete of a row somebody
+    // else had already taken would read as this release working.
     let gone = isle
         .call(move |conn| conn.execute("DELETE FROM asset WHERE id = ?1", rusqlite::params![asset]))
-        .await;
-    assert!(
-        gone.is_ok(),
-        "once the line is dropped nothing holds the bytes: {gone:?}"
-    );
+        .await
+        .expect("once the line is dropped nothing holds the bytes");
+    assert_eq!(gone, 1, "the asset the line was holding is the row taken");
     let owner = isle
         .call(move |conn| {
             conn.execute(
@@ -2434,11 +2435,9 @@ async fn an_asset_on_a_line_cannot_be_deleted_and_neither_can_its_persona() {
                 rusqlite::params![persona],
             )
         })
-        .await;
-    assert!(
-        owner.is_ok(),
-        "and the purge that was refused over it goes through: {owner:?}"
-    );
+        .await
+        .expect("and the purge that was refused over it goes through");
+    assert_eq!(owner, 1, "the persona whose cascade had stopped is taken");
 
     driver.shutdown().await.unwrap();
 }
