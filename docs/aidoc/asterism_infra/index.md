@@ -46,6 +46,7 @@ this crate.
 - [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
+- [`heads`](heads.md): Trained-head storage (#132 phase 2): the artifact a training run
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.

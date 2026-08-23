@@ -18,6 +18,7 @@ for later modalities.
 - `disclosure_stamp` — Writes the AI disclosure into a file this library produced.
 - `duplicate_scan` — Re-derives duplicate conflicts from fingerprints already on the rows.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
+- `head_train` — Trains the tag head from the person's rulings — the `HeadTrain`
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `material_text` — Recovers `material.meta_text` for the library that predates the

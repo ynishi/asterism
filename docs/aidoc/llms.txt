@@ -128,6 +128,7 @@
 - [asterism-core::domain::sort_eval](asterism_core/domain__sort_eval.md): Sort evaluation — the backend port of the UI grid comparator.
 - [asterism-core::domain::source_locator](asterism_core/domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
 - [asterism-core::domain::tag](asterism_core/domain__tag.md): `Tag` — the channel entity (a classification axis shared across
+- [asterism-core::domain::tag_head](asterism_core/domain__tag_head.md): The trained tag head (#132 phase 2): per-tag logistic rows over
 - [asterism-core::domain::thread](asterism_core/domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [asterism-core::domain::value](asterism_core/domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [asterism-core::domain::visual](asterism_core/domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
@@ -241,6 +242,7 @@
 - [asterism-infra::forge](asterism_infra/forge.md): What every forge store keeps, whatever it keeps it in.
 - [asterism-infra::forge::rows](asterism_infra/forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [asterism-infra::generator_params](asterism_infra/generator_params.md): Reading generator parameters out of stored metadata rows — the
+- [asterism-infra::heads](asterism_infra/heads.md): Trained-head storage (#132 phase 2): the artifact a training run
 - [asterism-infra::jobs](asterism_infra/jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [asterism-infra::jobs::chapter_ffmetadata](asterism_infra/jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [asterism-infra::jobs::handlers](asterism_infra/jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.

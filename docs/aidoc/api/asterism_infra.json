@@ -233,6 +233,61 @@
       "docs": "The extractor over stored rows.\n\nA unit struct because every input it reads arrives as an argument:\nthe judgement is in the code, the text is in the row, and nothing is\nconfigured. It re-runs across the whole library without opening a\nsingle file — the input is the canonical metadata object the\nfingerprint job stored, not bytes."
     },
     {
+      "path": "asterism_infra::heads",
+      "kind": "module",
+      "docs": "Trained-head storage (#132 phase 2): the artifact a training run\nwrites, and the one pointer promotion moves.\n\nLayout under [`crate::paths::heads_dir`]:\n\n```text\nheads/\n  head-v1/head.json     one training run's artifact, eval included\n  head-v2/head.json\n  current               the promoted label, or absent — zero-shot\n```\n\nAn artifact is immutable once written: a retrain is a new label,\nnever an overwrite, so `current` can move backwards as well as\nforwards and every eval stays inspectable. The artifact stores\n**only the trained rows** — tags below the training floor keep\ntheir zero-shot behaviour implicitly — which is why a head is\nkilobytes, not megabytes, at realistic ruling counts.\n\nPromotion is the caller's verdict, not this module's: writing an\nartifact records what training produced (wins and losses alike, a\nloss being exactly the evidence that zero-shot should stand);\n[`promote`] moves the pointer and is called only on a strict\nheld-out win."
+    },
+    {
+      "path": "asterism_infra::heads::CURRENT_FILE",
+      "kind": "constant",
+      "docs": "File name of the promotion pointer inside the heads root."
+    },
+    {
+      "path": "asterism_infra::heads::HEAD_ARTIFACT_SCHEMA",
+      "kind": "constant",
+      "docs": "The artifact schema this module writes and reads."
+    },
+    {
+      "path": "asterism_infra::heads::HEAD_FILE",
+      "kind": "constant",
+      "docs": "File name of the artifact inside a head's directory."
+    },
+    {
+      "path": "asterism_infra::heads::TagHeadArtifact",
+      "kind": "struct",
+      "docs": "One training run, persisted whole: identity, rows, and the eval\nthat judged it."
+    },
+    {
+      "path": "asterism_infra::heads::artifact_for",
+      "kind": "function",
+      "docs": "Builds an artifact from a run's outputs, stamping the schema and\nthe identity fields from the encoder's."
+    },
+    {
+      "path": "asterism_infra::heads::current_label",
+      "kind": "function",
+      "docs": "The promoted label, if any. Absent (or dangling) means zero-shot."
+    },
+    {
+      "path": "asterism_infra::heads::load_artifact",
+      "kind": "function",
+      "docs": "Reads one label's artifact, verifying the schema tag and that the\nartifact answers to the label it sits under."
+    },
+    {
+      "path": "asterism_infra::heads::next_head_label",
+      "kind": "function",
+      "docs": "The next unused label under `heads_root`, counting up from\n`head-v1`. Labels are ordinal, not content-addressed: two runs over\nidentical rulings would produce identical rows, and a person\nreading `heads/` should see the history of attempts, not a dedupe."
+    },
+    {
+      "path": "asterism_infra::heads::promote",
+      "kind": "function",
+      "docs": "Points `current` at a label — the promotion. The pointer is the\nwhole mechanism: the scoring side (the follow-up branch of #132)\nwill read it once at startup, bind-once like the encoder. Until\nthat side lands, the pointer records the verdict and nothing\nconsumes it — the zero-shot pass keeps scoring."
+    },
+    {
+      "path": "asterism_infra::heads::write_artifact",
+      "kind": "function",
+      "docs": "Writes one run's artifact under its label. Refuses an existing\nlabel: artifacts are immutable, and a collision means the caller\nskipped [`next_head_label`]."
+    },
+    {
       "path": "asterism_infra::jobs",
       "kind": "module",
       "docs": "Job engine — apalis with the `apalis-sql` SQLite backend.\n\n## Contents\n\n- [`AsterismJob`] — the queue payload. A single typed queue holds every\n  kind of job; the kind is carried in a slug field.\n- [`SqliteJobQueue`] — implementation of the `JobQueue` port from\n  `asterism-core`.\n- [`start`] — runs `SqliteStorage::setup` and spawns the worker\n  `Monitor` on a tokio task.\n\n## Coexistence with `rusqlite-isle`\n\n`apalis-sql` reaches SQLite through `sqlx 0.8` (which uses\n`libsqlite3-sys 0.30`). The workspace pins `rusqlite-isle` to the\nrelease line built against the same cluster, so both stacks link\nagainst a single copy of `sqlite3`. Job persistence tables (`Jobs`,\nand so on) are created by `SqliteStorage::setup` inside the same DB\nfile as the domain tables — they are owned by apalis, and the domain\nnever mirrors them.\n\n## Handlers\n\n[`handlers`] holds the per-kind implementations: `cover_gen`\n(modality-specific heuristic), `auto_tag` (keyword extraction + tag\nmaterialisation), and `edge_rebuild` (windowed incremental rebuild via\n`plan_edges`). `asset_add`, `persona_import`, and `index_rebuild` are\nfuture work."
@@ -346,6 +401,11 @@
       "path": "asterism_infra::jobs::handlers::edge_rebuild",
       "kind": "function",
       "docs": "Incrementally rebuilds constellation edges for the target asset.\n\nCandidate fetch is window-scoped (within ±48h of the target or\nsharing its session id, capped at 200); the weight / label rules\nlive in the pure `plan_edges` domain function."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::head_train",
+      "kind": "function",
+      "docs": "Trains the tag head from the person's rulings — the `HeadTrain`\njob. See `JobKind::HeadTrain` for the contract; the mechanics here\nare deliberately thin because the math lives in\n`asterism_core::domain::tag_head` (pure, tested) and the artifact\nin `crate::heads` (files, tested). What this handler owns is the\ncorpus walk: rulings → cached vectors → per-tag examples, the\nbaseline closure (the same cosine-and-floor rule the zero-shot\npass applies), and the promotion verdict."
     },
     {
       "path": "asterism_infra::jobs::handlers::index_rebuild",
@@ -601,6 +661,11 @@
       "path": "asterism_infra::paths::default_db_path",
       "kind": "function",
       "docs": "Returns the default SQLite database path (`<asterism_home>/asterism.db`)."
+    },
+    {
+      "path": "asterism_infra::paths::heads_dir",
+      "kind": "function",
+      "docs": "Returns (creating on demand) the profile-local trained-head root\n(#132 phase 2): one subdirectory per trained head\n(`<asterism_home>/heads/<label>/`), plus the `current` pointer file\npromotion writes. Profile-local for the same reason as\n[`models_dir`]: a head is trained on one profile's rulings, and a\nbench profile must not read — or win over — the real library's."
     },
     {
       "path": "asterism_infra::paths::models_dir",

@@ -720,6 +720,7 @@ the private design notes.
 - [`domain::sort_eval`](domain__sort_eval.md): Sort evaluation — the backend port of the UI grid comparator.
 - [`domain::source_locator`](domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
 - [`domain::tag`](domain__tag.md): `Tag` — the channel entity (a classification axis shared across
+- [`domain::tag_head`](domain__tag_head.md): The trained tag head (#132 phase 2): per-tag logistic rows over
 - [`domain::thread`](domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [`domain::value`](domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [`domain::visual`](domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
@@ -7218,6 +7219,59 @@ demands it.
 - `TagMergeOutcome` — Outcome of folding one tag into another
 
 
+<!-- asterism_core/domain__tag_head.md -->
+# asterism-core::domain::tag_head
+
+The trained tag head (#132 phase 2): per-tag logistic rows over
+frozen embeddings — pure math, no IO, no new dependencies.
+
+A head row is a binary logistic classifier for one tag, trained on
+the person's own rulings: an `accepted` suggestion is a positive
+example, a `rejected` one a negative, and the input is the asset's
+**cached** vector — training re-scores what the encoder already
+produced and never re-encodes anything.
+
+## Why no ML crate
+
+The issue left "linfa or candle" to be decided in-phase; the
+decision is neither. One row is a convex problem in at most a few
+thousand parameters over at most a few hundred examples — plain
+full-batch gradient descent converges in milliseconds, and the
+whole trainer is a page of arithmetic that a test can pin
+end-to-end. A tensor framework would buy nothing but a dependency
+graph.
+
+## The gate is the safety
+
+With rulings this sparse, a trained row can easily be worse than
+zero-shot. Nothing here is promoted on faith: every tag holds out
+part of its rulings ([`split_for_holdout`], deterministic — no RNG,
+so a rerun over the same rulings reproduces the same split), and
+[`evaluate_row`] scores the candidate **and** the caller-supplied
+zero-shot baseline on the same held-out examples. The caller
+promotes only on a strict win ([`HeadEval::is_win`]); a head that
+cannot beat cosine stays unpromoted and the zero-shot pass simply
+continues.
+
+## Functions
+
+- `evaluate_row` — Scores the candidate and the caller's zero-shot baseline on the
+- `split_for_holdout` — Splits one tag's rulings into train and held-out, per class, every
+- `train_row` — Trains one row by full-batch gradient descent on the training
+
+## Types
+
+- `HeadEval` — The whole head's eval: the per-row outcomes summed. Promotion reads
+- `RowEval` — Held-out outcome of one tag's candidate row against the baseline,
+- `RulingExample` — One ruling as the trainer consumes it: the asset's cached vector
+- `TrainedRow` — One trained row: `sigmoid(w · v + b)` is the probability the
+
+## Constants
+
+- `HOLD_OUT_EVERY` — Every N-th example of each class is held out for the eval (the
+- `MIN_RULINGS_PER_CLASS` — Minimum rulings **per class** (accepted, rejected) before a tag is
+
+
 <!-- asterism_core/domain__thread.md -->
 # asterism-core::domain::thread
 
@@ -10376,6 +10430,7 @@ this crate.
 - [`forge`](forge.md): What every forge store keeps, whatever it keeps it in.
 - [`forge::rows`](forge__rows.md): The shapes a store keeps, and the two translations either side of
 - [`generator_params`](generator_params.md): Reading generator parameters out of stored metadata rows — the
+- [`heads`](heads.md): Trained-head storage (#132 phase 2): the artifact a training run
 - [`jobs`](jobs.md): Job engine — apalis with the `apalis-sql` SQLite backend.
 - [`jobs::chapter_ffmetadata`](jobs__chapter_ffmetadata.md): Reading a container's declared chapter list through an external
 - [`jobs::handlers`](jobs__handlers.md): Pipeline job handlers: `cover_gen`, `auto_tag`, `edge_rebuild`.
@@ -10739,6 +10794,54 @@ ever made.
 - `StoredParamExtractor` — The extractor over stored rows.
 
 
+<!-- asterism_infra/heads.md -->
+# asterism-infra::heads
+
+Trained-head storage (#132 phase 2): the artifact a training run
+writes, and the one pointer promotion moves.
+
+Layout under [`crate::paths::heads_dir`]:
+
+```text
+heads/
+  head-v1/head.json     one training run's artifact, eval included
+  head-v2/head.json
+  current               the promoted label, or absent — zero-shot
+```
+
+An artifact is immutable once written: a retrain is a new label,
+never an overwrite, so `current` can move backwards as well as
+forwards and every eval stays inspectable. The artifact stores
+**only the trained rows** — tags below the training floor keep
+their zero-shot behaviour implicitly — which is why a head is
+kilobytes, not megabytes, at realistic ruling counts.
+
+Promotion is the caller's verdict, not this module's: writing an
+artifact records what training produced (wins and losses alike, a
+loss being exactly the evidence that zero-shot should stand);
+[`promote`] moves the pointer and is called only on a strict
+held-out win.
+
+## Functions
+
+- `artifact_for` — Builds an artifact from a run's outputs, stamping the schema and
+- `current_label` — The promoted label, if any. Absent (or dangling) means zero-shot.
+- `load_artifact` — Reads one label's artifact, verifying the schema tag and that the
+- `next_head_label` — The next unused label under `heads_root`, counting up from
+- `promote` — Points `current` at a label — the promotion. The pointer is the
+- `write_artifact` — Writes one run's artifact under its label. Refuses an existing
+
+## Types
+
+- `TagHeadArtifact` — One training run, persisted whole: identity, rows, and the eval
+
+## Constants
+
+- `CURRENT_FILE` — File name of the promotion pointer inside the heads root.
+- `HEAD_ARTIFACT_SCHEMA` — The artifact schema this module writes and reads.
+- `HEAD_FILE` — File name of the artifact inside a head's directory.
+
+
 <!-- asterism_infra/jobs.md -->
 # asterism-infra::jobs
 
@@ -10862,6 +10965,7 @@ for later modalities.
 - `disclosure_stamp` — Writes the AI disclosure into a file this library produced.
 - `duplicate_scan` — Re-derives duplicate conflicts from fingerprints already on the rows.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
+- `head_train` — Trains the tag head from the person's rulings — the `HeadTrain`
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
 - `material_text` — Recovers `material.meta_text` for the library that predates the
@@ -11221,6 +11325,7 @@ command pointing a development build at durable dogfood data.
 - `active_profile` — Returns the active data profile without creating directories.
 - `asterism_home` — Returns (creating on demand) the isolated Asterism home directory.
 - `default_db_path` — Returns the default SQLite database path (`<asterism_home>/asterism.db`).
+- `heads_dir` — Returns (creating on demand) the profile-local trained-head root
 - `models_dir` — Returns (creating on demand) the profile-local model-package root
 - `models_staging_dir` — Returns (creating on demand) the staging area a model install
 - `tantivy_index_dir` — Returns (creating on demand) the profile-local Tantivy index directory.
