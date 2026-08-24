@@ -8,6 +8,82 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- **`GET /teams/{team_id}/events` answers with a page, not the whole stream**
+  (#149). The response is now an object — `{ "events": [...], "next_after": N }`
+  — and takes `?after=<seq>&limit=<n>`, defaulting to 100 and clamping at 500. A
+  call with no parameters returns the first page rather than everything, which
+  is a breaking change for anything reading the array this used to return.
+
+  It is worth one because the previous shape had no bound at all: a ledger only
+  grows, every team-scoped mutation appends to it, and the response size was
+  therefore a function of how long the team had existed. The cursor is a keyset
+  over `seq`, which `(team_id, seq)` already orders, so a page costs the same
+  wherever in the stream it falls and never shifts under a reader while appends
+  land above it. `next_after` is `null` only when a page came back shorter than
+  the limit it asked for; a page that filled its limit carries a cursor even
+  when it happened to end at the last event there is, because whether anything
+  follows is only answerable by asking. Paging this before `forge.*` events
+  start landing is cheaper than paging it afterwards.
+
+- **The instance capacity is an admin, not an operator** (#148 revisions 7 and
+  8). `InstanceOperator` is `InstanceAdmin`, `TeamAuthority::Operator` and
+  `LedgerActor::Operator` rename with it, and `user_account.is_operator` becomes
+  `is_admin` by column rename. "Operator" was carrying several meanings at once
+  — this capacity, the agent that carried a write out, and the human who runs
+  the deployment — and this is the one with a single writer and no wire format
+  pinning it.
+
+  Two of those surfaces are visible to a caller. `SessionDto.operator` is now
+  `admin`, and `actor_kind` on the wire reads `"admin"` where it read
+  `"operator"`. Events written before the rename keep the old tag in storage
+  forever — `ledger_event` is append-only, guarded by triggers — so the domain
+  carries `#[serde(alias = "operator")]` permanently on the read side. Writes
+  emit `admin`; no later migration may assume the old tag has gone.
+
+- **An instance may hold more than one admin** (#148 revision 8). The bootstrap
+  path refused a second admin on the ground that the capacity had exactly one
+  holder. A single holder is a person who can be unavailable, and an instance
+  whose only admin is unreachable has no path back to its own destructive verbs.
+  `bootstrap-admin` is still how the _first_ admin arrives on an instance with
+  no account to authenticate as; it is no longer a limit on how many there may
+  be. The duplicate-login refusal is untouched.
+
+- **`SubjectRef::ForgeIdentity` carries the forge's vocabulary rather than an
+  opaque string** (#148 revision 4). It is now the pair #102 fixed — what the
+  handle stands for (`owner`, `subject`, `unrecorded`, `server`) and, for the
+  one kind that names somebody, whom. The canonical string the index and the
+  wire carry is the bare word, or `subject:<token>`, and a value outside that
+  vocabulary is refused at the boundary instead of stored and puzzled over
+  later. Nothing on a production path had ever written one, so no rows migrate.
+
+### Added
+
+- **A forge handle remembers the name it was minted under** (#148 revision 9).
+  `forge_actor` gains a nullable `display_name`, written when the row is minted
+  and not afterwards — the same captured-not-referenced discipline as the teams
+  plane's actor stamp, and held by the same `ON CONFLICT DO NOTHING` that makes
+  minting idempotent. A caller with no name to state mints a row without one.
+  The attribution triple has no display name to give today, so this is the seat
+  rather than the feature: a caller that has one writes it at mint and needs no
+  migration to start.
+
+- **What erasing a person costs is written down** (#148 decision 21). The
+  `ledger` module doc now names the three records that have to answer together —
+  the actor stamp on every event, the subject index, and `forge_actor` on the
+  local plane — the mechanisms that could answer, and the order constraint: this
+  is settled before any tamper-evidence chain exists, because after one, erasure
+  by rewriting a row is gone permanently. The ledger's retention is stated in
+  the same spirit: keep-all for v0, named as a position with a cost, which is
+  that `VACUUM INTO` rewrites the whole file on every backup.
+
+### Removed
+
+- **`port::share`** (#148 revision 3). An empty marker trait with no implementor
+  and no reference anywhere in the workspace, reserved for a vocabulary #63 has
+  not fixed. A seam that holds nothing is not holding a place.
+
 ### Added
 
 - **The forge reaches the desktop.** Twenty-five Tauri commands covering the
