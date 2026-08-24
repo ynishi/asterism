@@ -836,61 +836,8 @@ fn the_application_layer_keeps_no_synchronous_public_verbs() {
 
 // ------------------------------------------------- the Tauri mutation subset
 
-/// How many `#[tauri::command]` functions call a service mutation.
-///
-/// The desktop surface has no single point every write passes through
-/// — the commands are a flat list, each calling its service directly
-/// The number is what stands in for that missing
-/// point: it does not prevent anything, it makes a change in the size
-/// of the write surface something somebody had to type.
-///
-/// Counted from the source, so it moves when a mutation command is
-/// added or removed and not otherwise. Adding a read command leaves it
-/// alone.
-const TAURI_MUTATION_COMMANDS: usize = 102;
-
-#[test]
-fn the_tauri_mutation_surface_is_the_size_it_records() {
-    let root = workspace_root();
-    let path = root.join("crates/asterism-ui/src-tauri/src/commands.rs");
-    let lines = code_lines(&path);
-
-    let mut total = 0usize;
-    let mut mutations = 0usize;
-    let mut index = 0usize;
-    while index < lines.len() {
-        if lines[index].1.trim() != "#[tauri::command]" {
-            index += 1;
-            continue;
-        }
-        total += 1;
-        let mut body = String::new();
-        let mut cursor = index + 1;
-        while cursor < lines.len() {
-            let text = &lines[cursor].1;
-            body.push_str(text);
-            body.push('\n');
-            if text == "}" {
-                break;
-            }
-            cursor += 1;
-        }
-        if body.contains("AttributionContext::owner_surface()") {
-            mutations += 1;
-        }
-        index = cursor + 1;
-    }
-
-    assert!(
-        total > 0,
-        "no `#[tauri::command]` found — the scan is not reading commands.rs"
-    );
-    assert_eq!(
-        mutations, TAURI_MUTATION_COMMANDS,
-        "the desktop write surface changed size: {mutations} of {total} \
-         commands now name the owner's surface. If a mutation was added \
-         or removed, update TAURI_MUTATION_COMMANDS in the same diff. If \
-         the count fell because a mutation stopped passing a context, \
-         that is the change to look at"
-    );
-}
+// The tauri mutation-surface count (`TAURI_MUTATION_COMMANDS` and its
+// test) moved to `asterism-ui`'s own tests in #159: it reads that
+// crate's `src/commands.rs`, and the `-changed` gates run a crate's
+// tests only when that crate changes — from here, the guard was silent
+// exactly when its subject moved (#154). Do not bring it back.
