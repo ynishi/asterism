@@ -90,10 +90,12 @@
 //!
 //! **The arrow holds inside this crate, and nothing enforces it.**
 //! *Uses* is the verb, and a `use` is what counts: doc links across the
-//! boundary are prose about it, not crossings of it. By that reading no
-//! file in `asterism-core` outside [`forge`] uses a forge type today —
-//! a fact about the tree rather than a rule it obeys, since the next
-//! `use` would restore the dependency and no gate would say so.
+//! boundary are prose about it, not crossings of it. Nothing gates a
+//! `use` that points the other way, so what holds the arrow here is a
+//! reader noticing. [`application::mapping`](crate::application::mapping)
+//! names forge types and is meant to — [`forge`]'s doc says why every
+//! conversion sits there — so a gate would have to tell that apart
+//! from the crossing this rule is about.
 //!
 //! **Outside this crate the arrow says nothing, and is not meant to.**
 //! `asterism-infra` implements the forge's ports, `asterism-server`
@@ -102,10 +104,11 @@
 //! see both halves. The rule is about which way `asterism-core`
 //! depends, not about who may name what.
 //!
-//! Cutting [`forge`] into its own crate is what turns the inside half
-//! from a fact into a rule the compiler holds, and it is the remaining
-//! work on #81. Until then this paragraph is the whole enforcement,
-//! which is a reviewer's attention and nothing else.
+//! No compiler holds the inside half, so the paragraph above is the
+//! whole of it. `tests/forge_boundary.rs` is a neighbour and not that
+//! gate — it answers what the forge may name *outside* itself, which
+//! is the other direction and a stricter rule than this arrow;
+//! [`forge`]'s own doc says which words are on that list and why.
 //!
 //! One of the arrow's crossings is worth knowing, because it looks
 //! like a violation and is not. `dispatch` is a raw-layer module though

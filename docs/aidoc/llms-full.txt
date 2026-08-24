@@ -2221,10 +2221,12 @@ port — and a change that adds one is the change to refuse.
 
 **The arrow holds inside this crate, and nothing enforces it.**
 *Uses* is the verb, and a `use` is what counts: doc links across the
-boundary are prose about it, not crossings of it. By that reading no
-file in `asterism-core` outside [`forge`] uses a forge type today —
-a fact about the tree rather than a rule it obeys, since the next
-`use` would restore the dependency and no gate would say so.
+boundary are prose about it, not crossings of it. Nothing gates a
+`use` that points the other way, so what holds the arrow here is a
+reader noticing. [`application::mapping`](crate::application::mapping)
+names forge types and is meant to — [`forge`]'s doc says why every
+conversion sits there — so a gate would have to tell that apart
+from the crossing this rule is about.
 
 **Outside this crate the arrow says nothing, and is not meant to.**
 `asterism-infra` implements the forge's ports, `asterism-server`
@@ -2233,10 +2235,11 @@ names a forge type from outside is in a crate that is supposed to
 see both halves. The rule is about which way `asterism-core`
 depends, not about who may name what.
 
-Cutting [`forge`] into its own crate is what turns the inside half
-from a fact into a rule the compiler holds, and it is the remaining
-work on #81. Until then this paragraph is the whole enforcement,
-which is a reviewer's attention and nothing else.
+No compiler holds the inside half, so the paragraph above is the
+whole of it. `tests/forge_boundary.rs` is a neighbour and not that
+gate — it answers what the forge may name *outside* itself, which
+is the other direction and a stricter rule than this arrow;
+[`forge`]'s own doc says which words are on that list and why.
 
 One of the arrow's crossings is worth knowing, because it looks
 like a violation and is not. `dispatch` is a raw-layer module though
@@ -3572,11 +3575,10 @@ wider.** Two things follow that are easy to get backwards:
   not.
 
 The direction is what matters: the outside may name the forge, and
-the forge may not name the outside. #101 turns that into a crate
-graph, where the compiler holds it instead of a test. Until then the
-list above is the whole of the contract, and adding to it is a
-decision about what the lifted crate would have to carry rather
-than a note that something compiles.
+the forge may not name the outside. The list above is the whole of
+the contract, and adding to it is a decision about what the lifted
+crate would have to carry rather than a note that something
+compiles.
 
 # What is deliberately not here
 
@@ -4006,11 +4008,11 @@ with the hard one.
 
 Keeping lines, stated in the forge's own words.
 
-[`Lines`] is one of the four faces the forge asks for. Every type it
-mentions — [`Line`], [`Name`], [`Act`] — belongs to the model, so
-nothing here has to be translated and there is no vocabulary to
-isolate. Whatever implements it is somebody else's problem, and the
-forge never names them.
+[`Lines`] is one of the ports the forge asks through, which
+[`forge`](super) lists. Every type it mentions — [`Line`], [`Name`],
+[`Act`] — belongs to the model, so nothing here has to be translated
+and there is no vocabulary to isolate. Whatever implements it is
+somebody else's problem, and the forge never names them.
 
 # A line moves through one door, and it is not this one
 
@@ -5452,9 +5454,9 @@ proposed.
 
 Keeping pursuits, stated in the forge's own words.
 
-[`Pursuits`] is the quiet one of the four faces the forge asks for:
-opening work and adding rounds to it are what happens most, and
-neither touches a line.
+[`Pursuits`] is the quiet one of the ports the forge asks through,
+which [`forge`](super) lists: opening work and adding rounds to it
+are what happens most, and neither touches a line.
 
 # A round names the node it sits on
 
@@ -5614,11 +5616,12 @@ there for the same reason.
 One thing does take a conversation, and it is not on this face:
 [`Lines::discard`] takes every thread anchored to the line it
 drops — to a pursuit, a round, an entry as a round had it, or a
-change point, which is all four anchors there are. The alternative
+change point, which is every anchor [`Anchor`] has. The alternative
 is a remark about something that no longer exists. A conversation
 ends when the line it is about is thrown away, and nowhere else.
 
 [`Thread::amend`]: crate::domain::forge::model::thread::Thread::amend
+[`Anchor`]: crate::domain::forge::model::thread::Anchor
 [`Lines::discard`]: super::lines::Lines::discard
 
 ## Traits

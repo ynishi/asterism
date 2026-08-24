@@ -20,11 +20,12 @@
 //! One thing does take a conversation, and it is not on this face:
 //! [`Lines::discard`] takes every thread anchored to the line it
 //! drops — to a pursuit, a round, an entry as a round had it, or a
-//! change point, which is all four anchors there are. The alternative
+//! change point, which is every anchor [`Anchor`] has. The alternative
 //! is a remark about something that no longer exists. A conversation
 //! ends when the line it is about is thrown away, and nowhere else.
 //!
 //! [`Thread::amend`]: crate::domain::forge::model::thread::Thread::amend
+//! [`Anchor`]: crate::domain::forge::model::thread::Anchor
 //! [`Lines::discard`]: super::lines::Lines::discard
 
 use async_trait::async_trait;
