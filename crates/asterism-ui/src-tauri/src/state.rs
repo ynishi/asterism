@@ -13,8 +13,8 @@ use asterism_core::DomainError;
 use asterism_core::application::DispatchService;
 use asterism_core::application::{
     AppSettingService, AssetCommentService, AssetService, MaterialLayerService,
-    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SessionService,
-    SnapshotService, ThreadService, ThumbService,
+    MaterialMarkService, ModalityService, PersonaService, QueryGroupService, SeriesStrategyService,
+    SessionService, SnapshotService, ThreadService, ThumbService,
 };
 use asterism_core::domain::repository::ProgressEmitter;
 use asterism_core::domain::value::Progress;
@@ -94,6 +94,14 @@ pub struct AppState {
     /// Local telemetry append/read handle (`event_log` — dogfooding
     /// metrics recorded by the UI, read back for summaries).
     pub telemetry: asterism_infra::telemetry::Telemetry,
+    /// Series Strategy lifecycle — the registered derivation rules,
+    /// reached by the four `*_series_strategy` commands. No screen
+    /// consumes them yet, so their types stay out of `bindings.ts`
+    /// (see `build.rs`).
+    pub series_strategy_service: Arc<SeriesStrategyService>,
+    /// Read handle over the observation streams (`observation` view) —
+    /// the single-timeline listing `list_observations` serves.
+    pub observations: asterism_infra::observe::ObservationStore,
 }
 
 /// Tauri implementation of `ProgressEmitter` — forwards each payload to
@@ -171,6 +179,8 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         forge_thread_service: core.forge_thread_service,
         jobs_pool: core.jobs_pool,
         telemetry: core.telemetry,
+        series_strategy_service: core.series_strategy_service,
+        observations: core.observations,
     };
 
     Ok((app_state, server_ctx))
