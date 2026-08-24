@@ -86,22 +86,32 @@ impl SqliteActors {
     /// this way even though this store serialises its writes, because
     /// what holds the rule should be the statement rather than the
     /// arrangement around it.
+    ///
+    /// `display_name` is captured here and nowhere else, which is what
+    /// the conflict clause buys beyond concurrency: a later resolve of
+    /// the same handle does not reach the row, so the name a handle was
+    /// minted under is the name it keeps. The same discipline as the
+    /// teams plane's actor stamp, and for the same reason — a record
+    /// that re-derived the name would answer for today rather than for
+    /// when the work was done.
     async fn handle(
         &self,
         stands_for: &'static str,
         subject: Option<String>,
+        display_name: Option<String>,
     ) -> Result<ActorId, DomainError> {
         self.isle
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 tx.execute(
-                    "INSERT INTO forge_actor (id, stands_for, subject, created_at) \
-                     VALUES (?1, ?2, ?3, ?4) \
+                    "INSERT INTO forge_actor (id, stands_for, subject, display_name, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5) \
                      ON CONFLICT DO NOTHING",
                     params![
                         Uuid::now_v7(),
                         stands_for,
                         subject.as_deref(),
+                        display_name.as_deref(),
                         chrono::Utc::now().timestamp_millis(),
                     ],
                 )?;
@@ -132,11 +142,23 @@ impl Actors for SqliteActors {
     ///
     /// A write that named nobody resolves to one handle rather than a
     /// fresh one each time: "nobody said who" is a single answer.
+    ///
+    /// The name a handle is minted under comes from the same triple,
+    /// and the triple has none to give: an author is the owner or a
+    /// subject token, and the token is an identifier the sharing lists
+    /// and viewers carry rather than anything a person would recognise
+    /// as their name. Passing it as the display snapshot would put a
+    /// copy of the `subject` column into the column beside it and call
+    /// the duplicate a capture. So the snapshot is `None` until a
+    /// caller has a name to state, and the seat is here for the day
+    /// one does.
     async fn resolve(&self, by: &AttributionContext) -> Result<ActorId, DomainError> {
         match by.author() {
-            None => self.handle("unrecorded", None).await,
-            Some(Author::Owner) => self.handle("owner", None).await,
-            Some(Author::Subject(subject)) => self.handle("subject", Some(subject.clone())).await,
+            None => self.handle("unrecorded", None, None).await,
+            Some(Author::Owner) => self.handle("owner", None, None).await,
+            Some(Author::Subject(subject)) => {
+                self.handle("subject", Some(subject.clone()), None).await
+            }
         }
     }
 
@@ -148,7 +170,7 @@ impl Actors for SqliteActors {
     /// there are several, they are told apart by it, and nothing
     /// already written has to move.
     async fn server(&self) -> Result<ActorId, DomainError> {
-        self.handle("server", None).await
+        self.handle("server", None, None).await
     }
 }
 
@@ -286,6 +308,63 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 4, "and minted nothing on the second pass");
 
+        driver.shutdown().await.unwrap();
+    }
+
+    /// The display snapshot is written when the row is minted and not
+    /// afterwards. What holds that is the mint statement's conflict
+    /// clause, so the test is on the statement rather than on the one
+    /// value today's callers happen to pass.
+    #[tokio::test]
+    async fn the_display_snapshot_is_captured_at_mint_and_not_updated() {
+        let (isle, driver, _, _) = seeded().await;
+        let actors = SqliteActors::new(isle.clone());
+
+        let named =
+            AttributionContext::asserted(Some(Author::Subject("ana".into())), None).unwrap();
+        let handle = actors.resolve(&named).await.unwrap();
+
+        // Nothing on a write path has a name to state, so the column
+        // is NULL rather than a second copy of the subject token.
+        let captured: Option<String> = isle
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT display_name FROM forge_actor WHERE stands_for = 'subject'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(captured, None);
+
+        // A mint that does carry one keeps it, and a later resolve of
+        // the same handle does not reach the row to change it.
+        let second = SqliteActors::new(isle.clone())
+            .handle("owner", None, Some("Hoshino".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            SqliteActors::new(isle.clone())
+                .handle("owner", None, Some("Someone Else".into()))
+                .await
+                .unwrap(),
+            second,
+            "the same handle comes back rather than a second row"
+        );
+        let kept: Option<String> = isle
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT display_name FROM forge_actor WHERE stands_for = 'owner'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(kept.as_deref(), Some("Hoshino"));
+
+        assert_ne!(handle, second);
         driver.shutdown().await.unwrap();
     }
 
