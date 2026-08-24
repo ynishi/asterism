@@ -21,16 +21,16 @@ pub struct LoginCommand {
 /// Creates a team (`POST /teams/create`).
 ///
 /// Who may call this follows the registration policy (#83 §1): any
-/// authenticated user when registration is open, the operator only
-/// when it is closed.
+/// authenticated user when registration is open, admins only when it
+/// is closed.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct CreateTeamCommand {
     /// The founding owner's user id.
     ///
-    /// **Required when the operator creates the team**: the operator is
-    /// never implicitly a member (#83 §1), so the owner row must name
-    /// whichever user will own it — which may be the operator's own
-    /// user id, making that ownership an explicit membership row like
+    /// **Required when an admin creates the team**: an admin is never
+    /// implicitly a member (#83 §1), so the owner row must name
+    /// whichever user will own it — which may be the admin's own user
+    /// id, making that ownership an explicit membership row like
     /// anyone else's. A regular user founds their own team: they omit
     /// this (or name themselves; naming anyone else is refused).
     pub owner_user_id: Option<String>,

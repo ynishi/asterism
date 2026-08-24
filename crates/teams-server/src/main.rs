@@ -14,7 +14,7 @@
 //! ## Identity bootstrap
 //!
 //! No fixed default credentials exist (#83 §5). The initial admin —
-//! the InstanceOperator of #83 §1, outside every membership table — is
+//! the `InstanceAdmin` of #83 §1, outside every membership table — is
 //! created explicitly with `bootstrap-admin`, taking its password from
 //! `$ASTERISM_TEAMS_ADMIN_PASSWORD` (an environment variable rather
 //! than an argument, so the secret stays out of shell history and
@@ -86,8 +86,7 @@ enum Command {
         /// address is the operator's explicit call.
         #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
         bind: IpAddr,
-        /// Closed registration (#83 §1): only the operator may create
-        /// teams.
+        /// Closed registration (#83 §1): only admins may create teams.
         #[arg(long)]
         closed_registration: bool,
         /// Purge grace window in seconds (#95): how long a marked blob
@@ -104,18 +103,22 @@ enum Command {
         #[arg(long)]
         db: Option<PathBuf>,
     },
-    /// Creates the initial admin — the InstanceOperator (#83 §1),
-    /// outside every membership table. Password from
-    /// `$ASTERISM_TEAMS_ADMIN_PASSWORD`; there is no default, and
-    /// placeholder passwords are refused. Runs **once** per instance:
-    /// the operator is an instance capacity with exactly one holder in
-    /// v0, so re-running fails with "already bootstrapped" — minting
-    /// further operators is a later deliberate feature, not a re-run.
+    /// Creates an instance admin (#83 §1), outside every membership
+    /// table. Password from `$ASTERISM_TEAMS_ADMIN_PASSWORD`; there is
+    /// no default, and placeholder passwords are refused.
+    ///
+    /// Named for the case it exists for — the first admin on an
+    /// instance with no account to authenticate as — but not limited
+    /// to it. It refused a second admin until #148 revision 8, on the
+    /// ground that the capacity had exactly one holder; an instance
+    /// whose only admin is unreachable has no way back to its own
+    /// destructive verbs, so provisioning another is an ordinary run
+    /// of this command rather than a feature somebody has to add.
     BootstrapAdmin {
         /// SQLite database path.
         #[arg(long)]
         db: Option<PathBuf>,
-        /// The operator's login name.
+        /// The admin's login name.
         #[arg(long)]
         login: String,
         /// Display name for ledger stamps (default: the login).
@@ -242,7 +245,7 @@ async fn create_account(
     login: &str,
     display_name: Option<String>,
     password_env: &str,
-    operator: bool,
+    admin: bool,
 ) -> anyhow::Result<()> {
     let password = password_from_env(password_env)?;
     let db_path = resolve_db_path(db)?;
@@ -250,11 +253,11 @@ async fn create_account(
     let auth = PasswordAuth::new(isle);
     let display_name = display_name.unwrap_or_else(|| login.to_string());
     let outcome = auth
-        .create_account(login, &display_name, &password, operator, now_ms())
+        .create_account(login, &display_name, &password, admin, now_ms())
         .await;
     driver.shutdown().await.ok();
     let user_id = outcome?;
-    let kind = if operator { "operator" } else { "user" };
+    let kind = if admin { "admin" } else { "user" };
     println!("teams-server: {kind} {login:?} created (user_id {user_id})");
     Ok(())
 }

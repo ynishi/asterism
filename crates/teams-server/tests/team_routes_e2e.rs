@@ -120,11 +120,11 @@ fn get_authed(uri: &str, token: &str) -> Request<Body> {
 
 /// Provisions an account and logs it in through the real route,
 /// returning `(user_id, token)`.
-async fn user(h: &Harness, login: &str, operator: bool) -> (Uuid, String) {
+async fn user(h: &Harness, login: &str, admin: bool) -> (Uuid, String) {
     let user_id = h
         .ctx
         .auth
-        .create_account(login, login, GOOD, operator, now_ms())
+        .create_account(login, login, GOOD, admin, now_ms())
         .await
         .expect("create account");
     let (status, body) = call(
@@ -158,7 +158,7 @@ async fn events_of(h: &Harness, team_id: &str, token: &str) -> Vec<serde_json::V
     )
     .await;
     assert_eq!(status, StatusCode::OK, "events: {body}");
-    body.as_array().expect("events array").clone()
+    body["events"].as_array().expect("events array").clone()
 }
 
 #[tokio::test]
@@ -256,11 +256,11 @@ async fn the_authority_table_is_enforced_end_to_end() {
     }
     assert_eq!(events_of(&h, &team_id, &alice).await.len(), before);
 
-    // The operator, outside the roster, gets delete and nothing else
+    // An admin, outside the roster, gets delete and nothing else
     // (#83 §1: no implicit invite / remove / grant / purge).
     for (uri, payload) in &attempts[..4] {
         let (status, body) = call(&h.router, post_authed(uri, &op, payload.clone())).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "operator at {uri}: {body}");
+        assert_eq!(status, StatusCode::FORBIDDEN, "admin at {uri}: {body}");
     }
     let (status, body) = call(
         &h.router,
@@ -271,21 +271,21 @@ async fn the_authority_table_is_enforced_end_to_end() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "operator delete: {body}");
-    // …and the stamp says the operator did it — never disguised.
-    assert_eq!(body["actor_kind"], "operator");
+    assert_eq!(status, StatusCode::OK, "admin delete: {body}");
+    // …and the stamp says an admin did it — never disguised.
+    assert_eq!(body["actor_kind"], "admin");
     assert_eq!(body["kind"], "teams.team.deleted/1");
 
     // The stream (which outlives the team row) agrees.
     let team_uuid = Uuid::parse_str(&team_id).unwrap();
     let stream = h.ctx.repo.events(team_uuid).await.unwrap();
-    assert!(stream.last().unwrap().actor.is_operator());
+    assert!(stream.last().unwrap().actor.is_admin());
 
     h.driver.shutdown().await.unwrap();
 }
 
 #[tokio::test]
-async fn closed_registration_flips_creation_to_the_operator() {
+async fn closed_registration_flips_creation_to_an_admin() {
     let h = harness(RegistrationPolicy::Closed).await;
     let (alice_id, alice) = user(&h, "alice", false).await;
     let (op_id, op) = user(&h, "op", true).await;
@@ -298,7 +298,7 @@ async fn closed_registration_flips_creation_to_the_operator() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "closed create: {body}");
 
-    // The operator must name the founding owner — never implicitly a
+    // An admin must name the founding owner — never implicitly a
     // member, so an ownerless create is malformed…
     let (status, body) = call(
         &h.router,
@@ -319,8 +319,8 @@ async fn closed_registration_flips_creation_to_the_operator() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    // Naming alice works: she owns the team, the operator stays
-    // outside it, and the creation is operator-stamped.
+    // Naming alice works: she owns the team, the admin stays outside
+    // it, and the creation is admin-stamped.
     let (status, body) = call(
         &h.router,
         post_authed(
@@ -330,9 +330,9 @@ async fn closed_registration_flips_creation_to_the_operator() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "operator create: {body}");
+    assert_eq!(status, StatusCode::OK, "admin create: {body}");
     let team_id = body["team_id"].as_str().unwrap().to_string();
-    assert_eq!(body["event"]["actor_kind"], "operator");
+    assert_eq!(body["event"]["actor_kind"], "admin");
 
     let (status, roster) = call(
         &h.router,
@@ -341,7 +341,7 @@ async fn closed_registration_flips_creation_to_the_operator() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let members = roster["members"].as_array().unwrap();
-    assert_eq!(members.len(), 1, "the operator must not be in the roster");
+    assert_eq!(members.len(), 1, "the admin must not be in the roster");
     assert_eq!(members[0]["user_id"], alice_id.to_string());
     assert_eq!(members[0]["role"], "owner");
 
@@ -373,7 +373,7 @@ async fn a_user_founds_their_own_team_and_only_their_own() {
     assert_eq!(body["event"]["actor_kind"], "member");
 
     // Naming someone else is refused — founding a team you will not
-    // own is the operator's move, under closed registration.
+    // own is an admin's move, under closed registration.
     let (status, body) = call(
         &h.router,
         post_authed(
@@ -562,6 +562,104 @@ async fn malformed_targets_are_validation_errors_not_500s() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    h.driver.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_events_route_pages_and_hands_back_where_to_resume() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_, alice) = user(&h, "alice", false).await;
+    let team_id = create_team(&h, &alice).await;
+
+    // Founding event plus one per invite, so the stream outgrows a
+    // page of two.
+    for name in ["bob", "carol", "dave", "erin"] {
+        let (member_id, _) = user(&h, name, false).await;
+        let (status, body) = call(
+            &h.router,
+            post_authed(
+                &format!("/teams/{team_id}/members/invite"),
+                &alice,
+                serde_json::json!({ "user_id": member_id.to_string(), "role": "member" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "invite {name}: {body}");
+    }
+
+    // Walking in pages of two reproduces the whole stream in order,
+    // with nothing repeated at a boundary and nothing skipped.
+    let whole = events_of(&h, &team_id, &alice).await;
+    assert!(whole.len() > 2, "the fixture must outgrow one page");
+
+    let mut walked: Vec<serde_json::Value> = Vec::new();
+    let mut after: Option<i64> = None;
+    loop {
+        let uri = match after {
+            Some(seq) => format!("/teams/{team_id}/events?after={seq}&limit=2"),
+            None => format!("/teams/{team_id}/events?limit=2"),
+        };
+        let (status, body) = call(&h.router, get_authed(&uri, &alice)).await;
+        assert_eq!(status, StatusCode::OK, "page: {body}");
+        let page = body["events"].as_array().unwrap().clone();
+        assert!(page.len() <= 2, "a page never exceeds its limit");
+        walked.extend(page);
+        match body["next_after"].as_i64() {
+            Some(seq) => after = Some(seq),
+            None => break,
+        }
+    }
+    assert_eq!(walked, whole);
+
+    // The parameterless call is the first page, not the whole stream —
+    // the contract change this route is making. With a default of 100
+    // and a fixture of five that is the same list, so what pins the
+    // change is the shape: an object carrying `events`, never the bare
+    // array this used to answer with.
+    let (status, body) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team_id}/events"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.is_object(),
+        "the events read answers with a page: {body}"
+    );
+    assert!(body["events"].is_array());
+
+    // A limit above the ceiling is clamped rather than refused: asking
+    // for more than there is, is not an error.
+    let (status, body) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team_id}/events?limit=100000"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "clamped limit: {body}");
+    assert_eq!(body["events"].as_array().unwrap().len(), whole.len());
+
+    // And a limit of zero is clamped up to one, which is the floor the
+    // cursor contract needs. Left alone it would ask the repository
+    // for nothing and get an empty page that still counts as full —
+    // `len() == limit` holds at zero — so the response would carry
+    // `next_after: null` while the stream still had every event in it,
+    // telling a walker it had reached the end before it had read
+    // anything.
+    let (status, body) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team_id}/events?limit=0"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "zero limit: {body}");
+    let page = body["events"].as_array().unwrap();
+    assert_eq!(page.len(), 1, "zero is clamped to one, not honoured");
+    assert_eq!(page[0], whole[0], "and it is the first event, not none");
+    assert_eq!(
+        body["next_after"].as_i64(),
+        Some(whole[0]["seq"].as_i64().unwrap()),
+        "a full page carries a cursor, so the walk can go on"
+    );
 
     h.driver.shutdown().await.unwrap();
 }

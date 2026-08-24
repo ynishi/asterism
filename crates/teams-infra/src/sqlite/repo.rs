@@ -91,8 +91,8 @@ impl SqliteTeamsRepository {
     /// all times, and creation is where the first one lands). The
     /// founding owner is a [`Membership`] rather than being derived
     /// from `actor`, because the two are allowed to differ: under
-    /// closed registration the operator creates the team, and the
-    /// operator is never implicitly a member — the owner row belongs
+    /// closed registration an admin creates the team, and an admin is
+    /// never implicitly a member — the owner row belongs
     /// to whichever user will own it, while the ledger stamps whoever
     /// acted.
     pub async fn create_team(
@@ -651,8 +651,8 @@ impl SqliteTeamsRepository {
     /// the same transaction — one current head per instance (#132
     /// phase 3), the invariant the model registry carried before it.
     /// Republishing the same entry is accepted, not an error: it
-    /// supersedes and re-inserts, which is a history row saying the
-    /// operator published again.
+    /// supersedes and re-inserts, which is a history row saying an
+    /// admin published again.
     ///
     /// Like [`Self::record_locator`], no ledger append (see the module
     /// doc): the registry is instance-scope, the ledger's streams are
@@ -861,6 +861,12 @@ impl SqliteTeamsRepository {
 
     /// The team's stream in order — seq ascending, which storage makes
     /// insertion order.
+    ///
+    /// The whole stream, which is what makes this the read to stop
+    /// reaching for: a ledger only grows, and a team old enough to be
+    /// worth reading is a team whose stream does not fit in one
+    /// response. [`Self::events_page`] is the same walk with a cursor
+    /// and a bound on it.
     pub async fn events(&self, team_id: Uuid) -> Result<Vec<LedgerEvent>, DomainError> {
         let (events, subjects) = self
             .isle
@@ -876,6 +882,76 @@ impl SqliteTeamsRepository {
                     "SELECT seq, ref_type, ref_value FROM ledger_subject
                      WHERE team_id = ?1 ORDER BY seq, rowid",
                     params![team_id],
+                )?;
+                Ok((events, subjects))
+            })
+            .await
+            .map_err(infra_err)?;
+        promote_events(team_id, events, subjects)
+    }
+
+    /// One page of the team's stream: up to `limit` events with a seq
+    /// above `after`, seq ascending.
+    ///
+    /// A keyset cursor rather than an offset, and the key is one the
+    /// table already has — `(team_id, seq)` is the primary key, so the
+    /// page is a range scan from where the last one stopped and costs
+    /// the same whether it is the first page or the ten-thousandth.
+    /// `OFFSET` would walk and discard every row before the page, which
+    /// is the read getting slower exactly as the stream it reads gets
+    /// longer. It is also stable under concurrent appends in a way an
+    /// offset is not: appends land after the highest seq, so a page
+    /// taken from `after` never shifts under a reader mid-walk.
+    ///
+    /// `after = None` starts at the beginning. The caller resumes by
+    /// passing the last seq it received, so a page that came back
+    /// shorter than `limit` is the end of the stream *for now* — a
+    /// ledger has no final page, only a position nothing has been
+    /// appended past yet.
+    pub async fn events_page(
+        &self,
+        team_id: Uuid,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<LedgerEvent>, DomainError> {
+        // Zero is the caller asking for nothing, and it gets nothing
+        // without a round trip — `LIMIT 0` would return the same empty
+        // result from SQLite, so this is saving the query rather than
+        // correcting it.
+        //
+        // What it is not is a *cursor* answer. An empty page here
+        // satisfies `len() == limit` at zero, so a caller deriving
+        // "was this page full?" from the count gets `true` off a
+        // stream it has read nothing of. That is the reader's problem
+        // to avoid, and the HTTP surface avoids it by refusing to pass
+        // zero down at all; a reader that does pass zero is asking for
+        // no rows and must not also ask what came after them.
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let after = after.unwrap_or(0);
+        let limit = i64::from(limit);
+        let (events, subjects) = self
+            .isle
+            .call(move |conn| {
+                let events = fetch_event_rows(
+                    conn,
+                    "SELECT seq, event_id, actor, occurred_at, kind, payload
+                     FROM ledger_event WHERE team_id = ?1 AND seq > ?2
+                     ORDER BY seq LIMIT ?3",
+                    params![team_id, after, limit],
+                )?;
+                // The subjects of exactly the events on this page. The
+                // bound is the page's own last seq rather than a second
+                // LIMIT: an event carries any number of subjects, so a
+                // row count would cut one event's subjects in half.
+                let highest = events.last().map(|row| row.seq).unwrap_or(after);
+                let subjects = fetch_subject_rows(
+                    conn,
+                    "SELECT seq, ref_type, ref_value FROM ledger_subject
+                     WHERE team_id = ?1 AND seq > ?2 AND seq <= ?3
+                     ORDER BY seq, rowid",
+                    params![team_id, after, highest],
                 )?;
                 Ok((events, subjects))
             })
@@ -1899,21 +1975,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_operator_action_reads_back_as_the_operator() {
+    async fn an_admin_action_reads_back_as_the_admin() {
         let (repo, _isle, driver) = repo().await;
         let (team_id, _, _) = team_with_owner(&repo).await;
 
-        let operator =
-            teams_core::domain::identity::InstanceOperator::new(Uuid::now_v7(), "op").unwrap();
-        repo.delete_team(team_id, LedgerActor::operator(&operator), T0 + 1)
+        let admin =
+            teams_core::domain::identity::InstanceAdmin::new(Uuid::now_v7(), "admin").unwrap();
+        repo.delete_team(team_id, LedgerActor::admin(&admin), T0 + 1)
             .await
             .unwrap();
 
         let events = repo.events(team_id).await.unwrap();
         let last = events.last().unwrap();
         assert!(
-            last.actor.is_operator(),
-            "the operator's delete must read back operator-stamped, never disguised (#83 §1)"
+            last.actor.is_admin(),
+            "the admin's delete must read back admin-stamped, never disguised (#83 §1)"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_paged_walk_sees_the_whole_stream_once_and_in_order() {
+        let (repo, _isle, driver) = repo().await;
+        let (team_id, _, actor) = team_with_owner(&repo).await;
+
+        // Enough events that a page smaller than the stream is a real
+        // page: the founding event plus one per invite.
+        for step in 0..6 {
+            repo.add_member(
+                membership(team_id, Uuid::now_v7(), Role::Member),
+                actor.clone(),
+                T0 + 1 + step,
+            )
+            .await
+            .unwrap();
+        }
+        let whole = repo.events(team_id).await.unwrap();
+        assert!(whole.len() > 3, "the fixture must outgrow one page");
+
+        // Walking in pages of three reproduces the unpaged read
+        // exactly — same events, same order, nothing seen twice and
+        // nothing skipped at a page boundary.
+        let mut walked = Vec::new();
+        let mut after = None;
+        loop {
+            let page = repo.events_page(team_id, after, 3).await.unwrap();
+            assert!(page.len() <= 3, "a page never exceeds its limit");
+            let Some(last) = page.last() else { break };
+            after = Some(last.seq.get());
+            walked.extend(page);
+        }
+        assert_eq!(walked, whole);
+
+        // An event's subjects arrive with it rather than being cut at
+        // the page boundary: every walked event matches the unpaged
+        // one field for field, subjects included, which the equality
+        // above already asserts — this pins that they are not empty,
+        // so that equality is not two empty lists agreeing.
+        assert!(
+            walked.iter().any(|event| !event.subjects.is_empty()),
+            "the fixture must carry subjects for the page bound to be tested"
+        );
+
+        // The cursor is exclusive, and a limit of zero asks for
+        // nothing rather than for everything.
+        let first = repo.events_page(team_id, None, 1).await.unwrap();
+        let after_first = repo
+            .events_page(team_id, Some(first[0].seq.get()), 1)
+            .await
+            .unwrap();
+        assert_ne!(first[0].seq, after_first[0].seq);
+        assert!(repo.events_page(team_id, None, 0).await.unwrap().is_empty());
+
+        // Past the end is an empty page, not an error: a ledger has no
+        // final page, only a position nothing has passed yet.
+        let past_end = whole.last().unwrap().seq.get();
+        assert!(
+            repo.events_page(team_id, Some(past_end), 10)
+                .await
+                .unwrap()
+                .is_empty()
         );
 
         driver.shutdown().await.unwrap();

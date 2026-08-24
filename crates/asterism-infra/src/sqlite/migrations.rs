@@ -7561,6 +7561,32 @@ fn v102_forge_node_keys(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// V103 — a forge handle remembers the name it was minted under (#148
+/// revision 9).
+///
+/// The teams plane stamps a display name onto every ledger entry at
+/// write time and never touches it again, so a rename does not rewrite
+/// what history says. `forge_actor` had no equivalent: a handle is a
+/// surrogate id and a kind, and a reader wanting a name has to ask
+/// whatever answers for identity *now*. That is the right answer for a
+/// live roster and the wrong one for a record, which is what a forge
+/// node is.
+///
+/// So: captured, not referenced. The column is written when the row is
+/// minted and never updated afterwards — which the mint statement
+/// already gives for free, since it is `ON CONFLICT DO NOTHING` and a
+/// second resolve of the same handle does not touch the row.
+///
+/// Nullable, and it stays nullable. A caller that has no name to state
+/// mints a row without one, and NULL is that row saying so rather than
+/// a value standing in for it. The column is the seat: a caller with a
+/// name writes it at mint and needs no migration to start, and rows
+/// minted before it had one keep saying what was known when they were
+/// minted.
+const V103_FORGE_ACTOR_DISPLAY_NAME: &str = r#"
+ALTER TABLE forge_actor ADD COLUMN display_name TEXT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7666,6 +7692,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V100_TAG_EVIDENCE),
     Step::Sql(V101_TAG_HEAD_REF),
     Step::App(v102_forge_node_keys),
+    Step::Sql(V103_FORGE_ACTOR_DISPLAY_NAME),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

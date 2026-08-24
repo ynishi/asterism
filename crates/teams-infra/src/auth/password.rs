@@ -21,8 +21,9 @@
 //!   it on every login, so the table cannot accumulate dead rows
 //!   faster than logins happen).
 //! - **No default credentials exist** ([`reject_default_credential`]):
-//!   the bootstrap admin (#83 §5, the §1 InstanceOperator) is created
-//!   only from operator-supplied values, and a blank, too-short,
+//!   the bootstrap admin (#83 §5, the §1
+//!   [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
+//!   created only from operator-supplied values, and a blank, too-short,
 //!   login-equal, or well-known placeholder password is *refused* at
 //!   creation time rather than warned about.
 //!
@@ -63,8 +64,9 @@ const REFUSED_PASSWORDS: &[&str] = &[
 const MIN_PASSWORD_CHARS: usize = 8;
 
 /// One credential-store row, as the server's gate consumes it: who the
-/// session resolves to, and whether that account is the env/CLI
-/// bootstrap identity (#83 §1 InstanceOperator).
+/// session resolves to, and whether that account holds the env/CLI
+/// bootstrap capacity (#83 §1,
+/// [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRecord {
     /// The account's stable id — what memberships and stamps refer to.
@@ -73,10 +75,10 @@ pub struct AccountRecord {
     pub login: String,
     /// The display name the ledger would stamp for this account.
     pub display_name: String,
-    /// Whether this account is the InstanceOperator. A property of the
-    /// *account*, never of any membership row — the operator lives
-    /// outside the membership table (#83 §1).
-    pub operator: bool,
+    /// Whether this account is an instance admin. A property of the
+    /// *account*, never of any membership row — an admin lives outside
+    /// the membership table (#83 §1).
+    pub admin: bool,
 }
 
 /// The v0 password + session adapter over the teams database.
@@ -103,16 +105,21 @@ impl PasswordAuth {
     /// a concurrent insert, and the unique index backs it up against
     /// raw SQL.
     ///
-    /// `operator = true` is the bootstrap path, and it runs **once**:
-    /// the operator is an instance capacity with exactly one holder in
-    /// v0 (#83 §1), so a second operator creation is refused with
-    /// "already bootstrapped" and writes nothing.
+    /// `admin = true` provisions an instance admin, and it may be used
+    /// more than once. It refused a second admin until #148 revision
+    /// 8, on the ground that the capacity had exactly one holder in
+    /// v0; the refusal is gone because a single holder is a person who
+    /// can be unavailable, and an instance whose only admin is
+    /// unreachable has no path back to its own destructive verbs. What
+    /// the bootstrap command still is, is how the *first* admin
+    /// arrives on an instance with no accounts to authenticate as —
+    /// not a limit on how many there may be.
     pub async fn create_account(
         &self,
         login: &str,
         display_name: &str,
         password: &str,
-        operator: bool,
+        admin: bool,
         created_at_ms: i64,
     ) -> Result<Uuid, DomainError> {
         let login = login.trim().to_string();
@@ -136,26 +143,6 @@ impl PasswordAuth {
                         "login {login:?} is already registered"
                     ))));
                 }
-                // The operator is an instance capacity and v0 has
-                // exactly one (#83 §1): bootstrap is not re-runnable,
-                // and minting further operators is a later deliberate
-                // feature, not a second bootstrap. Checked inside the
-                // same closure as the insert, so two racing bootstraps
-                // cannot both pass.
-                if operator {
-                    let bootstrapped: bool = conn.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM user_account WHERE is_operator = 1)",
-                        [],
-                        |row| row.get(0),
-                    )?;
-                    if bootstrapped {
-                        return Ok(Err(DomainError::Validation(
-                            "this instance is already bootstrapped: an operator account \
-                             exists, and v0 has exactly one"
-                                .into(),
-                        )));
-                    }
-                }
                 // Hashing on the isle thread — see the module doc.
                 let hash = match hash_password(&password) {
                     Ok(hash) => hash,
@@ -163,9 +150,9 @@ impl PasswordAuth {
                 };
                 conn.execute(
                     "INSERT INTO user_account
-                     (user_id, login, display_name, password_hash, is_operator, created_at)
+                     (user_id, login, display_name, password_hash, is_admin, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![user_id, login, display_name, hash, operator, created_at_ms],
+                    params![user_id, login, display_name, hash, admin, created_at_ms],
                 )?;
                 Ok(Ok(()))
             })
@@ -181,7 +168,7 @@ impl PasswordAuth {
         self.isle
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT user_id, login, display_name, is_operator
+                    "SELECT user_id, login, display_name, is_admin
                      FROM user_account WHERE user_id = ?1",
                     params![user_id],
                     account_from_row,
@@ -252,7 +239,7 @@ impl PasswordAuth {
             .call(move |conn| {
                 let row = conn
                     .query_row(
-                        "SELECT s.expires_at, a.user_id, a.login, a.display_name, a.is_operator
+                        "SELECT s.expires_at, a.user_id, a.login, a.display_name, a.is_admin
                          FROM auth_session s
                          JOIN user_account a ON a.user_id = s.user_id
                          WHERE s.token_hash = ?1",
@@ -264,7 +251,7 @@ impl PasswordAuth {
                                     user_id: row.get(1)?,
                                     login: row.get(2)?,
                                     display_name: row.get(3)?,
-                                    operator: row.get(4)?,
+                                    admin: row.get(4)?,
                                 },
                             ))
                         },
@@ -427,14 +414,14 @@ fn dummy_hash() -> &'static str {
     })
 }
 
-/// Maps a `user_id, login, display_name, is_operator` row into an
+/// Maps a `user_id, login, display_name, is_admin` row into an
 /// [`AccountRecord`] — the one place the column order is spelled.
 fn account_from_row(row: &rusqlite::Row<'_>) -> Result<AccountRecord, rusqlite::Error> {
     Ok(AccountRecord {
         user_id: row.get(0)?,
         login: row.get(1)?,
         display_name: row.get(2)?,
-        operator: row.get(3)?,
+        admin: row.get(3)?,
     })
 }
 
@@ -496,7 +483,7 @@ mod tests {
         // What the table stores is a PHC string, never the password.
         let account = auth.account(user_id).await.unwrap().unwrap();
         assert_eq!(account.login, "hoshino");
-        assert!(!account.operator);
+        assert!(!account.admin);
 
         driver.shutdown().await.unwrap();
     }
@@ -626,50 +613,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bootstrap_runs_once_and_a_second_operator_is_refused() {
+    async fn an_instance_may_hold_more_than_one_admin() {
         let (auth, isle, driver) = auth().await;
-        auth.create_account("op", "Operator", GOOD, true, T0)
+        let first = auth
+            .create_account("admin", "Admin", GOOD, true, T0)
             .await
             .unwrap();
 
-        // A second bootstrap — different login, so what refuses it is
-        // the single-operator rule, not the duplicate-login one.
-        let refused = auth
-            .create_account("op2", "Second Operator", GOOD, true, T0)
-            .await;
-        match refused {
-            Err(DomainError::Validation(message)) => assert!(
-                message.contains("already bootstrapped"),
-                "the refusal must say why: {message}"
-            ),
-            other => panic!("expected the already-bootstrapped refusal, got {other:?}"),
+        // The refusal this used to meet is gone (#148 revision 8): a
+        // second admin lands, and both hold the capacity.
+        let second = auth
+            .create_account("admin2", "Second Admin", GOOD, true, T0)
+            .await
+            .unwrap();
+        assert_ne!(first, second);
+        for user_id in [first, second] {
+            assert!(auth.account(user_id).await.unwrap().unwrap().admin);
         }
 
-        // …and it created nothing.
         let accounts: i64 = isle
-            .call(|conn| conn.query_row("SELECT count(*) FROM user_account", [], |r| r.get(0)))
+            .call(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM user_account WHERE is_admin = 1",
+                    [],
+                    |r| r.get(0),
+                )
+            })
             .await
             .unwrap();
-        assert_eq!(accounts, 1);
+        assert_eq!(accounts, 2);
 
-        // Ordinary accounts are untouched by the rule.
-        auth.create_account("alice", "Alice", GOOD, false, T0)
-            .await
-            .unwrap();
+        // The one refusal that stays is the duplicate login, which is
+        // about the login and not about the capacity.
+        assert!(
+            auth.create_account("admin", "Impostor", GOOD, true, T0)
+                .await
+                .is_err()
+        );
 
         driver.shutdown().await.unwrap();
     }
 
     #[tokio::test]
-    async fn the_operator_flag_rides_the_account_not_a_membership() {
+    async fn the_admin_flag_rides_the_account_not_a_membership() {
         let (auth, _isle, driver) = auth().await;
-        let op_id = auth
-            .create_account("op", "Operator", GOOD, true, T0)
+        let admin_id = auth
+            .create_account("admin", "Admin", GOOD, true, T0)
             .await
             .unwrap();
-        let token = auth.create_session(op_id, T0, 60_000).await.unwrap();
+        let token = auth.create_session(admin_id, T0, 60_000).await.unwrap();
         let resolved = auth.resolve_session(&token, T0 + 1).await.unwrap().unwrap();
-        assert!(resolved.operator);
+        assert!(resolved.admin);
         driver.shutdown().await.unwrap();
     }
 }

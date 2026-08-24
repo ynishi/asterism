@@ -20,10 +20,10 @@ pub struct SessionDto {
     pub user_id: String,
     /// The display name the ledger would stamp for this account.
     pub display_name: String,
-    /// Whether this account is the instance operator (#83 §1) — acting
+    /// Whether this account is an instance admin (#83 §1) — acting
     /// inside a team without a membership row is ledger-stamped as
     /// such, never disguised as a member's action.
-    pub operator: bool,
+    pub admin: bool,
     /// When the session stops resolving, epoch ms.
     pub expires_at_ms: i64,
 }
@@ -67,8 +67,13 @@ pub struct LedgerEventDto {
     pub event_id: String,
     /// The stream the event belongs to.
     pub team_id: String,
-    /// `"member"` or `"operator"` — the #83 §1 distinguishability,
+    /// `"member"` or `"admin"` — the #83 §1 distinguishability,
     /// carried onto the wire.
+    ///
+    /// An event written before the capacity was renamed still says
+    /// `"admin"` here: the storage row keeps the word it was written
+    /// with, because `ledger_event` is append-only, and the domain's
+    /// read maps the old tag onto the current one on the way out.
     pub actor_kind: String,
     /// Who acted.
     pub actor_user_id: String,
@@ -133,8 +138,8 @@ pub struct PurgeReclaimedDto {
 }
 
 /// The team's marked-for-purge set
-/// (`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or
-/// operator, the mark's own authority).
+/// (`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or admin,
+/// the mark's own authority).
 ///
 /// This is the read surface the grace-visibility boundary (#83 §3
 /// [Grace visibility]) *grants*: the mark hides a link from the
@@ -182,10 +187,33 @@ pub struct HeadPublishedDto {
 /// One typed reference an event makes.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct SubjectRefDto {
-    /// The reference's kind: `"digest"`, `"user"`, `"blob"`, or the
-    /// reserved `"forge_identity"`.
+    /// The reference's kind: `"digest"`, `"user"`, `"blob"` or
+    /// `"forge_identity"`.
     pub ref_type: String,
-    /// The reference's value in its storage spelling (digest notation,
-    /// hyphenated UUID, or the opaque forge identity).
+    /// The reference's value in its storage spelling: digest notation,
+    /// a hyphenated UUID, or a forge handle as `"owner"`,
+    /// `"unrecorded"`, `"server"` or `"subject:<token>"`.
     pub value: String,
+}
+
+/// One page of a team's stream (`GET /teams/{team_id}/events`).
+///
+/// The stream only grows, so the read is paged rather than whole and
+/// the caller is handed where to resume rather than an offset to
+/// count from.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct LedgerPageDto {
+    /// The events on this page, seq ascending.
+    pub events: Vec<LedgerEventDto>,
+    /// The seq to pass as `after` for the next page, or `null` when
+    /// this page came back shorter than the limit it asked for.
+    ///
+    /// A page that filled its limit always carries a cursor, even when
+    /// it happened to end exactly at the last event there is: whether
+    /// anything follows is only answerable by asking. So `null` is the
+    /// short page, and it says that nothing lay past here when the
+    /// page was taken rather than that nothing ever will — a ledger
+    /// has no final page. A caller following a live stream keeps the
+    /// last seq it saw and asks again.
+    pub next_after: Option<i64>,
 }

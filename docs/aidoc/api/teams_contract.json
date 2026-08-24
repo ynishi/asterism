@@ -10,7 +10,7 @@
     {
       "path": "teams_contract::command::CreateTeamCommand",
       "kind": "struct",
-      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, the operator only\nwhen it is closed."
+      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
     },
     {
       "path": "teams_contract::command::GrantOwnerCommand",
@@ -63,6 +63,11 @@
       "docs": "One entry of a team's append-only stream\n(`GET /teams/{team_id}/events`, and the receipt every mutation\nroute returns)."
     },
     {
+      "path": "teams_contract::dto::LedgerPageDto",
+      "kind": "struct",
+      "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
+    },
+    {
       "path": "teams_contract::dto::MarkedBlobLinkDto",
       "kind": "struct",
       "docs": "One marked link — everything unmark (or a decision to let reclaim\nrun) needs."
@@ -70,7 +75,7 @@
     {
       "path": "teams_contract::dto::MarkedBlobsDto",
       "kind": "struct",
-      "docs": "The team's marked-for-purge set\n(`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or\noperator, the mark's own authority).\n\nThis is the read surface the grace-visibility boundary (#83 §3\n[Grace visibility]) *grants*: the mark hides a link from the\nnormal reads, but inside the team it is sayable state — and whoever\nmay mark must be able to see what is marked, or unmark is a verb\naimed blind."
+      "docs": "The team's marked-for-purge set\n(`GET /teams/{team_id}/blobs/purge/marked`, #95 — owner or admin,\nthe mark's own authority).\n\nThis is the read surface the grace-visibility boundary (#83 §3\n[Grace visibility]) *grants*: the mark hides a link from the\nnormal reads, but inside the team it is sayable state — and whoever\nmay mark must be able to see what is marked, or unmark is a verb\naimed blind."
     },
     {
       "path": "teams_contract::dto::PurgeReclaimedDto",

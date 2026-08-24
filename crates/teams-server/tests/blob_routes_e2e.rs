@@ -153,16 +153,16 @@ async fn user(h: &Harness, login: &str) -> (Uuid, String) {
     provision(h, login, false).await
 }
 
-/// Same, with the operator flag — the instance capacity of #83 §1.
-async fn operator_user(h: &Harness, login: &str) -> (Uuid, String) {
+/// Same, with the admin flag — the instance capacity of #83 §1.
+async fn admin_user(h: &Harness, login: &str) -> (Uuid, String) {
     provision(h, login, true).await
 }
 
-async fn provision(h: &Harness, login: &str, operator: bool) -> (Uuid, String) {
+async fn provision(h: &Harness, login: &str, admin: bool) -> (Uuid, String) {
     let user_id = h
         .ctx
         .auth
-        .create_account(login, login, GOOD, operator, now_ms())
+        .create_account(login, login, GOOD, admin, now_ms())
         .await
         .expect("create account");
     let (status, body) = call(
@@ -198,7 +198,7 @@ async fn events_of(h: &Harness, team_id: &str, token: &str) -> Vec<serde_json::V
     )
     .await;
     assert_eq!(status, StatusCode::OK, "events: {body}");
-    body.as_array().expect("events array").clone()
+    body["events"].as_array().expect("events array").clone()
 }
 
 fn upload_uri(team_id: &str, digest: &str) -> String {
@@ -412,11 +412,11 @@ async fn a_duplicate_link_is_the_repositorys_refusal_after_the_full_body() {
 }
 
 #[tokio::test]
-async fn every_read_miss_is_the_same_404_and_the_operator_reads_hits() {
+async fn every_read_miss_is_the_same_404_and_an_admin_reads_hits() {
     let h = harness().await;
     let (_alice_id, alice) = user(&h, "alice").await;
     let (_carol_id, carol) = user(&h, "carol").await;
-    let (_op_id, op) = operator_user(&h, "op").await;
+    let (_op_id, op) = admin_user(&h, "op").await;
     let team_a = create_team(&h, &alice).await;
     let team_c = create_team(&h, &carol).await;
     let bytes = b"alice's blob".to_vec();
@@ -428,7 +428,7 @@ async fn every_read_miss_is_the_same_404_and_the_operator_reads_hits() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    // Every way of missing — member, non-member, and operator arms —
+    // Every way of missing — member, non-member, and admin arms —
     // one indistinguishable answer:
     let misses = [
         // A member asking their own team for a digest nobody uploaded.
@@ -440,13 +440,13 @@ async fn every_read_miss_is_the_same_404_and_the_operator_reads_hits() {
         (read_uri(&team_c, &digest), &carol),
         // A team that does not exist at all.
         (read_uri(&Uuid::now_v7().to_string(), &digest), &alice),
-        // The operator asking a team for a digest nobody uploaded —
-        // the read capacity is general (§1), the link row still rules.
+        // An admin asking a team for a digest nobody uploaded — the
+        // read capacity is general (§1), the link row still rules.
         (read_uri(&team_a, &digest_of(b"never uploaded")), &op),
-        // The operator asking a team that does not hold the digest,
+        // An admin asking a team that does not hold the digest,
         // though another team (and the CAS) does.
         (read_uri(&team_c, &digest), &op),
-        // The operator asking a team that does not exist.
+        // An admin asking a team that does not exist.
         (read_uri(&Uuid::now_v7().to_string(), &digest), &op),
     ];
     let mut answers = Vec::new();
@@ -465,12 +465,12 @@ async fn every_read_miss_is_the_same_404_and_the_operator_reads_hits() {
     let (status, _, _) = call_raw(&h.router, get_authed(&read_uri(&team_a, &digest), &alice)).await;
     assert_eq!(status, StatusCode::OK);
 
-    // And the operator, outside every roster, reads the linked digest
+    // And an admin, outside every roster, reads the linked digest
     // too: §1's read boundary is general — roster, events, and blob
     // bytes alike.
     let (status, headers, got) =
         call_raw(&h.router, get_authed(&read_uri(&team_a, &digest), &op)).await;
-    assert_eq!(status, StatusCode::OK, "operator read of a linked digest");
+    assert_eq!(status, StatusCode::OK, "admin read of a linked digest");
     assert_eq!(got, bytes);
     assert_eq!(headers["content-type"], "application/octet-stream");
 

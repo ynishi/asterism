@@ -13,14 +13,19 @@ publish     = false
 [lib]
 
 [dependencies]
-# The one asterism-* crate the teams plane declares (#83 §4): the
-# domain vocabulary — the digest notation and its parsing rules — is
-# reused as-is rather than re-spelled. The rule is about DIRECT edges:
-# never asterism-infra / -contract / -server here — those are the local
-# app's plumbing, and teams-infra owns its own. What asterism-core
-# itself pulls in (today: asterism-contract, where the digest notation
-# lives) rides along transitively; the direction the license boundary
-# guards is the reverse one, asterism-* → teams-*, which stays empty.
+# The asterism-* vocabulary the teams plane reuses (#83 §4): the digest
+# notation and its parsing rules, taken as-is rather than re-spelled.
+#
+# The never-list is asterism-infra, asterism-server, and the local app's
+# request/response shapes — asterism-contract's command, query and dto.
+# Those are the desktop surface, and a team-plane type stated in them
+# would tie the hosted plane to it; teams-infra owns its own plumbing
+# for the same reason. asterism-contract::forge is off that list: it is
+# the forge's own vocabulary, and it already rides in transitively
+# behind asterism-core (where the digest notation lives), so naming it
+# adds no edge the graph does not already have. The direction the
+# license boundary guards is the reverse one, asterism-* → teams-*,
+# which stays empty.
 asterism-core = { path = "../asterism-core" }
 
 serde       = { workspace = true }

@@ -19,7 +19,7 @@ pub fn infra_err<E: std::error::Error + Send + Sync + 'static>(e: E) -> DomainEr
 }
 
 /// Serialises a [`LedgerActor`] into the `actor` TEXT column — the
-/// serde-tagged JSON form, so the member/operator distinction lands in
+/// serde-tagged JSON form, so the member/admin distinction lands in
 /// storage exactly as the domain spells it.
 pub fn actor_to_json(actor: &LedgerActor) -> Result<String, DomainError> {
     serde_json::to_string(actor)
@@ -38,9 +38,9 @@ pub fn actor_from_json(json: &str) -> Result<LedgerActor, DomainError> {
 /// Goes through the serde representation rather than a hand-written
 /// match so the columns and the wire form cannot disagree: the tag is
 /// the `ref_type`, the content — a string in every variant (digests,
-/// the uuid's hyphenated form, the opaque forge identity) — is the
-/// `ref_value`. A trace query looking for a subject encodes it the same
-/// way, so index walks compare exactly what appends wrote.
+/// the uuid's hyphenated form, the forge handle's canonical encoding) —
+/// is the `ref_value`. A trace query looking for a subject encodes it
+/// the same way, so index walks compare exactly what appends wrote.
 pub fn subject_to_ref(subject: &SubjectRef) -> Result<(String, String), DomainError> {
     let value = serde_json::to_value(subject)
         .map_err(|e| DomainError::Infra(anyhow::anyhow!("cannot serialise subject: {e}")))?;
@@ -78,6 +78,7 @@ pub fn subject_from_ref(ref_type: &str, ref_value: &str) -> Result<SubjectRef, D
 mod tests {
     use super::*;
     use teams_core::domain::identity::ActorStamp;
+    use teams_core::domain::ledger::ForgeIdentityRef;
     use uuid::Uuid;
 
     #[test]
@@ -89,7 +90,7 @@ mod tests {
         let member = LedgerActor::member(stamp.clone());
         let back = actor_from_json(&actor_to_json(&member).unwrap()).unwrap();
         assert_eq!(back, member);
-        assert!(!back.is_operator());
+        assert!(!back.is_admin());
     }
 
     #[test]
@@ -99,11 +100,35 @@ mod tests {
             SubjectRef::digest(&digest).unwrap(),
             SubjectRef::blob(&digest).unwrap(),
             SubjectRef::user(Uuid::now_v7()),
-            SubjectRef::forge_identity("opaque-until-#63"),
+            SubjectRef::forge_identity(ForgeIdentityRef::owner()),
+            SubjectRef::forge_identity(ForgeIdentityRef::unrecorded()),
+            SubjectRef::forge_identity(ForgeIdentityRef::server()),
+            SubjectRef::forge_identity(ForgeIdentityRef::subject("hoshino").unwrap()),
         ];
         for subject in subjects {
             let (ref_type, ref_value) = subject_to_ref(&subject).unwrap();
             assert_eq!(subject_from_ref(&ref_type, &ref_value).unwrap(), subject);
         }
+    }
+
+    #[test]
+    fn a_forge_handle_reaches_the_index_as_its_canonical_string() {
+        // The column pair is what a trace query compares against, so
+        // the typed pair has to arrive as the one string both sides
+        // spell — not as JSON the index could never match.
+        let (ref_type, ref_value) =
+            subject_to_ref(&SubjectRef::forge_identity(ForgeIdentityRef::owner())).unwrap();
+        assert_eq!(ref_type, "forge_identity");
+        assert_eq!(ref_value, "owner");
+
+        let (_, ref_value) = subject_to_ref(&SubjectRef::forge_identity(
+            ForgeIdentityRef::subject("hoshino").unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(ref_value, "subject:hoshino");
+
+        // A stored value outside the #102 vocabulary is a corrupt
+        // column, refused rather than carried as a guess.
+        assert!(subject_from_ref("forge_identity", "who-knows").is_err());
     }
 }

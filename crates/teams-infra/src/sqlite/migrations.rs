@@ -18,7 +18,22 @@
 //!   API**: no `updated_at`, no soft-delete column anywhere near it,
 //!   and `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort — the
 //!   repository exposes no update/delete path, and the schema backs
-//!   that up against raw SQL too.
+//!   that up against raw SQL too. What this costs when somebody asks
+//!   to be erased, and the three records that have to answer together,
+//!   is worked out in [`teams_core::domain::ledger`] rather than
+//!   restated here.
+//! - **The ledger keeps everything, and v0 says so on purpose.** No
+//!   pruning, no archival tier, no window — a team's stream holds
+//!   every event it ever appended. That was true before it was
+//!   decided, by omission; stating it makes it a position with a cost
+//!   somebody can weigh. The cost is not the disk the rows take, which
+//!   is small: it is that `teams-server backup` snapshots the database
+//!   with `VACUUM INTO`, which writes the whole file every time, so
+//!   the ledger's growth is paid again on every backup rather than
+//!   once at write. An instance that backs up nightly pays for its
+//!   entire history nightly. Trimming is a decision for whoever meets
+//!   that bill, and it needs this schema's append-only triggers
+//!   answered for first — there is no `DELETE` path here to reach for.
 //! - **`ledger_event` carries no foreign key to `team`.** The record
 //!   outlives the state on purpose: deleting a team removes its rows
 //!   (memberships and links cascade) while the same transaction
@@ -132,11 +147,14 @@ END;
 /// - **`user_account` holds credentials, not identity semantics.** The
 ///   domain's `User` stays credential-free behind `port::auth`; this
 ///   table is where the v0 password adapter keeps the argon2id PHC
-///   string. `is_operator` marks the env/CLI bootstrap identity
-///   (#83 §1 InstanceOperator) — a flag on the *account*, deliberately
-///   nowhere near `membership`: the operator lives outside the
-///   membership table, and owning a team is an explicit membership row
-///   like anyone else's.
+///   string. The flag this batch names `is_operator` — [`V6`] renames
+///   it to `is_admin` — marks the env/CLI bootstrap identity (#83 §1,
+///   [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)):
+///   a flag on the *account*, deliberately nowhere near `membership`,
+///   because an admin lives outside the membership table and owning a
+///   team is an explicit membership row like anyone else's.
+///
+/// [`V6`]: V6_ADMIN_RENAME
 /// - **`auth_session.token_hash` is the SHA-256 of the opaque token**,
 ///   never the token itself, so the database never contains a usable
 ///   bearer credential. Expiry is `expires_at` epoch ms; resolve-time
@@ -257,6 +275,32 @@ CREATE UNIQUE INDEX idx_head_registry_one_live
     WHERE superseded_at IS NULL;
 "#;
 
+/// Version 5 → 6: the instance capacity is called admin (#148
+/// revisions 7 and 8).
+///
+/// A column rename and nothing else — the flag means exactly what it
+/// meant, and every account keeps the value it had. What the rename is
+/// for is that "operator" was carrying several meanings at once: the
+/// capacity a person holds over an instance, the agent that carried a
+/// write out (which the attribution triple already spells that way),
+/// and the human who runs the deployment — which is the sense this
+/// crate's own prose keeps for it. The capacity is the one that moved,
+/// being the one with a single writer and no wire format pinning it.
+///
+/// **The ledger is not renamed with it.** Rows written before this
+/// batch carry `"operator"` inside their `actor` JSON, and
+/// `ledger_event` is append-only in the schema — the `BEFORE UPDATE`
+/// trigger V1 installed aborts any statement that would restate them,
+/// and a batch determined to rewrite them would have to drop that
+/// trigger first, which is a decision rather than an oversight. So the
+/// accommodation is on the read side and permanent: the domain's
+/// `LedgerActor::Admin` carries `#[serde(alias = "operator")]` for
+/// good, writes emit `admin`, and no batch after this one may assume
+/// the old tag is gone.
+const V6_ADMIN_RENAME: &str = r#"
+ALTER TABLE user_account RENAME COLUMN is_operator TO is_admin;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -265,6 +309,7 @@ const MIGRATIONS: &[&str] = &[
     V3_PURGE_MARK,
     V4_MODEL_REGISTRY,
     V5_HEAD_REGISTRY,
+    V6_ADMIN_RENAME,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -346,6 +391,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(elsewhere, 0, "the mark belongs to team_blob_link alone");
+    }
+
+    #[test]
+    fn v6_renames_the_account_flag_and_carries_its_values_across() {
+        // The rename is a rename: a row written under the old name
+        // reads back under the new one with the value it had.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, batch) in MIGRATIONS.iter().enumerate().take(5) {
+            conn.execute_batch(batch).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO user_account
+             (user_id, login, display_name, password_hash, is_operator, created_at)
+             VALUES (X'00', 'op', 'Operator', 'hash', 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let admin: bool = conn
+            .query_row("SELECT is_admin FROM user_account", [], |row| row.get(0))
+            .unwrap();
+        assert!(admin, "the flag keeps its value across the rename");
+
+        // And the old name is gone rather than duplicated.
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_account'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!ddl.contains("is_operator"), "{ddl}");
     }
 
     #[test]

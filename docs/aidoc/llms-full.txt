@@ -13921,6 +13921,7 @@ its own (#83 §1).
 - `BlobUploadedDto` — The result of `PUT /teams/{team_id}/blobs?digest=…`.
 - `HeadPublishedDto` — The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the
 - `LedgerEventDto` — One entry of a team's append-only stream
+- `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
@@ -13946,7 +13947,7 @@ in the follow-up slices (`teams-infra` / `teams-server`).
 
 - `domain::identity` — [`User`](domain::identity::User) /
   [`Membership`](domain::identity::Membership) /
-  [`InstanceOperator`](domain::identity::InstanceOperator) /
+  [`InstanceAdmin`](domain::identity::InstanceAdmin) /
   [`ActorStamp`](domain::identity::ActorStamp), the last-owner rule,
   and the #83 §1 authority table as decision functions.
 - `domain::ledger` — the append-only
@@ -13956,16 +13957,23 @@ in the follow-up slices (`teams-infra` / `teams-server`).
   [`Locator`](domain::store::Locator) and the declared-digest
   verification rule (accept or reject the whole op; no third
   outcome).
-- `port` — the traits `teams-infra` implements: blob storage,
-  credential verification, and the share port reserved for #63.
+- `port` — the traits `teams-infra` implements: blob storage and
+  credential verification.
 - `error` — [`DomainError`], the crate's `thiserror` enum.
 
 ## Dependency rule
 
-This crate depends on `asterism-core` and on no other asterism-*
-crate (#83 §4). What it takes from there is vocabulary — the
-`sha256:`-prefixed digest notation and its parser — reused as-is so
-the teams plane and the local app spell a byte fingerprint one way.
+What this crate takes from the local app is vocabulary — the
+`sha256:`-prefixed digest notation and its parser from
+`asterism-core`, reused as-is so the teams plane and the local app
+spell a byte fingerprint one way.
+
+Which `asterism-*` edges may be declared at all is stated once,
+beside the dependency itself in `Cargo.toml` (#83 §4): the
+never-list, what is deliberately not on it, and which direction the
+licence boundary guards. What the rule comes to *here* is that the
+types below are spelled in the teams plane's own words — no
+invariant in this crate is stated in a shape the desktop app owns.
 
 ## Modules
 
@@ -13978,7 +13986,6 @@ the teams plane and the local app spell a byte fingerprint one way.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
 - [`port::auth`](port__auth.md): `port::auth` — credential verification behind a provider swap
 - [`port::blob`](port__blob.md): `port::blob` — backing storage for the instance's global CAS.
-- [`port::share`](port__share.md): `port::share` — reserved for the share domain.
 
 
 <!-- teams_core/domain.md -->
@@ -14038,12 +14045,12 @@ Three separations carry this module, all from #83 §1:
 - **Membership is not identity.** A [`User`] exists independently of
   any team; a [`Membership`] is one `(user, team, role)` row and a
   team's set of them is what every invariant is evaluated over.
-- **The operator is not a member.** [`InstanceOperator`] is the
-  env/CLI bootstrap identity and lives *outside* the membership
-  set — owning a team is an explicit membership row like anyone
-  else's, and when the operator acts inside a team the ledger stamp
-  says so ([`LedgerActor::Operator`]): an operator action is never
-  disguised as a member's.
+- **The admin is not a member.** [`InstanceAdmin`] is the env/CLI
+  bootstrap identity and lives *outside* the membership set —
+  owning a team is an explicit membership row like anyone else's,
+  and when an admin acts inside a team the ledger stamp says so
+  ([`LedgerActor::Admin`]): an admin action is never disguised as
+  a member's.
 - **Authorization reads state, not history.** The decision functions
   here take the current membership set ([`TeamRoster`]); the ledger
   records what was decided and is never consulted to decide.
@@ -14063,8 +14070,8 @@ same three lines instead of re-deriving them.
 
 - `ActorStamp` — What the ledger records about who acted: `{ user_id, display_name
 - `CreationActor` — Who is asking to create a team. Creation happens before any roster
-- `InstanceOperator` — The env/CLI bootstrap identity — a distinct actor kind, **not** a
-- `LedgerActor` — The actor of a ledger event — a member's stamp or the operator's,
+- `InstanceAdmin` — The env/CLI bootstrap identity — a distinct actor kind, **not** a
+- `LedgerActor` — The actor of a ledger event — a member's stamp or an admin's, and
 - `Membership` — One `(user, team, role)` row — a user's standing inside one team.
 - `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
 - `Role` — A member's role within one team.
@@ -14098,6 +14105,49 @@ Two things this module deliberately does **not** do:
   pattern, not event sourcing — #83 §2 SoT note). Nothing here
   replays.
 
+## Erasing a person answers in three places
+
+A request to erase somebody is not one deletion, and the reason is
+that a person is answered for in three records, each holding a
+different part of the answer — a name in one, an association in the
+next, a handle in the third. All three have to answer, and an
+answer that covers two of them has erased nothing:
+
+1. **The [`ActorStamp`](crate::domain::identity::ActorStamp) on
+   every ledger event they wrote.** The name is captured at write
+   time precisely so a later rename does not rewrite history — the
+   property that makes the ledger readable is the property that
+   makes it hold the name.
+2. **Their rows in the subject index.** A `user` subject is a uuid
+   rather than a name, so what it exposes is the association: which
+   events touched this person, which is the question the index
+   exists to answer quickly.
+3. **`forge_actor` on the local plane.** The handle a member's
+   writes resolve to is minted on their own instance, outside this
+   plane's storage entirely, and the display snapshot it captures
+   is the same captured-not-referenced value as the stamp above.
+
+Three mechanisms can answer, and which one is chosen is a decision
+rather than a default: **masking at write** (the stamp records an
+id and no name, which costs every reader the ability to say who
+without a join, and costs history the name the account had then),
+**retention under a documented exemption** (the record is kept and
+the basis for keeping it is written down, which is what an audit
+log is usually held under), and **crypto-shredding** (the name is
+stored encrypted under a per-subject key and erasure destroys the
+key, which turns a rewrite into a delete somewhere the append-only
+rule does not reach).
+
+**The order matters, and this end of it comes first.** Today a row
+could be rewritten under a migration if the decision demanded it —
+expensive and against the schema's triggers, but possible. A
+tamper-evidence chain removes that: once each entry commits to its
+predecessor, rewriting one invalidates every entry after it, and
+erasure-by-rewriting is gone permanently rather than merely
+discouraged. So the mechanism is settled before a chain starts, not
+after — a chain built first would decide this question by making it
+unanswerable.
+
 ## Functions
 
 - `is_v0_kind` — Whether `kind` is one this build of the plane writes. Shape and
@@ -14106,6 +14156,8 @@ Two things this module deliberately does **not** do:
 
 - `EventKind` — A namespaced + versioned event kind — `"teams.membership.added/1"`.
 - `EventSeq` — Storage-assigned position of an event within its team's stream —
+- `ForgeIdentityRef` — A forge handle, as a ledger subject: what it stands for, and whom
+- `ForgeStandsFor` — What a forge handle stands for — the four kinds #102 fixed for the
 - `LedgerEvent` — One entry in a team's stream — the envelope, with the payload
 - `SubjectRef` — A typed reference an event makes — the index trace queries walk, so
 
@@ -14119,7 +14171,7 @@ Two things this module deliberately does **not** do:
 - `MEMBERSHIP_REMOVED` — A member left or was removed.
 - `ROLE_CHANGED` — A member's role changed — the payload carries **both** the old and
 - `TEAM_CREATED` — A team came into existence.
-- `TEAM_DELETED` — A team was deleted (owner, or the operator — ledger-stamped).
+- `TEAM_DELETED` — A team was deleted (owner, or an admin — ledger-stamped).
 - `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
 
 
@@ -14225,23 +14277,6 @@ none of that shows here, deliberately.
 ## Traits
 
 - `BlobStore` — Content-addressed blob storage — one physical copy per instance,
-
-
-<!-- teams_core/port__share.md -->
-# teams-core::port::share
-
-`port::share` — reserved for the share domain.
-
-#63 owns the share vocabulary: pursuit/cull/merge semantics,
-promotion copy *timing* (at IN vs at merge), and the minimum
-provenance payload at promotion. This port is filled after #63
-fixes those; it exists now so the crate layering already has the
-seam in the place the design says it goes (#83 §0), and so nothing
-grows share-shaped methods on the other ports in the meantime.
-
-## Traits
-
-- `SharePort` — Reserved — filled after #63. Deliberately empty: an invented verb
 
 
 <!-- teams_infra/index.md -->
@@ -14353,8 +14388,9 @@ Three decisions carry this module:
   it on every login, so the table cannot accumulate dead rows
   faster than logins happen).
 - **No default credentials exist** ([`reject_default_credential`]):
-  the bootstrap admin (#83 §5, the §1 InstanceOperator) is created
-  only from operator-supplied values, and a blank, too-short,
+  the bootstrap admin (#83 §5, the §1
+  [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
+  created only from operator-supplied values, and a blank, too-short,
   login-equal, or well-known placeholder password is *refused* at
   creation time rather than warned about.
 
@@ -14702,7 +14738,22 @@ past batch** — schema changes go at the end.
   API**: no `updated_at`, no soft-delete column anywhere near it,
   and `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort — the
   repository exposes no update/delete path, and the schema backs
-  that up against raw SQL too.
+  that up against raw SQL too. What this costs when somebody asks
+  to be erased, and the three records that have to answer together,
+  is worked out in [`teams_core::domain::ledger`] rather than
+  restated here.
+- **The ledger keeps everything, and v0 says so on purpose.** No
+  pruning, no archival tier, no window — a team's stream holds
+  every event it ever appended. That was true before it was
+  decided, by omission; stating it makes it a position with a cost
+  somebody can weigh. The cost is not the disk the rows take, which
+  is small: it is that `teams-server backup` snapshots the database
+  with `VACUUM INTO`, which writes the whole file every time, so
+  the ledger's growth is paid again on every backup rather than
+  once at write. An instance that backs up nightly pays for its
+  entire history nightly. Trimming is a decision for whoever meets
+  that bill, and it needs this schema's append-only triggers
+  answered for first — there is no `DELETE` path here to reach for.
 - **`ledger_event` carries no foreign key to `team`.** The record
   outlives the state on purpose: deleting a team removes its rows
   (memberships and links cascade) while the same transaction
@@ -14823,21 +14874,21 @@ slice).
 |---|---|---|
 | POST | `/teams/auth/login` | none (rate-limited) |
 | POST | `/teams/auth/logout` | bearer token (rate-limited) |
-| POST | `/teams/create` | any authenticated user; operator-only under closed registration |
-| POST | `/teams/{team_id}/delete` | owner, or the operator (operator-stamped) |
-| GET | `/teams/{team_id}/roster` | member, or the operator |
-| GET | `/teams/{team_id}/events` | member, or the operator |
+| POST | `/teams/create` | any authenticated user; admin-only under closed registration |
+| POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
+| GET | `/teams/{team_id}/roster` | member, or an admin |
+| GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
 | POST | `/teams/{team_id}/owners/grant` | owner |
 | POST | `/teams/{team_id}/owners/revoke` | owner |
-| PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; the operator has no implicit upload) |
-| GET | `/teams/{team_id}/blobs/{digest}` | member, or the operator — every failure is the same `404`, see below |
-| POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or the operator (operator-stamped — #95, the §1 delete row's reclaim sibling) |
-| POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
-| POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
-| GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
-| PUT | `/teams/heads/registry` | the operator only — instance scope (#132), no team gate |
+| PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |
+| GET | `/teams/{team_id}/blobs/{digest}` | member, or an admin — every failure is the same `404`, see below |
+| POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or an admin (admin-stamped — #95, the §1 delete row's reclaim sibling) |
+| POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or an admin (admin-stamped) |
+| POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or an admin (admin-stamped); refused while every mark is inside its grace window |
+| GET | `/teams/{team_id}/blobs/purge/marked` | owner, or an admin — the marked set, same authority as the mark |
+| PUT | `/teams/heads/registry` | admins only — instance scope (#132), no team gate |
 | GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
 
 ## The gate (#83 §5: every route, no exceptions)
@@ -14852,21 +14903,21 @@ Two middleware layers, in request order:
 2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
    segment → team existence (`404`) → the caller's current role in
    *this* team, read from state, never from the ledger (#83 §1).
-   A caller with neither a membership row nor the operator flag is
+   A caller with neither a membership row nor the admin flag is
    `403` before any handler runs.
 
 The handler then asks `teams-core`'s decision functions
 ([`verb_allowed`] / [`may_create_team`]) with the capacity the gate
 established. When both capacities could act, the membership row
-wins and the ledger stamp is the member's — the operator variant
-is reserved for the operator acting *from outside* the membership
-set, which is exactly when §1 demands the stamp say so.
+wins and the ledger stamp is the member's — the admin variant is
+reserved for an admin acting *from outside* the membership set,
+which is exactly when §1 demands the stamp say so.
 
 ## The blob read is the one deliberate exception to [`team_gate`]
 
 `GET /teams/{team_id}/blobs/{digest}` sits behind [`auth_gate`]
 only, and answers **one indistinguishable `404`** for every miss:
-unknown team, caller neither a member nor the operator, digest
+unknown team, caller neither a member nor an admin, digest
 never uploaded, digest linked only in a team the caller cannot
 read — and, since #95, a link **marked for purge**, whose grace
 window hides it behind the very same answer. The gate's

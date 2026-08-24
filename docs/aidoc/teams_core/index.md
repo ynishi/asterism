@@ -12,7 +12,7 @@ in the follow-up slices (`teams-infra` / `teams-server`).
 
 - `domain::identity` — [`User`](domain::identity::User) /
   [`Membership`](domain::identity::Membership) /
-  [`InstanceOperator`](domain::identity::InstanceOperator) /
+  [`InstanceAdmin`](domain::identity::InstanceAdmin) /
   [`ActorStamp`](domain::identity::ActorStamp), the last-owner rule,
   and the #83 §1 authority table as decision functions.
 - `domain::ledger` — the append-only
@@ -22,16 +22,23 @@ in the follow-up slices (`teams-infra` / `teams-server`).
   [`Locator`](domain::store::Locator) and the declared-digest
   verification rule (accept or reject the whole op; no third
   outcome).
-- `port` — the traits `teams-infra` implements: blob storage,
-  credential verification, and the share port reserved for #63.
+- `port` — the traits `teams-infra` implements: blob storage and
+  credential verification.
 - `error` — [`DomainError`], the crate's `thiserror` enum.
 
 ## Dependency rule
 
-This crate depends on `asterism-core` and on no other asterism-*
-crate (#83 §4). What it takes from there is vocabulary — the
-`sha256:`-prefixed digest notation and its parser — reused as-is so
-the teams plane and the local app spell a byte fingerprint one way.
+What this crate takes from the local app is vocabulary — the
+`sha256:`-prefixed digest notation and its parser from
+`asterism-core`, reused as-is so the teams plane and the local app
+spell a byte fingerprint one way.
+
+Which `asterism-*` edges may be declared at all is stated once,
+beside the dependency itself in `Cargo.toml` (#83 §4): the
+never-list, what is deliberately not on it, and which direction the
+licence boundary guards. What the rule comes to *here* is that the
+types below are spelled in the teams plane's own words — no
+invariant in this crate is stated in a shape the desktop app owns.
 
 ## Modules
 
@@ -44,5 +51,4 @@ the teams plane and the local app spell a byte fingerprint one way.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
 - [`port::auth`](port__auth.md): `port::auth` — credential verification behind a provider swap
 - [`port::blob`](port__blob.md): `port::blob` — backing storage for the instance's global CAS.
-- [`port::share`](port__share.md): `port::share` — reserved for the share domain.
 

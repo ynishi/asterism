@@ -5,12 +5,12 @@
 //! - **Membership is not identity.** A [`User`] exists independently of
 //!   any team; a [`Membership`] is one `(user, team, role)` row and a
 //!   team's set of them is what every invariant is evaluated over.
-//! - **The operator is not a member.** [`InstanceOperator`] is the
-//!   env/CLI bootstrap identity and lives *outside* the membership
-//!   set — owning a team is an explicit membership row like anyone
-//!   else's, and when the operator acts inside a team the ledger stamp
-//!   says so ([`LedgerActor::Operator`]): an operator action is never
-//!   disguised as a member's.
+//! - **The admin is not a member.** [`InstanceAdmin`] is the env/CLI
+//!   bootstrap identity and lives *outside* the membership set —
+//!   owning a team is an explicit membership row like anyone else's,
+//!   and when an admin acts inside a team the ledger stamp says so
+//!   ([`LedgerActor::Admin`]): an admin action is never disguised as
+//!   a member's.
 //! - **Authorization reads state, not history.** The decision functions
 //!   here take the current membership set ([`TeamRoster`]); the ledger
 //!   records what was decided and is never consulted to decide.
@@ -176,28 +176,34 @@ pub struct Membership {
 /// The env/CLI bootstrap identity — a distinct actor kind, **not** a
 /// membership (#83 §1).
 ///
-/// The operator lives outside the membership table and is never
-/// implicitly inside a team: if the operator wants to *own* a team,
-/// that is an explicit [`Membership`] row like anyone else's. What
-/// this type exists for is the other direction — when the operator
-/// acts inside a team without being a member (deleting it, say), the
-/// ledger must record an operator stamp, distinguishable from a
-/// member's ([`LedgerActor::Operator`]), so the action is never
-/// disguised as a member's.
+/// An admin lives outside the membership table and is never implicitly
+/// inside a team: if an admin wants to *own* a team, that is an
+/// explicit [`Membership`] row like anyone else's. What this type
+/// exists for is the other direction — when an admin acts inside a
+/// team without being a member (deleting it, say), the ledger must
+/// record an admin stamp, distinguishable from a member's
+/// ([`LedgerActor::Admin`]), so the action is never disguised as a
+/// member's.
+///
+/// The capacity is not single-holder. It was, through the bootstrap
+/// path's refusal of a second one, and that refusal is gone: an
+/// instance may have as many admins as it provisions, and the
+/// bootstrap command is how the *first* one arrives rather than how
+/// the *only* one does.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstanceOperator {
+pub struct InstanceAdmin {
     user_id: Uuid,
     display_name: String,
 }
 
-impl InstanceOperator {
-    /// Builds the operator identity. Same blank-name refusal as
+impl InstanceAdmin {
+    /// Builds an admin identity. Same blank-name refusal as
     /// [`User::new`], for the same reason: the stamp must say who.
     pub fn new(user_id: Uuid, display_name: impl Into<String>) -> Result<Self, DomainError> {
         let display_name = display_name.into();
         if display_name.trim().is_empty() {
             return Err(DomainError::Validation(
-                "operator display_name is blank".into(),
+                "admin display_name is blank".into(),
             ));
         }
         Ok(Self {
@@ -206,17 +212,17 @@ impl InstanceOperator {
         })
     }
 
-    /// The operator's stable id.
+    /// The admin's stable id.
     pub fn user_id(&self) -> Uuid {
         self.user_id
     }
 
-    /// The operator's display name.
+    /// The admin's display name.
     pub fn display_name(&self) -> &str {
         &self.display_name
     }
 
-    /// The stamp the ledger records when the operator acts.
+    /// The stamp the ledger records when this admin acts.
     pub fn stamp(&self) -> ActorStamp {
         ActorStamp {
             user_id: self.user_id,
@@ -239,11 +245,11 @@ pub struct ActorStamp {
     pub display_name: String,
 }
 
-/// The actor of a ledger event — a member's stamp or the operator's,
-/// and the two are never the same value.
+/// The actor of a ledger event — a member's stamp or an admin's, and
+/// the two are never the same value.
 ///
 /// An enum rather than a stamp plus a boolean, because the
-/// distinguishability is the requirement (#83 §1: an operator action
+/// distinguishability is the requirement (#83 §1: an admin action
 /// inside a team is never disguised as a member's): a boolean field is
 /// a value a writer can forget, a variant is a choice every
 /// constructor makes. The serde tag (`actor_kind`) carries the same
@@ -253,9 +259,22 @@ pub struct ActorStamp {
 pub enum LedgerActor {
     /// A team member acted, in their member capacity.
     Member(ActorStamp),
-    /// The instance operator acted — ledger-stamped as such even when
-    /// the same person also holds a membership row.
-    Operator(ActorStamp),
+    /// An instance admin acted — ledger-stamped as such even when the
+    /// same person also holds a membership row.
+    ///
+    /// The `operator` alias is how this variant reads rows written
+    /// before the capacity was renamed, and it is permanent. Nothing
+    /// restates those rows in the ordinary course: `ledger_event` is
+    /// append-only in the schema, guarded by `BEFORE UPDATE` and
+    /// `BEFORE DELETE` triggers, and no repository path updates one.
+    /// A migration set on rewriting them could drop the triggers
+    /// first, which the [`ledger`](crate::domain::ledger) module docs
+    /// weigh where they belong — so what holds here is the rule and
+    /// not an impossibility: writes emit `admin`, the alias only ever
+    /// runs on the read side, and no later batch may assume the old
+    /// tag has gone.
+    #[serde(rename = "admin", alias = "operator")]
+    Admin(ActorStamp),
 }
 
 impl LedgerActor {
@@ -264,24 +283,24 @@ impl LedgerActor {
         Self::Member(stamp)
     }
 
-    /// The operator acting as the operator. Takes the
-    /// [`InstanceOperator`] identity rather than a bare stamp, so an
-    /// operator-tagged entry can only be minted from the operator.
-    pub fn operator(operator: &InstanceOperator) -> Self {
-        Self::Operator(operator.stamp())
+    /// An admin acting as an admin. Takes the [`InstanceAdmin`]
+    /// identity rather than a bare stamp, so an admin-tagged entry can
+    /// only be minted from an admin.
+    pub fn admin(admin: &InstanceAdmin) -> Self {
+        Self::Admin(admin.stamp())
     }
 
     /// The stamp, whichever kind of actor it belongs to.
     pub fn stamp(&self) -> &ActorStamp {
         match self {
-            Self::Member(stamp) | Self::Operator(stamp) => stamp,
+            Self::Member(stamp) | Self::Admin(stamp) => stamp,
         }
     }
 
-    /// Whether this is the operator acting — the question the §1 rule
+    /// Whether this is an admin acting — the question the §1 rule
     /// exists to keep answerable.
-    pub const fn is_operator(&self) -> bool {
-        matches!(self, Self::Operator(_))
+    pub const fn is_admin(&self) -> bool {
+        matches!(self, Self::Admin(_))
     }
 }
 
@@ -310,11 +329,11 @@ pub enum TeamVerb {
 
 /// Who is asking, reduced to what the authority table cares about:
 /// the actor's current role in *this* team, or the fact that the
-/// actor is the instance operator.
+/// actor is an instance admin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TeamAuthority {
-    /// The instance operator, acting from outside the membership set.
-    Operator,
+    /// An instance admin, acting from outside the membership set.
+    Admin,
     /// A member, with their current role.
     Member(Role),
 }
@@ -322,13 +341,13 @@ pub enum TeamAuthority {
 /// The #83 §1 authority table for in-team verbs, as one decision
 /// function.
 ///
-/// Owners may do everything. The operator may **delete** a team and
+/// Owners may do everything. An admin may **delete** a team and
 /// **purge** its storage (mark / unmark / reclaim — #95 extends the §1
-/// delete row to its reclaim sibling), ledger-stamped as the operator
-/// in both cases, and nothing else in this table: §1 grants the
-/// operator no implicit invite / remove / role-grant inside a team it
-/// does not own — for those the operator joins like anyone else and
-/// acts through a membership row.
+/// delete row to its reclaim sibling), ledger-stamped as an admin in
+/// both cases, and nothing else in this table: §1 grants an admin no
+/// implicit invite / remove / role-grant inside a team they do not
+/// own — for those an admin joins like anyone else and acts through a
+/// membership row.
 ///
 /// This answers "does the role permit the verb" and nothing more; the
 /// last-owner rule is a property of the target and the roster, checked
@@ -338,7 +357,7 @@ pub const fn verb_allowed(authority: TeamAuthority, verb: TeamVerb) -> bool {
     match verb {
         TeamVerb::Delete | TeamVerb::Purge => matches!(
             authority,
-            TeamAuthority::Operator | TeamAuthority::Member(Role::Owner)
+            TeamAuthority::Admin | TeamAuthority::Member(Role::Owner)
         ),
         TeamVerb::Invite | TeamVerb::Remove | TeamVerb::GrantOwner | TeamVerb::RevokeOwner => {
             matches!(authority, TeamAuthority::Member(Role::Owner))
@@ -347,13 +366,13 @@ pub const fn verb_allowed(authority: TeamAuthority, verb: TeamVerb) -> bool {
 }
 
 /// Whether the instance accepts team creation from ordinary users, or
-/// only from the operator (#83 §1: "a closed-registration flag flips
-/// this to operator").
+/// only from an admin (#83 §1: "a closed-registration flag flips this
+/// to operator").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistrationPolicy {
     /// Any authenticated user may create a team.
     Open,
-    /// Only the instance operator may create a team.
+    /// Only an instance admin may create a team.
     Closed,
 }
 
@@ -364,15 +383,15 @@ pub enum RegistrationPolicy {
 pub enum CreationActor {
     /// Any authenticated user.
     AuthenticatedUser,
-    /// The instance operator.
-    Operator,
+    /// An instance admin.
+    Admin,
 }
 
 /// The team-create row of the #83 §1 authority table.
 pub const fn may_create_team(actor: CreationActor, policy: RegistrationPolicy) -> bool {
     match policy {
         RegistrationPolicy::Open => true,
-        RegistrationPolicy::Closed => matches!(actor, CreationActor::Operator),
+        RegistrationPolicy::Closed => matches!(actor, CreationActor::Admin),
     }
 }
 
@@ -628,31 +647,52 @@ mod tests {
     }
 
     #[test]
-    fn an_operator_stamp_is_never_a_member_stamp() {
+    fn an_admin_stamp_is_never_a_member_stamp() {
         let person = User::new(Uuid::now_v7(), "Hoshino").unwrap();
-        let operator = InstanceOperator::new(person.user_id(), "Hoshino").unwrap();
+        let admin = InstanceAdmin::new(person.user_id(), "Hoshino").unwrap();
 
         // Same human, same id, same name — the two actors still
         // compare unequal, because the capacity is part of the value.
         let as_member = LedgerActor::member(person.stamp());
-        let as_operator = LedgerActor::operator(&operator);
-        assert_ne!(as_member, as_operator);
-        assert!(!as_member.is_operator());
-        assert!(as_operator.is_operator());
-        assert_eq!(as_member.stamp(), as_operator.stamp());
+        let as_admin = LedgerActor::admin(&admin);
+        assert_ne!(as_member, as_admin);
+        assert!(!as_member.is_admin());
+        assert!(as_admin.is_admin());
+        assert_eq!(as_member.stamp(), as_admin.stamp());
 
         // The distinction survives serialization — what storage and
         // the wire see is tagged, so no reader downstream can confuse
         // the two even with identical stamps.
         let member_json = serde_json::to_value(&as_member).unwrap();
-        let operator_json = serde_json::to_value(&as_operator).unwrap();
+        let admin_json = serde_json::to_value(&as_admin).unwrap();
         assert_eq!(member_json["actor_kind"], serde_json::json!("member"));
-        assert_eq!(operator_json["actor_kind"], serde_json::json!("operator"));
+        assert_eq!(admin_json["actor_kind"], serde_json::json!("admin"));
+    }
+
+    #[test]
+    fn the_old_operator_tag_still_reads_and_is_never_written_back() {
+        // Rows written before the rename say "operator", and
+        // `ledger_event` is append-only by trigger, so nothing
+        // restates them in the ordinary course. The alias is permanent
+        // rather than transitional, and no later batch may assume the
+        // old tag has gone — see [`LedgerActor::Admin`] for why that
+        // is a rule rather than an impossibility.
+        let stamp = serde_json::json!({
+            "actor_kind": "operator",
+            "stamp": { "user_id": Uuid::now_v7(), "display_name": "Hoshino" },
+        });
+        let actor: LedgerActor = serde_json::from_value(stamp).unwrap();
+        assert!(actor.is_admin());
+
+        // Reading one does not make the writer emit one: re-serialising
+        // the value that just came back says "admin".
+        let round_tripped = serde_json::to_value(&actor).unwrap();
+        assert_eq!(round_tripped["actor_kind"], serde_json::json!("admin"));
     }
 
     #[test]
     fn the_authority_table_reads_as_specified() {
-        use TeamAuthority::{Member, Operator};
+        use TeamAuthority::{Admin, Member};
 
         let owner = Member(Role::Owner);
         let plain = Member(Role::Member);
@@ -669,12 +709,12 @@ mod tests {
             // table.
             assert!(verb_allowed(owner, verb));
             assert!(!verb_allowed(plain, verb));
-            // The operator's grants are the destructive pair — delete,
-            // and purge's mark/unmark/reclaim (#95, the §1 delete row
-            // extended) — ledger-stamped as the operator, never
-            // disguised (§1).
+            // An admin's grants are the destructive pair — delete, and
+            // purge's mark/unmark/reclaim (#95, the §1 delete row
+            // extended) — ledger-stamped as an admin, never disguised
+            // (§1).
             assert_eq!(
-                verb_allowed(Operator, verb),
+                verb_allowed(Admin, verb),
                 matches!(verb, TeamVerb::Delete | TeamVerb::Purge)
             );
         }
@@ -682,15 +722,15 @@ mod tests {
 
     #[test]
     fn team_creation_follows_the_registration_policy() {
-        use CreationActor::{AuthenticatedUser, Operator};
+        use CreationActor::{Admin, AuthenticatedUser};
 
         assert!(may_create_team(AuthenticatedUser, RegistrationPolicy::Open));
-        assert!(may_create_team(Operator, RegistrationPolicy::Open));
+        assert!(may_create_team(Admin, RegistrationPolicy::Open));
         assert!(!may_create_team(
             AuthenticatedUser,
             RegistrationPolicy::Closed
         ));
-        assert!(may_create_team(Operator, RegistrationPolicy::Closed));
+        assert!(may_create_team(Admin, RegistrationPolicy::Closed));
     }
 
     #[test]
