@@ -30,6 +30,7 @@
   import QuickLook from "./QuickLook.svelte";
   import SessionCommentsHover from "./SessionCommentsHover.svelte";
   import SessionTile from "./SessionTile.svelte";
+  import SettingsMaintenance from "./SettingsMaintenance.svelte";
   import SettingsModalities from "./SettingsModalities.svelte";
   import SettingsPreferences from "./SettingsPreferences.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
@@ -6496,6 +6497,7 @@
              effect at startup still needs adding to `STARTUP_ONLY` in
              the component for its badge.) -->
         <SettingsPreferences />
+        <SettingsMaintenance />
       </div>
     </div>
   </div>

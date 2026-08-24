@@ -36,6 +36,10 @@ export type DeclareAssetMetaCommand = { asset_id: string; key: string; value: st
 
 export type RebuildEdgesCommand = { asset_id: string; };
 
+export type OrganizeByLocationCommand = { persona_id: string | null; base_dir: string | null; };
+
+export type OrganizeByLocationResult = { dirs_created: number; groups_created: number; assets_organized: number; skipped: number; };
+
 export type CancelJobCommand = { job_id: string; };
 
 export type CreateGroupCommand = { persona_id: string; name: string; description: string | null; };
