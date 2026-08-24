@@ -255,13 +255,89 @@ pub const V0_KINDS: &[&str] = &[
     BLOB_LINK_RECLAIMED,
 ];
 
-/// Whether `kind` is one this build of the plane writes. Shape and
-/// registration are separate questions on purpose: a reader must
-/// accept well-formed kinds it does not know (a stream written by a
-/// newer build, `forge.*` after #63), a *writer* asks this before
+/// A line was opened on the team's forge.
+pub const FORGE_LINE_OPENED: &str = "forge.line.opened/1";
+/// A line was renamed — the payload carries the old name and the new,
+/// on `ROLE_CHANGED`'s reasoning: the entry reads on its own.
+pub const FORGE_LINE_RENAMED: &str = "forge.line.renamed/1";
+/// A line's collision rule was changed, old and new both in the
+/// payload.
+pub const FORGE_LINE_STRATEGY_SET: &str = "forge.line.strategy_set/1";
+/// A line was archived or taken back out of the archive.
+pub const FORGE_LINE_STANDING_SET: &str = "forge.line.standing_set/1";
+/// A line was dropped, with everything on it.
+pub const FORGE_LINE_DISCARDED: &str = "forge.line.discarded/1";
+/// Work was opened against a line.
+pub const FORGE_PURSUIT_OPENED: &str = "forge.pursuit.opened/1";
+/// A round was written onto open work.
+pub const FORGE_ROUND_PUSHED: &str = "forge.round.pushed/1";
+/// Work ended, and — when it was satisfied — the line moved with it.
+/// One event because it was one transaction: the ending and the change
+/// point are written together or not at all.
+pub const FORGE_PURSUIT_CLOSED: &str = "forge.pursuit.closed/1";
+/// A conversation was opened about work, a round, an entry as a round
+/// had it, or a change point.
+pub const FORGE_THREAD_OPENED: &str = "forge.thread.opened/1";
+/// Something was said in a conversation.
+pub const FORGE_THREAD_SAID: &str = "forge.thread.said/1";
+/// Something said was corrected. The correction is a new record and
+/// the earlier wording stays readable — the model's `amend`, and this
+/// is the ledger saying it happened.
+pub const FORGE_THREAD_AMENDED: &str = "forge.thread.amended/1";
+/// A conversation was given a title, or had the one it had taken off.
+pub const FORGE_THREAD_RENAMED: &str = "forge.thread.renamed/1";
+
+/// The kinds the hosted forge's verbs write (#148 decisions 17 and
+/// 20) — one per write-port method that changes a row, named after the
+/// verb rather than after the table, because what a reader wants from
+/// a stream is what somebody did.
+///
+/// A second slice beside [`V0_KINDS`] rather than an addition to it:
+/// the two namespaces are registered by different arguments — v0's are
+/// the substrate's own gestures, and these arrive because the team
+/// hosts a forge — and a reader asking "which kinds does the forge
+/// write" gets an answer that does not move when a membership kind is
+/// added.
+pub const FORGE_KINDS: &[&str] = &[
+    FORGE_LINE_OPENED,
+    FORGE_LINE_RENAMED,
+    FORGE_LINE_STRATEGY_SET,
+    FORGE_LINE_STANDING_SET,
+    FORGE_LINE_DISCARDED,
+    FORGE_PURSUIT_OPENED,
+    FORGE_ROUND_PUSHED,
+    FORGE_PURSUIT_CLOSED,
+    FORGE_THREAD_OPENED,
+    FORGE_THREAD_SAID,
+    FORGE_THREAD_AMENDED,
+    FORGE_THREAD_RENAMED,
+];
+
+/// Whether `kind` is one of the substrate's own v0 gestures.
+///
+/// Shape and registration are separate questions on purpose: a reader
+/// must accept well-formed kinds it does not know (a stream written by
+/// a newer build), and a *writer* asks [`is_registered_kind`] before
 /// appending.
 pub fn is_v0_kind(kind: &EventKind) -> bool {
     V0_KINDS.contains(&kind.as_str())
+}
+
+/// Whether `kind` is one the hosted forge writes.
+pub fn is_forge_kind(kind: &EventKind) -> bool {
+    FORGE_KINDS.contains(&kind.as_str())
+}
+
+/// Whether this build writes `kind` at all — the writer's question,
+/// over both registries.
+///
+/// The check a writer makes has to widen as the plane learns to write
+/// more, and putting the union here rather than at the append site is
+/// what keeps "which kinds exist" one answer: a namespace added later
+/// reaches every writer through this function instead of through an
+/// edit to each of them.
+pub fn is_registered_kind(kind: &EventKind) -> bool {
+    is_v0_kind(kind) || is_forge_kind(kind)
 }
 
 /// What a forge handle stands for — the four kinds #102 fixed for the
@@ -460,6 +536,12 @@ pub enum SubjectRef {
     User(Uuid),
     /// A stored blob, addressed the only way blobs are: by digest.
     Blob(String),
+    /// A line on the team's forge.
+    ForgeLine(Uuid),
+    /// One piece of work against such a line.
+    ForgePursuit(Uuid),
+    /// A conversation about any of it.
+    ForgeThread(Uuid),
 }
 
 impl SubjectRef {
@@ -481,6 +563,29 @@ impl SubjectRef {
     /// A forge-handle subject.
     pub const fn forge_identity(handle: ForgeIdentityRef) -> Self {
         Self::ForgeIdentity(handle)
+    }
+
+    /// A line subject.
+    ///
+    /// The three forge-node subjects take the ids the forge minted and
+    /// validate nothing beyond being a uuid, which is all their model
+    /// says about them: a `LineId` is a v7 uuid and carries no shape a
+    /// second parser could check. What makes them worth their own
+    /// variants is the index — "which events touched this line" is the
+    /// question a hosted forge makes people ask, and answering it by
+    /// reading payloads is what `ledger_subject` exists to avoid.
+    pub const fn forge_line(line_id: Uuid) -> Self {
+        Self::ForgeLine(line_id)
+    }
+
+    /// A pursuit subject.
+    pub const fn forge_pursuit(pursuit_id: Uuid) -> Self {
+        Self::ForgePursuit(pursuit_id)
+    }
+
+    /// A thread subject.
+    pub const fn forge_thread(thread_id: Uuid) -> Self {
+        Self::ForgeThread(thread_id)
     }
 }
 
@@ -566,11 +671,34 @@ mod tests {
     }
 
     #[test]
+    fn every_forge_kind_parses_registers_and_stays_out_of_the_v0_slice() {
+        for raw in FORGE_KINDS {
+            let kind = EventKind::parse(raw)
+                .unwrap_or_else(|e| panic!("registered kind {raw} must parse: {e}"));
+            assert!(is_forge_kind(&kind));
+            assert!(is_registered_kind(&kind));
+            // The two registries answer different questions, so a
+            // forge kind is not a v0 one and never becomes one.
+            assert!(!is_v0_kind(&kind), "{raw} belongs to the forge slice");
+            assert!(kind.as_str().starts_with("forge."));
+        }
+
+        // And the substrate's own gestures are registered without
+        // joining the forge's.
+        for raw in V0_KINDS {
+            let kind = EventKind::parse(raw).unwrap();
+            assert!(is_registered_kind(&kind));
+            assert!(!is_forge_kind(&kind));
+        }
+    }
+
+    #[test]
     fn a_kind_needs_a_namespace_and_a_canonical_version() {
         // A well-formed kind this build does not register still
         // parses — shape and registration are different questions.
         let foreign = EventKind::parse("forge.identity.linked/1").unwrap();
         assert!(!is_v0_kind(&foreign));
+        assert!(!is_registered_kind(&foreign));
 
         for invalid in [
             "teams.membership.added",    // no version
@@ -705,6 +833,25 @@ mod tests {
         assert_eq!(json["ref_type"], serde_json::json!("forge_identity"));
         assert_eq!(json["value"], serde_json::json!("subject:hoshino"));
         assert_eq!(serde_json::from_value::<SubjectRef>(json).unwrap(), subject);
+    }
+
+    #[test]
+    fn a_forge_node_subject_reaches_the_index_as_its_uuid() {
+        // The index column pair is (TEXT, TEXT), so a node subject has
+        // to serialise as a tag and a plain string the way the handle
+        // and the user subjects already do — an object here would be a
+        // value no trace query could ever match.
+        let id = Uuid::now_v7();
+        for (subject, expected) in [
+            (SubjectRef::forge_line(id), "forge_line"),
+            (SubjectRef::forge_pursuit(id), "forge_pursuit"),
+            (SubjectRef::forge_thread(id), "forge_thread"),
+        ] {
+            let json = serde_json::to_value(&subject).unwrap();
+            assert_eq!(json["ref_type"], serde_json::json!(expected));
+            assert_eq!(json["value"], serde_json::json!(id.to_string()));
+            assert_eq!(serde_json::from_value::<SubjectRef>(json).unwrap(), subject);
+        }
     }
 
     #[test]
