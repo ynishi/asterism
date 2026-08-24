@@ -37,6 +37,7 @@ its own module doc explains.
 - `asset_constellation` — Returns the fully-resolved hover-burst payload — each edge with
 - `asset_declare_meta` — Records — or removes — one AlbumMeta statement on an asset: the
 - `asset_declare_provenance` — Declares (or repairs) an asset's origin after the fact — the
+- `asset_declare_source_type` — Asserts — or retracts, via an absent `source_type` — the asset's
 - `asset_detail` — Detail view (asset + attached tags + constellation edges).
 - `asset_edges` — Returns the top-`limit` edges (by weight) for hover-burst
 - `asset_lineage` — Walks the whole `derived_from` chain around the asset, not just
@@ -53,6 +54,7 @@ its own module doc explains.
 - `create_material_layer` — Opens a band the person owns. Never the default — see
 - `create_modality` — Registers a new modality master row.
 - `create_query_group` — "Save as Group": mints a `kind='query'` Group from a `query_json`
+- `create_series_strategy` — Registers a series rule and asks for the keys it implies — the
 - `create_snapshot` — Freezes a picked asset list into a Snapshot and stops there
 - `create_thread` — Creates a Thread.
 - `delete_asset_comment` — Deletes a comment. Idempotent.
@@ -63,7 +65,9 @@ its own module doc explains.
 - `delete_modality` — Deletes a modality master row — only when no asset carries the slug
 - `delete_persona_profile` — Removes the persona profile row entirely.
 - `delete_persona_theme` — Removes the persona theme row entirely (reverts to defaults).
+- `delete_series_strategy` — Removes a series rule and, by the schema's cascade, every key
 - `delete_session` — Deletes a Session — only when no `asset` row still references
+- `delete_tag` — Drops a tag channel and every link to it — the command twin of
 - `delete_thread` — Deletes a Thread (cascades to messages).
 - `delete_thread_message` — Deletes one Message (misfire correction).
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
@@ -115,17 +119,21 @@ its own module doc explains.
 - `list_material_marks` — Lists every mark in `asset_id`'s material, in the material's own
 - `list_modalities` — Modality master listing — one row per registered modality (hidden
 - `list_modality_asset_counts` — Sidebar Modality counts — `(modality_slug, asset_count)`, optionally
+- `list_observations` — Every observation stream on one timeline, newest first — the
 - `list_persona_asset_counts` — Sidebar Persona counts — `(persona_id, asset_count)` per persona
 - `list_personas` — Lists every persona (used to render the sidebar).
+- `list_series_strategies` — Every registered series rule, oldest first, seeded and user-written
 - `list_sessions` — Sessions view — one row per `session_id` in the query scope.
 - `list_settings` — Every known application setting, resolved through code default →
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
+- `list_streams` — The stream names [`list_observations`]'s `stream` filter accepts —
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
 - `list_tag_suggestions` — Lists what the bound visual model proposed for one asset (#112),
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
 - `merge_groups` — Merges one manual group into another and deletes the source
+- `merge_tags` — Folds one tag channel into another and deletes the source — the
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
 - `open_forge_line` — Opens a line.
@@ -158,6 +166,7 @@ its own module doc explains.
 - `rename_forge_thread` — Names the conversation, or takes its name off.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
+- `rename_tag` — Renames a tag channel in place — the command twin of
 - `reopen_forge_line` — Takes it back out.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
@@ -185,5 +194,6 @@ its own module doc explains.
 - `update_asset_meta_batch` — Partially updates metadata for multiple assets in one call.
 - `update_modality` — Partially updates a modality master row (each omitted field is left
 - `update_query_group_query` — "Update query": validates + persists a replacement rule (rejecting
+- `update_series_strategy` — Partially updates a series rule (each omitted field is left
 - `visual_model_status` — Which visual model this process bound, if any (#112).
 
