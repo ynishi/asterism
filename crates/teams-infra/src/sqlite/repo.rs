@@ -41,6 +41,8 @@
 //! append recomputes over what actually committed. The domain's
 //! [`EventSeq`] validates what storage hands back and mints nothing.
 
+use std::collections::BTreeSet;
+
 use rusqlite::{OptionalExtension as _, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::DomainError;
@@ -77,6 +79,19 @@ impl SqliteTeamsRepository {
     /// in-memory sibling).
     pub fn new(isle: AsyncIsle) -> Self {
         Self { isle }
+    }
+
+    /// The handle this repository writes through.
+    ///
+    /// The hosted forge is built per request over the same one
+    /// ([`TeamForge::for_request`](crate::sqlite::forge::TeamForge::for_request)),
+    /// and it has to be the same one: decision 17 puts a forge write
+    /// and its ledger event in a single transaction, which two handles
+    /// on two connections could not be. So the transport takes it from
+    /// here rather than carrying a second copy that nothing checks
+    /// against this one.
+    pub fn isle(&self) -> AsyncIsle {
+        self.isle.clone()
     }
 
     // ------------------------------------------------------------------
@@ -795,6 +810,54 @@ impl SqliteTeamsRepository {
             .collect()
     }
 
+    /// Which of `digests` this team holds — the have-check's read
+    /// (#148 decision 19), asked over a list rather than one at a
+    /// time.
+    ///
+    /// [`Self::blob_link_exists`] answered one digest and this answers
+    /// many, with the same predicate underneath: a marked link is not
+    /// held, because a caller told "you have this" about a link inside
+    /// its grace window would skip a send for bytes a reclaim is about
+    /// to take. Digests are validated on the way *in* — a malformed
+    /// one is the caller's grammar error and says so, rather than
+    /// silently reading as "not held".
+    ///
+    /// The answer is a set of the ones held, not a bitmap: the caller
+    /// asked what it can skip, and a shape that only names those is
+    /// one a caller cannot line up against the wrong list.
+    pub async fn held_digests(
+        &self,
+        team_id: Uuid,
+        digests: Vec<String>,
+    ) -> Result<BTreeSet<String>, DomainError> {
+        let asked = digests
+            .iter()
+            .map(|digest| parse_digest(digest))
+            .collect::<Result<BTreeSet<String>, DomainError>>()?;
+        if asked.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        self.isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT digest FROM team_blob_link
+                     WHERE team_id = ?1 AND digest = ?2 AND purge_marked_at IS NULL",
+                )?;
+                let mut held = BTreeSet::new();
+                for digest in asked {
+                    let hit: Option<String> = stmt
+                        .query_row(params![team_id, digest], |row| row.get(0))
+                        .optional()?;
+                    if let Some(digest) = hit {
+                        held.insert(digest);
+                    }
+                }
+                Ok(held)
+            })
+            .await
+            .map_err(infra_err)
+    }
+
     /// The team's marked links with their mark instants — the purge
     /// half of the ledgerless state question ("what would a reclaim
     /// look at"). Deliberately a separate read instead of a flag on
@@ -964,9 +1027,79 @@ impl SqliteTeamsRepository {
         promote_events(team_id, events, subjects)
     }
 
+    /// One page of the events that reference `subject`:
+    /// [`Self::events_for_subject`]'s walk under
+    /// [`Self::events_page`]'s cursor.
+    ///
+    /// The transport exposes this one rather than its unpaged sibling,
+    /// and for decision 18's reason applied to a narrower question: a
+    /// subject filter bounds the stream by *what* rather than by how
+    /// much, and the forge's busiest subjects — a line, the work
+    /// against it — are exactly the ones that gain a row per push. A
+    /// read whose response size is a function of how much a line has
+    /// been worked on is the shape #149 took the cursor out for.
+    ///
+    /// Same keyset, same meaning: `after` is the last seq the caller
+    /// received, a short page is what ends the walk, and the index
+    /// walked is `(ref_type, ref_value)` rather than payload JSON
+    /// (#83 §2).
+    pub async fn events_for_subject_page(
+        &self,
+        team_id: Uuid,
+        subject: &SubjectRef,
+        after: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<LedgerEvent>, DomainError> {
+        // Zero for [`Self::events_page`]'s reason: an empty page here
+        // is not a cursor answer, and the caller gets it without a
+        // round trip.
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let (ref_type, ref_value) = subject_to_ref(subject)?;
+        let after = after.unwrap_or(0);
+        let limit = i64::from(limit);
+        let (events, subjects) = self
+            .isle
+            .call(move |conn| {
+                let events = fetch_event_rows(
+                    conn,
+                    "SELECT e.seq, e.event_id, e.actor, e.occurred_at, e.kind, e.payload
+                     FROM ledger_event e
+                     JOIN (SELECT DISTINCT seq FROM ledger_subject
+                           WHERE team_id = ?1 AND ref_type = ?2 AND ref_value = ?3) hits
+                       ON hits.seq = e.seq
+                     WHERE e.team_id = ?1 AND e.seq > ?4 ORDER BY e.seq LIMIT ?5",
+                    params![team_id, ref_type, ref_value, after, limit],
+                )?;
+                // The subject rows of exactly the page above, so an
+                // event never comes back carrying a partial subject
+                // list: the same seq window, not the same filter.
+                let subjects = fetch_subject_rows(
+                    conn,
+                    "SELECT seq, ref_type, ref_value FROM ledger_subject
+                     WHERE team_id = ?1 AND seq IN
+                           (SELECT seq FROM (SELECT DISTINCT seq FROM ledger_subject
+                                             WHERE team_id = ?1 AND ref_type = ?2
+                                               AND ref_value = ?3)
+                             WHERE seq > ?4 ORDER BY seq LIMIT ?5)
+                     ORDER BY seq, rowid",
+                    params![team_id, ref_type, ref_value, after, limit],
+                )?;
+                Ok((events, subjects))
+            })
+            .await
+            .map_err(infra_err)?;
+        promote_events(team_id, events, subjects)
+    }
+
     /// The events in a team's stream that reference `subject` — the
     /// trace query, answered by walking the `(ref_type, ref_value)`
     /// index and never by parsing payload JSON (#83 §2).
+    ///
+    /// The whole set, which is what makes this the one to stop
+    /// reaching for over HTTP — [`Self::events_for_subject_page`] is
+    /// the same walk with a cursor, and the transport exposes that.
     pub async fn events_for_subject(
         &self,
         team_id: Uuid,
@@ -1037,7 +1170,14 @@ impl SqliteTeamsRepository {
 /// `None` = no link row, `Some(None)` = linked and live, `Some(Some(t))`
 /// = linked and marked for purge at `t`. The three-way answer is what
 /// mark and unmark dispatch their refusals on.
-fn link_mark_in_tx(
+///
+/// `pub(crate)` for [`append_event_in_tx`]'s reason: the content verb
+/// (#148 decision 5) links a digest from
+/// [`sqlite::forge`](crate::sqlite::forge), inside its own
+/// transaction, and it dispatches on the same three answers. A second
+/// spelling of this read is a second place for "marked counts as
+/// held" to be got wrong.
+pub(crate) fn link_mark_in_tx(
     tx: &Transaction<'_>,
     team_id: Uuid,
     digest: &str,

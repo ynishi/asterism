@@ -361,7 +361,10 @@ ALTER TABLE user_account RENAME COLUMN is_operator TO is_admin;
 /// and when it was minted (#148 decisions 3 and 7). What composes it
 /// against the CAS is conversion, which arrives with the content verb;
 /// what is here is the identity `Store::exists` answers about, which
-/// is all the forge ever asks of the layer below it.
+/// is all the forge ever asks of the layer below it. (The verb landed
+/// in #151 and [`V8_TEAM_ASSET_CONTENT`] added the two columns that
+/// carry the conversion — this paragraph describes the table as this
+/// batch built it, which is what a migration doc is for.)
 ///
 /// **5. `forge_actor` is keyed within a team** — `UNIQUE (team_id,
 /// stands_for, COALESCE(subject, ''))`, over the coalesce for the
@@ -592,6 +595,51 @@ CREATE TABLE forge_thread_revision (
 ) STRICT, WITHOUT ROWID;
 "#;
 
+/// Version 7 → 8: what a `team_asset` was converted from (#148
+/// decision 5, the content verb).
+///
+/// `V7` left this open in as many words — "what composes it against
+/// the CAS is conversion, which arrives with the content verb" — and
+/// the verb is #151's. Two columns, both nullable, and the v0
+/// conversion fills both.
+///
+/// **`digest` is the CAS entry the asset was converted from.** One
+/// blob, which is the whole of the v0 conversion; decision 3 says a
+/// conversion may be several materials or a Collection, and the shape
+/// that admits those without rewriting this table is a second table
+/// keyed by asset — which is why the column is nullable rather than
+/// `NOT NULL`. An asset composed some other way leaves it empty and
+/// says so by that, instead of carrying a digest that stands for one
+/// part of itself. Not `UNIQUE`: decision 7 mints an asset per
+/// promotion over one stored copy, so two rows sharing a digest is the
+/// arrangement, not a fault.
+///
+/// **`entered_for` is the work the content arrived against.** It
+/// records decision 5's attachment rather than enforcing it: the
+/// column is nullable and unconstrained, so what the schema keeps is
+/// the evidence for rows that have one, and the invariant itself is
+/// the content verb's — it is checked at the door, in the same
+/// transaction that writes this row. Reading the column as the
+/// enforcement would be reading a record as a rule.
+/// It carries no foreign key, on `team_id`'s reasoning one batch
+/// up and one of its own: `Lines::discard` deletes the work against a
+/// line, and a `RESTRICT` key here would refuse the one verb that
+/// releases this content, while a `CASCADE` would delete the record of
+/// what was brought in as a side effect of dropping a line.
+///
+/// **Neither column is indexed, because nothing reads by them.** The
+/// two reads over this table both arrive with an id: `Store::exists`
+/// asks about one, the bulk resolve asks about a list, and the primary
+/// key serves both. The have-check looks like the exception and is
+/// not — it answers out of `team_blob_link`, whose own primary key is
+/// `(team_id, digest)`. An index here would be write cost on a table
+/// that gains a row per promotion, bought for no reader; the batch is
+/// append-only, so the moment to leave it out is this one.
+const V8_TEAM_ASSET_CONTENT: &str = r#"
+ALTER TABLE team_asset ADD COLUMN digest TEXT;
+ALTER TABLE team_asset ADD COLUMN entered_for BLOB;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -602,6 +650,7 @@ const MIGRATIONS: &[&str] = &[
     V5_HEAD_REGISTRY,
     V6_ADMIN_RENAME,
     V7_FORGE_TABLES,
+    V8_TEAM_ASSET_CONTENT,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -749,6 +798,71 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{table} must exist: {e}"));
             assert_eq!(scoped, 1, "{table} must be scoped to a team");
         }
+    }
+
+    #[test]
+    fn v8_reaches_a_database_that_already_has_assets_on_it() {
+        // The upgrade path, which the fresh-database tests cannot ask
+        // about: `V8` adds columns to a table `V7` may already have
+        // rows in, and an `ALTER TABLE ADD COLUMN` that demanded a
+        // value would refuse them. Both columns are nullable for that
+        // reason among others, and this is where "among others" is
+        // checked.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, batch) in MIGRATIONS.iter().enumerate().take(7) {
+            conn.execute_batch(batch).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        let (asset, team) = (Uuid::now_v7(), Uuid::now_v7());
+        conn.execute(
+            "INSERT INTO team_asset (id, team_id, created_at) VALUES (?1, ?2, 7)",
+            rusqlite::params![asset, team],
+        )
+        .expect("an asset minted before the content verb existed");
+
+        migrate(&mut conn).unwrap();
+
+        let (digest, entered_for, created_at): (Option<String>, Option<Uuid>, i64) = conn
+            .query_row(
+                "SELECT digest, entered_for, created_at FROM team_asset WHERE id = ?1",
+                rusqlite::params![asset],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("the row survives the upgrade");
+        assert_eq!(digest, None, "nothing invents a conversion for it");
+        assert_eq!(entered_for, None);
+        assert_eq!(created_at, 7, "and what it did carry is untouched");
+    }
+
+    #[test]
+    fn v8_lets_one_digest_stand_behind_two_assets() {
+        // Decision 7: two members promoting identical content produce
+        // two `TeamAsset`s over one stored copy, which is the only
+        // arrangement where "who brought what" survives the second
+        // contributor. A unique index on the digest would forbid it.
+        let conn = migrated();
+        let team = Uuid::now_v7();
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let mint = |asset: Uuid| {
+            conn.execute(
+                "INSERT INTO team_asset (id, team_id, created_at, digest, entered_for)
+                 VALUES (?1, ?2, 0, ?3, ?4)",
+                rusqlite::params![asset, team, digest, Uuid::now_v7()],
+            )
+        };
+        mint(Uuid::now_v7()).expect("the first promotion");
+        mint(Uuid::now_v7()).expect("the second promotion of the same bytes");
+
+        // And a conversion that is not one blob leaves both empty
+        // rather than carrying a digest that stands for a part of
+        // itself — which is what nullable is for here.
+        conn.execute(
+            "INSERT INTO team_asset (id, team_id, created_at) VALUES (?1, ?2, 0)",
+            rusqlite::params![Uuid::now_v7(), team],
+        )
+        .expect("an asset composed some other way");
     }
 
     #[test]

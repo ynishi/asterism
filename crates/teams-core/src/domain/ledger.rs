@@ -286,11 +286,27 @@ pub const FORGE_THREAD_SAID: &str = "forge.thread.said/1";
 pub const FORGE_THREAD_AMENDED: &str = "forge.thread.amended/1";
 /// A conversation was given a title, or had the one it had taken off.
 pub const FORGE_THREAD_RENAMED: &str = "forge.thread.renamed/1";
+/// Content entered the team against open work, and the team minted the
+/// asset it converted that content into (#148 decisions 5 and 7).
+///
+/// Named for the act rather than for the row, like every kind in
+/// [`FORGE_KINDS`]: a reader wants "somebody brought this in", not "a
+/// `team_asset` was inserted". The payload carries the asset the team
+/// minted, the digest the bytes hashed to and the work it entered
+/// against; the subjects carry the digest and the pursuit, so the
+/// trace query finds it from either end without parsing a payload.
+///
+/// One event per entry even when the bytes were already in the store:
+/// decision 7 mints a `TeamAsset` per promotion so that "who brought
+/// what" survives the second contributor, and an event skipped for a
+/// digest the store already held would lose exactly that.
+pub const FORGE_CONTENT_ENTERED: &str = "forge.content.entered/1";
 
 /// The kinds the hosted forge's verbs write (#148 decisions 17 and
-/// 20) — one per write-port method that changes a row, named after the
-/// verb rather than after the table, because what a reader wants from
-/// a stream is what somebody did.
+/// 20) — one per write-port method that changes a row, plus the one
+/// verb the hosting adds ([`FORGE_CONTENT_ENTERED`], #148 decision 5),
+/// named after the verb rather than after the table, because what a
+/// reader wants from a stream is what somebody did.
 ///
 /// A second slice beside [`V0_KINDS`] rather than an addition to it:
 /// the two namespaces are registered by different arguments — v0's are
@@ -311,6 +327,7 @@ pub const FORGE_KINDS: &[&str] = &[
     FORGE_THREAD_SAID,
     FORGE_THREAD_AMENDED,
     FORGE_THREAD_RENAMED,
+    FORGE_CONTENT_ENTERED,
 ];
 
 /// Whether `kind` is one of the substrate's own v0 gestures.
