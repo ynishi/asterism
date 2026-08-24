@@ -21,6 +21,49 @@ Two things this module deliberately does **not** do:
   pattern, not event sourcing — #83 §2 SoT note). Nothing here
   replays.
 
+## Erasing a person answers in three places
+
+A request to erase somebody is not one deletion, and the reason is
+that a person is answered for in three records, each holding a
+different part of the answer — a name in one, an association in the
+next, a handle in the third. All three have to answer, and an
+answer that covers two of them has erased nothing:
+
+1. **The [`ActorStamp`](crate::domain::identity::ActorStamp) on
+   every ledger event they wrote.** The name is captured at write
+   time precisely so a later rename does not rewrite history — the
+   property that makes the ledger readable is the property that
+   makes it hold the name.
+2. **Their rows in the subject index.** A `user` subject is a uuid
+   rather than a name, so what it exposes is the association: which
+   events touched this person, which is the question the index
+   exists to answer quickly.
+3. **`forge_actor` on the local plane.** The handle a member's
+   writes resolve to is minted on their own instance, outside this
+   plane's storage entirely, and the display snapshot it captures
+   is the same captured-not-referenced value as the stamp above.
+
+Three mechanisms can answer, and which one is chosen is a decision
+rather than a default: **masking at write** (the stamp records an
+id and no name, which costs every reader the ability to say who
+without a join, and costs history the name the account had then),
+**retention under a documented exemption** (the record is kept and
+the basis for keeping it is written down, which is what an audit
+log is usually held under), and **crypto-shredding** (the name is
+stored encrypted under a per-subject key and erasure destroys the
+key, which turns a rewrite into a delete somewhere the append-only
+rule does not reach).
+
+**The order matters, and this end of it comes first.** Today a row
+could be rewritten under a migration if the decision demanded it —
+expensive and against the schema's triggers, but possible. A
+tamper-evidence chain removes that: once each entry commits to its
+predecessor, rewriting one invalidates every entry after it, and
+erasure-by-rewriting is gone permanently rather than merely
+discouraged. So the mechanism is settled before a chain starts, not
+after — a chain built first would decide this question by making it
+unanswerable.
+
 ## Functions
 
 - `is_v0_kind` — Whether `kind` is one this build of the plane writes. Shape and
@@ -29,6 +72,8 @@ Two things this module deliberately does **not** do:
 
 - `EventKind` — A namespaced + versioned event kind — `"teams.membership.added/1"`.
 - `EventSeq` — Storage-assigned position of an event within its team's stream —
+- `ForgeIdentityRef` — A forge handle, as a ledger subject: what it stands for, and whom
+- `ForgeStandsFor` — What a forge handle stands for — the four kinds #102 fixed for the
 - `LedgerEvent` — One entry in a team's stream — the envelope, with the payload
 - `SubjectRef` — A typed reference an event makes — the index trace queries walk, so
 
@@ -42,6 +87,6 @@ Two things this module deliberately does **not** do:
 - `MEMBERSHIP_REMOVED` — A member left or was removed.
 - `ROLE_CHANGED` — A member's role changed — the payload carries **both** the old and
 - `TEAM_CREATED` — A team came into existence.
-- `TEAM_DELETED` — A team was deleted (owner, or the operator — ledger-stamped).
+- `TEAM_DELETED` — A team was deleted (owner, or an admin — ledger-stamped).
 - `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
 

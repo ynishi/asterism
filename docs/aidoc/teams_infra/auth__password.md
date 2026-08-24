@@ -23,8 +23,9 @@ Three decisions carry this module:
   it on every login, so the table cannot accumulate dead rows
   faster than logins happen).
 - **No default credentials exist** ([`reject_default_credential`]):
-  the bootstrap admin (#83 §5, the §1 InstanceOperator) is created
-  only from operator-supplied values, and a blank, too-short,
+  the bootstrap admin (#83 §5, the §1
+  [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
+  created only from operator-supplied values, and a blank, too-short,
   login-equal, or well-known placeholder password is *refused* at
   creation time rather than warned about.
 

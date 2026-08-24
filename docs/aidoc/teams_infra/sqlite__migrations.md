@@ -20,7 +20,22 @@ past batch** — schema changes go at the end.
   API**: no `updated_at`, no soft-delete column anywhere near it,
   and `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort — the
   repository exposes no update/delete path, and the schema backs
-  that up against raw SQL too.
+  that up against raw SQL too. What this costs when somebody asks
+  to be erased, and the three records that have to answer together,
+  is worked out in [`teams_core::domain::ledger`] rather than
+  restated here.
+- **The ledger keeps everything, and v0 says so on purpose.** No
+  pruning, no archival tier, no window — a team's stream holds
+  every event it ever appended. That was true before it was
+  decided, by omission; stating it makes it a position with a cost
+  somebody can weigh. The cost is not the disk the rows take, which
+  is small: it is that `teams-server backup` snapshots the database
+  with `VACUUM INTO`, which writes the whole file every time, so
+  the ledger's growth is paid again on every backup rather than
+  once at write. An instance that backs up nightly pays for its
+  entire history nightly. Trimming is a decision for whoever meets
+  that bill, and it needs this schema's append-only triggers
+  answered for first — there is no `DELETE` path here to reach for.
 - **`ledger_event` carries no foreign key to `team`.** The record
   outlives the state on purpose: deleting a team removes its rows
   (memberships and links cascade) while the same transaction

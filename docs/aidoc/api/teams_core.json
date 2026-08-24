@@ -25,7 +25,7 @@
     {
       "path": "teams_core::domain::identity",
       "kind": "module",
-      "docs": "`identity` — who exists, who belongs to a team, and who may do what.\n\nThree separations carry this module, all from #83 §1:\n\n- **Membership is not identity.** A [`User`] exists independently of\n  any team; a [`Membership`] is one `(user, team, role)` row and a\n  team's set of them is what every invariant is evaluated over.\n- **The operator is not a member.** [`InstanceOperator`] is the\n  env/CLI bootstrap identity and lives *outside* the membership\n  set — owning a team is an explicit membership row like anyone\n  else's, and when the operator acts inside a team the ledger stamp\n  says so ([`LedgerActor::Operator`]): an operator action is never\n  disguised as a member's.\n- **Authorization reads state, not history.** The decision functions\n  here take the current membership set ([`TeamRoster`]); the ledger\n  records what was decided and is never consulted to decide.\n\nThe one absolute invariant is the last-owner rule: every team has\n≥1 owner at all times, so the last owner cannot leave, be removed,\nor self-demote (the GitHub/GitLab/Gitea rule). It is enforced as\n`check_*` methods on [`TeamRoster`] so every write path asks the\nsame three lines instead of re-deriving them."
+      "docs": "`identity` — who exists, who belongs to a team, and who may do what.\n\nThree separations carry this module, all from #83 §1:\n\n- **Membership is not identity.** A [`User`] exists independently of\n  any team; a [`Membership`] is one `(user, team, role)` row and a\n  team's set of them is what every invariant is evaluated over.\n- **The admin is not a member.** [`InstanceAdmin`] is the env/CLI\n  bootstrap identity and lives *outside* the membership set —\n  owning a team is an explicit membership row like anyone else's,\n  and when an admin acts inside a team the ledger stamp says so\n  ([`LedgerActor::Admin`]): an admin action is never disguised as\n  a member's.\n- **Authorization reads state, not history.** The decision functions\n  here take the current membership set ([`TeamRoster`]); the ledger\n  records what was decided and is never consulted to decide.\n\nThe one absolute invariant is the last-owner rule: every team has\n≥1 owner at all times, so the last owner cannot leave, be removed,\nor self-demote (the GitHub/GitLab/Gitea rule). It is enforced as\n`check_*` methods on [`TeamRoster`] so every write path asks the\nsame three lines instead of re-deriving them."
     },
     {
       "path": "teams_core::domain::identity::ActorStamp",
@@ -38,14 +38,14 @@
       "docs": "Who is asking to create a team. Creation happens before any roster\nexists, so the actor here is not a [`TeamAuthority`] — there is no\nrole to have yet."
     },
     {
-      "path": "teams_core::domain::identity::InstanceOperator",
+      "path": "teams_core::domain::identity::InstanceAdmin",
       "kind": "struct",
-      "docs": "The env/CLI bootstrap identity — a distinct actor kind, **not** a\nmembership (#83 §1).\n\nThe operator lives outside the membership table and is never\nimplicitly inside a team: if the operator wants to *own* a team,\nthat is an explicit [`Membership`] row like anyone else's. What\nthis type exists for is the other direction — when the operator\nacts inside a team without being a member (deleting it, say), the\nledger must record an operator stamp, distinguishable from a\nmember's ([`LedgerActor::Operator`]), so the action is never\ndisguised as a member's."
+      "docs": "The env/CLI bootstrap identity — a distinct actor kind, **not** a\nmembership (#83 §1).\n\nAn admin lives outside the membership table and is never implicitly\ninside a team: if an admin wants to *own* a team, that is an\nexplicit [`Membership`] row like anyone else's. What this type\nexists for is the other direction — when an admin acts inside a\nteam without being a member (deleting it, say), the ledger must\nrecord an admin stamp, distinguishable from a member's\n([`LedgerActor::Admin`]), so the action is never disguised as a\nmember's.\n\nThe capacity is not single-holder. It was, through the bootstrap\npath's refusal of a second one, and that refusal is gone: an\ninstance may have as many admins as it provisions, and the\nbootstrap command is how the *first* one arrives rather than how\nthe *only* one does."
     },
     {
       "path": "teams_core::domain::identity::LedgerActor",
       "kind": "enum",
-      "docs": "The actor of a ledger event — a member's stamp or the operator's,\nand the two are never the same value.\n\nAn enum rather than a stamp plus a boolean, because the\ndistinguishability is the requirement (#83 §1: an operator action\ninside a team is never disguised as a member's): a boolean field is\na value a writer can forget, a variant is a choice every\nconstructor makes. The serde tag (`actor_kind`) carries the same\ndistinction onto the wire and into storage."
+      "docs": "The actor of a ledger event — a member's stamp or an admin's, and\nthe two are never the same value.\n\nAn enum rather than a stamp plus a boolean, because the\ndistinguishability is the requirement (#83 §1: an admin action\ninside a team is never disguised as a member's): a boolean field is\na value a writer can forget, a variant is a choice every\nconstructor makes. The serde tag (`actor_kind`) carries the same\ndistinction onto the wire and into storage."
     },
     {
       "path": "teams_core::domain::identity::Membership",
@@ -55,7 +55,7 @@
     {
       "path": "teams_core::domain::identity::RegistrationPolicy",
       "kind": "enum",
-      "docs": "Whether the instance accepts team creation from ordinary users, or\nonly from the operator (#83 §1: \"a closed-registration flag flips\nthis to operator\")."
+      "docs": "Whether the instance accepts team creation from ordinary users, or\nonly from an admin (#83 §1: \"a closed-registration flag flips this\nto operator\")."
     },
     {
       "path": "teams_core::domain::identity::Role",
@@ -65,7 +65,7 @@
     {
       "path": "teams_core::domain::identity::TeamAuthority",
       "kind": "enum",
-      "docs": "Who is asking, reduced to what the authority table cares about:\nthe actor's current role in *this* team, or the fact that the\nactor is the instance operator."
+      "docs": "Who is asking, reduced to what the authority table cares about:\nthe actor's current role in *this* team, or the fact that the\nactor is an instance admin."
     },
     {
       "path": "teams_core::domain::identity::TeamRoster",
@@ -90,12 +90,12 @@
     {
       "path": "teams_core::domain::identity::verb_allowed",
       "kind": "function",
-      "docs": "The #83 §1 authority table for in-team verbs, as one decision\nfunction.\n\nOwners may do everything. The operator may **delete** a team and\n**purge** its storage (mark / unmark / reclaim — #95 extends the §1\ndelete row to its reclaim sibling), ledger-stamped as the operator\nin both cases, and nothing else in this table: §1 grants the\noperator no implicit invite / remove / role-grant inside a team it\ndoes not own — for those the operator joins like anyone else and\nacts through a membership row.\n\nThis answers \"does the role permit the verb\" and nothing more; the\nlast-owner rule is a property of the target and the roster, checked\nseparately ([`TeamRoster::check_remove`] and friends), so a verb\ncan be permitted and still refused."
+      "docs": "The #83 §1 authority table for in-team verbs, as one decision\nfunction.\n\nOwners may do everything. An admin may **delete** a team and\n**purge** its storage (mark / unmark / reclaim — #95 extends the §1\ndelete row to its reclaim sibling), ledger-stamped as an admin in\nboth cases, and nothing else in this table: §1 grants an admin no\nimplicit invite / remove / role-grant inside a team they do not\nown — for those an admin joins like anyone else and acts through a\nmembership row.\n\nThis answers \"does the role permit the verb\" and nothing more; the\nlast-owner rule is a property of the target and the roster, checked\nseparately ([`TeamRoster::check_remove`] and friends), so a verb\ncan be permitted and still refused."
     },
     {
       "path": "teams_core::domain::ledger",
       "kind": "module",
-      "docs": "`ledger` — the actor-stamped, append-only event envelope (#83 §2).\n\nEach team has one stream. The substrate knows the envelope and\nnothing inside it: `payload` is a versioned body *per kind* and\nstays opaque here, `subjects` is the typed index trace queries walk\ninstead of parsing payloads, and `kind` is a namespaced + versioned\nstring so `forge.*` kinds can register after #63 with the envelope\nunchanged.\n\nTwo things this module deliberately does **not** do:\n\n- **Generate `seq`.** Monotonicity within a team is a storage\n  guarantee (one SQLite tx, single writer by deployment shape), so\n  [`EventSeq`] is a newtype the domain validates and carries but\n  never mints — a domain-side counter would be a second writable\n  truth, the one forbidden shape.\n- **Source state from events.** State tables are authoritative and\n  every state change appends its event in the same tx (audit-log\n  pattern, not event sourcing — #83 §2 SoT note). Nothing here\n  replays."
+      "docs": "`ledger` — the actor-stamped, append-only event envelope (#83 §2).\n\nEach team has one stream. The substrate knows the envelope and\nnothing inside it: `payload` is a versioned body *per kind* and\nstays opaque here, `subjects` is the typed index trace queries walk\ninstead of parsing payloads, and `kind` is a namespaced + versioned\nstring so `forge.*` kinds can register after #63 with the envelope\nunchanged.\n\nTwo things this module deliberately does **not** do:\n\n- **Generate `seq`.** Monotonicity within a team is a storage\n  guarantee (one SQLite tx, single writer by deployment shape), so\n  [`EventSeq`] is a newtype the domain validates and carries but\n  never mints — a domain-side counter would be a second writable\n  truth, the one forbidden shape.\n- **Source state from events.** State tables are authoritative and\n  every state change appends its event in the same tx (audit-log\n  pattern, not event sourcing — #83 §2 SoT note). Nothing here\n  replays.\n\n## Erasing a person answers in three places\n\nA request to erase somebody is not one deletion, and the reason is\nthat a person is answered for in three records, each holding a\ndifferent part of the answer — a name in one, an association in the\nnext, a handle in the third. All three have to answer, and an\nanswer that covers two of them has erased nothing:\n\n1. **The [`ActorStamp`](crate::domain::identity::ActorStamp) on\n   every ledger event they wrote.** The name is captured at write\n   time precisely so a later rename does not rewrite history — the\n   property that makes the ledger readable is the property that\n   makes it hold the name.\n2. **Their rows in the subject index.** A `user` subject is a uuid\n   rather than a name, so what it exposes is the association: which\n   events touched this person, which is the question the index\n   exists to answer quickly.\n3. **`forge_actor` on the local plane.** The handle a member's\n   writes resolve to is minted on their own instance, outside this\n   plane's storage entirely, and the display snapshot it captures\n   is the same captured-not-referenced value as the stamp above.\n\nThree mechanisms can answer, and which one is chosen is a decision\nrather than a default: **masking at write** (the stamp records an\nid and no name, which costs every reader the ability to say who\nwithout a join, and costs history the name the account had then),\n**retention under a documented exemption** (the record is kept and\nthe basis for keeping it is written down, which is what an audit\nlog is usually held under), and **crypto-shredding** (the name is\nstored encrypted under a per-subject key and erasure destroys the\nkey, which turns a rewrite into a delete somewhere the append-only\nrule does not reach).\n\n**The order matters, and this end of it comes first.** Today a row\ncould be rewritten under a migration if the decision demanded it —\nexpensive and against the schema's triggers, but possible. A\ntamper-evidence chain removes that: once each entry commits to its\npredecessor, rewriting one invalidates every entry after it, and\nerasure-by-rewriting is gone permanently rather than merely\ndiscouraged. So the mechanism is settled before a chain starts, not\nafter — a chain built first would decide this question by making it\nunanswerable."
     },
     {
       "path": "teams_core::domain::ledger::BLOB_COPY_COMPLETED",
@@ -126,6 +126,16 @@
       "path": "teams_core::domain::ledger::EventSeq",
       "kind": "struct",
       "docs": "Storage-assigned position of an event within its team's stream —\nmonotonic, starting at 1.\n\nA newtype rather than a bare `i64` so \"validated but not generated\"\nis a property of the type: the only constructor checks the value a\nstorage row handed back, and there is no `next()` for domain code\nto invent sequence numbers with."
+    },
+    {
+      "path": "teams_core::domain::ledger::ForgeIdentityRef",
+      "kind": "struct",
+      "docs": "A forge handle, as a ledger subject: what it stands for, and whom\nwhen that is a named subject.\n\nThe pair, not an opaque string. #102 fixed the vocabulary the local\nplane's `forge_actor` rows are keyed by, so there is a shape to\nvalidate and this type validates it: `subject` is present exactly\nwhen [`ForgeStandsFor::Subject`] is the kind — the same rule the\ntable states as a `CHECK`, and a pair that breaks it is refused\nhere rather than stored and puzzled over later.\n\nThe subject token is TEXT rather than a UUID because that is what\nthe column holds: the local plane's authors are named by the same\ntoken its sharing lists and viewers carry, which is opaque to both\nplanes and is not a uuid.\n\nThe canonical string is what crosses the wire and what the\n`ledger_subject` index is keyed by, so a trace query encodes a\nhandle exactly as an append wrote it: the bare word for the three\nkinds that name nobody, and `subject:<token>` for the one that\ndoes."
+    },
+    {
+      "path": "teams_core::domain::ledger::ForgeStandsFor",
+      "kind": "enum",
+      "docs": "What a forge handle stands for — the four kinds #102 fixed for the\nlocal plane's `forge_actor` rows.\n\n`owner` and `subject` are the two an author has; `unrecorded` is a\nwrite that named nobody, which is one actor rather than a fresh one\neach time; `server` is the instance itself, which is what a line's\nrule writes as. The teams plane spells them the same way because it\nis referring to the same rows, not because it re-derives the\nvocabulary: a word this list does not hold is refused at the\nboundary rather than carried as a guess."
     },
     {
       "path": "teams_core::domain::ledger::LedgerEvent",
@@ -160,7 +170,7 @@
     {
       "path": "teams_core::domain::ledger::TEAM_DELETED",
       "kind": "constant",
-      "docs": "A team was deleted (owner, or the operator — ledger-stamped)."
+      "docs": "A team was deleted (owner, or an admin — ledger-stamped)."
     },
     {
       "path": "teams_core::domain::ledger::V0_KINDS",
@@ -241,16 +251,6 @@
       "path": "teams_core::port::blob::BlobStore",
       "kind": "trait",
       "docs": "Content-addressed blob storage — one physical copy per instance,\naddressed by whole-file digest only.\n\n`put` takes the **declared** digest and returns a [`VerifiedCopy`]:\nthe adapter hashes while writing and the domain's verification rule\n([`verify_declared_digest`](crate::domain::store::verify_declared_digest))\ndecides accept-or-reject, so a mismatch surfaces as\n[`DomainError::DigestMismatch`] and no bytes land. The owned\n`Vec<u8>` is the v0 signature; when the adapter's streaming write\npath needs to show through the port (multi-GB promotions), a stream\nform is added *beside* this method rather than by changing what\nthis one promises."
-    },
-    {
-      "path": "teams_core::port::share",
-      "kind": "module",
-      "docs": "`port::share` — reserved for the share domain.\n\n#63 owns the share vocabulary: pursuit/cull/merge semantics,\npromotion copy *timing* (at IN vs at merge), and the minimum\nprovenance payload at promotion. This port is filled after #63\nfixes those; it exists now so the crate layering already has the\nseam in the place the design says it goes (#83 §0), and so nothing\ngrows share-shaped methods on the other ports in the meantime."
-    },
-    {
-      "path": "teams_core::port::share::SharePort",
-      "kind": "trait",
-      "docs": "Reserved — filled after #63. Deliberately empty: an invented verb\nhere would be this crate deciding what #63 exists to decide."
     }
   ]
 }

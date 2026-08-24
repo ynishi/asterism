@@ -348,7 +348,6 @@
 - [teams-core::port](teams_core/port.md): Ports — the traits `teams-infra` implements (dependency inversion,
 - [teams-core::port::auth](teams_core/port__auth.md): `port::auth` — credential verification behind a provider swap
 - [teams-core::port::blob](teams_core/port__blob.md): `port::blob` — backing storage for the instance's global CAS.
-- [teams-core::port::share](teams_core/port__share.md): `port::share` — reserved for the share domain.
 
 ## teams-infra 0.0.0
 
