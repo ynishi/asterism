@@ -2,11 +2,11 @@
 
 Keeping lines, stated in the forge's own words.
 
-[`Lines`] is one of the four faces the forge asks for. Every type it
-mentions — [`Line`], [`Name`], [`Act`] — belongs to the model, so
-nothing here has to be translated and there is no vocabulary to
-isolate. Whatever implements it is somebody else's problem, and the
-forge never names them.
+[`Lines`] is one of the ports the forge asks through, which
+[`forge`](super) lists. Every type it mentions — [`Line`], [`Name`],
+[`Act`] — belongs to the model, so nothing here has to be translated
+and there is no vocabulary to isolate. Whatever implements it is
+somebody else's problem, and the forge never names them.
 
 # A line moves through one door, and it is not this one
 
