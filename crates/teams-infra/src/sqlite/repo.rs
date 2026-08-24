@@ -914,10 +914,18 @@ impl SqliteTeamsRepository {
         after: Option<i64>,
         limit: u32,
     ) -> Result<Vec<LedgerEvent>, DomainError> {
-        // Zero is the caller asking for nothing, answered without a
-        // round trip: `LIMIT 0` would return the same empty result,
-        // and returning it here means the walk below never runs a
-        // query whose page is empty by construction.
+        // Zero is the caller asking for nothing, and it gets nothing
+        // without a round trip — `LIMIT 0` would return the same empty
+        // result from SQLite, so this is saving the query rather than
+        // correcting it.
+        //
+        // What it is not is a *cursor* answer. An empty page here
+        // satisfies `len() == limit` at zero, so a caller deriving
+        // "was this page full?" from the count gets `true` off a
+        // stream it has read nothing of. That is the reader's problem
+        // to avoid, and the HTTP surface avoids it by refusing to pass
+        // zero down at all; a reader that does pass zero is asking for
+        // no rows and must not also ask what came after them.
         if limit == 0 {
             return Ok(Vec::new());
         }

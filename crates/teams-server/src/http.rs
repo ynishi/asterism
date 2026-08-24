@@ -707,9 +707,11 @@ struct EventsQuery {
     /// Resume above this seq. Absent means from the beginning.
     after: Option<i64>,
     /// How many events at most. Absent means
-    /// [`EVENTS_PAGE_DEFAULT`]; anything above [`EVENTS_PAGE_MAX`] is
-    /// clamped to it rather than refused, because a caller asking for
-    /// more than the ceiling wants as much as it can have.
+    /// [`EVENTS_PAGE_DEFAULT`]; anything outside
+    /// `1..=`[`EVENTS_PAGE_MAX`] is clamped into it rather than
+    /// refused, because a caller asking for more than the ceiling
+    /// wants as much as it can have, and one asking for none is
+    /// asking for a page it can do nothing with.
     limit: Option<u32>,
 }
 
@@ -736,10 +738,18 @@ async fn events(
     Extension(access): Extension<TeamAccess>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<LedgerPageDto>, ApiError> {
+    // Clamped into `1..=MAX`, and the floor is load-bearing rather
+    // than tidiness: at zero the repository answers with an empty page
+    // that is nevertheless *full* — `len() == limit` holds at zero —
+    // so the walk below would read a cursorless page off a stream with
+    // events still in it, and say `next_after: null` about a position
+    // nothing had been read up to. A caller asking for no events is
+    // asking for a page it can do nothing with; it gets the smallest
+    // one that keeps the cursor contract true.
     let limit = query
         .limit
         .unwrap_or(EVENTS_PAGE_DEFAULT)
-        .min(EVENTS_PAGE_MAX);
+        .clamp(1, EVENTS_PAGE_MAX);
     let events = ctx
         .repo
         .events_page(access.team_id, query.after, limit)

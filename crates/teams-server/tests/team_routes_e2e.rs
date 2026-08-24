@@ -639,5 +639,27 @@ async fn the_events_route_pages_and_hands_back_where_to_resume() {
     assert_eq!(status, StatusCode::OK, "clamped limit: {body}");
     assert_eq!(body["events"].as_array().unwrap().len(), whole.len());
 
+    // And a limit of zero is clamped up to one, which is the floor the
+    // cursor contract needs. Left alone it would ask the repository
+    // for nothing and get an empty page that still counts as full —
+    // `len() == limit` holds at zero — so the response would carry
+    // `next_after: null` while the stream still had every event in it,
+    // telling a walker it had reached the end before it had read
+    // anything.
+    let (status, body) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team_id}/events?limit=0"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "zero limit: {body}");
+    let page = body["events"].as_array().unwrap();
+    assert_eq!(page.len(), 1, "zero is clamped to one, not honoured");
+    assert_eq!(page[0], whole[0], "and it is the first event, not none");
+    assert_eq!(
+        body["next_after"].as_i64(),
+        Some(whole[0]["seq"].as_i64().unwrap()),
+        "a full page carries a cursor, so the walk can go on"
+    );
+
     h.driver.shutdown().await.unwrap();
 }

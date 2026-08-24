@@ -672,9 +672,11 @@ mod tests {
     #[test]
     fn the_old_operator_tag_still_reads_and_is_never_written_back() {
         // Rows written before the rename say "operator", and
-        // `ledger_event` is append-only by trigger — there is no
-        // migration that could restate them, so this alias is
-        // permanent rather than transitional.
+        // `ledger_event` is append-only by trigger, so nothing
+        // restates them in the ordinary course. The alias is permanent
+        // rather than transitional, and no later batch may assume the
+        // old tag has gone — see [`LedgerActor::Admin`] for why that
+        // is a rule rather than an impossibility.
         let stamp = serde_json::json!({
             "actor_kind": "operator",
             "stamp": { "user_id": Uuid::now_v7(), "display_name": "Hoshino" },
