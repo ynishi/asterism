@@ -356,9 +356,12 @@
 - [teams-infra::auth::password](teams_infra/auth__password.md): `auth::password` — the v0 instance-local credential adapter
 - [teams-infra::backup](teams_infra/backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
 - [teams-infra::blob](teams_infra/blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+- [teams-infra::forge](teams_infra/forge.md): What the team's forge store keeps, whatever it keeps it in.
+- [teams-infra::forge::rows](teams_infra/forge__rows.md): The shapes this plane's forge store keeps, and the two translations
 - [teams-infra::gc](teams_infra/gc.md): `gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
 - [teams-infra::paths](teams_infra/paths.md): Data-profile and on-disk layout conventions for the teams plane.
 - [teams-infra::sqlite](teams_infra/sqlite.md): SQLite backend for the teams plane — connection lifecycle and schema
+- [teams-infra::sqlite::forge](teams_infra/sqlite__forge.md): The team's forge — adapters behind `asterism-core`'s forge ports,
 - [teams-infra::sqlite::map](teams_infra/sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
 - [teams-infra::sqlite::migrations](teams_infra/sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
 - [teams-infra::sqlite::repo](teams_infra/sqlite__repo.md): The teams repository — state tables and the per-team ledger behind

@@ -10,6 +10,8 @@ conventions over the teams-owned database.
   migrations, a fresh series starting at V1 (this database shares
   nothing with the app database — #83 §4).
 - [`repo`] — the repository over the state tables and the ledger.
+- [`forge`] — the forge's ports over one team's rows, appending to
+  that team's ledger in the same transaction (#148 decision 17).
 - [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
   points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
   pragmas set and the schema migrated.

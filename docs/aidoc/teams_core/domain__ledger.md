@@ -66,7 +66,9 @@ unanswerable.
 
 ## Functions
 
-- `is_v0_kind` — Whether `kind` is one this build of the plane writes. Shape and
+- `is_forge_kind` — Whether `kind` is one the hosted forge writes.
+- `is_registered_kind` — Whether this build writes `kind` at all — the writer's question,
+- `is_v0_kind` — Whether `kind` is one of the substrate's own v0 gestures.
 
 ## Types
 
@@ -83,6 +85,19 @@ unanswerable.
 - `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
 - `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
 - `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `FORGE_KINDS` — The kinds the hosted forge's verbs write (#148 decisions 17 and
+- `FORGE_LINE_DISCARDED` — A line was dropped, with everything on it.
+- `FORGE_LINE_OPENED` — A line was opened on the team's forge.
+- `FORGE_LINE_RENAMED` — A line was renamed — the payload carries the old name and the new,
+- `FORGE_LINE_STANDING_SET` — A line was archived or taken back out of the archive.
+- `FORGE_LINE_STRATEGY_SET` — A line's collision rule was changed, old and new both in the
+- `FORGE_PURSUIT_CLOSED` — Work ended, and — when it was satisfied — the line moved with it.
+- `FORGE_PURSUIT_OPENED` — Work was opened against a line.
+- `FORGE_ROUND_PUSHED` — A round was written onto open work.
+- `FORGE_THREAD_AMENDED` — Something said was corrected. The correction is a new record and
+- `FORGE_THREAD_OPENED` — A conversation was opened about work, a round, an entry as a round
+- `FORGE_THREAD_RENAMED` — A conversation was given a title, or had the one it had taken off.
+- `FORGE_THREAD_SAID` — Something was said in a conversation.
 - `MEMBERSHIP_ADDED` — A user became a member.
 - `MEMBERSHIP_REMOVED` — A member left or was removed.
 - `ROLE_CHANGED` — A member's role changed — the payload carries **both** the old and

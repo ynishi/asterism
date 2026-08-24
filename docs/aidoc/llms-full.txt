@@ -14150,7 +14150,9 @@ unanswerable.
 
 ## Functions
 
-- `is_v0_kind` — Whether `kind` is one this build of the plane writes. Shape and
+- `is_forge_kind` — Whether `kind` is one the hosted forge writes.
+- `is_registered_kind` — Whether this build writes `kind` at all — the writer's question,
+- `is_v0_kind` — Whether `kind` is one of the substrate's own v0 gestures.
 
 ## Types
 
@@ -14167,6 +14169,19 @@ unanswerable.
 - `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
 - `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
 - `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `FORGE_KINDS` — The kinds the hosted forge's verbs write (#148 decisions 17 and
+- `FORGE_LINE_DISCARDED` — A line was dropped, with everything on it.
+- `FORGE_LINE_OPENED` — A line was opened on the team's forge.
+- `FORGE_LINE_RENAMED` — A line was renamed — the payload carries the old name and the new,
+- `FORGE_LINE_STANDING_SET` — A line was archived or taken back out of the archive.
+- `FORGE_LINE_STRATEGY_SET` — A line's collision rule was changed, old and new both in the
+- `FORGE_PURSUIT_CLOSED` — Work ended, and — when it was satisfied — the line moved with it.
+- `FORGE_PURSUIT_OPENED` — Work was opened against a line.
+- `FORGE_ROUND_PUSHED` — A round was written onto open work.
+- `FORGE_THREAD_AMENDED` — Something said was corrected. The correction is a new record and
+- `FORGE_THREAD_OPENED` — A conversation was opened about work, a round, an entry as a round
+- `FORGE_THREAD_RENAMED` — A conversation was given a title, or had the one it had taken off.
+- `FORGE_THREAD_SAID` — Something was said in a conversation.
 - `MEMBERSHIP_ADDED` — A user became a member.
 - `MEMBERSHIP_REMOVED` — A member left or was removed.
 - `ROLE_CHANGED` — A member's role changed — the payload carries **both** the old and
@@ -14303,7 +14318,11 @@ mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
   planes never open each other's files.
 - [`sqlite`] — connection lifecycle (WAL, through the workspace's
   `rusqlite-isle` line), the fresh `PRAGMA user_version` migration
-  series starting at V1, and the repository.
+  series starting at V1, the repository, and — since #150 — the
+  forge the team hosts ([`sqlite::forge`]).
+- [`forge`] — the row shapes that forge sits on, which are the local
+  plane's again because the dependency rule below forbids sharing
+  the module they came from.
 - [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
   behind `teams-core`'s auth port, opaque sessions with expiry and
   a cleanup path.
@@ -14327,11 +14346,21 @@ without appending, and none appends without a state change — the
 single documented exception is the locator, whose operations are
 private-space and by design never land in any team's ledger.
 
+**The rule has a second writer, and it is the same rule** (#148
+decision 17). Every write-port method on
+[`TeamForge`](sqlite::forge::TeamForge) does the same thing for the
+forge's rows, through the same append. Its documented exception is
+minting a forge handle, which is not something somebody did — it
+happens on the way to a write, and the write records who.
+
 ## Dependency rule
 
-This crate depends on `teams-core` and never on `asterism-infra` /
-`-contract` / `-server` (#83 §4): those are the local app's
-plumbing, and the teams plane owns its own.
+This crate depends on `teams-core` and on `asterism-core`, and
+never on `asterism-infra` / `-contract` / `-server` (#83 §4): those
+are the local app's plumbing, and the teams plane owns its own. The
+`asterism-core` edge is #148 decision 20's — the team hosts the
+forge by implementing the ports `asterism-core` declares, so the
+model and the traits are named here and nothing below them is.
 
 ## Modules
 
@@ -14339,9 +14368,12 @@ plumbing, and the teams plane owns its own.
 - [`auth::password`](auth__password.md): `auth::password` — the v0 instance-local credential adapter
 - [`backup`](backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
 - [`blob`](blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
+- [`forge`](forge.md): What the team's forge store keeps, whatever it keeps it in.
+- [`forge::rows`](forge__rows.md): The shapes this plane's forge store keeps, and the two translations
 - [`gc`](gc.md): `gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95
 - [`paths`](paths.md): Data-profile and on-disk layout conventions for the teams plane.
 - [`sqlite`](sqlite.md): SQLite backend for the teams plane — connection lifecycle and schema
+- [`sqlite::forge`](sqlite__forge.md): The team's forge — adapters behind `asterism-core`'s forge ports,
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
 - [`sqlite::migrations`](sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
 - [`sqlite::repo`](sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
@@ -14536,6 +14568,96 @@ upload contract closes by always accepting the full body.
 - `StagingWrite` — One in-flight streaming write: the staging file, the running hash,
 
 
+<!-- teams_infra/forge.md -->
+# teams-infra::forge
+
+What the team's forge store keeps, whatever it keeps it in.
+
+[`rows`] is the shape the SQLite adapter in
+[`sqlite::forge`](crate::sqlite::forge) writes as columns. Nothing
+here talks to a store, and nothing here knows what a team is —
+taking a domain value apart and putting one back is the same work
+whichever store is underneath, and the scope is the adapter's.
+
+
+<!-- teams_infra/forge__rows.md -->
+# teams-infra::forge::rows
+
+The shapes this plane's forge store keeps, and the two translations
+either side of them.
+
+Every field here is a scalar or an id. Nothing holds a [`Line`], a
+[`Pursuit`], a [`ChangePoint`] or an [`Op`] — that is the whole
+point of the module, and the reason it is written out rather than
+replaced by keeping the domain values in a map.
+
+The names match what the tables are called, because the adapter
+that writes those is meant to be able to read this one as a
+specification of what it owes.
+
+# This is the local plane's module again, and that is deliberate
+
+`asterism-infra` holds one of these, shared by the adapters that
+live there. This plane cannot reach it: `asterism-infra` is on #83
+§4's never-list, and the edge #148 decision 20 opens is to
+`asterism-core` alone. So the team's adapter carries its own copy,
+which is the cost the decision names rather than one it overlooked.
+
+What keeps the copy honest is the same thing that keeps the schemas
+honest: it stays *literally* parallel, so a divergence is a diff
+somebody can read rather than behaviour somebody meets. Both halves
+are thin — taking a domain value apart is field access, and putting
+one back is [`restore`], which lives in `asterism-core` and is
+shared. The rules neither copy holds are the model's.
+
+Two things are deliberately not parallel, and they are the two
+worth knowing before diffing this against its source. **The doc
+comments are shortened**: the arguments they make are the same, and
+the long form is the one over in `asterism-infra`, so prose that
+differs there is prose, not drift — the field lists, the function
+signatures and the bodies are what a diff is for. **There is no
+`team_id`**: scope is the adapter's, the column is the adapter's,
+and a row shape that carried it would put the team into every
+signature the port deliberately leaves it out of.
+
+The tests below come across with the module, because they ask
+things no store can reach — a message that already carries a
+correction is not something any port hands over — and a copy that
+kept the translation and dropped them would leave the same cases
+unasked here and answered there.
+
+## Functions
+
+- `anchor_columns` — Flattens an anchor into the columns a store keeps it in.
+- `read_line` — Rebuilds a line from its row, its change points and their rows.
+- `read_pursuit` — Rebuilds work from its row, its nodes and their operations.
+- `read_thread` — Rebuilds a conversation from its row, what was said, and every
+- `take_anchor_apart` — The head row of a thread, anchor flattened into its five columns.
+- `take_change_point_apart` — One change point's rows, for the single-node write a close makes.
+- `take_close_apart` — One ending, for the append a commit makes.
+- `take_message_apart` — One thing said, for the append `say` makes.
+- `take_new_line_apart` — The row for a line that has just been opened.
+- `take_pursuit_apart` — The work's own row, and one `pursuit_node` row plus its
+- `take_revision_apart` — One correction, for the append `amend` makes.
+- `take_revisions_apart` — Every correction to one message, oldest first.
+- `take_round_apart` — One round, for the append a push makes.
+- `take_thread_apart` — A whole conversation, for the write that opens one.
+
+## Types
+
+- `ActRow` — An act, flattened the way a row carries one: a stamp, a handle, and
+- `AnchorColumns` — What a thread hangs off, as the five columns that carry it.
+- `ChangePointRow` — `change_point` — one move of a line, without the table it carries.
+- `ChangeRowRow` — `change_row` — one axis-triple of one entry, under one change
+- `LineRow` — `line` — the repository, and the three things about it that are not
+- `PursuitNodeRow` — `pursuit_node` — a round or an ending.
+- `PursuitOpRow` — `pursuit_op` — one operation of one round, in the order it was
+- `PursuitRow` — `pursuit` — one line of work.
+- `ThreadMessageRow` — `forge_thread_message` — one thing said.
+- `ThreadRevisionRow` — `forge_thread_revision` — a correction to something said.
+- `ThreadRow` — `forge_thread` — one conversation, and what it hangs off.
+
+
 <!-- teams_infra/gc.md -->
 # teams-infra::gc
 
@@ -14658,6 +14780,8 @@ conventions over the teams-owned database.
   migrations, a fresh series starting at V1 (this database shares
   nothing with the app database — #83 §4).
 - [`repo`] — the repository over the state tables and the ledger.
+- [`forge`] — the forge's ports over one team's rows, appending to
+  that team's ledger in the same transaction (#148 decision 17).
 - [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
   points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
   pragmas set and the schema migrated.
@@ -14693,6 +14817,92 @@ write lock at `BEGIN` keeps every wait on the busy-handler path.
 - `schema_version` — Reads the current schema version from an already-open isle.
 
 
+<!-- teams_infra/sqlite__forge.md -->
+# teams-infra::sqlite::forge
+
+The team's forge — adapters behind `asterism-core`'s forge ports,
+over the team's own database (#148 decision 20).
+
+One type for `Lines`, `Pursuits`, `Closings`, `Threads`, `Actors`
+and `Store`. The close is why the first four are one object: it
+writes a change point, its rows and an ending together, and two
+adapters sharing one transaction is a shape that only reads as
+sharing when they are the same object.
+
+`Actors` and `Store` join them for a smaller reason: they need the
+same three things this type holds — the isle, the team, and nothing
+else — and every question they answer is scoped by the team the way
+every other read here is. Neither appends to the stream. `Store` is
+a pure read, and minting a handle deliberately records nothing (see
+[`TeamForge::handle`]), so what they share with the write ports is
+the scope rather than the transaction.
+
+`Strategies` needs no adapter — `Builtin` is in `asterism-core`, and
+a collision rule is not storage.
+
+# The team is here and in no signature
+
+[`TeamForge`] holds a `team_id`, every statement carries it, and no
+port method mentions it. That is the seat `Lines::list` reserves
+when it says that scoping a listing belongs to whoever knows what a
+person is: the forge does not, this plane does, and the answer lands
+here rather than in a trait the local plane also implements.
+
+Reads are scoped as tightly as writes. A `LineId` from another team
+reads back as nothing rather than as somebody else's line, so a
+caller holding an id it should not have learns nothing from it.
+
+# Every write is one transaction, and the ledger is in it
+
+Decision 17: a forge write and its ledger event commit together or
+neither lands. So every write-port method here is one isle call
+opening one transaction, and inside it the rows change *and*
+[`append_event_in_tx`] runs — the same allocation of `seq`, the same
+registry check and the same subject index rows the repository's own
+gestures go through. A half-written pair is not a state this store
+can be in, which is what the e2e asks it for.
+
+# Two records, two fields
+
+Revision 6. The **event** records the capacity — `LedgerActor`,
+member or admin, with the display name stamped at write time. The
+**forge node** records who — an `ActorId`, which is a handle in
+`forge_actor` and carries no capacity at all. Neither is derived
+from the other, and an event carries the handle in its payload so
+the two can be read against each other without a join.
+
+Where the handle is one this team's `forge_actor` already holds,
+the event also carries it as a
+[`SubjectRef::ForgeIdentity`](teams_core::domain::ledger::SubjectRef::ForgeIdentity),
+which is what lets a trace query cross from a person to their forge
+writes without reading payloads. A handle with no row is not an
+error — the model mints `ActorId`s freely and a caller may carry one
+this store never saw — so the subject is added when it can be
+resolved and the payload's `by` answers either way.
+
+# What a payload does not carry
+
+Anything somebody wrote. Names of lines and titles of threads are
+here, because a name is how a team refers to a line and an event
+about a rename that did not say the names would not read on its
+own. Message bodies are not, and neither is content: the ledger is
+append-only in the schema and there is no path that rewrites a row,
+so a body copied into it is a second copy nothing can ever act on
+when somebody asks to be erased.
+
+# The head is never read to be compared
+
+Nothing here selects a head and checks it against what a caller
+decided: `UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id,
+parent_id)` refuse a fork as part of the insert. What that costs is
+telling one constraint violation from another, so the exact column
+list SQLite reports is what is matched — see `is_unique_violation`.
+
+## Types
+
+- `TeamForge` — The forge's ports over one team's rows in the teams database.
+
+
 <!-- teams_infra/sqlite__map.md -->
 # teams-infra::sqlite::map
 
@@ -14710,7 +14920,9 @@ is about to change.
 
 - `actor_from_json` — Parses the `actor` TEXT column back into a [`LedgerActor`].
 - `actor_to_json` — Serialises a [`LedgerActor`] into the `actor` TEXT column — the
+- `datetime_to_ms` — An instant as the epoch-ms column that carries it.
 - `infra_err` — Wraps an infrastructure error (typically `IsleError`) into
+- `ms_to_datetime` — An epoch-ms column as an instant, refusing a value no clock
 - `subject_from_ref` — Rebuilds a [`SubjectRef`] from its `(ref_type, ref_value)` columns —
 - `subject_to_ref` — Splits a [`SubjectRef`] into the `(ref_type, ref_value)` pair the
 
