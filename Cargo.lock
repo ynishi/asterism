@@ -8629,6 +8629,8 @@ name = "teams-server"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "asterism-contract",
+ "asterism-core",
  "axum",
  "clap",
  "http-body-util",

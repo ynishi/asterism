@@ -217,3 +217,70 @@ pub struct LedgerPageDto {
     /// last seq it saw and asks again.
     pub next_after: Option<i64>,
 }
+
+/// What the team minted for content that entered it
+/// (`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).
+///
+/// The asset id is the team's own surrogate and never a local one
+/// (#148 decision 6): a client keeps the correspondence on its own
+/// machine, and reading this as a local `AssetId` is the one thing
+/// that boundary forbids.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ContentEnteredDto {
+    /// The `TeamAsset` this promotion minted. One per promotion, so
+    /// two members bringing identical bytes get one each (#148
+    /// decision 7) — this is the id a round names as content.
+    pub asset_id: String,
+    /// The digest the bytes hashed to, as the server verified it.
+    pub digest: String,
+    /// The open work the content entered against (#148 decision 5).
+    pub pursuit_id: String,
+    /// The `forge.content.entered/1` event the write appended, in the
+    /// same transaction as the rows (#148 decision 17).
+    pub event: LedgerEventDto,
+}
+
+/// One asset a team holds, as the bulk resolve answers about it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct HeldAssetDto {
+    /// The team's surrogate for it.
+    pub asset_id: String,
+    /// What it was converted from, when the conversion was one blob —
+    /// which is the whole of v0. Absent for a conversion composed some
+    /// other way (#148 decision 3), which is a shape the schema admits
+    /// and nothing writes yet.
+    pub digest: Option<String>,
+    /// The work the content entered against, when the row records one.
+    pub entered_for_pursuit_id: Option<String>,
+    /// When the team minted it, epoch ms.
+    pub created_at_ms: i64,
+}
+
+/// The bulk resolve's answer
+/// (`POST /teams/{team_id}/forge/content/resolve`).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ResolvedContentDto {
+    /// The asked-about ids this team holds, with what each carries.
+    pub held: Vec<HeldAssetDto>,
+    /// The asked-about ids it does not — which includes ids another
+    /// team holds, because an id outside this team reads as absent
+    /// here and a caller learns nothing else about it.
+    pub unknown: Vec<String>,
+}
+
+/// The have-check's answer
+/// (`POST /teams/{team_id}/forge/content/have`).
+///
+/// The digests this team holds, and nothing about the rest: the
+/// question is what a client may skip sending, and an answer shaped as
+/// "held / not held" per digest is one a caller can line up against
+/// the wrong list.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct HeldContentDto {
+    /// Which of the asked digests are in this team's store now.
+    ///
+    /// A digest marked for purge is **not** here (#95): a client told
+    /// it could skip a send for bytes a reclaim is about to take would
+    /// have skipped it wrongly.
+    pub held: Vec<String>,
+}

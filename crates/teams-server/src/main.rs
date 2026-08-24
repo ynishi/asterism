@@ -3,12 +3,16 @@
 //! ## Role
 //!
 //! Serves the `/teams/*` HTTP API (auth v0 + team/membership routes —
-//! the #91 slice; blobs — #93; purge — #95) over the teams-owned
+//! the #91 slice; blobs — #93; purge — #95; the hosted forge and the
+//! subject-filtered ledger read — #151) over the teams-owned
 //! SQLite database, and carries the instance's maintenance verbs:
 //! `gc` (the zero-link sweep on demand) and `backup` (quiesce →
 //! `VACUUM INTO` → one DB-first archive), both #95. Fully separate
-//! from the `asterism-server` binary: the two share `asterism-core`
-//! (lib) only, so the license boundary sits at the bin edge (#83 §4).
+//! from the `asterism-server` binary: what the two share is library
+//! crates that depend on no teams-\* crate, so the license boundary
+//! sits at the bin edge (#83 §4). Which ones, and why each is
+//! permitted, is stated once — in this crate's `Cargo.toml`, beside
+//! the dependency lines themselves.
 //! The MCP surface is a later slice.
 //!
 //! ## Identity bootstrap

@@ -11,6 +11,8 @@
 //! | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 //! | GET | `/teams/{team_id}/roster` | member, or an admin |
 //! | GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
+//! | GET | `/teams/{team_id}/events/subject` | member, or an admin — one subject's events, same page contract |
+//! | — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 //! | POST | `/teams/{team_id}/members/invite` | owner |
 //! | POST | `/teams/{team_id}/members/remove` | owner |
 //! | POST | `/teams/{team_id}/owners/grant` | owner |
@@ -71,6 +73,13 @@
 //! `DigestMismatch` → 409 (the mismatch body carries declared and
 //! computed, both), `Infra` → 500; the gate adds 401/403/404 and the
 //! limiter 429.
+//!
+//! The forge's routes answer on a second table, because their
+//! refusals come from the other plane's `DomainError` and carry a
+//! field this one has no column for: `reason`, on a conflict, which
+//! is what tells a caller whether retrying is worth anything. Those
+//! bodies are `asterism-server`'s to the letter — see `ApiError::Forge`
+//! and `forge_response` below.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -82,6 +91,11 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Extension, Json, Router};
+// The other plane's refusal type, named for what it is here: the
+// hosted forge's services are `asterism-core`'s and speak its
+// `DomainError` (#148 decision 20), and two types called `DomainError`
+// in one module would read as one.
+use asterism_core::DomainError as ForgeError;
 use http_body_util::BodyExt as _;
 use teams_contract::command::{
     CreateTeamCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand, RemoveMemberCommand,
@@ -103,7 +117,7 @@ use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
 use teams_infra::auth::password::AccountRecord;
 use teams_infra::gc::sweep_zero_link_blobs;
-use teams_infra::sqlite::map::subject_to_ref;
+use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -111,9 +125,20 @@ use crate::state::{TeamsCtx, now_ms};
 
 /// HTTP-boundary error type. Same tagged body as `asterism-server`'s,
 /// with the auth/authority outcomes this surface adds.
-enum ApiError {
+pub(crate) enum ApiError {
     /// A domain refusal, mapped by variant.
     Domain(DomainError),
+    /// A refusal from the hosted forge, which speaks the other plane's
+    /// `DomainError` (#148 decision 20 — the services are
+    /// `asterism-core`'s, unchanged).
+    ///
+    /// Mapped by `asterism-server`'s table rather than by this one, to
+    /// the letter including the `reason` token on a conflict: the
+    /// mirrored routes answer with the same paths and the same DTOs
+    /// (decision 19), and a client that had to branch differently on a
+    /// refusal depending on which prefix it asked would not be talking
+    /// to a mirror.
+    Forge(ForgeError),
     /// No token, a malformed header, an unknown token, or an expired
     /// one — deliberately indistinguishable.
     Unauthorized,
@@ -141,9 +166,42 @@ impl From<DomainError> for ApiError {
     }
 }
 
+impl From<ForgeError> for ApiError {
+    fn from(err: ForgeError) -> Self {
+        Self::Forge(err)
+    }
+}
+
+/// A forge refusal as `asterism-server` answers it, to the letter.
+///
+/// Its own function rather than an arm of the table below, because
+/// this body has a field that one has no column for: on a conflict,
+/// the `reason` token that tells a caller whether retrying is worth
+/// anything. Four of them exist and `asterism-server`'s own error type
+/// documents what each asks of the caller; a mirrored route that
+/// dropped the token would leave a client with a 409 it cannot act on.
+fn forge_response(err: &ForgeError) -> Response {
+    let (status, kind) = match err {
+        ForgeError::PersonaNotFound(_)
+        | ForgeError::AssetNotFound(_)
+        | ForgeError::NotFound { .. } => (StatusCode::NOT_FOUND, "NotFound"),
+        ForgeError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation"),
+        ForgeError::DuplicatePersona(_) | ForgeError::Conflict { .. } => {
+            (StatusCode::CONFLICT, "Conflict")
+        }
+        ForgeError::Infra(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal"),
+    };
+    let mut body = serde_json::json!({ "kind": kind, "message": err.to_string() });
+    if let (Some(reason), Some(object)) = (err.reason(), body.as_object_mut()) {
+        object.insert("reason".into(), serde_json::Value::from(reason));
+    }
+    (status, Json(body)).into_response()
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, kind, message) = match self {
+            Self::Forge(err) => return forge_response(&err),
             Self::Domain(err) => {
                 let (status, kind) = match &err {
                     DomainError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation"),
@@ -202,22 +260,22 @@ impl IntoResponse for ApiError {
 /// The account [`auth_gate`] resolved — present on every request past
 /// it.
 #[derive(Clone)]
-struct AuthedAccount(AccountRecord);
+pub(crate) struct AuthedAccount(pub(crate) AccountRecord);
 
 /// What [`team_gate`] established about the caller in the `{team_id}`
 /// team: their current role (from state), and whether the admin
 /// capacity is available as a fallback.
 #[derive(Clone)]
-struct TeamAccess {
-    team_id: Uuid,
-    role: Option<Role>,
-    admin: bool,
+pub(crate) struct TeamAccess {
+    pub(crate) team_id: Uuid,
+    pub(crate) role: Option<Role>,
+    pub(crate) admin: bool,
 }
 
 /// Which capacity a verb was granted under — what decides the ledger
 /// stamp.
 #[derive(Clone, Copy)]
-enum Capacity {
+pub(crate) enum Capacity {
     Member,
     Admin,
 }
@@ -260,6 +318,13 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
             "/teams/{team_id}/blobs/purge/marked",
             get(purge_marked_list),
         )
+        .route("/teams/{team_id}/events/subject", get(events_for_subject))
+        // The hosted forge, mirrored under this team's prefix (#148
+        // decision 19). Merged *inside* the gate rather than beside
+        // it: "every route sits behind the membership gate" is the
+        // whole of the answer for all but the discard, and a forge
+        // route added later inherits that by where it is written.
+        .merge(crate::forge::routes())
         .layer(middleware::from_fn_with_state(ctx.clone(), team_gate));
 
     let authed = Router::new()
@@ -373,7 +438,7 @@ async fn team_gate(
 /// member acts through the row like anyone else, and the admin
 /// capacity only answers when the caller stands outside the roster —
 /// which is exactly the action §1 wants admin-stamped.
-fn decide(access: &TeamAccess, verb: TeamVerb) -> Result<Capacity, ApiError> {
+pub(crate) fn decide(access: &TeamAccess, verb: TeamVerb) -> Result<Capacity, ApiError> {
     if let Some(role) = access.role
         && verb_allowed(TeamAuthority::Member(role), verb)
     {
@@ -396,12 +461,14 @@ const fn verb_name(verb: TeamVerb) -> &'static str {
         TeamVerb::GrantOwner => "granting the owner role",
         TeamVerb::RevokeOwner => "revoking the owner role",
         TeamVerb::Purge => "purging the team's storage",
+        TeamVerb::ForgeWork => "working on this team's forge",
+        TeamVerb::ForgeDiscard => "discarding a line",
     }
 }
 
 /// The ledger stamp for `account` acting under `capacity` — the one
 /// place the member/admin variant is chosen (#83 §1: never disguised).
-fn stamp(account: &AccountRecord, capacity: Capacity) -> Result<LedgerActor, ApiError> {
+pub(crate) fn stamp(account: &AccountRecord, capacity: Capacity) -> Result<LedgerActor, ApiError> {
     Ok(match capacity {
         Capacity::Member => LedgerActor::member(ActorStamp {
             user_id: account.user_id,
@@ -699,7 +766,12 @@ async fn roster(
 /// request for the whole stream spelled differently, and the response
 /// this route pages in order to bound comes back anyway.
 const EVENTS_PAGE_DEFAULT: u32 = 100;
-const EVENTS_PAGE_MAX: u32 = 500;
+/// `pub(crate)` because this ceiling is not the events page's alone:
+/// the forge's two bulk reads derive theirs from it rather than
+/// picking their own, so changing this number moves them too. Why a
+/// caller-sized read is bounded at all is argued where those two
+/// define their bound, not here.
+pub(crate) const EVENTS_PAGE_MAX: u32 = 500;
 
 /// Query parameters of the events read.
 #[derive(serde::Deserialize)]
@@ -757,6 +829,106 @@ async fn events(
     // A full page may still be the last one, and the only way to know
     // is to ask again — so "shorter than asked for" is what ends the
     // walk, and a full page always carries a cursor.
+    let next_after = (events.len() as u32 == limit)
+        .then(|| events.last().map(|event| event.seq.get()))
+        .flatten();
+    let events = events
+        .iter()
+        .map(event_dto)
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    Ok(Json(LedgerPageDto { events, next_after }))
+}
+
+/// Query parameters of the subject-filtered events read: the pair that
+/// names a subject, plus [`EventsQuery`]'s cursor.
+#[derive(serde::Deserialize)]
+struct SubjectEventsQuery {
+    /// The subject's kind, spelled as the ledger's index spells it —
+    /// `forge_line`, `forge_pursuit`, `forge_thread`,
+    /// `forge_identity`, `user`, `digest`, `blob`.
+    #[serde(rename = "type")]
+    ref_type: String,
+    /// Its value in the same encoding: a hyphenated uuid, a
+    /// `sha256:`-prefixed digest, or a forge handle's canonical form.
+    value: String,
+    /// Resume above this seq. Absent means from the beginning.
+    after: Option<i64>,
+    /// How many at most — clamped exactly as [`events`] clamps it.
+    limit: Option<u32>,
+}
+
+/// `GET /teams/{team_id}/events/subject?type=<kind>&value=<v>&after=&limit=`
+/// — the events that reference one subject, in order.
+///
+/// The trace query the repository has always been able to answer and
+/// nothing could ask for (#83 §2). What made it worth exposing now is
+/// what it can be asked *about*: the ledger carries forge subjects
+/// since #150, so "everything that happened to this line" and
+/// "everything that happened to this piece of work" are one request
+/// each instead of a walk of the whole stream with a filter on the
+/// client.
+///
+/// Its own route rather than a parameter on [`events`], because the
+/// two are different questions with different costs, and a caller that
+/// forgot the filter would get the whole stream back believing it had
+/// asked for one subject's.
+///
+/// Same page contract as [`events`] — keyset over `seq`, a short page
+/// ends the walk — and the same authority: a member may read their
+/// team's stream, and reading a slice of it is not a different
+/// permission.
+///
+/// **What is judged is the pair, and how much of it depends on the
+/// kind.** A kind the ledger has no subject for is a `400`. The value
+/// is then whatever the subject vocabulary makes of it, which is that
+/// vocabulary's business rather than this route's and differs by
+/// kind: a forge handle outside #102's set and an id that is not a
+/// uuid are refused, because those kinds have a grammar, while a
+/// digest that is not one is carried through and matches nothing.
+/// Both endings are ones a caller can act on — a refusal, or an empty
+/// page — and an empty page is the true answer for a well-formed
+/// subject nothing references, which is why nothing here is a `404`.
+///
+/// This is deliberately *not* the have-check's rule for the same
+/// notation, where a malformed digest is a `400`
+/// ([`SqliteTeamsRepository::held_digests`](teams_infra::sqlite::repo::SqliteTeamsRepository::held_digests)).
+/// There the answer decides whether a client skips a send, and a
+/// nonsense digest silently reading as "not held" would be answered
+/// wrongly; here it decides which events come back, and the honest
+/// answer about a subject nothing wrote is none of them.
+async fn events_for_subject(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(access): Extension<TeamAccess>,
+    Query(query): Query<SubjectEventsQuery>,
+) -> Result<Json<LedgerPageDto>, ApiError> {
+    let subject = subject_from_ref(&query.ref_type, &query.value).map_err(|_| {
+        // The storage helper's own message names the columns it was
+        // built from, which is the wrong vocabulary out here: on this
+        // side the pair is what the caller wrote.
+        //
+        // The pair, and not the kind alone: this refusal covers a kind
+        // the ledger has no subject for *and* a value the kind's own
+        // grammar rejects (a forge handle outside #102's set, an id
+        // that is not a uuid). Naming only the kind would tell a
+        // caller who sent `forge_identity` with a bad handle that
+        // `forge_identity` is not a kind, in a sentence that goes on
+        // to list it.
+        ApiError::Domain(DomainError::Validation(format!(
+            "no subject of this ledger's is written {:?} = {:?} — the kinds are \
+             forge_line, forge_pursuit, forge_thread, forge_identity, user, digest \
+             and blob, and each spells its value its own way: a hyphenated uuid, a \
+             sha256: digest, or one of #102's forge handles",
+            query.ref_type, query.value
+        )))
+    })?;
+    let limit = query
+        .limit
+        .unwrap_or(EVENTS_PAGE_DEFAULT)
+        .clamp(1, EVENTS_PAGE_MAX);
+    let events = ctx
+        .repo
+        .events_for_subject_page(access.team_id, &subject, query.after, limit)
+        .await?;
     let next_after = (events.len() as u32 == limit)
         .then(|| events.last().map(|event| event.seq.get()))
         .flatten();
@@ -1132,7 +1304,7 @@ fn parse_uuid(raw: &str, field: &str) -> Result<Uuid, ApiError> {
 /// reuse the storage encoding (`teams-infra`'s `subject_to_ref`), so
 /// the wire, the index table and the domain cannot spell a reference
 /// three ways.
-fn event_dto(event: &LedgerEvent) -> Result<LedgerEventDto, ApiError> {
+pub(crate) fn event_dto(event: &LedgerEvent) -> Result<LedgerEventDto, ApiError> {
     let (actor_kind, actor) = match &event.actor {
         LedgerActor::Member(stamp) => ("member", stamp),
         LedgerActor::Admin(stamp) => ("admin", stamp),

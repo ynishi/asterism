@@ -304,9 +304,16 @@ impl LedgerActor {
     }
 }
 
-/// The administrative verbs of the #83 §1 authority table — everything
+/// The verbs an authority table answers for — everything
 /// but team creation, which needs the registration policy and no
 /// roster ([`may_create_team`]).
+///
+/// Two origins, and the enum does not sort them: the first six are
+/// #83 §1's own table, and [`Self::ForgeWork`] / [`Self::ForgeDiscard`]
+/// are #148 revision 5's, which is a different argument reaching a
+/// different boundary. Which is which matters when reading
+/// [`verb_allowed`], because §1's reasoning about an admin does not
+/// carry to the two the forge added.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TeamVerb {
     /// Delete the team.
@@ -325,6 +332,42 @@ pub enum TeamVerb {
     /// authority row (#95), and splitting them would invite the rows
     /// to drift apart.
     Purge,
+    /// Every write on the team's hosted forge except one: opening a
+    /// line, renaming it, re-pointing its rule, moving its standing,
+    /// opening work, pushing a round, resolving, closing, everything
+    /// said in a thread, and bringing content in against open work.
+    ///
+    /// One verb for all of them, on [`Self::Purge`]'s reasoning and
+    /// #148 revision 5's: they share one authority row, and the row
+    /// says membership. A member who cannot work on the lines their
+    /// team hosts has no reason to be in the team, and every one of
+    /// these leaves a record that anyone who can read the line can
+    /// recover from.
+    ///
+    /// **Membership is the only answer here, and revision 5 asks for
+    /// two.** The same revision that argues the permissive rule at
+    /// length closes by saying "the restrictive setting stays
+    /// available and is the default, on the shape `RegistrationPolicy`
+    /// already established" — which would make this verb take a policy
+    /// argument the way [`may_create_team`] takes one, and would make
+    /// the default the opposite of what the paragraph above it
+    /// concludes. The two readings pull against each other and #151
+    /// implemented the argued one, leaving the knob unbuilt rather
+    /// than inventing a default for it. Whichever way that is settled
+    /// belongs in #148, and settling it lands here: a policy argument
+    /// on [`verb_allowed`], or a sentence in revision 5 withdrawing
+    /// "and is the default".
+    ForgeWork,
+    /// Discarding a line, which takes its history and every piece of
+    /// work against it.
+    ///
+    /// Its own verb because it is the one forge write that is not
+    /// recoverable from what it leaves behind: after it there is no
+    /// record to read the line out of. Revision 5 draws the boundary
+    /// here rather than at seniority — this is the verb that takes the
+    /// log with it, so this is the verb that consults the authority
+    /// table.
+    ForgeDiscard,
 }
 
 /// Who is asking, reduced to what the authority table cares about:
@@ -349,6 +392,13 @@ pub enum TeamAuthority {
 /// own — for those an admin joins like anyone else and acts through a
 /// membership row.
 ///
+/// [`TeamVerb::ForgeWork`] is the one row a plain member answers, and
+/// it is the row #148 revision 5 added: membership is the whole of the
+/// answer for every forge write but the discard. An admin does **not**
+/// answer it — bringing work or content into a team is a member's act,
+/// which is already how the blob upload reads (#83 §1), and an admin
+/// standing outside the roster has no implicit one.
+///
 /// This answers "does the role permit the verb" and nothing more; the
 /// last-owner rule is a property of the target and the roster, checked
 /// separately ([`TeamRoster::check_remove`] and friends), so a verb
@@ -359,9 +409,14 @@ pub const fn verb_allowed(authority: TeamAuthority, verb: TeamVerb) -> bool {
             authority,
             TeamAuthority::Admin | TeamAuthority::Member(Role::Owner)
         ),
-        TeamVerb::Invite | TeamVerb::Remove | TeamVerb::GrantOwner | TeamVerb::RevokeOwner => {
+        TeamVerb::Invite
+        | TeamVerb::Remove
+        | TeamVerb::GrantOwner
+        | TeamVerb::RevokeOwner
+        | TeamVerb::ForgeDiscard => {
             matches!(authority, TeamAuthority::Member(Role::Owner))
         }
+        TeamVerb::ForgeWork => matches!(authority, TeamAuthority::Member(_)),
     }
 }
 
@@ -704,20 +759,39 @@ mod tests {
             TeamVerb::GrantOwner,
             TeamVerb::RevokeOwner,
             TeamVerb::Purge,
+            TeamVerb::ForgeDiscard,
         ] {
-            // Owners may do everything; plain members nothing in this
-            // table.
+            // Owners may do everything; plain members nothing in the
+            // owner-only part of this table.
             assert!(verb_allowed(owner, verb));
             assert!(!verb_allowed(plain, verb));
             // An admin's grants are the destructive pair — delete, and
             // purge's mark/unmark/reclaim (#95, the §1 delete row
             // extended) — ledger-stamped as an admin, never disguised
-            // (§1).
+            // (§1). Discarding a line is not among them: it is a forge
+            // verb, and §1 hands an admin no forge write at all.
             assert_eq!(
                 verb_allowed(Admin, verb),
                 matches!(verb, TeamVerb::Delete | TeamVerb::Purge)
             );
         }
+    }
+
+    #[test]
+    fn membership_is_the_whole_answer_for_forge_work() {
+        use TeamAuthority::{Admin, Member};
+
+        // Revision 5: the boundary that decides the forge's verbs
+        // stopped being seniority. A plain member works on the lines
+        // their team hosts, which is the reason they are in the team.
+        assert!(verb_allowed(Member(Role::Member), TeamVerb::ForgeWork));
+        assert!(verb_allowed(Member(Role::Owner), TeamVerb::ForgeWork));
+        // And an admin from outside the roster does not: bringing work
+        // into a team is a member's act (#83 §1), the same row the blob
+        // upload already reads.
+        assert!(!verb_allowed(Admin, TeamVerb::ForgeWork));
+        // The one that takes the log with it stays with the owner.
+        assert!(!verb_allowed(Member(Role::Member), TeamVerb::ForgeDiscard));
     }
 
     #[test]

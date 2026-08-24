@@ -11,10 +11,12 @@ description = "Hosted Team server for Asterism — its own binary, fully separat
 publish     = false
 
 # Its own [[bin]], fully separate from the asterism-server binary: the
-# only asterism-* crates in this binary are what asterism-core is and
-# brings (its own deps ride along transitively), no asterism-* crate
-# depends on any teams-*, and so the license boundary sits at the bin
-# edge (#83 §4).
+# only asterism-* crates in this binary are asterism-core, what it
+# brings (its own deps ride along transitively), and asterism-contract,
+# which declares no Asterism dependency at all and already rode in this
+# graph transitively through asterism-core. No asterism-* crate depends
+# on any teams-*, and so the license boundary sits at the bin edge
+# (#83 §4).
 [[bin]]
 name = "teams-server"
 path = "src/main.rs"
@@ -25,6 +27,20 @@ path = "src/main.rs"
 teams-core     = { path = "../teams-core" }
 teams-infra    = { path = "../teams-infra" }
 teams-contract = { path = "../teams-contract" }
+
+# The forge is hosted on the team plane (#148 decision 20), so the
+# transport that mirrors its verbs builds its services here, per
+# request, over teams-infra's adapters. Same edge teams-infra already
+# holds, and #83 §4 permits it outright.
+asterism-core = { path = "../asterism-core" }
+
+# The mirror carries the same DTOs below the prefix (#148 decision 19),
+# and #148 revision 10 narrows §4's never-list to the modules its own
+# reason covers: `asterism-contract::forge` is what this crate names
+# and the only module of it that may be named here. `command`, `query`
+# and `dto` stay on the never-list — there the stated reason ("the
+# local app's plumbing; teams-infra owns its own") is the true one.
+asterism-contract = { path = "../asterism-contract" }
 
 anyhow     = { workspace = true }
 axum       = { workspace = true }
