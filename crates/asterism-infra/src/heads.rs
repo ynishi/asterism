@@ -5,9 +5,9 @@
 //!
 //! ```text
 //! heads/
-//!   head-v1/head.json     one training run's artifact, eval included
-//!   head-v2/head.json
-//!   current               the promoted label, or absent — zero-shot
+//!   head-v1-9f80e2c1/head.json   one training run's artifact, eval included
+//!   head-v2-1a2b3c4d/head.json
+//!   current                      the promoted label, or absent — zero-shot
 //! ```
 //!
 //! An artifact is immutable once written: a retrain is a new label,
@@ -20,8 +20,10 @@
 //! Promotion is the caller's verdict, not this module's: writing an
 //! artifact records what training produced (wins and losses alike, a
 //! loss being exactly the evidence that zero-shot should stand);
-//! [`promote`] moves the pointer and is called only on a strict
-//! held-out win.
+//! [`promote`] only moves the pointer. The training caller promotes
+//! on a strict held-out win; a pull ([`install_pulled`]) promotes on
+//! the person's explicit act — the two verdicts that may move the one
+//! pointer.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -69,10 +71,15 @@ pub struct TagHeadArtifact {
     pub trained_at_ms: i64,
 }
 
-/// The next unused label under `heads_root`, counting up from
-/// `head-v1`. Labels are ordinal, not content-addressed: two runs over
-/// identical rulings would produce identical rows, and a person
-/// reading `heads/` should see the history of attempts, not a dedupe.
+/// The next ordinal label stem under `heads_root`, counting up from
+/// `head-v1`. A run appends a content discriminator to the stem
+/// (`head-v3-1a2b3c4d`) before writing, so labels are unique across
+/// *stores*, not only within one — a pulled head (#132 phase 3)
+/// lands under its publisher's label, and two members' third
+/// training runs must not claim the same name. The ordinal half
+/// stays because a person reading `heads/` should see the history of
+/// attempts in order; the discriminator half exists purely so that
+/// order never collides.
 pub fn next_head_label(heads_root: &Path) -> Result<String> {
     let mut highest = 0u32;
     for entry in std::fs::read_dir(heads_root)
@@ -82,12 +89,28 @@ pub fn next_head_label(heads_root: &Path) -> Result<String> {
         if let Some(n) = name
             .to_str()
             .and_then(|s| s.strip_prefix("head-v"))
+            .map(|s| s.split('-').next().unwrap_or(s))
             .and_then(|s| s.parse::<u32>().ok())
         {
             highest = highest.max(n);
         }
     }
     Ok(format!("head-v{}", highest + 1))
+}
+
+/// Appends the content discriminator to an ordinal stem: eight hex
+/// characters of the rows' digest, so the label is a function of what
+/// the head actually scores with.
+pub fn discriminated_label(stem: &str, rows: &BTreeMap<String, TrainedRow>) -> Result<String> {
+    let serialized = serde_json::to_string(rows)?;
+    let digest = asterism_core::domain::content_hash::of_bytes(serialized.as_bytes());
+    let hex = digest
+        .strip_prefix("sha256:")
+        .unwrap_or(&digest)
+        .chars()
+        .take(8)
+        .collect::<String>();
+    Ok(format!("{stem}-{hex}"))
 }
 
 /// Writes one run's artifact under its label. Refuses an existing
@@ -109,10 +132,9 @@ pub fn write_artifact(heads_root: &Path, artifact: &TagHeadArtifact) -> Result<P
 }
 
 /// Points `current` at a label — the promotion. The pointer is the
-/// whole mechanism: the scoring side (the follow-up branch of #132)
-/// will read it once at startup, bind-once like the encoder. Until
-/// that side lands, the pointer records the verdict and nothing
-/// consumes it — the zero-shot pass keeps scoring.
+/// whole mechanism: the scoring side reads it once at startup
+/// ([`bind_current`]), bind-once like the encoder, so a promotion
+/// applies on the next launch.
 pub fn promote(heads_root: &Path, label: &str) -> Result<()> {
     if !heads_root.join(label).join(HEAD_FILE).exists() {
         bail!("cannot promote {label}: no artifact under that label");
@@ -179,6 +201,36 @@ pub fn bind_current(
         return Ok(None);
     };
     let artifact = load_artifact(heads_root, &label)?;
+    verify_artifact(&artifact, identity)?;
+    let head = asterism_core::domain::visual::TagHeadRef::new(label.clone())
+        .map_err(|e| anyhow::anyhow!("{label:?} is not a usable head label: {e}"))?;
+    let mut rows = BTreeMap::new();
+    for (key, row) in artifact.rows {
+        let tag = uuid::Uuid::parse_str(&key).expect("verify_artifact checked every key");
+        rows.insert(asterism_core::domain::value::TagId::from_uuid(tag), row);
+    }
+    Ok(Some(asterism_core::domain::tag_head::BoundTagHead {
+        head,
+        rows,
+    }))
+}
+
+/// The checks a head must pass before it may score against `identity`
+/// — one function, because the startup bind and a pulled install
+/// (#132 phase 3) must refuse for exactly the same reasons: an
+/// identity that is not the bound encoder's, a row whose width
+/// disagrees with it, a key that is not a tag id.
+pub fn verify_artifact(artifact: &TagHeadArtifact, identity: &ModelIdentity) -> Result<()> {
+    let label = &artifact.head;
+    // The label becomes a directory name under the heads store: a
+    // separator, a dot-dot, or an absolute path (which `Path::join`
+    // substitutes wholesale) would let a pulled artifact write — and
+    // point `current` — outside the store. Locally minted labels can
+    // never look like this; a pulled one must be refused before any
+    // path is built from it.
+    if label.is_empty() || label.contains(['/', '\\']) || label == "." || label == ".." {
+        bail!("head label {label:?} is not a plain directory name");
+    }
     if artifact.model_id != identity.model_id
         || artifact.dim != identity.dim
         || artifact.preprocess_ver != identity.preprocess_ver
@@ -194,11 +246,8 @@ pub fn bind_current(
             identity.preprocess_ver
         );
     }
-    let head = asterism_core::domain::visual::TagHeadRef::new(label.clone())
-        .map_err(|e| anyhow::anyhow!("{label:?} is not a usable head label: {e}"))?;
-    let mut rows = BTreeMap::new();
-    for (key, row) in artifact.rows {
-        let tag = uuid::Uuid::parse_str(&key)
+    for (key, row) in &artifact.rows {
+        uuid::Uuid::parse_str(key)
             .with_context(|| format!("head {label} keys a row by {key:?}, not a tag id"))?;
         if row.weights.len() != identity.dim as usize {
             bail!(
@@ -207,12 +256,54 @@ pub fn bind_current(
                 identity.dim
             );
         }
-        rows.insert(asterism_core::domain::value::TagId::from_uuid(tag), row);
     }
-    Ok(Some(asterism_core::domain::tag_head::BoundTagHead {
-        head,
-        rows,
-    }))
+    Ok(())
+}
+
+/// Installs a pulled head artifact and promotes it — the member half
+/// of #132 phase 3. Returns the label promotion now points at.
+///
+/// The artifact is verified against the bound encoder with the same
+/// checks the startup bind runs ([`verify_artifact`]): a pulled head
+/// that could not bind must not install. The label is the
+/// publisher's, kept as-is: labels carry a content discriminator
+/// since the pull exists (see [`next_head_label`]), so a collision
+/// means one of two things — the identical artifact, in which case
+/// the install is a re-promote; or a genuinely different head under
+/// the same name, which is refused rather than renamed, because
+/// silently renaming would detach the label the team talks about
+/// from the bytes that score.
+pub fn install_pulled(heads_root: &Path, raw: &str, identity: &ModelIdentity) -> Result<String> {
+    let artifact: TagHeadArtifact =
+        serde_json::from_str(raw).context("the pulled bytes are not a head artifact")?;
+    if artifact.schema != HEAD_ARTIFACT_SCHEMA {
+        bail!(
+            "the pulled artifact carries schema {:?}, not {HEAD_ARTIFACT_SCHEMA:?}",
+            artifact.schema
+        );
+    }
+    verify_artifact(&artifact, identity)?;
+    let label = artifact.head.clone();
+    if heads_root.join(&label).join(HEAD_FILE).exists() {
+        let existing = load_artifact(heads_root, &label)
+            .with_context(|| format!("a local head under {label} exists but cannot be read"))?;
+        // A label identifies the ROWS — the bytes that score — which
+        // is exactly what its content discriminator digests. Same
+        // rows under the same label is the same head (the local copy
+        // stays, eval and timestamps included; artifacts are
+        // immutable) and pulling it again is a re-promote. Different
+        // rows under the same label is refused, never renamed.
+        if existing.rows != artifact.rows {
+            bail!(
+                "a different head already holds the label {label} locally; \
+                 the publisher labels a new train a new label"
+            );
+        }
+    } else {
+        write_artifact(heads_root, &artifact)?;
+    }
+    promote(heads_root, &label)?;
+    Ok(label)
 }
 
 /// Builds an artifact from a run's outputs, stamping the schema and
@@ -401,5 +492,99 @@ mod tests {
         write_artifact(root.path(), &bad_width).unwrap();
         promote(root.path(), "head-v2").unwrap();
         assert!(bind_current(root.path(), &identity()).is_err());
+    }
+
+    #[test]
+    fn a_pulled_artifact_installs_verifies_and_promotes() {
+        let root = tempfile::tempdir().unwrap();
+        let pulled = artifact("head-v3-1a2b3c4d");
+        let raw = serde_json::to_string(&pulled).unwrap();
+
+        let label = install_pulled(root.path(), &raw, &identity()).unwrap();
+        assert_eq!(label, "head-v3-1a2b3c4d");
+        assert_eq!(current_label(root.path()).unwrap(), Some(label.clone()));
+        assert_eq!(load_artifact(root.path(), &label).unwrap(), pulled);
+
+        // Pulling the identical artifact again is a re-promote, not a
+        // collision.
+        promote(root.path(), &label).unwrap();
+        assert_eq!(
+            install_pulled(root.path(), &raw, &identity()).unwrap(),
+            label
+        );
+
+        // A different head under the same label is refused — the
+        // label the team talks about must stay attached to the bytes
+        // that score.
+        let mut different = pulled.clone();
+        different
+            .rows
+            .get_mut("00000000-0000-0000-0000-000000000001")
+            .unwrap()
+            .bias = 9.0;
+        let raw = serde_json::to_string(&different).unwrap();
+        assert!(install_pulled(root.path(), &raw, &identity()).is_err());
+
+        // A head trained against another encoder never installs.
+        let mut foreign = artifact("head-v9-cafecafe");
+        foreign.model_id = "other-model".into();
+        let raw = serde_json::to_string(&foreign).unwrap();
+        assert!(install_pulled(root.path(), &raw, &identity()).is_err());
+        assert!(!root.path().join("head-v9-cafecafe").exists());
+
+        // Same rows, different run metadata: the label identifies the
+        // rows, so this is the same head and pulls as a re-promote.
+        let mut same_rows = pulled.clone();
+        same_rows.trained_at_ms = 999;
+        same_rows.eval.held_out = 40;
+        let raw = serde_json::to_string(&same_rows).unwrap();
+        assert_eq!(
+            install_pulled(root.path(), &raw, &identity()).unwrap(),
+            "head-v3-1a2b3c4d"
+        );
+        // The local copy stays as written — artifacts are immutable.
+        assert_eq!(
+            load_artifact(root.path(), "head-v3-1a2b3c4d").unwrap(),
+            pulled
+        );
+
+        // A label that reaches outside the store is refused before
+        // any path is built from it.
+        let mut hostile = artifact("../escape");
+        hostile.head = "../escape".into();
+        let raw = serde_json::to_string(&hostile).unwrap();
+        assert!(install_pulled(root.path(), &raw, &identity()).is_err());
+        let absolute = {
+            let mut a = artifact("/tmp/evil");
+            a.head = "/tmp/evil".into();
+            serde_json::to_string(&a).unwrap()
+        };
+        assert!(install_pulled(root.path(), &absolute, &identity()).is_err());
+    }
+
+    #[test]
+    fn ordinal_stems_count_past_discriminated_labels() {
+        let root = tempfile::tempdir().unwrap();
+        write_artifact(root.path(), &artifact("head-v2-deadbeef")).unwrap();
+        // The stem parser reads the ordinal before the discriminator,
+        // so the next run counts from it instead of restarting at 1.
+        assert_eq!(next_head_label(root.path()).unwrap(), "head-v3");
+
+        // The discriminator is a function of the rows: same rows,
+        // same label; different rows, different label.
+        let rows = artifact("x").rows;
+        let a = discriminated_label("head-v3", &rows).unwrap();
+        let b = discriminated_label("head-v3", &rows).unwrap();
+        assert_eq!(a, b);
+        assert!(
+            a.starts_with("head-v3-") && a.len() == "head-v3-".len() + 8,
+            "{a}"
+        );
+        let mut other = rows.clone();
+        other
+            .get_mut("00000000-0000-0000-0000-000000000001")
+            .unwrap()
+            .bias = 1.0;
+        assert_ne!(a, discriminated_label("head-v3", &other).unwrap());
     }
 }

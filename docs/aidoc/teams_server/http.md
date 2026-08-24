@@ -23,8 +23,8 @@ slice).
 | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
 | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
 | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
-| PUT | `/teams/models/registry` | the operator only — instance scope (#126), no team gate |
-| GET | `/teams/models/registry` | any authenticated account — the live entry's bytes, verbatim |
+| PUT | `/teams/heads/registry` | the operator only — instance scope (#132), no team gate |
+| GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
 
 ## The gate (#83 §5: every route, no exceptions)
 

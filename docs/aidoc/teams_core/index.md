@@ -36,9 +36,9 @@ the teams plane and the local app spell a byte fingerprint one way.
 ## Modules
 
 - [`domain`](domain.md): Domain types and invariants of the teams plane — everything here is
+- [`domain::head_registry`](domain__head_registry.md): `head_registry` — the instance's carriage of a trained tag head
 - [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
-- [`domain::model_registry`](domain__model_registry.md): `model_registry` — the instance's carriage of a qualified model's
 - [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,

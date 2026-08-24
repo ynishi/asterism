@@ -432,11 +432,24 @@ pub enum JobKind {
     /// scored on the same held-out set, and the run promotes only on a
     /// strict win — a losing run still writes its artifact and report,
     /// because "zero-shot is still better" is a result, not a failure.
-    /// Promotion is a pointer move. The scoring side — the follow-up
-    /// branch — will read it once at startup, the encoder's bind-once
-    /// rule; until that lands the pointer records the verdict and the
-    /// zero-shot pass keeps scoring.
+    /// Promotion is a pointer move, read once at startup — the
+    /// encoder's bind-once rule — so a promoted head applies on the
+    /// next launch.
     HeadTrain,
+    /// Installs a pulled head artifact (#132 phase 3) — the member
+    /// half of team distribution. Payload: `{ "artifact": { … } }`,
+    /// the artifact inline: the instance's registry sits behind its
+    /// session gate, and neither the queue row nor the app server
+    /// grows a credential — the client that already holds a session
+    /// fetches the bytes and hands them over.
+    ///
+    /// The artifact is verified with exactly the checks the startup
+    /// bind runs (encoder identity, row widths, key shapes); a head
+    /// that could not bind must not install. Installing promotes —
+    /// the same one pointer a winning local retrain moves, which is
+    /// the whole precedence story — and the promotion applies on the
+    /// next launch, bind-once, the encoder's rule.
+    HeadPull,
 }
 
 impl JobKind {
@@ -468,6 +481,7 @@ impl JobKind {
             Self::VisualEdgeRebuild => "visual_edge_rebuild",
             Self::VisualTagSuggest => "visual_tag_suggest",
             Self::HeadTrain => "head_train",
+            Self::HeadPull => "head_pull",
         }
     }
 
@@ -499,6 +513,7 @@ impl JobKind {
             "visual_edge_rebuild" => Ok(Self::VisualEdgeRebuild),
             "visual_tag_suggest" => Ok(Self::VisualTagSuggest),
             "head_train" => Ok(Self::HeadTrain),
+            "head_pull" => Ok(Self::HeadPull),
             other => Err(DomainError::Validation(format!(
                 "unknown job kind: {other:?}"
             ))),

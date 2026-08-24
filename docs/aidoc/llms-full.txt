@@ -10808,9 +10808,9 @@ Layout under [`crate::paths::heads_dir`]:
 
 ```text
 heads/
-  head-v1/head.json     one training run's artifact, eval included
-  head-v2/head.json
-  current               the promoted label, or absent — zero-shot
+  head-v1-9f80e2c1/head.json   one training run's artifact, eval included
+  head-v2-1a2b3c4d/head.json
+  current                      the promoted label, or absent — zero-shot
 ```
 
 An artifact is immutable once written: a retrain is a new label,
@@ -10823,17 +10823,22 @@ kilobytes, not megabytes, at realistic ruling counts.
 Promotion is the caller's verdict, not this module's: writing an
 artifact records what training produced (wins and losses alike, a
 loss being exactly the evidence that zero-shot should stand);
-[`promote`] moves the pointer and is called only on a strict
-held-out win.
+[`promote`] only moves the pointer. The training caller promotes
+on a strict held-out win; a pull ([`install_pulled`]) promotes on
+the person's explicit act — the two verdicts that may move the one
+pointer.
 
 ## Functions
 
 - `artifact_for` — Builds an artifact from a run's outputs, stamping the schema and
 - `bind_current` — Resolves the promoted head against the bound encoder — the scoring
 - `current_label` — The promoted label, if any. Absent (or dangling) means zero-shot.
+- `discriminated_label` — Appends the content discriminator to an ordinal stem: eight hex
+- `install_pulled` — Installs a pulled head artifact and promotes it — the member half
 - `load_artifact` — Reads one label's artifact, verifying the schema tag and that the
-- `next_head_label` — The next unused label under `heads_root`, counting up from
+- `next_head_label` — The next ordinal label stem under `heads_root`, counting up from
 - `promote` — Points `current` at a label — the promotion. The pointer is the
+- `verify_artifact` — The checks a head must pass before it may score against `identity`
 - `write_artifact` — Writes one run's artifact under its label. Refuses an existing
 
 ## Types
@@ -10970,6 +10975,7 @@ for later modalities.
 - `disclosure_stamp` — Writes the AI disclosure into a file this library produced.
 - `duplicate_scan` — Re-derives duplicate conflicts from fingerprints already on the rows.
 - `edge_rebuild` — Incrementally rebuilds constellation edges for the target asset.
+- `head_pull` — Installs a pulled head artifact and promotes it — the `HeadPull`
 - `head_train` — Trains the tag head from the person's rulings — the `HeadTrain`
 - `index_rebuild` — Rebuilds the Tantivy full-text index for one asset (single-doc
 - `material_hash` — Fingerprints an original's bytes into `material.content_hash`, then
@@ -13889,10 +13895,10 @@ its own (#83 §1).
 ## Types
 
 - `BlobUploadedDto` — The result of `PUT /teams/{team_id}/blobs?digest=…`.
+- `HeadPublishedDto` — The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
-- `ModelRegistryPublishedDto` — The receipt of `PUT /teams/models/registry` (#126) — the envelope
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
@@ -13940,9 +13946,9 @@ the teams plane and the local app spell a byte fingerprint one way.
 ## Modules
 
 - [`domain`](domain.md): Domain types and invariants of the teams plane — everything here is
+- [`domain::head_registry`](domain__head_registry.md): `head_registry` — the instance's carriage of a trained tag head
 - [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
-- [`domain::model_registry`](domain__model_registry.md): `model_registry` — the instance's carriage of a qualified model's
 - [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
@@ -13956,6 +13962,46 @@ the teams plane and the local app spell a byte fingerprint one way.
 
 Domain types and invariants of the teams plane — everything here is
 IO-free and unit-testable on a machine with no database and no disk.
+
+
+<!-- teams_core/domain__head_registry.md -->
+# teams-core::domain::head_registry
+
+`head_registry` — the instance's carriage of a trained tag head
+(#132 phase 3).
+
+The artifact (`asterism-tag-head-v1`) is what a member's training
+run writes locally: the per-tag rows, the encoder identity they
+were trained against, and the held-out eval. It is kilobytes of
+JSON, which is why it rides this registry row whole — no blob
+store involved. The instance is a carrier, not an authority, the
+same stance the route took when it carried the model entry
+(#127): it stores and re-serves the publisher's bytes **verbatim**
+and deliberately types nothing of the body — no rows, no eval, no
+floors. Verification belongs to the member app, which re-runs the
+same checks its startup bind runs before a pulled head may score.
+
+What *is* validated is the envelope — the part the instance
+answers for as a carrier: the bytes are one JSON object, the
+`schema` field names the one artifact version this instance
+carries, `head` is the non-empty label supersession history is
+keyed by, and the encoder identity fields are present — a pull
+must be able to refuse a head trained against another encoder
+before parsing anything deeper.
+
+The schema string is the app-side artifact's
+(`asterism-infra`'s head store writes it); it is re-spelled here
+rather than imported because `teams-*` depends on `asterism-core`
+only (#83 §4) — the same one-notation-two-spellings shape as the
+digest grammar note in [`crate::domain::store`].
+
+## Types
+
+- `TagHeadEntry` — A validated head entry: the publisher's bytes, verbatim, plus the
+
+## Constants
+
+- `HEAD_ENTRY_SCHEMA_V1` — The one artifact schema this plane carries. A future `-v2` is a
 
 
 <!-- teams_core/domain__identity.md -->
@@ -14051,40 +14097,6 @@ Two things this module deliberately does **not** do:
 - `TEAM_CREATED` — A team came into existence.
 - `TEAM_DELETED` — A team was deleted (owner, or the operator — ledger-stamped).
 - `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
-
-
-<!-- teams_core/domain__model_registry.md -->
-# teams-core::domain::model_registry
-
-`model_registry` — the instance's carriage of a qualified model's
-registry entry (#126).
-
-The entry (`asterism-model-registry-entry-v1`) is authored by the
-provider's tooling (`asterism-model-lab registry`) and consumed by
-the member app's fetch flow. Between the two, the instance is a
-carrier, not an authority (#126 decision 2): it stores and re-serves
-the provider's bytes **verbatim**, and this module deliberately
-types no field of the entry's body — no digests, no URLs, no
-qualification report. Parsing those here would grow the hosted
-plane a reading of the model contract that #83 §4's dependency rule
-keeps out (`teams-*` → `asterism-core` only; the entry's typed home
-is beside `ModelPackage`, on the app side of the split).
-
-What *is* validated is the envelope — the part the instance answers
-for as a carrier: the bytes are one JSON object, the `schema` field
-names the one version this instance knows how to carry, and
-`model_id` is a non-empty string the storage layer can key history
-by. A carrier that accepted arbitrary bytes would serve members
-something their fetch flow cannot consume, and could not say which
-model superseded which.
-
-## Types
-
-- `ModelRegistryEntry` — A validated registry entry: the provider's bytes, verbatim, plus
-
-## Constants
-
-- `ENTRY_SCHEMA_V1` — The one entry schema this plane carries. A future `-v2` is a new
 
 
 <!-- teams_core/domain__store.md -->
@@ -14713,8 +14725,8 @@ writes outside the ledger's scope, which #83 §2 fixes at the team
 boundary: [`SqliteTeamsRepository::record_locator`] (locators are
 private-space, which is also why the v0 kind registry has no
 locator kind) and
-[`SqliteTeamsRepository::publish_model_entry`] (the model registry
-is instance-scope — #126 — and carries its history in its own
+[`SqliteTeamsRepository::publish_head_entry`] (the head registry
+is instance-scope — #132 — and carries its history in its own
 superseded rows).
 
 ## Where the domain runs
@@ -14801,8 +14813,8 @@ slice).
 | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
 | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
 | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
-| PUT | `/teams/models/registry` | the operator only — instance scope (#126), no team gate |
-| GET | `/teams/models/registry` | any authenticated account — the live entry's bytes, verbatim |
+| PUT | `/teams/heads/registry` | the operator only — instance scope (#132), no team gate |
+| GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
 
 ## The gate (#83 §5: every route, no exceptions)
 

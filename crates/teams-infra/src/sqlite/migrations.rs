@@ -228,6 +228,35 @@ CREATE UNIQUE INDEX idx_model_registry_one_live
     WHERE superseded_at IS NULL;
 "#;
 
+/// Version 4 → 5: the registry carries the trained head (#132 phase
+/// 3), not a model entry.
+///
+/// The model-entry schema V4 carried lost its only consumer when the
+/// fetch flow retired; the head artifact — kilobytes of JSON — takes
+/// the same seat under the same rules (opaque bytes, one live row,
+/// superseded history kept). The rename is honesty, not mechanics:
+/// `label` is what supersession is keyed by now, and a table named
+/// for model entries would invite the next reader to store one.
+/// Existing rows are deleted rather than carried: they hold
+/// model-entry JSON nothing can consume any more, and the new
+/// envelope's read would refuse them anyway — better an empty
+/// registry than one that errors on its first GET. The unique
+/// expression index is re-created under the new name (an index does
+/// not follow a table rename by name, only by attachment).
+const V5_HEAD_REGISTRY: &str = r#"
+DELETE FROM model_registry_entry;
+
+DROP INDEX idx_model_registry_one_live;
+
+ALTER TABLE model_registry_entry RENAME TO head_registry_entry;
+
+ALTER TABLE head_registry_entry RENAME COLUMN model_id TO label;
+
+CREATE UNIQUE INDEX idx_head_registry_one_live
+    ON head_registry_entry((1))
+    WHERE superseded_at IS NULL;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -235,6 +264,7 @@ const MIGRATIONS: &[&str] = &[
     V2_AUTH_TABLES,
     V3_PURGE_MARK,
     V4_MODEL_REGISTRY,
+    V5_HEAD_REGISTRY,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

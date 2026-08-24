@@ -8,6 +8,21 @@
       "docs": "Domain types and invariants of the teams plane — everything here is\nIO-free and unit-testable on a machine with no database and no disk."
     },
     {
+      "path": "teams_core::domain::head_registry",
+      "kind": "module",
+      "docs": "`head_registry` — the instance's carriage of a trained tag head\n(#132 phase 3).\n\nThe artifact (`asterism-tag-head-v1`) is what a member's training\nrun writes locally: the per-tag rows, the encoder identity they\nwere trained against, and the held-out eval. It is kilobytes of\nJSON, which is why it rides this registry row whole — no blob\nstore involved. The instance is a carrier, not an authority, the\nsame stance the route took when it carried the model entry\n(#127): it stores and re-serves the publisher's bytes **verbatim**\nand deliberately types nothing of the body — no rows, no eval, no\nfloors. Verification belongs to the member app, which re-runs the\nsame checks its startup bind runs before a pulled head may score.\n\nWhat *is* validated is the envelope — the part the instance\nanswers for as a carrier: the bytes are one JSON object, the\n`schema` field names the one artifact version this instance\ncarries, `head` is the non-empty label supersession history is\nkeyed by, and the encoder identity fields are present — a pull\nmust be able to refuse a head trained against another encoder\nbefore parsing anything deeper.\n\nThe schema string is the app-side artifact's\n(`asterism-infra`'s head store writes it); it is re-spelled here\nrather than imported because `teams-*` depends on `asterism-core`\nonly (#83 §4) — the same one-notation-two-spellings shape as the\ndigest grammar note in [`crate::domain::store`]."
+    },
+    {
+      "path": "teams_core::domain::head_registry::HEAD_ENTRY_SCHEMA_V1",
+      "kind": "constant",
+      "docs": "The one artifact schema this plane carries. A future `-v2` is a\nnew constant and an explicit decision, not a silent pass-through."
+    },
+    {
+      "path": "teams_core::domain::head_registry::TagHeadEntry",
+      "kind": "struct",
+      "docs": "A validated head entry: the publisher's bytes, verbatim, plus the\nenvelope facts the instance keys carriage by."
+    },
+    {
       "path": "teams_core::domain::identity",
       "kind": "module",
       "docs": "`identity` — who exists, who belongs to a team, and who may do what.\n\nThree separations carry this module, all from #83 §1:\n\n- **Membership is not identity.** A [`User`] exists independently of\n  any team; a [`Membership`] is one `(user, team, role)` row and a\n  team's set of them is what every invariant is evaluated over.\n- **The operator is not a member.** [`InstanceOperator`] is the\n  env/CLI bootstrap identity and lives *outside* the membership\n  set — owning a team is an explicit membership row like anyone\n  else's, and when the operator acts inside a team the ledger stamp\n  says so ([`LedgerActor::Operator`]): an operator action is never\n  disguised as a member's.\n- **Authorization reads state, not history.** The decision functions\n  here take the current membership set ([`TeamRoster`]); the ledger\n  records what was decided and is never consulted to decide.\n\nThe one absolute invariant is the last-owner rule: every team has\n≥1 owner at all times, so the last owner cannot leave, be removed,\nor self-demote (the GitHub/GitLab/Gitea rule). It is enforced as\n`check_*` methods on [`TeamRoster`] so every write path asks the\nsame three lines instead of re-deriving them."
@@ -156,21 +171,6 @@
       "path": "teams_core::domain::ledger::is_v0_kind",
       "kind": "function",
       "docs": "Whether `kind` is one this build of the plane writes. Shape and\nregistration are separate questions on purpose: a reader must\naccept well-formed kinds it does not know (a stream written by a\nnewer build, `forge.*` after #63), a *writer* asks this before\nappending."
-    },
-    {
-      "path": "teams_core::domain::model_registry",
-      "kind": "module",
-      "docs": "`model_registry` — the instance's carriage of a qualified model's\nregistry entry (#126).\n\nThe entry (`asterism-model-registry-entry-v1`) is authored by the\nprovider's tooling (`asterism-model-lab registry`) and consumed by\nthe member app's fetch flow. Between the two, the instance is a\ncarrier, not an authority (#126 decision 2): it stores and re-serves\nthe provider's bytes **verbatim**, and this module deliberately\ntypes no field of the entry's body — no digests, no URLs, no\nqualification report. Parsing those here would grow the hosted\nplane a reading of the model contract that #83 §4's dependency rule\nkeeps out (`teams-*` → `asterism-core` only; the entry's typed home\nis beside `ModelPackage`, on the app side of the split).\n\nWhat *is* validated is the envelope — the part the instance answers\nfor as a carrier: the bytes are one JSON object, the `schema` field\nnames the one version this instance knows how to carry, and\n`model_id` is a non-empty string the storage layer can key history\nby. A carrier that accepted arbitrary bytes would serve members\nsomething their fetch flow cannot consume, and could not say which\nmodel superseded which."
-    },
-    {
-      "path": "teams_core::domain::model_registry::ENTRY_SCHEMA_V1",
-      "kind": "constant",
-      "docs": "The one entry schema this plane carries. A future `-v2` is a new\nconstant and an explicit decision, not a silent pass-through."
-    },
-    {
-      "path": "teams_core::domain::model_registry::ModelRegistryEntry",
-      "kind": "struct",
-      "docs": "A validated registry entry: the provider's bytes, verbatim, plus\nthe two envelope facts the instance keys carriage by.\n\nThe raw text is the value. Serving anything else — a re-serialized,\nkey-reordered, whitespace-normalized rendering — would mean the\nbytes a member verifies against are bytes the provider never\nauthored, for no gain."
     },
     {
       "path": "teams_core::domain::store",

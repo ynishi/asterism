@@ -163,17 +163,17 @@ pub struct MarkedBlobLinkDto {
     pub reclaimable_at_ms: i64,
 }
 
-/// The receipt of `PUT /teams/models/registry` (#126) — the envelope
-/// facts the instance validated, never the entry body, which the
-/// carrier does not read.
+/// The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the
+/// envelope facts the instance validated, never the artifact body,
+/// which the carrier does not read.
 ///
 /// No [`LedgerEventDto`] here, unlike every team-scoped mutation: the
 /// registry is instance-scope, outside the ledger's per-team streams
 /// (#83 §2); its history is the storage's own superseded rows.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct ModelRegistryPublishedDto {
-    /// The model the published entry describes.
-    pub model_id: String,
+pub struct HeadPublishedDto {
+    /// The published head's label.
+    pub label: String,
     /// When the publish landed (and any predecessor was superseded),
     /// epoch ms.
     pub published_at_ms: i64,

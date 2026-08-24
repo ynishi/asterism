@@ -1,6 +1,6 @@
-//! End-to-end guard for the model registry routes (#126, the first
-//! serving step): operator-only publish, any-member read, verbatim
-//! bytes, and supersession.
+//! End-to-end guard for the head registry routes (#132 phase 3):
+//! operator-only publish, any-member read, verbatim bytes, and
+//! supersession.
 //!
 //! Same wiring as the blob route guard — the real router over an
 //! in-memory teams DB, nothing bypassed.
@@ -13,8 +13,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use rusqlite_isle::{AsyncIsle, AsyncIsleDriver};
+use teams_core::domain::head_registry::HEAD_ENTRY_SCHEMA_V1;
 use teams_core::domain::identity::RegistrationPolicy;
-use teams_core::domain::model_registry::ENTRY_SCHEMA_V1;
 use teams_infra::auth::password::PasswordAuth;
 use teams_infra::blob::LocalFileStorageAdapter;
 use teams_infra::sqlite::SqliteTeamsRepository;
@@ -23,7 +23,7 @@ use teams_server::state::{TeamsCtx, now_ms};
 use tower::ServiceExt;
 
 const GOOD: &str = "correct horse battery staple";
-const REGISTRY: &str = "/teams/models/registry";
+const REGISTRY: &str = "/teams/heads/registry";
 
 struct Harness {
     ctx: Arc<TeamsCtx>,
@@ -110,11 +110,13 @@ fn get_entry(token: Option<&str>) -> Request<Body> {
     builder.body(Body::empty()).expect("build registry GET")
 }
 
-/// An entry with provider-chosen formatting — the whitespace and key
-/// order are part of what "verbatim" must preserve.
-fn entry_bytes(model_id: &str, marker: &str) -> String {
+/// An artifact with publisher-chosen formatting — the whitespace and
+/// key order are part of what "verbatim" must preserve.
+fn entry_bytes(label: &str, marker: &str) -> String {
     format!(
-        "{{\n  \"schema\": \"{ENTRY_SCHEMA_V1}\",\n  \"model_id\": \"{model_id}\",\n  \"marker\": \"{marker}\"\n}}\n"
+        "{{\n  \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\",\n  \"head\": \"{label}\",\n  \
+         \"model_id\": \"siglip2-base-patch16-256-q4v\",\n  \"dim\": 768,\n  \
+         \"preprocess_ver\": 1,\n  \"marker\": \"{marker}\"\n}}\n"
     )
 }
 
@@ -140,7 +142,7 @@ async fn the_operator_publishes_and_a_member_reads_the_same_bytes() {
     let h = harness().await;
     let operator = provision(&h, "op", true).await;
     let member = provision(&h, "alice", false).await;
-    let authored = entry_bytes("siglip2-base-patch16-256", "round-one");
+    let authored = entry_bytes("head-v3", "round-one");
 
     let (status, _, body) =
         status_and_bytes(&h.router, put_entry(&operator, authored.clone())).await;
@@ -151,12 +153,12 @@ async fn the_operator_publishes_and_a_member_reads_the_same_bytes() {
         String::from_utf8_lossy(&body)
     );
     let receipt: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(receipt["model_id"], "siglip2-base-patch16-256");
+    assert_eq!(receipt["label"], "head-v3");
     assert!(receipt["published_at_ms"].as_i64().unwrap() > 0);
 
-    // The member reads back the provider's bytes, verbatim — not a
-    // re-serialization (#126 decision 2: the entry is the trust
-    // anchor, the instance is transport).
+    // The member reads back the publisher's bytes, verbatim — not a
+    // re-serialization: the member app re-verifies the artifact
+    // itself, the instance is transport (#132).
     let (status, headers, bytes) = status_and_bytes(&h.router, get_entry(Some(&member))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers["content-type"], "application/json");
@@ -170,11 +172,11 @@ async fn publishing_again_supersedes_what_members_read() {
 
     let (status, _, _) = status_and_bytes(
         &h.router,
-        put_entry(&operator, entry_bytes("model-a", "old")),
+        put_entry(&operator, entry_bytes("head-v1", "old")),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let replacement = entry_bytes("model-b", "new");
+    let replacement = entry_bytes("head-v2", "new");
     let (status, _, _) =
         status_and_bytes(&h.router, put_entry(&operator, replacement.clone())).await;
     assert_eq!(status, StatusCode::OK);
@@ -193,11 +195,12 @@ async fn the_write_is_the_operators_and_the_read_is_authenticated() {
     let (status, _, _) = status_and_bytes(&h.router, get_entry(Some(&member))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // A non-operator publish is refused — the model is an instance
-    // concern, and the instance capacity is the write authority.
+    // A non-operator publish is refused — what scores for a team is
+    // an instance concern, and the instance capacity is the write
+    // authority.
     let (status, _, body) = status_and_bytes(
         &h.router,
-        put_entry(&member, entry_bytes("model-a", "nope")),
+        put_entry(&member, entry_bytes("head-v1", "nope")),
     )
     .await;
     assert_eq!(
@@ -217,11 +220,12 @@ async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
     let h = harness().await;
     let operator = provision(&h, "op", true).await;
 
-    // Wrong schema tag, missing model_id, non-JSON: all 400, nothing
-    // stored.
+    // Wrong schema tag, missing label, missing encoder identity,
+    // non-JSON: all 400, nothing stored.
     for bad in [
-        "{ \"schema\": \"not-a-schema\", \"model_id\": \"m\" }".to_string(),
-        format!("{{ \"schema\": \"{ENTRY_SCHEMA_V1}\" }}"),
+        "{ \"schema\": \"not-a-schema\", \"head\": \"h\" }".to_string(),
+        format!("{{ \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\" }}"),
+        format!("{{ \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\", \"head\": \"h\" }}"),
         "not json at all".to_string(),
     ] {
         let (status, _, body) = status_and_bytes(&h.router, put_entry(&operator, bad)).await;
@@ -235,10 +239,13 @@ async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
     let (status, _, _) = status_and_bytes(&h.router, get_entry(Some(&operator))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "nothing must have landed");
 
-    // A body the member app would still have to verify (no files, no
-    // digests) is carriable: the envelope is the instance's whole
-    // reading (#126 decision 2).
-    let thin = format!("{{ \"schema\": \"{ENTRY_SCHEMA_V1}\", \"model_id\": \"thin\" }}");
+    // A body the member app would still have to verify (no rows at
+    // all) is carriable: the envelope is the instance's whole
+    // reading (#132 — carrier, not authority).
+    let thin = format!(
+        "{{ \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\", \"head\": \"thin\", \
+         \"model_id\": \"m\", \"dim\": 4, \"preprocess_ver\": 1 }}"
+    );
     let (status, _, _) = status_and_bytes(&h.router, put_entry(&operator, thin)).await;
     assert_eq!(status, StatusCode::OK);
 }
