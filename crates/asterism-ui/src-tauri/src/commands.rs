@@ -1367,6 +1367,31 @@ pub async fn visual_model_status(
     Ok(state.asset_service.visual_model_status().await)
 }
 
+/// Enqueues a `HeadTrain` run over the rulings under the bound
+/// encoder — the command twin of `POST /asterism/heads/train` (#132).
+/// No input: the corpus is whatever rulings exist, so there is
+/// nothing to scope. Returns the job's task id; the completion
+/// message carries the held-out verdict and whether promotion
+/// happened. #130's model panel is where a screen invokes this.
+#[tauri::command]
+pub async fn train_tag_head(state: State<'_, AppState>) -> Result<String, UiError> {
+    Ok(state.asset_service.train_head().await?)
+}
+
+/// Enqueues a `HeadPull` install of a fetched head artifact — the
+/// command twin of `POST /asterism/heads/pull` (#132 phase 3). The
+/// caller fetches the artifact from the instance's registry (which
+/// sits behind its own session gate) and hands it over; verification
+/// — encoder identity, shapes, the startup-bind checks — is the
+/// job's, and installing promotes on the next launch.
+#[tauri::command]
+pub async fn pull_tag_head(
+    state: State<'_, AppState>,
+    artifact: serde_json::Value,
+) -> Result<String, UiError> {
+    Ok(state.asset_service.pull_head(artifact).await?)
+}
+
 /// Removes a tag from an asset. Idempotent — a missing link is a
 /// no-op; the tag row is left in place for other assets.
 #[tauri::command]
