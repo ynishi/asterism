@@ -12,8 +12,8 @@
 //! boundary: [`SqliteTeamsRepository::record_locator`] (locators are
 //! private-space, which is also why the v0 kind registry has no
 //! locator kind) and
-//! [`SqliteTeamsRepository::publish_model_entry`] (the model registry
-//! is instance-scope — #126 — and carries its history in its own
+//! [`SqliteTeamsRepository::publish_head_entry`] (the head registry
+//! is instance-scope — #132 — and carries its history in its own
 //! superseded rows).
 //!
 //! ## Where the domain runs
@@ -44,13 +44,13 @@
 use rusqlite::{OptionalExtension as _, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::DomainError;
+use teams_core::domain::head_registry::TagHeadEntry;
 use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamRoster};
 use teams_core::domain::ledger::{
     BLOB_COPY_COMPLETED, BLOB_LINK_PURGE_MARKED, BLOB_LINK_PURGE_UNMARKED, BLOB_LINK_RECLAIMED,
     EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED, ROLE_CHANGED,
     SubjectRef, TEAM_CREATED, TEAM_DELETED, is_v0_kind,
 };
-use teams_core::domain::model_registry::ModelRegistryEntry;
 use teams_core::domain::store::{Locator, TeamBlobLink, parse_digest};
 use uuid::Uuid;
 
@@ -647,34 +647,35 @@ impl SqliteTeamsRepository {
         Ok(())
     }
 
-    /// Publishes a model registry entry, superseding the live one (if
-    /// any) in the same transaction — the storage half of "one active
-    /// package per instance" (#126 decision 1). Republishing the same
-    /// entry is accepted, not an error: it supersedes and re-inserts,
-    /// which is a history row saying the operator published again.
+    /// Publishes a head entry, superseding the live one (if any) in
+    /// the same transaction — one current head per instance (#132
+    /// phase 3), the invariant the model registry carried before it.
+    /// Republishing the same entry is accepted, not an error: it
+    /// supersedes and re-inserts, which is a history row saying the
+    /// operator published again.
     ///
     /// Like [`Self::record_locator`], no ledger append (see the module
     /// doc): the registry is instance-scope, the ledger's streams are
     /// per-team (#83 §2), and the table's own superseded rows are the
     /// publish history — so this is a plain transaction, not
     /// `write_tx`'s state+event pair.
-    pub async fn publish_model_entry(
+    pub async fn publish_head_entry(
         &self,
-        entry: ModelRegistryEntry,
+        entry: TagHeadEntry,
         published_at_ms: i64,
     ) -> Result<(), DomainError> {
         self.isle
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 tx.execute(
-                    "UPDATE model_registry_entry SET superseded_at = ?1
+                    "UPDATE head_registry_entry SET superseded_at = ?1
                      WHERE superseded_at IS NULL",
                     params![published_at_ms],
                 )?;
                 tx.execute(
-                    "INSERT INTO model_registry_entry (model_id, entry, published_at)
+                    "INSERT INTO head_registry_entry (label, entry, published_at)
                      VALUES (?1, ?2, ?3)",
-                    params![entry.model_id(), entry.raw(), published_at_ms],
+                    params![entry.label(), entry.raw(), published_at_ms],
                 )?;
                 tx.commit()
             })
@@ -687,18 +688,18 @@ impl SqliteTeamsRepository {
     // Reads — promotion outside the closure (the map.rs convention).
     // ------------------------------------------------------------------
 
-    /// The live registry entry, or `None` while nothing has been
+    /// The live head entry, or `None` while nothing has been
     /// published. Stored bytes pass back through the domain's envelope
     /// parser on the way out (the [`Role::parse`] convention): a row
     /// this instance would no longer accept surfaces as a validation
     /// error, never as bytes served with the instance's implicit
     /// endorsement.
-    pub async fn current_model_entry(&self) -> Result<Option<ModelRegistryEntry>, DomainError> {
+    pub async fn current_head_entry(&self) -> Result<Option<TagHeadEntry>, DomainError> {
         let raw: Option<String> = self
             .isle
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT entry FROM model_registry_entry WHERE superseded_at IS NULL",
+                    "SELECT entry FROM head_registry_entry WHERE superseded_at IS NULL",
                     [],
                     |row| row.get(0),
                 )
@@ -706,7 +707,7 @@ impl SqliteTeamsRepository {
             })
             .await
             .map_err(infra_err)?;
-        raw.as_deref().map(ModelRegistryEntry::parse).transpose()
+        raw.as_deref().map(TagHeadEntry::parse).transpose()
     }
 
     /// Whether a team row exists.
@@ -1918,11 +1919,14 @@ mod tests {
         driver.shutdown().await.unwrap();
     }
 
-    fn model_entry(model_id: &str, marker: &str) -> ModelRegistryEntry {
-        ModelRegistryEntry::parse(
+    fn head_entry(label: &str, marker: &str) -> TagHeadEntry {
+        TagHeadEntry::parse(
             &serde_json::json!({
-                "schema": teams_core::domain::model_registry::ENTRY_SCHEMA_V1,
-                "model_id": model_id,
+                "schema": teams_core::domain::head_registry::HEAD_ENTRY_SCHEMA_V1,
+                "head": label,
+                "model_id": "test-model",
+                "dim": 4,
+                "preprocess_ver": 1,
                 "marker": marker,
             })
             .to_string(),
@@ -1931,36 +1935,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publishing_a_model_entry_supersedes_and_keeps_history() {
+    async fn publishing_a_head_entry_supersedes_and_keeps_history() {
         let (repo, isle, driver) = repo().await;
 
         // Nothing published yet — the read says so rather than erring.
-        assert!(repo.current_model_entry().await.unwrap().is_none());
+        assert!(repo.current_head_entry().await.unwrap().is_none());
 
-        repo.publish_model_entry(model_entry("model-a", "first"), T0)
+        repo.publish_head_entry(head_entry("head-v1", "first"), T0)
             .await
             .unwrap();
-        let current = repo.current_model_entry().await.unwrap().unwrap();
-        assert_eq!(current.model_id(), "model-a");
+        let current = repo.current_head_entry().await.unwrap().unwrap();
+        assert_eq!(current.label(), "head-v1");
         assert!(current.raw().contains("first"));
 
         // A second publish supersedes: the read answers the new entry,
-        // and the old row survives, stamped — the rollback history
-        // #126 keeps open stays answerable.
-        repo.publish_model_entry(model_entry("model-b", "second"), T0 + 1)
+        // and the old row survives, stamped — rollback stays
+        // answerable from the table's own history.
+        repo.publish_head_entry(head_entry("head-v2", "second"), T0 + 1)
             .await
             .unwrap();
-        let current = repo.current_model_entry().await.unwrap().unwrap();
-        assert_eq!(current.model_id(), "model-b");
+        let current = repo.current_head_entry().await.unwrap().unwrap();
+        assert_eq!(current.label(), "head-v2");
 
         let (rows, live): (i64, i64) = isle
             .call(|conn| {
                 Ok((
-                    conn.query_row("SELECT count(*) FROM model_registry_entry", [], |r| {
-                        r.get(0)
-                    })?,
+                    conn.query_row("SELECT count(*) FROM head_registry_entry", [], |r| r.get(0))?,
                     conn.query_row(
-                        "SELECT count(*) FROM model_registry_entry WHERE superseded_at IS NULL",
+                        "SELECT count(*) FROM head_registry_entry WHERE superseded_at IS NULL",
                         [],
                         |r| r.get(0),
                     )?,
@@ -1979,7 +1981,7 @@ mod tests {
     #[tokio::test]
     async fn the_schema_itself_refuses_a_second_live_entry() {
         let (repo, isle, driver) = repo().await;
-        repo.publish_model_entry(model_entry("model-a", "first"), T0)
+        repo.publish_head_entry(head_entry("head-v1", "first"), T0)
             .await
             .unwrap();
 
@@ -1991,8 +1993,8 @@ mod tests {
             .call(|conn| {
                 Ok(conn
                     .execute(
-                        "INSERT INTO model_registry_entry (model_id, entry, published_at)
-                         VALUES ('model-b', '{}', 1)",
+                        "INSERT INTO head_registry_entry (label, entry, published_at)
+                         VALUES ('head-v2', '{}', 1)",
                         [],
                     )
                     .is_err())

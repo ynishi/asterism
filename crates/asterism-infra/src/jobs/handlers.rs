@@ -3948,7 +3948,11 @@ pub async fn head_train(env: &JobEnv, _payload: &serde_json::Value) -> Result<St
     let heads_root = crate::paths::heads_dir()?;
     let won = eval.is_win();
     let label = run_blocking(move || {
-        let label = crate::heads::next_head_label(&heads_root)?;
+        // Ordinal stem plus content discriminator: unique across
+        // stores, so a published head never collides with another
+        // member's local labels (#132 phase 3).
+        let stem = crate::heads::next_head_label(&heads_root)?;
+        let label = crate::heads::discriminated_label(&stem, &rows)?;
         let artifact =
             crate::heads::artifact_for(label.clone(), &identity, rows, eval, rulings_used, now);
         crate::heads::write_artifact(&heads_root, &artifact)?;
@@ -3965,11 +3969,36 @@ pub async fn head_train(env: &JobEnv, _payload: &serde_json::Value) -> Result<St
         eval.candidate_correct,
         eval.baseline_correct,
         if won {
-            "promoted — the pointer is set; scoring through it is the next branch, \
-             zero-shot still scores today"
+            "promoted — the pointer is set; restart applies it"
         } else {
             "not promoted, zero-shot stands"
         }
+    ))
+}
+
+/// Installs a pulled head artifact and promotes it — the `HeadPull`
+/// job (#132 phase 3). See `JobKind::HeadPull` for the contract; the
+/// verification and the install live in `crate::heads`
+/// (`install_pulled`, the same checks the startup bind runs), and
+/// this handler owns only the payload shape and the completion
+/// message.
+pub async fn head_pull(env: &JobEnv, payload: &serde_json::Value) -> Result<String, DomainError> {
+    let Some(encoder) = env.deps.visual_encoder.get().cloned() else {
+        return Ok("no model configured, skipped".into());
+    };
+    let Some(artifact) = payload.get("artifact") else {
+        return Err(DomainError::Validation(
+            "head_pull takes an \"artifact\" object — the pulled head, inline".into(),
+        ));
+    };
+    let raw = artifact.to_string();
+    let identity = encoder.identity().clone();
+    let heads_root = crate::paths::heads_dir()?;
+    let label =
+        run_blocking(move || crate::heads::install_pulled(&heads_root, &raw, &identity)).await?;
+    Ok(format!(
+        "{label} installed and promoted; restart applies it — the per-head stamp \
+         re-scores the library through the ordinary walk"
     ))
 }
 

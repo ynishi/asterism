@@ -360,6 +360,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/asterism/models/status", get(visual_model_status))
         // Train the tag head from the person's rulings (#132).
         .route("/asterism/heads/train", post(train_tag_head))
+        // Install a pulled head artifact (#132 phase 3).
+        .route("/asterism/heads/pull", post(pull_tag_head))
         // Marks inside an Asset's material — the same four verbs on a
         // narrower anchor: a position in the content rather than a note
         // on the asset row.
@@ -2952,6 +2954,32 @@ async fn visual_model_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<Vis
 /// lands.
 async fn train_tag_head(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<serde_json::Value> {
     let task_id = ctx.asset_service.train_head().await?;
+    Ok(Json(serde_json::json!({
+        "enqueued": true,
+        "task_id": task_id,
+    })))
+}
+
+/// Body of `POST /asterism/heads/pull` — the pulled head artifact,
+/// inline. The instance's registry sits behind its own session gate,
+/// so the caller (which holds that session) fetches the bytes and
+/// hands them over; this server carries no credential.
+#[derive(serde::Deserialize)]
+struct HeadPullRequest {
+    /// The head artifact as fetched from the instance's registry.
+    artifact: serde_json::Value,
+}
+
+/// `POST /asterism/heads/pull` — enqueues a `HeadPull` install (#132
+/// phase 3). The artifact's verification — encoder identity, row
+/// widths, key shapes, the same checks the startup bind runs — is the
+/// job's; a pulled head that could not bind must not install.
+/// Installing promotes, and the promotion applies on the next launch.
+async fn pull_tag_head(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(body): Json<HeadPullRequest>,
+) -> ApiResult<serde_json::Value> {
+    let task_id = ctx.asset_service.pull_head(body.artifact).await?;
     Ok(Json(serde_json::json!({
         "enqueued": true,
         "task_id": task_id,

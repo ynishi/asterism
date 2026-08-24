@@ -4905,6 +4905,20 @@ impl AssetService {
             .await
     }
 
+    /// Enqueues the install of a pulled head artifact (#132 phase 3);
+    /// returns the engine's task id. The artifact travels inline —
+    /// the caller fetched it with its own instance session — and the
+    /// job verifies it against the bound encoder before installing
+    /// and promoting; the promotion applies on the next launch.
+    pub async fn pull_head(&self, artifact: serde_json::Value) -> Result<String, DomainError> {
+        self.jobs
+            .enqueue(
+                JobKind::HeadPull,
+                serde_json::json!({ "artifact": artifact }),
+            )
+            .await
+    }
+
     /// The visual model this process has bound, if any (#112) — the
     /// status the UI's model panel reads. All-`None` covers every
     /// no-model shape (feature off, no package, failed bind) because

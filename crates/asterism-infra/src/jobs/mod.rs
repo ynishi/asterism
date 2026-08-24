@@ -535,6 +535,16 @@ async fn handle_asterism_job(
                 true,
             ),
         },
+        // Gated the same way: a pulled head is verified against the
+        // bound encoder's identity, and with none bound there is
+        // nothing to verify against.
+        Ok(JobKind::HeadPull) => match env.deps.visual_encoder.get() {
+            Some(_) => (handlers::head_pull(&env, &job.payload).await, false),
+            None => (
+                Ok("head_pull skipped: no model configured".to_string()),
+                true,
+            ),
+        },
         Ok(JobKind::VisualTagSuggest) => match env.deps.visual_encoder.get() {
             Some(_) => (
                 handlers::visual_tag_suggest(&env, &job.payload).await,

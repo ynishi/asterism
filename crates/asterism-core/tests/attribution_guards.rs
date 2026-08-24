@@ -548,6 +548,13 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
          somebody's behalf (rule 4)",
     ),
     (
+        "asset_service::pull_head",
+        "enqueues the install of a pulled head artifact (#132 phase \
+         3); the head is derived state keyed by its label — verified \
+         against the encoder, never attributed to whoever pulled it, \
+         the same reasoning as train_head below (rule 4)",
+    ),
+    (
         "asset_service::train_head",
         "enqueues a tag-head training run (#132); the head is derived \
          state — its inputs are the rulings people already made (each \
