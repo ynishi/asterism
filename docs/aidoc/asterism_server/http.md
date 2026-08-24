@@ -25,7 +25,7 @@ added on the other side, so a verb landing here lands in
 `asterism-ui`'s `commands` too, in the same change.
 
 The tree does not meet it today, and the shortfall is one
-direction: 26 routed handlers have no command of the same name.
+direction: 22 routed handlers have no command of the same name.
 Ten of those are the same job under another name
 (`declare_asset_provenance` is `asset_declare_provenance`;
 `declare_asset_source_type` is `asset_declare_source_type`; the
@@ -39,16 +39,16 @@ command (#136's decision) because `list_settings` returns every
 registry key fully resolved and `set_setting` / `reset_setting`
 return the resolved row, so a single-key IPC read would be a
 second way to ask a question the app already has answered. **The
-remaining six are the debt**: `rebuild_index`, `rescan_duplicates`,
-`organize_by_location`, `remeasure_dims` — the maintenance verbs
-#136 deferred until whether they need a screen first is answered —
-and `train_tag_head` / `pull_tag_head`, which landed with #132
-after the last count was taken. They are unfinished work, not
-sanctioned differences, and the count above is the way to see
-whether that list is shrinking.
+remaining two are the debt**: `train_tag_head` / `pull_tag_head`,
+which landed with #132 after an earlier count and whose screen is
+#130's. They are unfinished work, not sanctioned differences, and
+the count above is the way to see whether that list is shrinking.
+(The four maintenance verbs #136 once deferred on the screen
+question now have commands and a settings-screen Maintenance
+section — the answer turned out to be a section, not a screen.)
 
 A count taken the other way — commands that have a route of the
-same name — is 161 of 172 and cannot answer this question, because
+same name — is 165 of 176 and cannot answer this question, because
 the direction that goes short is the other one. The eleven without
 one are the seven command-side names of the twins above (four
 `threads_about_*` routes collapse into one command, so ten route
@@ -77,7 +77,7 @@ an agent should be offered.
 Nothing checks any of this. It is a rule a person applies while
 adding a route, which is why it is written here rather than only in
 `README.md`, and why "the forge already does it this way" is not
-evidence that a gap is deliberate. The six above are what that
+evidence that a gap is deliberate. The two above are what that
 reasoning costs when nobody counts.
 
 ## Functions

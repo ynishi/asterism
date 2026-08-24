@@ -139,6 +139,7 @@ its own module doc explains.
 - `open_forge_line` — Opens a line.
 - `open_forge_pursuit` — Opens work against a line.
 - `open_forge_thread` — Opens a conversation about something in the forge.
+- `organize_by_location` — Backfill: auto-organises existing assets under a Dir tree derived
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -153,6 +154,7 @@ its own module doc explains.
 - `push_forge_round` — Writes a round.
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
+- `rebuild_index` — Enqueues a batch `IndexRebuild` job and returns its task id — the
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
 - `record_diag` — Appends one webview-origin diagnostic to `diag_log` — the capture
 - `record_event` — Appends one telemetry event to the local `event_log`. Fire-and-
@@ -160,6 +162,7 @@ its own module doc explains.
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
+- `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `rename_dir` — Renames a Dir.
 - `rename_forge_line` — Moves the line's own description. Not a landing: nothing goes on the
@@ -171,6 +174,7 @@ its own module doc explains.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.
+- `rescan_duplicates` — Re-derives duplicate conflicts from fingerprints already on the
 - `reset_setting` — Clears one setting override and returns the value that now applies.
 - `resolve_duplicate_conflict` — Answers one duplicate question — `folded` (queues the fold onto
 - `resolve_forge_pursuit` — Lets the line's rule answer whatever this work collides with.

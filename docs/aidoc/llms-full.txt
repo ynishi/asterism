@@ -13322,7 +13322,7 @@ added on the other side, so a verb landing here lands in
 `asterism-ui`'s `commands` too, in the same change.
 
 The tree does not meet it today, and the shortfall is one
-direction: 26 routed handlers have no command of the same name.
+direction: 22 routed handlers have no command of the same name.
 Ten of those are the same job under another name
 (`declare_asset_provenance` is `asset_declare_provenance`;
 `declare_asset_source_type` is `asset_declare_source_type`; the
@@ -13336,16 +13336,16 @@ command (#136's decision) because `list_settings` returns every
 registry key fully resolved and `set_setting` / `reset_setting`
 return the resolved row, so a single-key IPC read would be a
 second way to ask a question the app already has answered. **The
-remaining six are the debt**: `rebuild_index`, `rescan_duplicates`,
-`organize_by_location`, `remeasure_dims` — the maintenance verbs
-#136 deferred until whether they need a screen first is answered —
-and `train_tag_head` / `pull_tag_head`, which landed with #132
-after the last count was taken. They are unfinished work, not
-sanctioned differences, and the count above is the way to see
-whether that list is shrinking.
+remaining two are the debt**: `train_tag_head` / `pull_tag_head`,
+which landed with #132 after an earlier count and whose screen is
+#130's. They are unfinished work, not sanctioned differences, and
+the count above is the way to see whether that list is shrinking.
+(The four maintenance verbs #136 once deferred on the screen
+question now have commands and a settings-screen Maintenance
+section — the answer turned out to be a section, not a screen.)
 
 A count taken the other way — commands that have a route of the
-same name — is 161 of 172 and cannot answer this question, because
+same name — is 165 of 176 and cannot answer this question, because
 the direction that goes short is the other one. The eleven without
 one are the seven command-side names of the twins above (four
 `threads_about_*` routes collapse into one command, so ten route
@@ -13374,7 +13374,7 @@ an agent should be offered.
 Nothing checks any of this. It is a rule a person applies while
 adding a route, which is why it is written here rather than only in
 `README.md`, and why "the forge already does it this way" is not
-evidence that a gap is deliberate. The six above are what that
+evidence that a gap is deliberate. The two above are what that
 reasoning costs when nobody counts.
 
 ## Functions
@@ -13691,6 +13691,7 @@ its own module doc explains.
 - `open_forge_line` — Opens a line.
 - `open_forge_pursuit` — Opens work against a line.
 - `open_forge_thread` — Opens a conversation about something in the forge.
+- `organize_by_location` — Backfill: auto-organises existing assets under a Dir tree derived
 - `paste_image_import` — Writes a clipboard-pasted image blob to
 - `patch_session_metadata` — Partially updates a Session's metadata (`title` / `note` /
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
@@ -13705,6 +13706,7 @@ its own module doc explains.
 - `push_forge_round` — Writes a round.
 - `random_assets` — A random handful out of the current filter — the sidebar's
 - `rebuild_edges` — Enqueues an incremental constellation-edge rebuild for the asset.
+- `rebuild_index` — Enqueues a batch `IndexRebuild` job and returns its task id — the
 - `rebuild_sessions` — Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot
 - `record_diag` — Appends one webview-origin diagnostic to `diag_log` — the capture
 - `record_event` — Appends one telemetry event to the local `event_log`. Fire-and-
@@ -13712,6 +13714,7 @@ its own module doc explains.
 - `register_persona` — Registers a new persona.
 - `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
+- `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
 - `rename_dir` — Renames a Dir.
 - `rename_forge_line` — Moves the line's own description. Not a landing: nothing goes on the
@@ -13723,6 +13726,7 @@ its own module doc explains.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
 - `reorder_personas` — Rewrites `display_order` across a persona slice.
+- `rescan_duplicates` — Re-derives duplicate conflicts from fingerprints already on the
 - `reset_setting` — Clears one setting override and returns the value that now applies.
 - `resolve_duplicate_conflict` — Answers one duplicate question — `folded` (queues the fold onto
 - `resolve_forge_pursuit` — Lets the line's rule answer whatever this work collides with.
