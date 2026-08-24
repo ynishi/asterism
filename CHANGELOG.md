@@ -10,6 +10,27 @@ and this project adheres to
 
 ### Added
 
+- **Ten more of the socket's verbs reach the desktop** (#136): series-strategy
+  CRUD (`list_series_strategies`, `create_series_strategy`,
+  `update_series_strategy`, `delete_series_strategy`), tag administration
+  (`rename_tag`, `delete_tag`, `merge_tags`), the observation timeline
+  (`list_observations`, `list_streams`), and `asset_declare_source_type` — each
+  a thin twin of its route, the writes attributed from
+  `AttributionContext::owner_surface()`, with `SeriesStrategyService` and the
+  observation store newly wired into `AppState`.
+
+  The count in `asterism-server`'s `http` module doc is re-measured in both
+  directions: 26 routed handlers have no command of the same name — down from 34
+  by nine implemented here and `fetch_visual_model` retired with the model-fetch
+  prototype, back up by `train_tag_head` / `pull_tag_head`, which landed with
+  #132 after the last count. Of the 26, six remain debt — the four maintenance
+  verbs #136 deferred plus those two head verbs; `declare_asset_source_type`
+  moved to the alias twins (`asset_declare_source_type`). `get_setting` comes
+  off the list by decision rather than by implementation: `list_settings`
+  returns every registry key fully resolved and the write verbs return the
+  resolved row, so a single-key IPC read would be a second way to ask an
+  answered question.
+
 - **The forge reaches the desktop.** Twenty-five Tauri commands covering the
   forge's twenty-eight routes, with the three forge services reaching `AppState`
   — twenty-five rather than twenty-eight because the four `about` reads collapse

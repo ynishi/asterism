@@ -25,34 +25,37 @@ use asterism_contract::command::{
     AppendMessageCommand, ArchivePersonaCommand, ArchiveThreadCommand, AttachTagBatchCommand,
     AttachTagBatchResult, AttachTagCommand, BatchGroupMembershipCommand, CreateDirCommand,
     CreateDispatchCommand, CreateGroupCommand, CreateMaterialLayerCommand, CreateModalityCommand,
-    CreateQueryGroupCommand, CreateSnapshotCommand, CreateThreadCommand, DeleteAssetCommentCommand,
-    DeleteChapterMarkCommand, DeleteDirCommand, DeleteMaterialLayerCommand,
-    DeleteMaterialMarkCommand, DeleteMessageCommand, DeleteModalityCommand,
-    DeletePersonaProfileCommand, DeletePersonaThemeCommand, DeleteSessionCommand,
+    CreateQueryGroupCommand, CreateSeriesStrategyCommand, CreateSnapshotCommand,
+    CreateThreadCommand, DeleteAssetCommentCommand, DeleteChapterMarkCommand, DeleteDirCommand,
+    DeleteMaterialLayerCommand, DeleteMaterialMarkCommand, DeleteMessageCommand,
+    DeleteModalityCommand, DeletePersonaProfileCommand, DeletePersonaThemeCommand,
+    DeleteSeriesStrategyCommand, DeleteSessionCommand, DeleteTagCommand, DeleteTagResult,
     DeleteThreadCommand, DetachTagBatchCommand, DetachTagBatchResult, DetachTagCommand,
     DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
     EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
-    MoveDirCommand, MoveGroupToDirCommand, PasteImageImportCommand, PatchSessionMetadataCommand,
-    PostAssetCommentCommand, PostChapterMarkCommand, PostMaterialMarkCommand,
-    PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult, PromoteTagToGroupCommand,
-    PromoteTagToGroupResult, PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand,
-    PurgePersonaCommand, RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand,
-    RenameDirCommand, RenameGroupCommand, RenameSessionCommand, ReorderGroupAssetsCommand,
+    MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand,
+    PasteImageImportCommand, PatchSessionMetadataCommand, PostAssetCommentCommand,
+    PostChapterMarkCommand, PostMaterialMarkCommand, PromoteSnapshotToGroupCommand,
+    PromoteSnapshotToGroupResult, PromoteTagToGroupCommand, PromoteTagToGroupResult,
+    PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand,
+    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
+    RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand,
     ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
     ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
     RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
     SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
     TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
     UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand,
+    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetPageDto,
     AssetTextDto, ChapterMarkDto, ConstellationItemDto, DirDto, DispatchDto, DuplicateConflictDto,
     DuplicateReportDto, DuplicateResolutionDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto,
     MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto,
-    ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, RetrievedPageDto, SessionDto,
-    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, ThreadDto,
+    ModalityDefDto, ObservationDto, PersonaDto, PersonaProfileDto, PersonaThemeDto,
+    RetrievedPageDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SnapshotDto,
+    TagCountDto, TagDto, ThreadDto,
 };
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
@@ -61,7 +64,9 @@ use asterism_contract::forge::{
     OpenForgePursuitCommand, OpenForgeThreadCommand, PushForgeRoundCommand, RenameForgeLineCommand,
     RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
 };
-use asterism_contract::query::{GetAssetDetailQuery, ListAssetsQuery, SearchAssetsQuery};
+use asterism_contract::query::{
+    GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
+};
 use asterism_core::application::mapping::{
     forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
     forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
@@ -272,6 +277,66 @@ pub async fn delete_modality(
     state
         .modality_service
         .delete(command, &AttributionContext::owner_surface())
+        .await?;
+    Ok(())
+}
+
+/// Every registered series rule, oldest first, seeded and user-written
+/// alike — the command twin of `GET /asterism/series-strategies`.
+/// Rules, not groups: what a rule put on which key is a different
+/// question (see the route's doc).
+#[tauri::command]
+pub async fn list_series_strategies(
+    state: State<'_, AppState>,
+) -> Result<Vec<SeriesStrategyDto>, UiError> {
+    Ok(state.series_strategy_service.list().await?)
+}
+
+/// Registers a series rule and asks for the keys it implies — the
+/// command twin of `POST /asterism/series-strategies`. A rule this
+/// build could not carry out is refused before the row is written.
+#[tauri::command]
+pub async fn create_series_strategy(
+    state: State<'_, AppState>,
+    command: CreateSeriesStrategyCommand,
+) -> Result<SeriesStrategyDto, UiError> {
+    Ok(state
+        .series_strategy_service
+        .create(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Partially updates a series rule (each omitted field is left
+/// unchanged) — the command twin of
+/// `PATCH /asterism/series-strategies/{id}`. The `id` argument names
+/// the target and overwrites the body's copy, the same arbitration the
+/// route applies to its path segment.
+#[tauri::command]
+pub async fn update_series_strategy(
+    state: State<'_, AppState>,
+    id: String,
+    mut command: UpdateSeriesStrategyCommand,
+) -> Result<SeriesStrategyDto, UiError> {
+    command.id = id;
+    Ok(state
+        .series_strategy_service
+        .update(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Removes a series rule and, by the schema's cascade, every key
+/// derived under it — the command twin of
+/// `DELETE /asterism/series-strategies/{id}`. No guard, unlike
+/// [`delete_modality`]: a series key is recomputed from rows already
+/// in hand.
+#[tauri::command]
+pub async fn delete_series_strategy(state: State<'_, AppState>, id: String) -> Result<(), UiError> {
+    state
+        .series_strategy_service
+        .delete(
+            DeleteSeriesStrategyCommand { id },
+            &AttributionContext::owner_surface(),
+        )
         .await?;
     Ok(())
 }
@@ -918,6 +983,26 @@ pub async fn asset_declare_meta(
         .await?)
 }
 
+/// Asserts — or retracts, via an absent `source_type` — the asset's
+/// digital source type by hand: the command twin of
+/// `POST /asterism/assets/{id}/source-type`. A term the IPTC
+/// vocabulary does not define is refused at the door.
+///
+/// Like [`asset_declare_meta`], the statement's own `operator_ai`
+/// travels on the command and is a different subject from who the
+/// asset is by, which is why the attribution handed to the service is
+/// still the owner surface.
+#[tauri::command]
+pub async fn asset_declare_source_type(
+    state: State<'_, AppState>,
+    command: asterism_contract::command::DeclareSourceTypeCommand,
+) -> Result<asterism_contract::dto::AssetDto, UiError> {
+    Ok(state
+        .asset_service
+        .declare_source_type(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
 /// Where a video's transcoded preview rendition stands — the command
 /// twin of `GET /asterism/assets/{id}/video-preview`. The first call
 /// for a missing rendition enqueues the transcode; the pane polls
@@ -1266,6 +1351,48 @@ pub async fn promote_tag_to_group(
         .await?)
 }
 
+/// Renames a tag channel in place — the command twin of
+/// `POST /asterism/tags/rename`. Rejected when the name belongs to
+/// another tag: rename never merges (that is [`merge_tags`]).
+#[tauri::command]
+pub async fn rename_tag(
+    state: State<'_, AppState>,
+    command: RenameTagCommand,
+) -> Result<TagDto, UiError> {
+    Ok(state
+        .asset_service
+        .rename_tag(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Drops a tag channel and every link to it — the command twin of
+/// `POST /asterism/tags/delete`. Unlike [`detach_tag`], this removes
+/// the channel itself; there is no trash for tags.
+#[tauri::command]
+pub async fn delete_tag(
+    state: State<'_, AppState>,
+    command: DeleteTagCommand,
+) -> Result<DeleteTagResult, UiError> {
+    Ok(state
+        .asset_service
+        .delete_tag(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
+/// Folds one tag channel into another and deletes the source — the
+/// command twin of `POST /asterism/tags/merge`. `command.dry_run`
+/// reports the same numbers without writing; merge is not undoable.
+#[tauri::command]
+pub async fn merge_tags(
+    state: State<'_, AppState>,
+    command: MergeTagsCommand,
+) -> Result<MergeTagsResult, UiError> {
+    Ok(state
+        .asset_service
+        .merge_tags(command, &AttributionContext::owner_surface())
+        .await?)
+}
+
 /// Rewrites the front-to-back order of a Group's assets after a drag.
 #[tauri::command]
 pub async fn reorder_group_assets(
@@ -1500,6 +1627,30 @@ pub async fn list_events(
     query: asterism_contract::query::ListEventsQuery,
 ) -> Result<Vec<asterism_contract::dto::EventDto>, UiError> {
     Ok(state.telemetry.list(query).await?)
+}
+
+/// Every observation stream on one timeline, newest first — the
+/// command twin of `GET /asterism/observations`. Carries the shared
+/// envelope only; a stream's own columns stay with that stream's own
+/// socket endpoint (diagnostics the desktop does not read).
+#[tauri::command]
+pub async fn list_observations(
+    state: State<'_, AppState>,
+    query: ListObservationsQuery,
+) -> Result<Vec<ObservationDto>, UiError> {
+    Ok(state.observations.all(query).await?)
+}
+
+/// The stream names [`list_observations`]'s `stream` filter accepts —
+/// the command twin of `GET /asterism/observations/streams`. Published
+/// because the set is closed, and a caller guessing at it is how a
+/// filter ends up silently doing nothing.
+#[tauri::command]
+pub async fn list_streams() -> Result<Vec<String>, UiError> {
+    Ok(asterism_core::domain::observation::Stream::ALL
+        .iter()
+        .map(|s| s.as_str().to_string())
+        .collect())
 }
 
 /// Returns the cached JPEG bytes of a thumbnail for `asset_id` at

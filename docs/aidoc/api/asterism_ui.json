@@ -73,6 +73,11 @@
       "docs": "Declares (or repairs) an asset's origin after the fact — the\ncommand twin of `POST /asterism/assets/{id}/provenance`. Same\n`derived_from` vocabulary as ingest; an unresolvable claim is\nrecorded on `extra._trace`, not rejected."
     },
     {
+      "path": "asterism_ui::commands::asset_declare_source_type",
+      "kind": "function",
+      "docs": "Asserts — or retracts, via an absent `source_type` — the asset's\ndigital source type by hand: the command twin of\n`POST /asterism/assets/{id}/source-type`. A term the IPTC\nvocabulary does not define is refused at the door.\n\nLike [`asset_declare_meta`], the statement's own `operator_ai`\ntravels on the command and is a different subject from who the\nasset is by, which is why the attribution handed to the service is\nstill the owner surface."
+    },
+    {
       "path": "asterism_ui::commands::asset_detail",
       "kind": "function",
       "docs": "Detail view (asset + attached tags + constellation edges)."
@@ -153,6 +158,11 @@
       "docs": "\"Save as Group\": mints a `kind='query'` Group from a `query_json`\nv1 rule and evaluates it synchronously once."
     },
     {
+      "path": "asterism_ui::commands::create_series_strategy",
+      "kind": "function",
+      "docs": "Registers a series rule and asks for the keys it implies — the\ncommand twin of `POST /asterism/series-strategies`. A rule this\nbuild could not carry out is refused before the row is written."
+    },
+    {
       "path": "asterism_ui::commands::create_snapshot",
       "kind": "function",
       "docs": "Freezes a picked asset list into a Snapshot and stops there\n(content-hash deduped).\n\nThe freeze half of `promote_volatile_selection` without the promote.\nBoth other Snapshot-consuming commands (`create_dispatch`,\n`get_snapshot`) take a snapshot id, and until this existed the only\nway to obtain one was to also create a Group — so \"keep this exact\nset for now\" had to go through a side effect nobody asked for."
@@ -203,9 +213,19 @@
       "docs": "Removes the persona theme row entirely (reverts to defaults)."
     },
     {
+      "path": "asterism_ui::commands::delete_series_strategy",
+      "kind": "function",
+      "docs": "Removes a series rule and, by the schema's cascade, every key\nderived under it — the command twin of\n`DELETE /asterism/series-strategies/{id}`. No guard, unlike\n[`delete_modality`]: a series key is recomputed from rows already\nin hand."
+    },
+    {
       "path": "asterism_ui::commands::delete_session",
       "kind": "function",
       "docs": "Deletes a Session — only when no `asset` row still references\nit (`409 Conflict` otherwise). Mirror of the Modality delete\nguard; the UI disables the tile's ✕ button when\n`message_count > 0` so this error only surfaces under a race."
+    },
+    {
+      "path": "asterism_ui::commands::delete_tag",
+      "kind": "function",
+      "docs": "Drops a tag channel and every link to it — the command twin of\n`POST /asterism/tags/delete`. Unlike [`detach_tag`], this removes\nthe channel itself; there is no trash for tags."
     },
     {
       "path": "asterism_ui::commands::delete_thread",
@@ -463,6 +483,11 @@
       "docs": "Sidebar Modality counts — `(modality_slug, asset_count)`, optionally\nscoped to one persona (`None` = cross-persona total)."
     },
     {
+      "path": "asterism_ui::commands::list_observations",
+      "kind": "function",
+      "docs": "Every observation stream on one timeline, newest first — the\ncommand twin of `GET /asterism/observations`. Carries the shared\nenvelope only; a stream's own columns stay with that stream's own\nsocket endpoint (diagnostics the desktop does not read)."
+    },
+    {
       "path": "asterism_ui::commands::list_persona_asset_counts",
       "kind": "function",
       "docs": "Sidebar Persona counts — `(persona_id, asset_count)` per persona\nthat owns at least one asset. Ordered by count DESC then uuid ASC."
@@ -471,6 +496,11 @@
       "path": "asterism_ui::commands::list_personas",
       "kind": "function",
       "docs": "Lists every persona (used to render the sidebar)."
+    },
+    {
+      "path": "asterism_ui::commands::list_series_strategies",
+      "kind": "function",
+      "docs": "Every registered series rule, oldest first, seeded and user-written\nalike — the command twin of `GET /asterism/series-strategies`.\nRules, not groups: what a rule put on which key is a different\nquestion (see the route's doc)."
     },
     {
       "path": "asterism_ui::commands::list_sessions",
@@ -486,6 +516,11 @@
       "path": "asterism_ui::commands::list_snapshots_containing",
       "kind": "function",
       "docs": "Reverse lookup — every Snapshot whose asset_ids list contains this\nasset (P5). Renders on the detail panel as \"included in these\nfreezes\" chips."
+    },
+    {
+      "path": "asterism_ui::commands::list_streams",
+      "kind": "function",
+      "docs": "The stream names [`list_observations`]'s `stream` filter accepts —\nthe command twin of `GET /asterism/observations/streams`. Published\nbecause the set is closed, and a caller guessing at it is how a\nfilter ends up silently doing nothing."
     },
     {
       "path": "asterism_ui::commands::list_tag_counts",
@@ -516,6 +551,11 @@
       "path": "asterism_ui::commands::merge_groups",
       "kind": "function",
       "docs": "Merges one manual group into another and deletes the source\n(duplicate-group consolidation). Returns the number of\nmembers moved."
+    },
+    {
+      "path": "asterism_ui::commands::merge_tags",
+      "kind": "function",
+      "docs": "Folds one tag channel into another and deletes the source — the\ncommand twin of `POST /asterism/tags/merge`. `command.dry_run`\nreports the same numbers without writing; merge is not undoable."
     },
     {
       "path": "asterism_ui::commands::move_dir",
@@ -678,6 +718,11 @@
       "docs": "Renames a Session (title-only write). Passing `title: null`\nclears the title back to the untitled state — this is the sole\npath that expresses NULL because\n[`patch_session_metadata`] treats per-field `null` as \"leave\nunchanged\"."
     },
     {
+      "path": "asterism_ui::commands::rename_tag",
+      "kind": "function",
+      "docs": "Renames a tag channel in place — the command twin of\n`POST /asterism/tags/rename`. Rejected when the name belongs to\nanother tag: rename never merges (that is [`merge_tags`])."
+    },
+    {
       "path": "asterism_ui::commands::reopen_forge_line",
       "kind": "function",
       "docs": "Takes it back out."
@@ -811,6 +856,11 @@
       "path": "asterism_ui::commands::update_query_group_query",
       "kind": "function",
       "docs": "\"Update query\": validates + persists a replacement rule (rejecting\ndependency cycles) and re-evaluates the membership."
+    },
+    {
+      "path": "asterism_ui::commands::update_series_strategy",
+      "kind": "function",
+      "docs": "Partially updates a series rule (each omitted field is left\nunchanged) — the command twin of\n`PATCH /asterism/series-strategies/{id}`. The `id` argument names\nthe target and overwrites the body's copy, the same arbitration the\nroute applies to its path segment."
     },
     {
       "path": "asterism_ui::commands::visual_model_status",

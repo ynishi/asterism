@@ -16,11 +16,11 @@
 //!   (`RecordDiagCommand`) is in: the webview is itself a diagnostic
 //!   source (`lib/diag.ts`);
 //! - the series Strategy types (`SeriesStrategyDto` and its three
-//!   commands) stay out for the same reason. Registering a rule is an
-//!   HTTP / MCP surface for the agent driving an importer, and the UI
-//!   has no screen for it — the eventual UI is about promoting one
-//!   series to a real Group, which is a different shape from editing
-//!   a rule;
+//!   commands) stay out although their IPC commands now exist (#136):
+//!   no screen consumes them, and the eventual UI is about promoting
+//!   one series to a real Group, which is a different shape from
+//!   editing a rule. Until a screen imports one, exporting the shape
+//!   would only give it something to drift from;
 //! - the forge's types (`asterism_contract::forge`) stay out until a
 //!   screen imports one, and that is a different reason from the two
 //!   above rather than a weaker one. A screen is the whole reason that
