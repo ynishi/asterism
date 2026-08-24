@@ -18,6 +18,49 @@
 //!   every state change appends its event in the same tx (audit-log
 //!   pattern, not event sourcing — #83 §2 SoT note). Nothing here
 //!   replays.
+//!
+//! ## Erasing a person answers in three places
+//!
+//! A request to erase somebody is not one deletion, and the reason is
+//! that a person is answered for in three records, each holding a
+//! different part of the answer — a name in one, an association in the
+//! next, a handle in the third. All three have to answer, and an
+//! answer that covers two of them has erased nothing:
+//!
+//! 1. **The [`ActorStamp`](crate::domain::identity::ActorStamp) on
+//!    every ledger event they wrote.** The name is captured at write
+//!    time precisely so a later rename does not rewrite history — the
+//!    property that makes the ledger readable is the property that
+//!    makes it hold the name.
+//! 2. **Their rows in the subject index.** A `user` subject is a uuid
+//!    rather than a name, so what it exposes is the association: which
+//!    events touched this person, which is the question the index
+//!    exists to answer quickly.
+//! 3. **`forge_actor` on the local plane.** The handle a member's
+//!    writes resolve to is minted on their own instance, outside this
+//!    plane's storage entirely, and the display snapshot it captures
+//!    is the same captured-not-referenced value as the stamp above.
+//!
+//! Three mechanisms can answer, and which one is chosen is a decision
+//! rather than a default: **masking at write** (the stamp records an
+//! id and no name, which costs every reader the ability to say who
+//! without a join, and costs history the name the account had then),
+//! **retention under a documented exemption** (the record is kept and
+//! the basis for keeping it is written down, which is what an audit
+//! log is usually held under), and **crypto-shredding** (the name is
+//! stored encrypted under a per-subject key and erasure destroys the
+//! key, which turns a rewrite into a delete somewhere the append-only
+//! rule does not reach).
+//!
+//! **The order matters, and this end of it comes first.** Today a row
+//! could be rewritten under a migration if the decision demanded it —
+//! expensive and against the schema's triggers, but possible. A
+//! tamper-evidence chain removes that: once each entry commits to its
+//! predecessor, rewriting one invalidates every entry after it, and
+//! erasure-by-rewriting is gone permanently rather than merely
+//! discouraged. So the mechanism is settled before a chain starts, not
+//! after — a chain built first would decide this question by making it
+//! unanswerable.
 
 use crate::domain::identity::LedgerActor;
 use crate::domain::store;
@@ -163,7 +206,7 @@ impl std::fmt::Display for EventKind {
 
 /// A team came into existence.
 pub const TEAM_CREATED: &str = "teams.team.created/1";
-/// A team was deleted (owner, or the operator — ledger-stamped).
+/// A team was deleted (owner, or an admin — ledger-stamped).
 pub const TEAM_DELETED: &str = "teams.team.deleted/1";
 /// A user became a member.
 pub const MEMBERSHIP_ADDED: &str = "teams.membership.added/1";
@@ -221,6 +264,182 @@ pub fn is_v0_kind(kind: &EventKind) -> bool {
     V0_KINDS.contains(&kind.as_str())
 }
 
+/// What a forge handle stands for — the four kinds #102 fixed for the
+/// local plane's `forge_actor` rows.
+///
+/// `owner` and `subject` are the two an author has; `unrecorded` is a
+/// write that named nobody, which is one actor rather than a fresh one
+/// each time; `server` is the instance itself, which is what a line's
+/// rule writes as. The teams plane spells them the same way because it
+/// is referring to the same rows, not because it re-derives the
+/// vocabulary: a word this list does not hold is refused at the
+/// boundary rather than carried as a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ForgeStandsFor {
+    /// The owner of the instance the handle was minted on.
+    Owner,
+    /// A named subject, identified by the token beside it.
+    Subject,
+    /// A write that named nobody.
+    Unrecorded,
+    /// The instance itself, acting as a line's rule.
+    Server,
+}
+
+impl ForgeStandsFor {
+    /// The TEXT form — the word the local plane's `stands_for` column
+    /// holds.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Subject => "subject",
+            Self::Unrecorded => "unrecorded",
+            Self::Server => "server",
+        }
+    }
+}
+
+impl std::fmt::Display for ForgeStandsFor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A forge handle, as a ledger subject: what it stands for, and whom
+/// when that is a named subject.
+///
+/// The pair, not an opaque string. #102 fixed the vocabulary the local
+/// plane's `forge_actor` rows are keyed by, so there is a shape to
+/// validate and this type validates it: `subject` is present exactly
+/// when [`ForgeStandsFor::Subject`] is the kind — the same rule the
+/// table states as a `CHECK`, and a pair that breaks it is refused
+/// here rather than stored and puzzled over later.
+///
+/// The subject token is TEXT rather than a UUID because that is what
+/// the column holds: the local plane's authors are named by the same
+/// token its sharing lists and viewers carry, which is opaque to both
+/// planes and is not a uuid.
+///
+/// The canonical string is what crosses the wire and what the
+/// `ledger_subject` index is keyed by, so a trace query encodes a
+/// handle exactly as an append wrote it: the bare word for the three
+/// kinds that name nobody, and `subject:<token>` for the one that
+/// does.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ForgeIdentityRef {
+    stands_for: ForgeStandsFor,
+    subject: Option<String>,
+}
+
+impl ForgeIdentityRef {
+    /// The instance owner's handle.
+    pub const fn owner() -> Self {
+        Self {
+            stands_for: ForgeStandsFor::Owner,
+            subject: None,
+        }
+    }
+
+    /// The handle for writes that named nobody.
+    pub const fn unrecorded() -> Self {
+        Self {
+            stands_for: ForgeStandsFor::Unrecorded,
+            subject: None,
+        }
+    }
+
+    /// The instance's own handle.
+    pub const fn server() -> Self {
+        Self {
+            stands_for: ForgeStandsFor::Server,
+            subject: None,
+        }
+    }
+
+    /// A named subject's handle. A blank token is refused: the whole
+    /// point of this kind is that it says whom, and one that does not
+    /// is [`Self::unrecorded`] wearing the wrong word.
+    pub fn subject(token: impl Into<String>) -> Result<Self, DomainError> {
+        let token = token.into();
+        if token.trim().is_empty() {
+            return Err(DomainError::Validation(
+                "a forge subject handle names whom; use the unrecorded kind for a \
+                 write that named nobody"
+                    .into(),
+            ));
+        }
+        Ok(Self {
+            stands_for: ForgeStandsFor::Subject,
+            subject: Some(token),
+        })
+    }
+
+    /// Parses the canonical string form.
+    pub fn parse(raw: &str) -> Result<Self, DomainError> {
+        if let Some((kind, token)) = raw.split_once(':') {
+            if kind != ForgeStandsFor::Subject.as_str() {
+                return Err(DomainError::Validation(format!(
+                    "forge identity {raw:?} names a subject after {kind:?}; only \
+                     \"subject\" takes one"
+                )));
+            }
+            return Self::subject(token);
+        }
+        match raw {
+            "owner" => Ok(Self::owner()),
+            "unrecorded" => Ok(Self::unrecorded()),
+            "server" => Ok(Self::server()),
+            "subject" => Err(DomainError::Validation(
+                "forge identity \"subject\" names nobody (expected \"subject:<token>\")".into(),
+            )),
+            other => Err(DomainError::Validation(format!(
+                "forge identity {other:?} is not one of \"owner\" / \"subject:<token>\" / \
+                 \"unrecorded\" / \"server\""
+            ))),
+        }
+    }
+
+    /// What this handle stands for.
+    pub const fn stands_for(&self) -> ForgeStandsFor {
+        self.stands_for
+    }
+
+    /// The subject token, present exactly when the kind is
+    /// [`ForgeStandsFor::Subject`].
+    pub fn subject_token(&self) -> Option<&str> {
+        self.subject.as_deref()
+    }
+
+    /// The canonical string form — what storage and the wire carry.
+    pub fn encode(&self) -> String {
+        match &self.subject {
+            Some(token) => format!("{}:{token}", self.stands_for),
+            None => self.stands_for.as_str().to_string(),
+        }
+    }
+}
+
+impl TryFrom<String> for ForgeIdentityRef {
+    type Error = DomainError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<ForgeIdentityRef> for String {
+    fn from(value: ForgeIdentityRef) -> Self {
+        value.encode()
+    }
+}
+
+impl std::fmt::Display for ForgeIdentityRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.encode())
+    }
+}
+
 /// A typed reference an event makes — the index trace queries walk, so
 /// "which events touched X" never becomes payload parsing (#83 §2).
 ///
@@ -234,9 +453,9 @@ pub fn is_v0_kind(kind: &EventKind) -> bool {
 pub enum SubjectRef {
     /// A content digest (`sha256:` form, `asterism-core` notation).
     Digest(String),
-    /// Reserved for #63 — the forge identity vocabulary is not fixed
-    /// yet, so the payload is an opaque string this build only carries.
-    ForgeIdentity(String),
+    /// A forge handle, in the vocabulary #102 fixed
+    /// ([`ForgeIdentityRef`]).
+    ForgeIdentity(ForgeIdentityRef),
     /// A user.
     User(Uuid),
     /// A stored blob, addressed the only way blobs are: by digest.
@@ -259,9 +478,9 @@ impl SubjectRef {
         Self::User(user_id)
     }
 
-    /// A reserved forge-identity subject (#63).
-    pub fn forge_identity(opaque: impl Into<String>) -> Self {
-        Self::ForgeIdentity(opaque.into())
+    /// A forge-handle subject.
+    pub const fn forge_identity(handle: ForgeIdentityRef) -> Self {
+        Self::ForgeIdentity(handle)
     }
 }
 
@@ -283,7 +502,7 @@ pub struct LedgerEvent {
     /// land in any team's ledger (#83 §2).
     pub team_id: Uuid,
     /// Who acted, stamped at write time and distinguishable as member
-    /// or operator ([`LedgerActor`]).
+    /// or admin ([`LedgerActor`]).
     pub actor: LedgerActor,
     /// When, as milliseconds since the Unix epoch.
     pub occurred_at_ms: i64,
@@ -421,6 +640,71 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_forge_handle_is_a_pair_and_round_trips_through_its_canonical_string() {
+        let handles = [
+            ForgeIdentityRef::owner(),
+            ForgeIdentityRef::unrecorded(),
+            ForgeIdentityRef::server(),
+            ForgeIdentityRef::subject("hoshino").unwrap(),
+        ];
+        for handle in &handles {
+            assert_eq!(ForgeIdentityRef::parse(&handle.encode()).unwrap(), *handle);
+        }
+
+        // The three that name nobody encode as the bare word; the one
+        // that names somebody carries them after a colon.
+        assert_eq!(ForgeIdentityRef::owner().encode(), "owner");
+        assert_eq!(
+            ForgeIdentityRef::subject("hoshino").unwrap().encode(),
+            "subject:hoshino"
+        );
+
+        // A token is opaque text, not a uuid, and a colon inside one
+        // survives: the split is on the first, so the rest is the
+        // token whatever it holds.
+        let colonful = ForgeIdentityRef::subject("scheme:opaque").unwrap();
+        assert_eq!(colonful.subject_token(), Some("scheme:opaque"));
+        assert_eq!(
+            ForgeIdentityRef::parse(&colonful.encode()).unwrap(),
+            colonful
+        );
+
+        // The pair rule the local plane states as a CHECK: a token
+        // belongs to the subject kind and to no other.
+        assert_eq!(ForgeIdentityRef::owner().subject_token(), None);
+        for invalid in [
+            "subject",          // names nobody
+            "subject:",         // the same, spelled longer
+            "owner:hoshino",    // a kind that takes no token
+            "server:something", // likewise
+            "admin",            // not in the #102 vocabulary
+            "",
+        ] {
+            assert!(
+                matches!(
+                    ForgeIdentityRef::parse(invalid),
+                    Err(DomainError::Validation(_))
+                ),
+                "{invalid:?} must not parse as a forge handle"
+            );
+        }
+        assert!(ForgeIdentityRef::subject("   ").is_err());
+    }
+
+    #[test]
+    fn a_forge_subject_serialises_as_the_string_the_index_is_keyed_by() {
+        // The index column is TEXT and the wire value is a string, so
+        // the typed pair must not serialise as an object — the whole
+        // point of the canonical encoding is that a trace query and an
+        // append spell one handle one way.
+        let subject = SubjectRef::forge_identity(ForgeIdentityRef::subject("hoshino").unwrap());
+        let json = serde_json::to_value(&subject).unwrap();
+        assert_eq!(json["ref_type"], serde_json::json!("forge_identity"));
+        assert_eq!(json["value"], serde_json::json!("subject:hoshino"));
+        assert_eq!(serde_json::from_value::<SubjectRef>(json).unwrap(), subject);
     }
 
     #[test]

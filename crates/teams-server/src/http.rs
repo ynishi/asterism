@@ -7,21 +7,21 @@
 //! |---|---|---|
 //! | POST | `/teams/auth/login` | none (rate-limited) |
 //! | POST | `/teams/auth/logout` | bearer token (rate-limited) |
-//! | POST | `/teams/create` | any authenticated user; operator-only under closed registration |
-//! | POST | `/teams/{team_id}/delete` | owner, or the operator (operator-stamped) |
-//! | GET | `/teams/{team_id}/roster` | member, or the operator |
-//! | GET | `/teams/{team_id}/events` | member, or the operator |
+//! | POST | `/teams/create` | any authenticated user; admin-only under closed registration |
+//! | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
+//! | GET | `/teams/{team_id}/roster` | member, or an admin |
+//! | GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
 //! | POST | `/teams/{team_id}/members/invite` | owner |
 //! | POST | `/teams/{team_id}/members/remove` | owner |
 //! | POST | `/teams/{team_id}/owners/grant` | owner |
 //! | POST | `/teams/{team_id}/owners/revoke` | owner |
-//! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; the operator has no implicit upload) |
-//! | GET | `/teams/{team_id}/blobs/{digest}` | member, or the operator — every failure is the same `404`, see below |
-//! | POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or the operator (operator-stamped — #95, the §1 delete row's reclaim sibling) |
-//! | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or the operator (operator-stamped) |
-//! | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or the operator (operator-stamped); refused while every mark is inside its grace window |
-//! | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or the operator — the marked set, same authority as the mark |
-//! | PUT | `/teams/heads/registry` | the operator only — instance scope (#132), no team gate |
+//! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |
+//! | GET | `/teams/{team_id}/blobs/{digest}` | member, or an admin — every failure is the same `404`, see below |
+//! | POST | `/teams/{team_id}/blobs/{digest}/purge/mark` | owner, or an admin (admin-stamped — #95, the §1 delete row's reclaim sibling) |
+//! | POST | `/teams/{team_id}/blobs/{digest}/purge/unmark` | owner, or an admin (admin-stamped) |
+//! | POST | `/teams/{team_id}/blobs/purge/reclaim` | owner, or an admin (admin-stamped); refused while every mark is inside its grace window |
+//! | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or an admin — the marked set, same authority as the mark |
+//! | PUT | `/teams/heads/registry` | admins only — instance scope (#132), no team gate |
 //! | GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
 //!
 //! ## The gate (#83 §5: every route, no exceptions)
@@ -36,21 +36,21 @@
 //! 2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
 //!    segment → team existence (`404`) → the caller's current role in
 //!    *this* team, read from state, never from the ledger (#83 §1).
-//!    A caller with neither a membership row nor the operator flag is
+//!    A caller with neither a membership row nor the admin flag is
 //!    `403` before any handler runs.
 //!
 //! The handler then asks `teams-core`'s decision functions
 //! ([`verb_allowed`] / [`may_create_team`]) with the capacity the gate
 //! established. When both capacities could act, the membership row
-//! wins and the ledger stamp is the member's — the operator variant
-//! is reserved for the operator acting *from outside* the membership
-//! set, which is exactly when §1 demands the stamp say so.
+//! wins and the ledger stamp is the member's — the admin variant is
+//! reserved for an admin acting *from outside* the membership set,
+//! which is exactly when §1 demands the stamp say so.
 //!
 //! ## The blob read is the one deliberate exception to [`team_gate`]
 //!
 //! `GET /teams/{team_id}/blobs/{digest}` sits behind [`auth_gate`]
 //! only, and answers **one indistinguishable `404`** for every miss:
-//! unknown team, caller neither a member nor the operator, digest
+//! unknown team, caller neither a member nor an admin, digest
 //! never uploaded, digest linked only in a team the caller cannot
 //! read — and, since #95, a link **marked for purge**, whose grace
 //! window hides it behind the very same answer. The gate's
@@ -88,13 +88,14 @@ use teams_contract::command::{
     RevokeOwnerCommand, UploadBlobCommand,
 };
 use teams_contract::dto::{
-    BlobUploadedDto, HeadPublishedDto, LedgerEventDto, MarkedBlobLinkDto, MarkedBlobsDto,
-    PurgeReclaimedDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
+    BlobUploadedDto, HeadPublishedDto, LedgerEventDto, LedgerPageDto, MarkedBlobLinkDto,
+    MarkedBlobsDto, PurgeReclaimedDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
+    TeamCreatedDto,
 };
 use teams_core::DomainError;
 use teams_core::domain::head_registry::TagHeadEntry;
 use teams_core::domain::identity::{
-    ActorStamp, CreationActor, InstanceOperator, LedgerActor, Membership, Role, TeamAuthority,
+    ActorStamp, CreationActor, InstanceAdmin, LedgerActor, Membership, Role, TeamAuthority,
     TeamVerb, may_create_team, verb_allowed,
 };
 use teams_core::domain::ledger::LedgerEvent;
@@ -204,13 +205,13 @@ impl IntoResponse for ApiError {
 struct AuthedAccount(AccountRecord);
 
 /// What [`team_gate`] established about the caller in the `{team_id}`
-/// team: their current role (from state), and whether the operator
+/// team: their current role (from state), and whether the admin
 /// capacity is available as a fallback.
 #[derive(Clone)]
 struct TeamAccess {
     team_id: Uuid,
     role: Option<Role>,
-    operator: bool,
+    admin: bool,
 }
 
 /// Which capacity a verb was granted under — what decides the ledger
@@ -218,7 +219,7 @@ struct TeamAccess {
 #[derive(Clone, Copy)]
 enum Capacity {
     Member,
-    Operator,
+    Admin,
 }
 
 /// Builds the router; the caller binds a listener and calls
@@ -350,7 +351,7 @@ async fn team_gate(
     // Current membership state — never the ledger (#83 §1).
     let roster = ctx.repo.roster(team_id).await?;
     let role = roster.role_of(account.0.user_id);
-    if role.is_none() && !account.0.operator {
+    if role.is_none() && !account.0.admin {
         return Err(ApiError::Forbidden(
             "you are not a member of this team".to_string(),
         ));
@@ -358,7 +359,7 @@ async fn team_gate(
     req.extensions_mut().insert(TeamAccess {
         team_id,
         role,
-        operator: account.0.operator,
+        admin: account.0.admin,
     });
     Ok(next.run(req).await)
 }
@@ -368,18 +369,18 @@ async fn team_gate(
 // ----------------------------------------------------------------------
 
 /// Asks the #83 §1 authority table which capacity (if any) grants
-/// `verb`. The membership row is asked first: an operator who is also
-/// a member acts through the row like anyone else, and the operator
+/// `verb`. The membership row is asked first: an admin who is also a
+/// member acts through the row like anyone else, and the admin
 /// capacity only answers when the caller stands outside the roster —
-/// which is exactly the action §1 wants operator-stamped.
+/// which is exactly the action §1 wants admin-stamped.
 fn decide(access: &TeamAccess, verb: TeamVerb) -> Result<Capacity, ApiError> {
     if let Some(role) = access.role
         && verb_allowed(TeamAuthority::Member(role), verb)
     {
         return Ok(Capacity::Member);
     }
-    if access.operator && verb_allowed(TeamAuthority::Operator, verb) {
-        return Ok(Capacity::Operator);
+    if access.admin && verb_allowed(TeamAuthority::Admin, verb) {
+        return Ok(Capacity::Admin);
     }
     Err(ApiError::Forbidden(format!(
         "your role does not permit {}",
@@ -399,17 +400,16 @@ const fn verb_name(verb: TeamVerb) -> &'static str {
 }
 
 /// The ledger stamp for `account` acting under `capacity` — the one
-/// place the member/operator variant is chosen (#83 §1: never
-/// disguised).
+/// place the member/admin variant is chosen (#83 §1: never disguised).
 fn stamp(account: &AccountRecord, capacity: Capacity) -> Result<LedgerActor, ApiError> {
     Ok(match capacity {
         Capacity::Member => LedgerActor::member(ActorStamp {
             user_id: account.user_id,
             display_name: account.display_name.clone(),
         }),
-        Capacity::Operator => {
-            let operator = InstanceOperator::new(account.user_id, account.display_name.clone())?;
-            LedgerActor::operator(&operator)
+        Capacity::Admin => {
+            let admin = InstanceAdmin::new(account.user_id, account.display_name.clone())?;
+            LedgerActor::admin(&admin)
         }
     })
 }
@@ -446,7 +446,7 @@ async fn login(
         token,
         user_id: user_id.to_string(),
         display_name: account.display_name,
-        operator: account.operator,
+        admin: account.admin,
         expires_at_ms: now.saturating_add(ctx.session_ttl_ms),
     }))
 }
@@ -468,29 +468,28 @@ async fn logout(
 // ----------------------------------------------------------------------
 
 /// `POST /teams/create`. Registration policy first (#83 §1), then the
-/// founding-owner rules: a user founds their own team; the operator —
+/// founding-owner rules: a user founds their own team; an admin —
 /// never implicitly a member — must name the owner explicitly.
 async fn create_team(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
     Json(cmd): Json<CreateTeamCommand>,
 ) -> Result<Json<TeamCreatedDto>, ApiError> {
-    let creation_actor = if account.operator {
-        CreationActor::Operator
+    let creation_actor = if account.admin {
+        CreationActor::Admin
     } else {
         CreationActor::AuthenticatedUser
     };
     if !may_create_team(creation_actor, ctx.registration) {
         return Err(ApiError::Forbidden(
-            "registration is closed on this instance; only the operator may create teams"
-                .to_string(),
+            "registration is closed on this instance; only an admin may create teams".to_string(),
         ));
     }
-    let owner_user_id = match (&cmd.owner_user_id, account.operator) {
+    let owner_user_id = match (&cmd.owner_user_id, account.admin) {
         (Some(raw), true) => parse_uuid(raw, "owner_user_id")?,
         (None, true) => {
             return Err(ApiError::Domain(DomainError::Validation(
-                "the operator is never implicitly a member (#83 §1); \
+                "an admin is never implicitly a member (#83 §1); \
                  name the founding owner via owner_user_id"
                     .to_string(),
             )));
@@ -518,8 +517,8 @@ async fn create_team(
         team_id,
         role: Role::Owner,
     };
-    let capacity = if account.operator {
-        Capacity::Operator
+    let capacity = if account.admin {
+        Capacity::Admin
     } else {
         Capacity::Member
     };
@@ -538,8 +537,8 @@ async fn create_team(
     }))
 }
 
-/// `POST /teams/{team_id}/delete` — owner, or the operator
-/// (operator-stamped, #83 §1).
+/// `POST /teams/{team_id}/delete` — owner, or an admin
+/// (admin-stamped, #83 §1).
 async fn delete_team(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
@@ -693,18 +692,69 @@ async fn roster(
     }))
 }
 
-/// `GET /teams/{team_id}/events` — the team's stream in order. The
-/// per-member "who brought what" view starts here (#91).
+/// Events per page when the caller does not say, and the most any
+/// caller may ask for.
+///
+/// The ceiling is the load-bearing one: without it `?limit=` is a
+/// request for the whole stream spelled differently, and the response
+/// this route pages in order to bound comes back anyway.
+const EVENTS_PAGE_DEFAULT: u32 = 100;
+const EVENTS_PAGE_MAX: u32 = 500;
+
+/// Query parameters of the events read.
+#[derive(serde::Deserialize)]
+struct EventsQuery {
+    /// Resume above this seq. Absent means from the beginning.
+    after: Option<i64>,
+    /// How many events at most. Absent means
+    /// [`EVENTS_PAGE_DEFAULT`]; anything above [`EVENTS_PAGE_MAX`] is
+    /// clamped to it rather than refused, because a caller asking for
+    /// more than the ceiling wants as much as it can have.
+    limit: Option<u32>,
+}
+
+/// `GET /teams/{team_id}/events?after=<seq>&limit=<n>` — a page of the
+/// team's stream in order. The per-member "who brought what" view
+/// starts here (#91).
+///
+/// Paged, and a call with no parameters returns the first page rather
+/// than the whole stream — a change of contract for anyone who was
+/// reading the array this used to answer with. The reason it is worth
+/// one is that the previous shape had no bound at all: a ledger only
+/// grows, every team-scoped mutation appends to it, and the response
+/// size was therefore a function of how long the team had existed.
+/// Paging it before `forge.*` events start landing (#63) is cheaper
+/// than paging it afterwards.
+///
+/// The cursor is a keyset over `seq`, which the storage's primary key
+/// already orders, so a page costs the same wherever in the stream it
+/// falls. What `next_after` means is
+/// [`LedgerPageDto`]'s to say; what this handler owes it is the short
+/// page, which is the only thing here that can end a walk.
 async fn events(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(access): Extension<TeamAccess>,
-) -> Result<Json<Vec<LedgerEventDto>>, ApiError> {
-    let events = ctx.repo.events(access.team_id).await?;
-    events
+    Query(query): Query<EventsQuery>,
+) -> Result<Json<LedgerPageDto>, ApiError> {
+    let limit = query
+        .limit
+        .unwrap_or(EVENTS_PAGE_DEFAULT)
+        .min(EVENTS_PAGE_MAX);
+    let events = ctx
+        .repo
+        .events_page(access.team_id, query.after, limit)
+        .await?;
+    // A full page may still be the last one, and the only way to know
+    // is to ask again — so "shorter than asked for" is what ends the
+    // walk, and a full page always carries a cursor.
+    let next_after = (events.len() as u32 == limit)
+        .then(|| events.last().map(|event| event.seq.get()))
+        .flatten();
+    let events = events
         .iter()
         .map(event_dto)
-        .collect::<Result<Vec<_>, _>>()
-        .map(Json)
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    Ok(Json(LedgerPageDto { events, next_after }))
 }
 
 // ----------------------------------------------------------------------
@@ -745,14 +795,13 @@ async fn upload_blob(
         )));
     };
     let declared = DeclaredDigest::parse(raw_digest)?;
-    // A membership row, not the operator capacity: §83 §1 gives the
-    // operator delete and closed-registration create, nothing else
-    // implicit — bringing content into a team's store is a member's
-    // act, stamped as one.
+    // A membership row, not the admin capacity: §83 §1 gives an admin
+    // delete and closed-registration create, nothing else implicit —
+    // bringing content into a team's store is a member's act, stamped
+    // as one.
     if access.role.is_none() {
         return Err(ApiError::Forbidden(
-            "uploading into a team's store requires membership; the operator has no implicit \
-             upload"
+            "uploading into a team's store requires membership; an admin has no implicit upload"
                 .to_string(),
         ));
     }
@@ -792,10 +841,10 @@ async fn upload_blob(
 ///
 /// Visibility is the link boundary (#83 §3): the digest exists for
 /// this caller iff a link row sits in this team and the caller may
-/// read this team — a membership row, or the operator capacity. §1's
-/// read boundary is general: the operator may read what a member may
-/// read (roster, events, and blob bytes alike), because the operator
-/// physically owns the instance's disk and an HTTP-layer read denial
+/// read this team — a membership row, or the admin capacity. §1's
+/// read boundary is general: an admin may read what a member may read
+/// (roster, events, and blob bytes alike), because whoever holds that
+/// capacity reaches the instance's disk and an HTTP-layer read denial
 /// would be theater, not a boundary. Every way of not clearing the
 /// bar — unknown team, no read capacity, unlinked digest, digest
 /// linked elsewhere — is the same `404` (see the module doc's
@@ -812,12 +861,12 @@ async fn read_blob(
     Path((team_id, raw_digest)): Path<(Uuid, String)>,
 ) -> Result<Response, ApiError> {
     let digest = parse_digest(&raw_digest)?;
-    // The operator capacity, or a membership row (§1's general read
+    // The admin capacity, or a membership row (§1's general read
     // boundary). An unknown team reads as an empty roster, so the
     // membership probe covers "no such team" and "not a member" in
     // one motion — and the link table is consulted only for callers
     // who may read at all.
-    let may_read = account.operator
+    let may_read = account.admin
         || ctx
             .repo
             .roster(team_id)
@@ -862,7 +911,7 @@ async fn read_blob(
 // Handlers — head registry (#132 phase 3).
 // ----------------------------------------------------------------------
 
-/// `PUT /teams/heads/registry` — the operator only.
+/// `PUT /teams/heads/registry` — admins only.
 ///
 /// The body is a training run's head artifact, exactly as the member
 /// app wrote it; the domain validates the envelope (one JSON object,
@@ -872,7 +921,7 @@ async fn read_blob(
 /// supersedes the live entry in the same transaction: one current
 /// head per instance.
 ///
-/// Operator, not owner: what scores for a whole team is an instance
+/// Admin, not owner: what scores for a whole team is an instance
 /// concern — the same authority shape the model entry had, and
 /// closed-registration create has.
 async fn publish_head_registry(
@@ -880,9 +929,9 @@ async fn publish_head_registry(
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
     body: String,
 ) -> Result<Json<HeadPublishedDto>, ApiError> {
-    if !account.operator {
+    if !account.admin {
         return Err(ApiError::Forbidden(
-            "publishing a head is the operator's act; what scores for a team is an \
+            "publishing a head is an admin's act; what scores for a team is an \
              instance concern (#132), not any one member's"
                 .to_string(),
         ));
@@ -925,15 +974,15 @@ async fn head_registry(State(ctx): State<Arc<TeamsCtx>>) -> Result<Response, Api
 // Handlers — purge (#95, the #83 §3 lifecycle).
 // ----------------------------------------------------------------------
 
-/// `POST /teams/{team_id}/blobs/{digest}/purge/mark` — owner, or the
-/// operator (operator-stamped).
+/// `POST /teams/{team_id}/blobs/{digest}/purge/mark` — owner, or an
+/// admin (admin-stamped).
 ///
 /// The first half of the trash→purge two-step: from here the link is
 /// hidden from normal reads — the blob route answers its one `404` for
 /// it — but restorable via unmark until a reclaim takes it after the
 /// grace window. The refusals ("not linked", "already marked") are the
-/// repository's; they answer to an owner or the operator, who could
-/// read the link state anyway.
+/// repository's; they answer to an owner or an admin, who could read
+/// the link state anyway.
 async fn purge_mark(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
@@ -953,8 +1002,8 @@ async fn purge_mark(
     Ok(Json(event_dto(&event)?))
 }
 
-/// `POST /teams/{team_id}/blobs/{digest}/purge/unmark` — owner, or the
-/// operator (operator-stamped). Restores the marked link intact; the
+/// `POST /teams/{team_id}/blobs/{digest}/purge/unmark` — owner, or an
+/// admin (admin-stamped). Restores the marked link intact; the
 /// grace window bounds reclaim, not restoration.
 async fn purge_unmark(
     State(ctx): State<Arc<TeamsCtx>>,
@@ -975,8 +1024,8 @@ async fn purge_unmark(
     Ok(Json(event_dto(&event)?))
 }
 
-/// `POST /teams/{team_id}/blobs/purge/reclaim` — owner, or the
-/// operator (operator-stamped). The explicit second verb of the
+/// `POST /teams/{team_id}/blobs/purge/reclaim` — owner, or an admin
+/// (admin-stamped). The explicit second verb of the
 /// two-step (#83 §3: reclaim is the only path that removes links for
 /// reclaim's sake).
 ///
@@ -1016,8 +1065,8 @@ async fn purge_reclaim(
     }))
 }
 
-/// `GET /teams/{team_id}/blobs/purge/marked` — owner, or the operator
-/// (operator-stamped authority, though a read stamps nothing): the
+/// `GET /teams/{team_id}/blobs/purge/marked` — owner, or an admin
+/// (admin-stamped authority, though a read stamps nothing): the
 /// team's marked-for-purge set, with each mark's instant and when it
 /// becomes reclaimable.
 ///
@@ -1076,7 +1125,7 @@ fn parse_uuid(raw: &str, field: &str) -> Result<Uuid, ApiError> {
 fn event_dto(event: &LedgerEvent) -> Result<LedgerEventDto, ApiError> {
     let (actor_kind, actor) = match &event.actor {
         LedgerActor::Member(stamp) => ("member", stamp),
-        LedgerActor::Operator(stamp) => ("operator", stamp),
+        LedgerActor::Admin(stamp) => ("admin", stamp),
     };
     let subjects = event
         .subjects

@@ -44,8 +44,8 @@ pub struct TeamsCtx {
     /// The instance's CAS — bytes only; visibility is the link rows'
     /// question, answered through [`Self::repo`] (#83 §3, #93).
     pub blobs: LocalFileStorageAdapter,
-    /// Whether any authenticated user may create teams, or only the
-    /// operator (#83 §1's closed-registration flag).
+    /// Whether any authenticated user may create teams, or only
+    /// admins (#83 §1's closed-registration flag).
     pub registration: RegistrationPolicy,
     /// Session lifetime handed to every login.
     pub session_ttl_ms: i64,

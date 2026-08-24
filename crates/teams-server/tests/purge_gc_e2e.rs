@@ -138,14 +138,14 @@ async fn user(h: &Harness, login: &str) -> String {
     provision(h, login, false).await
 }
 
-async fn operator_user(h: &Harness, login: &str) -> String {
+async fn admin_user(h: &Harness, login: &str) -> String {
     provision(h, login, true).await
 }
 
-async fn provision(h: &Harness, login: &str, operator: bool) -> String {
+async fn provision(h: &Harness, login: &str, admin: bool) -> String {
     h.ctx
         .auth
-        .create_account(login, login, GOOD, operator, now_ms())
+        .create_account(login, login, GOOD, admin, now_ms())
         .await
         .expect("create account");
     let (status, body) = call(
@@ -235,7 +235,8 @@ async fn event_kinds(h: &Harness, team_id: &str, token: &str) -> Vec<String> {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "events: {body}");
-    body.as_array()
+    body["events"]
+        .as_array()
         .expect("events array")
         .iter()
         .map(|e| e["kind"].as_str().unwrap().to_string())
@@ -414,10 +415,10 @@ async fn reclaim_is_refused_while_the_grace_window_runs_and_unmark_still_works()
 }
 
 #[tokio::test]
-async fn purge_authority_is_owner_or_operator_stamped_as_such() {
+async fn purge_authority_is_owner_or_admin_stamped_as_such() {
     let h = harness(0).await;
     let alice = user(&h, "alice").await;
-    let op = operator_user(&h, "op").await;
+    let op = admin_user(&h, "op").await;
     let team_id = create_team(&h, &alice).await;
     let bob = invite(&h, &team_id, &alice, "bob").await;
     let carol = user(&h, "carol").await;
@@ -443,19 +444,19 @@ async fn purge_authority_is_owner_or_operator_stamped_as_such() {
         "refused verbs must write nothing: {kinds:?}"
     );
 
-    // The operator — outside the roster — may run the whole two-step
+    // An admin — outside the roster — may run the whole two-step
     // (marked list included: whoever may unmark must see what is
-    // marked), and every event reads back operator-stamped, never
+    // marked), and every event reads back admin-stamped, never
     // disguised (#83 §1, the delete row's reclaim sibling).
     let (status, body) = call(&h.router, post_authed(&mark_uri(&team_id, &digest), &op)).await;
-    assert_eq!(status, StatusCode::OK, "operator mark: {body}");
-    assert_eq!(body["actor_kind"], "operator");
+    assert_eq!(status, StatusCode::OK, "admin mark: {body}");
+    assert_eq!(body["actor_kind"], "admin");
     let (status, body) = call(&h.router, get_authed(&marked_uri(&team_id), &op)).await;
-    assert_eq!(status, StatusCode::OK, "operator marked list: {body}");
+    assert_eq!(status, StatusCode::OK, "admin marked list: {body}");
     assert_eq!(body["marked"][0]["digest"], digest);
     let (status, body) = call(&h.router, post_authed(&reclaim_uri(&team_id), &op)).await;
-    assert_eq!(status, StatusCode::OK, "operator reclaim: {body}");
-    assert_eq!(body["event"]["actor_kind"], "operator");
+    assert_eq!(status, StatusCode::OK, "admin reclaim: {body}");
+    assert_eq!(body["event"]["actor_kind"], "admin");
 
     h.driver.shutdown().await.unwrap();
 }

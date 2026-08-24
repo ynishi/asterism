@@ -1,5 +1,5 @@
 //! End-to-end guard for the head registry routes (#132 phase 3):
-//! operator-only publish, any-member read, verbatim bytes, and
+//! admin-only publish, any-member read, verbatim bytes, and
 //! supersession.
 //!
 //! Same wiring as the blob route guard — the real router over an
@@ -65,10 +65,10 @@ async fn harness() -> Harness {
 }
 
 /// Provisions an account and logs it in through the real route.
-async fn provision(h: &Harness, login: &str, operator: bool) -> String {
+async fn provision(h: &Harness, login: &str, admin: bool) -> String {
     h.ctx
         .auth
-        .create_account(login, login, GOOD, operator, now_ms())
+        .create_account(login, login, GOOD, admin, now_ms())
         .await
         .expect("create account");
     let response = h
@@ -138,14 +138,13 @@ async fn status_and_bytes(
 }
 
 #[tokio::test]
-async fn the_operator_publishes_and_a_member_reads_the_same_bytes() {
+async fn an_admin_publishes_and_a_member_reads_the_same_bytes() {
     let h = harness().await;
-    let operator = provision(&h, "op", true).await;
+    let admin = provision(&h, "op", true).await;
     let member = provision(&h, "alice", false).await;
     let authored = entry_bytes("head-v3", "round-one");
 
-    let (status, _, body) =
-        status_and_bytes(&h.router, put_entry(&operator, authored.clone())).await;
+    let (status, _, body) = status_and_bytes(&h.router, put_entry(&admin, authored.clone())).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -168,26 +167,22 @@ async fn the_operator_publishes_and_a_member_reads_the_same_bytes() {
 #[tokio::test]
 async fn publishing_again_supersedes_what_members_read() {
     let h = harness().await;
-    let operator = provision(&h, "op", true).await;
+    let admin = provision(&h, "op", true).await;
 
-    let (status, _, _) = status_and_bytes(
-        &h.router,
-        put_entry(&operator, entry_bytes("head-v1", "old")),
-    )
-    .await;
+    let (status, _, _) =
+        status_and_bytes(&h.router, put_entry(&admin, entry_bytes("head-v1", "old"))).await;
     assert_eq!(status, StatusCode::OK);
     let replacement = entry_bytes("head-v2", "new");
-    let (status, _, _) =
-        status_and_bytes(&h.router, put_entry(&operator, replacement.clone())).await;
+    let (status, _, _) = status_and_bytes(&h.router, put_entry(&admin, replacement.clone())).await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, _, bytes) = status_and_bytes(&h.router, get_entry(Some(&operator))).await;
+    let (status, _, bytes) = status_and_bytes(&h.router, get_entry(Some(&admin))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(String::from_utf8(bytes).unwrap(), replacement);
 }
 
 #[tokio::test]
-async fn the_write_is_the_operators_and_the_read_is_authenticated() {
+async fn the_write_is_an_admins_and_the_read_is_authenticated() {
     let h = harness().await;
     let member = provision(&h, "alice", false).await;
 
@@ -195,7 +190,7 @@ async fn the_write_is_the_operators_and_the_read_is_authenticated() {
     let (status, _, _) = status_and_bytes(&h.router, get_entry(Some(&member))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // A non-operator publish is refused — what scores for a team is
+    // A non-admin publish is refused — what scores for a team is
     // an instance concern, and the instance capacity is the write
     // authority.
     let (status, _, body) = status_and_bytes(
@@ -218,7 +213,7 @@ async fn the_write_is_the_operators_and_the_read_is_authenticated() {
 #[tokio::test]
 async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
     let h = harness().await;
-    let operator = provision(&h, "op", true).await;
+    let admin = provision(&h, "op", true).await;
 
     // Wrong schema tag, missing label, missing encoder identity,
     // non-JSON: all 400, nothing stored.
@@ -228,7 +223,7 @@ async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
         format!("{{ \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\", \"head\": \"h\" }}"),
         "not json at all".to_string(),
     ] {
-        let (status, _, body) = status_and_bytes(&h.router, put_entry(&operator, bad)).await;
+        let (status, _, body) = status_and_bytes(&h.router, put_entry(&admin, bad)).await;
         assert_eq!(
             status,
             StatusCode::BAD_REQUEST,
@@ -236,7 +231,7 @@ async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
             String::from_utf8_lossy(&body)
         );
     }
-    let (status, _, _) = status_and_bytes(&h.router, get_entry(Some(&operator))).await;
+    let (status, _, _) = status_and_bytes(&h.router, get_entry(Some(&admin))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "nothing must have landed");
 
     // A body the member app would still have to verify (no rows at
@@ -246,6 +241,6 @@ async fn the_carrier_validates_the_envelope_and_nothing_deeper() {
         "{{ \"schema\": \"{HEAD_ENTRY_SCHEMA_V1}\", \"head\": \"thin\", \
          \"model_id\": \"m\", \"dim\": 4, \"preprocess_ver\": 1 }}"
     );
-    let (status, _, _) = status_and_bytes(&h.router, put_entry(&operator, thin)).await;
+    let (status, _, _) = status_and_bytes(&h.router, put_entry(&admin, thin)).await;
     assert_eq!(status, StatusCode::OK);
 }
