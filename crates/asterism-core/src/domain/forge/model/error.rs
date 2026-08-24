@@ -407,9 +407,9 @@ mod tests {
     /// one variant cannot be both. It went unnoticed because the
     /// SQLite adapter flattens every restore refusal into `Infra`
     /// before a caller sees it, so the model's answer was being
-    /// discarded rather than read — right by accident, and only over
-    /// one of the two stores. Saying it here is what makes it true of
-    /// both, and of any store written later.
+    /// discarded rather than read — right by accident, and over one
+    /// store at a time. Saying it here is what makes it true of every
+    /// store there is, and of any store written later.
     ///
     /// A read has no state to conflict with; the row simply could not
     /// have been written, so it is not a conflict at any kind.

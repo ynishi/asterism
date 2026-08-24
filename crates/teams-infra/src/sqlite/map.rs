@@ -8,9 +8,28 @@
 //! invariants to be evaluated *inside* the transaction, on the state it
 //! is about to change.
 
+use chrono::{DateTime, Utc};
 use teams_core::DomainError;
 use teams_core::domain::identity::LedgerActor;
 use teams_core::domain::ledger::SubjectRef;
+
+/// An epoch-ms column as an instant, refusing a value no clock
+/// produced.
+///
+/// The forge's acts carry a `DateTime<Utc>` and every stamp column on
+/// this plane is `INTEGER` epoch ms, so this pair is what the hosted
+/// forge's rows cross. It refuses out-of-range rather than saturating:
+/// a stored timestamp that is not a time is a corrupt row, and a
+/// clamped one would read as a real instant nobody wrote.
+pub fn ms_to_datetime(ms: i64) -> Result<DateTime<Utc>, DomainError> {
+    DateTime::<Utc>::from_timestamp_millis(ms)
+        .ok_or_else(|| DomainError::Infra(anyhow::anyhow!("timestamp out of range: {ms}")))
+}
+
+/// An instant as the epoch-ms column that carries it.
+pub fn datetime_to_ms(dt: &DateTime<Utc>) -> i64 {
+    dt.timestamp_millis()
+}
 
 /// Wraps an infrastructure error (typically `IsleError`) into
 /// `DomainError::Infra`.

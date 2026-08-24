@@ -301,6 +301,297 @@ const V6_ADMIN_RENAME: &str = r#"
 ALTER TABLE user_account RENAME COLUMN is_operator TO is_admin;
 "#;
 
+/// Version 6 → 7: the team hosts a forge (#148 decision 20).
+///
+/// The local plane's forge tables, replicated here under the same
+/// names — `line`, `change_point`, `change_row`, `pursuit`,
+/// `pursuit_node`, `pursuit_op`, `forge_actor` and the three thread
+/// tables — plus `team_asset`, which is this plane's own. Separate
+/// database files, so the shared names clash with nothing and the
+/// adapter differs from `asterism-infra`'s by as little as it can.
+///
+/// **Staying literally parallel is the mitigation, not an accident.**
+/// More than one set of adapters tracks this model from here on, and
+/// what makes a drift between them visible is that the schemas can be
+/// diffed: a column that moved on one plane and not the other shows up
+/// as a difference between this batch and the local plane's forge
+/// batches — `V96`, `V97`, `V98`, `V102` and `V103` — rather than as
+/// behaviour somebody notices later. So the shapes are copied down to
+/// the `CHECK` constraints, and every deliberate difference is one of
+/// the six below.
+///
+/// **1. `team_id` on every table, and it carries no key.** The scope
+/// the local plane does not have. The column is redundant against the
+/// ids alone — a `line_id` is a v7 uuid and identifies its line across
+/// every team — and it is here anyway, because scoping a read to a
+/// team is then a predicate on the table being read rather than a join
+/// back to `line` through whichever chain of parents that table
+/// happens to hang off.
+///
+/// A reference to `team(id)` is what it looks like it wants, and it
+/// would decide a question this batch has no business deciding.
+/// `CASCADE` would make deleting a team delete its forge — except that
+/// it could not, because every key *inside* the forge is `RESTRICT`
+/// and a cascade into `line` is refused by the change points on it. So
+/// the key would either fail a team deletion that works today, or —
+/// written the other way — quietly destroy a line's whole history as a
+/// side effect of a membership gesture. What actually releases a
+/// line's contents is `Lines::discard`, which is a forge verb with
+/// rules of its own, and wiring a team deletion to it is a decision
+/// with an owner and a place, neither of which is a foreign key
+/// declaration. The owner is the transport and the client — #151 and
+/// #152, the siblings #148 splits this issue from — because deciding
+/// what a team's departure does to its work needs the surface that
+/// asks the question. Until that lands, deleting a team leaves its forge
+/// rows behind, and this paragraph is where that is written down.
+///
+/// **2. `UNIQUE (team_id, name)` on `line`.** The forge's `Name`
+/// deliberately leaves name uniqueness to whoever owns the namespace
+/// (#148 decision 1), and on this plane that is the team. The local
+/// plane answers the same question with silence, which is the right
+/// answer for a namespace with one person in it.
+///
+/// **3. `change_row.content` and `pursuit_op.content` point at
+/// `team_asset`.** The one downward foreign key the forge holds, aimed
+/// at this plane's own surrogate. `RESTRICT` for the local plane's
+/// reason: a line says what is on it *now*, so a line naming bytes
+/// somebody deleted is a line lying about the present.
+///
+/// **4. `team_asset` is identity and nothing else.** `id`, its team,
+/// and when it was minted (#148 decisions 3 and 7). What composes it
+/// against the CAS is conversion, which arrives with the content verb;
+/// what is here is the identity `Store::exists` answers about, which
+/// is all the forge ever asks of the layer below it.
+///
+/// **5. `forge_actor` is keyed within a team** — `UNIQUE (team_id,
+/// stands_for, COALESCE(subject, ''))`, over the coalesce for the
+/// local plane's reason (SQLite counts NULLs as distinct, so a plain
+/// index would admit a second owner). `display_name` is the write-time
+/// snapshot the local plane gained in `V103`, present from the start
+/// here.
+///
+/// **6. The three composite-key tables are `WITHOUT ROWID`.** This
+/// plane's house style, and the tables it applies to are exactly the
+/// ones whose primary key is not a single BLOB. It changes no
+/// semantics — which is why it is safe to differ on.
+///
+/// `change_point` is written in the shape the local plane arrived at
+/// in `V102` rather than the one `V96` built and `V102` rebuilt: a new
+/// database has no rows to carry across, so the keys go in at
+/// `CREATE`. `parent_id` stays bare there and on `pursuit.base_id` and
+/// `pursuit_node.parent_id`, for the reason `V102` gives — a parent is
+/// either the genesis or a change point, and the genesis is columns on
+/// `line` rather than a row.
+const V7_FORGE_TABLES: &str = r#"
+CREATE TABLE team_asset (
+    id         BLOB PRIMARY KEY,
+    team_id    BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX idx_team_asset_team ON team_asset(team_id);
+
+CREATE TABLE line (
+    id           BLOB PRIMARY KEY,
+    team_id      BLOB NOT NULL,
+    name         TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    standing     TEXT NOT NULL
+        CHECK (standing IN ('open', 'archived')),
+    genesis_id   BLOB NOT NULL,
+    genesis_at   INTEGER NOT NULL,
+    genesis_by   BLOB NOT NULL,
+    genesis_kind TEXT NOT NULL
+        CHECK (genesis_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_line_team_name ON line(team_id, name);
+CREATE INDEX idx_line_team ON line(team_id);
+
+CREATE TABLE pursuit (
+    id           BLOB PRIMARY KEY,
+    team_id      BLOB NOT NULL,
+    line_id      BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id    BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    open_node    BLOB NOT NULL,
+    base_id      BLOB NOT NULL,
+    title        TEXT,
+    note         TEXT,
+    open_at      INTEGER NOT NULL,
+    open_by      BLOB NOT NULL,
+    open_kind    TEXT NOT NULL
+        CHECK (open_kind IN ('user', 'system')),
+    created_at   INTEGER NOT NULL,
+    created_by   BLOB NOT NULL,
+    created_kind TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at   INTEGER NOT NULL,
+    updated_by   BLOB NOT NULL,
+    updated_kind TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_pursuit_line ON pursuit(line_id);
+CREATE INDEX idx_pursuit_parent ON pursuit(parent_id);
+CREATE INDEX idx_pursuit_team ON pursuit(team_id);
+CREATE UNIQUE INDEX idx_pursuit_line_id ON pursuit(line_id, id);
+
+CREATE TABLE pursuit_node (
+    id         BLOB PRIMARY KEY,
+    team_id    BLOB NOT NULL,
+    pursuit_id BLOB NOT NULL REFERENCES pursuit(id) ON DELETE RESTRICT,
+    parent_id  BLOB NOT NULL,
+    kind       TEXT NOT NULL
+        CHECK (kind IN ('round', 'close')),
+    outcome    TEXT
+        CHECK (outcome IN ('satisfied', 'abandoned')),
+    note       TEXT,
+    at         INTEGER NOT NULL,
+    actor_id   BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system')),
+    CHECK ((kind = 'close') = (outcome IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_pursuit_node_on_parent
+    ON pursuit_node(pursuit_id, parent_id);
+CREATE UNIQUE INDEX idx_pursuit_node_one_close
+    ON pursuit_node(pursuit_id) WHERE kind = 'close';
+CREATE INDEX idx_pursuit_node_pursuit ON pursuit_node(pursuit_id);
+
+CREATE TABLE pursuit_op (
+    node_id  BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL,
+    team_id  BLOB NOT NULL,
+    entry_id BLOB NOT NULL,
+    verb     TEXT NOT NULL
+        CHECK (verb IN ('add', 'replace', 'rename', 'remove')),
+    content  BLOB REFERENCES team_asset(id) ON DELETE RESTRICT,
+    name     TEXT,
+    PRIMARY KEY (node_id, position),
+    CHECK ((verb IN ('add', 'replace')) = (content IS NOT NULL)),
+    CHECK ((verb IN ('add', 'rename')) = (name IS NOT NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_pursuit_op_entry ON pursuit_op(entry_id);
+CREATE INDEX idx_pursuit_op_content ON pursuit_op(content);
+
+CREATE TABLE change_point (
+    id         BLOB PRIMARY KEY,
+    team_id    BLOB NOT NULL,
+    line_id    BLOB NOT NULL REFERENCES line(id) ON DELETE RESTRICT,
+    parent_id  BLOB NOT NULL,
+    from_work  BLOB NOT NULL,
+    by_node    BLOB NOT NULL REFERENCES pursuit_node(id) ON DELETE RESTRICT,
+    at         INTEGER NOT NULL,
+    actor_id   BLOB NOT NULL,
+    actor_kind TEXT NOT NULL
+        CHECK (actor_kind IN ('user', 'system')),
+    FOREIGN KEY (line_id, from_work)
+        REFERENCES pursuit(line_id, id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE UNIQUE INDEX idx_change_point_on_parent
+    ON change_point(line_id, parent_id);
+CREATE INDEX idx_change_point_line ON change_point(line_id);
+CREATE INDEX idx_change_point_from ON change_point(from_work);
+CREATE INDEX idx_change_point_by ON change_point(by_node);
+
+CREATE TABLE change_row (
+    point_id  BLOB NOT NULL REFERENCES change_point(id) ON DELETE RESTRICT,
+    entry_id  BLOB NOT NULL,
+    team_id   BLOB NOT NULL,
+    existence TEXT
+        CHECK (existence IN ('present', 'absent')),
+    content   BLOB REFERENCES team_asset(id) ON DELETE RESTRICT,
+    name      TEXT,
+    PRIMARY KEY (point_id, entry_id),
+    CHECK (existence IS NOT NULL OR content IS NOT NULL OR name IS NOT NULL),
+    CHECK (existence IS NOT 'absent' OR (content IS NULL AND name IS NULL))
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_change_row_entry ON change_row(entry_id);
+CREATE INDEX idx_change_row_content ON change_row(content);
+
+CREATE TABLE forge_actor (
+    id           BLOB PRIMARY KEY,
+    team_id      BLOB NOT NULL,
+    stands_for   TEXT NOT NULL
+        CHECK (stands_for IN ('owner', 'subject', 'unrecorded', 'server')),
+    subject      TEXT,
+    display_name TEXT,
+    created_at   INTEGER NOT NULL,
+    CHECK ((stands_for = 'subject') = (subject IS NOT NULL))
+) STRICT;
+
+CREATE UNIQUE INDEX idx_forge_actor_stands_for
+    ON forge_actor(team_id, stands_for, COALESCE(subject, ''));
+
+CREATE TABLE forge_thread (
+    id                  BLOB PRIMARY KEY,
+    team_id             BLOB NOT NULL,
+    anchor_kind         TEXT NOT NULL
+        CHECK (anchor_kind IN ('pursuit', 'round', 'entry', 'change_point')),
+    anchor_pursuit      BLOB REFERENCES pursuit(id) ON DELETE RESTRICT,
+    anchor_node         BLOB,
+    anchor_entry        BLOB,
+    anchor_change_point BLOB REFERENCES change_point(id) ON DELETE RESTRICT,
+    title               TEXT,
+    created_at          INTEGER NOT NULL,
+    created_by          BLOB NOT NULL,
+    created_kind        TEXT NOT NULL
+        CHECK (created_kind IN ('user', 'system')),
+    updated_at          INTEGER NOT NULL,
+    updated_by          BLOB NOT NULL,
+    updated_kind        TEXT NOT NULL
+        CHECK (updated_kind IN ('user', 'system')),
+    CHECK ((anchor_kind = 'pursuit') = (anchor_pursuit IS NOT NULL)),
+    CHECK ((anchor_kind IN ('round', 'entry')) = (anchor_node IS NOT NULL)),
+    CHECK ((anchor_kind = 'entry') = (anchor_entry IS NOT NULL)),
+    CHECK ((anchor_kind = 'change_point') = (anchor_change_point IS NOT NULL))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_anchor_pursuit ON forge_thread(anchor_pursuit);
+CREATE INDEX idx_forge_thread_anchor_node ON forge_thread(anchor_node);
+CREATE INDEX idx_forge_thread_anchor_change_point ON forge_thread(anchor_change_point);
+CREATE INDEX idx_forge_thread_team ON forge_thread(team_id);
+
+CREATE TABLE forge_thread_message (
+    id        BLOB PRIMARY KEY,
+    team_id   BLOB NOT NULL,
+    thread_id BLOB NOT NULL REFERENCES forge_thread(id) ON DELETE RESTRICT,
+    parent_id BLOB REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    body      TEXT NOT NULL,
+    said_at   INTEGER NOT NULL,
+    said_by   BLOB NOT NULL,
+    said_kind TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system'))
+) STRICT;
+
+CREATE INDEX idx_forge_thread_message_thread
+    ON forge_thread_message(thread_id, said_at);
+
+CREATE TABLE forge_thread_revision (
+    message_id BLOB NOT NULL REFERENCES forge_thread_message(id) ON DELETE RESTRICT,
+    position   INTEGER NOT NULL,
+    team_id    BLOB NOT NULL,
+    body       TEXT NOT NULL,
+    said_at    INTEGER NOT NULL,
+    said_by    BLOB NOT NULL,
+    said_kind  TEXT NOT NULL
+        CHECK (said_kind IN ('user', 'system')),
+    PRIMARY KEY (message_id, position)
+) STRICT, WITHOUT ROWID;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -310,6 +601,7 @@ const MIGRATIONS: &[&str] = &[
     V4_MODEL_REGISTRY,
     V5_HEAD_REGISTRY,
     V6_ADMIN_RENAME,
+    V7_FORGE_TABLES,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -333,6 +625,7 @@ pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     fn migrated() -> Connection {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -428,6 +721,88 @@ mod tests {
             )
             .unwrap();
         assert!(!ddl.contains("is_operator"), "{ddl}");
+    }
+
+    #[test]
+    fn v7_scopes_every_forge_table_to_a_team() {
+        let conn = migrated();
+        for table in [
+            "line",
+            "change_point",
+            "change_row",
+            "pursuit",
+            "pursuit_node",
+            "pursuit_op",
+            "forge_actor",
+            "forge_thread",
+            "forge_thread_message",
+            "forge_thread_revision",
+            "team_asset",
+        ] {
+            let scoped: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM pragma_table_info(?1)
+                      WHERE name = 'team_id' AND \"notnull\" = 1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|e| panic!("{table} must exist: {e}"));
+            assert_eq!(scoped, 1, "{table} must be scoped to a team");
+        }
+    }
+
+    #[test]
+    fn v7_answers_the_name_question_the_forge_leaves_to_its_host() {
+        let conn = migrated();
+        let team = Uuid::now_v7();
+        let other = Uuid::now_v7();
+        let open = |team_id: Uuid, name: &str| {
+            conn.execute(
+                "INSERT INTO line
+                 (id, team_id, name, strategy, standing, genesis_id, genesis_at, genesis_by,
+                  genesis_kind, created_at, created_by, created_kind,
+                  updated_at, updated_by, updated_kind)
+                 VALUES (?1, ?2, ?3, 'mainline-first', 'open', ?4, 0, ?4, 'user',
+                         0, ?4, 'user', 0, ?4, 'user')",
+                rusqlite::params![Uuid::now_v7(), team_id, name, Uuid::now_v7()],
+            )
+        };
+
+        open(team, "notes").expect("the first line of a name");
+        // The same name in the same team is the collision the host
+        // answers…
+        assert!(open(team, "notes").is_err());
+        // …and the same name in another team is not a collision at
+        // all: the namespace belongs to the team, not to the instance.
+        open(other, "notes").expect("another team's namespace is its own");
+    }
+
+    #[test]
+    fn v7_keeps_the_forge_rules_the_local_plane_states() {
+        let conn = migrated();
+        let ddl: String = conn
+            .query_row(
+                "SELECT group_concat(sql, ';') FROM sqlite_master
+                  WHERE name IN ('idx_change_point_on_parent',
+                                 'idx_pursuit_node_on_parent',
+                                 'idx_pursuit_node_one_close')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        // Neither log forks, and work ends once — the three indexes
+        // that are the concurrency control rather than a check beside
+        // it. They are keyed on the node ids alone here as they are on
+        // the local plane: a line id is unique across teams, so adding
+        // the scope column would widen a key that is already exact.
+        for expected in [
+            "change_point(line_id, parent_id)",
+            "pursuit_node(pursuit_id, parent_id)",
+            "pursuit_node(pursuit_id) WHERE kind = 'close'",
+        ] {
+            assert!(ddl.contains(expected), "{expected} missing from: {ddl}");
+        }
     }
 
     #[test]
