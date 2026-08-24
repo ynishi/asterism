@@ -334,6 +334,31 @@ and this project adheres to
 
 ### Added
 
+- **A trained head travels to the team** (#132 phase 3, the last phase). The
+  instance's registry — whose model-entry schema lost its only consumer when the
+  fetch flow retired — now carries the head artifact itself:
+  `PUT`/`GET /teams/heads/registry`, operator-published, opaque as ever, the
+  envelope alone validated (the `asterism-tag-head-v1` tag, a label, the encoder
+  identity a pull must be able to refuse on). The artifact is kilobytes of JSON,
+  so it rides the registry row whole — no blob store involved. Existing
+  model-entry rows are cleared by the migration: nothing could consume them any
+  more, and the new envelope's read would have refused them anyway.
+
+  On the member side, `POST /asterism/heads/pull` hands the fetched artifact to
+  a `HeadPull` job (inline, credential-free — the caller holds the instance
+  session, the app never does). The job verifies it with exactly the checks the
+  startup bind runs — encoder identity, row widths, key shapes; a head that
+  could not bind must not install — then installs it into the local `heads/`
+  store and promotes it. Precedence needed no machinery: a pulled head and a
+  winning local retrain move the same one pointer, last promotion wins, and
+  rollback is re-promoting an older label.
+
+  Labels grew a content discriminator (`head-v3-1a2b3c4d`) so a published head
+  never collides with another member's local ordinals; the identical artifact
+  re-pulled is a re-promote, and a different head under a taken label is refused
+  rather than renamed — the label a team talks about stays attached to the bytes
+  that score.
+
 - **The app carries its encoder** (#132 phase 0). The bundled encoder is
   `siglip2-base-patch16-256-q4v` — the current model with a q4f16 vision tower
   over an int8 text tower, ~372 MB against the fp32 pair's ~1.5 GB — chosen by
