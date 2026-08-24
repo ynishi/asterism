@@ -235,7 +235,7 @@
     {
       "path": "asterism_infra::heads",
       "kind": "module",
-      "docs": "Trained-head storage (#132 phase 2): the artifact a training run\nwrites, and the one pointer promotion moves.\n\nLayout under [`crate::paths::heads_dir`]:\n\n```text\nheads/\n  head-v1/head.json     one training run's artifact, eval included\n  head-v2/head.json\n  current               the promoted label, or absent — zero-shot\n```\n\nAn artifact is immutable once written: a retrain is a new label,\nnever an overwrite, so `current` can move backwards as well as\nforwards and every eval stays inspectable. The artifact stores\n**only the trained rows** — tags below the training floor keep\ntheir zero-shot behaviour implicitly — which is why a head is\nkilobytes, not megabytes, at realistic ruling counts.\n\nPromotion is the caller's verdict, not this module's: writing an\nartifact records what training produced (wins and losses alike, a\nloss being exactly the evidence that zero-shot should stand);\n[`promote`] moves the pointer and is called only on a strict\nheld-out win."
+      "docs": "Trained-head storage (#132 phase 2): the artifact a training run\nwrites, and the one pointer promotion moves.\n\nLayout under [`crate::paths::heads_dir`]:\n\n```text\nheads/\n  head-v1-9f80e2c1/head.json   one training run's artifact, eval included\n  head-v2-1a2b3c4d/head.json\n  current                      the promoted label, or absent — zero-shot\n```\n\nAn artifact is immutable once written: a retrain is a new label,\nnever an overwrite, so `current` can move backwards as well as\nforwards and every eval stays inspectable. The artifact stores\n**only the trained rows** — tags below the training floor keep\ntheir zero-shot behaviour implicitly — which is why a head is\nkilobytes, not megabytes, at realistic ruling counts.\n\nPromotion is the caller's verdict, not this module's: writing an\nartifact records what training produced (wins and losses alike, a\nloss being exactly the evidence that zero-shot should stand);\n[`promote`] only moves the pointer. The training caller promotes\non a strict held-out win; a pull ([`install_pulled`]) promotes on\nthe person's explicit act — the two verdicts that may move the one\npointer."
     },
     {
       "path": "asterism_infra::heads::CURRENT_FILE",
@@ -273,6 +273,16 @@
       "docs": "The promoted label, if any. Absent (or dangling) means zero-shot."
     },
     {
+      "path": "asterism_infra::heads::discriminated_label",
+      "kind": "function",
+      "docs": "Appends the content discriminator to an ordinal stem: eight hex\ncharacters of the rows' digest, so the label is a function of what\nthe head actually scores with."
+    },
+    {
+      "path": "asterism_infra::heads::install_pulled",
+      "kind": "function",
+      "docs": "Installs a pulled head artifact and promotes it — the member half\nof #132 phase 3. Returns the label promotion now points at.\n\nThe artifact is verified against the bound encoder with the same\nchecks the startup bind runs ([`verify_artifact`]): a pulled head\nthat could not bind must not install. The label is the\npublisher's, kept as-is: labels carry a content discriminator\nsince the pull exists (see [`next_head_label`]), so a collision\nmeans one of two things — the identical artifact, in which case\nthe install is a re-promote; or a genuinely different head under\nthe same name, which is refused rather than renamed, because\nsilently renaming would detach the label the team talks about\nfrom the bytes that score."
+    },
+    {
       "path": "asterism_infra::heads::load_artifact",
       "kind": "function",
       "docs": "Reads one label's artifact, verifying the schema tag and that the\nartifact answers to the label it sits under."
@@ -280,12 +290,17 @@
     {
       "path": "asterism_infra::heads::next_head_label",
       "kind": "function",
-      "docs": "The next unused label under `heads_root`, counting up from\n`head-v1`. Labels are ordinal, not content-addressed: two runs over\nidentical rulings would produce identical rows, and a person\nreading `heads/` should see the history of attempts, not a dedupe."
+      "docs": "The next ordinal label stem under `heads_root`, counting up from\n`head-v1`. A run appends a content discriminator to the stem\n(`head-v3-1a2b3c4d`) before writing, so labels are unique across\n*stores*, not only within one — a pulled head (#132 phase 3)\nlands under its publisher's label, and two members' third\ntraining runs must not claim the same name. The ordinal half\nstays because a person reading `heads/` should see the history of\nattempts in order; the discriminator half exists purely so that\norder never collides."
     },
     {
       "path": "asterism_infra::heads::promote",
       "kind": "function",
-      "docs": "Points `current` at a label — the promotion. The pointer is the\nwhole mechanism: the scoring side (the follow-up branch of #132)\nwill read it once at startup, bind-once like the encoder. Until\nthat side lands, the pointer records the verdict and nothing\nconsumes it — the zero-shot pass keeps scoring."
+      "docs": "Points `current` at a label — the promotion. The pointer is the\nwhole mechanism: the scoring side reads it once at startup\n([`bind_current`]), bind-once like the encoder, so a promotion\napplies on the next launch."
+    },
+    {
+      "path": "asterism_infra::heads::verify_artifact",
+      "kind": "function",
+      "docs": "The checks a head must pass before it may score against `identity`\n— one function, because the startup bind and a pulled install\n(#132 phase 3) must refuse for exactly the same reasons: an\nidentity that is not the bound encoder's, a row whose width\ndisagrees with it, a key that is not a tag id."
     },
     {
       "path": "asterism_infra::heads::write_artifact",
@@ -406,6 +421,11 @@
       "path": "asterism_infra::jobs::handlers::edge_rebuild",
       "kind": "function",
       "docs": "Incrementally rebuilds constellation edges for the target asset.\n\nCandidate fetch is window-scoped (within ±48h of the target or\nsharing its session id, capped at 200); the weight / label rules\nlive in the pure `plan_edges` domain function."
+    },
+    {
+      "path": "asterism_infra::jobs::handlers::head_pull",
+      "kind": "function",
+      "docs": "Installs a pulled head artifact and promotes it — the `HeadPull`\njob (#132 phase 3). See `JobKind::HeadPull` for the contract; the\nverification and the install live in `crate::heads`\n(`install_pulled`, the same checks the startup bind runs), and\nthis handler owns only the payload shape and the completion\nmessage."
     },
     {
       "path": "asterism_infra::jobs::handlers::head_train",

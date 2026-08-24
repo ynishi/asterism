@@ -14,8 +14,8 @@ writes outside the ledger's scope, which #83 §2 fixes at the team
 boundary: [`SqliteTeamsRepository::record_locator`] (locators are
 private-space, which is also why the v0 kind registry has no
 locator kind) and
-[`SqliteTeamsRepository::publish_model_entry`] (the model registry
-is instance-scope — #126 — and carries its history in its own
+[`SqliteTeamsRepository::publish_head_entry`] (the head registry
+is instance-scope — #132 — and carries its history in its own
 superseded rows).
 
 ## Where the domain runs
