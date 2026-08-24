@@ -60,6 +60,23 @@ and this project adheres to
 
 ### Added
 
+- **The maintenance verbs reach the desktop, with a place to press them**
+  (#136). Four Tauri commands — `rebuild_index`, `rescan_duplicates`,
+  `remeasure_dims` (the route's two shapes: asset ids overwrite, a scope fills
+  blanks unless it is `all`), and `organize_by_location`, the only one whose
+  service takes an attribution argument — and a Maintenance section in the
+  settings panel that invokes them. The three job verbs report into the existing
+  jobs ticker with no new wiring; the organize backfill runs synchronously and
+  reports its summary in place, with the multi-minute cost on a large library
+  stated in the hint. `OrganizeByLocationCommand` / `OrganizeByLocationResult`
+  enter `bindings.ts` now that a screen consumes them.
+
+  This answers #136's open screen question for these four — a settings section,
+  not a screen of their own — and shrinks the parity debt in `asterism-server`'s
+  `http` module doc to two: `train_tag_head` / `pull_tag_head`, whose screen is
+  #130's model panel. Both directions of the count are re-measured: 22 routed
+  handlers without a same-name command, 165 of 176 commands with one.
+
 - **A forge handle remembers the name it was minted under** (#148 revision 9).
   `forge_actor` gains a nullable `display_name`, written when the row is minted
   and not afterwards — the same captured-not-referenced discipline as the teams

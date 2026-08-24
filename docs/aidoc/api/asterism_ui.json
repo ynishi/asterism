@@ -583,6 +583,11 @@
       "docs": "Opens a conversation about something in the forge.\n\n**The anchor is resolved, not accepted.** The command names ids and\na kind; the service reads the pursuit or the line and the model\nbuilds the anchor from what it finds, so a pursuit nobody opened and\nan entry the round never touched are two different refusals."
     },
     {
+      "path": "asterism_ui::commands::organize_by_location",
+      "kind": "function",
+      "docs": "Backfill: auto-organises existing assets under a Dir tree derived\nfrom `source_locator` — the command twin of\n`POST /asterism/organize/by-location`. Synchronous rather than a\njob: the summary comes back when the pass finishes, and a large\nlibrary is a multi-minute wait (the service doc carries the cost)."
+    },
+    {
       "path": "asterism_ui::commands::paste_image_import",
       "kind": "function",
       "docs": "Writes a clipboard-pasted image blob to\n`~/Pictures/Asterism/pasted/paste-<ts>.<ext>` and dispatches\n`add_asset` for it. The MIME-type hint picks the extension; the\ndownstream pipeline still sniffs the actual container so a\nslightly-wrong `image/webp` label does not stop cover_gen /\nthumb_gen from producing previews."
@@ -653,6 +658,11 @@
       "docs": "Enqueues an incremental constellation-edge rebuild for the asset.\nReturns the engine's task id."
     },
     {
+      "path": "asterism_ui::commands::rebuild_index",
+      "kind": "function",
+      "docs": "Enqueues a batch `IndexRebuild` job and returns its task id — the\ncommand twin of `POST /asterism/index/rebuild`. Idempotent on an\nalready-indexed DB; progress reaches the jobs ticker."
+    },
+    {
       "path": "asterism_ui::commands::rebuild_sessions",
       "kind": "function",
       "docs": "Enqueues a `SessionRebuild` job. The precomputed rkyv snapshot\nwas retired in the Session 1st-class migration, so the handler\nis a no-op today; the tauri command stays for wire compatibility\nso a future reconciliation pass has a caller-visible entry\npoint (progress emits via the shared `job:progress:{id}` channel)."
@@ -686,6 +696,11 @@
       "path": "asterism_ui::commands::reject_tag_suggestion",
       "kind": "function",
       "docs": "Rejects one tag suggestion (#112); this model never proposes the\npair again."
+    },
+    {
+      "path": "asterism_ui::commands::remeasure_dims",
+      "kind": "function",
+      "docs": "Re-reads artefacts and rewrites `width_px` / `height_px` — the\ncommand twin of `POST /asterism/assets/remeasure`, with the same\ntwo shapes and the same refusal to accept both: `asset_ids` is \"I\nput the right file behind these, read them again\" (overwrites);\n`scope` is `unlooked` / `unmeasured` / `all`, and only `all`\nreplaces existing answers. Returns the enqueued task ids (one job\nper asset on the id shape, one batch job on the scope shape)."
     },
     {
       "path": "asterism_ui::commands::remove_asset_from_group",
@@ -741,6 +756,11 @@
       "path": "asterism_ui::commands::reorder_personas",
       "kind": "function",
       "docs": "Rewrites `display_order` across a persona slice."
+    },
+    {
+      "path": "asterism_ui::commands::rescan_duplicates",
+      "kind": "function",
+      "docs": "Re-derives duplicate conflicts from fingerprints already on the\nrows — the command twin of `POST /asterism/duplicates/rescan`.\nTakes no input: the pass is idempotent, never folds, and always\nwalks the whole library (the route's doc has the reasoning).\nReturns the enqueued job's task id."
     },
     {
       "path": "asterism_ui::commands::reset_setting",

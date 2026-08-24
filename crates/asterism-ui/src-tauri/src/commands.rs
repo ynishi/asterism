@@ -34,19 +34,20 @@ use asterism_contract::command::{
     DispatchRunCommand, EditAssetCommentCommand, EditChapterMarkCommand, EditMaterialMarkCommand,
     EmptyTrashCommand, EmptyTrashResult, LinkGroupCommand, MergeAssetsCommand, MergeGroupsCommand,
     MergeTagsCommand, MergeTagsResult, MoveDirCommand, MoveGroupToDirCommand,
-    PasteImageImportCommand, PatchSessionMetadataCommand, PostAssetCommentCommand,
-    PostChapterMarkCommand, PostMaterialMarkCommand, PromoteSnapshotToGroupCommand,
-    PromoteSnapshotToGroupResult, PromoteTagToGroupCommand, PromoteTagToGroupResult,
-    PromoteVolatileSelectionCommand, PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand,
-    RedispatchCommand, RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand,
-    RenameGroupCommand, RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand,
-    ReorderGroupChildrenCommand, ReorderPersonasCommand, ResetSettingCommand,
-    ResolveDuplicateConflictCommand, RestoreAssetCommand, RestoreGroupCommand,
-    RestorePersonaCommand, SetDefaultMaterialLayerCommand, SetPersonaProfileCommand,
-    SetPersonaThemeCommand, SetSettingCommand, TrashAssetCommand, TrashGroupCommand,
-    TrashPersonaCommand, UnlinkGroupCommand, UpdateAssetMetaBatchCommand,
-    UpdateAssetMetaBatchResult, UpdateAssetMetaCommand, UpdateModalityCommand,
-    UpdateQueryGroupQueryCommand, UpdateSeriesStrategyCommand,
+    OrganizeByLocationCommand, OrganizeByLocationResult, PasteImageImportCommand,
+    PatchSessionMetadataCommand, PostAssetCommentCommand, PostChapterMarkCommand,
+    PostMaterialMarkCommand, PromoteSnapshotToGroupCommand, PromoteSnapshotToGroupResult,
+    PromoteTagToGroupCommand, PromoteTagToGroupResult, PromoteVolatileSelectionCommand,
+    PurgeAssetCommand, PurgeGroupCommand, PurgePersonaCommand, RedispatchCommand,
+    RegisterPersonaCommand, RemoveAssetFromGroupCommand, RenameDirCommand, RenameGroupCommand,
+    RenameSessionCommand, RenameTagCommand, ReorderGroupAssetsCommand, ReorderGroupChildrenCommand,
+    ReorderPersonasCommand, ResetSettingCommand, ResolveDuplicateConflictCommand,
+    RestoreAssetCommand, RestoreGroupCommand, RestorePersonaCommand,
+    SetDefaultMaterialLayerCommand, SetPersonaProfileCommand, SetPersonaThemeCommand,
+    SetSettingCommand, TrashAssetCommand, TrashGroupCommand, TrashPersonaCommand,
+    UnlinkGroupCommand, UpdateAssetMetaBatchCommand, UpdateAssetMetaBatchResult,
+    UpdateAssetMetaCommand, UpdateModalityCommand, UpdateQueryGroupQueryCommand,
+    UpdateSeriesStrategyCommand,
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetPageDto,
@@ -67,12 +68,13 @@ use asterism_contract::forge::{
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
+use asterism_core::DomainError;
 use asterism_core::application::mapping::{
     forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
     forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
     forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
     forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
-    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_asset_id,
 };
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::forge::model::pursuit::Intent;
@@ -1024,6 +1026,72 @@ pub async fn rebuild_edges(
     asset_id: String,
 ) -> Result<String, UiError> {
     Ok(state.asset_service.rebuild_edges(&asset_id).await?)
+}
+
+/// Enqueues a batch `IndexRebuild` job and returns its task id — the
+/// command twin of `POST /asterism/index/rebuild`. Idempotent on an
+/// already-indexed DB; progress reaches the jobs ticker.
+#[tauri::command]
+pub async fn rebuild_index(state: State<'_, AppState>) -> Result<String, UiError> {
+    Ok(state.asset_service.rebuild_index().await?)
+}
+
+/// Re-derives duplicate conflicts from fingerprints already on the
+/// rows — the command twin of `POST /asterism/duplicates/rescan`.
+/// Takes no input: the pass is idempotent, never folds, and always
+/// walks the whole library (the route's doc has the reasoning).
+/// Returns the enqueued job's task id.
+#[tauri::command]
+pub async fn rescan_duplicates(state: State<'_, AppState>) -> Result<String, UiError> {
+    Ok(state.asset_service.rescan_duplicates().await?)
+}
+
+/// Re-reads artefacts and rewrites `width_px` / `height_px` — the
+/// command twin of `POST /asterism/assets/remeasure`, with the same
+/// two shapes and the same refusal to accept both: `asset_ids` is "I
+/// put the right file behind these, read them again" (overwrites);
+/// `scope` is `unlooked` / `unmeasured` / `all`, and only `all`
+/// replaces existing answers. Returns the enqueued task ids (one job
+/// per asset on the id shape, one batch job on the scope shape).
+#[tauri::command]
+pub async fn remeasure_dims(
+    state: State<'_, AppState>,
+    asset_ids: Vec<String>,
+    scope: Option<String>,
+) -> Result<Vec<String>, UiError> {
+    match (asset_ids.is_empty(), scope.as_deref()) {
+        (false, None) => {
+            let ids = asset_ids
+                .iter()
+                .map(|id| parse_asset_id(id))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(state.asset_service.remeasure_dims(&ids).await?)
+        }
+        (true, Some(scope)) => Ok(vec![state.asset_service.remeasure_dims_batch(scope).await?]),
+        (true, None) => {
+            Err(DomainError::Validation("name either asset_ids or a scope".into()).into())
+        }
+        (false, Some(_)) => Err(DomainError::Validation(
+            "asset_ids and scope are different requests; name one".into(),
+        )
+        .into()),
+    }
+}
+
+/// Backfill: auto-organises existing assets under a Dir tree derived
+/// from `source_locator` — the command twin of
+/// `POST /asterism/organize/by-location`. Synchronous rather than a
+/// job: the summary comes back when the pass finishes, and a large
+/// library is a multi-minute wait (the service doc carries the cost).
+#[tauri::command]
+pub async fn organize_by_location(
+    state: State<'_, AppState>,
+    command: OrganizeByLocationCommand,
+) -> Result<OrganizeByLocationResult, UiError> {
+    Ok(state
+        .asset_service
+        .organize_by_location(command, &AttributionContext::owner_surface())
+        .await?)
 }
 
 /// Sidebar Tags section — every tag paired with the number of
