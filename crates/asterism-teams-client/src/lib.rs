@@ -36,7 +36,7 @@
 //!   does not leave (#148 decision 13). A column added to the Asset
 //!   next year starts out staying home.
 //!
-//! ## The clone
+//! ## The two copies, and which way each goes
 //!
 //! [`clone`] takes one entry of a team's line onto this machine (#148
 //! decision 10). It is an import rather than a forge concept — new
@@ -44,10 +44,17 @@
 //! `source_kind` and `source_locator` the way every other import
 //! spells it.
 //!
-//! It stops where the local plane's own vocabulary begins: recording
-//! an arrival is [`clone::Imports`], a port a caller fills, for the
-//! reason the relation's port is one — `asterism-contract`'s `command`
-//! module is the local app's plumbing and stays off this crate's graph.
+//! [`publish`] goes the other way, seeding a team's line from a private
+//! one (decision 11). Its two seedings differ by more than size: the
+//! current state is one change point, and re-enacting the chain sends
+//! every content the line ever named and restamps every act to the
+//! publisher.
+//!
+//! Both stop where the local plane's own vocabulary begins. Recording
+//! an arrival is [`clone::Imports`] and reading what a line's content
+//! is is [`publish::Holdings`] — ports a caller fills, for the reason
+//! the relation's port is one: `asterism-contract`'s `command` module
+//! is the local app's plumbing and stays off this crate's graph.
 //!
 //! ## What is not here
 //!
@@ -63,6 +70,7 @@ pub mod clone;
 pub mod link;
 pub mod mapper;
 pub mod promotion;
+pub mod publish;
 
 pub use client::{TeamsClient, TeamsClientError};
 pub use clone::{Arrival, CloneRequest, Cloned, Imports, clone_entry};
@@ -72,3 +80,4 @@ pub use mapper::{
     read_projection_body,
 };
 pub use promotion::{Promotion, PromotionOutcome};
+pub use publish::{HeldSubject, Holdings, Publication, Published, Seeding, publish};

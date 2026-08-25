@@ -247,7 +247,13 @@ pub async fn promote(
 
 /// The one material a v0 promotion carries, or a refusal that says why
 /// this Asset is not one (#148 decision 3 — see the module doc).
-fn sole_material(asset: &Asset) -> Result<&Material, DomainError> {
+///
+/// Crate-visible because publishing sends the same materials under the
+/// same rule: a private line seeding a team one hands over each content
+/// it names, and "what a team holds for a Collection" is the same
+/// unanswered question there as here. Two spellings of it would be two
+/// answers.
+pub(crate) fn sole_material(asset: &Asset) -> Result<&Material, DomainError> {
     if asset.role == AssetRole::Collection {
         return Err(DomainError::Validation(format!(
             "asset {} is a Collection, whose content is the assets pointing at it rather \
@@ -275,7 +281,13 @@ fn sole_material(asset: &Asset) -> Result<&Material, DomainError> {
 }
 
 /// Hashes a file the way the wire spells digests, in chunks.
-async fn hash_at_promote_time(path: &Path) -> Result<String, DomainError> {
+///
+/// Crate-visible for the reason [`sole_material`] is, and carrying the
+/// same rule with it: the file is read now rather than trusted from a
+/// stored hash, because the declared digest is what the server verifies
+/// while it writes and a stale one is refused after the whole body has
+/// gone.
+pub(crate) async fn hash_at_promote_time(path: &Path) -> Result<String, DomainError> {
     let mut file = tokio::fs::File::open(path).await.map_err(|err| {
         DomainError::Infra(anyhow::anyhow!(
             "reading {} to compute its digest: {err}",
