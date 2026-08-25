@@ -6,7 +6,8 @@ authors.workspace    = true
 repository.workspace = true
 homepage.workspace   = true
 description = "Domain layer of the Asterism teams plane — identity, ledger envelope, store rules, ports (IO-free)"
-# license deliberately undeclared until the teams-plane licensing decision (issue #83 §4)
+# The decision #83 §4 deferred to publish time, made at v0.1.0 (#162).
+license     = "AGPL-3.0-or-later"
 # Not published to crates.io.
 publish     = false
 
