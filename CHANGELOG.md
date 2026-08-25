@@ -20,6 +20,71 @@ and this project adheres to
   without touching a release. The six Apple secrets enter by name only; the
   workflow header is the checklist of what each one is.
 
+- **A member can take a copy of what a team holds** (#153, #148 decision 10). A
+  clone is a detached copy, which makes it an import rather than a forge
+  concept: it mints its own `AssetId`, it writes no relation row — a row there
+  means "I put this there", and a copy did not — and it says where it came from
+  the way every other import does, through a new `SourceKind::TEAM_LINE` slug
+  and a locator naming the team, the line, the entry and the team asset it was
+  taken from. Cloning something already here is answered from the existing
+  duplicate machinery before a byte moves, because that locator is built from
+  those four ids and carries nothing the caller chose.
+
+  The locator is a path rather than a name, and the reason is that everything
+  downstream which wants bytes asks whether there are any: a copy filed under a
+  logical name would arrive with no hash, no thumbnail, no cover text and no
+  promoting it onward, each failing silently. The one part of the path that is
+  not an id is the file extension, taken from what the line calls the entry
+  because an extension is the only thing that classifies a material — so
+  renaming an entry across extensions on the team's line makes a re-clone a
+  second copy, which is stated where the path is built rather than left to be
+  found.
+
+- **A private line can seed a team's line** (#153, #148 decision 11). Publishing
+  transfers the current state: the team gets a genesis and one change point
+  holding what the line holds now. Replaying the chain is an option at init and
+  nothing more — a line seeded with its current state cannot be given its
+  history afterwards, because the history would have to arrive underneath change
+  points that already exist.
+
+  Replaying is a **re-enactment**, and the word is in the type, in what the verb
+  answers, and in what the panel says. The acts are restamped to whoever
+  published, because the original actors are not necessarily members of the team
+  and inventing a handle for them would be the team's record claiming what it
+  does not know. So the team's line does not record who did the work upstream;
+  at this boundary the question is who brought this here, and the restamped act
+  answers exactly that. What it costs is stated rather than discovered: a
+  re-enactment sends every content the line ever named, including everything an
+  entry was replaced with and everything taken back off. Work logs and
+  conversations do not cross at all — nothing reads the private line's pursuits,
+  so the abandoned rounds #66 decision 2 protects have no path across.
+
+  The cheaper seeding is also the narrower one. It cannot take a line whose live
+  entries share content, because a promotion's repeat check is keyed on the
+  asset and the line, so the second entry would be answered from the first and
+  the team would receive one where the private line has two. That is refused
+  outright rather than narrowed in silence, and a re-enactment takes it, because
+  a chain names each entry in its own right. Both refusals are answered before
+  the team's line is opened: a refusal met half-way through leaves a line on
+  somebody else's team, and unlike a local one that is not the publisher's to
+  tidy away.
+
+- **Shared lines list in their own panel** (#153, #148 decision 16). A shared
+  line is served through rather than mirrored, so the panel holds no copy: it
+  reads when it opens, when a line is selected, and when a write it made changed
+  the answer, and it empties when the connection goes rather than showing the
+  last thing the server said. Kept apart from the local lines rather than mixed
+  into them, which is what having two sources honestly looks like. It shows how
+  many change points a line has, which is the visible difference between one
+  published as it stands and one whose chain was re-enacted, and it carries the
+  clone and publish verbs with what re-enacting costs written beside the choice.
+
+  The desktop's write surface grew by one, and the mutation-surface guard
+  records it. Only the clone counts: it writes to this machine, so it names the
+  owner's own operation surface. The other seven commands reach a team's server,
+  where the author is the authenticated member and the team stamps it, so a
+  context stated locally would be a second answer to a settled question.
+
 - **A member's machine can promote an Asset onto a team's line** (#152, #148
   decisions 3–9 and 12–15). The member's half of #148: a client that talks to a
   team server, the one composite act that hands an Asset over, and the relation
