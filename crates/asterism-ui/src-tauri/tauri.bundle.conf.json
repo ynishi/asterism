@@ -3,6 +3,9 @@
   "bundle": {
     "externalBin": [
       "../../../target/ffmpeg-sidecar/ffmpeg"
-    ]
+    ],
+    "macOS": {
+      "hardenedRuntime": true
+    }
   }
 }
