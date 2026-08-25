@@ -114,6 +114,17 @@ and this project adheres to
 
 ### Added
 
+- **The last two verbs of #136's debt gain commands, and the parity debt hits
+  zero**: `train_tag_head` (enqueue a `HeadTrain` run over the rulings under the
+  bound encoder — no input, the corpus is every ruling) and `pull_tag_head`
+  (enqueue a `HeadPull` install of a head artifact the caller fetched;
+  verification is the job's, promotion applies on the next launch). Commands
+  only — #130's model panel is the screen that will invoke them, and the
+  artifact stays opaque JSON on this side, so the local plane still carries no
+  dependency on the teams crates and no registry credential. The `http` module
+  doc's count is re-measured both ways: 20 routed handlers without a same-name
+  command, every one a sanctioned difference; 167 of 178 commands with one.
+
 - **The maintenance verbs reach the desktop, with a place to press them**
   (#136). Four Tauri commands — `rebuild_index`, `rescan_duplicates`,
   `remeasure_dims` (the route's two shapes: asset ids overwrite, a scope fills

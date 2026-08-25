@@ -326,6 +326,8 @@ pub fn run() {
             commands::accept_tag_suggestion,
             commands::reject_tag_suggestion,
             commands::visual_model_status,
+            commands::train_tag_head,
+            commands::pull_tag_head,
             commands::detach_tag,
             commands::attach_tag_batch,
             commands::detach_tag_batch,
