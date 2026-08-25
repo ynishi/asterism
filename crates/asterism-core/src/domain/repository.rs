@@ -44,6 +44,7 @@ use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
 use crate::domain::source_locator::SourceLocator;
 use crate::domain::tag::{Tag, TagCount, TagMergeOutcome};
+use crate::domain::team_link::{AssetLink, AssetLinkKey, TeamScopedId};
 use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
     AssetCommentId, AssetId, ChapterMarkId, DirId, DispatchId, DuplicateConflictId,
@@ -3937,4 +3938,85 @@ pub trait SeriesRepository: Send + Sync {
         after: Option<(&AssetId, u32, &StrategyId)>,
         limit: u32,
     ) -> Result<Vec<UnderivedSeries>, DomainError>;
+}
+
+/// Persistence port for [`AssetLink`] — what a promotion left at home
+/// (#148 decisions 8 and 9).
+///
+/// **The shape of the set is the argument for each verb.** A row is
+/// written once and never updated: a promotion happened, and nothing
+/// that happens later makes it have happened differently. So there is
+/// no `update` here, and [`Self::record`] is an insert whose only
+/// conflict is the same promotion recorded twice.
+///
+/// The two reads are the two questions actually asked of the relation.
+/// [`Self::list_for_team`] is the one a verify walks. [`Self::for_asset`]
+/// is the one the local plane asks while looking at an Asset — *what
+/// has become of this in this team* — and it is a verb rather than a
+/// filter over the first because that is a question about one row in a
+/// table that grows with every promotion a machine has ever made.
+///
+/// The last two are what make the relation *advisory but attended*.
+/// Either end may vanish and neither may break the other, so nothing
+/// in the schema stops a row from outliving what it points at — which
+/// means something has to go looking. [`Self::dangling_locally`]
+/// answers the half a machine can answer alone. The other half is a
+/// question for the team, and the answer to it arrives as a list of
+/// keys handed to [`Self::reap`], which is why that verb takes keys
+/// rather than a predicate: what is gone on a server is not a fact
+/// this port can evaluate.
+///
+/// **`reap` removes link rows and touches nothing else.** Not the
+/// Asset, not a mark, not a team's copy of anything. A relation
+/// tidying itself up must not be a path by which either end loses
+/// something, and a caller reading this trait should be able to see
+/// that from the signature.
+#[async_trait]
+pub trait AssetLinkRepository: Send + Sync {
+    /// Records a promotion.
+    ///
+    /// Recording the same `(team, line, entry)` twice is not an error
+    /// and does not change the stored row: an entry is named once, a
+    /// retry of the same promotion is the same fact, and the first
+    /// write is the one that says when it happened.
+    async fn record(&self, link: &AssetLink) -> Result<(), DomainError>;
+
+    /// Every row for one team, oldest promotion first.
+    ///
+    /// Scoped to a team because that is how the relation is read —
+    /// "reading the row for the team you are looking at is the whole
+    /// of it" — and because verifying against a server is a
+    /// per-team act: one team, one session, one set of lines.
+    async fn list_for_team(&self, team_id: TeamScopedId) -> Result<Vec<AssetLink>, DomainError>;
+
+    /// What has become of one Asset in one team — every line of that
+    /// team this Asset was promoted onto.
+    ///
+    /// A list rather than an option: within one team an Asset may sit
+    /// on several lines, and only `(team, line, entry)` is unique.
+    /// Empty is the ordinary answer for an Asset nobody promoted here.
+    ///
+    /// Its own verb rather than a filter over [`Self::list_for_team`]
+    /// because of what the two walk. This asks about one Asset, and an
+    /// implementation can answer it from an index; filtering the team's
+    /// whole list in the caller walks every promotion the machine has
+    /// ever made to that team in order to find at most a handful.
+    async fn for_asset(
+        &self,
+        team_id: TeamScopedId,
+        local_asset_id: &AssetId,
+    ) -> Result<Vec<AssetLink>, DomainError>;
+
+    /// Every row of this team whose local Asset is no longer there.
+    ///
+    /// The half of the verification a machine can answer without
+    /// asking anybody: the Asset was deleted and the row survived it,
+    /// exactly as decision 9 permits. The other half — an entry a team
+    /// no longer has — is a question for that team, and its answer
+    /// reaches this port as keys for [`Self::reap`].
+    async fn dangling_locally(&self, team_id: TeamScopedId) -> Result<Vec<AssetLink>, DomainError>;
+
+    /// Removes the named rows, and nothing else. Answers how many
+    /// existed to be removed.
+    async fn reap(&self, keys: &[AssetLinkKey]) -> Result<u64, DomainError>;
 }
