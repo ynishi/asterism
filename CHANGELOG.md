@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- **A release workflow: the macOS download opens like an app** (#165). A pushed
+  `v*` tag builds the production-shaped bundle through `just dogfood-build`,
+  signs it with the Developer ID identity under the hardened runtime, notarizes
+  the .app and the DMG each with their own stapled ticket, asserts what
+  Gatekeeper would ask (`spctl --assess`, `stapler validate`), and attaches the
+  DMG to a _draft_ release — publishing stays a human decision. A
+  `workflow_dispatch` run rehearses the same pipeline into a workflow artifact
+  without touching a release. The six Apple secrets enter by name only; the
+  workflow header is the checklist of what each one is.
+
 - **The team's forge is served over HTTP** (#151, #148 decisions 5 and 19). The
   local forge surface is mirrored under `/teams/{team_id}/forge/*` — same paths
   below the prefix, same DTOs from `asterism-contract::forge`, same handler
