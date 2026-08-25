@@ -13418,16 +13418,30 @@ gained commands ahead of #130's model panel, the screen that will
 invoke them.)
 
 A count taken the other way — commands that have a route of the
-same name — is 167 of 178 and cannot answer this question, because
-the direction that goes short is the other one. The eleven without
-one are the seven command-side names of the twins above (four
-`threads_about_*` routes collapse into one command, so ten route
-names pair with seven command names); `paste_image_import` and
-`rehome_dropped_path`, which stage clipboard and drag-drop
+same name — is 167 of 186 and cannot answer this question, because
+the direction that goes short is the other one. The nineteen
+without one are the seven command-side names of the twins above
+(four `threads_about_*` routes collapse into one command, so ten
+route names pair with seven command names); `paste_image_import`
+and `rehome_dropped_path`, which stage clipboard and drag-drop
 material — desktop facts a socket client does not have;
 `get_asset_thumbs`, a batch second command over the single-thumb
-route; and `active_profile`, a desktop-chrome read of which local
-data profile this process opened, with no route today.
+route; `active_profile`, a desktop-chrome read of which local
+data profile this process opened, with no route today; and the
+eight that talk to a **team** rather than to this process.
+
+Those eight are the one place the obligation above is deliberately
+one-sided, and #153 added them. They are not verbs against this
+server — they are a member's client talking to somebody else's,
+carrying that server's session — so a route here would be this
+process proxying a connection it does not hold and cannot
+authenticate. The obligation is about a person not losing a verb by
+being on the other surface, and a socket client that wants a team
+has the same client library the desktop has. Nothing forbids the
+edge — `asterism-teams-client` is an `asterism-*` crate and #83 §4
+permits it here exactly as it permits it in `asterism-ui` — so if a
+headless deployment ever needs to publish a line, this is a
+decision to revisit rather than a wall.
 
 Two differences in *shape* are by design. Attribution: these
 handlers build a context from command fields with
@@ -13582,7 +13596,7 @@ bus in this process.
 A team hosts a forge and holds what its members brought (#148
 decisions 1 and 2). This is what a member's machine runs to talk to
 one: a session, the reads over a shared line, the forge's verbs,
-and the one composite act that is the point of the whole issue —
+and the composite act that is the point of the whole issue —
 [`promotion`], handing an Asset over so the team converts it into
 something of its own.
 
@@ -13615,12 +13629,27 @@ learned over HTTP.
   does not leave (#148 decision 13). A column added to the Asset
   next year starts out staying home.
 
-## What is not here
+## The two copies, and which way each goes
 
-**The clone** (#148 decision 10) — it is #153's, and it is an
-import rather than a forge concept: it mints new ids, writes no
-relation row, and says where it came from through `source_kind` the
-way every other import does.
+[`clone`] takes one entry of a team's line onto this machine (#148
+decision 10). It is an import rather than a forge concept — new
+ids, no relation row, and where it came from spelled in
+`source_kind` and `source_locator` the way every other import
+spells it.
+
+[`publish`] goes the other way, seeding a team's line from a private
+one (decision 11). Its two seedings differ by more than size: the
+current state is one change point, and re-enacting the chain sends
+every content the line ever named and restamps every act to the
+publisher.
+
+Both stop where the local plane's own vocabulary begins. Recording
+an arrival is [`clone::Imports`] and reading what a line's content
+is is [`publish::Holdings`] — ports a caller fills, for the reason
+the relation's port is one: `asterism-contract`'s `command` module
+is the local app's plumbing and stays off this crate's graph.
+
+## What is not here
 
 **A local copy of a shared line.** Decision 16 serves shared lines
 through rather than mirroring them, so every read here is a request
@@ -13630,9 +13659,11 @@ what a clone is for.
 ## Modules
 
 - [`client`](client.md): Talking to a team server (#148 decisions 16 and 19).
+- [`clone`](clone.md): Taking a copy of what a team holds (#148 decision 10).
 - [`link`](link.md): Verify and reap — what makes the relation *attended* rather than
 - [`mapper`](mapper.md): The one mapper — what may travel, and the declaration that decides
 - [`promotion`](promotion.md): Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
+- [`publish`](publish.md): Seeding a team's line from a private one (#148 decision 11).
 
 
 <!-- asterism_teams_client/client.md -->
@@ -13675,6 +13706,65 @@ a subject and a digest, which is what the decision says may.
 
 - `TeamsClient` — A client bound to one team server, holding at most one session.
 - `TeamsClientError` — What can go wrong between here and a team.
+
+
+<!-- asterism_teams_client/clone.md -->
+# asterism-teams-client::clone
+
+Taking a copy of what a team holds (#148 decision 10).
+
+Working on a shared line needs no copy — open a pursuit against it,
+and decision 16 serves the reads through. Cloning is for when the
+copy *is* the point: leaving a team, or starting from what a team
+has and going a different way, which the model will not let you do
+in place because it refuses a fork outright.
+
+## A clone is an import, not a forge concept
+
+Three things follow from that word, and each is visible in the code
+below rather than left to a caller's discipline.
+
+It **mints new ids**, because the local plane mints its own
+([`Imports::record`] hands back a local [`AssetId`], and nothing
+here reads a [`TeamScopedId`] as one).
+
+It **writes no relation row**. There is no [`AssetLinkRepository`]
+in this module's signature at all, which is the strongest way to say
+it: a link row means "I put this there", and a copy did not put
+anything anywhere.
+
+It **says where it came from through `source_kind` and
+`source_locator`**, the way every other import does — and that is
+the part with a design decision in it, so [`cloned_locator`] carries
+the argument.
+
+## What is not taken
+
+The projection is read and handed back whole, but only its title
+lands on the copy, through the one field an ingest has for saying
+what something is called. Marks do not: the ingest command has no
+slot for one, and [`ReadMark`](crate::ReadMark) is deliberately not
+[`PromotedMark`](crate::PromotedMark) — a mark read off the wire has
+no layer under it and no verified origin, so it is not a thing this
+machine may go on to promote as its own. A caller wanting more than
+the title has [`Cloned::projection`] and the whole view in it.
+
+[`AssetLinkRepository`]: asterism_core::domain::repository::AssetLinkRepository
+
+## Functions
+
+- `clone_entry` — Copies one entry of a team's line onto this machine.
+- `cloned_locator` — Where a clone of one entry lives, and therefore what it is recorded
+
+## Types
+
+- `Arrival` — What a clone hands the local plane, once the bytes are on disk.
+- `CloneRequest` — One entry of one line of one team, to be copied.
+- `Cloned` — What a clone left behind, on this machine.
+
+## Traits
+
+- `Imports` — Where a clone puts what it took.
 
 
 <!-- asterism_teams_client/link.md -->
@@ -13903,6 +13993,86 @@ exists this function skips the body on it too.
 - `PromotionOutcome` — What a promotion left behind, on both sides.
 
 
+<!-- asterism_teams_client/publish.md -->
+# asterism-teams-client::publish
+
+Seeding a team's line from a private one (#148 decision 11).
+
+The other direction from a clone, and it transfers the current state
+for the same reason: what a team is being given is something to work
+on, not somebody's record of how they got there.
+
+## Two seedings, and only one of them is free
+
+[`Seeding::CurrentState`] is the default and the cheap one. The
+team's line gets a genesis and one change point, holding what the
+private line holds now.
+
+[`Seeding::Reenactment`] replays the chain — one pursuit and one
+close per change point, so the team's line ends with as many change
+points as the private one had. **It is chosen at init and nowhere
+else**: a line that was seeded with its current state cannot be
+given its history afterwards, because the history would have to
+arrive underneath change points that already exist.
+
+What it costs is worth saying rather than leaving to be discovered.
+A re-enactment sends **every content the line ever named** — the set
+[`Line::holds`] describes, which only ever grows and includes
+everything an entry was replaced with and everything taken back off
+the line. Seeding the current state sends what is on the line now,
+which is usually far less.
+
+The cheaper seeding is also the narrower one, in a way that is
+nobody's guess: it cannot take a line whose live entries share
+content, because a promotion's repeat check is keyed on the asset
+and the line, so the second entry would be answered from the first
+and the team would receive one where the private line has two.
+`seeds` refuses that outright rather than narrowing it silently, and
+a re-enactment takes it, because a chain names each entry in its own
+right. Both refusals happen before the team's line is opened — see
+`seeds` for the ordering and for the one failure it cannot cover.
+
+## Why it is a re-enactment and not a history
+
+The acts are restamped to whoever published. The original actors are
+not necessarily members of this team, so there is nobody on the team
+plane for the old stamps to name — and inventing one would be the
+team's record claiming knowledge it does not have. So the team's
+line does not record who did the work upstream, and that is not a
+hole: at this boundary the question is who brought this here, and
+the restamped act answers exactly that. Who made it before is the
+private side's record, which #66 decision 2 says the team never had
+a claim on.
+
+The word for that is **re-enactment**, and it is in the type, in
+[`Published::reenacted`], and in what the UI says.
+
+## What does not travel at all
+
+Work logs and conversations, and they are not offered at init
+either. A pursuit that was abandoned, a round that was pushed and
+thought better of, a thread arguing about it — those are the private
+deliberation #66 decision 2 protects. Nothing in this module reads
+the private line's pursuits: the seeding walks the *line's* chain,
+which is what was landed, and the work that produced it is not
+reachable from here.
+
+## Functions
+
+- `publish` — Opens a line on the team and seeds it from a private one.
+
+## Types
+
+- `HeldSubject` — One local asset a line names, with what may be said about it.
+- `Publication` — A private line, and the team to seed from it.
+- `Published` — What a publication left on the team.
+- `Seeding` — How much of a private line the team's copy is given.
+
+## Traits
+
+- `Holdings` — What a publication reads out of the local plane.
+
+
 <!-- asterism_teams_wire/index.md -->
 # asterism-teams-wire 0.0.0
 
@@ -14094,13 +14264,22 @@ Tauri command handlers — a thin translation layer. They pass DTOs
 through to the application services in `asterism-core` and convert
 `DomainError` into `UiError`. No business logic lives here.
 
-Every mutation here names its attribution channel explicitly —
-[`AttributionContext::owner_surface`]. This is the owner's own
-operation surface (the desktop app's IPC), so the owner-ness is a
-property of the surface rather than a guess about the caller, and the
-commands carry no attribution fields for it to read. The argument is
-required by the service signatures, so a new mutation cannot be added
-here without choosing.
+Every mutation that writes to *this machine* names its attribution
+channel explicitly — [`AttributionContext::owner_surface`]. This is
+the owner's own operation surface (the desktop app's IPC), so the
+owner-ness is a property of the surface rather than a guess about the
+caller, and the commands carry no attribution fields for it to read.
+The argument is required by the service signatures, so a new
+mutation cannot be added here without choosing.
+
+The qualifier is #153's and covers exactly one block, at the end of
+this file: the verbs that write to a **team**. There the author is
+the authenticated member and the team's server stamps it, so a
+context stated here would be a second answer to a settled question.
+Two of those verbs — connecting and publishing — write nothing
+through a service that takes a context, and `publish_line_to_team`
+additionally writes local relation rows, which carry no actor at
+all. The block says all of this where it sits.
 
 # This surface and the HTTP one are mirrors
 
@@ -14137,7 +14316,9 @@ its own module doc explains.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `clone_shared_entry` — Takes a copy of one entry of a shared line (#148 decision 10).
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
+- `connect_team_server` — Logs this window in to a team server and holds the session.
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -14163,6 +14344,7 @@ its own module doc explains.
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
 - `detach_tag_batch` — Detaches one tag from many assets in one call.
 - `discard_forge_line` — Takes the line, its history and every piece of work against it.
+- `disconnect_team_server` — Drops the session. The panel goes empty rather than stale.
 - `dispatch_run` — Live-source dispatch (`dispatch_run`): freezes a Group (query
 - `edit_asset_comment` — Rewrites the body of an existing comment (stamps `edited_at`).
 - `edit_chapter_mark` — Retitles a section and, unlike the mark face, may move it: the reason
@@ -14215,6 +14397,7 @@ its own module doc explains.
 - `list_series_strategies` — Every registered series rule, oldest first, seeded and user-written
 - `list_sessions` — Sessions view — one row per `session_id` in the query scope.
 - `list_settings` — Every known application setting, resolved through code default →
+- `list_shared_lines` — Every line a team hosts, without its history.
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
 - `list_streams` — The stream names [`list_observations`]'s `stream` filter accepts —
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
@@ -14238,6 +14421,7 @@ its own module doc explains.
 - `promote_snapshot_to_group` — Promotes a Snapshot into a hand-owned Group (mirror of
 - `promote_tag_to_group` — Snapshots every asset carrying a tag into a newly-created Group.
 - `promote_volatile_selection` — Fuses freeze + promote for the grid's volatile pick (W5-d):
+- `publish_line_to_team` — Seeds a team's line from a local one (#148 decision 11).
 - `pull_tag_head` — Enqueues a `HeadPull` install of a fetched head artifact — the
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
@@ -14251,7 +14435,7 @@ its own module doc explains.
 - `record_event` — Appends one telemetry event to the local `event_log`. Fire-and-
 - `redispatch` — Re-runs a finished dispatch with the same frozen input (P2).
 - `register_persona` — Registers a new persona.
-- `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
+- `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
@@ -14280,7 +14464,10 @@ its own module doc explains.
 - `set_persona_profile` — Upserts the persona's identity signal.
 - `set_persona_theme` — Sets (or clears) the wallpaper for a persona.
 - `set_setting` — Stores one setting override and returns the value that now applies.
+- `shared_line_history` — A shared line and its whole history.
+- `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
 - `trash_group` — Moves a Group to the trash (reversible; membership and drag order

@@ -3,7 +3,7 @@
 //! A team hosts a forge and holds what its members brought (#148
 //! decisions 1 and 2). This is what a member's machine runs to talk to
 //! one: a session, the reads over a shared line, the forge's verbs,
-//! and the one composite act that is the point of the whole issue —
+//! and the composite act that is the point of the whole issue —
 //! [`promotion`], handing an Asset over so the team converts it into
 //! something of its own.
 //!
@@ -36,12 +36,27 @@
 //!   does not leave (#148 decision 13). A column added to the Asset
 //!   next year starts out staying home.
 //!
-//! ## What is not here
+//! ## The two copies, and which way each goes
 //!
-//! **The clone** (#148 decision 10) — it is #153's, and it is an
-//! import rather than a forge concept: it mints new ids, writes no
-//! relation row, and says where it came from through `source_kind` the
-//! way every other import does.
+//! [`clone`] takes one entry of a team's line onto this machine (#148
+//! decision 10). It is an import rather than a forge concept — new
+//! ids, no relation row, and where it came from spelled in
+//! `source_kind` and `source_locator` the way every other import
+//! spells it.
+//!
+//! [`publish`] goes the other way, seeding a team's line from a private
+//! one (decision 11). Its two seedings differ by more than size: the
+//! current state is one change point, and re-enacting the chain sends
+//! every content the line ever named and restamps every act to the
+//! publisher.
+//!
+//! Both stop where the local plane's own vocabulary begins. Recording
+//! an arrival is [`clone::Imports`] and reading what a line's content
+//! is is [`publish::Holdings`] — ports a caller fills, for the reason
+//! the relation's port is one: `asterism-contract`'s `command` module
+//! is the local app's plumbing and stays off this crate's graph.
+//!
+//! ## What is not here
 //!
 //! **A local copy of a shared line.** Decision 16 serves shared lines
 //! through rather than mirroring them, so every read here is a request
@@ -51,14 +66,18 @@
 #![warn(missing_docs)]
 
 pub mod client;
+pub mod clone;
 pub mod link;
 pub mod mapper;
 pub mod promotion;
+pub mod publish;
 
 pub use client::{TeamsClient, TeamsClientError};
+pub use clone::{Arrival, CloneRequest, Cloned, Imports, clone_entry};
 pub use link::{DanglingLink, LinkVerification};
 pub use mapper::{
     DeclaredInput, LocalSubject, ProjectionView, PromotedMark, ReadMark, projection_body,
     read_projection_body,
 };
 pub use promotion::{Promotion, PromotionOutcome};
+pub use publish::{HeldSubject, Holdings, Publication, Published, Seeding, publish};

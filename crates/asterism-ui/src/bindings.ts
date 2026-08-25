@@ -312,3 +312,13 @@ export type MessageDto = { id: string; thread_id: string; author_kind: string; a
 
 export type MessageRefDto = { kind: string; id: string; };
 
+export type ForgeLineDto = { id: string; name: string; strategy_id: string; standing: string; head_id: string; created_at_ms: number; updated_at_ms: number; };
+
+export type ForgeEntryStateDto = { entry_id: string; alive: boolean; name: string | null; content_asset_id: string | null; };
+
+export type ForgeLineHistoryDto = { line: { id: string; name: string; strategy_id: string; standing: string; head_id: string; created_at_ms: number; updated_at_ms: number; }; genesis_id: string; genesis_at_ms: number; changes: { id: string; parent_id: string; from_pursuit_id: string; by_node_id: string; at_ms: number; actor_kind: string; actor_id: string; table: { entry_id: string; existence: string | null; content_asset_id: string | null; name: string | null; }[]; }[]; };
+
+export type ForgeChangePointDto = { id: string; parent_id: string; from_pursuit_id: string; by_node_id: string; at_ms: number; actor_kind: string; actor_id: string; table: { entry_id: string; existence: string | null; content_asset_id: string | null; name: string | null; }[]; };
+
+export type ForgeChangeRowDto = { entry_id: string; existence: string | null; content_asset_id: string | null; name: string | null; };
+

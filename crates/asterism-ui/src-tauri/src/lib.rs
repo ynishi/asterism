@@ -427,6 +427,17 @@ pub fn run() {
             commands::amend_forge_message,
             commands::rename_forge_thread,
             commands::list_forge_threads_about,
+            // Lines a team hosts. Their own block for the reason they
+            // get their own panel: the source is a server, not this
+            // machine (#148 decision 16).
+            commands::connect_team_server,
+            commands::disconnect_team_server,
+            commands::team_server_session,
+            commands::list_shared_lines,
+            commands::shared_line_states,
+            commands::shared_line_history,
+            commands::clone_shared_entry,
+            commands::publish_line_to_team,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

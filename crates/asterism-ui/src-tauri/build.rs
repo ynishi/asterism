@@ -21,13 +21,24 @@
 //!   one series to a real Group, which is a different shape from
 //!   editing a rule. Until a screen imports one, exporting the shape
 //!   would only give it something to drift from;
-//! - the forge's types (`asterism_contract::forge`) stay out until a
-//!   screen imports one, and that is a different reason from the two
+//! - the forge's types (`asterism_contract::forge`) stayed out until a
+//!   screen imported one, and that was a different reason from the two
 //!   above rather than a weaker one. A screen is the whole reason that
 //!   surface is being built — HTTP first, the UI on it — and
 //!   exporting a shape before the screen that shapes it is how a
 //!   binding drifts from what the screen actually needs. A type enters
 //!   this list in the change that consumes it.
+//!
+//! #153 is that change for five of them. The shared-lines panel
+//! (#148 decision 16) lists `ForgeLineDto`, shows what is on a line
+//! with `ForgeEntryStateDto`, and counts a line's change points out of
+//! `ForgeLineHistoryDto` — which is how the panel shows the difference
+//! between a line published as it stands and one whose chain was
+//! re-enacted, and which drags in the `ForgeChangePointDto` /
+//! `ForgeChangeRowDto` it is made of. The rest of the forge surface is
+//! still not exported, on the rule above and not by oversight: the
+//! panel does not open work, push rounds or hold conversations, and
+//! the screen that does is the change that adds those.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,
@@ -69,6 +80,9 @@ use asterism_contract::dto::{
     RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto,
     SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto,
     ThreadAnchorDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
+};
+use asterism_contract::forge::{
+    ForgeChangePointDto, ForgeChangeRowDto, ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, GetJobStatusQuery, ListAssetsQuery, ListEventsQuery, RandomAssetsQuery,
@@ -245,6 +259,12 @@ fn main() {
         ThreadAnchorDto,
         MessageDto,
         MessageRefDto,
+        // The forge, as far as the shared-lines panel reads it (#153).
+        ForgeLineDto,
+        ForgeEntryStateDto,
+        ForgeLineHistoryDto,
+        ForgeChangePointDto,
+        ForgeChangeRowDto,
     )
     .expect("failed to export TS bindings from asterism-contract");
     tauri_build::build()

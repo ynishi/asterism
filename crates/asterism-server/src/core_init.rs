@@ -540,6 +540,38 @@ pub struct CoreCtx {
     /// `ServerCtx::from_core` (HTTP + MCP) and `AppState` (Tauri IPC),
     /// so all three doors reach the same rows.
     pub material_layer_service: Arc<MaterialLayerService>,
+    /// The marks, behind their own port rather than behind the service
+    /// above.
+    ///
+    /// Publishing a line to a team is the caller: what may travel in a
+    /// projection is the marks whose layer origin is `User` (#148
+    /// decision 4), and `PromotedMark::gather` decides that by joining
+    /// each mark to its band on `layer_id`. `MaterialMarkDto` does not
+    /// carry one — nothing on the read surfaces needed it — so a
+    /// caller holding DTOs cannot make that join at all, and a filter
+    /// that cannot join is a filter that passes everything.
+    ///
+    /// The bands do not need the same treatment: `MaterialLayerService`
+    /// hands back `MaterialLayer` itself, origin and all, so the
+    /// publication reads those through the service like any other
+    /// caller.
+    pub material_marks: Arc<dyn asterism_core::domain::repository::MaterialMarkRepository>,
+    /// The asset rows, behind their port.
+    ///
+    /// `AssetService` is the door for everything a surface asks about
+    /// an asset, and two questions a clone asks are not on it: whether
+    /// a `(source_kind, locator)` pair is already recorded, and what
+    /// the asset a line's content names actually is. Both are
+    /// `AssetRepository`'s and neither wants the service's other
+    /// twenty arguments.
+    pub assets: Arc<dyn asterism_core::domain::repository::AssetRepository>,
+    /// The relation a promotion leaves at home (#148 decisions 8 and
+    /// 9).
+    ///
+    /// #152 built the adapter and its tests and wired it to no surface,
+    /// because nothing on one had a promotion to record yet.
+    /// Publishing a line is that, so the port comes through here.
+    pub asset_links: Arc<dyn asterism_core::domain::repository::AssetLinkRepository>,
     /// App-level Threads container (both UI and HTTP writes land on
     /// the same rows through this service).
     pub thread_service: Arc<ThreadService>,
@@ -1344,16 +1376,19 @@ pub async fn init_core_with(
             Arc::new(asset_bodies.clone()),
         )),
         material_mark_service: Arc::new(MaterialMarkService::new(
-            material_marks,
+            material_marks.clone(),
             material_layers.clone(),
             assets_arc.clone(),
             personas.clone(),
         )),
         material_layer_service: Arc::new(MaterialLayerService::new(
-            material_layers,
+            material_layers.clone(),
             chapter_marks,
-            assets_arc,
+            assets_arc.clone(),
         )),
+        material_marks,
+        assets: assets_arc,
+        asset_links: Arc::new(sqlite::repo::SqliteAssetLinkRepository::new(isle.clone())),
         thread_service: Arc::new(ThreadService::new(threads, personas)),
         exporter_registry,
         jobs_pool,

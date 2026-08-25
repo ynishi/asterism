@@ -33,6 +33,7 @@
   import SettingsMaintenance from "./SettingsMaintenance.svelte";
   import SettingsModalities from "./SettingsModalities.svelte";
   import SettingsPreferences from "./SettingsPreferences.svelte";
+  import SharedLinesPanel from "./SharedLinesPanel.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
   import TagList from "./TagList.svelte";
   import { perfBaseline } from "./lib/dev/perf-baseline";
@@ -42,6 +43,7 @@
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { interaction } from "./lib/interaction/mode.svelte";
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
+  import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { groupCatalog } from "./lib/stores/group.svelte";
   import { modalityCatalog } from "./lib/stores/modality.svelte";
   import { formatCatalog } from "./lib/stores/format.svelte";
@@ -5383,6 +5385,19 @@
           ○ duplicates
         </button>
       </li>
+      <!-- Not a facet either, and for a stronger reason than the two
+           above: what it opens is not this library. A team's lines are
+           read from that team's server, so they list in their own
+           panel rather than anywhere the grid can mix them in
+           (#148 decision 16). -->
+      <li>
+        <button
+          onclick={() => void sharedCatalog.openPanel()}
+          title="Lines a team hosts. Read from the team's server, not from here."
+        >
+          ○ shared lines
+        </button>
+      </li>
     </ul>
 
     <h2>Voice</h2>
@@ -6298,6 +6313,11 @@
 <UndoToast />
 
 <DispatchHistoryPanel />
+
+<!-- The lines a team hosts, kept apart from the local ones because
+     they come from somewhere else (#148 decision 16). Store-gated and
+     0-prop, like the drawer above it. -->
+<SharedLinesPanel />
 
 <SnapshotView
   onPromptName={(title, placeholder) => customPrompt(title, placeholder, "")}

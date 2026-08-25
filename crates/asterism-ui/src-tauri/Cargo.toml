@@ -33,6 +33,15 @@ asterism-exporter-comfy = { path = "../../asterism-exporter-comfy" }
 asterism-exporter-file  = { path = "../../asterism-exporter-file" }
 asterism-exporter-http  = { path = "../../asterism-exporter-http" }
 
+# The member's half of a shared line (#148 decision 15 / #153). This is
+# the edge the panel needs and the only one it may draw: `asterism-* ->
+# teams-*` is forbidden in any form by #83 §4, and `asterism-teams-client`
+# is not a `teams-*` crate — it is the client, which depends on the wire
+# leaf and on nothing in the teams plane. Adding `teams-core`,
+# `teams-infra`, `teams-contract` or `teams-server` here would be the
+# forbidden edge; this is not.
+asterism-teams-client   = { path = "../../asterism-teams-client" }
+
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 tokio       = { workspace = true }

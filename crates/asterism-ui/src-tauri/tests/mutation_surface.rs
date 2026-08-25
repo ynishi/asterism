@@ -22,7 +22,14 @@ use std::path::Path;
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 103;
+///
+/// 103 → 104 in #153: `clone_shared_entry` records a copy of what a
+/// team holds on this machine, which is an import and therefore the
+/// owner's own write. The other seven commands in that block reach a
+/// team's server, where the author is the authenticated member and the
+/// team stamps it, so none of them names this surface — and the count
+/// says so.
+const TAURI_MUTATION_COMMANDS: usize = 104;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {

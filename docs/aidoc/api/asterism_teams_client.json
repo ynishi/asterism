@@ -18,6 +18,41 @@
       "docs": "What can go wrong between here and a team."
     },
     {
+      "path": "asterism_teams_client::clone",
+      "kind": "module",
+      "docs": "Taking a copy of what a team holds (#148 decision 10).\n\nWorking on a shared line needs no copy — open a pursuit against it,\nand decision 16 serves the reads through. Cloning is for when the\ncopy *is* the point: leaving a team, or starting from what a team\nhas and going a different way, which the model will not let you do\nin place because it refuses a fork outright.\n\n## A clone is an import, not a forge concept\n\nThree things follow from that word, and each is visible in the code\nbelow rather than left to a caller's discipline.\n\nIt **mints new ids**, because the local plane mints its own\n([`Imports::record`] hands back a local [`AssetId`], and nothing\nhere reads a [`TeamScopedId`] as one).\n\nIt **writes no relation row**. There is no [`AssetLinkRepository`]\nin this module's signature at all, which is the strongest way to say\nit: a link row means \"I put this there\", and a copy did not put\nanything anywhere.\n\nIt **says where it came from through `source_kind` and\n`source_locator`**, the way every other import does — and that is\nthe part with a design decision in it, so [`cloned_locator`] carries\nthe argument.\n\n## What is not taken\n\nThe projection is read and handed back whole, but only its title\nlands on the copy, through the one field an ingest has for saying\nwhat something is called. Marks do not: the ingest command has no\nslot for one, and [`ReadMark`](crate::ReadMark) is deliberately not\n[`PromotedMark`](crate::PromotedMark) — a mark read off the wire has\nno layer under it and no verified origin, so it is not a thing this\nmachine may go on to promote as its own. A caller wanting more than\nthe title has [`Cloned::projection`] and the whole view in it.\n\n[`AssetLinkRepository`]: asterism_core::domain::repository::AssetLinkRepository"
+    },
+    {
+      "path": "asterism_teams_client::clone::Arrival",
+      "kind": "struct",
+      "docs": "What a clone hands the local plane, once the bytes are on disk.\n\nEvery field is what an ingest already asks for. There is no team\nvocabulary in it on purpose: by this point the copy is an artefact\nthat arrived from somewhere, the somewhere is spelled in\n`source_kind` and `locator`, and the side that records it has no\nbusiness knowing what a team is."
+    },
+    {
+      "path": "asterism_teams_client::clone::CloneRequest",
+      "kind": "struct",
+      "docs": "One entry of one line of one team, to be copied."
+    },
+    {
+      "path": "asterism_teams_client::clone::Cloned",
+      "kind": "struct",
+      "docs": "What a clone left behind, on this machine."
+    },
+    {
+      "path": "asterism_teams_client::clone::Imports",
+      "kind": "trait",
+      "docs": "Where a clone puts what it took.\n\nTwo questions rather than one, because the answer to the first\ndecides whether the download happens at all — the same ordering\n[`promote`](crate::promotion::promote) uses when it asks whether an\nasset is already on a line before it sends a byte."
+    },
+    {
+      "path": "asterism_teams_client::clone::clone_entry",
+      "kind": "function",
+      "docs": "Copies one entry of a team's line onto this machine.\n\nThe order is the point, and it is the promotion's order read\nbackwards: ask what is already here before fetching anything, then\nfetch, then record. A clone that recorded first would own a row\ndescribing bytes that had not arrived."
+    },
+    {
+      "path": "asterism_teams_client::clone::cloned_locator",
+      "kind": "function",
+      "docs": "Where a clone of one entry lives, and therefore what it is recorded\nunder.\n\nThe locator is a path, and that is the decision worth stating. The\nother kinds a locator can be — a name that never had bytes, a remote\naddress — would say where the copy came from more literally, and\nwould cost the copy every reader that needs bytes: no hash, no\nthumbnail, no cover text, and no promoting it onward to another\nteam, all of them silently rather than as an error. A clone whose\nbytes cannot be read is not a copy.\n\nSo the path is made to answer both questions at once. It carries no\ntimestamp, no counter and nothing the caller chose, which is what\nmakes cloning the same thing twice ask `find_by_source` the same\nquestion twice and get the first copy back. The team, line and entry\nsay where it came from; the team asset id at the leaf is what keeps\nthe answer honest when an entry's content is replaced, since the\nreplacement is a different asset and therefore a different path\nrather than a stale hit on the old one.\n\n**The extension is a fifth input, and it is not an id.** It is taken\nfrom what the line calls the entry, because an extension is the only\nthing that classifies a material — a copy landing without one is\nimported and invisible, with no mime, no thumbnail and no indexed\nbody. The cost of that is a stated limitation: renaming an entry\nfrom `a.png` to `a.jpg` on the team's line changes the path without\nchanging a single id, so a re-clone after such a rename lands a\nsecond copy of bytes this machine already has. Renames that leave\nthe extension alone — which is most of them — do not.\n\nThe extension is also the only part of this path that comes from\ntext somebody else wrote, so it is taken through\n`Path::extension` and then held to ASCII alphanumerics: a name is\nnot allowed to steer where a clone is written."
+    },
+    {
       "path": "asterism_teams_client::link",
       "kind": "module",
       "docs": "Verify and reap — what makes the relation *attended* rather than\nmerely advisory (#148 decision 9).\n\nEither end of a promotion can vanish independently and neither may\nbreak the other, so nothing in the schema stops a link row from\noutliving what it points at. Decision 9 names the two systems that\nlive with exactly that and go looking anyway: GitLab's loose\nforeign keys, which are a missing constraint plus a worker that\ncleans up after one, and `git annex fsck`, which tolerates a\ndangling location log and checks for it.\n\n## Two ends, two questions, one of which needs the network\n\n- **The Asset was deleted.** Answerable here, with no session and\n  no server: `AssetLinkRepository::dangling_locally` is an\n  anti-join against the local `asset` table.\n- **The entry is gone from the team.** Not answerable here at all.\n  [`verify`] asks the team — two reads per line the relation names,\n  for the reason its own doc gives — and a line that no longer\n  exists answers `404`, which is what a discard leaves behind.\n\n## What is *not* dangling\n\nA **trashed** Asset. The local plane can still restore it, so the\nrow still corresponds to something.\n\nAn entry that was **removed from the line**. Taking an entry off a\nline is a change point saying so, and the fold still lists it —\nnothing in a forge truly disappears except through a discard. A row\npointing at a removed entry points at something the team can still\naccount for, and reaping it would throw away the record of a\npromotion that did happen.\n\nAn entry named by a round of **work that is still open**. It has\nnot landed on the line yet and it is not lost either; see\n[`verify`] for why that costs a second read.\n\n## Reap\n\n[`reap`] is a thin pass to `AssetLinkRepository::reap`, whose doc\nstates what a reap may touch. Nothing is added on the way through,\nand that is the whole of this module's part in it."
@@ -111,6 +146,41 @@
       "path": "asterism_teams_client::promotion::promote",
       "kind": "function",
       "docs": "Runs a promotion.\n\n`now_ms` is the caller's clock, so that a caller batching several\npromotions can stamp them alike and a test can stamp them at all."
+    },
+    {
+      "path": "asterism_teams_client::publish",
+      "kind": "module",
+      "docs": "Seeding a team's line from a private one (#148 decision 11).\n\nThe other direction from a clone, and it transfers the current state\nfor the same reason: what a team is being given is something to work\non, not somebody's record of how they got there.\n\n## Two seedings, and only one of them is free\n\n[`Seeding::CurrentState`] is the default and the cheap one. The\nteam's line gets a genesis and one change point, holding what the\nprivate line holds now.\n\n[`Seeding::Reenactment`] replays the chain — one pursuit and one\nclose per change point, so the team's line ends with as many change\npoints as the private one had. **It is chosen at init and nowhere\nelse**: a line that was seeded with its current state cannot be\ngiven its history afterwards, because the history would have to\narrive underneath change points that already exist.\n\nWhat it costs is worth saying rather than leaving to be discovered.\nA re-enactment sends **every content the line ever named** — the set\n[`Line::holds`] describes, which only ever grows and includes\neverything an entry was replaced with and everything taken back off\nthe line. Seeding the current state sends what is on the line now,\nwhich is usually far less.\n\nThe cheaper seeding is also the narrower one, in a way that is\nnobody's guess: it cannot take a line whose live entries share\ncontent, because a promotion's repeat check is keyed on the asset\nand the line, so the second entry would be answered from the first\nand the team would receive one where the private line has two.\n`seeds` refuses that outright rather than narrowing it silently, and\na re-enactment takes it, because a chain names each entry in its own\nright. Both refusals happen before the team's line is opened — see\n`seeds` for the ordering and for the one failure it cannot cover.\n\n## Why it is a re-enactment and not a history\n\nThe acts are restamped to whoever published. The original actors are\nnot necessarily members of this team, so there is nobody on the team\nplane for the old stamps to name — and inventing one would be the\nteam's record claiming knowledge it does not have. So the team's\nline does not record who did the work upstream, and that is not a\nhole: at this boundary the question is who brought this here, and\nthe restamped act answers exactly that. Who made it before is the\nprivate side's record, which #66 decision 2 says the team never had\na claim on.\n\nThe word for that is **re-enactment**, and it is in the type, in\n[`Published::reenacted`], and in what the UI says.\n\n## What does not travel at all\n\nWork logs and conversations, and they are not offered at init\neither. A pursuit that was abandoned, a round that was pushed and\nthought better of, a thread arguing about it — those are the private\ndeliberation #66 decision 2 protects. Nothing in this module reads\nthe private line's pursuits: the seeding walks the *line's* chain,\nwhich is what was landed, and the work that produced it is not\nreachable from here."
+    },
+    {
+      "path": "asterism_teams_client::publish::HeldSubject",
+      "kind": "struct",
+      "docs": "One local asset a line names, with what may be said about it.\n\nOwned rather than borrowed because a publication resolves these one\nat a time as it walks, and a borrow would ask the caller to hold\nevery asset a line ever named in memory at once — which for a\nre-enactment is the whole of [`Line::holds`]."
+    },
+    {
+      "path": "asterism_teams_client::publish::Holdings",
+      "kind": "trait",
+      "docs": "What a publication reads out of the local plane.\n\nOne question, asked per content. The forge holds asset ids and\nnothing else; turning one into something with bytes and marks is the\nlayer below's business, and this is the seam."
+    },
+    {
+      "path": "asterism_teams_client::publish::Publication",
+      "kind": "struct",
+      "docs": "A private line, and the team to seed from it."
+    },
+    {
+      "path": "asterism_teams_client::publish::Published",
+      "kind": "struct",
+      "docs": "What a publication left on the team."
+    },
+    {
+      "path": "asterism_teams_client::publish::Seeding",
+      "kind": "enum",
+      "docs": "How much of a private line the team's copy is given.\n\nChosen when the team's line is opened and never afterwards — see the\nmodule doc for why there is no later verb."
+    },
+    {
+      "path": "asterism_teams_client::publish::publish",
+      "kind": "function",
+      "docs": "Opens a line on the team and seeds it from a private one."
     }
   ]
 }

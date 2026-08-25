@@ -45,16 +45,30 @@
 //! invoke them.)
 //!
 //! A count taken the other way — commands that have a route of the
-//! same name — is 167 of 178 and cannot answer this question, because
-//! the direction that goes short is the other one. The eleven without
-//! one are the seven command-side names of the twins above (four
-//! `threads_about_*` routes collapse into one command, so ten route
-//! names pair with seven command names); `paste_image_import` and
-//! `rehome_dropped_path`, which stage clipboard and drag-drop
+//! same name — is 167 of 186 and cannot answer this question, because
+//! the direction that goes short is the other one. The nineteen
+//! without one are the seven command-side names of the twins above
+//! (four `threads_about_*` routes collapse into one command, so ten
+//! route names pair with seven command names); `paste_image_import`
+//! and `rehome_dropped_path`, which stage clipboard and drag-drop
 //! material — desktop facts a socket client does not have;
 //! `get_asset_thumbs`, a batch second command over the single-thumb
-//! route; and `active_profile`, a desktop-chrome read of which local
-//! data profile this process opened, with no route today.
+//! route; `active_profile`, a desktop-chrome read of which local
+//! data profile this process opened, with no route today; and the
+//! eight that talk to a **team** rather than to this process.
+//!
+//! Those eight are the one place the obligation above is deliberately
+//! one-sided, and #153 added them. They are not verbs against this
+//! server — they are a member's client talking to somebody else's,
+//! carrying that server's session — so a route here would be this
+//! process proxying a connection it does not hold and cannot
+//! authenticate. The obligation is about a person not losing a verb by
+//! being on the other surface, and a socket client that wants a team
+//! has the same client library the desktop has. Nothing forbids the
+//! edge — `asterism-teams-client` is an `asterism-*` crate and #83 §4
+//! permits it here exactly as it permits it in `asterism-ui` — so if a
+//! headless deployment ever needs to publish a line, this is a
+//! decision to revisit rather than a wall.
 //!
 //! Two differences in *shape* are by design. Attribution: these
 //! handlers build a context from command fields with
