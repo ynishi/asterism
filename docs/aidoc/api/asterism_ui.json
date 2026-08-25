@@ -628,6 +628,11 @@
       "docs": "Fuses freeze + promote for the grid's volatile pick (W5-d):\nmints a Snapshot from the picked ids (content-hash deduped)\nand promotes it into a hand-owned Group in one step — the\nright-click \"Group-ify selection\" entry, no pre-existing Snapshot\nneeded."
     },
     {
+      "path": "asterism_ui::commands::pull_tag_head",
+      "kind": "function",
+      "docs": "Enqueues a `HeadPull` install of a fetched head artifact — the\ncommand twin of `POST /asterism/heads/pull` (#132 phase 3). The\ncaller fetches the artifact from the instance's registry (which\nsits behind its own session gate) and hands it over; verification\n— encoder identity, shapes, the startup-bind checks — is the\njob's, and installing promotes on the next launch."
+    },
+    {
       "path": "asterism_ui::commands::purge_asset",
       "kind": "function",
       "docs": "Permanently deletes an already-trashed asset. Conflicts when the\nasset is still live — trash it first."
@@ -836,6 +841,11 @@
       "path": "asterism_ui::commands::snapshot_members",
       "kind": "function",
       "docs": "Snapshot view members (`snapshot_members`): renderable cards\nin frozen `position` order (later-deleted assets are absent)."
+    },
+    {
+      "path": "asterism_ui::commands::train_tag_head",
+      "kind": "function",
+      "docs": "Enqueues a `HeadTrain` run over the rulings under the bound\nencoder — the command twin of `POST /asterism/heads/train` (#132).\nNo input: the corpus is whatever rulings exist, so there is\nnothing to scope. Returns the job's task id; the completion\nmessage carries the held-out verdict and whether promotion\nhappened. #130's model panel is where a screen invokes this."
     },
     {
       "path": "asterism_ui::commands::trash_asset",

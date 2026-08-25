@@ -148,6 +148,7 @@ its own module doc explains.
 - `promote_snapshot_to_group` — Promotes a Snapshot into a hand-owned Group (mirror of
 - `promote_tag_to_group` — Snapshots every asset carrying a tag into a newly-created Group.
 - `promote_volatile_selection` — Fuses freeze + promote for the grid's volatile pick (W5-d):
+- `pull_tag_head` — Enqueues a `HeadPull` install of a fetched head artifact — the
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
 - `purge_persona` — Permanently deletes an already-trashed persona and everything it
@@ -190,6 +191,7 @@ its own module doc explains.
 - `set_persona_theme` — Sets (or clears) the wallpaper for a persona.
 - `set_setting` — Stores one setting override and returns the value that now applies.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
 - `trash_group` — Moves a Group to the trash (reversible; membership and drag order
 - `trash_persona` — Moves a persona and every asset it holds to the trash (reversible).
