@@ -99,7 +99,7 @@ use crate::error::DomainError;
 /// does not change for being asked twice, and a store that asked again
 /// would be asking a question it already has the answer to. That
 /// division is the store's to implement and this is where it is
-/// stated, so that two stores cannot each hold half of it.
+/// stated, so that no two stores can each hold half of it.
 ///
 /// # Why the store cannot decide this itself
 ///

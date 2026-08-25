@@ -8,6 +8,60 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **The team plane hosts a forge** (#150, #148 decision 20). `teams-infra` gains
+  `TeamForge`, a set of adapters behind the forge ports `asterism-core` already
+  declares — `Lines`, `Pursuits`, `Closings`, `Threads`, `Actors` and `Store` —
+  over the team's own database. `asterism-core` does not change by a line of
+  code; the one new dependency edge is `teams-infra → asterism-core`, which #83
+  §4 permits outright and whose never-list (`asterism-infra`, `-contract`,
+  `-server`) is unchanged.
+
+  The point of embedding rather than fronting is decision 17: every write-port
+  method is one transaction holding the forge write **and** its ledger append,
+  which an event spanning two processes and two databases could not be. It goes
+  through the same allocation of `seq`, the same registry check and the same
+  subject-index rows the repository's own gestures use, so a write that is
+  refused leaves neither a forge row nor a ledger entry. Team scope lives in the
+  adapter and in no port signature — the seat `Lines::list` reserves for whoever
+  knows what a person is — and is enforced on reads as tightly as on writes, so
+  an id belonging to another team reads back as absent.
+
+  Nothing is served yet. There is no HTTP surface and no client; those are #151
+  and #152.
+
+- **Schema V7 — the forge's tables on the teams database** (#150). The local
+  plane's `line`, `change_point`, `change_row`, `pursuit`, `pursuit_node`,
+  `pursuit_op`, `forge_actor` and the three thread tables, replicated under the
+  same names in a separate database file, plus `team_asset` — the TeamAsset
+  surrogate (#148 decisions 3 and 7), carrying identity and nothing else until
+  the content verb lands. The deliberate differences are `team_id` on every
+  table, `UNIQUE (team_id, name)` on `line` — the name-uniqueness question the
+  forge's `Name` leaves to whoever owns the namespace, answered here by the team
+  — the two content keys pointing at `team_asset`, and `forge_actor` keyed
+  within a team with the write-time `display_name` snapshot from #149.
+
+  `team_id` deliberately carries no foreign key to `team`. Every key inside the
+  forge is `RESTRICT`, so a cascade into `line` is refused by the change points
+  on it: the key would either break a team deletion that works today or quietly
+  destroy a line's whole history as a side effect of a membership gesture.
+  Deleting a team therefore leaves its forge rows behind for now, and wiring a
+  deletion to `Lines::discard` — which is what actually releases a line's
+  contents — belongs with the transport and the client.
+
+- **Twelve `forge.*` event kinds, and three forge subject refs** (#150).
+  `FORGE_KINDS` registers `forge.line.opened/1` through
+  `forge.thread.renamed/1`, named after the verb rather than the table. They are
+  a slice of their own beside `V0_KINDS`, and `is_registered_kind` is the union
+  a writer asks; the envelope does not change, which is what the namespace
+  reservation in `ledger.rs` was for. `SubjectRef` gains `forge_line`,
+  `forge_pursuit` and `forge_thread`, so "which events touched this line" is an
+  index walk rather than payload parsing. Rename-shaped kinds carry the old
+  value and the new, read inside the transaction that replaces it; no payload
+  carries a message body or content, because the ledger is append-only and a
+  copy there is one nothing can act on later.
+
 ### Changed
 
 - **`GET /teams/{team_id}/events` answers with a page, not the whole stream**

@@ -13,10 +13,15 @@ publish     = false
 [lib]
 
 [dependencies]
-# The one asterism-* edge this crate is allowed is none at all: the
-# teams plane depends on `teams-core` and owns its own plumbing (#83
-# §4 — never asterism-infra / -contract / -server here).
+# The teams plane depends on `teams-core` and owns its own plumbing
+# (#83 §4 — never asterism-infra / -contract / -server here).
 teams-core = { path = "../teams-core" }
+
+# The one asterism-* edge, and #83 §4 permits it outright: hosting the
+# forge on the team plane means implementing the ports `asterism-core`
+# already declares (#148 decision 20), so the forge's model and its
+# port traits are named here and nothing below them is.
+asterism-core = { path = "../asterism-core" }
 
 # SQLite access, same line as the rest of the workspace: `rusqlite-isle`
 # provides the thread-isolated actor, `rusqlite` is depended on directly
@@ -27,6 +32,9 @@ rusqlite      = { workspace = true }
 anyhow     = { workspace = true }
 serde_json = { workspace = true }
 uuid       = { workspace = true }
+# The forge's acts carry a `DateTime<Utc>`; the columns carry epoch ms,
+# and the conversion between the two is this crate's.
+chrono     = { workspace = true }
 
 # Auth v0 (#83 §5): argon2id hashing through RustCrypto — never hand-rolled.
 argon2 = { workspace = true }

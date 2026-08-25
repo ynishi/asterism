@@ -19,7 +19,11 @@
 //!   planes never open each other's files.
 //! - [`sqlite`] — connection lifecycle (WAL, through the workspace's
 //!   `rusqlite-isle` line), the fresh `PRAGMA user_version` migration
-//!   series starting at V1, and the repository.
+//!   series starting at V1, the repository, and — since #150 — the
+//!   forge the team hosts ([`sqlite::forge`]).
+//! - [`forge`] — the row shapes that forge sits on, which are the local
+//!   plane's again because the dependency rule below forbids sharing
+//!   the module they came from.
 //! - [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
 //!   behind `teams-core`'s auth port, opaque sessions with expiry and
 //!   a cleanup path.
@@ -43,17 +47,28 @@
 //! single documented exception is the locator, whose operations are
 //! private-space and by design never land in any team's ledger.
 //!
+//! **The rule has a second writer, and it is the same rule** (#148
+//! decision 17). Every write-port method on
+//! [`TeamForge`](sqlite::forge::TeamForge) does the same thing for the
+//! forge's rows, through the same append. Its documented exception is
+//! minting a forge handle, which is not something somebody did — it
+//! happens on the way to a write, and the write records who.
+//!
 //! ## Dependency rule
 //!
-//! This crate depends on `teams-core` and never on `asterism-infra` /
-//! `-contract` / `-server` (#83 §4): those are the local app's
-//! plumbing, and the teams plane owns its own.
+//! This crate depends on `teams-core` and on `asterism-core`, and
+//! never on `asterism-infra` / `-contract` / `-server` (#83 §4): those
+//! are the local app's plumbing, and the teams plane owns its own. The
+//! `asterism-core` edge is #148 decision 20's — the team hosts the
+//! forge by implementing the ports `asterism-core` declares, so the
+//! model and the traits are named here and nothing below them is.
 
 #![warn(missing_docs)]
 
 pub mod auth;
 pub mod backup;
 pub mod blob;
+pub mod forge;
 pub mod gc;
 pub mod paths;
 pub mod sqlite;

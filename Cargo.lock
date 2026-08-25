@@ -8609,7 +8609,9 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "argon2",
+ "asterism-core",
  "async-trait",
+ "chrono",
  "rand 0.9.5",
  "rusqlite",
  "rusqlite-isle",

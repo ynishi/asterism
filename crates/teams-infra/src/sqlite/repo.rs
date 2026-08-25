@@ -49,7 +49,7 @@ use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamRoster};
 use teams_core::domain::ledger::{
     BLOB_COPY_COMPLETED, BLOB_LINK_PURGE_MARKED, BLOB_LINK_PURGE_UNMARKED, BLOB_LINK_RECLAIMED,
     EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED, ROLE_CHANGED,
-    SubjectRef, TEAM_CREATED, TEAM_DELETED, is_v0_kind,
+    SubjectRef, TEAM_CREATED, TEAM_DELETED, is_registered_kind,
 };
 use teams_core::domain::store::{Locator, TeamBlobLink, parse_digest};
 use uuid::Uuid;
@@ -154,8 +154,12 @@ impl SqliteTeamsRepository {
     /// Membership rows and blob links cascade away with the team row;
     /// the ledger survives by construction (no foreign key points from
     /// it to `team`), so the stream ends with the event that says why
-    /// it ended. Whether the caller *may* delete is [`verb_allowed`]'s
-    /// question and the server's to ask — this method enforces state
+    /// it ended. **The team's forge rows survive too**, and that is a
+    /// deferral rather than a cascade nobody wrote — the reasoning and
+    /// who owns settling it are on
+    /// [`V7`](crate::sqlite::migrations)'s `team_id` paragraph.
+    /// Whether the caller *may* delete is [`verb_allowed`]'s question
+    /// and the server's to ask — this method enforces state
     /// invariants, not authority.
     ///
     /// [`verb_allowed`]: teams_core::domain::identity::verb_allowed
@@ -1090,7 +1094,15 @@ fn roster_in_tx(tx: &Transaction<'_>, team_id: Uuid) -> TxOutcome<TeamRoster> {
 /// part ([`EventSeq`] for the storage-assigned position, the writer's
 /// registry check for the kind, [`LedgerEvent::new`] for the
 /// envelope), then writes the event row and its subject index rows.
-fn append_event_in_tx(
+///
+/// `pub(crate)` because the same-tx rule has a second writer now: the
+/// hosted forge (#148 decisions 17 and 20) appends through this from
+/// [`sqlite::forge`](crate::sqlite::forge), inside the transaction its
+/// own write is in. Sharing the function rather than the SQL is what
+/// keeps `seq` allocation, the registry check and the subject index
+/// one implementation — a forge verb that wrote its own `MAX(seq) + 1`
+/// would be a second place for the gapless guarantee to be got right.
+pub(crate) fn append_event_in_tx(
     tx: &Transaction<'_>,
     team_id: Uuid,
     actor: &LedgerActor,
@@ -1114,9 +1126,11 @@ fn append_event_in_tx(
     };
     // The writer's question, not the reader's: shape-valid kinds this
     // build does not register must not be appended by it (#83 §2).
-    if !is_v0_kind(&kind) {
+    // Both registries answer — the substrate's own gestures and the
+    // hosted forge's verbs — because both write through here.
+    if !is_registered_kind(&kind) {
         return Ok(Err(DomainError::Validation(format!(
-            "event kind {kind} is not in the v0 registry; this build does not write it"
+            "event kind {kind} is in neither registry; this build does not write it"
         ))));
     }
     let event = match LedgerEvent::new(

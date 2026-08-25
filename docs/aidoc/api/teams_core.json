@@ -128,6 +128,71 @@
       "docs": "Storage-assigned position of an event within its team's stream —\nmonotonic, starting at 1.\n\nA newtype rather than a bare `i64` so \"validated but not generated\"\nis a property of the type: the only constructor checks the value a\nstorage row handed back, and there is no `next()` for domain code\nto invent sequence numbers with."
     },
     {
+      "path": "teams_core::domain::ledger::FORGE_KINDS",
+      "kind": "constant",
+      "docs": "The kinds the hosted forge's verbs write (#148 decisions 17 and\n20) — one per write-port method that changes a row, named after the\nverb rather than after the table, because what a reader wants from\na stream is what somebody did.\n\nA second slice beside [`V0_KINDS`] rather than an addition to it:\nthe two namespaces are registered by different arguments — v0's are\nthe substrate's own gestures, and these arrive because the team\nhosts a forge — and a reader asking \"which kinds does the forge\nwrite\" gets an answer that does not move when a membership kind is\nadded."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_LINE_DISCARDED",
+      "kind": "constant",
+      "docs": "A line was dropped, with everything on it."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_LINE_OPENED",
+      "kind": "constant",
+      "docs": "A line was opened on the team's forge."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_LINE_RENAMED",
+      "kind": "constant",
+      "docs": "A line was renamed — the payload carries the old name and the new,\non `ROLE_CHANGED`'s reasoning: the entry reads on its own."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_LINE_STANDING_SET",
+      "kind": "constant",
+      "docs": "A line was archived or taken back out of the archive."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_LINE_STRATEGY_SET",
+      "kind": "constant",
+      "docs": "A line's collision rule was changed, old and new both in the\npayload."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_PURSUIT_CLOSED",
+      "kind": "constant",
+      "docs": "Work ended, and — when it was satisfied — the line moved with it.\nOne event because it was one transaction: the ending and the change\npoint are written together or not at all."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_PURSUIT_OPENED",
+      "kind": "constant",
+      "docs": "Work was opened against a line."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_ROUND_PUSHED",
+      "kind": "constant",
+      "docs": "A round was written onto open work."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_THREAD_AMENDED",
+      "kind": "constant",
+      "docs": "Something said was corrected. The correction is a new record and\nthe earlier wording stays readable — the model's `amend`, and this\nis the ledger saying it happened."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_THREAD_OPENED",
+      "kind": "constant",
+      "docs": "A conversation was opened about work, a round, an entry as a round\nhad it, or a change point."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_THREAD_RENAMED",
+      "kind": "constant",
+      "docs": "A conversation was given a title, or had the one it had taken off."
+    },
+    {
+      "path": "teams_core::domain::ledger::FORGE_THREAD_SAID",
+      "kind": "constant",
+      "docs": "Something was said in a conversation."
+    },
+    {
       "path": "teams_core::domain::ledger::ForgeIdentityRef",
       "kind": "struct",
       "docs": "A forge handle, as a ledger subject: what it stands for, and whom\nwhen that is a named subject.\n\nThe pair, not an opaque string. #102 fixed the vocabulary the local\nplane's `forge_actor` rows are keyed by, so there is a shape to\nvalidate and this type validates it: `subject` is present exactly\nwhen [`ForgeStandsFor::Subject`] is the kind — the same rule the\ntable states as a `CHECK`, and a pair that breaks it is refused\nhere rather than stored and puzzled over later.\n\nThe subject token is TEXT rather than a UUID because that is what\nthe column holds: the local plane's authors are named by the same\ntoken its sharing lists and viewers carry, which is opaque to both\nplanes and is not a uuid.\n\nThe canonical string is what crosses the wire and what the\n`ledger_subject` index is keyed by, so a trace query encodes a\nhandle exactly as an append wrote it: the bare word for the three\nkinds that name nobody, and `subject:<token>` for the one that\ndoes."
@@ -178,9 +243,19 @@
       "docs": "The v0 kind registry: team lifecycle, membership changes, role\nchanges, blob-copy completed, and the purge two-step. A slice\nrather than knowledge spread over call sites, for the reason\n`asterism-core` keeps `RESERVED_VALUES` as a list — whoever needs\n\"every kind v0 ships\" (a projection, a migration, a doc generator)\nwalks this, and a kind added later reaches them without an edit on\ntheir side."
     },
     {
+      "path": "teams_core::domain::ledger::is_forge_kind",
+      "kind": "function",
+      "docs": "Whether `kind` is one the hosted forge writes."
+    },
+    {
+      "path": "teams_core::domain::ledger::is_registered_kind",
+      "kind": "function",
+      "docs": "Whether this build writes `kind` at all — the writer's question,\nover both registries.\n\nThe check a writer makes has to widen as the plane learns to write\nmore, and putting the union here rather than at the append site is\nwhat keeps \"which kinds exist\" one answer: a namespace added later\nreaches every writer through this function instead of through an\nedit to each of them."
+    },
+    {
       "path": "teams_core::domain::ledger::is_v0_kind",
       "kind": "function",
-      "docs": "Whether `kind` is one this build of the plane writes. Shape and\nregistration are separate questions on purpose: a reader must\naccept well-formed kinds it does not know (a stream written by a\nnewer build, `forge.*` after #63), a *writer* asks this before\nappending."
+      "docs": "Whether `kind` is one of the substrate's own v0 gestures.\n\nShape and registration are separate questions on purpose: a reader\nmust accept well-formed kinds it does not know (a stream written by\na newer build), and a *writer* asks [`is_registered_kind`] before\nappending."
     },
     {
       "path": "teams_core::domain::store",

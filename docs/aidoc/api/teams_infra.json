@@ -68,6 +68,141 @@
       "docs": "One in-flight streaming write: the staging file, the running hash,\nand the promise that nothing becomes visible until [`commit`]'s\nrename.\n\nDropping this without committing removes the staging file\n(best-effort, synchronously — the startup sweep catches whatever a\ncrash leaves behind).\n\n[`commit`]: Self::commit"
     },
     {
+      "path": "teams_infra::forge",
+      "kind": "module",
+      "docs": "What the team's forge store keeps, whatever it keeps it in.\n\n[`rows`] is the shape the SQLite adapter in\n[`sqlite::forge`](crate::sqlite::forge) writes as columns. Nothing\nhere talks to a store, and nothing here knows what a team is —\ntaking a domain value apart and putting one back is the same work\nwhichever store is underneath, and the scope is the adapter's."
+    },
+    {
+      "path": "teams_infra::forge::rows",
+      "kind": "module",
+      "docs": "The shapes this plane's forge store keeps, and the two translations\neither side of them.\n\nEvery field here is a scalar or an id. Nothing holds a [`Line`], a\n[`Pursuit`], a [`ChangePoint`] or an [`Op`] — that is the whole\npoint of the module, and the reason it is written out rather than\nreplaced by keeping the domain values in a map.\n\nThe names match what the tables are called, because the adapter\nthat writes those is meant to be able to read this one as a\nspecification of what it owes.\n\n# This is the local plane's module again, and that is deliberate\n\n`asterism-infra` holds one of these, shared by the adapters that\nlive there. This plane cannot reach it: `asterism-infra` is on #83\n§4's never-list, and the edge #148 decision 20 opens is to\n`asterism-core` alone. So the team's adapter carries its own copy,\nwhich is the cost the decision names rather than one it overlooked.\n\nWhat keeps the copy honest is the same thing that keeps the schemas\nhonest: it stays *literally* parallel, so a divergence is a diff\nsomebody can read rather than behaviour somebody meets. Both halves\nare thin — taking a domain value apart is field access, and putting\none back is [`restore`], which lives in `asterism-core` and is\nshared. The rules neither copy holds are the model's.\n\nTwo things are deliberately not parallel, and they are the two\nworth knowing before diffing this against its source. **The doc\ncomments are shortened**: the arguments they make are the same, and\nthe long form is the one over in `asterism-infra`, so prose that\ndiffers there is prose, not drift — the field lists, the function\nsignatures and the bodies are what a diff is for. **There is no\n`team_id`**: scope is the adapter's, the column is the adapter's,\nand a row shape that carried it would put the team into every\nsignature the port deliberately leaves it out of.\n\nThe tests below come across with the module, because they ask\nthings no store can reach — a message that already carries a\ncorrection is not something any port hands over — and a copy that\nkept the translation and dropped them would leave the same cases\nunasked here and answered there."
+    },
+    {
+      "path": "teams_infra::forge::rows::ActRow",
+      "kind": "struct",
+      "docs": "An act, flattened the way a row carries one: a stamp, a handle, and\nwhich kind of actor the handle names."
+    },
+    {
+      "path": "teams_infra::forge::rows::AnchorColumns",
+      "kind": "type_alias",
+      "docs": "What a thread hangs off, as the five columns that carry it.\n\nApart from the row it goes into, because asking *which threads hang\noff this* is the same flattening with nothing to put it in."
+    },
+    {
+      "path": "teams_infra::forge::rows::ChangePointRow",
+      "kind": "struct",
+      "docs": "`change_point` — one move of a line, without the table it carries."
+    },
+    {
+      "path": "teams_infra::forge::rows::ChangeRowRow",
+      "kind": "struct",
+      "docs": "`change_row` — one axis-triple of one entry, under one change\npoint. The primary key is `(point, entry)`."
+    },
+    {
+      "path": "teams_infra::forge::rows::LineRow",
+      "kind": "struct",
+      "docs": "`line` — the repository, and the three things about it that are not\nin its history."
+    },
+    {
+      "path": "teams_infra::forge::rows::PursuitNodeRow",
+      "kind": "struct",
+      "docs": "`pursuit_node` — a round or an ending."
+    },
+    {
+      "path": "teams_infra::forge::rows::PursuitOpRow",
+      "kind": "struct",
+      "docs": "`pursuit_op` — one operation of one round, in the order it was\nwritten."
+    },
+    {
+      "path": "teams_infra::forge::rows::PursuitRow",
+      "kind": "struct",
+      "docs": "`pursuit` — one line of work."
+    },
+    {
+      "path": "teams_infra::forge::rows::ThreadMessageRow",
+      "kind": "struct",
+      "docs": "`forge_thread_message` — one thing said."
+    },
+    {
+      "path": "teams_infra::forge::rows::ThreadRevisionRow",
+      "kind": "struct",
+      "docs": "`forge_thread_revision` — a correction to something said."
+    },
+    {
+      "path": "teams_infra::forge::rows::ThreadRow",
+      "kind": "struct",
+      "docs": "`forge_thread` — one conversation, and what it hangs off."
+    },
+    {
+      "path": "teams_infra::forge::rows::anchor_columns",
+      "kind": "function",
+      "docs": "Flattens an anchor into the columns a store keeps it in."
+    },
+    {
+      "path": "teams_infra::forge::rows::read_line",
+      "kind": "function",
+      "docs": "Rebuilds a line from its row, its change points and their rows.\n\nThe refusals are the model's, reached through [`restore::line`]: a\nchain that does not line up, or a table that would leave two live\nentries under one name, fails the read."
+    },
+    {
+      "path": "teams_infra::forge::rows::read_pursuit",
+      "kind": "function",
+      "docs": "Rebuilds work from its row, its nodes and their operations.\n\nNodes are put in the log's order first, by walking the parent links\nfrom the node the pursuit opened at — the same walk the line side\ndoes, and the reason neither table keeps a sequence beside the\nchain."
+    },
+    {
+      "path": "teams_infra::forge::rows::read_thread",
+      "kind": "function",
+      "docs": "Rebuilds a conversation from its row, what was said, and every\ncorrection.\n\nMessages are put in the order they were said, which for a thread is\na stamp and not a chain. [`restore::thread`] keeps that order,\nmoving only a reply the stamps put before the message it answers."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_anchor_apart",
+      "kind": "function",
+      "docs": "The head row of a thread, anchor flattened into its five columns."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_change_point_apart",
+      "kind": "function",
+      "docs": "One change point's rows, for the single-node write a close makes."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_close_apart",
+      "kind": "function",
+      "docs": "One ending, for the append a commit makes."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_message_apart",
+      "kind": "function",
+      "docs": "One thing said, for the append `say` makes."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_new_line_apart",
+      "kind": "function",
+      "docs": "The row for a line that has just been opened."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_pursuit_apart",
+      "kind": "function",
+      "docs": "The work's own row, and one `pursuit_node` row plus its\n`pursuit_op`s for every node after the one it opened at."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_revision_apart",
+      "kind": "function",
+      "docs": "One correction, for the append `amend` makes."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_revisions_apart",
+      "kind": "function",
+      "docs": "Every correction to one message, oldest first."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_round_apart",
+      "kind": "function",
+      "docs": "One round, for the append a push makes."
+    },
+    {
+      "path": "teams_infra::forge::rows::take_thread_apart",
+      "kind": "function",
+      "docs": "A whole conversation, for the write that opens one.\n\nThe stamps both come from the first message: a thread is opened by\nsaying something, so the moment it was opened is the moment that\nwas said, and there is no second act to take them from."
+    },
+    {
       "path": "teams_infra::gc",
       "kind": "module",
       "docs": "`gc` — the zero-link sweep (#83 §3 registry-GC shape, the #95\nslice): blob bytes that no team links anymore are deleted, after a\nreclaim and on demand (`teams-server gc`).\n\n## What the sweep protects\n\nA blob's bytes survive while **any** link row references its digest\n— marked-for-purge links included, because a marked link is\nrestorable during its grace window and restoring a link whose bytes\nwere swept would be a dangling reference by another name. The\nsweep's question is therefore\n[`SqliteTeamsRepository::digest_linked_anywhere`], deliberately not\nthe read surface's visibility predicate.\n\n## The racing same-digest upload, and why the answer is a lock\n\nThe #93 adapter's write path makes bytes durable (staging → rename)\n**before** the link row commits (#83 §3 ordering). That order is\nwhat makes a dangling link impossible for uploads — and it is\nexactly what a concurrent sweep could break: between the upload's\nrename and its link commit, the digest has bytes and zero links,\nand a sweep deciding in that window would delete bytes whose link\nis about to commit — a dangling link, manufactured by the sweeper.\n\nRe-checking links after removing the file cannot close this: the\nhazardous interleaving (upload renames → sweep checks links, sees\nzero → sweep deletes → upload's link commits) has the re-check land\n*before* the link exists, however many times it re-checks. What\ncloses it is excluding the interleaving: [`GcGuard`] is a\n`tokio::sync::RwLock` — every upload holds it **shared** across its\nrename→link-commit span (uploads never block each other), and the\nsweep holds it **exclusive** across its check-and-delete, so no\nupload is ever mid-span while the sweep decides. This leans on the\nsingle-process deployment shape #93 fixed (one server process owns\nDB and blob dir); a second process bypasses the guard, which is why\nthe `gc` CLI documents \"stopped server or same process\" and why\ncross-process coordination stays out of scope (#95 out-of-scope\nlist)."
@@ -115,7 +250,17 @@
     {
       "path": "teams_infra::sqlite",
       "kind": "module",
-      "docs": "SQLite backend for the teams plane — connection lifecycle and schema\nmigration built on `rusqlite-isle`, mirroring `asterism-infra`'s\nconventions over the teams-owned database.\n\n## Layout\n\n- [`migrations`] — `PRAGMA user_version`-based append-only\n  migrations, a fresh series starting at V1 (this database shares\n  nothing with the app database — #83 §4).\n- [`repo`] — the repository over the state tables and the ledger.\n- [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry\n  points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the\n  pragmas set and the schema migrated.\n- [`open_existing_at_latest`] — the maintenance verbs' entry point\n  (#95): pragmas only, **no migration**, refused unless the schema\n  is already current.\n\n## Pragma choices\n\nSame set as the app database, for the same reasons:\n\n- `journal_mode = WAL` — the 1-writer / N-readers setup #83 §4\n  names as the workload fit (append-only ledger, short tx).\n- `synchronous = NORMAL` — the usual tradeoff paired with WAL.\n- `foreign_keys = ON` — SQLite defaults to `OFF` per connection, so\n  it is reissued inside every init closure.\n- `busy_timeout = 5000` — one process by deployment shape, but a\n  backup command will eventually share the file, and waiting beats\n  an immediate `SQLITE_BUSY`.\n\nOne non-pragma setting rides along: transactions default to `BEGIN\nIMMEDIATE`. Every repository write opens a transaction that will\nwrite, and a DEFERRED transaction that upgrades from read to write\nbypasses the busy handler on the upgrade (the same trap\n`asterism-infra` documents from its 2026-07/08 flakes) — taking the\nwrite lock at `BEGIN` keeps every wait on the busy-handler path."
+      "docs": "SQLite backend for the teams plane — connection lifecycle and schema\nmigration built on `rusqlite-isle`, mirroring `asterism-infra`'s\nconventions over the teams-owned database.\n\n## Layout\n\n- [`migrations`] — `PRAGMA user_version`-based append-only\n  migrations, a fresh series starting at V1 (this database shares\n  nothing with the app database — #83 §4).\n- [`repo`] — the repository over the state tables and the ledger.\n- [`forge`] — the forge's ports over one team's rows, appending to\n  that team's ledger in the same transaction (#148 decision 17).\n- [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry\n  points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the\n  pragmas set and the schema migrated.\n- [`open_existing_at_latest`] — the maintenance verbs' entry point\n  (#95): pragmas only, **no migration**, refused unless the schema\n  is already current.\n\n## Pragma choices\n\nSame set as the app database, for the same reasons:\n\n- `journal_mode = WAL` — the 1-writer / N-readers setup #83 §4\n  names as the workload fit (append-only ledger, short tx).\n- `synchronous = NORMAL` — the usual tradeoff paired with WAL.\n- `foreign_keys = ON` — SQLite defaults to `OFF` per connection, so\n  it is reissued inside every init closure.\n- `busy_timeout = 5000` — one process by deployment shape, but a\n  backup command will eventually share the file, and waiting beats\n  an immediate `SQLITE_BUSY`.\n\nOne non-pragma setting rides along: transactions default to `BEGIN\nIMMEDIATE`. Every repository write opens a transaction that will\nwrite, and a DEFERRED transaction that upgrades from read to write\nbypasses the busy handler on the upgrade (the same trap\n`asterism-infra` documents from its 2026-07/08 flakes) — taking the\nwrite lock at `BEGIN` keeps every wait on the busy-handler path."
+    },
+    {
+      "path": "teams_infra::sqlite::forge",
+      "kind": "module",
+      "docs": "The team's forge — adapters behind `asterism-core`'s forge ports,\nover the team's own database (#148 decision 20).\n\nOne type for `Lines`, `Pursuits`, `Closings`, `Threads`, `Actors`\nand `Store`. The close is why the first four are one object: it\nwrites a change point, its rows and an ending together, and two\nadapters sharing one transaction is a shape that only reads as\nsharing when they are the same object.\n\n`Actors` and `Store` join them for a smaller reason: they need the\nsame three things this type holds — the isle, the team, and nothing\nelse — and every question they answer is scoped by the team the way\nevery other read here is. Neither appends to the stream. `Store` is\na pure read, and minting a handle deliberately records nothing (see\n[`TeamForge::handle`]), so what they share with the write ports is\nthe scope rather than the transaction.\n\n`Strategies` needs no adapter — `Builtin` is in `asterism-core`, and\na collision rule is not storage.\n\n# The team is here and in no signature\n\n[`TeamForge`] holds a `team_id`, every statement carries it, and no\nport method mentions it. That is the seat `Lines::list` reserves\nwhen it says that scoping a listing belongs to whoever knows what a\nperson is: the forge does not, this plane does, and the answer lands\nhere rather than in a trait the local plane also implements.\n\nReads are scoped as tightly as writes. A `LineId` from another team\nreads back as nothing rather than as somebody else's line, so a\ncaller holding an id it should not have learns nothing from it.\n\n# Every write is one transaction, and the ledger is in it\n\nDecision 17: a forge write and its ledger event commit together or\nneither lands. So every write-port method here is one isle call\nopening one transaction, and inside it the rows change *and*\n[`append_event_in_tx`] runs — the same allocation of `seq`, the same\nregistry check and the same subject index rows the repository's own\ngestures go through. A half-written pair is not a state this store\ncan be in, which is what the e2e asks it for.\n\n# Two records, two fields\n\nRevision 6. The **event** records the capacity — `LedgerActor`,\nmember or admin, with the display name stamped at write time. The\n**forge node** records who — an `ActorId`, which is a handle in\n`forge_actor` and carries no capacity at all. Neither is derived\nfrom the other, and an event carries the handle in its payload so\nthe two can be read against each other without a join.\n\nWhere the handle is one this team's `forge_actor` already holds,\nthe event also carries it as a\n[`SubjectRef::ForgeIdentity`](teams_core::domain::ledger::SubjectRef::ForgeIdentity),\nwhich is what lets a trace query cross from a person to their forge\nwrites without reading payloads. A handle with no row is not an\nerror — the model mints `ActorId`s freely and a caller may carry one\nthis store never saw — so the subject is added when it can be\nresolved and the payload's `by` answers either way.\n\n# What a payload does not carry\n\nAnything somebody wrote. Names of lines and titles of threads are\nhere, because a name is how a team refers to a line and an event\nabout a rename that did not say the names would not read on its\nown. Message bodies are not, and neither is content: the ledger is\nappend-only in the schema and there is no path that rewrites a row,\nso a body copied into it is a second copy nothing can ever act on\nwhen somebody asks to be erased.\n\n# The head is never read to be compared\n\nNothing here selects a head and checks it against what a caller\ndecided: `UNIQUE (line_id, parent_id)` and `UNIQUE (pursuit_id,\nparent_id)` refuse a fork as part of the insert. What that costs is\ntelling one constraint violation from another, so the exact column\nlist SQLite reports is what is matched — see `is_unique_violation`."
+    },
+    {
+      "path": "teams_infra::sqlite::forge::TeamForge",
+      "kind": "struct",
+      "docs": "The forge's ports over one team's rows in the teams database.\n\nBuilt per request and cheap to build: an isle handle, a uuid and the\nrequest's actor stamp. The services above it take five `Arc`s, and\nthe five are clones of one of these."
     },
     {
       "path": "teams_infra::sqlite::map",
@@ -133,9 +278,19 @@
       "docs": "Serialises a [`LedgerActor`] into the `actor` TEXT column — the\nserde-tagged JSON form, so the member/admin distinction lands in\nstorage exactly as the domain spells it."
     },
     {
+      "path": "teams_infra::sqlite::map::datetime_to_ms",
+      "kind": "function",
+      "docs": "An instant as the epoch-ms column that carries it."
+    },
+    {
       "path": "teams_infra::sqlite::map::infra_err",
       "kind": "function",
       "docs": "Wraps an infrastructure error (typically `IsleError`) into\n`DomainError::Infra`."
+    },
+    {
+      "path": "teams_infra::sqlite::map::ms_to_datetime",
+      "kind": "function",
+      "docs": "An epoch-ms column as an instant, refusing a value no clock\nproduced.\n\nThe forge's acts carry a `DateTime<Utc>` and every stamp column on\nthis plane is `INTEGER` epoch ms, so this pair is what the hosted\nforge's rows cross. It refuses out-of-range rather than saturating:\na stored timestamp that is not a time is a corrupt row, and a\nclamped one would read as a real instant nobody wrote."
     },
     {
       "path": "teams_infra::sqlite::map::subject_from_ref",
