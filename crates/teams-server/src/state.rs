@@ -55,9 +55,11 @@ pub struct TeamsCtx {
     /// (#95). [`DEFAULT_PURGE_GRACE_MS`] unless the operator says
     /// otherwise; tests use a tiny one.
     pub purge_grace_ms: i64,
-    /// The guard between the upload write path and the zero-link
-    /// sweep: uploads hold it shared across rename → link commit, the
-    /// sweep holds it exclusive (`teams_infra::gc`).
+    /// The guard between the write paths that put bytes in the CAS and
+    /// the zero-link sweep: each holds it shared across rename → link
+    /// commit, the sweep holds it exclusive (`teams_infra::gc`). Two
+    /// paths hold it — the blob upload (#93) and the forge's content
+    /// verb (#151) — because both end in that same pair of steps.
     pub gc_guard: Arc<GcGuard>,
 }
 

@@ -102,10 +102,10 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::domain::identity::LedgerActor;
 use teams_core::domain::ledger::{
-    FORGE_LINE_DISCARDED, FORGE_LINE_OPENED, FORGE_LINE_RENAMED, FORGE_LINE_STANDING_SET,
-    FORGE_LINE_STRATEGY_SET, FORGE_PURSUIT_CLOSED, FORGE_PURSUIT_OPENED, FORGE_ROUND_PUSHED,
-    FORGE_THREAD_AMENDED, FORGE_THREAD_OPENED, FORGE_THREAD_RENAMED, FORGE_THREAD_SAID,
-    ForgeIdentityRef, SubjectRef,
+    FORGE_CONTENT_ENTERED, FORGE_LINE_DISCARDED, FORGE_LINE_OPENED, FORGE_LINE_RENAMED,
+    FORGE_LINE_STANDING_SET, FORGE_LINE_STRATEGY_SET, FORGE_PURSUIT_CLOSED, FORGE_PURSUIT_OPENED,
+    FORGE_ROUND_PUSHED, FORGE_THREAD_AMENDED, FORGE_THREAD_OPENED, FORGE_THREAD_RENAMED,
+    FORGE_THREAD_SAID, ForgeIdentityRef, LedgerEvent, SubjectRef,
 };
 use uuid::Uuid;
 
@@ -114,7 +114,7 @@ use crate::forge::rows::{
     ThreadMessageRow, ThreadRevisionRow, ThreadRow,
 };
 use crate::sqlite::map::{datetime_to_ms, ms_to_datetime};
-use crate::sqlite::repo::append_event_in_tx;
+use crate::sqlite::repo::{append_event_in_tx, link_mark_in_tx};
 
 /// The forge's ports over one team's rows in the teams database.
 ///
@@ -2337,5 +2337,243 @@ impl Store for TeamForge {
             })
             .await
             .map_err(infra_err)
+    }
+}
+
+// ----------------------------------------------------------------------
+// Content — the verb the hosting adds (#148 decision 5).
+// ----------------------------------------------------------------------
+
+/// What one entry of content is about, gathered so the in-transaction
+/// half takes one argument rather than four more positional ones.
+struct EnteringContent<'a> {
+    /// The surrogate the team is minting for it.
+    asset: Uuid,
+    /// The open work it is entering against.
+    pursuit: Uuid,
+    /// The verified digest the bytes hashed to.
+    digest: &'a str,
+    /// The instant the row and the event both carry.
+    occurred_at_ms: i64,
+}
+
+/// The content verb's rows and its event, inside the caller's
+/// transaction — [`TeamForge::enter_content`]'s whole write, so that
+/// method is the transaction and this is what is in it.
+fn enter_content_in_tx(
+    tx: &Transaction<'_>,
+    team_id: Uuid,
+    actor: &LedgerActor,
+    entering: EnteringContent<'_>,
+) -> rusqlite::Result<Result<LedgerEvent, DomainError>> {
+    let EnteringContent {
+        asset,
+        pursuit,
+        digest,
+        occurred_at_ms,
+    } = entering;
+    if !team_has(tx, team_id, "pursuit", &pursuit)? {
+        return Ok(Err(DomainError::not_found(
+            "pursuit",
+            PursuitId::from_uuid(pursuit),
+        )));
+    }
+    let ended: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pursuit_node WHERE pursuit_id = ?1 AND kind = 'close')",
+        params![pursuit],
+        |row| row.get(0),
+    )?;
+    if ended {
+        return Ok(Err(DomainError::settled(format!(
+            "work {pursuit} has ended; content enters a team against open work \
+             (#148 decision 5)"
+        ))));
+    }
+    match link_mark_in_tx(tx, team_id, digest)? {
+        // Linked and live: decision 7's second contributor, who gets
+        // an asset of their own over the copy already there.
+        Some(None) => {}
+        Some(Some(_)) => {
+            return Ok(Err(DomainError::blocked(format!(
+                "{digest} is marked for purge in this team; unmark it before naming it \
+                 as content"
+            ))));
+        }
+        None => {
+            tx.execute(
+                "INSERT INTO team_blob_link (team_id, digest, created_at) VALUES (?1, ?2, ?3)",
+                params![team_id, digest, occurred_at_ms],
+            )?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO team_asset (id, team_id, created_at, digest, entered_for)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![asset, team_id, occurred_at_ms, digest, pursuit],
+    )?;
+    // Both ends of the trace: the digest, which is how the store's
+    // side of it is asked about, and the work, which is how decision
+    // 5's attachment is. The team asset is in the payload rather than
+    // the index — the ledger's subject vocabulary is the team's, and
+    // a surrogate this plane mints per promotion is not a reference
+    // anything outside a payload asks by.
+    let digest_subject = match teams_core::domain::ledger::SubjectRef::digest(digest) {
+        Ok(subject) => subject,
+        Err(refused) => return Ok(Err(ledger_refusal(FORGE_CONTENT_ENTERED, refused))),
+    };
+    match append_event_in_tx(
+        tx,
+        team_id,
+        actor,
+        occurred_at_ms,
+        FORGE_CONTENT_ENTERED,
+        vec![digest_subject, SubjectRef::forge_pursuit(pursuit)],
+        serde_json::json!({
+            "asset_id": asset.to_string(),
+            "digest": digest,
+            "pursuit_id": pursuit.to_string(),
+        }),
+    )? {
+        Ok(event) => Ok(Ok(event)),
+        Err(refused) => Ok(Err(ledger_refusal(FORGE_CONTENT_ENTERED, refused))),
+    }
+}
+
+/// One `team_asset` as a caller reading it back sees it — what the
+/// bulk resolve answers with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldAsset {
+    /// The team's own surrogate. Decision 6: each plane mints its own
+    /// `AssetId`, and this one is never a local one.
+    pub asset: AssetId,
+    /// The CAS entry this asset was converted from, when the
+    /// conversion was one blob — which is the whole of v0 (`V8`).
+    pub digest: Option<String>,
+    /// The work the content entered against (decision 5).
+    pub entered_for: Option<PursuitId>,
+    /// When the team minted it.
+    pub created_at_ms: i64,
+}
+
+impl TeamForge {
+    /// Mints the asset a team holds for content that has just entered
+    /// it against open work — the content verb's write half (#148
+    /// decision 5).
+    ///
+    /// The bytes are already durable in the CAS by the time this runs,
+    /// on the upload path's ordering (#83 §3): what is left is the
+    /// three rows that say the team holds them, and they land in one
+    /// transaction with the event. A failure before this leaves an
+    /// orphan blob, which the sweep takes; a failure inside it leaves
+    /// nothing at all.
+    ///
+    /// **Both refusals are about the work rather than the bytes.**
+    /// Content arrives against *open* work or it does not arrive:
+    /// decision 5 keeps the team from holding an asset unattached to
+    /// work, and ended work is not something new content can attach
+    /// to. A pursuit belonging to another team reads as absent, the
+    /// scope every other read here keeps.
+    ///
+    /// **A digest whose link is marked for purge is refused, not
+    /// re-linked.** The mark means a reclaim is coming for those bytes
+    /// (#95), and minting an asset over them would hand a line content
+    /// that is scheduled to disappear — the "line lying about the
+    /// present" decision 2 forbids, arriving by the back door. The
+    /// remedy is the caller's and the message says it: unmark first.
+    ///
+    /// A digest already linked and live is **not** refused, which is
+    /// where this parts company with
+    /// [`add_blob_link`](crate::sqlite::repo::SqliteTeamsRepository::add_blob_link).
+    /// Decision 7 mints an asset per promotion over one stored copy,
+    /// so the second contributor of identical bytes gets their own
+    /// asset and their own event, and the link row is left as it is.
+    pub async fn enter_content(
+        &self,
+        pursuit: PursuitId,
+        digest: String,
+        occurred_at_ms: i64,
+    ) -> Result<(AssetId, LedgerEvent), DomainError> {
+        let asset = AssetId::new();
+        let (team_id, actor) = (self.team_id, self.actor.clone());
+        let (asset_uuid, pursuit_uuid) = (*asset.as_uuid(), *pursuit.as_uuid());
+
+        let event = self
+            .isle
+            .call(move |conn| {
+                let tx = conn.transaction()?;
+                let outcome = enter_content_in_tx(
+                    &tx,
+                    team_id,
+                    &actor,
+                    EnteringContent {
+                        asset: asset_uuid,
+                        pursuit: pursuit_uuid,
+                        digest: &digest,
+                        occurred_at_ms,
+                    },
+                )?;
+                match outcome {
+                    Ok(event) => {
+                        tx.commit()?;
+                        Ok(Ok(event))
+                    }
+                    Err(refused) => {
+                        tx.rollback()?;
+                        Ok(Err(refused))
+                    }
+                }
+            })
+            .await
+            .map_err(infra_err)??;
+        Ok((asset, event))
+    }
+
+    /// The assets among `assets` this team holds, with what each was
+    /// converted from — the bulk resolve (#148 decision 19).
+    ///
+    /// Only the ones held come back, and an id this team did not mint
+    /// is simply not in the answer: a caller learns which of its own
+    /// ids resolve here and nothing about anybody else's, which is the
+    /// same scope [`Store::exists`] keeps one id at a time.
+    pub async fn resolve_assets(
+        &self,
+        assets: Vec<AssetId>,
+    ) -> Result<Vec<HeldAsset>, DomainError> {
+        if assets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let team_id = self.team_id;
+        let wanted: BTreeSet<Uuid> = assets.iter().map(|asset| *asset.as_uuid()).collect();
+        let rows: Vec<(Uuid, Option<String>, Option<Uuid>, i64)> = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, digest, entered_for, created_at FROM team_asset
+                      WHERE id = ?1 AND team_id = ?2",
+                )?;
+                let mut found = Vec::new();
+                for id in wanted {
+                    let row = stmt
+                        .query_row(params![id, team_id], |row| {
+                            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                        })
+                        .optional()?;
+                    if let Some(row) = row {
+                        found.push(row);
+                    }
+                }
+                Ok(found)
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, digest, entered_for, created_at_ms)| HeldAsset {
+                asset: AssetId::from_uuid(id),
+                digest,
+                entered_for: entered_for.map(PursuitId::from_uuid),
+                created_at_ms,
+            })
+            .collect())
     }
 }

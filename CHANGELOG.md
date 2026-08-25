@@ -10,13 +10,112 @@ and this project adheres to
 
 ### Added
 
+- **The team's forge is served over HTTP** (#151, #148 decisions 5 and 19). The
+  local forge surface is mirrored under `/teams/{team_id}/forge/*` — same paths
+  below the prefix, same DTOs from `asterism-contract::forge`, same handler
+  form, and refusals on `asterism-server`'s status table down to the `reason`
+  token a conflict carries. Every route sits behind the existing `auth_gate` +
+  `team_gate` pair.
+
+  Three things differ from the local surface, and each is what hosting is. The
+  services are built per request, over a `TeamForge` carrying the team and the
+  capacity the gate established, because a context-held service could carry
+  neither. The author is the authenticated member: `author_kind` and
+  `author_subject` are **refused** rather than overwritten, since the gate has
+  already answered who is asking and a write claiming to be somebody else is the
+  one shape #83 §1 forbids outright — only `operator_ai` is still the caller's
+  to state. And the ledger event records the capacity while the forge node
+  records who (#148 revision 6), which is two records and two fields.
+
+- **Membership is what decides a forge verb, and seniority is not** (#148
+  revision 5). `TeamVerb` gains `ForgeWork` and `ForgeDiscard`. Opening a line,
+  renaming it, re-pointing its rule, moving its standing, opening work, pushing
+  a round, resolving, closing, everything said in a thread and bringing content
+  in are a member's acts — they all leave a record, and anyone who can read the
+  line can recover from any of them. Discarding a line is the exception, because
+  it is the verb that takes the log with it, and it asks for an owner. An admin
+  standing outside the roster answers neither: #83 §1 grants an admin the
+  destructive pair on the team's own substrate and nothing implicit inside a
+  team they are not in.
+
+  Revision 5 also says "the restrictive setting stays available and is the
+  default", which pulls against the paragraph it closes. This ships the argued
+  reading and leaves that knob unbuilt rather than inventing a default for it;
+  the divergence is recorded on `TeamVerb::ForgeWork` and settling it belongs to
+  #148.
+
+- **Content enters a team against open work** (#148 decision 5). A new verb,
+  `PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`, is the one entry
+  point: the team never holds an asset unattached to work, and the content is
+  there before the round that names it. The byte path is the blob upload's,
+  unchanged — streamed, always hashed whole, durable before any row commits —
+  and what it adds after that is the `team_asset` a round can name, its
+  `team_blob_link`, and one `forge.content.entered/1` event, all in a single
+  transaction. Work that has ended is a `409` carrying `settled`; work of
+  another team reads as absent; a digest marked for purge is refused with
+  `blocked` rather than re-linked, because minting an asset over bytes a reclaim
+  is coming for would hand a line content scheduled to disappear.
+
+  Identical bytes promoted twice mint two assets over one stored copy (#148
+  decision 7), which is the only arrangement where "who brought what" survives
+  the second contributor.
+
+- **Two bulk reads over what a team holds** (#148 decision 19).
+  `POST …/forge/content/resolve` answers which of a list of team asset ids the
+  team holds and what each was converted from; ids it did not mint come back as
+  unknown rather than as a refusal. `POST …/forge/content/have` answers which of
+  a list of digests it already has, and exists to avoid re-sending bytes and for
+  nothing else — it answers inside one team, to that team's members, about
+  digests the asker is holding anyway, so what it reveals is what uploading
+  would reveal one round trip later. Asked across teams it would be the
+  deduplication side channel #83 §3 closes by making the link row the visibility
+  boundary. A digest marked for purge answers as not held. Both are bounded at
+  500 per request and refuse rather than truncate, because a truncated answer to
+  either is a wrong one.
+
+- **Schema V8 — what a `team_asset` was converted from** (#151). `digest` and
+  `entered_for`, both nullable, both unindexed. V7 left the composition open in
+  as many words and the content verb is what settles it: one blob is the whole
+  of the v0 conversion, and a conversion composed some other way leaves the
+  column empty rather than carrying a digest standing for one part of itself.
+  Not `UNIQUE`, per decision 7. `entered_for` records decision 5's attachment
+  rather than enforcing it — the invariant is checked at the door, in the
+  transaction that writes the row — and carries no foreign key, because
+  `Lines::discard` deletes the work against a line and a `RESTRICT` key would
+  refuse the one verb that releases this content.
+
+- **A thirteenth `forge.*` kind** (#151). `forge.content.entered/1` joins
+  `FORGE_KINDS`, named for the act like its siblings. Its payload carries the
+  asset, the digest and the work; its subjects are the digest and the pursuit,
+  so a trace query reaches a promotion from either end without parsing a
+  payload. One event per promotion even when the store already held the bytes,
+  for decision 7's reason.
+
+- **`GET /teams/{team_id}/events/subject`** (#151). The subject-filtered ledger
+  read has been answerable in the repository since #83 §2 and had no way to be
+  asked; what made it worth exposing is what it can now be asked about, since
+  the ledger carries forge subjects. Same page contract as the stream read —
+  keyset over `seq`, a short page ends the walk — over a paged sibling of
+  `events_for_subject`, because a subject filter bounds by what rather than by
+  how much and the forge's busiest subjects gain a row per push.
+
 - **The team plane hosts a forge** (#150, #148 decision 20). `teams-infra` gains
   `TeamForge`, a set of adapters behind the forge ports `asterism-core` already
   declares — `Lines`, `Pursuits`, `Closings`, `Threads`, `Actors` and `Store` —
   over the team's own database. `asterism-core` does not change by a line of
   code; the one new dependency edge is `teams-infra → asterism-core`, which #83
-  §4 permits outright and whose never-list (`asterism-infra`, `-contract`,
-  `-server`) is unchanged.
+  §4 permits outright.
+
+  §4's never-list has since been narrowed rather than left as it was (#148
+  revision 10): it forbade `teams-* → asterism-contract` entirely, and the
+  reason it states — "those are the local app's plumbing; teams-infra owns its
+  own" — does not hold for `asterism-contract::forge`, which declares no
+  Asterism dependency, is MIT/Apache and `publish = false`, and already rode in
+  `teams-core`'s graph transitively. So that one module may be named from the
+  teams plane, and `command`, `query` and `dto` stay forbidden, where the stated
+  reason is the true one. `asterism-infra` and `asterism-server` are untouched
+  by the narrowing. Nothing in this entry depends on it — the transport is what
+  takes it up (#151, below).
 
   The point of embedding rather than fronting is decision 17: every write-port
   method is one transaction holding the forge write **and** its ledger append,
@@ -28,8 +127,8 @@ and this project adheres to
   knows what a person is — and is enforced on reads as tightly as on writes, so
   an id belonging to another team reads back as absent.
 
-  Nothing is served yet. There is no HTTP surface and no client; those are #151
-  and #152.
+  Nothing was served when this landed. The HTTP surface arrived with #151,
+  below; the member's client is still #152.
 
 - **Schema V7 — the forge's tables on the teams database** (#150). The local
   plane's `line`, `change_point`, `change_row`, `pursuit`, `pursuit_node`,
