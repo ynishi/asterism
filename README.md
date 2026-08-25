@@ -200,9 +200,13 @@ Licensing is declared **per crate** (the `license` field in each crate's
 
 at your option, and it stays that way.
 
-The crates implementing a hosted collaboration plane (shared spaces, sync, team
-features) leave the field undeclared while that licence is decided, and may be
-released under a different one.
+The crates implementing the hosted teams plane — `teams-core`, `teams-infra`,
+`teams-contract`, `teams-server` — are licensed under the GNU Affero General
+Public License, version 3 or later ([LICENSE-AGPL](LICENSE-AGPL)). The boundary
+between the two regimes sits at the binary's edge: `teams-server` owns its own
+binary, the direction the licence boundary guards — an `asterism-*` crate
+depending on a `teams-*` crate — stays empty, and the two sides share only what
+the MIT/Apache side declares.
 
 One crate sits on neither side. `asterism-teams-wire` carries the wire
 vocabulary a member's client and a team server both speak, depends on neither
@@ -212,7 +216,9 @@ codebase. Its manifest says so at the field.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
+dual licensed as above, without any additional terms or conditions. A
+contribution to the four `teams-*` crates is licensed under AGPL-3.0-or-later,
+the licence those crates carry.
 
 ## Author
 

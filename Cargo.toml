@@ -26,8 +26,8 @@ members = [
     "crates/asterism-model-lab",
     # The teams plane (#83). Same layering discipline as the asterism-*
     # rows above, one deliberate difference: these four do not inherit
-    # the workspace license — each manifest says why where the field
-    # would be.
+    # the workspace license — each declares AGPL-3.0-or-later, the call
+    # #83 §4 deferred and #162 made at v0.1.0.
     "crates/teams-core",
     "crates/teams-infra",
     "crates/teams-contract",
@@ -37,8 +37,7 @@ members = [
     # workspace licence — the leaf deliberately, because the edge it
     # exists to make legal runs from this side (#148 decision 15), and
     # #83 §4 names a leaf `asterism-<thing>` for exactly that reason.
-    # Neither links a reserved-licence crate; their manifests argue it
-    # at length.
+    # Neither links an AGPL crate; their manifests argue it at length.
     "crates/asterism-teams-wire",
     "crates/asterism-teams-client",
 ]

@@ -20,6 +20,14 @@ and this project adheres to
   carries evidence and assertion each on its own; the derivation is the one
   `record_for` already composes, extracted rather than re-derived.
 
+- **The teams plane's license is declared: AGPL-3.0-or-later** (#162). The four
+  `teams-*` manifests replace the deliberately-undeclared comment with the
+  field, the canonical AGPL-3.0 text lands at the root as `LICENSE-AGPL`, and
+  README's Licence section states both regimes and the boundary — the guarded
+  direction, an `asterism-*` crate depending on a `teams-*` crate, stays empty.
+  The call #83 §4 deferred to publish time, made at v0.1.0; `publish = false`
+  stands untouched.
+
 - **A release workflow: the macOS download opens like an app** (#165). A pushed
   `v*` tag builds the production-shaped bundle through `just dogfood-build`,
   signs it with the Developer ID identity under the hardened runtime, notarizes
