@@ -85,6 +85,7 @@ unanswerable.
 - `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
 - `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
 - `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `FORGE_CONTENT_ENTERED` — Content entered the team against open work, and the team minted the
 - `FORGE_KINDS` — The kinds the hosted forge's verbs write (#148 decisions 17 and
 - `FORGE_LINE_DISCARDED` — A line was dropped, with everything on it.
 - `FORGE_LINE_OPENED` — A line was opened on the team's forge.

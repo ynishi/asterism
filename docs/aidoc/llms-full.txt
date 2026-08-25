@@ -13906,10 +13906,13 @@ session token → user_id → membership gate).
 ## Types
 
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
+- `EnterContentCommand` — Brings content into a team against open work
 - `GrantOwnerCommand` — Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
+- `HaveContentCommand` — Asks which digests a team already has
 - `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
+- `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 - `UploadBlobCommand` — Uploads a blob into the team's store
 
@@ -13927,12 +13930,16 @@ its own (#83 §1).
 ## Types
 
 - `BlobUploadedDto` — The result of `PUT /teams/{team_id}/blobs?digest=…`.
+- `ContentEnteredDto` — What the team minted for content that entered it
 - `HeadPublishedDto` — The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the
+- `HeldAssetDto` — One asset a team holds, as the bulk resolve answers about it.
+- `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
+- `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
 - `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
@@ -14085,7 +14092,7 @@ same three lines instead of re-deriving them.
 - `Role` — A member's role within one team.
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
 - `TeamRoster` — One team's membership set — the value every membership invariant is
-- `TeamVerb` — The administrative verbs of the #83 §1 authority table — everything
+- `TeamVerb` — The verbs an authority table answers for — everything
 - `User` — A person known to the instance — the identity teams are built from.
 
 
@@ -14177,6 +14184,7 @@ unanswerable.
 - `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
 - `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
 - `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `FORGE_CONTENT_ENTERED` — Content entered the team against open work, and the team minted the
 - `FORGE_KINDS` — The kinds the hosted forge's verbs write (#148 decisions 17 and
 - `FORGE_LINE_DISCARDED` — A line was dropped, with everything on it.
 - `FORGE_LINE_OPENED` — A line was opened on the team's forge.
@@ -14908,6 +14916,7 @@ list SQLite reports is what is matched — see `is_unique_violation`.
 
 ## Types
 
+- `HeldAsset` — One `team_asset` as a caller reading it back sees it — what the
 - `TeamForge` — The forge's ports over one team's rows in the teams database.
 
 
@@ -15066,6 +15075,12 @@ route tests drive in-process:
 - [`http`] — the axum `/teams/*` router: the session → user →
   membership gate, the authority checks over `teams-core`'s
   decision functions, and the domain-refusal → 4xx mapping.
+- `forge` — the team's hosted forge over HTTP (#151): the local
+  surface mirrored under `/teams/{team_id}/forge/*`, and the verbs
+  hosting adds. Its routes are merged inside [`http`]'s gate. Not
+  linked, and not public: the module is `pub(crate)` because it
+  exports no type, only routes that reach a caller through
+  [`http::router`].
 - [`rate_limit`] — the one limiter every auth endpoint sits behind
   (#83 §5: from v0, not retrofitted).
 - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
@@ -15098,6 +15113,8 @@ slice).
 | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 | GET | `/teams/{team_id}/roster` | member, or an admin |
 | GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
+| GET | `/teams/{team_id}/events/subject` | member, or an admin — one subject's events, same page contract |
+| — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
 | POST | `/teams/{team_id}/owners/grant` | owner |
@@ -15158,6 +15175,13 @@ Domain refusals surface as client errors, never `500`:
 `DigestMismatch` → 409 (the mismatch body carries declared and
 computed, both), `Infra` → 500; the gate adds 401/403/404 and the
 limiter 429.
+
+The forge's routes answer on a second table, because their
+refusals come from the other plane's `DomainError` and carry a
+field this one has no column for: `reason`, on a conflict, which
+is what tells a caller whether retrying is worth anything. Those
+bodies are `asterism-server`'s to the letter — see `ApiError::Forge`
+and `forge_response` below.
 
 ## Functions
 
