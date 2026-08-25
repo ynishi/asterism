@@ -53,7 +53,8 @@ async fn harness(purge_grace_ms: i64) -> Harness {
         .expect("open blob store");
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
-        auth: PasswordAuth::new(isle),
+        auth: PasswordAuth::new(isle.clone()),
+        projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle),
         blobs,
         registration: RegistrationPolicy::Open,
         session_ttl_ms: 60_000,

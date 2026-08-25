@@ -46,8 +46,10 @@
 //!
 //! ## What is not here
 //!
-//! A projection verb. Decision 12 rides a projection on the push
-//! rather than giving it one, and its body and its mapper are #152's.
+//! A projection *write* verb. Decision 12 rides a projection on the
+//! push rather than giving it one, so that no second editing surface
+//! grows beside the verbs. The read is here (`get_entry_projection`),
+//! and so is the capture, on the push.
 //!
 //! A line's own reads are unpaged, exactly as the local surface leaves
 //! them. `GET /lines/{id}` grows with the line's history and
@@ -60,10 +62,10 @@ use std::sync::Arc;
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
     ForgeEntryStateDto, ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto,
-    ForgePursuitActCommand, ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto,
-    ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand,
-    PushForgeRoundCommand, RenameForgeLineCommand, RenameForgeThreadCommand,
-    SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+    ForgeOpDto, ForgePursuitActCommand, ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto,
+    ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand, OpenForgePursuitCommand,
+    OpenForgeThreadCommand, PushForgeRoundCommand, RenameForgeLineCommand,
+    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
 };
 use asterism_core::application::forge::{Anchored, LineService, PursuitService, ThreadService};
 use asterism_core::application::mapping::{
@@ -80,15 +82,23 @@ use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
 use asterism_core::domain::forge::strategies::Builtin;
 use asterism_core::domain::value::AssetId;
+use asterism_teams_wire::command::{
+    EnterContentCommand, HaveContentCommand, ResolveContentCommand,
+};
+use asterism_teams_wire::dto::{
+    ContentEnteredDto, HeldAssetDto, HeldContentDto, ResolvedContentDto,
+};
+use asterism_teams_wire::projection::{
+    EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
+};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post, put};
 use axum::{Extension, Json, Router};
 use http_body_util::BodyExt as _;
-use teams_contract::command::{EnterContentCommand, HaveContentCommand, ResolveContentCommand};
-use teams_contract::dto::{ContentEnteredDto, HeldAssetDto, HeldContentDto, ResolvedContentDto};
 use teams_core::DomainError;
 use teams_core::domain::identity::{LedgerActor, TeamVerb};
+use teams_core::domain::projection::ProjectionBody;
 use teams_core::domain::store::DeclaredDigest;
 use teams_infra::auth::password::AccountRecord;
 use teams_infra::sqlite::forge::TeamForge;
@@ -105,10 +115,16 @@ type ForgeResult<T> = Result<Json<T>, ApiError>;
 /// The forge's routes, without the gate — [`crate::http::router`]
 /// merges them inside it.
 ///
-/// The paths below the prefix are the local surface's, verbatim. Read
-/// them against `asterism-server`'s router: a difference between the
-/// two lists is a difference in the mirror, which is the whole thing
-/// this route table promises not to have.
+/// The mirrored paths below the prefix are the local surface's,
+/// verbatim. Read them against `asterism-server`'s router: a
+/// difference between the two lists is a difference in the mirror,
+/// which is the whole thing this route table promises not to have.
+///
+/// Four routes here are **not** mirrored, because hosting is what adds
+/// them and the local plane has nowhere to put them: the three content
+/// verbs at the bottom, and the projection read. Each says so where it
+/// sits. A route added here without such a note is claiming to be a
+/// mirror of something, and that claim is checkable.
 pub(crate) fn routes() -> Router<Arc<TeamsCtx>> {
     Router::new()
         // A line.
@@ -140,6 +156,17 @@ pub(crate) fn routes() -> Router<Arc<TeamsCtx>> {
         .route(
             "/teams/{team_id}/forge/lines/{id}/discard",
             post(discard_line),
+        )
+        // What a promoter said about an entry (#148 decision 12).
+        // **Not a mirrored path** — the local plane stores no
+        // projections, so there is nothing for this to mirror. Read
+        // only: the write rides on the push, and `entries` is a static
+        // segment under the line rather than a surface of its own, so
+        // the shape says that a projection hangs off `(line, entry)`
+        // and nothing else.
+        .route(
+            "/teams/{team_id}/forge/lines/{id}/entries/{entry}/projection",
+            get(get_entry_projection),
         )
         .route("/teams/{team_id}/forge/strategies", get(list_strategies))
         // Work against a line.
@@ -699,7 +726,8 @@ async fn get_pursuit(
     pursuit_now(&wired, &pursuit_id(&id)?).await
 }
 
-/// `POST /teams/{team_id}/forge/pursuits/{id}/push` — writes a round.
+/// `POST /teams/{team_id}/forge/pursuits/{id}/push` — writes a round,
+/// and captures whatever descriptions rode in with it.
 ///
 /// What it checks is that the content each operation names exists —
 /// and on this plane "exists" means *this team has it*
@@ -709,13 +737,41 @@ async fn get_pursuit(
 /// ordering decision 5 keeps: content is there before the round that
 /// names it, because a round must not name what the instance does not
 /// hold.
+///
+/// ## The projection rides here rather than getting a verb
+///
+/// Decision 19 says so, and decision 12 says why: only a forge op
+/// replaces a projection, so no second editing surface grows beside
+/// the verbs. The body is a
+/// [`WithProjections`] wrapper over the mirror's own command, which
+/// flattens — a push sent by a caller that knows nothing about
+/// projections is byte-for-byte the request it always was, so the
+/// route's shape below the prefix still matches the local surface's.
+///
+/// What an envelope is checked for is in [`describing`], and none of
+/// it is inside the body (decision 14). The line and the team are not
+/// checked at all — they are taken from the pursuit and from the gate,
+/// because a client-stated one would be a second answer to a question
+/// those already settle.
+///
+/// **The capture happens after the push succeeded, in its own
+/// transaction, and cannot fail the push.** Decision 12 makes a
+/// projection something that can be lost without the line lying, which
+/// is what licenses the second write. The ordering forecloses the
+/// failure that is *not* permitted — a description of a round that was
+/// refused — and the swallowed error below forecloses the other one, a
+/// caller told that a round it can see on the line did not land.
 async fn push_round(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
     Extension(access): Extension<TeamAccess>,
     Path((_team, id)): Path<(Uuid, String)>,
-    Json(command): Json<PushForgeRoundCommand>,
+    Json(body): Json<WithProjections<PushForgeRoundCommand>>,
 ) -> ForgeResult<ForgePursuitDto> {
+    let WithProjections {
+        push: command,
+        projections,
+    } = body;
     let (wired, by) = writing(
         &ctx,
         &account,
@@ -728,13 +784,125 @@ async fn push_round(
         ),
     )?;
     let id = pursuit_id(&id)?;
+    let described = describing(&projections, &command.ops)?;
     let ops = command
         .ops
         .iter()
         .map(forge_op)
         .collect::<Result<Vec<_>, _>>()?;
     wired.work.push(&id, ops, command.note, &by).await?;
+
+    if !described.is_empty() {
+        let pursuit = wired.work.get(&id).await?;
+        let line = *pursuit.of().as_uuid();
+        // Deliberately not `?`. The round is committed by the time
+        // this runs, and a `?` here would answer a landed push with a
+        // failure — which is the one thing the caller must not be
+        // told, because it would retry and mint a second TeamAsset and
+        // push a second round for content that is already on the line.
+        // What is actually lost when this fails is the description,
+        // and decision 12 makes that a loss the line survives. So the
+        // push answers for the push, and the failure goes to stderr
+        // where this binary already writes.
+        if let Err(err) = ctx
+            .projections
+            .capture(access.team_id, line, account.user_id, now_ms(), described)
+            .await
+        {
+            eprintln!(
+                "teams-server: the round on line {line} landed and its projections did not: \
+                 {err}"
+            );
+        }
+    }
     pursuit_now(&wired, &id).await
+}
+
+/// Reads the envelopes a push carried, refusing any that names an
+/// entry the push does not operate on.
+///
+/// The refusal is about the *key*, not the contents: a projection is
+/// keyed `(line, entry)`, the line is the pursuit's, and the entry has
+/// to be one this round actually touched or the push becomes a way to
+/// write over any entry on the line. Nothing here opens a body — the
+/// only thing asked of one is that it is not empty and not past the
+/// ceiling, which
+/// [`ProjectionBody::parse`](teams_core::domain::projection::ProjectionBody::parse)
+/// answers without reading it.
+fn describing(
+    envelopes: &[EntryProjectionEnvelope],
+    ops: &[ForgeOpDto],
+) -> Result<Vec<(Uuid, u32, ProjectionBody)>, ApiError> {
+    envelopes
+        .iter()
+        .map(|envelope| {
+            if !ops.iter().any(|op| op.entry_id == envelope.entry_id) {
+                return Err(ApiError::Domain(DomainError::Validation(format!(
+                    "a projection describes an entry the round it rides on operates on, \
+                     and no operation here names {:?}",
+                    envelope.entry_id
+                ))));
+            }
+            let entry = Uuid::parse_str(&envelope.entry_id).map_err(|_| {
+                ApiError::Domain(DomainError::Validation(format!(
+                    "entry id {:?} is not a UUID",
+                    envelope.entry_id
+                )))
+            })?;
+            Ok((
+                entry,
+                envelope.version,
+                ProjectionBody::parse(envelope.body.clone())?,
+            ))
+        })
+        .collect()
+}
+
+/// `GET /teams/{team_id}/forge/lines/{id}/entries/{entry}/projection`
+/// — what a promoter said about one entry.
+///
+/// **The gate proves membership of the team in the path, and the read
+/// is scoped to that same team.** Both halves are needed and only the
+/// first is automatic: a line id is unique across teams, so
+/// `(line, entry)` alone finds whichever team's row exists, and a
+/// member of any team who learned another team's ids would read its
+/// promoter's description. So `access.team_id` goes to the store, the
+/// way every other line-scoped read here reaches
+/// `TeamForge::for_request`, and a row belonging to another team
+/// answers as absent.
+///
+/// **The one read this projection has**, and there is deliberately no
+/// list: a description is looked up while looking at an entry, and a
+/// route returning every projection on a line would be a second shape
+/// for reading what the line's own reads already enumerate.
+///
+/// A missing projection is a `404` and an ordinary answer (decision
+/// 12). The body comes back verbatim — this handler does not parse it,
+/// and the DTO it travels in names nothing inside it (decision 14).
+async fn get_entry_projection(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(access): Extension<TeamAccess>,
+    Path((_team, line, entry)): Path<(Uuid, String, String)>,
+) -> ForgeResult<EntryProjectionDto> {
+    let line = *line_id(&line)?.as_uuid();
+    let entry = Uuid::parse_str(&entry).map_err(|_| {
+        ApiError::Domain(DomainError::Validation(format!(
+            "entry id {entry:?} is not a UUID"
+        )))
+    })?;
+    let found = ctx
+        .projections
+        .find(access.team_id, line, entry)
+        .await?
+        .ok_or(ApiError::ProjectionNotFound)?;
+    Ok(Json(EntryProjectionDto {
+        line_id: found.line_id.to_string(),
+        entry_id: found.entry_id.to_string(),
+        version: found.version,
+        body: found.body.as_str().to_string(),
+        promoted_by: found.promoted_by.to_string(),
+        pushed_at_ms: found.pushed_at_ms,
+    }))
 }
 
 /// `POST /teams/{team_id}/forge/pursuits/{id}/resolve` — lets the

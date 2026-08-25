@@ -53,6 +53,7 @@ projection instead of full `Asset` entities.
 - `AssetBodyRepository` — Persistence port for the full-text search **body cache** — the
 - `AssetCommentRepository` — Persistence port for [`AssetComment`] — the per-Asset thread of
 - `AssetIndexer` — Ingest side of retrieval — keeps the index in step with the assets.
+- `AssetLinkRepository` — Persistence port for [`AssetLink`] — what a promotion left at home
 - `AssetRepository` — Persistence port for [`Asset`], including the read projection.
 - `AssetRetriever` — Retrieval port — "find me something like this", answered as a
 - `ChapterMarkRepository` — Persistence port for [`ChapterMark`] — the sections a structure

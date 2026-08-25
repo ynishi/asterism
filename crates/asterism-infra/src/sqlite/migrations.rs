@@ -7587,6 +7587,71 @@ const V103_FORGE_ACTOR_DISPLAY_NAME: &str = r#"
 ALTER TABLE forge_actor ADD COLUMN display_name TEXT;
 "#;
 
+/// V104 — what a promotion left at home (#148 decisions 8 and 9).
+///
+/// A member hands an Asset to a team and the team converts it into
+/// something of its own. Neither side holds a reference to the other's
+/// object; this table is the whole of what the member's machine keeps
+/// about the correspondence, and it exists on this side only.
+///
+/// **The key is `(team_id, line_id, entry_id)`, and the Asset is not
+/// part of it.** Decision 8 fixes those three at the client before the
+/// server has seen anything — an operation mints its entry id on the
+/// spot — which is the shape offline-first sync converges on: the
+/// client owns the correlation key and the server maps, rather than
+/// the client learning a server id and mapping back. Two promotions of
+/// one Asset onto two lines are two rows, because a promotion is
+/// identified by where it landed.
+///
+/// **No foreign key, on any of the four ids, and that is the
+/// decision rather than an omission.** Decision 9 states the
+/// constraint the schema has to satisfy: either end can vanish
+/// independently, and neither may break the other. Both available keys
+/// break it in opposite directions. `RESTRICT` would make deleting a
+/// promoted Asset fail while a link row exists, so the team's side
+/// would be reaching into the local plane to forbid a local act.
+/// `CASCADE` would delete the row as a side effect of that delete,
+/// which is quieter and worse: it makes the local plane's delete reach
+/// into the relation, and it removes the very evidence a verify is
+/// supposed to find. What is left is no key and a pair of verbs that
+/// go looking — GitLab's loose foreign keys, which are exactly this
+/// (no database constraint, plus a worker that cleans up after one),
+/// and `git annex fsck`, which tolerates a dangling location log and
+/// checks for one. Decision 9 names both.
+///
+/// So `local_asset_id` is a plain `BLOB`: a UUID that usually names a
+/// row in `asset` and sometimes does not, and finding the second case
+/// is `AssetLinkRepository::dangling_locally`'s job. The other three
+/// name nothing on this machine at all — they are another plane's
+/// surrogates, held as opaque handles (decision 6), and there is
+/// nothing here for a key to point at even in principle.
+///
+/// **One index, on `(team_id, local_asset_id)`.** The primary key
+/// leads with `team_id`, so it already serves everything that arrives
+/// with a key or a team prefix: listing a team's rows, scanning them
+/// for a missing Asset, and the keyed deletes a reap issues. The read
+/// it cannot serve is the one asked from the other direction — *what
+/// has become of this Asset in this team*, asked while looking at an
+/// Asset — because `local_asset_id` is not in the key at any position.
+/// `AssetLinkRepository::for_asset` is that read, and this index is
+/// what keeps it from walking every promotion the machine ever made to
+/// the team. `WITHOUT ROWID` puts the row in the primary-key btree, so
+/// the index is a second copy of three columns rather than of the
+/// whole row.
+const V104_TEAM_ASSET_LINK: &str = r#"
+CREATE TABLE team_asset_link (
+    team_id        BLOB    NOT NULL,
+    line_id        BLOB    NOT NULL,
+    entry_id       BLOB    NOT NULL,
+    local_asset_id BLOB    NOT NULL,
+    pushed_at      INTEGER NOT NULL,
+    PRIMARY KEY (team_id, line_id, entry_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_team_asset_link_on_asset
+    ON team_asset_link (team_id, local_asset_id);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[Step] = &[
@@ -7693,6 +7758,7 @@ const MIGRATIONS: &[Step] = &[
     Step::Sql(V101_TAG_HEAD_REF),
     Step::App(v102_forge_node_keys),
     Step::Sql(V103_FORGE_ACTOR_DISPLAY_NAME),
+    Step::Sql(V104_TEAM_ASSET_LINK),
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

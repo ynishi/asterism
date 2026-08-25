@@ -14,6 +14,7 @@ use teams_infra::auth::password::PasswordAuth;
 use teams_infra::blob::LocalFileStorageAdapter;
 use teams_infra::gc::GcGuard;
 use teams_infra::sqlite::SqliteTeamsRepository;
+use teams_infra::sqlite::projection::SqliteProjectionStore;
 
 use crate::rate_limit::RateLimiter;
 
@@ -61,6 +62,14 @@ pub struct TeamsCtx {
     /// paths hold it — the blob upload (#93) and the forge's content
     /// verb (#151) — because both end in that same pair of steps.
     pub gc_guard: Arc<GcGuard>,
+    /// Captured descriptions, keyed by entry (#148 decision 12).
+    ///
+    /// Its own field rather than a method on [`Self::repo`], for the
+    /// reason it is its own module in `teams-infra`: the projection
+    /// sits outside the forge and outside the state tables the ledger
+    /// is the receipt for, and a handler reaching it through the
+    /// repository would make it look like one of those.
+    pub projections: SqliteProjectionStore,
 }
 
 /// Milliseconds since the Unix epoch, now — the single clock every

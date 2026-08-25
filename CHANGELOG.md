@@ -20,6 +20,69 @@ and this project adheres to
   without touching a release. The six Apple secrets enter by name only; the
   workflow header is the checklist of what each one is.
 
+- **A member's machine can promote an Asset onto a team's line** (#152, #148
+  decisions 3–9 and 12–15). The member's half of #148: a client that talks to a
+  team server, the one composite act that hands an Asset over, and the relation
+  that records it at home. A promotion gathers what cannot be re-derived — the
+  material's bytes and the marks whose layer origin is `User` — brings the
+  content in against open work, pushes a round that names the entry, and writes
+  one row on the promoting machine. Thumbnails, indexed bodies and
+  `Imported`/`Machine` marks stay home, because the receiving side can make them
+  again (#148 decision 4).
+
+  Two members promoting identical bytes get a `TeamAsset` each over one stored
+  copy (#148 decision 7), which is the only arrangement where "who brought what"
+  survives the second contributor. Ids do not cross: a team's ids arrive as a
+  `TeamScopedId`, which has no conversion to or from a local `AssetId` in either
+  direction, so #148 decision 6's forbidden read does not compile. Subjects and
+  digests do cross, which is what that decision says may.
+
+  A shared line is served through rather than mirrored (#148 decision 16), so
+  every read is a request and there is no staleness to reason about. Wanting a
+  line locally is what a clone is for, and a clone is #153's.
+
+- **`asterism-teams-wire` — the leaf both planes may link** (#152, #148 decision
+  15). #83 §4 forbids `asterism-* → teams-*` in any form, and prescribes its own
+  second choice for vocabulary both sides need and neither owns: a leaf that
+  depends on neither. This is it, MIT/Apache-2.0 and named on §4's
+  `asterism-<thing>` rule, carrying the session, team, roster, ledger-page,
+  content-verb and projection shapes. The existing `teams-contract` could not be
+  that leaf — its licence is deliberately undeclared pending §4 and it declares
+  a `teams-core` dependency — so those shapes moved rather than being copied,
+  and `teams-contract` keeps what a member's client does not speak: the roster
+  verbs, the blob upload, the purge two-step and the head registry.
+
+- **Descriptive metadata travels as a captured projection** (#152, #148
+  decisions 12–14). Keyed `(line, entry)` on the teams plane and outside the
+  forge, so it can be lost without any line lying about the present. The body is
+  opaque end to end — no column, no validation, no index, and no DTO naming a
+  field inside it — and the one thing that opens one is a single mapper on the
+  member's side, which branches on the version the body carries. What may travel
+  is declared at that mapper, so an input nobody declared does not leave: a
+  column added to the local model later starts out staying home (#148 decision
+  13). The write rides on the round push rather than getting a verb of its own,
+  which is what keeps a second editing surface from growing beside the verbs.
+
+- **`AssetLink` — the correspondence, held only on the member's machine** (#152,
+  #148 decisions 8 and 9). Keyed `(team_id, line_id, entry_id)`, all three fixed
+  by the client rather than learned back from the server. The server holds no
+  reference to a local Asset in either direction. The relation is advisory and
+  attended: either end may vanish and neither may break the other, so the table
+  carries no foreign key — `RESTRICT` would let a team's row forbid a local
+  delete and `CASCADE` would destroy the evidence a check is meant to find — and
+  a verify and a reap go looking instead, on GitLab's loose-foreign-key and
+  `git annex fsck` precedent. A reap removes link rows and touches nothing else.
+
+- **Schema V104 (app) — `team_asset_link`** (#152). The relation above, with the
+  absent foreign key argued at the batch, and one index for the read a local
+  plane makes while looking at an Asset.
+
+- **Schema V9 (teams) — `asset_projection`** (#152). One row per entry, replaced
+  rather than versioned, scoped by `team_id` so a read cannot cross to another
+  team's description. `version` is a fact about the envelope rather than a field
+  of the body, which is what lets the plane keep and sweep bodies it has never
+  opened.
+
 - **The team's forge is served over HTTP** (#151, #148 decisions 5 and 19). The
   local forge surface is mirrored under `/teams/{team_id}/forge/*` — same paths
   below the prefix, same DTOs from `asterism-contract::forge`, same handler
@@ -138,7 +201,7 @@ and this project adheres to
   an id belonging to another team reads back as absent.
 
   Nothing was served when this landed. The HTTP surface arrived with #151,
-  below; the member's client is still #152.
+  below, and the member's client with #152, above.
 
 - **Schema V7 — the forge's tables on the teams database** (#150). The local
   plane's `line`, `change_point`, `change_row`, `pursuit`, `pursuit_node`,

@@ -46,6 +46,7 @@ invariant in this crate is stated in a shape the desktop app owns.
 - [`domain::head_registry`](domain__head_registry.md): `head_registry` — the instance's carriage of a trained tag head
 - [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [`domain::projection`](domain__projection.md): The captured projection — descriptive metadata, keyed by entry and
 - [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,

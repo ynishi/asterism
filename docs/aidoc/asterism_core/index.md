@@ -159,6 +159,7 @@ the private design notes.
 - [`domain::source_locator`](domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
 - [`domain::tag`](domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [`domain::tag_head`](domain__tag_head.md): The trained tag head (#132 phase 2): per-tag logistic rows over
+- [`domain::team_link`](domain__team_link.md): The relation between a local Asset and what a team made of it
 - [`domain::thread`](domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [`domain::value`](domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [`domain::visual`](domain__visual.md): Visual-feature vocabulary and the encoder port (#112).

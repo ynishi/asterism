@@ -1,0 +1,121 @@
+{
+  "crate": "asterism-teams-wire",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_teams_wire::command",
+      "kind": "module",
+      "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
+    },
+    {
+      "path": "asterism_teams_wire::command::CreateTeamCommand",
+      "kind": "struct",
+      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
+    },
+    {
+      "path": "asterism_teams_wire::command::EnterContentCommand",
+      "kind": "struct",
+      "docs": "Brings content into a team against open work\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=sha256:<hex>`,\nmembers only — #148 decision 5).\n\nIts one field travels in the **query string**: the request body is\nthe content's raw bytes, streamed, so there is no JSON body for it\nto ride in (the OCI registry `PUT ?digest=` shape, #83 §3). What\nthe write leaves behind is what separates this from the substrate's\nown upload: it mints the team asset a round can name, and the work\nit entered against is the path's."
+    },
+    {
+      "path": "asterism_teams_wire::command::HaveContentCommand",
+      "kind": "struct",
+      "docs": "Asks which digests a team already has\n(`POST /teams/{team_id}/forge/content/have`, members only).\n\n**This exists to avoid re-sending bytes and for nothing else.** It\nanswers inside one team, to that team's members, about digests the\ncaller is holding and could upload anyway — so what it reveals is\nwhat the asker could learn by uploading, minus the upload. That\nbound is the design rather than a caveat on it: the same question\nasked across teams, or by anyone outside one, is the deduplication\nside channel Harnik et al. (2010) describes, and #83 §3 closes it\nby making the link row the visibility boundary. This route is\ninside that boundary.\n\nA POST for a read, for [`ResolveContentCommand`]'s reason."
+    },
+    {
+      "path": "asterism_teams_wire::command::LoginCommand",
+      "kind": "struct",
+      "docs": "Presents a credential to `POST /teams/auth/login`."
+    },
+    {
+      "path": "asterism_teams_wire::command::ResolveContentCommand",
+      "kind": "struct",
+      "docs": "Asks what a team holds for a list of its own asset ids\n(`POST /teams/{team_id}/forge/content/resolve`, members only).\n\nA body rather than a query string because the list is the request:\na client reconciling what it promoted asks about as many ids as it\nhas, and a URL is not where that belongs."
+    },
+    {
+      "path": "asterism_teams_wire::dto",
+      "kind": "module",
+      "docs": "Response shapes of the `/teams/*` routes a member's client reads.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
+    },
+    {
+      "path": "asterism_teams_wire::dto::ContentEnteredDto",
+      "kind": "struct",
+      "docs": "What the team minted for content that entered it\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).\n\nThe asset id is the team's own surrogate and never a local one\n(#148 decision 6): a client keeps the correspondence on its own\nmachine, and reading this as a local `AssetId` is the one thing\nthat boundary forbids."
+    },
+    {
+      "path": "asterism_teams_wire::dto::HeldAssetDto",
+      "kind": "struct",
+      "docs": "One asset a team holds, as the bulk resolve answers about it."
+    },
+    {
+      "path": "asterism_teams_wire::dto::HeldContentDto",
+      "kind": "struct",
+      "docs": "The have-check's answer\n(`POST /teams/{team_id}/forge/content/have`).\n\nThe digests this team holds, and nothing about the rest: the\nquestion is what a client may skip sending, and an answer shaped as\n\"held / not held\" per digest is one a caller can line up against\nthe wrong list."
+    },
+    {
+      "path": "asterism_teams_wire::dto::LedgerEventDto",
+      "kind": "struct",
+      "docs": "One entry of a team's append-only stream\n(`GET /teams/{team_id}/events`, and the receipt every mutation\nroute returns)."
+    },
+    {
+      "path": "asterism_teams_wire::dto::LedgerPageDto",
+      "kind": "struct",
+      "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
+    },
+    {
+      "path": "asterism_teams_wire::dto::ResolvedContentDto",
+      "kind": "struct",
+      "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
+    },
+    {
+      "path": "asterism_teams_wire::dto::RosterDto",
+      "kind": "struct",
+      "docs": "The team's current membership set\n(`GET /teams/{team_id}/roster`)."
+    },
+    {
+      "path": "asterism_teams_wire::dto::RosterMemberDto",
+      "kind": "struct",
+      "docs": "One membership row as the roster lists it."
+    },
+    {
+      "path": "asterism_teams_wire::dto::SessionDto",
+      "kind": "struct",
+      "docs": "A freshly minted session (`POST /teams/auth/login`).\n\n**No derived `Debug`** — see the hand-written one below. This is\nthe one shape in this crate carrying a live credential."
+    },
+    {
+      "path": "asterism_teams_wire::dto::SubjectRefDto",
+      "kind": "struct",
+      "docs": "One typed reference an event makes."
+    },
+    {
+      "path": "asterism_teams_wire::dto::TeamCreatedDto",
+      "kind": "struct",
+      "docs": "The result of `POST /teams/create`."
+    },
+    {
+      "path": "asterism_teams_wire::projection",
+      "kind": "module",
+      "docs": "The captured projection — descriptive metadata a promoter said at\nthe time (#148 decisions 12, 13 and 14).\n\n## What this crate's part in it is\n\nDecision 14 keeps the body opaque, and the transport's share of\nthat is small and absolute: **the body is a `String` here and no\nshape in this crate has a field that came from inside it.** Why the\nrule exists, and why\n[`EntryProjectionEnvelope::version`] is a fact about the envelope\nrather than a breach of it, are argued once in\n`teams_core::domain::projection`.\n\nDecision 13's declaration is likewise settled before a body reaches\nhere — it lives at the member's mapper, the only place that knows\nboth the local model and the body. By the time this crate sees one,\nthe answer is a string. A filter expressed on the wire would be a\nsecond place to forget something, and forgetting there fails in the\nunsafe direction."
+    },
+    {
+      "path": "asterism_teams_wire::projection::EntryProjectionDto",
+      "kind": "struct",
+      "docs": "One captured projection, read back\n(`GET /teams/{team_id}/forge/lines/{line_id}/entries/{entry_id}/projection`).\n\nThe team does not edit it and neither does this shape: what comes\nback is what the promoter said at the time, on the same discipline\nas an `ActorStamp` capturing a display name at write time (#148\ndecision 12)."
+    },
+    {
+      "path": "asterism_teams_wire::projection::EntryProjectionEnvelope",
+      "kind": "struct",
+      "docs": "One entry's projection, as it rides onto a round push."
+    },
+    {
+      "path": "asterism_teams_wire::projection::PROJECTION_VERSION",
+      "kind": "constant",
+      "docs": "The current envelope version — what a client writing today stamps,\nand what a reader may assume when it recognises nothing else."
+    },
+    {
+      "path": "asterism_teams_wire::projection::WithProjections",
+      "kind": "struct",
+      "docs": "A round push as a team takes it: whatever the forge's push command\nis, plus the projections riding with it.\n\n**Generic over the push command on purpose.** Decision 19 rides the\nprojection on the push rather than giving it a verb, so the wire\nshape is \"a push, and also these\" — and this crate may not name the\npush, which lives in `asterism-contract::forge` where both planes\nalready read it (#148 revision 10). Taking it as a parameter is how\nthe composition gets written once instead of once per side: the\nserver deserialises `WithProjections<PushForgeRoundCommand>` and\nthe client serialises the same type, over the same flattened body.\n\nThe flatten is what keeps the mirror a mirror. A body with no\n`projections` key is exactly the push command it always was, so a\nclient that knows nothing about projections talks to this route\nunchanged, and the route's shape below the prefix still matches the\nlocal surface's (#148 decision 19).\n\nNo `SchemaBridge` here, unlike everything else in this crate: a\ngeneric has no one rendered schema, and the two shapes it composes\neach have theirs."
+    }
+  ]
+}

@@ -55,6 +55,7 @@ async fn instance(
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
         auth: PasswordAuth::new(isle.clone()),
+        projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle.clone()),
         blobs,
         registration: RegistrationPolicy::Open,
         session_ttl_ms: 60_000,
