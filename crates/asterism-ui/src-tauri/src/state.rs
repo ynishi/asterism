@@ -72,6 +72,33 @@ pub struct AppState {
     /// panel shows, which one the person may edit, and the chapters
     /// inside a structure band.
     pub material_layer_service: Arc<MaterialLayerService>,
+    /// The marks behind their own port — what a publication joins to
+    /// their bands to decide which of them a person wrote. See
+    /// `CoreCtx::material_marks` for why the service above will not
+    /// answer that, and why the bands need no equivalent.
+    pub material_marks: Arc<dyn asterism_core::domain::repository::MaterialMarkRepository>,
+    /// The asset rows behind their port — the two questions a clone
+    /// asks that `AssetService` has no method for. See
+    /// `CoreCtx::assets`.
+    pub assets: Arc<dyn asterism_core::domain::repository::AssetRepository>,
+    /// The relation a promotion leaves at home, which publishing a line
+    /// writes into. See `CoreCtx::asset_links`.
+    pub asset_links: Arc<dyn asterism_core::domain::repository::AssetLinkRepository>,
+    /// The team server this window is talking to, when it is talking to
+    /// one.
+    ///
+    /// A shared line is served through rather than mirrored (#148
+    /// decision 16), so this is not a cache — it is the connection every
+    /// read of one goes down, and when it is `None` the shared panel has
+    /// nothing to show rather than something stale.
+    ///
+    /// Held in a lock because logging in mutates the client, and behind
+    /// an `Option` because the desktop starts with no team and may end
+    /// with none. There is no stored URL or token anywhere: the session
+    /// lives for as long as the window does, which is the smallest
+    /// thing that works and the only one that does not put a
+    /// credential somewhere this issue did not design a home for.
+    pub teams: Arc<tokio::sync::Mutex<Option<asterism_teams_client::TeamsClient>>>,
     /// App-level Threads container — UI writes flow through this
     /// service; the HTTP surface (Claude Code / agents) writes to
     /// the same rows via `ServerCtx::thread_service`, since both
@@ -173,6 +200,10 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         asset_comment_service: core.asset_comment_service,
         material_mark_service: core.material_mark_service,
         material_layer_service: core.material_layer_service,
+        material_marks: core.material_marks,
+        assets: core.assets,
+        asset_links: core.asset_links,
+        teams: Arc::new(tokio::sync::Mutex::new(None)),
         thread_service: core.thread_service,
         line_service: core.line_service,
         pursuit_service: core.pursuit_service,

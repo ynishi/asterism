@@ -711,6 +711,7 @@ dependencies = [
  "asterism-exporter-http",
  "asterism-infra",
  "asterism-server",
+ "asterism-teams-client",
  "async-trait",
  "axum",
  "chrono",

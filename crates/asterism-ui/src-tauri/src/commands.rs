@@ -2,13 +2,22 @@
 //! through to the application services in `asterism-core` and convert
 //! `DomainError` into `UiError`. No business logic lives here.
 //!
-//! Every mutation here names its attribution channel explicitly —
-//! [`AttributionContext::owner_surface`]. This is the owner's own
-//! operation surface (the desktop app's IPC), so the owner-ness is a
-//! property of the surface rather than a guess about the caller, and the
-//! commands carry no attribution fields for it to read. The argument is
-//! required by the service signatures, so a new mutation cannot be added
-//! here without choosing.
+//! Every mutation that writes to *this machine* names its attribution
+//! channel explicitly — [`AttributionContext::owner_surface`]. This is
+//! the owner's own operation surface (the desktop app's IPC), so the
+//! owner-ness is a property of the surface rather than a guess about the
+//! caller, and the commands carry no attribution fields for it to read.
+//! The argument is required by the service signatures, so a new
+//! mutation cannot be added here without choosing.
+//!
+//! The qualifier is #153's and covers exactly one block, at the end of
+//! this file: the verbs that write to a **team**. There the author is
+//! the authenticated member and the team's server stamps it, so a
+//! context stated here would be a second answer to a settled question.
+//! Two of those verbs — connecting and publishing — write nothing
+//! through a service that takes a context, and `publish_line_to_team`
+//! additionally writes local relation rows, which carry no actor at
+//! all. The block says all of this where it sits.
 //!
 //! # This surface and the HTTP one are mirrors
 //!
@@ -70,15 +79,19 @@ use asterism_contract::query::{
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
-    forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
+    asset_to_dto, forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
     forge_history_to_dto, forge_line_id, forge_line_to_dto, forge_message_id, forge_message_to_dto,
     forge_name, forge_op, forge_outcome, forge_pursuit_id, forge_pursuit_to_dto,
     forge_revision_to_dto, forge_round_to_dto, forge_states_to_dto, forge_strategy_id,
-    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_asset_id,
+    forge_strategy_to_dto, forge_thread_id, forge_thread_to_dto, parse_asset_id, parse_persona_id,
 };
 use asterism_core::domain::attribution::AttributionContext;
 use asterism_core::domain::forge::model::pursuit::Intent;
 use asterism_core::domain::forge::model::value::{LineId, PursuitId, ThreadId};
+use asterism_core::domain::repository::SourceLookupScope;
+use asterism_core::domain::source_locator::SourceLocator;
+use asterism_core::domain::team_link::TeamScopedId;
+use asterism_core::domain::value::{AssetId, PersonaId, SourceKind};
 use tauri::State;
 
 use crate::error::UiError;
@@ -546,7 +559,7 @@ pub async fn add_asset(
         .await?)
 }
 
-/// Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
+/// Rehomes a dropped path into `$HOME/asterism/dropped/`
 /// when it lives under a volatile TEMP dir (macOS screenshot
 /// stash lands in `/private/var/folders/…/TemporaryItems/`, and
 /// screenshots dragged out of the preview thumbnail vanish once
@@ -602,7 +615,7 @@ pub async fn rehome_dropped_path(source: String) -> Result<String, UiError> {
 }
 
 /// Writes a clipboard-pasted image blob to
-/// `~/Pictures/Asterism/pasted/paste-<ts>.<ext>` and dispatches
+/// `$HOME/asterism/pasted/paste-<ts>.<ext>` and dispatches
 /// `add_asset` for it. The MIME-type hint picks the extension; the
 /// downstream pipeline still sniffs the actual container so a
 /// slightly-wrong `image/webp` label does not stop cover_gen /
@@ -2925,4 +2938,406 @@ pub async fn list_forge_threads_about(
     )?;
     let found = state.forge_thread_service.about(about).await?;
     Ok(found.iter().map(forge_thread_to_dto).collect())
+}
+
+// -----------------------------------------------------------------
+// Lines a team hosts (#148 decisions 10, 11 and 16).
+//
+// Everything below reaches a team's server, which is the difference
+// from the block above. A shared line is served through rather than
+// mirrored, so each of these reads is a request and there is no local
+// copy to be out of date with — which is also why they answer the same
+// DTOs the local verbs do. Two sources, one vocabulary, and a panel
+// that keeps them apart.
+//
+// Two of them also write here, and it is worth saying which, because
+// "goes to a server" would otherwise read as "touches nothing local".
+// `clone_shared_entry` records an asset on this machine — that is what
+// a clone is. `publish_line_to_team` writes the relation rows a
+// promotion leaves at home (#148 decision 8). Neither of those is a
+// reason for the block to sit anywhere else; the reads and the writes
+// share a connection, and splitting them would put the connection in
+// two places.
+//
+// The attribution question has a different answer here too. A write in
+// the block above is the owner's, because the surface says so. A write
+// that lands on a team is the authenticated member's, because the team
+// says so — the client states no author at all and the server stamps
+// the session. So `owner_surface` appears below exactly once, on the
+// clone, and it is right there for the reason it is right anywhere:
+// the clone's write is a local import, on the owner's own machine,
+// through the owner's own window.
+// -----------------------------------------------------------------
+
+/// Turns what went wrong with a team into what the window shows.
+///
+/// A refusal the server wrote keeps its own words — the panel is
+/// telling somebody why the team said no, and "internal error" is not
+/// that. Everything else the client can fail at is this machine's
+/// business and reads as one.
+fn teams_error(err: asterism_teams_client::TeamsClientError) -> UiError {
+    use asterism_teams_client::TeamsClientError as E;
+    match err {
+        E::Local(domain) => UiError::from(domain),
+        E::Refused {
+            status: 404,
+            message,
+            ..
+        } => UiError::from(DomainError::not_found("on the team server", message)),
+        E::Refused {
+            status, message, ..
+        } if (400..500).contains(&status) => UiError::from(DomainError::Validation(message)),
+        other => UiError::from(DomainError::Infra(anyhow::anyhow!("{other}"))),
+    }
+}
+
+/// The team server this window is talking to, or a refusal saying it is
+/// talking to none.
+async fn teams_client(state: &AppState) -> Result<asterism_teams_client::TeamsClient, UiError> {
+    state.teams.lock().await.clone().ok_or_else(|| {
+        UiError::from(DomainError::Validation(
+            "this window is not connected to a team server; connect to one first".into(),
+        ))
+    })
+}
+
+fn team_id(raw: &str, what: &'static str) -> Result<TeamScopedId, UiError> {
+    Ok(TeamScopedId::parse(raw, what)?)
+}
+
+/// Logs this window in to a team server and holds the session.
+///
+/// Nothing is stored. The URL and the session live for as long as the
+/// window does — see `AppState::teams` for why a credential has no home
+/// on disk yet.
+#[tauri::command]
+pub async fn connect_team_server(
+    state: State<'_, AppState>,
+    base_url: String,
+    login: String,
+    password: String,
+) -> Result<String, UiError> {
+    let mut client = asterism_teams_client::TeamsClient::new(base_url);
+    client.login(&login, &password).await.map_err(teams_error)?;
+    let user = client
+        .user_id()
+        .ok_or_else(|| {
+            UiError::from(DomainError::Infra(anyhow::anyhow!(
+                "the server accepted the login and named nobody"
+            )))
+        })?
+        .to_string();
+    *state.teams.lock().await = Some(client);
+    Ok(user)
+}
+
+/// Drops the session. The panel goes empty rather than stale.
+#[tauri::command]
+pub async fn disconnect_team_server(state: State<'_, AppState>) -> Result<(), UiError> {
+    if let Some(mut client) = state.teams.lock().await.take() {
+        // Best effort: the local session is already gone, and a server
+        // that cannot be reached to be told will expire it.
+        let _ = client.logout().await;
+    }
+    Ok(())
+}
+
+/// Whether this window is talking to a team server.
+#[tauri::command]
+pub async fn team_server_session(state: State<'_, AppState>) -> Result<Option<String>, UiError> {
+    Ok(state
+        .teams
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|client| client.user_id().map(ToString::to_string)))
+}
+
+/// Every line a team hosts, without its history.
+///
+/// The panel these go in is its own, separate from the local lines —
+/// which is what having two sources honestly looks like (decision 16).
+#[tauri::command]
+pub async fn list_shared_lines(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+) -> Result<Vec<ForgeLineDto>, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .lines(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)
+}
+
+/// What is on a shared line, folded from its chain by the server.
+#[tauri::command]
+pub async fn shared_line_states(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+) -> Result<Vec<ForgeEntryStateDto>, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .line_states(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&line_id, "line id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// A shared line and its whole history.
+#[tauri::command]
+pub async fn shared_line_history(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+) -> Result<ForgeLineHistoryDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .line_history(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&line_id, "line id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// Takes a copy of one entry of a shared line (#148 decision 10).
+///
+/// An import, and it lands through the same door every other import
+/// lands through — which is why the answer is an ordinary `AssetDto`
+/// and why the duplicate machinery recognises the second ask.
+#[tauri::command]
+pub async fn clone_shared_entry(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+    entry_id: String,
+    persona_id: String,
+) -> Result<AssetDto, UiError> {
+    let client = teams_client(&state).await?;
+    let persona = parse_persona_id(&persona_id)?;
+    let root = clones_dir()?;
+    // The channel is chosen here rather than inside the port below,
+    // and that is not a detail. A mutation on this surface names
+    // `AttributionContext::owner_surface()` in its own body, which is
+    // both how the service learns who is asking and how the guard in
+    // `tests/mutation_surface.rs` can see that the write surface grew.
+    // Passed down rather than constructed there, so the choosing stays
+    // where the command is.
+    let library = LocalLibrary {
+        state: &state,
+        persona,
+        by: AttributionContext::owner_surface(),
+    };
+    let cloned = asterism_teams_client::clone::clone_entry(
+        &client,
+        &library,
+        asterism_teams_client::clone::CloneRequest {
+            team_id: team_id(&team_id_raw, "team id")?,
+            line_id: team_id(&line_id, "line id")?,
+            entry_id: team_id(&entry_id, "entry id")?,
+            persona_id: &persona,
+            root: &root,
+        },
+        chrono::Utc::now(),
+    )
+    .await
+    .map_err(teams_error)?;
+    let held = state
+        .assets
+        .find(&cloned.asset_id)
+        .await?
+        .ok_or_else(|| DomainError::not_found("asset", cloned.asset_id))?;
+    Ok(asset_to_dto(&held))
+}
+
+/// Seeds a team's line from a local one (#148 decision 11).
+///
+/// `reenact` is the option at init and nowhere else. It replays the
+/// chain — one pursuit and one close per change point — and it is a
+/// **re-enactment**: the acts are restamped to whoever published, so
+/// the team's line does not record who did the work upstream. It also
+/// sends every content the line ever named, which is usually far more
+/// than what the line holds now. The panel says both of those things
+/// before it offers the choice.
+#[tauri::command]
+pub async fn publish_line_to_team(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+    name: String,
+    strategy_id: String,
+    reenact: bool,
+) -> Result<ForgeLineDto, UiError> {
+    let client = teams_client(&state).await?;
+    let line = state
+        .line_service
+        .get(&forge_line_id(&line_id, "line id")?)
+        .await?;
+    let holdings = LocalHoldings { state: &state };
+    let published = asterism_teams_client::publish::publish(
+        &client,
+        state.asset_links.as_ref(),
+        &holdings,
+        asterism_teams_client::publish::Publication {
+            team_id: team_id(&team_id_raw, "team id")?,
+            line: &line,
+            named: &name,
+            strategy_id: &strategy_id,
+            seeding: if reenact {
+                asterism_teams_client::publish::Seeding::Reenactment
+            } else {
+                asterism_teams_client::publish::Seeding::CurrentState
+            },
+        },
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .await
+    .map_err(teams_error)?;
+    client
+        .lines(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?
+        .into_iter()
+        .find(|line| line.id == published.line_id.to_string())
+        .ok_or_else(|| {
+            UiError::from(DomainError::Infra(anyhow::anyhow!(
+                "the line was seeded and the team does not list it"
+            )))
+        })
+}
+
+/// Where copies of what a team holds are kept.
+///
+/// Beside the other two places the desktop puts bytes it was handed
+/// rather than pointed at — `rehome_dropped_path` and
+/// `paste_image_import` — and for the same reason: a locator has to go
+/// on outliving the gesture that produced it.
+fn clones_dir() -> Result<std::path::PathBuf, UiError> {
+    let home = std::env::var("HOME")
+        .map_err(|e| UiError::from(DomainError::Validation(format!("HOME env not set: {e}"))))?;
+    Ok(std::path::PathBuf::from(home).join("asterism/cloned"))
+}
+
+/// The local library a clone lands in.
+struct LocalLibrary<'a> {
+    state: &'a AppState,
+    persona: PersonaId,
+    /// Chosen by the command, not here — see `clone_shared_entry`.
+    by: AttributionContext,
+}
+
+#[async_trait::async_trait]
+impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
+    async fn held(&self, source_kind: &str, locator: &str) -> Result<Option<AssetId>, DomainError> {
+        Ok(self
+            .state
+            .assets
+            .find_by_source(
+                &self.persona,
+                &SourceKind::new(source_kind)?,
+                &SourceLocator::from_wire(locator)?,
+                SourceLookupScope::Live,
+            )
+            .await?
+            .map(|asset| asset.id))
+    }
+
+    async fn record(
+        &self,
+        arrival: asterism_teams_client::clone::Arrival<'_>,
+    ) -> Result<AssetId, DomainError> {
+        let added = self
+            .state
+            .asset_service
+            .add(
+                AddAssetCommand {
+                    persona_id: self.persona.to_string(),
+                    source_kind: arrival.source_kind.to_string(),
+                    locator: arrival.locator.to_string(),
+                    // Unclassified, as a paste is: "is an image" is a
+                    // data format and the material layer answers it
+                    // from the file.
+                    modality: None,
+                    occurred_at_ms: arrival.occurred_at.timestamp_millis(),
+                    session_id: None,
+                    external_session_key: None,
+                    external_key: None,
+                    bundle_id: None,
+                    labels: vec!["cloned".into()],
+                    register_note: None,
+                    platform: None,
+                    file_size_bytes: Some(arrival.bytes),
+                    duration_ms: None,
+                    width_px: None,
+                    height_px: None,
+                    extra_json: None,
+                    // What the promoter called it, which is the one
+                    // thing an ingest has a slot for saying.
+                    cover_hint: arrival.cover_hint.map(ToString::to_string),
+                    auto_organize_base_dir: None,
+                    // A copy declares no origin on this axis: where it
+                    // came from is `source_kind` and the locator, and
+                    // `derived_from` names a local asset this was made
+                    // out of, which nothing here is.
+                    derived_from: None,
+                    // The three assertion fields stay empty for the
+                    // reason `paste_image_import` states: this arrived
+                    // through the owner's own surface, which the
+                    // context below says and an assertion may not.
+                    author_kind: None,
+                    author_subject: None,
+                    operator_ai: None,
+                    on_duplicate: None,
+                    // A logical locator would be refused with one, and
+                    // this one is a path — but the digest the team
+                    // verified is about the bytes as the team holds
+                    // them, and what lands here is what arrived. The
+                    // hash job reads the file and answers for itself.
+                    declared_content_hash: None,
+                    album_meta: Default::default(),
+                },
+                &self.by,
+            )
+            .await?;
+        parse_asset_id(&added.id)
+    }
+}
+
+/// What a line's content is, on this machine.
+struct LocalHoldings<'a> {
+    state: &'a AppState,
+}
+
+#[async_trait::async_trait]
+impl asterism_teams_client::publish::Holdings for LocalHoldings<'_> {
+    async fn subject(
+        &self,
+        content: AssetId,
+    ) -> Result<asterism_teams_client::publish::HeldSubject, DomainError> {
+        let asset = self
+            .state
+            .assets
+            .find(&content)
+            .await?
+            .ok_or_else(|| DomainError::not_found("asset", content))?;
+        // The origin filter is the domain's, over the domain's values:
+        // a mark travels when the band it sits in was written by a
+        // person (#148 decision 4), and `gather` is the only thing that
+        // can say so. The bands come through their service, which hands
+        // back the domain value; the marks cannot, because the DTO
+        // drops the `layer_id` the join is made of.
+        let layers = self
+            .state
+            .material_layer_service
+            .list_by_asset(&content)
+            .await?;
+        let marks = self.state.material_marks.list_by_asset(&content).await?;
+        Ok(asterism_teams_client::publish::HeldSubject {
+            user_marks: asterism_teams_client::PromotedMark::gather(&layers, &marks),
+            asset,
+        })
+    }
 }
