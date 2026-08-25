@@ -5,7 +5,7 @@
     {
       "path": "asterism_ui::commands",
       "kind": "module",
-      "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation here names its attribution channel explicitly —\n[`AttributionContext::owner_surface`]. This is the owner's own\noperation surface (the desktop app's IPC), so the owner-ness is a\nproperty of the surface rather than a guess about the caller, and the\ncommands carry no attribution fields for it to read. The argument is\nrequired by the service signatures, so a new mutation cannot be added\nhere without choosing.\n\n# This surface and the HTTP one are mirrors\n\nNot \"mostly overlapping\" — a verb on one belongs on the other, in the\nsame change. `asterism-server`'s `http` module doc states the rule\nand the two differences that are by design: attribution, and where\nthe id comes from.\n\nMCP is not part of that obligation. It is curated on purpose, which\nits own module doc explains."
+      "docs": "Tauri command handlers — a thin translation layer. They pass DTOs\nthrough to the application services in `asterism-core` and convert\n`DomainError` into `UiError`. No business logic lives here.\n\nEvery mutation that writes to *this machine* names its attribution\nchannel explicitly — [`AttributionContext::owner_surface`]. This is\nthe owner's own operation surface (the desktop app's IPC), so the\nowner-ness is a property of the surface rather than a guess about the\ncaller, and the commands carry no attribution fields for it to read.\nThe argument is required by the service signatures, so a new\nmutation cannot be added here without choosing.\n\nThe qualifier is #153's and covers exactly one block, at the end of\nthis file: the verbs that write to a **team**. There the author is\nthe authenticated member and the team's server stamps it, so a\ncontext stated here would be a second answer to a settled question.\nTwo of those verbs — connecting and publishing — write nothing\nthrough a service that takes a context, and `publish_line_to_team`\nadditionally writes local relation rows, which carry no actor at\nall. The block says all of this where it sits.\n\n# This surface and the HTTP one are mirrors\n\nNot \"mostly overlapping\" — a verb on one belongs on the other, in the\nsame change. `asterism-server`'s `http` module doc states the rule\nand the two differences that are by design: attribution, and where\nthe id comes from.\n\nMCP is not part of that obligation. It is curated on purpose, which\nits own module doc explains."
     },
     {
       "path": "asterism_ui::commands::accept_tag_suggestion",
@@ -123,9 +123,19 @@
       "docs": "Bulk attach / detach of asset↔group pairs. Returns\n`[attached, detached]` written-row counts."
     },
     {
+      "path": "asterism_ui::commands::clone_shared_entry",
+      "kind": "function",
+      "docs": "Takes a copy of one entry of a shared line (#148 decision 10).\n\nAn import, and it lands through the same door every other import\nlands through — which is why the answer is an ordinary `AssetDto`\nand why the duplicate machinery recognises the second ask."
+    },
+    {
       "path": "asterism_ui::commands::close_forge_pursuit",
       "kind": "function",
       "docs": "Ends the work, and puts what it says on the line if it says\nanything.\n\n**A [`UiError::Conflict`] from here is not always worth retrying,\nand its `reason` says which kind it is:** `\"blocked\"` wants\nsomething done first and the message says what, `\"raced\"` will\nusually win on a retry, `\"settled\"` never helps, and `\"clashes\"` has\nto ask for something different. They are spelled out on\n`close_forge_pursuit` in `asterism-server`'s `http` module,\nincluding why `\"blocked\"` arrives for two different reasons."
+    },
+    {
+      "path": "asterism_ui::commands::connect_team_server",
+      "kind": "function",
+      "docs": "Logs this window in to a team server and holds the session.\n\nNothing is stored. The URL and the session live for as long as the\nwindow does — see `AppState::teams` for why a credential has no home\non disk yet."
     },
     {
       "path": "asterism_ui::commands::create_dir",
@@ -251,6 +261,11 @@
       "path": "asterism_ui::commands::discard_forge_line",
       "kind": "function",
       "docs": "Takes the line, its history and every piece of work against it.\n\n**The answer is the point.** It names the assets the drop released,\nand after this write there is no record left to derive them from, so\na caller that ignores it has lost the only answer there will be."
+    },
+    {
+      "path": "asterism_ui::commands::disconnect_team_server",
+      "kind": "function",
+      "docs": "Drops the session. The panel goes empty rather than stale."
     },
     {
       "path": "asterism_ui::commands::dispatch_run",
@@ -513,6 +528,11 @@
       "docs": "Every known application setting, resolved through code default →\nenvironment variable → stored row (last wins). Each row reports the\nlayer that supplied it (`source`), the whole chain it came from\n(`layers`), and the registry metadata, so the settings panel can\nrender a control and show where its value came from without a\nsecond call."
     },
     {
+      "path": "asterism_ui::commands::list_shared_lines",
+      "kind": "function",
+      "docs": "Every line a team hosts, without its history.\n\nThe panel these go in is its own, separate from the local lines —\nwhich is what having two sources honestly looks like (decision 16)."
+    },
+    {
       "path": "asterism_ui::commands::list_snapshots_containing",
       "kind": "function",
       "docs": "Reverse lookup — every Snapshot whose asset_ids list contains this\nasset (P5). Renders on the detail panel as \"included in these\nfreezes\" chips."
@@ -590,7 +610,7 @@
     {
       "path": "asterism_ui::commands::paste_image_import",
       "kind": "function",
-      "docs": "Writes a clipboard-pasted image blob to\n`~/Pictures/Asterism/pasted/paste-<ts>.<ext>` and dispatches\n`add_asset` for it. The MIME-type hint picks the extension; the\ndownstream pipeline still sniffs the actual container so a\nslightly-wrong `image/webp` label does not stop cover_gen /\nthumb_gen from producing previews."
+      "docs": "Writes a clipboard-pasted image blob to\n`$HOME/asterism/pasted/paste-<ts>.<ext>` and dispatches\n`add_asset` for it. The MIME-type hint picks the extension; the\ndownstream pipeline still sniffs the actual container so a\nslightly-wrong `image/webp` label does not stop cover_gen /\nthumb_gen from producing previews."
     },
     {
       "path": "asterism_ui::commands::patch_session_metadata",
@@ -626,6 +646,11 @@
       "path": "asterism_ui::commands::promote_volatile_selection",
       "kind": "function",
       "docs": "Fuses freeze + promote for the grid's volatile pick (W5-d):\nmints a Snapshot from the picked ids (content-hash deduped)\nand promotes it into a hand-owned Group in one step — the\nright-click \"Group-ify selection\" entry, no pre-existing Snapshot\nneeded."
+    },
+    {
+      "path": "asterism_ui::commands::publish_line_to_team",
+      "kind": "function",
+      "docs": "Seeds a team's line from a local one (#148 decision 11).\n\n`reenact` is the option at init and nowhere else. It replays the\nchain — one pursuit and one close per change point — and it is a\n**re-enactment**: the acts are restamped to whoever published, so\nthe team's line does not record who did the work upstream. It also\nsends every content the line ever named, which is usually far more\nthan what the line holds now. The panel says both of those things\nbefore it offers the choice."
     },
     {
       "path": "asterism_ui::commands::pull_tag_head",
@@ -695,7 +720,7 @@
     {
       "path": "asterism_ui::commands::rehome_dropped_path",
       "kind": "function",
-      "docs": "Rehomes a dropped path into `~/Pictures/Asterism/dropped/`\nwhen it lives under a volatile TEMP dir (macOS screenshot\nstash lands in `/private/var/folders/…/TemporaryItems/`, and\nscreenshots dragged out of the preview thumbnail vanish once\nthe preview closes — a stale locator would then break every\ndownstream read). The copy also drops the path into the Tauri\n`assetProtocol` scope so `convertFileSrc` works for full-window\nimage playback. Returns the durable path; the frontend feeds it\nstraight into `add_asset`."
+      "docs": "Rehomes a dropped path into `$HOME/asterism/dropped/`\nwhen it lives under a volatile TEMP dir (macOS screenshot\nstash lands in `/private/var/folders/…/TemporaryItems/`, and\nscreenshots dragged out of the preview thumbnail vanish once\nthe preview closes — a stale locator would then break every\ndownstream read). The copy also drops the path into the Tauri\n`assetProtocol` scope so `convertFileSrc` works for full-window\nimage playback. Returns the durable path; the frontend feeds it\nstraight into `add_asset`."
     },
     {
       "path": "asterism_ui::commands::reject_tag_suggestion",
@@ -838,9 +863,24 @@
       "docs": "Stores one setting override and returns the value that now applies.\n\nA successful write always resolves to `source: \"stored\"` — nothing\noutranks the user's choice. The resolved row is returned rather than\nthe input so the caller also gets the refreshed `layers` chain.\nRejects a value that does not match the key's declared kind or falls\noutside its range, and an unknown key."
     },
     {
+      "path": "asterism_ui::commands::shared_line_history",
+      "kind": "function",
+      "docs": "A shared line and its whole history."
+    },
+    {
+      "path": "asterism_ui::commands::shared_line_states",
+      "kind": "function",
+      "docs": "What is on a shared line, folded from its chain by the server."
+    },
+    {
       "path": "asterism_ui::commands::snapshot_members",
       "kind": "function",
       "docs": "Snapshot view members (`snapshot_members`): renderable cards\nin frozen `position` order (later-deleted assets are absent)."
+    },
+    {
+      "path": "asterism_ui::commands::team_server_session",
+      "kind": "function",
+      "docs": "Whether this window is talking to a team server."
     },
     {
       "path": "asterism_ui::commands::train_tag_head",

@@ -324,9 +324,11 @@
 
 - [asterism-teams-client overview](asterism_teams_client/index.md): # asterism-teams-client — the member's half of a shared line
 - [asterism-teams-client::client](asterism_teams_client/client.md): Talking to a team server (#148 decisions 16 and 19).
+- [asterism-teams-client::clone](asterism_teams_client/clone.md): Taking a copy of what a team holds (#148 decision 10).
 - [asterism-teams-client::link](asterism_teams_client/link.md): Verify and reap — what makes the relation *attended* rather than
 - [asterism-teams-client::mapper](asterism_teams_client/mapper.md): The one mapper — what may travel, and the declaration that decides
 - [asterism-teams-client::promotion](asterism_teams_client/promotion.md): Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
+- [asterism-teams-client::publish](asterism_teams_client/publish.md): Seeding a team's line from a private one (#148 decision 11).
 
 ## asterism-teams-wire 0.0.0
 

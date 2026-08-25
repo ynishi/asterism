@@ -4,13 +4,22 @@ Tauri command handlers — a thin translation layer. They pass DTOs
 through to the application services in `asterism-core` and convert
 `DomainError` into `UiError`. No business logic lives here.
 
-Every mutation here names its attribution channel explicitly —
-[`AttributionContext::owner_surface`]. This is the owner's own
-operation surface (the desktop app's IPC), so the owner-ness is a
-property of the surface rather than a guess about the caller, and the
-commands carry no attribution fields for it to read. The argument is
-required by the service signatures, so a new mutation cannot be added
-here without choosing.
+Every mutation that writes to *this machine* names its attribution
+channel explicitly — [`AttributionContext::owner_surface`]. This is
+the owner's own operation surface (the desktop app's IPC), so the
+owner-ness is a property of the surface rather than a guess about the
+caller, and the commands carry no attribution fields for it to read.
+The argument is required by the service signatures, so a new
+mutation cannot be added here without choosing.
+
+The qualifier is #153's and covers exactly one block, at the end of
+this file: the verbs that write to a **team**. There the author is
+the authenticated member and the team's server stamps it, so a
+context stated here would be a second answer to a settled question.
+Two of those verbs — connecting and publishing — write nothing
+through a service that takes a context, and `publish_line_to_team`
+additionally writes local relation rows, which carry no actor at
+all. The block says all of this where it sits.
 
 # This surface and the HTTP one are mirrors
 
@@ -47,7 +56,9 @@ its own module doc explains.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `clone_shared_entry` — Takes a copy of one entry of a shared line (#148 decision 10).
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
+- `connect_team_server` — Logs this window in to a team server and holds the session.
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -73,6 +84,7 @@ its own module doc explains.
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
 - `detach_tag_batch` — Detaches one tag from many assets in one call.
 - `discard_forge_line` — Takes the line, its history and every piece of work against it.
+- `disconnect_team_server` — Drops the session. The panel goes empty rather than stale.
 - `dispatch_run` — Live-source dispatch (`dispatch_run`): freezes a Group (query
 - `edit_asset_comment` — Rewrites the body of an existing comment (stamps `edited_at`).
 - `edit_chapter_mark` — Retitles a section and, unlike the mark face, may move it: the reason
@@ -125,6 +137,7 @@ its own module doc explains.
 - `list_series_strategies` — Every registered series rule, oldest first, seeded and user-written
 - `list_sessions` — Sessions view — one row per `session_id` in the query scope.
 - `list_settings` — Every known application setting, resolved through code default →
+- `list_shared_lines` — Every line a team hosts, without its history.
 - `list_snapshots_containing` — Reverse lookup — every Snapshot whose asset_ids list contains this
 - `list_streams` — The stream names [`list_observations`]'s `stream` filter accepts —
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
@@ -148,6 +161,7 @@ its own module doc explains.
 - `promote_snapshot_to_group` — Promotes a Snapshot into a hand-owned Group (mirror of
 - `promote_tag_to_group` — Snapshots every asset carrying a tag into a newly-created Group.
 - `promote_volatile_selection` — Fuses freeze + promote for the grid's volatile pick (W5-d):
+- `publish_line_to_team` — Seeds a team's line from a local one (#148 decision 11).
 - `pull_tag_head` — Enqueues a `HeadPull` install of a fetched head artifact — the
 - `purge_asset` — Permanently deletes an already-trashed asset. Conflicts when the
 - `purge_group` — Permanently deletes an already-trashed Group (cascades the m:n
@@ -161,7 +175,7 @@ its own module doc explains.
 - `record_event` — Appends one telemetry event to the local `event_log`. Fire-and-
 - `redispatch` — Re-runs a finished dispatch with the same frozen input (P2).
 - `register_persona` — Registers a new persona.
-- `rehome_dropped_path` — Rehomes a dropped path into `~/Pictures/Asterism/dropped/`
+- `rehome_dropped_path` — Rehomes a dropped path into `$HOME/asterism/dropped/`
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
@@ -190,7 +204,10 @@ its own module doc explains.
 - `set_persona_profile` — Upserts the persona's identity signal.
 - `set_persona_theme` — Sets (or clears) the wallpaper for a persona.
 - `set_setting` — Stores one setting override and returns the value that now applies.
+- `shared_line_history` — A shared line and its whole history.
+- `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
 - `trash_group` — Moves a Group to the trash (reversible; membership and drag order
