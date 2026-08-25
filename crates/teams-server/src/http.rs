@@ -98,13 +98,11 @@ use axum::{Extension, Json, Router};
 use asterism_core::DomainError as ForgeError;
 use http_body_util::BodyExt as _;
 use teams_contract::command::{
-    CreateTeamCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand, RemoveMemberCommand,
-    RevokeOwnerCommand, UploadBlobCommand,
+    GrantOwnerCommand, InviteMemberCommand, RemoveMemberCommand, RevokeOwnerCommand,
+    UploadBlobCommand,
 };
 use teams_contract::dto::{
-    BlobUploadedDto, HeadPublishedDto, LedgerEventDto, LedgerPageDto, MarkedBlobLinkDto,
-    MarkedBlobsDto, PurgeReclaimedDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
-    TeamCreatedDto,
+    BlobUploadedDto, HeadPublishedDto, MarkedBlobLinkDto, MarkedBlobsDto, PurgeReclaimedDto,
 };
 use teams_core::DomainError;
 use teams_core::domain::head_registry::TagHeadEntry;
@@ -118,6 +116,15 @@ use teams_core::port::auth::CredentialVerifier;
 use teams_infra::auth::password::AccountRecord;
 use teams_infra::gc::sweep_zero_link_blobs;
 use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
+// The shapes a member's client also reads, from the leaf both planes
+// depend on (#148 decision 15). Which crate a shape comes from is the
+// answer to "does a client say this", and nothing else changed about
+// any of them.
+use asterism_teams_wire::command::{CreateTeamCommand, LoginCommand};
+use asterism_teams_wire::dto::{
+    LedgerEventDto, LedgerPageDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
+    TeamCreatedDto,
+};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -146,6 +153,16 @@ pub(crate) enum ApiError {
     Forbidden(String),
     /// The `{team_id}` names no team on this instance.
     TeamNotFound,
+    /// Nothing has been said about this entry (#148 decision 12) — an
+    /// ordinary absence rather than a fault.
+    ///
+    /// The same `404` also covers an entry on another team's line,
+    /// which the read scopes out. Conflating the two is not the blob
+    /// read's evasion: the line's own reads enumerate its entries to
+    /// any member, so nothing is being hidden from a caller who can
+    /// already see it, and a caller who cannot see the line learns
+    /// only that this instance will not answer them about it.
+    ProjectionNotFound,
     /// The blob read's one answer for every miss — unknown team,
     /// non-member, unlinked digest, foreign digest — deliberately a
     /// single variant so the four cannot drift into distinguishable
@@ -237,6 +254,11 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "NotFound",
                 "no such blob in this team".to_string(),
+            ),
+            Self::ProjectionNotFound => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "nothing has been said about this entry".to_string(),
             ),
             Self::HeadRegistryEmpty => (
                 StatusCode::NOT_FOUND,

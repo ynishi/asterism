@@ -27,6 +27,10 @@ path = "src/main.rs"
 teams-core     = { path = "../teams-core" }
 teams-infra    = { path = "../teams-infra" }
 teams-contract = { path = "../teams-contract" }
+# The shapes a member's client also speaks (#148 decision 15). Same
+# routes, same fields — which crate they live in is the answer to
+# whether a client says them, and this binary answers both halves.
+asterism-teams-wire = { path = "../asterism-teams-wire" }
 
 # The forge is hosted on the team plane (#148 decision 20), so the
 # transport that mirrors its verbs builds its services here, per
@@ -64,7 +68,9 @@ tokio-util = { workspace = true }
 
 [dev-dependencies]
 # The route e2e drives the real router through `oneshot` rather than
-# binding a port — same discipline as asterism-server's suites.
+# binding a port — same discipline as asterism-server's suites. The
+# #148 client e2e is the one exception and says why in its module doc:
+# there the client is what is under test, and it speaks HTTP.
 tower = { version = "0.5", features = ["util"] }
 # The tests open the in-memory teams DB themselves and hold its driver,
 # so the isle types appear in test signatures.

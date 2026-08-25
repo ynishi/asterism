@@ -32,6 +32,14 @@ members = [
     "crates/teams-infra",
     "crates/teams-contract",
     "crates/teams-server",
+    # The member's half of #148 (issue #152), and the leaf between the
+    # two planes. Both are `asterism-*` rows and both inherit the
+    # workspace licence — the leaf deliberately, because the edge it
+    # exists to make legal runs from this side (#148 decision 15), and
+    # #83 §4 names a leaf `asterism-<thing>` for exactly that reason.
+    # Neither links a reserved-licence crate; their manifests argue it
+    # at length.
+    "crates/asterism-teams-wire",
 ]
 
 [workspace.package]
@@ -196,7 +204,24 @@ base64      = "0.22"
 # already pinned this exact line by hand (server / importer-sdk / the two
 # exporters) and `asterism-benchgen`'s `load-file` loader cannot drift
 # into two reqwest builds — one TLS backend, one linked copy.
-reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+#
+# `stream` was added when the member's client landed (#148): a
+# promotion sends a material's bytes, and a material is whatever a
+# person put in their library. Without it the only way to build a
+# request body is to hand `reqwest` an owned `Vec<u8>`, which makes the
+# largest allocation in a promoting process the size of the largest
+# file it promotes — the same trade the workspace already refuses on
+# the serving side (see `tokio-util` above).
+#
+# What it costs, stated at the level the lockfile records rather than
+# the level crate names would let it be waved past: the feature turns
+# on `futures-util` and `tokio-util`, both already built here, and
+# `wasm-streams`, which was not — `Cargo.lock` gains a second block for
+# it at 0.4.2 beside the 0.5.0 another dependency holds. Nothing on
+# this workspace's targets builds either, because `reqwest` declares it
+# under `cfg(target_arch = "wasm32")`; what changes is one more entry
+# to resolve and audit.
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 # --- asterism-core: string collation ---
 # The grid sort is a two-sided contract (`domain::sort_eval` +

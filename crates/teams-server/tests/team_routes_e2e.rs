@@ -48,6 +48,7 @@ async fn harness(registration: RegistrationPolicy) -> Harness {
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
         auth: PasswordAuth::new(isle.clone()),
+        projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle.clone()),
         blobs,
         registration,
         session_ttl_ms: 60_000,
