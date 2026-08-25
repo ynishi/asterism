@@ -263,6 +263,21 @@
       "docs": "Whether `kind` is one of the substrate's own v0 gestures.\n\nShape and registration are separate questions on purpose: a reader\nmust accept well-formed kinds it does not know (a stream written by\na newer build), and a *writer* asks [`is_registered_kind`] before\nappending."
     },
     {
+      "path": "teams_core::domain::projection",
+      "kind": "module",
+      "docs": "The captured projection — descriptive metadata, keyed by entry and\nopaque all the way down (#148 decisions 12, 13 and 14).\n\n## Outside the forge, on purpose\n\nThe forge has three axes and #102 forbids a column that answers\nwhat the history already answers, so a description is not a fourth\naxis and does not go on a change point. It lives beside the forge\non this plane, keyed `(line, entry)`. The consequence the design\nactually wants from that: **a projection can be lost without the\nline lying.** Everything else here follows from it — including why\nthe write does not share the forge's transaction, and why nothing\nappends to the ledger when one is captured.\n\n## Captured, not owned\n\nIt is what the promoter said at the time, on the same discipline as\nan `ActorStamp` capturing a display name at write time. The team\ndoes not edit it. Only a forge op replaces one — which is why the\nwrite rides on the round push (#148 decision 19) rather than\ngetting a verb of its own, so no second editing surface grows\nbeside the verbs.\n\n## Opaque, and this module is where that is kept honest\n\nDecision 14 gives the test: *if a port signature, a column, or a\nDTO ever names something inside the body, this decision has been\nbroken.* [`ProjectionBody`] exists so that the test is easy to\napply here — it is a newtype over a string that nothing on this\nplane parses, whose one accessor hands back the whole of it, and\nwhich has no `serde_json` anywhere near it. This plane stores it,\nhands it back, and never learns what is in it."
+    },
+    {
+      "path": "teams_core::domain::projection::EntryProjection",
+      "kind": "struct",
+      "docs": "One entry's captured projection."
+    },
+    {
+      "path": "teams_core::domain::projection::ProjectionBody",
+      "kind": "struct",
+      "docs": "A description, as bytes this plane does not read.\n\nDeliberately not a `serde_json::Value`: parsing it here would make\nits schema an architectural fact of the teams plane, which is\nexactly what decision 14 refuses. It is not validated as JSON\neither — a body that does not parse is a member's client's bug and\nthis plane is not the place it is caught, because catching it would\nmean opening the body."
+    },
+    {
       "path": "teams_core::domain::store",
       "kind": "module",
       "docs": "`store` — the team-side view of instance-owned blobs, and the\ndeclared-digest contract (#83 §3).\n\nThe store proper is a global CAS the instance owns; what this\nmodule types is the layer everything consults instead of bytes:\n\n- [`TeamBlobLink`] — the visibility AND dedupe boundary. A digest\n  \"exists\" for a caller iff a link row sits in a team they belong\n  to; purge scope is a team's links, never the CAS directly.\n- [`Locator`] — a *private* link to content the instance does not\n  hold: a uri, and at most a digest **hint** from the last\n  sighting. The instance guarantees nothing about it.\n- The promotion verification rule — [`verify_declared_digest`],\n  whose two outcomes are the whole point of this module.\n\n# Digest notation is `asterism-core`'s, reused as-is\n\nEvery digest here is the `sha256:`-prefixed storage form defined by\n`asterism_core::domain::content_hash` (and the contract crate under\nit). [`parse_digest`] delegates to that parser rather than\nre-spelling the grammar — one notation, one set of shape rules,\nacross the local app and the teams plane (#83 §3: \"core digest\nreused, `sha256:` prefix kept; strip only at the path-mapping\nedge\")."

@@ -18,7 +18,8 @@ route tests drive in-process:
 - [`rate_limit`] — the one limiter every auth endpoint sits behind
   (#83 §5: from v0, not retrofitted).
 - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
-  read: repository, credential store, registration policy.
+  read: every store and setting a request needs, assembled once.
+  The struct's own fields are the list.
 
 The blob routes are #93's, the purge routes and the `gc` / `backup`
 CLI verbs #95's; the MCP surface is a later slice — the module docs

@@ -79,5 +79,6 @@ model and the traits are named here and nothing below them is.
 - [`sqlite::forge`](sqlite__forge.md): The team's forge — adapters behind `asterism-core`'s forge ports,
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
 - [`sqlite::migrations`](sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [`sqlite::projection`](sqlite__projection.md): Storage for captured projections (#148 decisions 12 and 14).
 - [`sqlite::repo`](sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
 

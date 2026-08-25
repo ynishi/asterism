@@ -2363,6 +2363,11 @@
       "docs": "Ingest side of retrieval — keeps the index in step with the assets.\n\nSplit from [`AssetRetriever`] because the callers are disjoint:\ntrash / purge / rebuild paths write and never read, the read path\nreads and never writes. Keeping them apart means a service's field\nlist states which half it actually touches.\n\n`flush` is required after any series of `upsert` / `remove` before\nthe changes are retrievable; batching a whole `IndexRebuild` page\nbefore one flush is the intended pattern."
     },
     {
+      "path": "asterism_core::domain::repository::AssetLinkRepository",
+      "kind": "trait",
+      "docs": "Persistence port for [`AssetLink`] — what a promotion left at home\n(#148 decisions 8 and 9).\n\n**The shape of the set is the argument for each verb.** A row is\nwritten once and never updated: a promotion happened, and nothing\nthat happens later makes it have happened differently. So there is\nno `update` here, and [`Self::record`] is an insert whose only\nconflict is the same promotion recorded twice.\n\nThe two reads are the two questions actually asked of the relation.\n[`Self::list_for_team`] is the one a verify walks. [`Self::for_asset`]\nis the one the local plane asks while looking at an Asset — *what\nhas become of this in this team* — and it is a verb rather than a\nfilter over the first because that is a question about one row in a\ntable that grows with every promotion a machine has ever made.\n\nThe last two are what make the relation *advisory but attended*.\nEither end may vanish and neither may break the other, so nothing\nin the schema stops a row from outliving what it points at — which\nmeans something has to go looking. [`Self::dangling_locally`]\nanswers the half a machine can answer alone. The other half is a\nquestion for the team, and the answer to it arrives as a list of\nkeys handed to [`Self::reap`], which is why that verb takes keys\nrather than a predicate: what is gone on a server is not a fact\nthis port can evaluate.\n\n**`reap` removes link rows and touches nothing else.** Not the\nAsset, not a mark, not a team's copy of anything. A relation\ntidying itself up must not be a path by which either end loses\nsomething, and a caller reading this trait should be able to see\nthat from the signature."
+    },
+    {
       "path": "asterism_core::domain::repository::AssetRepository",
       "kind": "trait",
       "docs": "Persistence port for [`Asset`], including the read projection."
@@ -2866,6 +2871,26 @@
       "path": "asterism_core::domain::tag_head::train_row",
       "kind": "function",
       "docs": "Trains one row by full-batch gradient descent on the training\nsplit. Deterministic: zero init, fixed schedule, no shuffling."
+    },
+    {
+      "path": "asterism_core::domain::team_link",
+      "kind": "module",
+      "docs": "The relation between a local Asset and what a team made of it\n(#148 decisions 6, 8 and 9).\n\n## It lives here and nowhere else\n\nA promotion hands an Asset over and the team converts it into\nsomething of its own. Neither side holds a reference to the other's\nobject: the server holds no reference to a local Asset, in either\ndirection, and this module is the whole of what the member's\nmachine keeps about the correspondence.\n\nIts key is `(team_id, line_id, entry_id)` — all three fixed by the\nclient rather than learned back from the server, which is the shape\noffline-first sync converges on. Within one member and one team the\nrelation is 1:1 by construction; across teams one Asset has as many\nrows as teams; across members one team entry has a row on each\nmachine that promoted it. There is no global 1:1 and nothing needs\none — each row is a weak reference to its own team, and reading the\nrow for the team you are looking at is the whole of it.\n\n## Advisory, and attended\n\nEither end can vanish independently and neither may break the\nother (#148 decision 9). So there is no foreign key under any of\nthe four ids, and the pair of verbs that make \"advisory\" different\nfrom \"unattended\" are\n[`AssetLinkRepository::dangling_locally`](crate::domain::repository::AssetLinkRepository::dangling_locally)\nand\n[`AssetLinkRepository::reap`](crate::domain::repository::AssetLinkRepository::reap).\nWhy no key rather than one of the two SQLite offers is argued from\nthe storage side, in the V104 migration.\n\n## A clone writes no row\n\nOnly a promotion does. A cloned Asset is a detached copy and says\nwhere it came from through `source_kind` / `source_locator` the way\nevery other import does (#148 decision 10) — which is also why a\nrow here means \"I put this there\" and never merely \"I have seen\nthis\"."
+    },
+    {
+      "path": "asterism_core::domain::team_link::AssetLink",
+      "kind": "struct",
+      "docs": "One promotion, recorded at home."
+    },
+    {
+      "path": "asterism_core::domain::team_link::AssetLinkKey",
+      "kind": "struct",
+      "docs": "What identifies one promotion: the team, the line, and the entry on\nit (#148 decision 8).\n\nThe Asset is deliberately not part of the key. Two promotions of\nthe same Asset onto two lines are two rows, and a promotion is\nidentified by where it landed rather than by what it was — which is\nalso what makes the key usable as the correlation key the client\nfixes before the server has seen anything."
+    },
+    {
+      "path": "asterism_core::domain::team_link::TeamScopedId",
+      "kind": "struct",
+      "docs": "An id another plane minted, held here as an opaque handle.\n\n**The type is the enforcement.** #148 decision 6 lets a team-scoped\nid ride the wire as a handle for talking to that team, and forbids\nexactly one thing: a client reading one as a local `AssetId`. There\nis no `From`, no `TryFrom` and no accessor that yields an\n[`AssetId`] here, in either direction, so the forbidden read is not\nsomething a caller has to remember not to do.\n\nWhat it *is* good for is being handed back to the team it came\nfrom. [`Self::as_uuid`] exists for that — writing the handle to\nstorage and spelling it into a URL — and for nothing else.\n\nWhich plane's namespace a value belongs to is not carried in the\ntype: two handles from two teams are both `TeamScopedId`, and what\ndistinguishes them is the [`AssetLinkKey::team_id`] beside them.\nThat is the same weak-reference discipline decision 8 describes,\nand widening this type to carry its team would imply a registry of\nteams that the local plane deliberately does not keep."
     },
     {
       "path": "asterism_core::domain::thread",
