@@ -1,0 +1,228 @@
+# The release build: signed, notarized, attached to a draft release.
+#
+# `check.yml` answers whether the tree is green; this workflow answers
+# what a person downloads. It exists so that a tag's DMG opens on a Mac
+# that has never seen this project — no right-click bypass, no
+# "unidentified developer" — which requires a Developer ID signature,
+# the hardened runtime, and a notarization ticket stapled where
+# Gatekeeper looks for it (#165).
+#
+# The build itself is `just dogfood-build`, deliberately: that recipe is
+# the one definition of the production-shaped bundle, it depends on the
+# ffmpeg sidecar, and its trailing assert is the teeth that catch a
+# bundle missing the sidecar. This workflow adds identity around that
+# recipe rather than a second description of the build. The sidecar is
+# signed by the bundler along with every other Mach-O in the bundle —
+# one unsigned binary inside would fail notarization, and that failure
+# surfaces inside the build step itself, where the bundler's own
+# submission waits on Apple's answer.
+#
+# ## Secrets — the exact names this workflow reads
+#
+# Everything below enters as a repository secret and is referenced by
+# name, never written to the tree. The certificate side signs; the API
+# key side notarizes. All six are required; the preflight step fails
+# the run naming whichever are missing, before any minutes are spent
+# compiling. The list exists three times in this file — this header,
+# the preflight's `env` block, and its loop — and nothing keeps the
+# copies equal: edit them together.
+#
+#   APPLE_CERTIFICATE           base64 of the Developer ID Application
+#                               certificate exported as .p12
+#   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+#   APPLE_SIGNING_IDENTITY      the certificate's full name, e.g.
+#                               "Developer ID Application: Name (TEAMID)"
+#   APPLE_API_ISSUER            App Store Connect API key issuer id
+#   APPLE_API_KEY               App Store Connect API key id
+#   APPLE_API_KEY_CONTENT       the API key's .p8 content, verbatim
+#
+# The first three are the Tauri bundler's own environment contract — it
+# imports the certificate into an ephemeral keychain itself, so there is
+# no keychain choreography here to drift. The .p8 is written to the
+# runner's temporary directory and handed over as APPLE_API_KEY_PATH,
+# which is the shape the bundler's notarization step expects.
+#
+# ## Triggers
+#
+# A `v*` tag is the release path: build, notarize, then create a
+# *draft* release carrying the DMG. Draft on purpose — publishing is a
+# decision, not a side effect of pushing a tag, and the release notes
+# deserve a human pass before anyone can download against them.
+#
+# `workflow_dispatch` is the rehearsal path: same build, same signing,
+# same notarization, but the DMG lands as a workflow artifact and no
+# release is touched — the release steps test the event, not the ref,
+# so a dispatch started from a tag rehearses too. It exists so the
+# signing setup can be proven the day the certificates arrive, without
+# spending a tag on the proof.
+#
+# ## What is deliberately absent
+#
+#   - Windows and Linux. Each is its own toolchain and certificate
+#     story (#165 scopes them out); this file should grow a job per
+#     platform rather than a matrix that pretends they are the same.
+#   - An updater. Signing is its prerequisite, not its implementation.
+#   - Any version derivation. The version in the DMG's filename comes
+#     from `tauri.conf.json` in the tree at the tag; the guard step
+#     below refuses a tag that disagrees with it, so a v0.1.0 tag
+#     cannot ship a 0.0.0 bundle.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# `write` for the draft release and its asset. The rehearsal path never
+# uses it.
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    # Generous for the same reason check.yml's is: the first run has no
+    # cache and builds asterism-ui with every workspace member behind it
+    # plus an ffmpeg from source, and notarization adds Apple's queue on
+    # top, which this repository cannot see or hurry.
+    timeout-minutes: 90
+
+    steps:
+      - name: preflight — every secret present, or say which are not
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD \
+                      APPLE_SIGNING_IDENTITY APPLE_API_ISSUER \
+                      APPLE_API_KEY APPLE_API_KEY_CONTENT; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} )); then
+            echo "missing repository secrets: ${missing[*]}" >&2
+            echo "the header of this workflow says what each one is" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      # A tag names a version; the tree at the tag carries one too. When
+      # they disagree the DMG would advertise the tree's number under
+      # the tag's name, so the run stops here instead of shipping the
+      # disagreement.
+      - name: the tag and tauri.conf.json agree on the version
+        if: github.ref_type == 'tag'
+        run: |
+          conf_version=$(python3 -c "import json; print(json.load(open('crates/asterism-ui/src-tauri/tauri.conf.json'))['version'])")
+          if [[ "v$conf_version" != "$GITHUB_REF_NAME" ]]; then
+            echo "tag $GITHUB_REF_NAME but tauri.conf.json says $conf_version — bump the config before tagging" >&2
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/asterism-ui/package-lock.json
+
+      - uses: extractions/setup-just@v4
+
+      - name: npm ci
+        working-directory: crates/asterism-ui
+        run: npm ci
+
+      # The .p8 never appears in the tree or the log; it exists as a
+      # file only because APPLE_API_KEY_PATH is the bundler's contract
+      # for it. RUNNER_TEMP is wiped with the runner.
+      - name: stage the notarization key
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          key_path="$RUNNER_TEMP/apple-api-key.p8"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$key_path"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      # One recipe, plus identity. The bundler sees the certificate
+      # variables and signs every binary in the bundle with the hardened
+      # runtime — tauri.bundle.conf.json pins that explicitly, though it
+      # is also the bundler's default, so the pin states the requirement
+      # rather than enables it — then submits the .app for notarization
+      # and staples it, all inside this step.
+      - name: just dogfood-build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: just dogfood-build
+
+      # The bundler notarized and stapled the .app; the DMG is its own
+      # submission. Without this, `spctl` still accepts the app inside,
+      # but a `stapler validate` against the DMG — the thing a person
+      # actually downloads — has nothing to find, and Gatekeeper's
+      # assessment of the DMG on open falls back to a network round-trip
+      # Apple does not promise to answer. #165's verification bar names
+      # the DMG, so the DMG gets its own ticket.
+      - name: notarize the DMG
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          # `submit --wait` can exit zero with a verdict of Invalid; the
+          # staple would then fail, but without saying why. Read the
+          # verdict, and on anything but Accepted print Apple's own log
+          # — the only place the reason lives — before going red.
+          submission=$(xcrun notarytool submit "$dmg" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait --output-format json)
+          echo "$submission"
+          status=$(echo "$submission" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+          if [[ "$status" != "Accepted" ]]; then
+            id=$(echo "$submission" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+            xcrun notarytool log "$id" \
+              --key "$APPLE_API_KEY_PATH" \
+              --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER"
+            exit 1
+          fi
+          xcrun stapler staple "$dmg"
+
+      # The two commands #165 says a clean machine would run. They run
+      # here, on every release, rather than living only in the issue.
+      - name: gatekeeper accepts what was built
+        run: |
+          spctl --assess --type execute --verbose=2 target/release/bundle/macos/Asterism.app
+          xcrun stapler validate target/release/bundle/dmg/*.dmg
+
+      - name: attach the DMG to a draft release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
+
+      - name: keep the rehearsal's DMG
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterism-macos-dmg
+          path: target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

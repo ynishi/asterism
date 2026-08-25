@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- **A release workflow: the macOS download opens like an app** (#165). A pushed
+  `v*` tag builds the production-shaped bundle through `just dogfood-build`,
+  signs it with the Developer ID identity under the hardened runtime, notarizes
+  the .app and the DMG each with their own stapled ticket, asserts what
+  Gatekeeper would ask (`spctl --assess`, `stapler validate`), and attaches the
+  DMG to a _draft_ release — publishing stays a human decision. A
+  `workflow_dispatch` run rehearses the same pipeline into a workflow artifact
+  without touching a release. The six Apple secrets enter by name only; the
+  workflow header is the checklist of what each one is.
+
 - **A member's machine can promote an Asset onto a team's line** (#152, #148
   decisions 3–9 and 12–15). The member's half of #148: a client that talks to a
   team server, the one composite act that hands an Asset over, and the relation
