@@ -98,6 +98,7 @@ this crate.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [`sqlite::repo::tag`](sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::tag_evidence`](sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
+- [`sqlite::repo::team_asset_link`](sqlite__repo__team_asset_link.md): SQLite adapter for the `AssetLinkRepository` port — what a
 - [`sqlite::repo::thread`](sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [`sqlite::repo::thumb`](sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
 - [`sqlite::repo::visual`](sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).

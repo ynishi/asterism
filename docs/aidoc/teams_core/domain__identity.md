@@ -39,6 +39,6 @@ same three lines instead of re-deriving them.
 - `Role` — A member's role within one team.
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
 - `TeamRoster` — One team's membership set — the value every membership invariant is
-- `TeamVerb` — The administrative verbs of the #83 §1 authority table — everything
+- `TeamVerb` — The verbs an authority table answers for — everything
 - `User` — A person known to the instance — the identity teams are built from.
 

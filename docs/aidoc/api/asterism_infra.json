@@ -1193,6 +1193,16 @@
       "docs": "SQLite adapter for `TagVectorRepository` (uses a writer isle)."
     },
     {
+      "path": "asterism_infra::sqlite::repo::team_asset_link",
+      "kind": "module",
+      "docs": "SQLite adapter for the `AssetLinkRepository` port — what a\npromotion left at home (#148 decisions 8 and 9).\n\nThe table carries no foreign key, so the check the schema declines\nto enforce is written here instead: [`dangling_locally`] is an\nanti-join against `asset` — a `NOT EXISTS` looking for the rows a\ndelete left behind — and nothing else in this file reaches outside\n`team_asset_link`. The V104 migration argues why the key is absent;\nthis module is the other half of that argument, the part that goes\nlooking.\n\n[`dangling_locally`]: SqliteAssetLinkRepository::dangling_locally"
+    },
+    {
+      "path": "asterism_infra::sqlite::repo::team_asset_link::SqliteAssetLinkRepository",
+      "kind": "struct",
+      "docs": "SQLite adapter for `AssetLinkRepository`."
+    },
+    {
       "path": "asterism_infra::sqlite::repo::thread",
       "kind": "module",
       "docs": "SQLite adapter for the `ThreadRepository` port.\n\nStorage shape mirrors the V20 migration in\n[`crate::sqlite::migrations`]. Projection columns on `thread`\n(`message_count`, `last_message_at`,\n`updated_at`) are trigger-maintained; `save` therefore preserves\nthem across an `ON CONFLICT DO UPDATE` (title / archive edits only\ntouch the caller-owned columns). `append_message` is idempotent by\n`(thread_id, idempotency_key)` — a repeat write returns the\npre-existing row instead of a constraint error."

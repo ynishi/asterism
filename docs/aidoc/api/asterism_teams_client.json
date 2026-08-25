@@ -1,0 +1,116 @@
+{
+  "crate": "asterism-teams-client",
+  "version": "0.0.0",
+  "items": [
+    {
+      "path": "asterism_teams_client::client",
+      "kind": "module",
+      "docs": "Talking to a team server (#148 decisions 16 and 19).\n\n## Served through, never mirrored\n\nDecision 16: reads and writes go to the server, there is no local\ncopy of a shared line, and therefore no staleness to reason about.\nSo every method here is a request. There is no cache, no `sync`,\nand no \"refresh\" — and there should not be one, because a mirror\nwould be the weaker version of a clone with a cache attached, and a\nclone is #153's.\n\n## The shape of the surface\n\nDecision 19: the transport is the local forge's verbs mirrored\nunder `/teams/{team_id}/forge/*`, plus a content verb scoped to a\npursuit, a bulk resolve and a have-check.\n\n**This crate implements a subset of that, and the subset is the\ndesign.** #152 is a promotion and the reads a member needs around\none, so the line and pursuit verbs a promotion walks are here and\nthe conversation verbs are not — nothing in this issue says\nanything in a thread. What every path here does promise is to be\nthe router's verbatim: a path spelled differently on the two sides\nis a bug in one of them, and that is the claim worth checking.\n\n## Ids that come back are handles\n\nEvery id a team states arrives as a\n[`TeamScopedId`](asterism_core::domain::team_link::TeamScopedId),\nwhich has no conversion to or from a local `AssetId` in either\ndirection (#148 decision 6). What crosses in the other direction is\na subject and a digest, which is what the decision says may."
+    },
+    {
+      "path": "asterism_teams_client::client::TeamsClient",
+      "kind": "struct",
+      "docs": "A client bound to one team server, holding at most one session."
+    },
+    {
+      "path": "asterism_teams_client::client::TeamsClientError",
+      "kind": "enum",
+      "docs": "What can go wrong between here and a team."
+    },
+    {
+      "path": "asterism_teams_client::link",
+      "kind": "module",
+      "docs": "Verify and reap — what makes the relation *attended* rather than\nmerely advisory (#148 decision 9).\n\nEither end of a promotion can vanish independently and neither may\nbreak the other, so nothing in the schema stops a link row from\noutliving what it points at. Decision 9 names the two systems that\nlive with exactly that and go looking anyway: GitLab's loose\nforeign keys, which are a missing constraint plus a worker that\ncleans up after one, and `git annex fsck`, which tolerates a\ndangling location log and checks for it.\n\n## Two ends, two questions, one of which needs the network\n\n- **The Asset was deleted.** Answerable here, with no session and\n  no server: `AssetLinkRepository::dangling_locally` is an\n  anti-join against the local `asset` table.\n- **The entry is gone from the team.** Not answerable here at all.\n  [`verify`] asks the team — two reads per line the relation names,\n  for the reason its own doc gives — and a line that no longer\n  exists answers `404`, which is what a discard leaves behind.\n\n## What is *not* dangling\n\nA **trashed** Asset. The local plane can still restore it, so the\nrow still corresponds to something.\n\nAn entry that was **removed from the line**. Taking an entry off a\nline is a change point saying so, and the fold still lists it —\nnothing in a forge truly disappears except through a discard. A row\npointing at a removed entry points at something the team can still\naccount for, and reaping it would throw away the record of a\npromotion that did happen.\n\nAn entry named by a round of **work that is still open**. It has\nnot landed on the line yet and it is not lost either; see\n[`verify`] for why that costs a second read.\n\n## Reap\n\n[`reap`] is a thin pass to `AssetLinkRepository::reap`, whose doc\nstates what a reap may touch. Nothing is added on the way through,\nand that is the whole of this module's part in it."
+    },
+    {
+      "path": "asterism_teams_client::link::DanglingLink",
+      "kind": "struct",
+      "docs": "One row that points at something that is not there."
+    },
+    {
+      "path": "asterism_teams_client::link::LinkVerification",
+      "kind": "struct",
+      "docs": "What a verify found."
+    },
+    {
+      "path": "asterism_teams_client::link::Missing",
+      "kind": "enum",
+      "docs": "Which end of a link went missing."
+    },
+    {
+      "path": "asterism_teams_client::link::reap",
+      "kind": "function",
+      "docs": "Removes the named link rows, and nothing else. Answers how many\nthere were to remove."
+    },
+    {
+      "path": "asterism_teams_client::link::verify",
+      "kind": "function",
+      "docs": "Checks every row this machine holds for one team, both ends.\n\nTwo reads per line rather than one per row: the relation names far\nmore entries than lines, and each read answers for all of a line's\nentries at once.\n\n**Both reads are needed, and the reason is what an entry id means\nat each stage.** A promotion names its entry in a round, and a\nround is a candidate — the entry reaches the line's fold only when\nthe work closes and lands. So a link written a minute ago, against\nwork still open, is *not* in `states` and is not dangling either.\nAsking `states` alone would report every promotion into open work\nas broken, which is the loudest possible false positive: it would\ninvite a reap that deletes the record of promotions that are\nentirely intact. The pursuits against the line are where those\nentries are, and a discard takes both."
+    },
+    {
+      "path": "asterism_teams_client::mapper",
+      "kind": "module",
+      "docs": "The one mapper — what may travel, and the declaration that decides\nit (#148 decisions 13 and 14).\n\n## Why there is exactly one\n\nDecision 14 puts the local Asset and the projection body behind a\nsingle mapper, so this module is the only place in the workspace\nthat knows both. Decision 13 then puts the *declaration* at that\nsame seam, because the body is fed from labels, groups, personas,\nseries, comments, marks and whatever the local model gains next —\nand a declaration attached to any one of those would cover one\ninput rather than the set.\n\n## An input nobody declared does not travel\n\nThat is the property, and it is worth being precise about how it is\nheld rather than merely intended.\n\n**Nothing here serialises an `Asset`.** There is no\n`serde_json::to_value(asset)` and no `#[derive(Serialize)]` on\nanything local. [`projection_body`] builds its output by walking\n[`DeclaredInput::ALL`] and asking each declaration for its value,\nso a field added to `Asset` next year produces no key here: it is\nnot that it would be filtered out, it is that nothing would go\nlooking for it.\n\n**A declaration cannot be half-added, and the one edit the\ncompiler will not force is worth naming.** Adding an input is four\nedits in this file: the variant, [`DeclaredInput::key`],\n[`DeclaredInput::take`], and [`DeclaredInput::ALL`]. The middle two\nmatch exhaustively, so a variant without them does not compile.\n`ALL` is the one that fails quietly — a variant left out of it\nsimply never travels — and quiet in that direction is the safe one:\nthe failure decision 13 names is *forgetting to untick something*,\nand a design whose slip is \"it stayed home\" cannot fail that way.\n\n**The test says so too.** `every_key_in_a_body_was_declared` builds\na subject with everything populated and asserts the body's key set\nis the declared set plus the version tag, which catches a key\nwritten by hand into the assembly rather than through a\ndeclaration.\n\n## What is declared today, and what was left out\n\n[`DeclaredInput::ALL`] is the answer, and it is eight lines of code\naway; what follows is why each is there and, more usefully, why the\nnear misses are not.\n\nThe near misses are left undeclared for one reason — decision 4's\nargument that what can be re-derived stays home reads on a\ndescription as well as on a thumbnail:\n\n- **`cover`** is produced by the CoverGen job from a\n  modality-specific template. The receiving side can generate its\n  own, and one member's template output is not a description the\n  team should be handed as though a person wrote it.\n- **`register_note`** is the same shape: an annotation about tone\n  that a job fills.\n- **`labels`** and **`keywords`** are mixed provenance — some a\n  person applied in the grid, some an importer wrote as a\n  `journal_kind:` prefix, and the Asset does not carry which is\n  which. An input whose provenance is not decidable is one that\n  cannot be declared honestly, so it is not declared.\n\nAny of those becomes a declaration the day the local model can say\nwho wrote it. That is a decision, taken here, in the open."
+    },
+    {
+      "path": "asterism_teams_client::mapper::DeclaredInput",
+      "kind": "enum",
+      "docs": "One input that has been declared shareable (#148 decision 13).\n\nAdding a variant is adding a declaration, and the compiler makes it\na complete one: [`Self::key`] and [`Self::take`] both match\nexhaustively, and [`Self::ALL`] is what [`projection_body`] walks."
+    },
+    {
+      "path": "asterism_teams_client::mapper::LocalSubject",
+      "kind": "struct",
+      "docs": "Everything the mapper is allowed to look at.\n\nA struct rather than a bare `&Asset` because the marks do not live\non the Asset, and because the *inputs* are what a declaration\ndeclares over — a caller assembling one of these can see the whole\nset the mapper could possibly read."
+    },
+    {
+      "path": "asterism_teams_client::mapper::ProjectionView",
+      "kind": "struct",
+      "docs": "A projection body, as the mapper for its version understands it."
+    },
+    {
+      "path": "asterism_teams_client::mapper::PromotedMark",
+      "kind": "struct",
+      "docs": "One mark a person wrote, as it travels.\n\n**Decision 4's filter is applied before one of these exists, and\nthe fields are private so that stays true.** A mark's origin is a\nproperty of the layer it sits on rather than of the mark, so the\nfilter has to be applied by something that can see both — which is\n[`PromotedMark::gather`], the only constructor there is. A caller\ncannot assemble one of these out of a mark it liked the look of,\nwhich is what makes \"a `PromotedMark` is a mark whose layer origin\nwas [`LayerOrigin::User`]\" a fact about the type rather than a note\nabout how to use it.\n\nWhat travels is the span and the words. Not the mark's id, not its\nlayer's, not its author record — the receiving side mints its own\nids for everything (decision 6), and an id from here would be one\nmore thing that means nothing there."
+    },
+    {
+      "path": "asterism_teams_client::mapper::ReadMark",
+      "kind": "struct",
+      "docs": "One mark as a body carried it.\n\nA different type from [`PromotedMark`] on purpose. A `PromotedMark`\nis a mark this machine's own layers said a person wrote; this is\ntext that arrived from somebody else's mapper, and the two must not\nbe interchangeable — a mark read off the wire has no local layer,\nno origin this machine verified, and nothing here promotes it back."
+    },
+    {
+      "path": "asterism_teams_client::mapper::VERSION_KEY",
+      "kind": "constant",
+      "docs": "The key the body's own version rides under.\n\nDecision 14 puts the branch at the mapper and the mapper reads the\nbody, so the body carries a version of its own — beside the\nenvelope's copy, which exists so that everything between the two\nmappers can stay incurious. Short because it is in every body ever\nwritten."
+    },
+    {
+      "path": "asterism_teams_client::mapper::projection_body",
+      "kind": "function",
+      "docs": "Builds the body a projection travels in, or nothing when no\ndeclared input had a value.\n\nNothing rather than `{\"v\": 1}`: an entry with nothing to say has no\nprojection, which is the same distinction\n`ProjectionBody::parse` refuses an empty body over on the other\nplane."
+    },
+    {
+      "path": "asterism_teams_client::mapper::read_projection_body",
+      "kind": "function",
+      "docs": "Reads a projection body — the half of decision 14 that says *the\nbody carries a version, and the mapper branches on it*.\n\n**This is the only thing in the workspace that opens a body**, and\nthat is the whole point: the teams plane stores it unread, the wire\ncarries it as a string, and understanding it is one function on the\nmember's side. A caller that reaches for `serde_json` on an\n[`EntryProjectionDto`](asterism_teams_wire::projection::EntryProjectionDto)\nbody has stepped around the seam.\n\nThe branch is on the body's own `v` rather than on the envelope's\ncopy. The envelope is the transport's declaration and the body's is\nthe author's; where they disagree the author is right, because the\nauthor is what was actually written. Nothing compares them — see\n`teams_core::domain::projection`.\n\nA version this build does not know is an error rather than a\nbest-effort read: a newer mapper may have moved what a key means,\nand guessing at that is how a description starts saying something\nits author did not.\n\nWithin a version, a key nobody here recognises is **ignored**. That\nis not the declaration leaking — the declaration governs what\nleaves this machine, and refusing to show a person the title they\ncan plainly see because a stray key sat beside it would be a worse\nanswer than reading what is understood."
+    },
+    {
+      "path": "asterism_teams_client::promotion",
+      "kind": "module",
+      "docs": "Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).\n\n## One act, five steps, in this order\n\n1. **Gather what cannot be re-derived** — the material's bytes, and\n   the marks whose layer origin is `User`. That filter is decision\n   4's and it lives in\n   [`PromotedMark::gather`](crate::mapper::PromotedMark::gather);\n   thumbnails, indexed bodies and `Imported`/`Machine` marks stay\n   home because the receiving side can make them again.\n2. **Ask what the team already has**, so a send can be skipped when\n   the answer allows it — see the note on the have-check below.\n3. **Enter the content against open work.** The team mints a\n   `TeamAsset` for it, one per promotion (decision 7), so two\n   members bringing identical bytes get one each and \"who brought\n   what\" survives the second contributor.\n4. **Push a round that names it**, with the entry id this client\n   minted (decision 8) and the projection riding along (decision\n   12). The content is there before the round names it, which is\n   decision 5's ordering.\n5. **Record the relation at home** — and only at home. The server\n   holds no reference to the local Asset, in either direction.\n\nThe order is not an implementation detail. Content before round is\ndecision 5; link after both is what keeps a link row from ever\nnaming an entry that was never written.\n\n## What v0 will promote\n\n**One Asset, one local material.** Decision 3 says the team holds a\nconversion and deliberately does not fix its composition — an Asset\nmay be several materials, or a Collection whose content is the\nassets pointing at it. The teams plane's schema already admits\nthose: `team_asset.digest` is nullable precisely so a conversion\ncomposed some other way can leave it empty.\n\nWhat is missing is the composition itself — which parts land in the\nCAS and which in rows — and that is a design question decision 3\nleaves open rather than a gap in this function. So a Collection and\na multi-material Asset are **refused with a message that says\nwhich**, rather than promoted as one of their parts. Promoting one\npart of an Asset and calling it the Asset would be worse than\nrefusing: the receiving side could not reproduce it, and decision 4\nis precisely the rule that what travels must be enough to.\n\n## The have-check, honestly\n\nDecision 19 adds it \"to avoid re-sending\". With the transport as\n#151 built it, that saving is only partly available, and it is\nworth stating rather than papering over.\n\nThe content verb is the only thing that mints a `TeamAsset`, and it\nmints one from bytes — there is no verb that mints an asset over a\ndigest the team already holds. Decision 7 requires the mint on\nevery promotion, so a second member promoting identical bytes still\ncalls the verb and still sends the body.\n\nWhat is available on the other axis is the one that matters day to\nday: **a repeat of the same promotion sends nothing at all.** Before\nanything is uploaded, [`promote`] asks the relation whether this\nclient already promoted this Asset onto this line, and a client\nthat did is answered from its own machine — without the have-check,\nwhich is why [`PromotionOutcome::bytes_already_held`] is `None`\nthere. On the path that does send, the digest answer is reported so\na caller can show it, and the day a mint-over-held-digest verb\nexists this function skips the body on it too."
+    },
+    {
+      "path": "asterism_teams_client::promotion::Promotion",
+      "kind": "struct",
+      "docs": "One promotion, described."
+    },
+    {
+      "path": "asterism_teams_client::promotion::PromotionOutcome",
+      "kind": "struct",
+      "docs": "What a promotion left behind, on both sides."
+    },
+    {
+      "path": "asterism_teams_client::promotion::promote",
+      "kind": "function",
+      "docs": "Runs a promotion.\n\n`now_ms` is the caller's clock, so that a caller batching several\npromotions can stamp them alike and a test can stamp them at all."
+    }
+  ]
+}

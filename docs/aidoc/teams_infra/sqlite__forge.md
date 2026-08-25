@@ -80,5 +80,6 @@ list SQLite reports is what is matched — see `is_unique_violation`.
 
 ## Types
 
+- `HeldAsset` — One `team_asset` as a caller reading it back sees it — what the
 - `TeamForge` — The forge's ports over one team's rows in the teams database.
 

@@ -721,6 +721,7 @@ the private design notes.
 - [`domain::source_locator`](domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
 - [`domain::tag`](domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [`domain::tag_head`](domain__tag_head.md): The trained tag head (#132 phase 2): per-tag logistic rows over
+- [`domain::team_link`](domain__team_link.md): The relation between a local Asset and what a team made of it
 - [`domain::thread`](domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [`domain::value`](domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [`domain::visual`](domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
@@ -6652,6 +6653,7 @@ projection instead of full `Asset` entities.
 - `AssetBodyRepository` — Persistence port for the full-text search **body cache** — the
 - `AssetCommentRepository` — Persistence port for [`AssetComment`] — the per-Asset thread of
 - `AssetIndexer` — Ingest side of retrieval — keeps the index in step with the assets.
+- `AssetLinkRepository` — Persistence port for [`AssetLink`] — what a promotion left at home
 - `AssetRepository` — Persistence port for [`Asset`], including the read projection.
 - `AssetRetriever` — Retrieval port — "find me something like this", answered as a
 - `ChapterMarkRepository` — Persistence port for [`ChapterMark`] — the sections a structure
@@ -7274,6 +7276,56 @@ continues.
 
 - `HOLD_OUT_EVERY` — Every N-th example of each class is held out for the eval (the
 - `MIN_RULINGS_PER_CLASS` — Minimum rulings **per class** (accepted, rejected) before a tag is
+
+
+<!-- asterism_core/domain__team_link.md -->
+# asterism-core::domain::team_link
+
+The relation between a local Asset and what a team made of it
+(#148 decisions 6, 8 and 9).
+
+## It lives here and nowhere else
+
+A promotion hands an Asset over and the team converts it into
+something of its own. Neither side holds a reference to the other's
+object: the server holds no reference to a local Asset, in either
+direction, and this module is the whole of what the member's
+machine keeps about the correspondence.
+
+Its key is `(team_id, line_id, entry_id)` — all three fixed by the
+client rather than learned back from the server, which is the shape
+offline-first sync converges on. Within one member and one team the
+relation is 1:1 by construction; across teams one Asset has as many
+rows as teams; across members one team entry has a row on each
+machine that promoted it. There is no global 1:1 and nothing needs
+one — each row is a weak reference to its own team, and reading the
+row for the team you are looking at is the whole of it.
+
+## Advisory, and attended
+
+Either end can vanish independently and neither may break the
+other (#148 decision 9). So there is no foreign key under any of
+the four ids, and the pair of verbs that make "advisory" different
+from "unattended" are
+[`AssetLinkRepository::dangling_locally`](crate::domain::repository::AssetLinkRepository::dangling_locally)
+and
+[`AssetLinkRepository::reap`](crate::domain::repository::AssetLinkRepository::reap).
+Why no key rather than one of the two SQLite offers is argued from
+the storage side, in the V104 migration.
+
+## A clone writes no row
+
+Only a promotion does. A cloned Asset is a detached copy and says
+where it came from through `source_kind` / `source_locator` the way
+every other import does (#148 decision 10) — which is also why a
+row here means "I put this there" and never merely "I have seen
+this".
+
+## Types
+
+- `AssetLink` — One promotion, recorded at home.
+- `AssetLinkKey` — What identifies one promotion: the team, the line, and the entry on
+- `TeamScopedId` — An id another plane minted, held here as an opaque handle.
 
 
 <!-- asterism_core/domain__thread.md -->
@@ -10486,6 +10538,7 @@ this crate.
 - [`sqlite::repo::snapshot`](sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [`sqlite::repo::tag`](sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
 - [`sqlite::repo::tag_evidence`](sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
+- [`sqlite::repo::team_asset_link`](sqlite__repo__team_asset_link.md): SQLite adapter for the `AssetLinkRepository` port — what a
 - [`sqlite::repo::thread`](sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [`sqlite::repo::thumb`](sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
 - [`sqlite::repo::visual`](sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).
@@ -12992,6 +13045,27 @@ guarantee is structural, not a handler branch.
 - `SqliteTagVectorRepository` — SQLite adapter for `TagVectorRepository` (uses a writer isle).
 
 
+<!-- asterism_infra/sqlite__repo__team_asset_link.md -->
+# asterism-infra::sqlite::repo::team_asset_link
+
+SQLite adapter for the `AssetLinkRepository` port — what a
+promotion left at home (#148 decisions 8 and 9).
+
+The table carries no foreign key, so the check the schema declines
+to enforce is written here instead: [`dangling_locally`] is an
+anti-join against `asset` — a `NOT EXISTS` looking for the rows a
+delete left behind — and nothing else in this file reaches outside
+`team_asset_link`. The V104 migration argues why the key is absent;
+this module is the other half of that argument, the part that goes
+looking.
+
+[`dangling_locally`]: SqliteAssetLinkRepository::dangling_locally
+
+## Types
+
+- `SqliteAssetLinkRepository` — SQLite adapter for `AssetLinkRepository`.
+
+
 <!-- asterism_infra/sqlite__repo__thread.md -->
 # asterism-infra::sqlite::repo::thread
 
@@ -13500,6 +13574,468 @@ bus in this process.
 - `ServerCtx` — Bundle of services that HTTP handlers share via `axum` state.
 
 
+<!-- asterism_teams_client/index.md -->
+# asterism-teams-client 0.0.0
+
+# asterism-teams-client — the member's half of a shared line
+
+A team hosts a forge and holds what its members brought (#148
+decisions 1 and 2). This is what a member's machine runs to talk to
+one: a session, the reads over a shared line, the forge's verbs,
+and the one composite act that is the point of the whole issue —
+[`promotion`], handing an Asset over so the team converts it into
+something of its own.
+
+## Where the boundary is
+
+`asterism-* -> teams-*` is forbidden in any form (#83 §4), so this
+crate reaches the wire through two doors and no others:
+`asterism-teams-wire`, the leaf both planes depend on and which depends on
+neither, and `asterism-contract::forge`, whose DTOs were already
+MIT/Apache and already read on both sides. What follows from that
+is worth stating plainly: **this crate never links the team plane's
+code**, only its vocabulary. Everything it knows about a team it
+learned over HTTP.
+
+## The three things that do not cross
+
+- **Ids.** Each plane mints its own surrogates (#148 decision 6). A
+  team's id for anything arrives here as a
+  [`TeamScopedId`](asterism_core::domain::team_link::TeamScopedId),
+  which is a different type from `AssetId` with no conversion in
+  either direction, so the forbidden read does not compile.
+  Subjects and digests do cross, and they are the two the issue
+  says may.
+- **Anything re-derivable.** A promotion sends the material and the
+  marks a person wrote, and nothing else (#148 decision 4).
+  Thumbnails, indexed bodies and `Imported`/`Machine` marks stay
+  home because the receiving side can make them again.
+- **Anything undeclared.** What may travel in a projection is
+  declared at [`mapper`], and a local field nobody has declared
+  does not leave (#148 decision 13). A column added to the Asset
+  next year starts out staying home.
+
+## What is not here
+
+**The clone** (#148 decision 10) — it is #153's, and it is an
+import rather than a forge concept: it mints new ids, writes no
+relation row, and says where it came from through `source_kind` the
+way every other import does.
+
+**A local copy of a shared line.** Decision 16 serves shared lines
+through rather than mirroring them, so every read here is a request
+and there is no staleness to reason about. Wanting it locally is
+what a clone is for.
+
+## Modules
+
+- [`client`](client.md): Talking to a team server (#148 decisions 16 and 19).
+- [`link`](link.md): Verify and reap — what makes the relation *attended* rather than
+- [`mapper`](mapper.md): The one mapper — what may travel, and the declaration that decides
+- [`promotion`](promotion.md): Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
+
+
+<!-- asterism_teams_client/client.md -->
+# asterism-teams-client::client
+
+Talking to a team server (#148 decisions 16 and 19).
+
+## Served through, never mirrored
+
+Decision 16: reads and writes go to the server, there is no local
+copy of a shared line, and therefore no staleness to reason about.
+So every method here is a request. There is no cache, no `sync`,
+and no "refresh" — and there should not be one, because a mirror
+would be the weaker version of a clone with a cache attached, and a
+clone is #153's.
+
+## The shape of the surface
+
+Decision 19: the transport is the local forge's verbs mirrored
+under `/teams/{team_id}/forge/*`, plus a content verb scoped to a
+pursuit, a bulk resolve and a have-check.
+
+**This crate implements a subset of that, and the subset is the
+design.** #152 is a promotion and the reads a member needs around
+one, so the line and pursuit verbs a promotion walks are here and
+the conversation verbs are not — nothing in this issue says
+anything in a thread. What every path here does promise is to be
+the router's verbatim: a path spelled differently on the two sides
+is a bug in one of them, and that is the claim worth checking.
+
+## Ids that come back are handles
+
+Every id a team states arrives as a
+[`TeamScopedId`](asterism_core::domain::team_link::TeamScopedId),
+which has no conversion to or from a local `AssetId` in either
+direction (#148 decision 6). What crosses in the other direction is
+a subject and a digest, which is what the decision says may.
+
+## Types
+
+- `TeamsClient` — A client bound to one team server, holding at most one session.
+- `TeamsClientError` — What can go wrong between here and a team.
+
+
+<!-- asterism_teams_client/link.md -->
+# asterism-teams-client::link
+
+Verify and reap — what makes the relation *attended* rather than
+merely advisory (#148 decision 9).
+
+Either end of a promotion can vanish independently and neither may
+break the other, so nothing in the schema stops a link row from
+outliving what it points at. Decision 9 names the two systems that
+live with exactly that and go looking anyway: GitLab's loose
+foreign keys, which are a missing constraint plus a worker that
+cleans up after one, and `git annex fsck`, which tolerates a
+dangling location log and checks for it.
+
+## Two ends, two questions, one of which needs the network
+
+- **The Asset was deleted.** Answerable here, with no session and
+  no server: `AssetLinkRepository::dangling_locally` is an
+  anti-join against the local `asset` table.
+- **The entry is gone from the team.** Not answerable here at all.
+  [`verify`] asks the team — two reads per line the relation names,
+  for the reason its own doc gives — and a line that no longer
+  exists answers `404`, which is what a discard leaves behind.
+
+## What is *not* dangling
+
+A **trashed** Asset. The local plane can still restore it, so the
+row still corresponds to something.
+
+An entry that was **removed from the line**. Taking an entry off a
+line is a change point saying so, and the fold still lists it —
+nothing in a forge truly disappears except through a discard. A row
+pointing at a removed entry points at something the team can still
+account for, and reaping it would throw away the record of a
+promotion that did happen.
+
+An entry named by a round of **work that is still open**. It has
+not landed on the line yet and it is not lost either; see
+[`verify`] for why that costs a second read.
+
+## Reap
+
+[`reap`] is a thin pass to `AssetLinkRepository::reap`, whose doc
+states what a reap may touch. Nothing is added on the way through,
+and that is the whole of this module's part in it.
+
+## Functions
+
+- `reap` — Removes the named link rows, and nothing else. Answers how many
+- `verify` — Checks every row this machine holds for one team, both ends.
+
+## Types
+
+- `DanglingLink` — One row that points at something that is not there.
+- `LinkVerification` — What a verify found.
+- `Missing` — Which end of a link went missing.
+
+
+<!-- asterism_teams_client/mapper.md -->
+# asterism-teams-client::mapper
+
+The one mapper — what may travel, and the declaration that decides
+it (#148 decisions 13 and 14).
+
+## Why there is exactly one
+
+Decision 14 puts the local Asset and the projection body behind a
+single mapper, so this module is the only place in the workspace
+that knows both. Decision 13 then puts the *declaration* at that
+same seam, because the body is fed from labels, groups, personas,
+series, comments, marks and whatever the local model gains next —
+and a declaration attached to any one of those would cover one
+input rather than the set.
+
+## An input nobody declared does not travel
+
+That is the property, and it is worth being precise about how it is
+held rather than merely intended.
+
+**Nothing here serialises an `Asset`.** There is no
+`serde_json::to_value(asset)` and no `#[derive(Serialize)]` on
+anything local. [`projection_body`] builds its output by walking
+[`DeclaredInput::ALL`] and asking each declaration for its value,
+so a field added to `Asset` next year produces no key here: it is
+not that it would be filtered out, it is that nothing would go
+looking for it.
+
+**A declaration cannot be half-added, and the one edit the
+compiler will not force is worth naming.** Adding an input is four
+edits in this file: the variant, [`DeclaredInput::key`],
+[`DeclaredInput::take`], and [`DeclaredInput::ALL`]. The middle two
+match exhaustively, so a variant without them does not compile.
+`ALL` is the one that fails quietly — a variant left out of it
+simply never travels — and quiet in that direction is the safe one:
+the failure decision 13 names is *forgetting to untick something*,
+and a design whose slip is "it stayed home" cannot fail that way.
+
+**The test says so too.** `every_key_in_a_body_was_declared` builds
+a subject with everything populated and asserts the body's key set
+is the declared set plus the version tag, which catches a key
+written by hand into the assembly rather than through a
+declaration.
+
+## What is declared today, and what was left out
+
+[`DeclaredInput::ALL`] is the answer, and it is eight lines of code
+away; what follows is why each is there and, more usefully, why the
+near misses are not.
+
+The near misses are left undeclared for one reason — decision 4's
+argument that what can be re-derived stays home reads on a
+description as well as on a thumbnail:
+
+- **`cover`** is produced by the CoverGen job from a
+  modality-specific template. The receiving side can generate its
+  own, and one member's template output is not a description the
+  team should be handed as though a person wrote it.
+- **`register_note`** is the same shape: an annotation about tone
+  that a job fills.
+- **`labels`** and **`keywords`** are mixed provenance — some a
+  person applied in the grid, some an importer wrote as a
+  `journal_kind:` prefix, and the Asset does not carry which is
+  which. An input whose provenance is not decidable is one that
+  cannot be declared honestly, so it is not declared.
+
+Any of those becomes a declaration the day the local model can say
+who wrote it. That is a decision, taken here, in the open.
+
+## Functions
+
+- `projection_body` — Builds the body a projection travels in, or nothing when no
+- `read_projection_body` — Reads a projection body — the half of decision 14 that says *the
+
+## Types
+
+- `DeclaredInput` — One input that has been declared shareable (#148 decision 13).
+- `LocalSubject` — Everything the mapper is allowed to look at.
+- `ProjectionView` — A projection body, as the mapper for its version understands it.
+- `PromotedMark` — One mark a person wrote, as it travels.
+- `ReadMark` — One mark as a body carried it.
+
+## Constants
+
+- `VERSION_KEY` — The key the body's own version rides under.
+
+
+<!-- asterism_teams_client/promotion.md -->
+# asterism-teams-client::promotion
+
+Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
+
+## One act, five steps, in this order
+
+1. **Gather what cannot be re-derived** — the material's bytes, and
+   the marks whose layer origin is `User`. That filter is decision
+   4's and it lives in
+   [`PromotedMark::gather`](crate::mapper::PromotedMark::gather);
+   thumbnails, indexed bodies and `Imported`/`Machine` marks stay
+   home because the receiving side can make them again.
+2. **Ask what the team already has**, so a send can be skipped when
+   the answer allows it — see the note on the have-check below.
+3. **Enter the content against open work.** The team mints a
+   `TeamAsset` for it, one per promotion (decision 7), so two
+   members bringing identical bytes get one each and "who brought
+   what" survives the second contributor.
+4. **Push a round that names it**, with the entry id this client
+   minted (decision 8) and the projection riding along (decision
+   12). The content is there before the round names it, which is
+   decision 5's ordering.
+5. **Record the relation at home** — and only at home. The server
+   holds no reference to the local Asset, in either direction.
+
+The order is not an implementation detail. Content before round is
+decision 5; link after both is what keeps a link row from ever
+naming an entry that was never written.
+
+## What v0 will promote
+
+**One Asset, one local material.** Decision 3 says the team holds a
+conversion and deliberately does not fix its composition — an Asset
+may be several materials, or a Collection whose content is the
+assets pointing at it. The teams plane's schema already admits
+those: `team_asset.digest` is nullable precisely so a conversion
+composed some other way can leave it empty.
+
+What is missing is the composition itself — which parts land in the
+CAS and which in rows — and that is a design question decision 3
+leaves open rather than a gap in this function. So a Collection and
+a multi-material Asset are **refused with a message that says
+which**, rather than promoted as one of their parts. Promoting one
+part of an Asset and calling it the Asset would be worse than
+refusing: the receiving side could not reproduce it, and decision 4
+is precisely the rule that what travels must be enough to.
+
+## The have-check, honestly
+
+Decision 19 adds it "to avoid re-sending". With the transport as
+#151 built it, that saving is only partly available, and it is
+worth stating rather than papering over.
+
+The content verb is the only thing that mints a `TeamAsset`, and it
+mints one from bytes — there is no verb that mints an asset over a
+digest the team already holds. Decision 7 requires the mint on
+every promotion, so a second member promoting identical bytes still
+calls the verb and still sends the body.
+
+What is available on the other axis is the one that matters day to
+day: **a repeat of the same promotion sends nothing at all.** Before
+anything is uploaded, [`promote`] asks the relation whether this
+client already promoted this Asset onto this line, and a client
+that did is answered from its own machine — without the have-check,
+which is why [`PromotionOutcome::bytes_already_held`] is `None`
+there. On the path that does send, the digest answer is reported so
+a caller can show it, and the day a mint-over-held-digest verb
+exists this function skips the body on it too.
+
+## Functions
+
+- `promote` — Runs a promotion.
+
+## Types
+
+- `Promotion` — One promotion, described.
+- `PromotionOutcome` — What a promotion left behind, on both sides.
+
+
+<!-- asterism_teams_wire/index.md -->
+# asterism-teams-wire 0.0.0
+
+# asterism-teams-wire — what a member's client and a team server
+both say
+
+The leaf #148 decision 15 asks for: MIT/Apache, depended on by both
+planes, depending on neither. #83 §4 forbids `asterism-* ->
+teams-*` in any form, so the member's client cannot reach the
+vocabulary it needs where that vocabulary used to live; §4's own
+second choice for exactly this case is a leaf, and this is it.
+
+## What lives here, and what does not
+
+Here: the shapes that are **teams-shaped** — a session, a team and
+its roster, a page of the ledger, the three content verbs hosting
+adds, and the projection envelope (#148 decisions 12 to 14).
+
+Not here, and each for a stated reason:
+
+- **The forge's verbs.** Their DTOs are already MIT/Apache in
+  `asterism-contract::forge`, and #148 revision 10 says both planes
+  may name them there. A copy here would be a second home for one
+  type, which is the failure this crate is meant to prevent rather
+  than a shape it should take.
+- **The substrate's own surfaces.** The blob upload, the purge
+  two-step and the head registry stay in `teams-contract`: they are
+  an operator's and an admin's vocabulary, and a member's client
+  does not speak them. The dividing line is *who says it*, not what
+  it is about.
+- **Validation.** Same as `teams-contract`: role words, ids and
+  digests are parsed by whichever plane receives them. This crate
+  defines shapes.
+
+## Wire representation
+
+Unchanged from the surfaces these shapes came off, because a moved
+type that re-spelled its fields would not be a move:
+
+- Ids: UUID hyphenated `String`.
+- Timestamps: unix epoch milliseconds as `i64`.
+- Opaque JSON — a ledger event's payload, a projection's body —
+  serialised into a `String`. Schema-bridge does not render
+  `serde_json::Value`, and in the projection's case the opacity is
+  the design rather than a limitation of the renderer (#148
+  decision 14).
+
+## Modules
+
+- [`command`](command.md): Command shapes — inputs of the `/teams/*` routes a member's client
+- [`dto`](dto.md): Response shapes of the `/teams/*` routes a member's client reads.
+- [`projection`](projection.md): The captured projection — descriptive metadata a promoter said at
+
+
+<!-- asterism_teams_wire/command.md -->
+# asterism-teams-wire::command
+
+Command shapes — inputs of the `/teams/*` routes a member's client
+calls.
+
+The session token is **not** a field on any of these: it travels in
+the `Authorization: Bearer` header, resolved by the server's gate
+middleware before a handler sees the body (#83 §5 — every route:
+session token → user_id → membership gate).
+
+## Types
+
+- `CreateTeamCommand` — Creates a team (`POST /teams/create`).
+- `EnterContentCommand` — Brings content into a team against open work
+- `HaveContentCommand` — Asks which digests a team already has
+- `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
+- `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
+
+
+<!-- asterism_teams_wire/dto.md -->
+# asterism-teams-wire::dto
+
+Response shapes of the `/teams/*` routes a member's client reads.
+
+Mutation routes answer with the [`LedgerEventDto`] their write
+appended — the same-tx rule (#83 §2) means the event *is* the
+receipt, and a role change carrying old+new in its payload reads on
+its own (#83 §1).
+
+## Types
+
+- `ContentEnteredDto` — What the team minted for content that entered it
+- `HeldAssetDto` — One asset a team holds, as the bulk resolve answers about it.
+- `HeldContentDto` — The have-check's answer
+- `LedgerEventDto` — One entry of a team's append-only stream
+- `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
+- `ResolvedContentDto` — The bulk resolve's answer
+- `RosterDto` — The team's current membership set
+- `RosterMemberDto` — One membership row as the roster lists it.
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
+- `SubjectRefDto` — One typed reference an event makes.
+- `TeamCreatedDto` — The result of `POST /teams/create`.
+
+
+<!-- asterism_teams_wire/projection.md -->
+# asterism-teams-wire::projection
+
+The captured projection — descriptive metadata a promoter said at
+the time (#148 decisions 12, 13 and 14).
+
+## What this crate's part in it is
+
+Decision 14 keeps the body opaque, and the transport's share of
+that is small and absolute: **the body is a `String` here and no
+shape in this crate has a field that came from inside it.** Why the
+rule exists, and why
+[`EntryProjectionEnvelope::version`] is a fact about the envelope
+rather than a breach of it, are argued once in
+`teams_core::domain::projection`.
+
+Decision 13's declaration is likewise settled before a body reaches
+here — it lives at the member's mapper, the only place that knows
+both the local model and the body. By the time this crate sees one,
+the answer is a string. A filter expressed on the wire would be a
+second place to forget something, and forgetting there fails in the
+unsafe direction.
+
+## Types
+
+- `EntryProjectionDto` — One captured projection, read back
+- `EntryProjectionEnvelope` — One entry's projection, as it rides onto a round push.
+- `WithProjections` — A round push as a team takes it: whatever the forge's push command
+
+## Constants
+
+- `PROJECTION_VERSION` — The current envelope version — what a client writing today stamps,
+
+
 <!-- asterism_ui/index.md -->
 # asterism-ui 0.0.0
 
@@ -13863,6 +14399,19 @@ than served.
 
 # teams-contract — wire contract for the teams plane
 
+What is left here after #148 decision 15: the `/teams/*` shapes a
+member's client does not speak. The roster verbs, which are an
+owner's; the substrate's own blob upload and its purge two-step;
+the instance head registry. Everything a client says or reads moved
+to `asterism-teams-wire`, the MIT/Apache leaf both planes may link — this
+crate cannot be that leaf, for the two reasons #148 gives: its
+licence is deliberately undeclared pending #83 §4, and it declares
+a `teams-core` dependency.
+
+Nothing was copied. `LedgerEventDto` is named from the leaf where
+two shapes here embed it, because one type with two homes is the
+failure a leaf exists to prevent.
+
 The request/response shapes of the `/teams/*` HTTP surface
 (#83 §5, the #91 slice), through the same schema-bridge flow as
 `asterism-contract`: plain serde structs with
@@ -13889,14 +14438,21 @@ Validation is not here: role words go through
 
 ## Modules
 
-- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes.
-- [`dto`](dto.md): Response DTOs of the `/teams/*` surface.
+- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes an
+- [`dto`](dto.md): Response DTOs of the `/teams/*` surfaces a member's client does not
 
 
 <!-- teams_contract/command.md -->
 # teams-contract::command
 
-Command DTOs — inputs of the state-changing `/teams/*` routes.
+Command DTOs — inputs of the state-changing `/teams/*` routes an
+owner, an admin or an operator's tooling calls.
+
+What a **member's client** sends moved to `asterism-teams-wire` when the
+leaf landed (#148 decision 15): login, team creation and the three
+content verbs live there now, because the client may not link this
+crate. What stayed is what is not a member's vocabulary — the
+roster verbs, which are an owner's, and the substrate's own upload.
 
 The session token is **not** a field on any of these: it travels in
 the `Authorization: Bearer` header, resolved by the server's gate
@@ -13905,10 +14461,8 @@ session token → user_id → membership gate).
 
 ## Types
 
-- `CreateTeamCommand` — Creates a team (`POST /teams/create`).
 - `GrantOwnerCommand` — Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
 - `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
-- `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 - `UploadBlobCommand` — Uploads a blob into the team's store
@@ -13917,27 +14471,26 @@ session token → user_id → membership gate).
 <!-- teams_contract/dto.md -->
 # teams-contract::dto
 
-Response DTOs of the `/teams/*` surface.
+Response DTOs of the `/teams/*` surfaces a member's client does not
+speak.
 
 Mutation routes answer with the [`LedgerEventDto`] their write
 appended — the same-tx rule (#83 §2) means the event *is* the
 receipt, and a role change carrying old+new in its payload reads on
-its own (#83 §1).
+its own (#83 §1). That envelope now lives in `asterism-teams-wire`, along
+with the session, the roster, the ledger page and the content
+verbs' answers: a member's client reads all of those and may not
+link this crate (#148 decision 15). It is named here rather than
+re-spelled, which is the whole point of a leaf both planes depend
+on.
 
 ## Types
 
 - `BlobUploadedDto` — The result of `PUT /teams/{team_id}/blobs?digest=…`.
 - `HeadPublishedDto` — The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the
-- `LedgerEventDto` — One entry of a team's append-only stream
-- `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
 - `MarkedBlobLinkDto` — One marked link — everything unmark (or a decision to let reclaim
 - `MarkedBlobsDto` — The team's marked-for-purge set
 - `PurgeReclaimedDto` — The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).
-- `RosterDto` — The team's current membership set
-- `RosterMemberDto` — One membership row as the roster lists it.
-- `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
-- `SubjectRefDto` — One typed reference an event makes.
-- `TeamCreatedDto` — The result of `POST /teams/create`.
 
 
 <!-- teams_core/index.md -->
@@ -13989,6 +14542,7 @@ invariant in this crate is stated in a shape the desktop app owns.
 - [`domain::head_registry`](domain__head_registry.md): `head_registry` — the instance's carriage of a trained tag head
 - [`domain::identity`](domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [`domain::ledger`](domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [`domain::projection`](domain__projection.md): The captured projection — descriptive metadata, keyed by entry and
 - [`domain::store`](domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [`error`](error.md): `DomainError` — the innermost error type of the teams plane.
 - [`port`](port.md): Ports — the traits `teams-infra` implements (dependency inversion,
@@ -14085,7 +14639,7 @@ same three lines instead of re-deriving them.
 - `Role` — A member's role within one team.
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
 - `TeamRoster` — One team's membership set — the value every membership invariant is
-- `TeamVerb` — The administrative verbs of the #83 §1 authority table — everything
+- `TeamVerb` — The verbs an authority table answers for — everything
 - `User` — A person known to the instance — the identity teams are built from.
 
 
@@ -14177,6 +14731,7 @@ unanswerable.
 - `BLOB_LINK_PURGE_MARKED` — A team's blob link was marked for purge (#83 §3 lifecycle, the #95
 - `BLOB_LINK_PURGE_UNMARKED` — A purge mark was lifted during the grace window — the link is
 - `BLOB_LINK_RECLAIMED` — Marked links whose grace window elapsed were reclaimed — the second
+- `FORGE_CONTENT_ENTERED` — Content entered the team against open work, and the team minted the
 - `FORGE_KINDS` — The kinds the hosted forge's verbs write (#148 decisions 17 and
 - `FORGE_LINE_DISCARDED` — A line was dropped, with everything on it.
 - `FORGE_LINE_OPENED` — A line was opened on the team's forge.
@@ -14196,6 +14751,48 @@ unanswerable.
 - `TEAM_CREATED` — A team came into existence.
 - `TEAM_DELETED` — A team was deleted (owner, or an admin — ledger-stamped).
 - `V0_KINDS` — The v0 kind registry: team lifecycle, membership changes, role
+
+
+<!-- teams_core/domain__projection.md -->
+# teams-core::domain::projection
+
+The captured projection — descriptive metadata, keyed by entry and
+opaque all the way down (#148 decisions 12, 13 and 14).
+
+## Outside the forge, on purpose
+
+The forge has three axes and #102 forbids a column that answers
+what the history already answers, so a description is not a fourth
+axis and does not go on a change point. It lives beside the forge
+on this plane, keyed `(line, entry)`. The consequence the design
+actually wants from that: **a projection can be lost without the
+line lying.** Everything else here follows from it — including why
+the write does not share the forge's transaction, and why nothing
+appends to the ledger when one is captured.
+
+## Captured, not owned
+
+It is what the promoter said at the time, on the same discipline as
+an `ActorStamp` capturing a display name at write time. The team
+does not edit it. Only a forge op replaces one — which is why the
+write rides on the round push (#148 decision 19) rather than
+getting a verb of its own, so no second editing surface grows
+beside the verbs.
+
+## Opaque, and this module is where that is kept honest
+
+Decision 14 gives the test: *if a port signature, a column, or a
+DTO ever names something inside the body, this decision has been
+broken.* [`ProjectionBody`] exists so that the test is easy to
+apply here — it is a newtype over a string that nothing on this
+plane parses, whose one accessor hands back the whole of it, and
+which has no `serde_json` anywhere near it. This plane stores it,
+hands it back, and never learns what is in it.
+
+## Types
+
+- `EntryProjection` — One entry's captured projection.
+- `ProjectionBody` — A description, as bytes this plane does not read.
 
 
 <!-- teams_core/domain__store.md -->
@@ -14384,6 +14981,7 @@ model and the traits are named here and nothing below them is.
 - [`sqlite::forge`](sqlite__forge.md): The team's forge — adapters behind `asterism-core`'s forge ports,
 - [`sqlite::map`](sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
 - [`sqlite::migrations`](sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [`sqlite::projection`](sqlite__projection.md): Storage for captured projections (#148 decisions 12 and 14).
 - [`sqlite::repo`](sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
 
 
@@ -14790,6 +15388,10 @@ conventions over the teams-owned database.
 - [`repo`] — the repository over the state tables and the ledger.
 - [`forge`] — the forge's ports over one team's rows, appending to
   that team's ledger in the same transaction (#148 decision 17).
+- [`projection`] — captured descriptions, keyed by entry and
+  **outside** the forge (#148 decision 12). A module of its own
+  rather than a corner of [`forge`], because where the code lives
+  is part of how "outside" stays true.
 - [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
   points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
   pragmas set and the schema migrated.
@@ -14908,6 +15510,7 @@ list SQLite reports is what is matched — see `is_unique_violation`.
 
 ## Types
 
+- `HeldAsset` — One `team_asset` as a caller reading it back sees it — what the
 - `TeamForge` — The forge's ports over one team's rows in the teams database.
 
 
@@ -15003,6 +15606,47 @@ past batch** — schema changes go at the end.
 - `LATEST_VERSION` — Latest schema version (`MIGRATIONS.len()`).
 
 
+<!-- teams_infra/sqlite__projection.md -->
+# teams-infra::sqlite::projection
+
+Storage for captured projections (#148 decisions 12 and 14).
+
+**Its own module, beside the forge rather than inside it.** Decision
+12 puts the projection outside the forge, and where the code lives
+is part of how that stays true: nothing here goes through
+[`TeamForge`](crate::sqlite::forge::TeamForge), touches a forge
+table, or appends to the ledger. What connects the two is that the
+push handler calls both, in that order, which is the whole of the
+coupling.
+
+## Why the write is not in the forge's transaction
+
+The forge's writes and their ledger events share one transaction
+because #83 §2 makes the event the receipt for the write — two
+independently writable truths is the one forbidden arrangement, and
+same-tx is what forecloses it. A projection is not in that
+relationship with anything: decision 12 makes it losable, which is
+what makes a separate write correct here rather than merely
+tolerable.
+
+[`capture`](SqliteProjectionStore::capture) therefore opens its own
+transaction and never appends to the ledger. When it runs relative
+to the push is not this file's rule and is argued where it can be
+broken — `teams_server::forge::push_round`.
+
+## Nothing here reads the body
+
+It arrives as a
+[`ProjectionBody`](teams_core::domain::projection::ProjectionBody),
+goes into a `TEXT` column, and comes back out. There is no parse,
+no index and no column lifted out of it — decision 14's check
+applied to the one file that would be tempted to break it.
+
+## Types
+
+- `SqliteProjectionStore` — The `asset_projection` table, and nothing else.
+
+
 <!-- teams_infra/sqlite__repo.md -->
 # teams-infra::sqlite::repo
 
@@ -15066,10 +15710,17 @@ route tests drive in-process:
 - [`http`] — the axum `/teams/*` router: the session → user →
   membership gate, the authority checks over `teams-core`'s
   decision functions, and the domain-refusal → 4xx mapping.
+- `forge` — the team's hosted forge over HTTP (#151): the local
+  surface mirrored under `/teams/{team_id}/forge/*`, and the verbs
+  hosting adds. Its routes are merged inside [`http`]'s gate. Not
+  linked, and not public: the module is `pub(crate)` because it
+  exports no type, only routes that reach a caller through
+  [`http::router`].
 - [`rate_limit`] — the one limiter every auth endpoint sits behind
   (#83 §5: from v0, not retrofitted).
 - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
-  read: repository, credential store, registration policy.
+  read: every store and setting a request needs, assembled once.
+  The struct's own fields are the list.
 
 The blob routes are #93's, the purge routes and the `gc` / `backup`
 CLI verbs #95's; the MCP surface is a later slice — the module docs
@@ -15098,6 +15749,8 @@ slice).
 | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 | GET | `/teams/{team_id}/roster` | member, or an admin |
 | GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
+| GET | `/teams/{team_id}/events/subject` | member, or an admin — one subject's events, same page contract |
+| — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
 | POST | `/teams/{team_id}/owners/grant` | owner |
@@ -15158,6 +15811,13 @@ Domain refusals surface as client errors, never `500`:
 `DigestMismatch` → 409 (the mismatch body carries declared and
 computed, both), `Infra` → 500; the gate adds 401/403/404 and the
 limiter 429.
+
+The forge's routes answer on a second table, because their
+refusals come from the other plane's `DomainError` and carry a
+field this one has no column for: `reason`, on a conflict, which
+is what tells a caller whether retrying is worth anything. Those
+bodies are `asterism-server`'s to the letter — see `ApiError::Forge`
+and `forge_response` below.
 
 ## Functions
 

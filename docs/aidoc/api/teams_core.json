@@ -75,7 +75,7 @@
     {
       "path": "teams_core::domain::identity::TeamVerb",
       "kind": "enum",
-      "docs": "The administrative verbs of the #83 §1 authority table — everything\nbut team creation, which needs the registration policy and no\nroster ([`may_create_team`])."
+      "docs": "The verbs an authority table answers for — everything\nbut team creation, which needs the registration policy and no\nroster ([`may_create_team`]).\n\nTwo origins, and the enum does not sort them: the first six are\n#83 §1's own table, and [`Self::ForgeWork`] / [`Self::ForgeDiscard`]\nare #148 revision 5's, which is a different argument reaching a\ndifferent boundary. Which is which matters when reading\n[`verb_allowed`], because §1's reasoning about an admin does not\ncarry to the two the forge added."
     },
     {
       "path": "teams_core::domain::identity::User",
@@ -90,7 +90,7 @@
     {
       "path": "teams_core::domain::identity::verb_allowed",
       "kind": "function",
-      "docs": "The #83 §1 authority table for in-team verbs, as one decision\nfunction.\n\nOwners may do everything. An admin may **delete** a team and\n**purge** its storage (mark / unmark / reclaim — #95 extends the §1\ndelete row to its reclaim sibling), ledger-stamped as an admin in\nboth cases, and nothing else in this table: §1 grants an admin no\nimplicit invite / remove / role-grant inside a team they do not\nown — for those an admin joins like anyone else and acts through a\nmembership row.\n\nThis answers \"does the role permit the verb\" and nothing more; the\nlast-owner rule is a property of the target and the roster, checked\nseparately ([`TeamRoster::check_remove`] and friends), so a verb\ncan be permitted and still refused."
+      "docs": "The #83 §1 authority table for in-team verbs, as one decision\nfunction.\n\nOwners may do everything. An admin may **delete** a team and\n**purge** its storage (mark / unmark / reclaim — #95 extends the §1\ndelete row to its reclaim sibling), ledger-stamped as an admin in\nboth cases, and nothing else in this table: §1 grants an admin no\nimplicit invite / remove / role-grant inside a team they do not\nown — for those an admin joins like anyone else and acts through a\nmembership row.\n\n[`TeamVerb::ForgeWork`] is the one row a plain member answers, and\nit is the row #148 revision 5 added: membership is the whole of the\nanswer for every forge write but the discard. An admin does **not**\nanswer it — bringing work or content into a team is a member's act,\nwhich is already how the blob upload reads (#83 §1), and an admin\nstanding outside the roster has no implicit one.\n\nThis answers \"does the role permit the verb\" and nothing more; the\nlast-owner rule is a property of the target and the roster, checked\nseparately ([`TeamRoster::check_remove`] and friends), so a verb\ncan be permitted and still refused."
     },
     {
       "path": "teams_core::domain::ledger",
@@ -128,9 +128,14 @@
       "docs": "Storage-assigned position of an event within its team's stream —\nmonotonic, starting at 1.\n\nA newtype rather than a bare `i64` so \"validated but not generated\"\nis a property of the type: the only constructor checks the value a\nstorage row handed back, and there is no `next()` for domain code\nto invent sequence numbers with."
     },
     {
+      "path": "teams_core::domain::ledger::FORGE_CONTENT_ENTERED",
+      "kind": "constant",
+      "docs": "Content entered the team against open work, and the team minted the\nasset it converted that content into (#148 decisions 5 and 7).\n\nNamed for the act rather than for the row, like every kind in\n[`FORGE_KINDS`]: a reader wants \"somebody brought this in\", not \"a\n`team_asset` was inserted\". The payload carries the asset the team\nminted, the digest the bytes hashed to and the work it entered\nagainst; the subjects carry the digest and the pursuit, so the\ntrace query finds it from either end without parsing a payload.\n\nOne event per entry even when the bytes were already in the store:\ndecision 7 mints a `TeamAsset` per promotion so that \"who brought\nwhat\" survives the second contributor, and an event skipped for a\ndigest the store already held would lose exactly that."
+    },
+    {
       "path": "teams_core::domain::ledger::FORGE_KINDS",
       "kind": "constant",
-      "docs": "The kinds the hosted forge's verbs write (#148 decisions 17 and\n20) — one per write-port method that changes a row, named after the\nverb rather than after the table, because what a reader wants from\na stream is what somebody did.\n\nA second slice beside [`V0_KINDS`] rather than an addition to it:\nthe two namespaces are registered by different arguments — v0's are\nthe substrate's own gestures, and these arrive because the team\nhosts a forge — and a reader asking \"which kinds does the forge\nwrite\" gets an answer that does not move when a membership kind is\nadded."
+      "docs": "The kinds the hosted forge's verbs write (#148 decisions 17 and\n20) — one per write-port method that changes a row, plus the one\nverb the hosting adds ([`FORGE_CONTENT_ENTERED`], #148 decision 5),\nnamed after the verb rather than after the table, because what a\nreader wants from a stream is what somebody did.\n\nA second slice beside [`V0_KINDS`] rather than an addition to it:\nthe two namespaces are registered by different arguments — v0's are\nthe substrate's own gestures, and these arrive because the team\nhosts a forge — and a reader asking \"which kinds does the forge\nwrite\" gets an answer that does not move when a membership kind is\nadded."
     },
     {
       "path": "teams_core::domain::ledger::FORGE_LINE_DISCARDED",
@@ -256,6 +261,21 @@
       "path": "teams_core::domain::ledger::is_v0_kind",
       "kind": "function",
       "docs": "Whether `kind` is one of the substrate's own v0 gestures.\n\nShape and registration are separate questions on purpose: a reader\nmust accept well-formed kinds it does not know (a stream written by\na newer build), and a *writer* asks [`is_registered_kind`] before\nappending."
+    },
+    {
+      "path": "teams_core::domain::projection",
+      "kind": "module",
+      "docs": "The captured projection — descriptive metadata, keyed by entry and\nopaque all the way down (#148 decisions 12, 13 and 14).\n\n## Outside the forge, on purpose\n\nThe forge has three axes and #102 forbids a column that answers\nwhat the history already answers, so a description is not a fourth\naxis and does not go on a change point. It lives beside the forge\non this plane, keyed `(line, entry)`. The consequence the design\nactually wants from that: **a projection can be lost without the\nline lying.** Everything else here follows from it — including why\nthe write does not share the forge's transaction, and why nothing\nappends to the ledger when one is captured.\n\n## Captured, not owned\n\nIt is what the promoter said at the time, on the same discipline as\nan `ActorStamp` capturing a display name at write time. The team\ndoes not edit it. Only a forge op replaces one — which is why the\nwrite rides on the round push (#148 decision 19) rather than\ngetting a verb of its own, so no second editing surface grows\nbeside the verbs.\n\n## Opaque, and this module is where that is kept honest\n\nDecision 14 gives the test: *if a port signature, a column, or a\nDTO ever names something inside the body, this decision has been\nbroken.* [`ProjectionBody`] exists so that the test is easy to\napply here — it is a newtype over a string that nothing on this\nplane parses, whose one accessor hands back the whole of it, and\nwhich has no `serde_json` anywhere near it. This plane stores it,\nhands it back, and never learns what is in it."
+    },
+    {
+      "path": "teams_core::domain::projection::EntryProjection",
+      "kind": "struct",
+      "docs": "One entry's captured projection."
+    },
+    {
+      "path": "teams_core::domain::projection::ProjectionBody",
+      "kind": "struct",
+      "docs": "A description, as bytes this plane does not read.\n\nDeliberately not a `serde_json::Value`: parsing it here would make\nits schema an architectural fact of the teams plane, which is\nexactly what decision 14 refuses. It is not validated as JSON\neither — a body that does not parse is a member's client's bug and\nthis plane is not the place it is caught, because catching it would\nmean opening the body."
     },
     {
       "path": "teams_core::domain::store",

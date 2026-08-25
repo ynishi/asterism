@@ -129,6 +129,7 @@
 - [asterism-core::domain::source_locator](asterism_core/domain__source_locator.md): `source_locator` — where an artefact's bytes are, held as a typed
 - [asterism-core::domain::tag](asterism_core/domain__tag.md): `Tag` — the channel entity (a classification axis shared across
 - [asterism-core::domain::tag_head](asterism_core/domain__tag_head.md): The trained tag head (#132 phase 2): per-tag logistic rows over
+- [asterism-core::domain::team_link](asterism_core/domain__team_link.md): The relation between a local Asset and what a team made of it
 - [asterism-core::domain::thread](asterism_core/domain__thread.md): `Thread` — the app-level container that collects `Message`s from
 - [asterism-core::domain::value](asterism_core/domain__value.md): Value objects: id / slug / text newtypes plus `Visibility`, `SourceRef`,
 - [asterism-core::domain::visual](asterism_core/domain__visual.md): Visual-feature vocabulary and the encoder port (#112).
@@ -294,6 +295,7 @@
 - [asterism-infra::sqlite::repo::snapshot](asterism_infra/sqlite__repo__snapshot.md): SQLite adapter for the `SnapshotRepository` port.
 - [asterism-infra::sqlite::repo::tag](asterism_infra/sqlite__repo__tag.md): SQLite adapter for the `TagRepository` port (backed by rusqlite-isle).
 - [asterism-infra::sqlite::repo::tag_evidence](asterism_infra/sqlite__repo__tag_evidence.md): SQLite adapters for `TagEvidenceRepository` and
+- [asterism-infra::sqlite::repo::team_asset_link](asterism_infra/sqlite__repo__team_asset_link.md): SQLite adapter for the `AssetLinkRepository` port — what a
 - [asterism-infra::sqlite::repo::thread](asterism_infra/sqlite__repo__thread.md): SQLite adapter for the `ThreadRepository` port.
 - [asterism-infra::sqlite::repo::thumb](asterism_infra/sqlite__repo__thumb.md): SQLite adapter for the `ThumbRepository` port.
 - [asterism-infra::sqlite::repo::visual](asterism_infra/sqlite__repo__visual.md): SQLite adapter for the `VisualFeatureRepository` port (#112).
@@ -318,6 +320,21 @@
 - [asterism-server::mcp_proxy](asterism_server/mcp_proxy.md): MCP stdio proxy — the lifecycle-aware entry point MCP clients spawn.
 - [asterism-server::state](asterism_server/state.md): Backend context for the standalone server. Thin wrapper over the
 
+## asterism-teams-client 0.0.0
+
+- [asterism-teams-client overview](asterism_teams_client/index.md): # asterism-teams-client — the member's half of a shared line
+- [asterism-teams-client::client](asterism_teams_client/client.md): Talking to a team server (#148 decisions 16 and 19).
+- [asterism-teams-client::link](asterism_teams_client/link.md): Verify and reap — what makes the relation *attended* rather than
+- [asterism-teams-client::mapper](asterism_teams_client/mapper.md): The one mapper — what may travel, and the declaration that decides
+- [asterism-teams-client::promotion](asterism_teams_client/promotion.md): Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
+
+## asterism-teams-wire 0.0.0
+
+- [asterism-teams-wire overview](asterism_teams_wire/index.md): # asterism-teams-wire — what a member's client and a team server
+- [asterism-teams-wire::command](asterism_teams_wire/command.md): Command shapes — inputs of the `/teams/*` routes a member's client
+- [asterism-teams-wire::dto](asterism_teams_wire/dto.md): Response shapes of the `/teams/*` routes a member's client reads.
+- [asterism-teams-wire::projection](asterism_teams_wire/projection.md): The captured projection — descriptive metadata a promoter said at
+
 ## asterism-ui 0.0.0
 
 - [asterism-ui overview](asterism_ui/index.md): # asterism-ui — Asterism desktop UI (Tauri v2 backend)
@@ -333,8 +350,8 @@
 ## teams-contract 0.0.0
 
 - [teams-contract overview](teams_contract/index.md): # teams-contract — wire contract for the teams plane
-- [teams-contract::command](teams_contract/command.md): Command DTOs — inputs of the state-changing `/teams/*` routes.
-- [teams-contract::dto](teams_contract/dto.md): Response DTOs of the `/teams/*` surface.
+- [teams-contract::command](teams_contract/command.md): Command DTOs — inputs of the state-changing `/teams/*` routes an
+- [teams-contract::dto](teams_contract/dto.md): Response DTOs of the `/teams/*` surfaces a member's client does not
 
 ## teams-core 0.0.0
 
@@ -343,6 +360,7 @@
 - [teams-core::domain::head_registry](teams_core/domain__head_registry.md): `head_registry` — the instance's carriage of a trained tag head
 - [teams-core::domain::identity](teams_core/domain__identity.md): `identity` — who exists, who belongs to a team, and who may do what.
 - [teams-core::domain::ledger](teams_core/domain__ledger.md): `ledger` — the actor-stamped, append-only event envelope (#83 §2).
+- [teams-core::domain::projection](teams_core/domain__projection.md): The captured projection — descriptive metadata, keyed by entry and
 - [teams-core::domain::store](teams_core/domain__store.md): `store` — the team-side view of instance-owned blobs, and the
 - [teams-core::error](teams_core/error.md): `DomainError` — the innermost error type of the teams plane.
 - [teams-core::port](teams_core/port.md): Ports — the traits `teams-infra` implements (dependency inversion,
@@ -364,6 +382,7 @@
 - [teams-infra::sqlite::forge](teams_infra/sqlite__forge.md): The team's forge — adapters behind `asterism-core`'s forge ports,
 - [teams-infra::sqlite::map](teams_infra/sqlite__map.md): Row ↔ domain conversion helpers for the teams tables.
 - [teams-infra::sqlite::migrations](teams_infra/sqlite__migrations.md): Teams-database schema migrations — `PRAGMA user_version` scheme.
+- [teams-infra::sqlite::projection](teams_infra/sqlite__projection.md): Storage for captured projections (#148 decisions 12 and 14).
 - [teams-infra::sqlite::repo](teams_infra/sqlite__repo.md): The teams repository — state tables and the per-team ledger behind
 
 ## teams-server 0.0.0

@@ -5,12 +5,7 @@
     {
       "path": "teams_contract::command",
       "kind": "module",
-      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
-    },
-    {
-      "path": "teams_contract::command::CreateTeamCommand",
-      "kind": "struct",
-      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
+      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes an\nowner, an admin or an operator's tooling calls.\n\nWhat a **member's client** sends moved to `asterism-teams-wire` when the\nleaf landed (#148 decision 15): login, team creation and the three\ncontent verbs live there now, because the client may not link this\ncrate. What stayed is what is not a member's vocabulary — the\nroster verbs, which are an owner's, and the substrate's own upload.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "teams_contract::command::GrantOwnerCommand",
@@ -21,11 +16,6 @@
       "path": "teams_contract::command::InviteMemberCommand",
       "kind": "struct",
       "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
-    },
-    {
-      "path": "teams_contract::command::LoginCommand",
-      "kind": "struct",
-      "docs": "Presents a credential to `POST /teams/auth/login`."
     },
     {
       "path": "teams_contract::command::RemoveMemberCommand",
@@ -40,12 +30,12 @@
     {
       "path": "teams_contract::command::UploadBlobCommand",
       "kind": "struct",
-      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nThe one command whose fields travel in the **query string**: the\nrequest body is the blob's raw bytes, streamed, so there is no JSON\nbody for them to ride in (the OCI registry `PUT ?digest=` shape,\n#83 §3)."
+      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nIts fields travel in the **query string**: the request body is the\nblob's raw bytes, streamed, so there is no JSON body for them to\nride in (the OCI registry `PUT ?digest=` shape, #83 §3).\n`asterism_teams_wire::command::EnterContentCommand` is the same shape for\nthe same reason."
     },
     {
       "path": "teams_contract::dto",
       "kind": "module",
-      "docs": "Response DTOs of the `/teams/*` surface.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
+      "docs": "Response DTOs of the `/teams/*` surfaces a member's client does not\nspeak.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1). That envelope now lives in `asterism-teams-wire`, along\nwith the session, the roster, the ledger page and the content\nverbs' answers: a member's client reads all of those and may not\nlink this crate (#148 decision 15). It is named here rather than\nre-spelled, which is the whole point of a leaf both planes depend\non."
     },
     {
       "path": "teams_contract::dto::BlobUploadedDto",
@@ -56,16 +46,6 @@
       "path": "teams_contract::dto::HeadPublishedDto",
       "kind": "struct",
       "docs": "The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the\nenvelope facts the instance validated, never the artifact body,\nwhich the carrier does not read.\n\nNo [`LedgerEventDto`] here, unlike every team-scoped mutation: the\nregistry is instance-scope, outside the ledger's per-team streams\n(#83 §2); its history is the storage's own superseded rows."
-    },
-    {
-      "path": "teams_contract::dto::LedgerEventDto",
-      "kind": "struct",
-      "docs": "One entry of a team's append-only stream\n(`GET /teams/{team_id}/events`, and the receipt every mutation\nroute returns)."
-    },
-    {
-      "path": "teams_contract::dto::LedgerPageDto",
-      "kind": "struct",
-      "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
     },
     {
       "path": "teams_contract::dto::MarkedBlobLinkDto",
@@ -81,31 +61,6 @@
       "path": "teams_contract::dto::PurgeReclaimedDto",
       "kind": "struct",
       "docs": "The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).\n\nMark and unmark answer with their [`LedgerEventDto`] alone (the\nreceipt convention); reclaim gets a shape of its own because one\ncall removes many links and triggers the zero-link sweep behind it."
-    },
-    {
-      "path": "teams_contract::dto::RosterDto",
-      "kind": "struct",
-      "docs": "The team's current membership set\n(`GET /teams/{team_id}/roster`)."
-    },
-    {
-      "path": "teams_contract::dto::RosterMemberDto",
-      "kind": "struct",
-      "docs": "One membership row as the roster lists it."
-    },
-    {
-      "path": "teams_contract::dto::SessionDto",
-      "kind": "struct",
-      "docs": "A freshly minted session (`POST /teams/auth/login`)."
-    },
-    {
-      "path": "teams_contract::dto::SubjectRefDto",
-      "kind": "struct",
-      "docs": "One typed reference an event makes."
-    },
-    {
-      "path": "teams_contract::dto::TeamCreatedDto",
-      "kind": "struct",
-      "docs": "The result of `POST /teams/create`."
     }
   ]
 }
