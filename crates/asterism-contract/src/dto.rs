@@ -1047,6 +1047,52 @@ pub struct VideoPreviewDto {
     pub detail: Option<String>,
 }
 
+/// What one asset's digital source type currently rests on
+/// (`GET /asterism/assets/{id}/source-type`).
+///
+/// The read the detail panel's "Source type" row draws its three
+/// states from: an assertion when a person made one, the container's
+/// own evidence when nothing was asserted, and neither when neither
+/// exists. Both halves travel because a retract's destination — what
+/// the evidence says on its own — has to be knowable without a second
+/// read; one value with two possible origins could not say it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AssetSourceTypeDto {
+    /// Asset id.
+    pub asset_id: String,
+    /// The term the container's evidence establishes, as its IPTC
+    /// short name (`trainedAlgorithmicMedia`, `digitalCapture`, …).
+    /// `None` when the container declares nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    /// `true` while the container stands unread — the metadata
+    /// fingerprint is pending (the question not yet asked) or failed
+    /// (asked, and the bytes could not be read). A `None` `evidence`
+    /// beside `true` is either of those, not "read and found
+    /// nothing" — the distinction the storage keeps and this read
+    /// keeps with it.
+    pub evidence_pending: bool,
+    /// The person's own assertion, when one is recorded. Outranks the
+    /// evidence everywhere downstream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asserted: Option<AssertedSourceTypeDto>,
+}
+
+/// The recorded source-type assertion an asset carries.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AssertedSourceTypeDto {
+    /// The asserted term's IPTC short name.
+    pub source_type: String,
+    /// Agent the statement came through, absent when nobody stated
+    /// one — which is not a claim that a person was at the keyboard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<String>,
+    /// When the assertion was made (unix epoch ms). Absent only on a
+    /// damaged entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_at_ms: Option<i64>,
+}
+
 /// Composite response for the detail view (asset + tags + edges).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct AssetDetailDto {

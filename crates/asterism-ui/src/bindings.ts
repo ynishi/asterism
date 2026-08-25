@@ -34,6 +34,12 @@ export type DeclareProvenanceCommand = { asset_id: string; derived_from: string;
 
 export type DeclareAssetMetaCommand = { asset_id: string; key: string; value: string | null; operator_ai: string | null; };
 
+export type DeclareSourceTypeCommand = { asset_id: string; source_type: string | null; operator_ai: string | null; };
+
+export type AssetSourceTypeDto = { asset_id: string; evidence: string | null; evidence_pending: boolean; asserted: { source_type: string; operator: string | null; declared_at_ms: number | null; } | null; };
+
+export type AssertedSourceTypeDto = { source_type: string; operator: string | null; declared_at_ms: number | null; };
+
 export type RebuildEdgesCommand = { asset_id: string; };
 
 export type OrganizeByLocationCommand = { persona_id: string | null; base_dir: string | null; };

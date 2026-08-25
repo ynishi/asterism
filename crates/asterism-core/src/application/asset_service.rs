@@ -845,6 +845,72 @@ impl AssetService {
         Ok(crate::application::mapping::asset_to_dto(&asset))
     }
 
+    /// What the asset's digital source type currently rests on — the
+    /// container's own evidence and the person's assertion, each on
+    /// its own.
+    ///
+    /// The read behind the detail panel's "Source type" row. Both
+    /// halves travel so a retract's destination — what the evidence
+    /// says on its own — is knowable without a second read, rather
+    /// than the one composed term the disclosure signs; composing the
+    /// two is [`record_for`]'s job and stays there.
+    ///
+    /// Unlike the disclosure build, a pending or failed metadata
+    /// fingerprint is not refused: nothing read here is stamped into a
+    /// file, so "not yet read" is an answer the panel can show rather
+    /// than a state to stop on. `evidence_pending` says which absence
+    /// this is.
+    ///
+    /// Same visibility gate as [`Self::detail`]: even this much is an
+    /// existence oracle, so a viewer outside a restricted asset's
+    /// sharing list gets [`DomainError::AssetNotFound`] before any of
+    /// it.
+    ///
+    /// [`record_for`]: crate::domain::disclosure::record_for
+    pub async fn source_type_of(
+        &self,
+        asset_id: &str,
+        viewer_subject: Option<&str>,
+    ) -> Result<asterism_contract::dto::AssetSourceTypeDto, DomainError> {
+        use crate::domain::disclosure;
+        use crate::domain::measurement::MeasurementStatus;
+
+        let asset = self.find_visible(asset_id, viewer_subject).await?;
+
+        let (meta_kv, evidence_pending) = match asset.materials.first() {
+            None => (None, false),
+            Some(material) => match material.meta_hash_status {
+                MeasurementStatus::Pending | MeasurementStatus::Failed => (None, true),
+                _ => (material.meta_kv.clone(), false),
+            },
+        };
+        let parents = crate::application::disclosure_service::parent_evidence(
+            &self.assets,
+            &self.edges,
+            &asset.id,
+        )
+        .await?;
+        let container = meta_kv
+            .as_deref()
+            .map(disclosure::read_evidence)
+            .unwrap_or_default();
+        let evidence =
+            disclosure::evidence_source_type(&container, &parents).map(|ty| ty.term().to_string());
+        let asserted = disclosure::asserted_source_type_entry(&asset.extra).map(|entry| {
+            asterism_contract::dto::AssertedSourceTypeDto {
+                source_type: entry.term.term().to_string(),
+                operator: entry.operator,
+                declared_at_ms: entry.declared_at_ms,
+            }
+        });
+        Ok(asterism_contract::dto::AssetSourceTypeDto {
+            asset_id: asset.id.to_string(),
+            evidence,
+            evidence_pending,
+            asserted,
+        })
+    }
+
     /// Re-composes one asset's search document after a write to a field
     /// the document is derived from.
     ///

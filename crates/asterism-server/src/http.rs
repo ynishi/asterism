@@ -128,9 +128,9 @@ use asterism_contract::command::{
 };
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
-    AssetPageDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto, DirDto, DispatchDto,
-    DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto, EventDto, GroupDto,
-    GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
+    AssetPageDto, AssetSourceTypeDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
+    DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
     MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
     ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
     RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
@@ -354,7 +354,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         )
         .route(
             "/asterism/assets/{id}/source-type",
-            post(declare_asset_source_type),
+            post(declare_asset_source_type).get(asset_source_type),
         )
         .route("/asterism/assets/{id}/lineage", get(asset_lineage))
         .route("/asterism/assets/{id}/groups", get(groups_of_asset))
@@ -1419,6 +1419,26 @@ async fn declare_asset_source_type(
     ))
 }
 
+/// `GET /asterism/assets/{id}/source-type` — what the source type
+/// currently rests on: the container's evidence and the person's
+/// assertion, each on its own, with "not yet fingerprinted" kept
+/// distinct from "declares nothing".
+///
+/// Takes `?viewer_subject=` like the other single-asset reads: the
+/// answer confirms an asset exists, so a restricted asset answers 404
+/// for an outside viewer.
+async fn asset_source_type(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(id): Path<String>,
+    Query(params): Query<ViewerParams>,
+) -> ApiResult<AssetSourceTypeDto> {
+    Ok(Json(
+        ctx.asset_service
+            .source_type_of(&id, params.viewer_subject.as_deref())
+            .await?,
+    ))
+}
+
 /// `GET /asterism/assets/{id}/video-preview` — where the transcoded
 /// preview rendition stands (`ready` / `pending` / `not_needed` /
 /// `failed`). The first call for a missing rendition enqueues the
@@ -2465,8 +2485,10 @@ async fn delete_dir(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-/// Query-string parameters shared by the byte-serving asset reads
-/// (`/file`, `/thumbs/{size_px}`).
+/// Query-string parameters shared by the single-asset reads that must
+/// not act as an existence oracle — the byte-serving pair (`/file`,
+/// `/thumbs/{size_px}`) and the JSON reads beside them
+/// (`/video-preview`, `/source-type`).
 #[derive(Debug, Default, Deserialize)]
 struct ViewerParams {
     viewer_subject: Option<String>,

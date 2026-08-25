@@ -306,6 +306,7 @@ pub fn run() {
             commands::asset_declare_provenance,
             commands::asset_declare_meta,
             commands::asset_declare_source_type,
+            commands::asset_source_type,
             commands::asset_video_preview,
             commands::rebuild_edges,
             commands::rebuild_index,

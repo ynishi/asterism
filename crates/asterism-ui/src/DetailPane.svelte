@@ -33,6 +33,7 @@
   import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import AlbumMetaSection from "./AlbumMetaSection.svelte";
+  import SourceTypeRow from "./SourceTypeRow.svelte";
   import { readAlbumMeta } from "./lib/album-meta";
   import MaterialChapters from "./MaterialChapters.svelte";
   import MaterialMarks from "./MaterialMarks.svelte";
@@ -1847,11 +1848,22 @@
                 </dd>
               {/if}
 
+              <!-- Source type — what the file's origin rests on: the
+                   container's evidence, or the person's assertion over
+                   it (#108). Beside the other statements because an
+                   assertion is one; the disclosure signs whichever
+                   voice wins. -->
+              <SourceTypeRow
+                assetId={detail.asset.id}
+                onChanged={applyDeclaredMeta}
+              />
+
               <!-- AlbumMeta — what somebody said about this row, under a
-                   name they chose. Next to Provenance because the two
-                   are both statements rather than readings, and apart
-                   from it because a claim draws an edge and this draws
-                   nothing. -->
+                   name they chose. In the statements neighbourhood —
+                   Provenance, Source type — because all three are
+                   statements rather than readings, and apart from
+                   Provenance because a claim draws an edge and this
+                   draws nothing. -->
               <AlbumMetaSection
                 assetId={detail.asset.id}
                 statements={readAlbumMeta(parseExtra(detail.asset))}
