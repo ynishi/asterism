@@ -10,6 +10,16 @@ and this project adheres to
 
 ### Added
 
+- **The source type is asserted from the asset detail panel** (#108). A "Source
+  type" row with three states: the person's assertion (term, who, when, Edit and
+  Retract), the term the container's evidence establishes (labelled as the
+  container's, behind an Override…), and unknown — with a container not yet
+  fingerprinted saying "not yet read" rather than "declares nothing". The select
+  is closed over the five IPTC terms, so the panel cannot send what the backend
+  would refuse. Behind it, a new read (`GET /asterism/assets/{id}/source-type`)
+  carries evidence and assertion each on its own; the derivation is the one
+  `record_for` already composes, extracted rather than re-derived.
+
 - **A release workflow: the macOS download opens like an app** (#165). A pushed
   `v*` tag builds the production-shaped bundle through `just dogfood-build`,
   signs it with the Developer ID identity under the hardened runtime, notarizes
