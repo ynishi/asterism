@@ -8,10 +8,10 @@ homepage.workspace   = true
 description = "The wire vocabulary a member's client and a team server both speak — a leaf that depends on neither plane (#148 decision 15)"
 
 # **This crate inherits the workspace licence, and that is the whole
-# point of it.** The other four `teams-*` crates leave the field
-# undeclared pending #83 §4; this one cannot, because the edge it
+# point of it.** The other four `teams-*` crates declare
+# AGPL-3.0-or-later (#162); this one cannot, because the edge it
 # exists to make legal is `asterism-* -> here`. #83 §4 forbids the
-# local plane linking the reserved-licence plane in any form, and
+# local plane linking the AGPL plane in any form, and
 # prescribes its own second choice for code both sides need and neither
 # owns: a leaf both depend on and which depends on neither. That is
 # this crate, and #148 decision 15 names it.
@@ -19,7 +19,7 @@ description = "The wire vocabulary a member's client and a team server both spea
 # So the dependency list below is load-bearing rather than incidental.
 # Nothing here may name `teams-core`, `teams-infra`, `teams-contract`,
 # `teams-server` or any `asterism-*` crate — the first group would put
-# the reserved licence back under the leaf, and the second would make
+# the AGPL back under the leaf, and the second would make
 # the leaf a second name for one plane's types. A dependency added here
 # is a decision about the boundary, not about convenience.
 #
