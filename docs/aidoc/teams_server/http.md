@@ -13,6 +13,8 @@ slice).
 | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 | GET | `/teams/{team_id}/roster` | member, or an admin |
 | GET | `/teams/{team_id}/events` | member, or an admin — paged, see [`events`] |
+| GET | `/teams/{team_id}/events/subject` | member, or an admin — one subject's events, same page contract |
+| — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
 | POST | `/teams/{team_id}/owners/grant` | owner |
@@ -73,6 +75,13 @@ Domain refusals surface as client errors, never `500`:
 `DigestMismatch` → 409 (the mismatch body carries declared and
 computed, both), `Infra` → 500; the gate adds 401/403/404 and the
 limiter 429.
+
+The forge's routes answer on a second table, because their
+refusals come from the other plane's `DomainError` and carry a
+field this one has no column for: `reason`, on a conflict, which
+is what tells a caller whether retrying is worth anything. Those
+bodies are `asterism-server`'s to the letter — see `ApiError::Forge`
+and `forge_response` below.
 
 ## Functions
 

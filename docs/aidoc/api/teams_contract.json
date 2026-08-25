@@ -13,9 +13,19 @@
       "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
     },
     {
+      "path": "teams_contract::command::EnterContentCommand",
+      "kind": "struct",
+      "docs": "Brings content into a team against open work\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=sha256:<hex>`,\nmembers only — #148 decision 5).\n\n[`UploadBlobCommand`]'s shape for [`UploadBlobCommand`]'s reason.\nWhat differs is what the write leaves behind: this one mints the\nteam asset a round can name, and the work it entered against is the\npath's."
+    },
+    {
       "path": "teams_contract::command::GrantOwnerCommand",
       "kind": "struct",
       "docs": "Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner\nonly). The resulting ledger event carries both the old and the new\nrole in its payload."
+    },
+    {
+      "path": "teams_contract::command::HaveContentCommand",
+      "kind": "struct",
+      "docs": "Asks which digests a team already has\n(`POST /teams/{team_id}/forge/content/have`, members only).\n\n**This exists to avoid re-sending bytes and for nothing else.** It\nanswers inside one team, to that team's members, about digests the\ncaller is holding and could upload anyway — so what it reveals is\nwhat the asker could learn by uploading, minus the upload. That\nbound is the design rather than a caveat on it: the same question\nasked across teams, or by anyone outside one, is the deduplication\nside channel Harnik et al. (2010) describes, and #83 §3 closes it\nby making the link row the visibility boundary. This route is\ninside that boundary.\n\nA POST for a read, for [`ResolveContentCommand`]'s reason."
     },
     {
       "path": "teams_contract::command::InviteMemberCommand",
@@ -33,6 +43,11 @@
       "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
     },
     {
+      "path": "teams_contract::command::ResolveContentCommand",
+      "kind": "struct",
+      "docs": "Asks what a team holds for a list of its own asset ids\n(`POST /teams/{team_id}/forge/content/resolve`, members only).\n\nA body rather than a query string because the list is the request:\na client reconciling what it promoted asks about as many ids as it\nhas, and a URL is not where that belongs."
+    },
+    {
       "path": "teams_contract::command::RevokeOwnerCommand",
       "kind": "struct",
       "docs": "Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,\nowner only). Revoking the last owner — including yourself — is a\n`409` (#83 §1: the last owner cannot self-demote)."
@@ -40,7 +55,7 @@
     {
       "path": "teams_contract::command::UploadBlobCommand",
       "kind": "struct",
-      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nThe one command whose fields travel in the **query string**: the\nrequest body is the blob's raw bytes, streamed, so there is no JSON\nbody for them to ride in (the OCI registry `PUT ?digest=` shape,\n#83 §3)."
+      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nIts fields travel in the **query string**: the request body is the\nblob's raw bytes, streamed, so there is no JSON body for them to\nride in (the OCI registry `PUT ?digest=` shape, #83 §3).\n[`EnterContentCommand`] is the same shape for the same reason."
     },
     {
       "path": "teams_contract::dto",
@@ -53,9 +68,24 @@
       "docs": "The result of `PUT /teams/{team_id}/blobs?digest=…`.\n\nDeliberately identical for a first copy and a deduplicated one: the\nCAS holding the digest already is server-side knowledge only, and a\nresponse that said \"skipped\" would be the Harnik-2010 dedupe side\nchannel (#83 §3). What the caller learns is what changed *for their\nteam*: the link now exists, and here is the event that recorded it."
     },
     {
+      "path": "teams_contract::dto::ContentEnteredDto",
+      "kind": "struct",
+      "docs": "What the team minted for content that entered it\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).\n\nThe asset id is the team's own surrogate and never a local one\n(#148 decision 6): a client keeps the correspondence on its own\nmachine, and reading this as a local `AssetId` is the one thing\nthat boundary forbids."
+    },
+    {
       "path": "teams_contract::dto::HeadPublishedDto",
       "kind": "struct",
       "docs": "The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the\nenvelope facts the instance validated, never the artifact body,\nwhich the carrier does not read.\n\nNo [`LedgerEventDto`] here, unlike every team-scoped mutation: the\nregistry is instance-scope, outside the ledger's per-team streams\n(#83 §2); its history is the storage's own superseded rows."
+    },
+    {
+      "path": "teams_contract::dto::HeldAssetDto",
+      "kind": "struct",
+      "docs": "One asset a team holds, as the bulk resolve answers about it."
+    },
+    {
+      "path": "teams_contract::dto::HeldContentDto",
+      "kind": "struct",
+      "docs": "The have-check's answer\n(`POST /teams/{team_id}/forge/content/have`).\n\nThe digests this team holds, and nothing about the rest: the\nquestion is what a client may skip sending, and an answer shaped as\n\"held / not held\" per digest is one a caller can line up against\nthe wrong list."
     },
     {
       "path": "teams_contract::dto::LedgerEventDto",
@@ -81,6 +111,11 @@
       "path": "teams_contract::dto::PurgeReclaimedDto",
       "kind": "struct",
       "docs": "The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).\n\nMark and unmark answer with their [`LedgerEventDto`] alone (the\nreceipt convention); reclaim gets a shape of its own because one\ncall removes many links and triggers the zero-link sweep behind it."
+    },
+    {
+      "path": "teams_contract::dto::ResolvedContentDto",
+      "kind": "struct",
+      "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
     },
     {
       "path": "teams_contract::dto::RosterDto",

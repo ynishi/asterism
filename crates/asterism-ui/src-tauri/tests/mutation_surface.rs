@@ -22,7 +22,7 @@ use std::path::Path;
 /// Counted from the source, so it moves when a mutation command is
 /// added or removed and not otherwise. Adding a read command leaves it
 /// alone.
-const TAURI_MUTATION_COMMANDS: usize = 102;
+const TAURI_MUTATION_COMMANDS: usize = 103;
 
 #[test]
 fn the_tauri_mutation_surface_is_the_size_it_records() {
