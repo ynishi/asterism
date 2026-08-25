@@ -218,6 +218,12 @@ export type TagSuggestionDto = { tag_id: string; name: string; model_id: string;
 
 export type VisualModelStatusDto = { model_id: string | null; dim: number | null; preprocess_ver: number | null; };
 
+export type HeadStatusDto = { promoted: string | null; bound: string | null; restart_required: boolean; run: { model_id: string; dim: number; preprocess_ver: number; trained_tags: number; rulings_used: number; held_out: number; candidate_correct: number; baseline_correct: number; trained_at_ms: number; } | null; readiness: { rulings: number; tags_with_rulings: number; tags_ready: number; min_rulings_per_class: number; }; };
+
+export type TrainedHeadRunDto = { model_id: string; dim: number; preprocess_ver: number; trained_tags: number; rulings_used: number; held_out: number; candidate_correct: number; baseline_correct: number; trained_at_ms: number; };
+
+export type RulingReadinessDto = { rulings: number; tags_with_rulings: number; tags_ready: number; min_rulings_per_class: number; };
+
 export type TagCountDto = { tag: { id: string; name: string; axis: string | null; }; asset_count: number; };
 
 export type SessionDto = { id: string; persona_id: string; external_key: string; title: string | null; note: string | null; cover_hint: string | null; started_at_ms: number; ended_at_ms: number; message_count: number; created_at_ms: number; updated_at_ms: number; };

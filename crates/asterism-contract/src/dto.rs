@@ -730,6 +730,77 @@ pub struct VisualModelStatusDto {
     pub preprocess_ver: Option<u32>,
 }
 
+/// Which trained head scores tags, and what stands between the
+/// rulings on disk and the next one (#130, #132).
+///
+/// Deliberately not part of [`VisualModelStatusDto`]: that answers
+/// which encoder this process bound — app infrastructure, bundled,
+/// nothing to manage — and this answers what a person manages. The
+/// two are read together and stay two reads.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct HeadStatusDto {
+    /// The label the promotion pointer names; `None` = zero-shot.
+    pub promoted: Option<String>,
+    /// The label **this process** scores with — bound once at startup.
+    /// `None` = zero-shot, which is also the answer when a pointer
+    /// exists that could not be honoured.
+    pub bound: Option<String>,
+    /// Whether a relaunch would change which head scores: what would
+    /// bind at the next launch is not what is bound now. A pointer this
+    /// encoder would refuse binds nothing, so beside a bound head it
+    /// sets this — the relaunch drops to zero-shot.
+    pub restart_required: bool,
+    /// The run behind [`Self::promoted`]. `None` beside a `promoted`
+    /// label means the artifact could not be read — dangling or
+    /// corrupt, the same condition startup warns about and scores
+    /// zero-shot through.
+    pub run: Option<TrainedHeadRunDto>,
+    /// How much the next training run would have to learn from.
+    pub readiness: RulingReadinessDto,
+}
+
+/// The training run one head artifact records (#132).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TrainedHeadRunDto {
+    /// Encoder id the run trained against — a head scores only
+    /// against the vectors it learned from, so a value differing from
+    /// [`VisualModelStatusDto::model_id`] is why a promotion is not
+    /// binding.
+    pub model_id: String,
+    /// Vector width the run trained at.
+    pub dim: u32,
+    /// Preprocessing revision the run trained under.
+    pub preprocess_ver: u32,
+    /// Tags that got a trained row; the rest keep zero-shot.
+    pub trained_tags: u32,
+    /// Rulings the run consumed, both classes, all tags.
+    pub rulings_used: u32,
+    /// Held-out examples the promotion verdict was taken on.
+    pub held_out: u32,
+    /// Held-out calls the trained head got right.
+    pub candidate_correct: u32,
+    /// Held-out calls the zero-shot baseline got right, on the same
+    /// examples. Promotion is a strict win over this number.
+    pub baseline_correct: u32,
+    /// When the run finished (epoch ms).
+    pub trained_at_ms: i64,
+}
+
+/// What the rulings on disk would give a training run (#130).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RulingReadinessDto {
+    /// Rulings recorded under the bound encoder, both classes.
+    pub rulings: u32,
+    /// Tags holding at least one ruling.
+    pub tags_with_rulings: u32,
+    /// Tags holding at least [`Self::min_rulings_per_class`] rulings
+    /// **of each class** — the only ones a run would train. Zero here
+    /// means training has nothing to do yet.
+    pub tags_ready: u32,
+    /// The training floor, per class, as the trainer holds it.
+    pub min_rulings_per_class: u32,
+}
+
 /// A single channel tag.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TagDto {

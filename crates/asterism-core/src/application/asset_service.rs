@@ -255,6 +255,15 @@ pub struct AssetService {
     /// identity: which model's suggestions to show and rule on. An
     /// unset cell means no suggestions exist to list.
     visual_encoder: Arc<std::sync::OnceLock<Arc<dyn crate::domain::visual::VisualEncoder>>>,
+    /// The trained-head store (#132) — read-only here: what the
+    /// promotion pointer names. Why the port has no write side is on
+    /// [`TagHeadStore`](crate::domain::repository::TagHeadStore).
+    tag_heads: Arc<dyn crate::domain::repository::TagHeadStore>,
+    /// The head cell this process bound at startup (#132), read here
+    /// for its label alone. The pointer may have moved since — a
+    /// training win or a pull sets it without touching this cell — and
+    /// that difference is exactly what asks for a relaunch.
+    tag_head: Arc<std::sync::OnceLock<Arc<crate::domain::tag_head::BoundTagHead>>>,
 }
 
 impl AssetService {
@@ -281,6 +290,8 @@ impl AssetService {
         previews_dir: std::path::PathBuf,
         tag_evidence: Arc<dyn crate::domain::repository::TagEvidenceRepository>,
         visual_encoder: Arc<std::sync::OnceLock<Arc<dyn crate::domain::visual::VisualEncoder>>>,
+        tag_heads: Arc<dyn crate::domain::repository::TagHeadStore>,
+        tag_head: Arc<std::sync::OnceLock<Arc<crate::domain::tag_head::BoundTagHead>>>,
     ) -> Self {
         Self {
             assets,
@@ -303,6 +314,8 @@ impl AssetService {
             previews_dir,
             tag_evidence,
             visual_encoder,
+            tag_heads,
+            tag_head,
         }
     }
 
@@ -5005,6 +5018,37 @@ impl AssetService {
                 preprocess_ver: None,
             },
         }
+    }
+
+    /// Which trained head scores tags, and what a next training run
+    /// would have to learn from (#130).
+    ///
+    /// The encoder half of the panel is
+    /// [`visual_model_status`](Self::visual_model_status) and stays
+    /// there: that reads identity, this reads what a person manages.
+    /// With no encoder bound the readiness counts are zero rather than
+    /// absent — rulings are recorded *under* an encoder identity, so
+    /// there is no corpus to count, which is a real answer.
+    pub async fn head_status(&self) -> Result<asterism_contract::dto::HeadStatusDto, DomainError> {
+        let identity = self
+            .visual_encoder
+            .get()
+            .map(|encoder| encoder.identity().clone());
+        let promoted = self.tag_heads.promoted().await?;
+        let rulings = match &identity {
+            Some(identity) => {
+                self.tag_evidence
+                    .rulings_of_model(&identity.model_id)
+                    .await?
+            }
+            None => Vec::new(),
+        };
+        Ok(crate::application::mapping::head_status_to_dto(
+            promoted.as_ref(),
+            self.tag_head.get().map(|bound| &bound.head),
+            identity.as_ref(),
+            &rulings,
+        ))
     }
 
     /// Lists what the bound model proposed for one asset (#112),

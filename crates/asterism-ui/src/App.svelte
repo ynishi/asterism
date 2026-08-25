@@ -32,6 +32,7 @@
   import SessionTile from "./SessionTile.svelte";
   import SettingsMaintenance from "./SettingsMaintenance.svelte";
   import SettingsModalities from "./SettingsModalities.svelte";
+  import SettingsModel from "./SettingsModel.svelte";
   import SettingsPreferences from "./SettingsPreferences.svelte";
   import SharedLinesPanel from "./SharedLinesPanel.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
@@ -6517,6 +6518,7 @@
              effect at startup still needs adding to `STARTUP_ONLY` in
              the component for its badge.) -->
         <SettingsPreferences />
+        <SettingsModel />
         <SettingsMaintenance />
       </div>
     </div>

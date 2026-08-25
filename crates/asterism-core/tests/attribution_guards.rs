@@ -441,6 +441,12 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "asset_service::visual_model_status",
         "read — which model this process bound, if any",
     ),
+    (
+        "asset_service::head_status",
+        "read — which trained head the promotion pointer names, what \
+         this process bound, and how many rulings a next training run \
+         would learn from",
+    ),
     ("asset_service::list_index", "read — the light index page"),
     (
         "asset_service::hydrate_cards",
