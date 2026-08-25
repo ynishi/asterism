@@ -52,6 +52,7 @@ use asterism_teams_wire::projection::{
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use tokio::io::AsyncWriteExt as _;
 use tokio_util::io::ReaderStream;
 
 /// What can go wrong between here and a team.
@@ -602,6 +603,89 @@ impl TeamsClient {
             &HaveContentCommand { digests },
         )
         .await
+    }
+
+    /// Streams the bytes behind a digest onto this machine, and answers
+    /// with how many arrived.
+    ///
+    /// The other direction of [`enter_content`](Self::enter_content),
+    /// and the verb a clone is built on (#148 decision 10): working on
+    /// a shared line needs no copy, and this is for when the copy is
+    /// the point. Streamed for the reason the upload is — the file at
+    /// the far end is whatever somebody promoted, and a clone that read
+    /// it into a `Vec` first would size the process by the largest
+    /// thing any member ever brought.
+    ///
+    /// The digest is the identifier, not the team asset id: the team
+    /// mints an asset per promotion over one stored copy (decision 7),
+    /// so several assets share a digest and the bytes are the digest's.
+    /// [`resolve_content`](Self::resolve_content) is what turns the id a
+    /// round names into the digest to ask for here.
+    ///
+    /// `into` is created and truncated. A refusal leaves nothing behind
+    /// — the file is opened only once the server has answered, so a
+    /// caller never has to tell a failed download from an empty one.
+    pub async fn fetch_content(
+        &self,
+        team: TeamScopedId,
+        digest: &str,
+        into: &Path,
+    ) -> Result<u64, TeamsClientError> {
+        let token = self.token("fetch_content")?.to_string();
+        let url = self.url(&format!("/teams/{team}/blobs/{digest}"));
+        let mut response = self
+            .http
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        // Read the status before the file exists. A 404 here is the
+        // ordinary answer for a digest this team does not hold, and it
+        // must not also leave a truncated file where the clone was
+        // going. The refusal is decoded the long way rather than
+        // through `refusal`, which takes the response whole — and this
+        // one is a stream that is about to be consumed a chunk at a
+        // time.
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(refused("GET", &url, status.as_u16(), &body));
+        }
+        let mut file = tokio::fs::File::create(into).await.map_err(|err| {
+            TeamsClientError::Local(DomainError::Infra(anyhow::anyhow!(
+                "creating {} to clone into: {err}",
+                into.display()
+            )))
+        })?;
+        let mut written = 0u64;
+        while let Some(chunk) =
+            response
+                .chunk()
+                .await
+                .map_err(|source| TeamsClientError::Transport {
+                    url: url.clone(),
+                    source,
+                })?
+        {
+            file.write_all(&chunk).await.map_err(|err| {
+                TeamsClientError::Local(DomainError::Infra(anyhow::anyhow!(
+                    "writing {} while cloning: {err}",
+                    into.display()
+                )))
+            })?;
+            written += chunk.len() as u64;
+        }
+        file.flush().await.map_err(|err| {
+            TeamsClientError::Local(DomainError::Infra(anyhow::anyhow!(
+                "finishing {} while cloning: {err}",
+                into.display()
+            )))
+        })?;
+        Ok(written)
     }
 
     /// Which of these team asset ids the team holds, and what each was

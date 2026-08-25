@@ -481,6 +481,23 @@ impl SourceKind {
     pub const PERSONA_PACK: &'static str = "persona-pack";
     /// Ingested via an external persona-journal primitive.
     pub const PERSONA_JOURNAL: &'static str = "persona-journal";
+    /// Copied out of a line a team hosts (#148 decision 10).
+    ///
+    /// A clone is an import and not a forge concept: it mints its own
+    /// ids, writes no `AssetLink` row — a row there means "I put this
+    /// there", which a copy did not — and says where it came from the
+    /// way every other import does, through this slug and a locator
+    /// naming the team, the line, the entry and the team asset it was
+    /// taken from. That locator is a path, because the bytes really do
+    /// arrive and land somewhere; what makes the copy re-recognisable
+    /// is that the path is built from those four ids and carries
+    /// nothing the caller chose, so cloning the same thing twice asks
+    /// [`AssetRepository::find_by_source`] the same question twice. The
+    /// one thing in it that is not an id is the file extension, and
+    /// what that costs is written where the path is built.
+    ///
+    /// [`AssetRepository::find_by_source`]: crate::domain::repository::AssetRepository::find_by_source
+    pub const TEAM_LINE: &'static str = "team-line";
     /// Prefix used for `source_kind`s materialised by the outbound
     /// dispatch pipeline. Concatenated with an exporter slug to form
     /// values like `"dispatch-comfy"` / `"dispatch-file"` /
