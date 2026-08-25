@@ -84,12 +84,15 @@ unknown.
 ## Functions
 
 - `asserted_source_type` — The source type a person asserted on this asset, if any.
+- `asserted_source_type_entry` — The full statement [`SOURCE_TYPE_KEY`] files, if any.
 - `declared_origin` — What a container's metadata declares about the file's origin.
+- `evidence_source_type` — The term the container's own evidence establishes, if any.
 - `read_evidence` — Reads the canonical metadata object a probe stored.
 - `record_for` — Builds the record for one artefact.
 
 ## Types
 
+- `AssertedSourceType` — A person's source-type assertion with the statement's own context —
 - `ContainerEvidence` — What a container's metadata establishes about how a file was made.
 - `ParentEvidence` — What a parent contributes to its child's disclosure.
 - `ParentOrigin` — What a parent's own container declares about how it was made.

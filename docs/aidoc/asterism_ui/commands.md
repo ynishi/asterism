@@ -51,6 +51,7 @@ its own module doc explains.
 - `asset_edges` — Returns the top-`limit` edges (by weight) for hover-burst
 - `asset_lineage` — Walks the whole `derived_from` chain around the asset, not just
 - `asset_provenance` — Returns the 1-hop `derived_from` lineage around the asset —
+- `asset_source_type` — What the asset's source type currently rests on — the read twin of
 - `asset_texts` — Resolves the full source text of each asset (session Reader
 - `asset_video_preview` — Where a video's transcoded preview rendition stands — the command
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first

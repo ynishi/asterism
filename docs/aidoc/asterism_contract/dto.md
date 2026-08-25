@@ -9,6 +9,7 @@ the domain types.
 
 ## Types
 
+- `AssertedSourceTypeDto` — The recorded source-type assertion an asset carries.
 - `AssetCardDto` — Lightweight card representation used on the grid (wire form of
 - `AssetCommentDto` — One comment attached to an Asset.
 - `AssetCountEntryDto` — One row of a sidebar count aggregation — `(key, asset_count)`.
@@ -17,6 +18,7 @@ the domain types.
 - `AssetIndexEntryDto` — Index-only wire form for 6-figure grids.
 - `AssetIndexPageDto` — Paginated index page (sibling of `AssetPageDto`).
 - `AssetPageDto` — Paginated grid page.
+- `AssetSourceTypeDto` — What one asset's digital source type currently rests on
 - `AssetTextDto` — Full source text of one asset, resolved from the original
 - `ChapterMarkDto` — One named section of a material — an entry in a chapter list.
 - `ConstellationItemDto` — One hover-burst item — an edge paired with the card it lands on.

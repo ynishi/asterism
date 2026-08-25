@@ -292,6 +292,7 @@ the domain types.
 
 ## Types
 
+- `AssertedSourceTypeDto` — The recorded source-type assertion an asset carries.
 - `AssetCardDto` — Lightweight card representation used on the grid (wire form of
 - `AssetCommentDto` — One comment attached to an Asset.
 - `AssetCountEntryDto` — One row of a sidebar count aggregation — `(key, asset_count)`.
@@ -300,6 +301,7 @@ the domain types.
 - `AssetIndexEntryDto` — Index-only wire form for 6-figure grids.
 - `AssetIndexPageDto` — Paginated index page (sibling of `AssetPageDto`).
 - `AssetPageDto` — Paginated grid page.
+- `AssetSourceTypeDto` — What one asset's digital source type currently rests on
 - `AssetTextDto` — Full source text of one asset, resolved from the original
 - `ChapterMarkDto` — One named section of a material — an entry in a chapter list.
 - `ConstellationItemDto` — One hover-burst item — an edge paired with the card it lands on.
@@ -3072,12 +3074,15 @@ unknown.
 ## Functions
 
 - `asserted_source_type` — The source type a person asserted on this asset, if any.
+- `asserted_source_type_entry` — The full statement [`SOURCE_TYPE_KEY`] files, if any.
 - `declared_origin` — What a container's metadata declares about the file's origin.
+- `evidence_source_type` — The term the container's own evidence establishes, if any.
 - `read_evidence` — Reads the canonical metadata object a probe stored.
 - `record_for` — Builds the record for one artefact.
 
 ## Types
 
+- `AssertedSourceType` — A person's source-type assertion with the statement's own context —
 - `ContainerEvidence` — What a container's metadata establishes about how a file was made.
 - `ParentEvidence` — What a parent contributes to its child's disclosure.
 - `ParentOrigin` — What a parent's own container declares about how it was made.
@@ -14311,6 +14316,7 @@ its own module doc explains.
 - `asset_edges` — Returns the top-`limit` edges (by weight) for hover-burst
 - `asset_lineage` — Walks the whole `derived_from` chain around the asset, not just
 - `asset_provenance` — Returns the 1-hop `derived_from` lineage around the asset —
+- `asset_source_type` — What the asset's source type currently rests on — the read twin of
 - `asset_texts` — Resolves the full source text of each asset (session Reader
 - `asset_video_preview` — Where a video's transcoded preview rendition stands — the command
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
