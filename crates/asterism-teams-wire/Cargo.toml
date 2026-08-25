@@ -1,0 +1,59 @@
+[package]
+name = "asterism-teams-wire"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+homepage.workspace   = true
+description = "The wire vocabulary a member's client and a team server both speak — a leaf that depends on neither plane (#148 decision 15)"
+
+# **This crate inherits the workspace licence, and that is the whole
+# point of it.** The other four `teams-*` crates leave the field
+# undeclared pending #83 §4; this one cannot, because the edge it
+# exists to make legal is `asterism-* -> here`. #83 §4 forbids the
+# local plane linking the reserved-licence plane in any form, and
+# prescribes its own second choice for code both sides need and neither
+# owns: a leaf both depend on and which depends on neither. That is
+# this crate, and #148 decision 15 names it.
+#
+# So the dependency list below is load-bearing rather than incidental.
+# Nothing here may name `teams-core`, `teams-infra`, `teams-contract`,
+# `teams-server` or any `asterism-*` crate — the first group would put
+# the reserved licence back under the leaf, and the second would make
+# the leaf a second name for one plane's types. A dependency added here
+# is a decision about the boundary, not about convenience.
+#
+# The name follows #83 §4's `asterism-<thing>` rule for a leaf, which
+# is what settles the ambiguity the other spelling had: §4 states its
+# never-list by prefix, so a `teams-`-prefixed leaf made the one edge
+# it exists to permit — `asterism-teams-client` depending on it — read
+# as the forbidden one, and took three files of prose to talk a reader
+# out of. `-teams-` in the middle says what the vocabulary is about;
+# the `asterism-` prefix says which side of the licence boundary the
+# crate sits on, which is the question a reader is actually asking.
+#
+# What is deliberately **not** here: the forge's own verbs. Their DTOs
+# are already MIT/Apache in `asterism-contract::forge`, both sides
+# already name them (#148 revision 10), and re-spelling them here would
+# be the two-homes-for-one-type problem this crate exists to avoid.
+license.workspace = true
+
+# Not published to crates.io — the workspace's other members are not
+# either, and the licence above is about who may link this, not about
+# a registry.
+publish = false
+
+[lib]
+
+[dependencies]
+serde = { workspace = true }
+
+# The one dependency past serde, and it is here for what the crate is:
+# these shapes are the wire's schema, and `schema-bridge` is how this
+# workspace renders a schema for a TypeScript consumer from the Rust
+# definition rather than from a second copy of it. Already a workspace
+# dependency (`asterism-contract` and `teams-contract` both take it),
+# so no new external crate enters the graph — and it declares nothing
+# of either plane, which is the test every line in this section has to
+# pass.
+schema-bridge = { workspace = true }

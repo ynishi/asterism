@@ -339,11 +339,14 @@ ALTER TABLE user_account RENAME COLUMN is_operator TO is_admin;
 /// line's contents is `Lines::discard`, which is a forge verb with
 /// rules of its own, and wiring a team deletion to it is a decision
 /// with an owner and a place, neither of which is a foreign key
-/// declaration. The owner is the transport and the client — #151 and
-/// #152, the siblings #148 splits this issue from — because deciding
-/// what a team's departure does to its work needs the surface that
-/// asks the question. Until that lands, deleting a team leaves its forge
-/// rows behind, and this paragraph is where that is written down.
+/// declaration. **Deleting a team leaves its forge rows behind, and
+/// this paragraph is where that is written down.** #151 and #152 were
+/// expected to settle it, on the reasoning that deciding what a team's
+/// departure does to its work needs the surface that asks the
+/// question; both landed and neither did, so the decision is still
+/// unowned. `asset_projection` (V9) carries a `team_id` for the same
+/// reason and is in the same position: a sweep is expressible, and
+/// nothing calls one.
 ///
 /// **2. `UNIQUE (team_id, name)` on `line`.** The forge's `Name`
 /// deliberately leaves name uniqueness to whoever owns the namespace
@@ -640,6 +643,79 @@ ALTER TABLE team_asset ADD COLUMN digest TEXT;
 ALTER TABLE team_asset ADD COLUMN entered_for BLOB;
 "#;
 
+/// V9 — what a promoter said about an entry (#148 decisions 12 and
+/// 14).
+///
+/// **Outside the forge, and the table is where that is visible.** The
+/// forge has three axes and #102 forbids a column that answers what
+/// the history already answers, so a description does not go on a
+/// change point. It sits here instead, keyed `(line_id, entry_id)`.
+/// What being outside buys is stated where the type is defined
+/// (`teams_core::domain::projection`).
+///
+/// **`team_id` is what scopes it, and it is not part of the key.**
+/// Exactly the arrangement `V7` gives every forge table: a line id is
+/// unique across teams, so the key is already exact and adding the
+/// scope column to it would widen a key for nothing. What the column
+/// is for is the read — a caller arrives holding a team's session and
+/// a `(line, entry)` pair, and without this column the store can only
+/// answer whether *somebody's* entry has a description, not whether
+/// this caller's team has one. That is a cross-team read, and it is
+/// the reason this column is `NOT NULL` and every statement over this
+/// table filters on it.
+///
+/// It also gives a team's departure something to find. Deleting a team
+/// leaves its forge rows behind today and would leave these too; the
+/// difference is that a sweep is now *expressible*, which it was not
+/// while the table had no idea whose rows it held. Who owns that
+/// sweep is the same open question `V7` records for the forge rows,
+/// and this batch does not answer it.
+///
+/// **`body` is opaque, and every column that is not here is the
+/// decision.** Decision 14 keeps the body free of columns, validation
+/// and indexes on this plane: no `title`, no `description`, no `tags`,
+/// nothing lifted out of it — the check the decision states is that a
+/// column naming something inside the body breaks it. So `body` is
+/// `TEXT` holding whatever the member's mapper wrote, stored and
+/// handed back unread.
+///
+/// `version` is not such a column — it is a fact about the envelope
+/// rather than a field of the description, and
+/// `teams_core::domain::projection` is where that distinction is
+/// argued. A migration is where a column gets added, which is why the
+/// rule is restated here and not merely pointed at.
+///
+/// **One row per entry, replaced rather than versioned.** Decision 12
+/// says a projection is captured at the time and only a forge op
+/// replaces one — so the history of what was said is the ledger's
+/// (each replacing push has its own event), and this table holds the
+/// present. `promoted_by` and `pushed_at` are the stamp on the row the
+/// present came from, on the write-time-capture discipline the ledger
+/// already keeps.
+///
+/// **No foreign key to `line` or to any entry.** There is no entry
+/// table to point at — an entry is a name that appears in change rows
+/// rather than a row of its own — and a key on `line_id` would refuse
+/// `Lines::discard`, the one verb that takes a line with its log. A
+/// discarded line leaves its projections behind, which is the same
+/// arrangement `team_asset` keeps for its own reasons one batch up:
+/// releasing is not deleting, and reclaiming storage is the purge's
+/// job rather than a side effect of dropping a line.
+const V9_ASSET_PROJECTION: &str = r#"
+CREATE TABLE asset_projection (
+    line_id     BLOB    NOT NULL,
+    entry_id    BLOB    NOT NULL,
+    team_id     BLOB    NOT NULL,
+    version     INTEGER NOT NULL,
+    body        TEXT    NOT NULL,
+    promoted_by BLOB    NOT NULL,
+    pushed_at   INTEGER NOT NULL,
+    PRIMARY KEY (line_id, entry_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX idx_asset_projection_team ON asset_projection(team_id);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -651,6 +727,7 @@ const MIGRATIONS: &[&str] = &[
     V6_ADMIN_RENAME,
     V7_FORGE_TABLES,
     V8_TEAM_ASSET_CONTENT,
+    V9_ASSET_PROJECTION,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -917,6 +994,54 @@ mod tests {
         ] {
             assert!(ddl.contains(expected), "{expected} missing from: {ddl}");
         }
+    }
+
+    #[test]
+    fn the_projection_lifts_no_field_out_of_its_body() {
+        // A column added here for a field a client happened to be
+        // putting in its bodies is how #148 decision 14 would be
+        // broken, and this is the test that says so before it ships.
+        let conn = migrated();
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'asset_projection'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for lifted in [
+            "title",
+            "description",
+            "summary",
+            "tags",
+            "labels",
+            "keywords",
+            "marks",
+        ] {
+            assert!(
+                !ddl.contains(lifted),
+                "asset_projection must not name {lifted:?}, which lives inside the body: {ddl}"
+            );
+        }
+
+        // And nothing indexes the body either — an index over a
+        // projection's contents is a reader that has opinions about
+        // what is in one. The team scope is indexed, which is a fact
+        // about whose row it is rather than about what the row says.
+        let indexed: Vec<String> = conn
+            .prepare(
+                "SELECT sql FROM sqlite_master
+                  WHERE type = 'index' AND tbl_name = 'asset_projection'
+                    AND sql IS NOT NULL",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(indexed.len(), 1, "{indexed:?}");
+        assert!(indexed[0].contains("team_id"), "{indexed:?}");
+        assert!(!indexed[0].contains("body"), "{indexed:?}");
     }
 
     #[test]

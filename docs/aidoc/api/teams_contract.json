@@ -5,17 +5,7 @@
     {
       "path": "teams_contract::command",
       "kind": "module",
-      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
-    },
-    {
-      "path": "teams_contract::command::CreateTeamCommand",
-      "kind": "struct",
-      "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
-    },
-    {
-      "path": "teams_contract::command::EnterContentCommand",
-      "kind": "struct",
-      "docs": "Brings content into a team against open work\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=sha256:<hex>`,\nmembers only — #148 decision 5).\n\n[`UploadBlobCommand`]'s shape for [`UploadBlobCommand`]'s reason.\nWhat differs is what the write leaves behind: this one mints the\nteam asset a round can name, and the work it entered against is the\npath's."
+      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes an\nowner, an admin or an operator's tooling calls.\n\nWhat a **member's client** sends moved to `asterism-teams-wire` when the\nleaf landed (#148 decision 15): login, team creation and the three\ncontent verbs live there now, because the client may not link this\ncrate. What stayed is what is not a member's vocabulary — the\nroster verbs, which are an owner's, and the substrate's own upload.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "teams_contract::command::GrantOwnerCommand",
@@ -23,29 +13,14 @@
       "docs": "Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner\nonly). The resulting ledger event carries both the old and the new\nrole in its payload."
     },
     {
-      "path": "teams_contract::command::HaveContentCommand",
-      "kind": "struct",
-      "docs": "Asks which digests a team already has\n(`POST /teams/{team_id}/forge/content/have`, members only).\n\n**This exists to avoid re-sending bytes and for nothing else.** It\nanswers inside one team, to that team's members, about digests the\ncaller is holding and could upload anyway — so what it reveals is\nwhat the asker could learn by uploading, minus the upload. That\nbound is the design rather than a caveat on it: the same question\nasked across teams, or by anyone outside one, is the deduplication\nside channel Harnik et al. (2010) describes, and #83 §3 closes it\nby making the link row the visibility boundary. This route is\ninside that boundary.\n\nA POST for a read, for [`ResolveContentCommand`]'s reason."
-    },
-    {
       "path": "teams_contract::command::InviteMemberCommand",
       "kind": "struct",
       "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
     },
     {
-      "path": "teams_contract::command::LoginCommand",
-      "kind": "struct",
-      "docs": "Presents a credential to `POST /teams/auth/login`."
-    },
-    {
       "path": "teams_contract::command::RemoveMemberCommand",
       "kind": "struct",
       "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
-    },
-    {
-      "path": "teams_contract::command::ResolveContentCommand",
-      "kind": "struct",
-      "docs": "Asks what a team holds for a list of its own asset ids\n(`POST /teams/{team_id}/forge/content/resolve`, members only).\n\nA body rather than a query string because the list is the request:\na client reconciling what it promoted asks about as many ids as it\nhas, and a URL is not where that belongs."
     },
     {
       "path": "teams_contract::command::RevokeOwnerCommand",
@@ -55,12 +30,12 @@
     {
       "path": "teams_contract::command::UploadBlobCommand",
       "kind": "struct",
-      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nIts fields travel in the **query string**: the request body is the\nblob's raw bytes, streamed, so there is no JSON body for them to\nride in (the OCI registry `PUT ?digest=` shape, #83 §3).\n[`EnterContentCommand`] is the same shape for the same reason."
+      "docs": "Uploads a blob into the team's store\n(`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).\n\nIts fields travel in the **query string**: the request body is the\nblob's raw bytes, streamed, so there is no JSON body for them to\nride in (the OCI registry `PUT ?digest=` shape, #83 §3).\n`asterism_teams_wire::command::EnterContentCommand` is the same shape for\nthe same reason."
     },
     {
       "path": "teams_contract::dto",
       "kind": "module",
-      "docs": "Response DTOs of the `/teams/*` surface.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
+      "docs": "Response DTOs of the `/teams/*` surfaces a member's client does not\nspeak.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1). That envelope now lives in `asterism-teams-wire`, along\nwith the session, the roster, the ledger page and the content\nverbs' answers: a member's client reads all of those and may not\nlink this crate (#148 decision 15). It is named here rather than\nre-spelled, which is the whole point of a leaf both planes depend\non."
     },
     {
       "path": "teams_contract::dto::BlobUploadedDto",
@@ -68,34 +43,9 @@
       "docs": "The result of `PUT /teams/{team_id}/blobs?digest=…`.\n\nDeliberately identical for a first copy and a deduplicated one: the\nCAS holding the digest already is server-side knowledge only, and a\nresponse that said \"skipped\" would be the Harnik-2010 dedupe side\nchannel (#83 §3). What the caller learns is what changed *for their\nteam*: the link now exists, and here is the event that recorded it."
     },
     {
-      "path": "teams_contract::dto::ContentEnteredDto",
-      "kind": "struct",
-      "docs": "What the team minted for content that entered it\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).\n\nThe asset id is the team's own surrogate and never a local one\n(#148 decision 6): a client keeps the correspondence on its own\nmachine, and reading this as a local `AssetId` is the one thing\nthat boundary forbids."
-    },
-    {
       "path": "teams_contract::dto::HeadPublishedDto",
       "kind": "struct",
       "docs": "The receipt of `PUT /teams/heads/registry` (#132 phase 3) — the\nenvelope facts the instance validated, never the artifact body,\nwhich the carrier does not read.\n\nNo [`LedgerEventDto`] here, unlike every team-scoped mutation: the\nregistry is instance-scope, outside the ledger's per-team streams\n(#83 §2); its history is the storage's own superseded rows."
-    },
-    {
-      "path": "teams_contract::dto::HeldAssetDto",
-      "kind": "struct",
-      "docs": "One asset a team holds, as the bulk resolve answers about it."
-    },
-    {
-      "path": "teams_contract::dto::HeldContentDto",
-      "kind": "struct",
-      "docs": "The have-check's answer\n(`POST /teams/{team_id}/forge/content/have`).\n\nThe digests this team holds, and nothing about the rest: the\nquestion is what a client may skip sending, and an answer shaped as\n\"held / not held\" per digest is one a caller can line up against\nthe wrong list."
-    },
-    {
-      "path": "teams_contract::dto::LedgerEventDto",
-      "kind": "struct",
-      "docs": "One entry of a team's append-only stream\n(`GET /teams/{team_id}/events`, and the receipt every mutation\nroute returns)."
-    },
-    {
-      "path": "teams_contract::dto::LedgerPageDto",
-      "kind": "struct",
-      "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
     },
     {
       "path": "teams_contract::dto::MarkedBlobLinkDto",
@@ -111,36 +61,6 @@
       "path": "teams_contract::dto::PurgeReclaimedDto",
       "kind": "struct",
       "docs": "The result of `POST /teams/{team_id}/blobs/purge/reclaim` (#95).\n\nMark and unmark answer with their [`LedgerEventDto`] alone (the\nreceipt convention); reclaim gets a shape of its own because one\ncall removes many links and triggers the zero-link sweep behind it."
-    },
-    {
-      "path": "teams_contract::dto::ResolvedContentDto",
-      "kind": "struct",
-      "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
-    },
-    {
-      "path": "teams_contract::dto::RosterDto",
-      "kind": "struct",
-      "docs": "The team's current membership set\n(`GET /teams/{team_id}/roster`)."
-    },
-    {
-      "path": "teams_contract::dto::RosterMemberDto",
-      "kind": "struct",
-      "docs": "One membership row as the roster lists it."
-    },
-    {
-      "path": "teams_contract::dto::SessionDto",
-      "kind": "struct",
-      "docs": "A freshly minted session (`POST /teams/auth/login`)."
-    },
-    {
-      "path": "teams_contract::dto::SubjectRefDto",
-      "kind": "struct",
-      "docs": "One typed reference an event makes."
-    },
-    {
-      "path": "teams_contract::dto::TeamCreatedDto",
-      "kind": "struct",
-      "docs": "The result of `POST /teams/create`."
     }
   ]
 }

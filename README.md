@@ -193,17 +193,22 @@ defined in [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md).
 ## Licence
 
 Licensing is declared **per crate** (the `license` field in each crate's
-`Cargo.toml`). Every crate currently in this repository — the local-first core —
-is licensed under either of
+`Cargo.toml`). The local-first core is licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option.
+at your option, and it stays that way.
 
-Future crates implementing a hosted collaboration plane (shared spaces, sync,
-team features) may be released under a different license; the local-first core
-stays MIT/Apache-2.0.
+The crates implementing a hosted collaboration plane (shared spaces, sync, team
+features) leave the field undeclared while that licence is decided, and may be
+released under a different one.
+
+One crate sits on neither side. `asterism-teams-wire` carries the wire
+vocabulary a member's client and a team server both speak, depends on neither
+plane, and is MIT/Apache-2.0 — which is what lets the local-first core link it
+at all, and what makes the server implementable by something that is not this
+codebase. Its manifest says so at the field.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be

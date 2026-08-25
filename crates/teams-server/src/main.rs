@@ -293,7 +293,8 @@ async fn main() -> anyhow::Result<()> {
             };
             let ctx = Arc::new(TeamsCtx {
                 repo: SqliteTeamsRepository::new(isle.clone()),
-                auth: PasswordAuth::new(isle),
+                auth: PasswordAuth::new(isle.clone()),
+                projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle),
                 blobs,
                 registration,
                 session_ttl_ms: DEFAULT_SESSION_TTL_MS,

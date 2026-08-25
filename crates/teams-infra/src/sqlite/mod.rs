@@ -10,6 +10,10 @@
 //! - [`repo`] — the repository over the state tables and the ledger.
 //! - [`forge`] — the forge's ports over one team's rows, appending to
 //!   that team's ledger in the same transaction (#148 decision 17).
+//! - [`projection`] — captured descriptions, keyed by entry and
+//!   **outside** the forge (#148 decision 12). A module of its own
+//!   rather than a corner of [`forge`], because where the code lives
+//!   is part of how "outside" stays true.
 //! - [`open_and_migrate`] / [`open_and_migrate_in_memory`] — entry
 //!   points that return an `(AsyncIsle, AsyncIsleDriver)` pair with the
 //!   pragmas set and the schema migrated.
@@ -40,6 +44,7 @@
 pub mod forge;
 pub mod map;
 pub mod migrations;
+pub mod projection;
 pub mod repo;
 
 use rusqlite::Connection;

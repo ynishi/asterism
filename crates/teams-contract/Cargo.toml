@@ -15,6 +15,15 @@ publish     = false
 [dependencies]
 teams-core = { path = "../teams-core" }
 
+# The wire vocabulary both planes share (#148 decision 15). Two shapes
+# here embed `LedgerEventDto`, which now lives in the leaf because a
+# member's client reads it and may not link this crate — so it is named
+# from there rather than re-spelled. A `teams-* -> leaf` edge is the
+# arrangement §4's second choice describes, and it adds no licence
+# question: the leaf carries the workspace licence and depends on
+# neither plane.
+asterism-teams-wire = { path = "../asterism-teams-wire" }
+
 serde = { workspace = true }
 
 # Generates TypeScript bindings from the DTOs defined here — the same
