@@ -1,0 +1,65 @@
+[package]
+name = "asterism-teams-client"
+version.workspace       = true
+edition.workspace       = true
+authors.workspace       = true
+repository.workspace     = true
+homepage.workspace       = true
+license.workspace        = true
+documentation.workspace  = true
+description = "The member's half of a shared line — talking to a team server, promoting an Asset, and the relation that stays home (#148)"
+
+# Not published to crates.io, like every other member of this
+# workspace.
+publish = false
+
+[lib]
+
+[dependencies]
+# The two crates this may name, and the reason it may name each.
+#
+# `asterism-teams-wire` is the leaf #148 decision 15 asks for: MIT/Apache,
+# depended on by both planes, depending on neither. It is how a client
+# reaches the teams-shaped vocabulary without #83 §4's forbidden edge.
+#
+# `asterism-contract` carries the forge's own verbs, already MIT/Apache
+# and already read by both planes (#148 revision 10 narrows §4's
+# never-list to the modules whose stated reason covers them — `forge`
+# is not one of those). Only `forge` and `digest` are named here;
+# `command`, `query` and `dto` are the local app's plumbing and stay on
+# the never-list.
+#
+# **No `teams-core`, `teams-infra`, `teams-contract` or `teams-server`,
+# ever.** That is the edge #83 §4 forbids in any form, and it is why
+# the leaf exists. A dependency added to this section is a decision
+# about that boundary.
+asterism-teams-wire = { path = "../asterism-teams-wire" }
+asterism-contract   = { path = "../asterism-contract" }
+
+# The local model a promotion reads and the mapper declares over: the
+# Asset, its materials, its marks and their layer origins, plus the
+# `AssetLink` relation's own port (#148 decisions 4, 8 and 9). The
+# adapter behind that port is `asterism-infra`'s, which this crate does
+# not name — a caller hands one in.
+asterism-core = { path = "../asterism-core" }
+
+# The HTTP client. The workspace line, not a second pin: four crates
+# already hand-pinned this exact shape so that one TLS backend and one
+# linked copy survive (see the workspace manifest), and a client crate
+# is the fifth.
+reqwest = { workspace = true }
+# `ReaderStream` — a promotion's material is whatever a person put in
+# their library, and a video read into a `Vec<u8>` before it is sent
+# would make the largest allocation in the process the size of the
+# largest file promoted. The same adapter both servers already stream
+# originals through.
+tokio-util = { workspace = true }
+tokio      = { workspace = true }
+
+anyhow      = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }

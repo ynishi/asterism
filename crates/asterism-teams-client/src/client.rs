@@ -1,0 +1,760 @@
+//! Talking to a team server (#148 decisions 16 and 19).
+//!
+//! ## Served through, never mirrored
+//!
+//! Decision 16: reads and writes go to the server, there is no local
+//! copy of a shared line, and therefore no staleness to reason about.
+//! So every method here is a request. There is no cache, no `sync`,
+//! and no "refresh" — and there should not be one, because a mirror
+//! would be the weaker version of a clone with a cache attached, and a
+//! clone is #153's.
+//!
+//! ## The shape of the surface
+//!
+//! Decision 19: the transport is the local forge's verbs mirrored
+//! under `/teams/{team_id}/forge/*`, plus a content verb scoped to a
+//! pursuit, a bulk resolve and a have-check.
+//!
+//! **This crate implements a subset of that, and the subset is the
+//! design.** #152 is a promotion and the reads a member needs around
+//! one, so the line and pursuit verbs a promotion walks are here and
+//! the conversation verbs are not — nothing in this issue says
+//! anything in a thread. What every path here does promise is to be
+//! the router's verbatim: a path spelled differently on the two sides
+//! is a bug in one of them, and that is the claim worth checking.
+//!
+//! ## Ids that come back are handles
+//!
+//! Every id a team states arrives as a
+//! [`TeamScopedId`](asterism_core::domain::team_link::TeamScopedId),
+//! which has no conversion to or from a local `AssetId` in either
+//! direction (#148 decision 6). What crosses in the other direction is
+//! a subject and a digest, which is what the decision says may.
+
+use std::path::Path;
+
+use asterism_contract::forge::{
+    CloseForgePursuitCommand, ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineActCommand,
+    ForgeLineDto, ForgeLineHistoryDto, ForgeOpDto, ForgePursuitDto, OpenForgeLineCommand,
+    OpenForgePursuitCommand, PushForgeRoundCommand,
+};
+use asterism_core::domain::team_link::TeamScopedId;
+use asterism_core::error::DomainError;
+use asterism_teams_wire::command::{
+    CreateTeamCommand, HaveContentCommand, LoginCommand, ResolveContentCommand,
+};
+use asterism_teams_wire::dto::{
+    ContentEnteredDto, HeldContentDto, LedgerPageDto, ResolvedContentDto, RosterDto, SessionDto,
+    TeamCreatedDto,
+};
+use asterism_teams_wire::projection::{
+    EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
+};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tokio_util::io::ReaderStream;
+
+/// What can go wrong between here and a team.
+#[derive(Debug, thiserror::Error)]
+pub enum TeamsClientError {
+    /// The request never got an answer.
+    #[error("talking to {url}: {source}")]
+    Transport {
+        /// What was being asked for.
+        url: String,
+        /// The underlying failure.
+        #[source]
+        source: reqwest::Error,
+    },
+
+    /// The server answered, and the answer was a refusal.
+    ///
+    /// Carries `reason` because the forge's conflicts do (`blocked`,
+    /// `raced`, `settled`, `clashes`), and it is the token that tells a
+    /// caller whether retrying is worth anything. Dropping it would
+    /// leave a client with a 409 it cannot act on.
+    #[error("{method} {url}: HTTP {status} {kind}: {message}")]
+    Refused {
+        /// The verb that was refused.
+        method: &'static str,
+        /// The path it was aimed at.
+        url: String,
+        /// The status code.
+        status: u16,
+        /// The house error body's `kind`.
+        kind: String,
+        /// The house error body's `message`.
+        message: String,
+        /// The conflict token, when the refusal was a conflict.
+        reason: Option<String>,
+    },
+
+    /// The answer did not decode into what the route promises.
+    #[error("decoding the answer to {url}: {message}")]
+    Decode {
+        /// What was being asked for.
+        url: String,
+        /// What went wrong.
+        message: String,
+    },
+
+    /// A call that needs a session was made before [`TeamsClient::login`].
+    #[error("no session: log in before calling {what}")]
+    NoSession {
+        /// The call that wanted one.
+        what: &'static str,
+    },
+
+    /// Something local refused before anything was sent.
+    #[error(transparent)]
+    Local(#[from] DomainError),
+}
+
+/// A client bound to one team server, holding at most one session.
+#[derive(Clone)]
+pub struct TeamsClient {
+    base_url: String,
+    http: reqwest::Client,
+    session: Option<SessionDto>,
+}
+
+/// Written by hand because the derived one prints the bearer token.
+///
+/// A session token is a credential with a live server behind it, and
+/// `Debug` is what ends up in a panic message, a test failure and a
+/// log line — the three places a value is copied out of by someone who
+/// was looking at something else. So the token is not here, and what
+/// is here is what a person debugging actually needs: which server,
+/// and whether there is a session at all.
+impl std::fmt::Debug for TeamsClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TeamsClient")
+            .field("base_url", &self.base_url)
+            .field(
+                "session",
+                &self
+                    .session
+                    .as_ref()
+                    .map_or("none", |_| "held (token not shown)"),
+            )
+            .finish()
+    }
+}
+
+impl TeamsClient {
+    /// Points a client at a server. No request is made here.
+    ///
+    /// `base_url` is the origin without a trailing slash, e.g.
+    /// `http://127.0.0.1:8787`.
+    pub fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into().trim_end_matches('/').to_string(),
+            http: reqwest::Client::new(),
+            session: None,
+        }
+    }
+
+    /// The session, if there is one. Its token is the one value in
+    /// this crate that must not be logged.
+    pub const fn session(&self) -> Option<&SessionDto> {
+        self.session.as_ref()
+    }
+
+    /// Who the server says this client is, as a subject.
+    ///
+    /// The account's user id rather than its display name: decision 6
+    /// puts author subjects and viewer subjects in one namespace, and a
+    /// display name moves.
+    pub fn user_id(&self) -> Option<&str> {
+        self.session.as_ref().map(|it| it.user_id.as_str())
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base_url)
+    }
+
+    fn token(&self, what: &'static str) -> Result<&str, TeamsClientError> {
+        self.session
+            .as_ref()
+            .map(|it| it.token.as_str())
+            .ok_or(TeamsClientError::NoSession { what })
+    }
+
+    // ------------------------------------------------------------------
+    // Session (#83 §5).
+    // ------------------------------------------------------------------
+
+    /// Logs in, and keeps the session for every call after this one.
+    ///
+    /// A wrong password and an unknown login are the same `401`; the
+    /// API does not say which half failed, and neither does this.
+    pub async fn login(
+        &mut self,
+        login: &str,
+        password: &str,
+    ) -> Result<SessionDto, TeamsClientError> {
+        let url = self.url("/teams/auth/login");
+        let response = self
+            .http
+            .post(&url)
+            .json(&LoginCommand {
+                login: login.to_string(),
+                password: password.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        let session: SessionDto = read_json("POST", &url, response).await?;
+        self.session = Some(session.clone());
+        Ok(session)
+    }
+
+    /// Ends the session, here and on the server.
+    ///
+    /// The local half happens whatever the server says: a session this
+    /// client will not present again is over from its own point of
+    /// view, and a network failure on the way out must not leave a
+    /// token sitting in memory.
+    pub async fn logout(&mut self) -> Result<(), TeamsClientError> {
+        let Some(session) = self.session.take() else {
+            return Ok(());
+        };
+        let url = self.url("/teams/auth/logout");
+        let response = self
+            .http
+            .post(&url)
+            .bearer_auth(&session.token)
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        refusal("POST", &url, response).await
+    }
+
+    // ------------------------------------------------------------------
+    // A team.
+    // ------------------------------------------------------------------
+
+    /// Founds a team (`POST /teams/create`).
+    pub async fn create_team(
+        &self,
+        owner_user_id: Option<&str>,
+    ) -> Result<TeamCreatedDto, TeamsClientError> {
+        self.post(
+            "/teams/create",
+            "create_team",
+            &CreateTeamCommand {
+                owner_user_id: owner_user_id.map(str::to_string),
+            },
+        )
+        .await
+    }
+
+    /// The team's current membership set.
+    pub async fn roster(&self, team: TeamScopedId) -> Result<RosterDto, TeamsClientError> {
+        self.get(&format!("/teams/{team}/roster"), "roster").await
+    }
+
+    /// One page of the team's stream, seq ascending (#148 decision 18).
+    ///
+    /// `after` is the `next_after` of the page before, or nothing for
+    /// the first. A page whose `next_after` is `null` says nothing lay
+    /// past here *when it was taken* — a ledger has no final page, so a
+    /// caller following a live stream keeps the last seq it saw and
+    /// asks again.
+    pub async fn events(
+        &self,
+        team: TeamScopedId,
+        after: Option<i64>,
+        limit: Option<u32>,
+    ) -> Result<LedgerPageDto, TeamsClientError> {
+        let mut path = format!("/teams/{team}/events");
+        let mut sep = '?';
+        if let Some(after) = after {
+            path.push_str(&format!("{sep}after={after}"));
+            sep = '&';
+        }
+        if let Some(limit) = limit {
+            path.push_str(&format!("{sep}limit={limit}"));
+        }
+        self.get(&path, "events").await
+    }
+
+    // ------------------------------------------------------------------
+    // The shared lines, served through (#148 decision 16).
+    // ------------------------------------------------------------------
+
+    /// Every line this team hosts, without its history.
+    ///
+    /// The panel the UI puts these in is its own, separate from the
+    /// local lines — which is what having two sources honestly looks
+    /// like (decision 16).
+    pub async fn lines(&self, team: TeamScopedId) -> Result<Vec<ForgeLineDto>, TeamsClientError> {
+        self.get(&format!("/teams/{team}/forge/lines"), "lines")
+            .await
+    }
+
+    /// Opens a line on the team's forge. A member's act (#148 revision
+    /// 5); the name is unique within the team.
+    pub async fn open_line(
+        &self,
+        team: TeamScopedId,
+        name: &str,
+        strategy_id: &str,
+    ) -> Result<ForgeLineDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/lines"),
+            "open_line",
+            &OpenForgeLineCommand {
+                name: name.to_string(),
+                strategy_id: strategy_id.to_string(),
+                // The three attribution fields the mirror refuses: on a
+                // team's forge the author is the authenticated member,
+                // and a command that stated one would be a second
+                // answer to a settled question (#148 revision 6).
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+            },
+        )
+        .await
+    }
+
+    /// Marks the line finished with. A member's act, and reversible by
+    /// [`Self::reopen_line`].
+    ///
+    /// Here because the discard needs it: the forge drops a line from
+    /// the archive rather than from active use, so archiving is the
+    /// step before. Its inverse is here for the same reason a door
+    /// that opens should close — a surface that can archive and cannot
+    /// reopen would leave a caller stuck at a state it reached by
+    /// accident.
+    pub async fn archive_line(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<ForgeLineDto, TeamsClientError> {
+        self.act_on_line(team, line, "archive", "archive_line")
+            .await
+    }
+
+    /// Takes the line back out of the archive.
+    pub async fn reopen_line(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<ForgeLineDto, TeamsClientError> {
+        self.act_on_line(team, line, "reopen", "reopen_line").await
+    }
+
+    async fn act_on_line(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+        verb: &str,
+        what: &'static str,
+    ) -> Result<ForgeLineDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/lines/{line}/{verb}"),
+            what,
+            &ForgeLineActCommand {
+                line_id: line.to_string(),
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+            },
+        )
+        .await
+    }
+
+    /// Takes the line, its history and every piece of work against it.
+    ///
+    /// **The one verb on this surface that asks more than membership**
+    /// (#148 revision 5): it is the verb that takes the log with it, so
+    /// the server wants an owner and answers `403` to anyone else.
+    ///
+    /// The response names the assets the forge was holding and is not
+    /// holding any more, and after this write there is no record left
+    /// to derive them from — which is also why a member's relation rows
+    /// for this line all dangle afterwards, and why
+    /// [`verify`](crate::link::verify) exists.
+    pub async fn discard_line(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<ForgeDiscardedDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/lines/{line}/discard"),
+            "discard_line",
+            &ForgeLineActCommand {
+                line_id: line.to_string(),
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+            },
+        )
+        .await
+    }
+
+    /// A line and its whole history.
+    pub async fn line_history(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<ForgeLineHistoryDto, TeamsClientError> {
+        self.get(&format!("/teams/{team}/forge/lines/{line}"), "line_history")
+            .await
+    }
+
+    /// What is on the line now, folded from the chain.
+    ///
+    /// The read a verify uses for its team half: an entry that is not
+    /// here any more is one a link row may be dangling against
+    /// (#148 decision 9).
+    pub async fn line_states(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<Vec<ForgeEntryStateDto>, TeamsClientError> {
+        self.get(
+            &format!("/teams/{team}/forge/lines/{line}/states"),
+            "line_states",
+        )
+        .await
+    }
+
+    /// Every piece of work against a line, open and ended alike.
+    pub async fn pursuits_of_line(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+    ) -> Result<Vec<ForgePursuitDto>, TeamsClientError> {
+        self.get(
+            &format!("/teams/{team}/forge/lines/{line}/pursuits"),
+            "pursuits_of_line",
+        )
+        .await
+    }
+
+    /// Opens work against a line.
+    pub async fn open_pursuit(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+        title: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<ForgePursuitDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/pursuits"),
+            "open_pursuit",
+            &OpenForgePursuitCommand {
+                line_id: line.to_string(),
+                parent_id: None,
+                title: title.map(str::to_string),
+                note: note.map(str::to_string),
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+            },
+        )
+        .await
+    }
+
+    /// The work, whole.
+    pub async fn pursuit(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+    ) -> Result<ForgePursuitDto, TeamsClientError> {
+        self.get(
+            &format!("/teams/{team}/forge/pursuits/{pursuit}"),
+            "pursuit",
+        )
+        .await
+    }
+
+    /// Writes a round, carrying whatever descriptions ride with it.
+    ///
+    /// The projections are a separate argument rather than a field of
+    /// the ops for the reason decision 12 gives: a projection is
+    /// captured beside the forge rather than being part of what the
+    /// forge records. On the wire they flatten into the same body, so a
+    /// push with none is byte-for-byte the mirror's own request.
+    pub async fn push_round(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+        ops: Vec<ForgeOpDto>,
+        note: Option<&str>,
+        projections: Vec<EntryProjectionEnvelope>,
+    ) -> Result<ForgePursuitDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/pursuits/{pursuit}/push"),
+            "push_round",
+            &WithProjections {
+                push: PushForgeRoundCommand {
+                    pursuit_id: pursuit.to_string(),
+                    ops,
+                    note: note.map(str::to_string),
+                    author_kind: None,
+                    author_subject: None,
+                    operator_ai: None,
+                },
+                projections,
+            },
+        )
+        .await
+    }
+
+    /// Ends the work, and puts what it says on the line if it says
+    /// anything.
+    pub async fn close_pursuit(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+        outcome: &str,
+        note: Option<&str>,
+    ) -> Result<ForgePursuitDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/pursuits/{pursuit}/close"),
+            "close_pursuit",
+            &CloseForgePursuitCommand {
+                pursuit_id: pursuit.to_string(),
+                outcome: outcome.to_string(),
+                note: note.map(str::to_string),
+                author_kind: None,
+                author_subject: None,
+                operator_ai: None,
+            },
+        )
+        .await
+    }
+
+    // ------------------------------------------------------------------
+    // Content — the verbs hosting adds (#148 decisions 5 and 19).
+    // ------------------------------------------------------------------
+
+    /// Streams a material into the team against open work, and answers
+    /// with the `TeamAsset` the team minted for it.
+    ///
+    /// **The entry point is a forge op and there is exactly one**
+    /// (decision 5), which is why this takes a pursuit: the team never
+    /// holds an Asset that is not attached to work, and the content is
+    /// there before the round that names it.
+    ///
+    /// The file is streamed rather than read: a material is whatever a
+    /// person put in their library, and the largest allocation in a
+    /// promoting process should not be the size of the largest file it
+    /// promotes.
+    ///
+    /// `digest` is what the caller declares the bytes to be, in
+    /// `sha256:<64hex>`. The server hashes while it writes and refuses
+    /// the whole operation on a mismatch — no blob, no asset, no event.
+    pub async fn enter_content(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+        digest: &str,
+        material: &Path,
+    ) -> Result<ContentEnteredDto, TeamsClientError> {
+        let token = self.token("enter_content")?.to_string();
+        let path = format!("/teams/{team}/forge/pursuits/{pursuit}/content?digest={digest}",);
+        let url = self.url(&path);
+        let file = tokio::fs::File::open(material).await.map_err(|err| {
+            TeamsClientError::Local(DomainError::Infra(anyhow::anyhow!(
+                "opening {} to promote it: {err}",
+                material.display()
+            )))
+        })?;
+        let response = self
+            .http
+            .put(&url)
+            .bearer_auth(token)
+            .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        read_json("PUT", &url, response).await
+    }
+
+    /// Which of these digests the team already holds.
+    ///
+    /// **Its only purpose is to let a client skip a send.** What it can
+    /// reveal is what the asker could learn by uploading, one round
+    /// trip earlier, which is why it is safe inside a team and would
+    /// not be a route away from one (#83 §3).
+    pub async fn have_content(
+        &self,
+        team: TeamScopedId,
+        digests: Vec<String>,
+    ) -> Result<HeldContentDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/content/have"),
+            "have_content",
+            &HaveContentCommand { digests },
+        )
+        .await
+    }
+
+    /// Which of these team asset ids the team holds, and what each was
+    /// converted from.
+    ///
+    /// The ids are the team's own — an id this client minted locally is
+    /// not one of these, which is what the type says (#148 decision 6).
+    pub async fn resolve_content(
+        &self,
+        team: TeamScopedId,
+        asset_ids: &[TeamScopedId],
+    ) -> Result<ResolvedContentDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/forge/content/resolve"),
+            "resolve_content",
+            &ResolveContentCommand {
+                asset_ids: asset_ids.iter().map(ToString::to_string).collect(),
+            },
+        )
+        .await
+    }
+
+    /// What a promoter said about one entry, or nothing.
+    ///
+    /// Absent is an ordinary answer, not an error: an entry may have
+    /// been named by a client that captured no description, and a
+    /// projection may be lost without the line lying (#148 decision
+    /// 12). The body comes back as the string it was written as — this
+    /// client does not parse it either, and the mapper is the one place
+    /// that does.
+    pub async fn entry_projection(
+        &self,
+        team: TeamScopedId,
+        line: TeamScopedId,
+        entry: TeamScopedId,
+    ) -> Result<Option<EntryProjectionDto>, TeamsClientError> {
+        let path = format!("/teams/{team}/forge/lines/{line}/entries/{entry}/projection");
+        match self
+            .get::<EntryProjectionDto>(&path, "entry_projection")
+            .await
+        {
+            Ok(found) => Ok(Some(found)),
+            Err(TeamsClientError::Refused { status: 404, .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The two shapes every call above is one of.
+    // ------------------------------------------------------------------
+
+    async fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        what: &'static str,
+    ) -> Result<T, TeamsClientError> {
+        let token = self.token(what)?.to_string();
+        let url = self.url(path);
+        let response = self
+            .http
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        read_json("GET", &url, response).await
+    }
+
+    async fn post<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        what: &'static str,
+        body: &B,
+    ) -> Result<T, TeamsClientError> {
+        let token = self.token(what)?.to_string();
+        let url = self.url(path);
+        let response = self
+            .http
+            .post(&url)
+            .bearer_auth(token)
+            .json(body)
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        read_json("POST", &url, response).await
+    }
+}
+
+/// Reads a body as text first, then decides.
+///
+/// Text first rather than `resp.json()` because a refusal and an answer
+/// arrive on the same channel and only one of them is the shape the
+/// route promises: reading the text keeps the server's own `message`
+/// and `reason` available for the error, instead of reporting "expected
+/// struct X" about a body that was telling the caller what went wrong.
+async fn read_json<T: DeserializeOwned>(
+    method: &'static str,
+    url: &str,
+    response: reqwest::Response,
+) -> Result<T, TeamsClientError> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|source| TeamsClientError::Transport {
+            url: url.to_string(),
+            source,
+        })?;
+    if !status.is_success() {
+        return Err(refused(method, url, status.as_u16(), &body));
+    }
+    serde_json::from_str(&body).map_err(|err| TeamsClientError::Decode {
+        url: url.to_string(),
+        message: format!("{err}: {}", body.chars().take(200).collect::<String>()),
+    })
+}
+
+/// The same for a route that answers with nothing.
+async fn refusal(
+    method: &'static str,
+    url: &str,
+    response: reqwest::Response,
+) -> Result<(), TeamsClientError> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let body = response.text().await.unwrap_or_default();
+    Err(refused(method, url, status.as_u16(), &body))
+}
+
+/// Turns the house error body into the error type, keeping `reason`.
+fn refused(method: &'static str, url: &str, status: u16, body: &str) -> TeamsClientError {
+    let parsed: Option<serde_json::Value> = serde_json::from_str(body).ok();
+    let field = |name: &str| -> Option<String> {
+        parsed
+            .as_ref()?
+            .get(name)?
+            .as_str()
+            .map(std::string::ToString::to_string)
+    };
+    TeamsClientError::Refused {
+        method,
+        url: url.to_string(),
+        status,
+        kind: field("kind").unwrap_or_else(|| "Unknown".to_string()),
+        message: field("message").unwrap_or_else(|| body.to_string()),
+        reason: field("reason"),
+    }
+}

@@ -67,6 +67,26 @@ http-body-util = "0.1"
 tokio-util = { workspace = true }
 
 [dev-dependencies]
+# The member's client, for the #148 e2e — and only for it, which is why
+# this line is here rather than above.
+#
+# It has to be this direction. #83 §4 forbids `asterism-* -> teams-*`
+# in any form, so `asterism-teams-client` cannot take this crate even
+# as a dev-dependency; the reverse is the permitted direction, and the
+# client is on none of §4's never-list — that list is the local app's
+# plumbing (`asterism-infra`, `-server`, and `-contract`'s command /
+# query / dto), and a client built to talk to this server is the
+# counterparty rather than the plumbing. Being a dev-dependency, it is
+# not in the binary.
+#
+# What is deliberately **not** here: `asterism-infra`. The relation's
+# SQLite adapter is tested where it lives; a fake behind the same port
+# stands in for it in the e2e. That crate is the first name on §4's
+# never-list and stays off this graph, dev or otherwise.
+asterism-teams-client = { path = "../asterism-teams-client" }
+async-trait           = { workspace = true }
+chrono                = { workspace = true }
+
 # The route e2e drives the real router through `oneshot` rather than
 # binding a port — same discipline as asterism-server's suites. The
 # #148 client e2e is the one exception and says why in its module doc:

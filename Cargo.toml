@@ -40,6 +40,7 @@ members = [
     # Neither links a reserved-licence crate; their manifests argue it
     # at length.
     "crates/asterism-teams-wire",
+    "crates/asterism-teams-client",
 ]
 
 [workspace.package]
