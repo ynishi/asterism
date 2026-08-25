@@ -511,6 +511,11 @@ const CONTEXT_EXEMPT: &[(&str, &str)] = &[
         "read — the recorded provenance claim",
     ),
     ("asset_service::lineage_of", "read — the derivation chain"),
+    (
+        "asset_service::source_type_of",
+        "read — what the source type rests on: the container's evidence \
+         and the recorded assertion, writing neither",
+    ),
     // ---- asset_service: derived artefacts and sweeps
     (
         "asset_service::video_preview",

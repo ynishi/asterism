@@ -317,12 +317,52 @@ pub const SOURCE_TYPE_KEY: &str = "source_type";
 /// declare verb refuses unknown terms at the door, so an unreadable
 /// stored value is damage, and damage must not fabricate a claim.
 pub fn asserted_source_type(extra: &serde_json::Value) -> Option<DigitalSourceType> {
-    extra
+    asserted_source_type_entry(extra).map(|entry| entry.term)
+}
+
+/// A person's source-type assertion with the statement's own context —
+/// the operator it came through and the moment it was made.
+///
+/// The read a surface answering "who said this, and when" needs, where
+/// [`asserted_source_type`] stays the one-word answer the record
+/// builder wants. Both read the same stored statement through the same
+/// parse, so a value damaged into unreadability vanishes from both
+/// rather than from one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssertedSourceType {
+    /// The asserted term.
+    pub term: DigitalSourceType,
+    /// Agent the statement came through, absent when nobody stated
+    /// one — and an unrecorded operator is not a claim that a person
+    /// was at the keyboard, the rule the entry shape states.
+    pub operator: Option<String>,
+    /// When the assertion was made (unix epoch ms). Absent only on a
+    /// damaged entry: the declare verb always writes the moment, and
+    /// damage must not fabricate one.
+    pub declared_at_ms: Option<i64>,
+}
+
+/// The full statement [`SOURCE_TYPE_KEY`] files, if any.
+///
+/// Same damage rule as [`asserted_source_type`]: a stored value that
+/// does not parse as a term reads as no assertion rather than an
+/// error.
+pub fn asserted_source_type_entry(extra: &serde_json::Value) -> Option<AssertedSourceType> {
+    let note = extra
         .get(crate::domain::provenance::TRACE_KEY)?
-        .get(SOURCE_TYPE_KEY)?
+        .get(SOURCE_TYPE_KEY)?;
+    let term = note
         .get("value")?
         .as_str()
-        .and_then(|value| DigitalSourceType::parse(value).ok())
+        .and_then(|value| DigitalSourceType::parse(value).ok())?;
+    Some(AssertedSourceType {
+        term,
+        operator: note
+            .get("operator")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        declared_at_ms: note.get("declared_at_ms").and_then(|value| value.as_i64()),
+    })
 }
 
 /// Whether an artefact's prompt is disclosed in the exported file.
@@ -403,6 +443,42 @@ pub enum PromptDisclosure {
     Embed,
 }
 
+/// The term the container's own evidence establishes, if any.
+///
+/// The evidence half of [`record_for`]'s term, exposed on its own for
+/// the surface that shows a person what the container says before they
+/// assert over it. The person's assertion is the other half and
+/// outranks this one; [`record_for`] composes the two.
+///
+/// A parent *declared* non-synthetic is the whole difference between
+/// the two synthetic terms — it is what makes this a model altering
+/// material that did not come from one. Declared, not merely
+/// undeclared: composite asserts that outside material is in the file,
+/// and a parent nobody knows anything about cannot put that assertion
+/// into a signed claim. When every parent is synthetic or unknown, the
+/// term stays at what the child's own container states.
+pub fn evidence_source_type(
+    evidence: &ContainerEvidence,
+    parents: &[ParentEvidence],
+) -> Option<DigitalSourceType> {
+    if evidence.generated {
+        Some(
+            if parents
+                .iter()
+                .any(|p| p.origin == ParentOrigin::NotSynthetic)
+            {
+                DigitalSourceType::CompositeWithTrainedAlgorithmicMedia
+            } else {
+                DigitalSourceType::TrainedAlgorithmicMedia
+            },
+        )
+    } else if evidence.captured {
+        Some(DigitalSourceType::DigitalCapture)
+    } else {
+        None
+    }
+}
+
 /// Builds the record for one artefact.
 ///
 /// `meta_kv` is the canonical metadata of the material the file came
@@ -435,30 +511,7 @@ pub fn record_for(
         record = record.with_title(title);
     }
 
-    let evidence_type = if evidence.generated {
-        // A parent *declared* non-synthetic is the whole difference
-        // between the two terms — it is what makes this a model
-        // altering material that did not come from one. Declared, not
-        // merely undeclared: composite asserts that outside material is
-        // in the file, and a parent nobody knows anything about cannot
-        // put that assertion into a signed claim. When every parent is
-        // synthetic or unknown, the term stays at what the child's own
-        // container states.
-        Some(
-            if parents
-                .iter()
-                .any(|p| p.origin == ParentOrigin::NotSynthetic)
-            {
-                DigitalSourceType::CompositeWithTrainedAlgorithmicMedia
-            } else {
-                DigitalSourceType::TrainedAlgorithmicMedia
-            },
-        )
-    } else if evidence.captured {
-        Some(DigitalSourceType::DigitalCapture)
-    } else {
-        None
-    };
+    let evidence_type = evidence_source_type(&evidence, parents);
 
     // The person's assertion outranks the container's word. The
     // certificate the manifest is signed under is theirs, so their
@@ -731,6 +784,75 @@ mod tests {
         ] {
             assert_eq!(asserted_source_type(&damaged), None, "for {damaged}");
         }
+    }
+
+    #[test]
+    fn the_full_assertion_carries_who_and_when_and_absence_stays_absent() {
+        let extra = serde_json::json!({
+            "_trace": { "source_type": {
+                "value": "http://cv.iptc.org/newscodes/digitalsourcetype/humanEdits",
+                "operator": "claude",
+                "declared_at_ms": 1_785_000_000_000_i64,
+            } }
+        });
+        assert_eq!(
+            asserted_source_type_entry(&extra),
+            Some(AssertedSourceType {
+                term: DigitalSourceType::HumanEdits,
+                operator: Some("claude".into()),
+                declared_at_ms: Some(1_785_000_000_000),
+            })
+        );
+        // An unrecorded operator is not a claim that a person was at
+        // the keyboard, and a damaged moment must not fabricate one.
+        let bare = serde_json::json!({
+            "_trace": { "source_type": { "value": "digitalCapture" } }
+        });
+        assert_eq!(
+            asserted_source_type_entry(&bare),
+            Some(AssertedSourceType {
+                term: DigitalSourceType::DigitalCapture,
+                operator: None,
+                declared_at_ms: None,
+            })
+        );
+        // Both readers sit on one parse, so damage vanishes from both.
+        let damaged = serde_json::json!({
+            "_trace": { "source_type": { "value": "notATerm" } }
+        });
+        assert_eq!(asserted_source_type_entry(&damaged), None);
+    }
+
+    #[test]
+    fn the_evidence_term_stands_alone_the_way_the_record_composes_it() {
+        let generated = ContainerEvidence {
+            generated: true,
+            ..Default::default()
+        };
+        let captured = ContainerEvidence {
+            captured: true,
+            ..Default::default()
+        };
+        let photo_parent = [ParentEvidence {
+            asset_id: "p".into(),
+            origin: ParentOrigin::NotSynthetic,
+        }];
+        assert_eq!(
+            evidence_source_type(&generated, &[]),
+            Some(DigitalSourceType::TrainedAlgorithmicMedia)
+        );
+        assert_eq!(
+            evidence_source_type(&generated, &photo_parent),
+            Some(DigitalSourceType::CompositeWithTrainedAlgorithmicMedia)
+        );
+        assert_eq!(
+            evidence_source_type(&captured, &[]),
+            Some(DigitalSourceType::DigitalCapture)
+        );
+        assert_eq!(
+            evidence_source_type(&ContainerEvidence::default(), &[]),
+            None
+        );
     }
 
     #[test]

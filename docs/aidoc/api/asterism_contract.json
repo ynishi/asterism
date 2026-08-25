@@ -568,6 +568,11 @@
       "docs": "Response DTOs — outputs shared between the application services, the\nTypeScript bindings, and any future MCP tool responses.\n\nConversion from domain types happens in `asterism-core`\n(`application::mapping`); this crate is a leaf and knows nothing about\nthe domain types."
     },
     {
+      "path": "asterism_contract::dto::AssertedSourceTypeDto",
+      "kind": "struct",
+      "docs": "The recorded source-type assertion an asset carries."
+    },
+    {
       "path": "asterism_contract::dto::AssetCardDto",
       "kind": "struct",
       "docs": "Lightweight card representation used on the grid (wire form of\n`AssetCard`)."
@@ -606,6 +611,11 @@
       "path": "asterism_contract::dto::AssetPageDto",
       "kind": "struct",
       "docs": "Paginated grid page."
+    },
+    {
+      "path": "asterism_contract::dto::AssetSourceTypeDto",
+      "kind": "struct",
+      "docs": "What one asset's digital source type currently rests on\n(`GET /asterism/assets/{id}/source-type`).\n\nThe read the detail panel's \"Source type\" row draws its three\nstates from: an assertion when a person made one, the container's\nown evidence when nothing was asserted, and neither when neither\nexists. Both halves travel because a retract's destination — what\nthe evidence says on its own — has to be knowable without a second\nread; one value with two possible origins could not say it."
     },
     {
       "path": "asterism_contract::dto::AssetTextDto",

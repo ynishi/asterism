@@ -197,49 +197,7 @@ impl DisclosureService {
             Some(material) => material.meta_kv.clone(),
         };
 
-        let edges = self
-            .edges
-            .edges_of(asset_id, Some(EdgeKind::DerivedFrom), MAX_PARENTS)
-            .await?;
-        let mut parents = Vec::with_capacity(edges.len());
-        for edge in edges {
-            // `from` is the newer asset by the write path's convention,
-            // so the parent is on the far side.
-            let parent_id = edge.to;
-            // What the parent declares is what separates "a model made
-            // this" from "a model altered a photograph" — and only a
-            // declaration separates them. A parent this cannot read is
-            // unknown, and unknown asserts nothing: it neither widens
-            // the term into `compositeWithTrainedAlgorithmicMedia` nor
-            // narrows it, because putting either movement on a parent
-            // nobody read would write a claim no evidence made.
-            // Storage will not let an edge dangle (a foreign key refuses
-            // it, pinned by `an_edge_cannot_point_at_an_asset_that_is_
-            // not_there`), so the missing-row case covers a row
-            // disappearing between these two reads rather than a shape a
-            // caller can write. A parent racing its own fingerprint
-            // reads the same way — unknown until its rows land, and a
-            // re-apply after they do re-derives with what they say.
-            //
-            // A person's assertion on the parent is read first: an
-            // asserted term is a declaration on the same footing as the
-            // container's own, and it is what the hand-assertion route
-            // exists to supply for a parent whose container says
-            // nothing.
-            let origin = match self.assets.find(&parent_id).await? {
-                None => disclosure::ParentOrigin::Unknown,
-                Some(parent) => match disclosure::asserted_source_type(&parent.extra) {
-                    Some(ty) => disclosure::ParentOrigin::declared(ty),
-                    None => disclosure::declared_origin(
-                        parent.materials.first().and_then(|m| m.meta_kv.as_deref()),
-                    ),
-                },
-            };
-            parents.push(ParentEvidence {
-                asset_id: parent_id.to_string(),
-                origin,
-            });
-        }
+        let parents = parent_evidence(&self.assets, &self.edges, asset_id).await?;
 
         // Extraction is a reading of the same stored value the
         // evidence comes from, so it runs where the evidence is read
@@ -280,6 +238,62 @@ impl DisclosureService {
         let record = self.record_for(asset_id, dispatch_id).await?;
         self.writer.apply(path, &record).await
     }
+}
+
+/// Reads the declared origin of every `derived_from` parent.
+///
+/// A free function over the two ports rather than a method, because it
+/// has two callers with different services behind them: the record
+/// builder here, and the source-type read on `AssetService` that shows
+/// a person what the evidence says before they assert over it. One
+/// reading, so the two cannot disagree about what a parent declares.
+///
+/// What the parent declares is what separates "a model made this" from
+/// "a model altered a photograph" — and only a declaration separates
+/// them. A parent this cannot read is unknown, and unknown asserts
+/// nothing: it neither widens the term into
+/// `compositeWithTrainedAlgorithmicMedia` nor narrows it, because
+/// putting either movement on a parent nobody read would write a claim
+/// no evidence made. Storage will not let an edge dangle (a foreign key
+/// refuses it, pinned by `an_edge_cannot_point_at_an_asset_that_is_
+/// not_there`), so the missing-row case covers a row disappearing
+/// between these two reads rather than a shape a caller can write. A
+/// parent racing its own fingerprint reads the same way — unknown until
+/// its rows land, and a re-apply after they do re-derives with what
+/// they say.
+///
+/// A person's assertion on the parent is read first: an asserted term
+/// is a declaration on the same footing as the container's own, and it
+/// is what the hand-assertion route exists to supply for a parent whose
+/// container says nothing.
+pub(crate) async fn parent_evidence(
+    assets: &Arc<dyn AssetRepository>,
+    edges: &Arc<dyn EdgeRepository>,
+    asset_id: &AssetId,
+) -> Result<Vec<ParentEvidence>, DomainError> {
+    let edge_rows = edges
+        .edges_of(asset_id, Some(EdgeKind::DerivedFrom), MAX_PARENTS)
+        .await?;
+    let mut parents = Vec::with_capacity(edge_rows.len());
+    for edge in edge_rows {
+        // `from` is the newer asset by the write path's convention,
+        // so the parent is on the far side.
+        let parent_id = edge.to;
+        let origin = match assets.find(&parent_id).await? {
+            None => disclosure::ParentOrigin::Unknown,
+            Some(parent) => match disclosure::asserted_source_type(&parent.extra) {
+                Some(ty) => disclosure::ParentOrigin::declared(ty),
+                None => disclosure::declared_origin(
+                    parent.materials.first().and_then(|m| m.meta_kv.as_deref()),
+                ),
+            },
+        };
+        parents.push(ParentEvidence {
+            asset_id: parent_id.to_string(),
+            origin,
+        });
+    }
+    Ok(parents)
 }
 
 // The behaviour of this service is tested in

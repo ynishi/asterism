@@ -1018,6 +1018,19 @@ pub async fn asset_declare_source_type(
         .await?)
 }
 
+/// What the asset's source type currently rests on — the read twin of
+/// `GET /asterism/assets/{id}/source-type`: the container's evidence
+/// and the person's assertion, each on its own, with "not yet
+/// fingerprinted" kept distinct from "declares nothing".
+#[tauri::command]
+pub async fn asset_source_type(
+    state: State<'_, AppState>,
+    asset_id: String,
+) -> Result<asterism_contract::dto::AssetSourceTypeDto, UiError> {
+    // The desktop pane is the owner's own window — no viewer filtering.
+    Ok(state.asset_service.source_type_of(&asset_id, None).await?)
+}
+
 /// Where a video's transcoded preview rendition stands — the command
 /// twin of `GET /asterism/assets/{id}/video-preview`. The first call
 /// for a missing rendition enqueues the transcode; the pane polls

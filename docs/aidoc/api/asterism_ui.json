@@ -98,6 +98,11 @@
       "docs": "Returns the 1-hop `derived_from` lineage around the asset —\nancestors (Selection inputs this asset was derived from) and\ndescendants (assets later derived from this one). Powers the\ndetail-pane Provenance section."
     },
     {
+      "path": "asterism_ui::commands::asset_source_type",
+      "kind": "function",
+      "docs": "What the asset's source type currently rests on — the read twin of\n`GET /asterism/assets/{id}/source-type`: the container's evidence\nand the person's assertion, each on its own, with \"not yet\nfingerprinted\" kept distinct from \"declares nothing\"."
+    },
+    {
       "path": "asterism_ui::commands::asset_texts",
       "kind": "function",
       "docs": "Resolves the full source text of each asset (session Reader\nview). Unreadable sources come back as `text = None` so the UI\ncan fall back to the stored cover snippet."
