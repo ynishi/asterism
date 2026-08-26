@@ -43,6 +43,7 @@
   import { recordEvent } from "./lib/telemetry";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { assetPageCatalog } from "./lib/stores/asset-page.svelte";
+  import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { interaction } from "./lib/interaction/mode.svelte";
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
@@ -830,6 +831,17 @@
       payload: { asset_id: id },
     });
   }
+  // The sixth caller, and the only one from outside this component.
+  // It hands over an id and nothing else; what opening means stays
+  // here, which is why `openDetail` is what answers rather than a
+  // second write to `openAssetId`.
+  $effect(() => {
+    const asked = detailRequest.asset;
+    if (asked === null) return;
+    detailRequest.take();
+    openDetail(asked);
+  });
+
   function closeDetail() {
     openAssetId = null;
     interaction.remove("detail");

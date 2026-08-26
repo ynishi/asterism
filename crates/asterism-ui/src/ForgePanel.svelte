@@ -45,6 +45,7 @@
   import ForgeWork from "./ForgeWork.svelte";
   import ForgeTalk from "./ForgeTalk.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
@@ -218,16 +219,39 @@
 {#snippet tile(assetId: string | null, name: string | null)}
   {#if assetId === null}
     <!-- An entry can carry a name and no content: a table may name one
-         before anything fills it. -->
+         before anything fills it. Nothing to open, so not a button. -->
     <span class="no-content" aria-hidden="true">—</span>
-  {:else if kindOf(assetId) !== ""}
-    <span class="no-content kind">{kindOf(assetId)}</span>
+    <span class="entry-name">{name ?? "(unnamed)"}</span>
   {:else}
-    <img
-      src={thumbCatalog.thumbById(assetId)}
-      alt={name ?? "an entry with no name"}
-      loading="lazy"
-    />
+    <!-- A tile opens the asset properly.
+         What a line shows of an entry is a thumbnail and the name the
+         *line* gives it, which is deliberately not the asset's — so
+         "what is this actually" is a question the forge raises and
+         cannot answer. The detail pane answers it, and comes up over
+         the drawer rather than instead of it, so closing it leaves the
+         line exactly where it was.
+
+         The picture and the name are one button rather than a picture
+         that happens to be clickable. The first build made only the
+         image one, with the affordance carried by the cursor and a
+         tooltip, and the first person to meet it asked where to press.
+         The whole cell is the target now, and it says so at rest. -->
+    <button
+      class="tile"
+      onclick={() => detailRequest.open(assetId)}
+      title={`Open ${name ?? "this entry"}`}
+    >
+      {#if kindOf(assetId) !== ""}
+        <span class="no-content kind">{kindOf(assetId)}</span>
+      {:else}
+        <img
+          src={thumbCatalog.thumbById(assetId)}
+          alt={name ?? "an entry with no name"}
+          loading="lazy"
+        />
+      {/if}
+      <span class="entry-name">{name ?? "(unnamed)"}<span class="open-hint">↗</span></span>
+    </button>
   {/if}
 {/snippet}
 
@@ -438,7 +462,6 @@
             {#each forgeCatalog.onTheLine as entry (entry.entry_id)}
               <li>
                 {@render tile(entry.content_asset_id, entry.name)}
-                <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
               </li>
             {/each}
           </ul>
@@ -462,7 +485,6 @@
                 {#each forgeCatalog.offTheLine as entry (entry.entry_id)}
                   <li>
                     {@render tile(entry.content_asset_id, entry.name)}
-                    <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
                   </li>
                 {/each}
               </ul>
@@ -729,6 +751,37 @@
     object-fit: cover;
     border-radius: 0.2rem;
     background: rgba(128, 128, 128, 0.15);
+  }
+  /* The button is the whole cell — picture and name — and it says at
+     rest that it is one: an arrow beside the name, and a frame that
+     answers to hover and to the keyboard. A cursor and a tooltip were
+     what it had first, and neither is visible until somebody has
+     already guessed. */
+  .tile {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.15rem;
+    text-align: left;
+    width: 100%;
+  }
+  .tile:hover,
+  .tile:focus-visible {
+    border-color: rgba(128, 128, 128, 0.55);
+    background: rgba(128, 128, 128, 0.12);
+  }
+  .open-hint {
+    opacity: 0.55;
+    margin-left: 0.25rem;
+  }
+  .tile:hover .open-hint,
+  .tile:focus-visible .open-hint {
+    opacity: 1;
   }
   .no-content {
     display: grid;

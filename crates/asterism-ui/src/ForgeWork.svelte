@@ -40,6 +40,7 @@
   // close that would change nothing is a validation refusal and its
   // message is the whole answer.
   import { api } from "./lib/api";
+  import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import type { ForgeProjectedEntry } from "./lib/stores/forge.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
@@ -455,18 +456,28 @@
     <ul class="projected">
       {#each projected as row (row.entryId)}
         <li class:gone={!row.alive}>
-          <!-- A thumbnail where there is one, and what the thing is
-               where there is not. `ForgePanel`'s tile says why. -->
+          <!-- A thumbnail where there is one, what the thing is where
+               there is not, and a way to open it either way.
+               `ForgePanel`'s tile says why for both. -->
           {#if row.assetId === null}
             <span class="no-content" aria-hidden="true">—</span>
-          {:else if kindOf(row.assetId) !== ""}
-            <span class="no-content kind">{kindOf(row.assetId)}</span>
           {:else}
-            <img
-              src={thumbCatalog.thumbById(row.assetId)}
-              alt={row.name ?? "an entry with no name"}
-              loading="lazy"
-            />
+            {@const assetId = row.assetId}
+            <button
+              class="tile"
+              onclick={() => detailRequest.open(assetId)}
+              title={`Open ${row.name ?? "this entry"}`}
+            >
+              {#if kindOf(assetId) !== ""}
+                <span class="no-content kind">{kindOf(assetId)}</span>
+              {:else}
+                <img
+                  src={thumbCatalog.thumbById(assetId)}
+                  alt={row.name ?? "an entry with no name"}
+                  loading="lazy"
+                />
+              {/if}
+            </button>
           {/if}
           <span class="op-name">{row.name ?? "(unnamed)"}</span>
           <span class="row-verbs">
@@ -721,6 +732,22 @@
   .projected li.gone .no-content {
     outline: 2px dashed currentColor;
     outline-offset: -2px;
+  }
+  /* The frame, for `ForgePanel`'s reason. The name is not inside it
+     here: a row already carries verbs of its own, and a button holding
+     the name would put the row's label inside one of them. */
+  .tile {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.2rem;
+    cursor: pointer;
+    display: block;
+    flex: 0 0 auto;
+    padding: 0;
+  }
+  .tile:hover,
+  .tile:focus-visible {
+    border-color: rgba(128, 128, 128, 0.55);
   }
   .projected img,
   .no-content {

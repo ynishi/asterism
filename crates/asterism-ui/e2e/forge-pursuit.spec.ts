@@ -794,18 +794,23 @@ describe("a pursuit against a line", () => {
       ROUND_TRIP_MS,
       async () => {
         tile = await browser.execute(() => {
+          // Through the button, which is the tile's frame rather than
+          // its content: what a person sees is the thumbnail or the
+          // word inside it.
           const cell = document.querySelector(
             '[role="dialog"][aria-label="Forge"] .entries li > :first-child',
           );
-          if (cell === null) return "(no tile)";
-          if (cell.tagName === "IMG") {
-            return `img:${(cell as HTMLImageElement).src.slice(0, 11)}`;
+          const inner =
+            cell?.tagName === "BUTTON" ? cell.firstElementChild : cell;
+          if (!inner) return "(no tile)";
+          if (inner.tagName === "IMG") {
+            return `img:${(inner as HTMLImageElement).src.slice(0, 11)}`;
           }
           // By class rather than by className: Svelte appends a
           // per-component scoping class, so the attribute is never the
           // string the markup wrote.
-          const said = cell.textContent?.trim() ?? "";
-          return `${cell.classList.contains("kind") ? "kind" : "blank"}:${said}`;
+          const said = inner.textContent?.trim() ?? "";
+          return `${inner.classList.contains("kind") ? "kind" : "blank"}:${said}`;
         });
         return (
           tile.startsWith("img:blob:") ||
@@ -1112,6 +1117,43 @@ describe("a pursuit against a line", () => {
       "the second close did not leave exactly the entry it kept",
     );
     await shot("second-pass-landed");
+
+    // What the line calls an entry is not what the asset is called, so
+    // "what is this actually" is a question the forge raises and cannot
+    // answer. The detail pane answers it, and comes up *over* the
+    // drawer rather than instead of it — which is the whole reason the
+    // tile does not have to step aside first.
+    await stage(trail, "open the entry properly", DRIVER_MS, () =>
+      press(`${DRAWER} .entries .tile`),
+    );
+    await pollUntil(
+      trail,
+      "the detail pane is over the drawer",
+      ROUND_TRIP_MS,
+      async () =>
+        browser.execute(() => {
+          const pane = document.querySelector(".detail-backdrop .detail-panel");
+          const drawer = document.querySelector(
+            '[role="dialog"][aria-label="Forge"]',
+          );
+          return pane !== null && drawer !== null;
+        }),
+      "pressing a tile did not open the detail pane, or closed the drawer",
+    );
+    await shot("detail-over-the-drawer");
+    await stage(trail, "close the detail", DRIVER_MS, () =>
+      press(".detail-backdrop .detail-close"),
+    );
+    await pollUntil(
+      trail,
+      "the line is where it was left",
+      ROUND_TRIP_MS,
+      async () => {
+        const drawer = await readDrawer();
+        return drawer.drawerPresent && drawer.heading === SECOND_LINE;
+      },
+      "closing the detail did not leave the forge where it was",
+    );
 
     // The chain records both landings, and the genesis is not one of
     // them.
