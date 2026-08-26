@@ -467,10 +467,13 @@ and this project adheres to
 
   `.claude/CLAUDE.md` stays tracked through the negation, which has to come last
   — git takes the last matching pattern, so `CLAUDE*.md` below it would ignore
-  the symlink instead. The negation is not what puts the file in a clone; a
-  tracked file is checked out whatever the ignore list says. It is what keeps
-  the path addable without `-f` and visible to anything that consults
-  `check-ignore`.
+  the symlink instead. The negation is the declaration: a tracked file the
+  ignore list refuses reads exactly like somebody's `git add -f` past it, and
+  nothing in the result says which it was. It is also what makes the path
+  addable at all — git consults the index while the file is in it, so the file
+  survives either way, but the first add is refused without the negation, and so
+  is a re-add after `git rm --cached` or after a Windows checkout writes the
+  link out as a regular file.
 
   `AGENTS.md` is deliberately not treated the same way. A subdirectory can carry
   one, and it is repository content rather than a machine's local state.
