@@ -87,18 +87,23 @@ async function stage<T>(
 
 /** Polls a condition built from `execute`, which is untaxed — a
  *  `findElement` poll costs ~6 s and blows any honest ceiling. */
+/// `message` may be a function, which is how a poll reports what it
+/// actually saw: a string is built before the polling starts and can
+/// only describe what was expected.
 async function pollUntil(
   trail: string[],
   name: string,
   ms: number,
   check: () => Promise<boolean>,
-  message: string,
+  message: string | (() => string),
 ) {
   await stage(trail, name, ms + DRIVER_MS, async () => {
     const deadline = Date.now() + ms;
     for (;;) {
       if (await check()) return;
-      if (Date.now() > deadline) throw new Error(message);
+      if (Date.now() > deadline) {
+        throw new Error(typeof message === "string" ? message : message());
+      }
       await new Promise((r) => setTimeout(r, POLL_GAP_MS));
     }
   });
@@ -182,7 +187,15 @@ function readDrawer(): Promise<WorkSnapshot> {
         (p.textContent ?? "").includes("corrected"),
       ).length,
       onTheLine: counts.filter((t) => t.endsWith("on the line"))[0] ?? "",
-      released: drawer.querySelector(".released")?.textContent?.trim() ?? "",
+      // Whitespace-collapsed, because this one is read as a sentence
+      // rather than for a word: the count and its noun are two
+      // expressions in the markup with a line break between them, so
+      // `textContent` has "1\n        asset" where a reader sees "1
+      // asset". `forge-line.spec.ts` compares only the first word and
+      // never met this.
+      released: (drawer.querySelector(".released")?.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim(),
     };
   });
 }
@@ -507,19 +520,29 @@ describe("a pursuit against a line", () => {
     await stage(trail, "confirm the discard", DRIVER_MS, () =>
       clickLabelled("body", "Discard Forever"),
     );
+    // What this last poll saw, if it never comes true. A conjunction of
+    // three that fails as one boolean says only that something went
+    // wrong; the first run of this spec failed here and the three
+    // candidates — the line still listed, no notice at all, a count
+    // that is not one — want three different fixes.
+    let lastSeen = "";
     await pollUntil(
       trail,
       "the notice names the asset it released",
       ROUND_TRIP_MS,
       async () => {
         const drawer = await readDrawer();
+        lastSeen =
+          `open=[${drawer.open.join("|")}] archived=[${drawer.archived.join("|")}] ` +
+          `released=${JSON.stringify(drawer.released)}`;
         return (
           !drawer.open.includes(LINE_NAME) &&
           !drawer.archived.includes(LINE_NAME) &&
           drawer.released.startsWith("Discarded. 1 asset released")
         );
       },
-      "the discard did not report the one asset the line was holding",
+      () =>
+        `the discard did not report the one asset the line was holding; last saw ${lastSeen}`,
     );
 
     await stage(trail, "close the drawer", DRIVER_MS, () =>
