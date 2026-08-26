@@ -435,6 +435,33 @@ class ThumbCatalog {
     return convertFileSrc(card.source_locator);
   }
 
+  // A 256 px thumb for a surface that holds an asset id and no card.
+  //
+  // The forge is that surface: a line's entry names the asset it
+  // carries (`ForgeEntryStateDto.content_asset_id`) and nothing else
+  // about it, so `thumbSrc`'s two fallbacks — the original file, and
+  // the video placeholder — have nothing to read. A cache miss
+  // therefore paints the placeholder and waits for `ensureThumb`'s job
+  // rather than reaching for the original, which is the right trade
+  // here: an entry's asset is one of hundreds on a line, and a panel
+  // that streamed every original on open would be worse than one that
+  // fills in.
+  //
+  // One consequence worth knowing: a key that exhausted its retries
+  // stays on the placeholder for the rest of the session here, where
+  // `thumbSrc` would still have the original to fall back to.
+  thumbById(assetId: string): string {
+    void this.tick; // subscribe to reactive updates
+    const key = this.#key(assetId, 256);
+    const cached = this.#urls.get(key);
+    if (cached) {
+      this.#touch(key);
+      return cached;
+    }
+    void this.ensureThumb(assetId, 256);
+    return TRANSPARENT_PX;
+  }
+
   // Detail-view src: prefer the pre-generated 512 px preview so we
   // do not stream a multi-MB original through the asset protocol;
   // fall back to the raw file on cache miss / fetch failure. The
