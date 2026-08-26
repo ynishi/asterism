@@ -2888,8 +2888,7 @@
   }
 
   function clearSelection() {
-    gridSelection.selectedIds.clear();
-    gridSelection.lastAnchorId = null;
+    gridSelection.clear();
     bulkModalityOpen = false;
     bulkTagOpen = false;
   }

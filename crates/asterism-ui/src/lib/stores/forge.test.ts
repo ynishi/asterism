@@ -397,7 +397,7 @@ describe("work against a line", () => {
     expect(rows.get("let-go")?.alive).toBe(false);
   });
 
-  it("drops a removal of something the line is not holding", async () => {
+  it("says nothing about a removal of what the line is not holding", async () => {
     answering({
       get_forge_line_states: [entry("let-go", false)],
       list_forge_pursuits_of_line: [],
@@ -413,11 +413,43 @@ describe("work against a line", () => {
     );
     await forgeCatalog.pursuit.load({ pursuitId: "P1" });
 
-    // Taking off something already off has nothing left to do, and the
-    // close records no such entry — so neither reads as one this work
-    // let go. Adding and then removing within one piece of work is the
-    // way somebody reaches this, and it is two presses.
-    expect(forgeCatalog.projection.map((r) => r.entryId)).toEqual([]);
+    const rows = new Map(forgeCatalog.projection.map((r) => [r.entryId, r]));
+    // Added and taken off inside one piece of work: the fold leaves a
+    // removal, the line was not holding it, and the close records
+    // nothing — so it is not an entry the line has, in either state.
+    // Two presses away, which is why it is pinned.
+    expect(rows.has("fresh")).toBe(false);
+    // The line's own entry stays exactly as the line has it. A
+    // redundant removal is not a second letting-go, and it is not a
+    // reason for the entry to leave the list either.
+    expect(rows.get("let-go")).toMatchObject({ name: "let-go", alive: false });
+  });
+
+  it("folds the work before it meets the line", async () => {
+    answering({
+      get_forge_line_states: [entry("held", true)],
+      list_forge_pursuits_of_line: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        { entry_id: "held", kind: "remove", content_asset_id: null, name: null },
+        { entry_id: "held", kind: "rename", content_asset_id: null, name: "late" },
+        { entry_id: "held", kind: "replace", content_asset_id: "a9", name: null },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+
+    // The winning existence decides what the row says, and it wins over
+    // the whole work rather than over what came before it: an entry on
+    // its way off states existence and nothing else, so neither the
+    // rename nor the replace after the removal reaches the line. Both
+    // verbs are on screen for a row this work has taken off, so both
+    // are one press from being believed.
+    expect(forgeCatalog.projection).toEqual([
+      { entryId: "held", name: "held", assetId: "asset-held", alive: false },
+    ]);
   });
 
   it("counts a clash against the line, not against the work's own ops", async () => {
@@ -456,6 +488,45 @@ describe("work against a line", () => {
     );
     await forgeCatalog.pursuit.load({ pursuitId: "P1" });
     expect(forgeCatalog.wouldClash).toEqual([]);
+  });
+
+  it("names the anchor by ids and reads back what hangs off it", async () => {
+    answering({ list_forge_threads_about: [] });
+    await forgeCatalog.talkAbout({
+      kind: "entry",
+      about: "cut 04",
+      pursuitId: "P1",
+      nodeId: "r1",
+      entryId: "e1",
+    });
+
+    // Every id the command takes, including the ones this kind has no
+    // use for. Both directions are refused on the other side — a
+    // `"round"` carrying an entry id would answer about the round for a
+    // caller that asked about the entry — so the absent ones are said
+    // rather than left out.
+    expect(apiMock).toHaveBeenCalledWith("list_forge_threads_about", {
+      anchorKind: "entry",
+      pursuitId: "P1",
+      lineId: null,
+      nodeId: "r1",
+      entryId: "e1",
+      changePointId: null,
+    });
+  });
+
+  it("lets go of a conversation when the work under it goes", async () => {
+    answering({ list_forge_threads_about: [] });
+    await forgeCatalog.talkAbout({
+      kind: "pursuit",
+      about: "this work",
+      pursuitId: "P1",
+    });
+
+    forgeCatalog.clearWork();
+
+    expect(forgeCatalog.talkingAbout).toBeNull();
+    expect(forgeCatalog.threads.data).toEqual([]);
   });
 
   it("lets go of the work when the panel closes", async () => {

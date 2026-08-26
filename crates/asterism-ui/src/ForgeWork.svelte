@@ -133,6 +133,11 @@
       if (cards.length < ids.length) {
         said = `${ids.length - cards.length} of ${ids.length} selected assets were not added — the library did not answer for them.`;
       }
+      // The pick is consumed by the round, which is the app's
+      // convention for an operation over a selection. Said after the
+      // count above, because that sentence is about what was picked and
+      // the picking is over.
+      gridSelection.clear();
     } finally {
       adding = false;
     }
@@ -166,15 +171,30 @@
   // grid holds exactly one. The alternative — refill with the first of
   // several — picks on somebody's behalf which of their selection this
   // entry becomes.
+  //
+  // The id is read back for the same reason `addSelection` reads its
+  // cards: a selected id the library will not answer for is one the
+  // round would name and the write would refuse, and it costs one call
+  // to find out here instead.
   async function replace(row: ForgeProjectedEntry) {
     const ids = [...gridSelection.selectedIds];
     if (ids.length !== 1) return;
+    said = null;
+    const cards = await api<AssetCardDto[]>("hydrate_cards", {
+      ids,
+      viewerSubject: null,
+    });
+    if (cards.length === 0) {
+      said = "The library did not answer for the selected asset.";
+      return;
+    }
     await ask({
       entry_id: row.entryId,
       kind: "replace",
-      content_asset_id: ids[0],
+      content_asset_id: cards[0].id,
       name: null,
     });
+    gridSelection.clear();
   }
 
   async function remove(row: ForgeProjectedEntry) {
@@ -341,6 +361,17 @@
     <span class="quiet">
       {work.close === null ? "open" : work.close.outcome}
     </span>
+    <!-- Talking about work that has ended is not offered less: what was
+         said about a piece of work is often said after it. -->
+    <button
+      class="talk-about"
+      onclick={() =>
+        forgeCatalog.talkAbout({
+          kind: "pursuit",
+          about: `this work`,
+          pursuitId: work.id,
+        })}
+    >say something</button>
   </header>
 
   {#if work.note !== null}
@@ -449,6 +480,16 @@
         <p class="round-head">
           <span>{summarise(round)}</span>
           <span class="quiet">{when(round.at_ms)}</span>
+          <button
+            class="talk-about"
+            onclick={() =>
+              forgeCatalog.talkAbout({
+                kind: "round",
+                about: "this round",
+                pursuitId: work.id,
+                nodeId: round.id,
+              })}
+          >say something</button>
         </p>
         {#if round.note !== null}
           <p class="quiet note">{round.note}</p>
@@ -461,6 +502,20 @@
                    not. -->
               <span class="kind">{op.kind}</span>
               <span class="op-name">{opName(op)}</span>
+              <!-- An entry as *that round* had it, which is why the
+                   round is named beside it: the same entry in two
+                   rounds is two things to talk about. -->
+              <button
+                class="talk-about"
+                onclick={() =>
+                  forgeCatalog.talkAbout({
+                    kind: "entry",
+                    about: opName(op),
+                    pursuitId: work.id,
+                    nodeId: round.id,
+                    entryId: op.entry_id,
+                  })}
+              >say something</button>
             </li>
           {/each}
         </ul>
@@ -558,6 +613,17 @@
     cursor: pointer;
     opacity: 0.75;
     padding: 0;
+  }
+  .talk-about {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    margin-left: auto;
+    opacity: 0.7;
+    padding: 0;
+    text-decoration: underline;
   }
   .note {
     font-style: italic;

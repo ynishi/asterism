@@ -18,7 +18,10 @@
 // line, and what a satisfied close puts on the line is only visible
 // because the round before it asked for something. None of these is a
 // provocation that can be set up some other way without seeding the
-// thing the spec is meant to prove.
+// thing the spec is meant to prove. The conversation in the middle
+// hangs off the round for the same reason: an anchor is resolved
+// against the work rather than taken on trust, so there is no round to
+// talk about until one has been written.
 //
 // # What this one proves that the line spec could not
 //
@@ -109,14 +112,18 @@ interface WorkSnapshot {
   archived: string[];
   /** The selected line's header, if one is selected. */
   heading: string;
-  /** Titles of the work listed against it, open first. */
-  work: string[];
   /** The title in the work header, when one piece of work is showing. */
   working: string;
   /** How many rounds the log holds. */
   rounds: number;
   /** Operation labels across every round, in order. */
   ops: string[];
+  /** What the conversation surface is about, when one is open. */
+  talkAbout: string;
+  /** What each message says now, in order. */
+  said: string[];
+  /** How many messages say they have been corrected. */
+  corrected: number;
   /** The contents tab's count line. */
   onTheLine: string;
   /** The discard notice, if it is showing. */
@@ -133,10 +140,12 @@ function readDrawer(): Promise<WorkSnapshot> {
       open: [] as string[],
       archived: [] as string[],
       heading: "",
-      work: [] as string[],
       working: "",
       rounds: 0,
       ops: [] as string[],
+      talkAbout: "",
+      said: [] as string[],
+      corrected: 0,
       onTheLine: "",
       released: "",
     };
@@ -159,15 +168,19 @@ function readDrawer(): Promise<WorkSnapshot> {
       open: namesIn(lists[0]),
       archived: namesIn(lists[1]),
       heading: detail?.querySelector("h3")?.textContent?.trim() ?? "",
-      work: Array.from(drawer.querySelectorAll(".work-list button")).map(
-        (b) => b.textContent?.trim() ?? "",
-      ),
       working:
         drawer.querySelector(".work-head strong")?.textContent?.trim() ?? "",
       rounds: drawer.querySelectorAll(".rounds > li").length,
       ops: Array.from(drawer.querySelectorAll(".ops .op-name")).map(
         (s) => s.textContent?.trim() ?? "",
       ),
+      talkAbout: drawer.querySelector(".talk h4")?.textContent?.trim() ?? "",
+      said: Array.from(drawer.querySelectorAll(".talk .said")).map(
+        (p) => p.textContent?.trim() ?? "",
+      ),
+      corrected: Array.from(drawer.querySelectorAll(".talk .by")).filter((p) =>
+        (p.textContent ?? "").includes("corrected"),
+      ).length,
       onTheLine: counts.filter((t) => t.endsWith("on the line"))[0] ?? "",
       released: drawer.querySelector(".released")?.textContent?.trim() ?? "",
     };
@@ -357,6 +370,70 @@ describe("a pursuit against a line", () => {
         return drawer.rounds === 1 && drawer.ops.length === 1;
       },
       "the round never appeared in the work's log",
+    );
+
+    // Say something about the round, and then correct it. The
+    // correction is the half worth driving through the real backend:
+    // the model keeps what was said first and every revision, and a
+    // surface that rendered only the latest would misreport somebody.
+    await stage(trail, "open a conversation about the round", DRIVER_MS, () =>
+      clickLabelled(`${DRAWER} .round-head`, "say something"),
+    );
+    await pollUntil(
+      trail,
+      "the conversation surface paints",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).talkAbout === "Said about this round",
+      "pressing say something did not open the conversation surface",
+    );
+    await stage(trail, "start it", DRIVER_MS, () =>
+      browser.execute(() => {
+        const form = document.querySelector(
+          '[role="dialog"][aria-label="Forge"] .talk form.start',
+        );
+        const input = form?.querySelector("input");
+        if (!form || !input) return false;
+        input.value = "first thing said";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        return true;
+      }),
+    );
+    await pollUntil(
+      trail,
+      "what was said comes back",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).said.includes("first thing said"),
+      "the conversation never showed what was said in it",
+    );
+    await stage(trail, "start a correction", DRIVER_MS, () =>
+      clickLabelled(`${DRAWER} .talk`, "correct"),
+    );
+    await stage(trail, "save the correction", DRIVER_MS, () =>
+      browser.execute(() => {
+        const input = document.querySelector(
+          '[role="dialog"][aria-label="Forge"] .talk li form input',
+        ) as HTMLInputElement | null;
+        const form = input?.closest("form");
+        if (!input || !form) return false;
+        input.value = "what I meant";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        return true;
+      }),
+    );
+    await pollUntil(
+      trail,
+      "the message says it was corrected",
+      ROUND_TRIP_MS,
+      async () => {
+        const drawer = await readDrawer();
+        return drawer.said.includes("what I meant") && drawer.corrected === 1;
+      },
+      "the correction did not reach the message, or left no trace of itself",
+    );
+    await stage(trail, "close the conversation", DRIVER_MS, () =>
+      clickLabelled(`${DRAWER} .talk header`, "close"),
     );
 
     // Nothing is on the line yet. A round is a request, and the panel

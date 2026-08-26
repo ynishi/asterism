@@ -43,6 +43,7 @@
   // the line at all. What this component does for it is the frame: it
   // says which line, and hands that line down.
   import ForgeWork from "./ForgeWork.svelte";
+  import ForgeTalk from "./ForgeTalk.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
@@ -442,6 +443,20 @@
                 <span>{point.actor_id}</span>
                 <span class="quiet">{when(point.at_ms)}</span>
               </button>
+              <!-- A conversation about what landed rather than about
+                   the work it came out of. The model keeps those as
+                   separate anchors, and a change point outlives the
+                   pursuit that produced it. -->
+              <button
+                class="talk-about"
+                onclick={() =>
+                  forgeCatalog.talkAbout({
+                    kind: "change",
+                    about: "what landed here",
+                    lineId: current.id,
+                    changePointId: point.id,
+                  })}
+              >say something</button>
 
               {#if openPoint === point.id}
                 <!-- One line per entry the point moved, phrased from
@@ -469,6 +484,13 @@
           genesis · {when(forgeCatalog.history.data.genesis_at_ms)}
         </p>
       {/if}
+
+      <!-- Mounted once, under whichever tab is showing, because a
+           conversation is about something on one of them and moving the
+           reader to a fourth tab to read it would be moving them away
+           from what it is about. Renders nothing until somebody opens
+           one. -->
+      <ForgeTalk />
     {/if}
   </div>
       </section>
@@ -664,6 +686,16 @@
     color: inherit;
     cursor: pointer;
     padding: 0.3rem 0;
+  }
+  .talk-about {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    opacity: 0.7;
+    padding: 0 0 0.2rem 1.2rem;
+    text-decoration: underline;
   }
   .verbs {
     display: flex;

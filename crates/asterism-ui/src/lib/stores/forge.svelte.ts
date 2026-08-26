@@ -153,6 +153,7 @@ import type {
   ForgePursuitDto,
   ForgeResolvedDto,
   ForgeStrategyDto,
+  ForgeThreadDto,
 } from "../../bindings";
 
 /// What a read of one line needs to name it.
@@ -160,6 +161,29 @@ type LineArgs = { lineId: string };
 
 /// What a read of one piece of work needs to name it.
 type PursuitArgs = { pursuitId: string };
+
+/// What a conversation is being held about, as a caller names it.
+///
+/// Ids and a kind rather than a `ForgeAnchorDto`: that shape is what a
+/// read answers with, and `ForgeAnchorDto`'s own doc says a caller does
+/// not build one — the service resolves an anchor from the ids and the
+/// model makes it, so an entry a round never touched is refused rather
+/// than recorded.
+///
+/// `about` is the one field that is not an id. A conversation is opened
+/// from wherever it is about — a round in the log, an entry in a row, a
+/// change point in the chain — and shown in one place below, which
+/// would otherwise have to work out what it is looking at from ids
+/// alone.
+export interface ForgeTalkAnchor {
+  kind: "pursuit" | "round" | "entry" | "change";
+  about: string;
+  pursuitId?: string;
+  lineId?: string;
+  nodeId?: string;
+  entryId?: string;
+  changePointId?: string;
+}
 
 /// One entry as a satisfied close would leave it.
 export interface ForgeProjectedEntry {
@@ -307,6 +331,37 @@ class ForgeCatalog {
     "forgeCatalog.behind",
   );
 
+  /// What is being talked about, if anything is.
+  ///
+  /// One at a time, and held here rather than in whichever component
+  /// offered it: the conversations are shown in one place below the
+  /// tabs, and what they are about is opened from three different ones
+  /// — a piece of work, a round or one of its entries, a change point
+  /// in the chain.
+  talkingAbout = $state<ForgeTalkAnchor | null>(null);
+
+  /// The conversations about it. More than one can hang off the same
+  /// thing — two people starting separate ones about a round is not a
+  /// mistake to merge — so this is a list.
+  ///
+  /// Each arrives whole, with every message and every correction to
+  /// each. That is `ForgeThreadDto`'s decision and not this store's:
+  /// rendering only what a message says now would leave a withdrawn
+  /// sentence attributed to whoever withdrew it.
+  threads = new Resource<ForgeTalkAnchor, ForgeThreadDto[]>(
+    async (anchor) =>
+      api<ForgeThreadDto[]>("list_forge_threads_about", {
+        anchorKind: anchor.kind,
+        pursuitId: anchor.pursuitId ?? null,
+        lineId: anchor.lineId ?? null,
+        nodeId: anchor.nodeId ?? null,
+        entryId: anchor.entryId ?? null,
+        changePointId: anchor.changePointId ?? null,
+      }),
+    [] as ForgeThreadDto[],
+    "forgeCatalog.threads",
+  );
+
   /// Opening the panel reads the list and the rules. Nothing reloads on
   /// a timer: the lines a person opened are not something a background
   /// write moves, and a panel that refreshed under a selection would
@@ -378,6 +433,11 @@ class ForgeCatalog {
     this.pursuit.reset();
     this.collisions.reset();
     this.behind.reset();
+    // A conversation opened from a round or one of its entries is
+    // about a node of the work being let go. One opened about a change
+    // point is not, but it was opened from a chain this move drops as
+    // well, so there is nothing left on screen for it to sit under.
+    this.stopTalking();
   }
 
   /// Opens work against a line.
@@ -511,6 +571,89 @@ class ForgeCatalog {
     ]);
   }
 
+  /// Shows what is said about one thing, and reads it.
+  async talkAbout(anchor: ForgeTalkAnchor): Promise<void> {
+    this.talkingAbout = anchor;
+    await this.threads.load(anchor);
+  }
+
+  /// Stops showing it. Not a write of any kind — a conversation is
+  /// there whether or not anybody has it open.
+  stopTalking(): void {
+    this.talkingAbout = null;
+    this.threads.reset();
+  }
+
+  /// Starts a conversation about it.
+  ///
+  /// **There is no opening one empty.** A conversation is what was said
+  /// in it, so the first thing said is part of opening it rather than a
+  /// message written afterwards.
+  ///
+  /// The anchor is named by ids and resolved by the service against the
+  /// pursuit or the line, so this cannot open a conversation about an
+  /// entry a round never touched — the refusal is the model's.
+  async openTalk(
+    anchor: ForgeTalkAnchor,
+    said: string,
+    title: string | null,
+  ): Promise<void> {
+    await mutate(
+      "open_forge_thread",
+      {
+        command: {
+          anchor_kind: anchor.kind,
+          pursuit_id: anchor.pursuitId ?? null,
+          line_id: anchor.lineId ?? null,
+          node_id: anchor.nodeId ?? null,
+          entry_id: anchor.entryId ?? null,
+          change_point_id: anchor.changePointId ?? null,
+          title,
+          said,
+        },
+      },
+      "start a conversation",
+    );
+    await this.threads.load(anchor);
+  }
+
+  /// Says something in one.
+  ///
+  /// The write answers with the message it wrote and this re-reads the
+  /// list, for the reason `pushRound` re-reads the work: `Resource`'s
+  /// generation guard is what decides what is on screen, and a message
+  /// spliced in beside it would be a second answer nothing arbitrates.
+  async sayInTalk(
+    anchor: ForgeTalkAnchor,
+    threadId: string,
+    said: string,
+    replyingTo: string | null,
+  ): Promise<void> {
+    await mutate(
+      "say_in_forge_thread",
+      { threadId, command: { thread_id: threadId, replying_to: replyingTo, said } },
+      "say this",
+    );
+    await this.threads.load(anchor);
+  }
+
+  /// Corrects something said. **Nothing is overwritten** — the model
+  /// keeps what was said first and every correction to it, and the
+  /// screen shows both, so this is an addition rather than an edit.
+  async amendInTalk(
+    anchor: ForgeTalkAnchor,
+    threadId: string,
+    messageId: string,
+    said: string,
+  ): Promise<void> {
+    await mutate(
+      "amend_forge_message",
+      { threadId, command: { thread_id: threadId, message_id: messageId, said } },
+      "correct this",
+    );
+    await this.threads.load(anchor);
+  }
+
   /// Closing ends the question rather than pausing it.
   ///
   /// Everything a line's selection produced goes with it. Keeping any of that
@@ -637,14 +780,23 @@ class ForgeCatalog {
   /// because a fold nobody can see is a fold each screen writes again
   /// slightly differently, and this one has three rules to get wrong.
   ///
-  /// **The model's rules, applied to a line rather than to the work
-  /// alone.** `op.rs` states the first two: per axis the last operation
-  /// wins, and existence absorbs the content and name it arrives with
-  /// *or stands alone* — an entry on its way off keeps nothing else,
-  /// so a rename earlier in the same work is not what the line ends up
-  /// calling it. `change.rs`'s `normalise` states the third: taking off
-  /// something the line does not hold has nothing left to do, and the
-  /// row goes rather than showing as an entry that was let go.
+  /// **In two steps, because the model takes two.** `op.rs`'s `fold`
+  /// reduces the whole work to one row per entry *before* anything
+  /// meets the line: per axis the last operation wins, and then the
+  /// winning existence decides what the row says — present carries the
+  /// content and name that won, absent says existence and nothing else,
+  /// and an entry no operation placed keeps whatever axes were written.
+  /// Applying operations to a line one at a time instead gets four
+  /// cases wrong, all of them two presses away: remove-then-rename and
+  /// remove-then-replace show what the landing will discard, and an
+  /// entry added, removed and renamed inside one piece of work becomes
+  /// a row no close produces.
+  ///
+  /// Only then does the line come in, which is `change.rs`'s
+  /// `normalise`: a removal of something the line is not holding has
+  /// nothing left to do, and an entry the line has never heard of is
+  /// not on this list at all — but one the line knows and let go stays
+  /// exactly as the line has it.
   ///
   /// **Not the model's answer, and it cannot be.** A landing arriving
   /// meanwhile changes what this is folded onto — most of them touch
@@ -652,45 +804,61 @@ class ForgeCatalog {
   /// ones that collide are refused. Reading it early is what lets
   /// somebody fix a name before the close tells them to.
   get projection(): ForgeProjectedEntry[] {
-    const held = new Map<string, ForgeProjectedEntry>();
+    // Step one: the work alone, per axis, last operation winning.
+    const existence = new Map<string, boolean>();
+    const content = new Map<string, string | null>();
+    const named = new Map<string, string | null>();
+    for (const round of this.pursuit.data?.rounds ?? []) {
+      for (const op of round.ops) {
+        if (op.kind === "add") {
+          existence.set(op.entry_id, true);
+          content.set(op.entry_id, op.content_asset_id);
+          named.set(op.entry_id, op.name);
+        } else if (op.kind === "replace") {
+          content.set(op.entry_id, op.content_asset_id);
+        } else if (op.kind === "rename") {
+          named.set(op.entry_id, op.name);
+        } else if (op.kind === "remove") {
+          existence.set(op.entry_id, false);
+        }
+      }
+    }
+
+    // Step two: over the line, which is where an entry gets a name this
+    // work never mentioned and where a removal of something already off
+    // stops being anything at all.
+    const rows = new Map<string, ForgeProjectedEntry>();
     for (const state of this.states.data) {
-      held.set(state.entry_id, {
+      rows.set(state.entry_id, {
         entryId: state.entry_id,
         name: state.name,
         assetId: state.content_asset_id,
         alive: state.alive,
       });
     }
-    const rows = new Map([...held].map(([id, row]) => [id, { ...row }]));
-    for (const round of this.pursuit.data?.rounds ?? []) {
-      for (const op of round.ops) {
-        const row = rows.get(op.entry_id) ?? {
-          entryId: op.entry_id,
-          name: null,
-          assetId: null,
-          alive: false,
-        };
-        if (op.kind === "add") {
-          row.name = op.name;
-          row.assetId = op.content_asset_id;
-          row.alive = true;
-          rows.set(op.entry_id, row);
-        } else if (op.kind === "replace") {
-          row.assetId = op.content_asset_id;
-          rows.set(op.entry_id, row);
-        } else if (op.kind === "rename") {
-          row.name = op.name;
-          rows.set(op.entry_id, row);
-        } else if (op.kind === "remove") {
-          // Existence standing alone: what the line ends up saying is
-          // what it said before, minus the entry. An entry it was not
-          // holding is not something a removal can take off, so the row
-          // goes entirely rather than reading as one this work let go.
-          const before = held.get(op.entry_id);
-          if (before === undefined || !before.alive) rows.delete(op.entry_id);
-          else rows.set(op.entry_id, { ...before, alive: false });
+    const touched = new Set([
+      ...existence.keys(),
+      ...content.keys(),
+      ...named.keys(),
+    ]);
+    for (const entryId of touched) {
+      const before = rows.get(entryId);
+      const goes = existence.get(entryId);
+      if (goes === false) {
+        // Existence standing alone. The line goes on saying what it
+        // said, minus the entry — and if it was not holding it, this
+        // says nothing at all.
+        if (before !== undefined && before.alive) {
+          rows.set(entryId, { ...before, alive: false });
         }
+        continue;
       }
+      rows.set(entryId, {
+        entryId,
+        name: named.get(entryId) ?? before?.name ?? null,
+        assetId: content.get(entryId) ?? before?.assetId ?? null,
+        alive: goes === true ? true : (before?.alive ?? false),
+      });
     }
     return [...rows.values()];
   }
@@ -703,11 +871,16 @@ class ForgeCatalog {
   /// matters most is an added name meeting one the line already holds,
   /// and counting only what the work asked for stays silent on exactly
   /// that. Names default from filenames, and filenames repeat.
+  /// Names are compared trimmed, because `Name::new` trims before it
+  /// stores one — so `"cut 04"` and `"cut 04 "` are one name to the
+  /// rule that refuses, and would be two to anything comparing what was
+  /// typed.
   get wouldClash(): string[] {
     const seen = new Map<string, number>();
     for (const row of this.projection) {
       if (!row.alive || row.name === null) continue;
-      seen.set(row.name, (seen.get(row.name) ?? 0) + 1);
+      const name = row.name.trim();
+      seen.set(name, (seen.get(name) ?? 0) + 1);
     }
     return [...seen.entries()]
       .filter(([, count]) => count > 1)
