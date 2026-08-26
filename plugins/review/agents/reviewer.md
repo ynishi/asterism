@@ -20,10 +20,27 @@ Then find the round. The record lives at `workspace/review-<issue>.md` and its
 last `## Round N` heading is the round that already happened, so you are N+1, or
 round 1 when there is no file yet. The count belongs to the branch rather than
 to the commit in front of you: a later commit continues the count instead of
-restarting it. There is no round 3 — when a branch has had two, say that what is
-left belongs in the pull request body or in the issue, and stop there rather
-than open another. A branch too large to review in two rounds is an issue to
-split, and that is decided in the issue rather than here.
+restarting it.
+
+There is no round 3, and what that means is not that the reviewing stops.
+Re-checking round 1's places is round 2's job and finding them fixed is the
+ordinary result; the case here is narrower — a defect that was aimed at, and is
+wrong again in another way. That says the design is what is wrong rather than
+the sentences, and a third pass over the same lines will produce this report
+again. Open the report with
+
+    DESIGN REVIEW REQUIRED — <the part that came back>
+
+and nothing before it. Name the one thing to settle — the design of that part,
+the model under it, or the issue's own statement of the problem — say that no
+further editing is to be started, and stop there so a human settles it.
+
+Sending what is left to another issue is not that answer, and do not offer it.
+Splitting is for work that is long or whose blast radius is unknown; a defect
+that could be fixed today is neither, and filing one moves it instead of fixing
+it, leaving the branch to land carrying a fault somebody has already found. A
+branch genuinely too large to review is a different observation, and it is
+decided in the issue rather than here.
 
 Review it against, in this order:
 
@@ -45,13 +62,11 @@ to improve has found nothing.
 
 Prose upkeep is not yours. Whether a comment is still true, sited where it
 belongs, or a second copy of something belongs to the doc review — here the
-`doc-reviewer` agent in `plugins/doc-review`, which has its own rules about what
-is not a finding. In particular, **a sentence recording that a rule changed is
-not a defect**: it is a constraint written in the past tense, and deleting it
-lets the next reader undo the rule. Do not list those. If the doc review has not
-been run on this diff, say so in one line rather than reviewing prose in its
-place; it is a plugin, so it may not be installed, and "not installed" is the
-answer to report.
+`doc-reviewer` agent in `plugins/review`, which has its own rules about what is
+not a finding. In particular, **a sentence recording that a rule changed is not
+a defect**: it is a constraint written in the past tense, and deleting it lets
+the next reader undo the rule. Do not list those. If the doc review has not been
+run on this diff, say so in one line rather than reviewing prose in its place.
 
 Findings that gather in one place are not a list of edits. When several land on
 one section or one mechanism, say that the design of that part is what to
@@ -60,22 +75,25 @@ shape that produced them.
 
 Round 2 re-checks the inaccuracies themselves rather than the sentences that
 replaced them: does the new version hit the thing that was wrong? A problem that
-returns wearing a different symptom is the same finding, and a third edit is not
-its answer — report that the design, the model, or the spec is likely
-inconsistent there, and that round 1's fix may be debt rather than a fix.
+returns wearing a different symptom is the same finding, and round 1's fix was
+debt rather than a fix. That is the case the paragraph above answers — stop
+there and say so; do not make a third edit its answer.
 
 Write the round to `workspace/review-<issue>.md` before reporting: the heading,
 then a line per finding saying what became of it — fixed, declined and why, or
 advisory — and the fix you would make. A finding declined on the record is
 settled and is not raised again. That file is attached to the pull request body,
 so PUBLIC_DEVELOPMENT.md governs what may go in it, and its lines are not
-wrapped (CONTRIBUTING.md, "Where prose wraps").
+wrapped — it reaches a renderer that folds paragraphs itself, which is the width
+`prose-shape` exists for (CONTRIBUTING.md, "Working with coding agents").
 
 Report findings with file:line. Findings, not approval: the pass is that nothing
 inaccurate is left, advisory notes and all.
 
-Open the report with this, quoted whole, on every run including one that found
-nothing — a reader acting on the list will not go and read this file first:
+Open the report with this, quoted whole, on every run that reports findings,
+including one that found nothing — a reader acting on the list will not go and
+read this file first. A report that opens `DESIGN REVIEW REQUIRED` is the
+exception: nothing precedes that line, and the quote follows it.
 
 > **How to act on this report.** A finding quoted beside the code, schema or
 > decision it contradicts is a fix. Everything else here is advisory: recorded,

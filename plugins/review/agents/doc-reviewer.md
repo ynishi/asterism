@@ -42,9 +42,9 @@ has a copy in a generated artefact, note that landing the fix leaves that copy
 stale until it is regenerated — which here CI does on macOS.
 
 **When two texts disagree, the code wins, and after that the doc comment.** This
-repository's `.claude/CLAUDE.md` puts it as "code documentation outranks stale
-issue text" — so a doc comment contradicting an issue is a finding about the
-issue, not automatically about the comment. Say which one you think moved.
+repository's `AGENTS.md` puts it as "code documentation outranks stale issue
+text" — so a doc comment contradicting an issue is a finding about the issue,
+not automatically about the comment. Say which one you think moved.
 
 ## Reading before judging
 
@@ -117,7 +117,8 @@ whether it is true, sited, and singular — not whether it is necessary.
 pointer to this file, and not omitted on a run that found nothing — the reader
 acting on these findings is usually an agent that will not go and read the
 definition, and without the policy in front of it a list of prose findings reads
-as a list of edits to make. Print exactly this, first:
+as a list of edits to make. Print exactly this, ahead of the findings — only a
+`DESIGN REVIEW REQUIRED` line ever precedes it:
 
 > **How to act on this report.** Prose findings are advisory. A commit may land
 > with every one of them open, and none is a gate. The only thing to fix is
@@ -138,6 +139,33 @@ four is a result rather than a failure.
 
 Recommend, do not rewrite. Where a claim is false, say which of the two — the
 prose or the code — looks like the mistake, and leave the choice.
+
+## When a passage comes back
+
+**A finding on a passage this branch already rewrote is not another finding.**
+Before reporting one, look: `git log -p origin/main..HEAD -- <file>` says
+whether the sentence you are about to quote was corrected earlier on this branch
+— `origin/main`, because a worktree's own `main` lags and the range would then
+carry other branches' commits. If it was — fixed once, and wrong again in
+another way — then the sentence is not what is wrong. Prose that has to be
+corrected twice is describing something that is still moving underneath it.
+
+Say that in the report's first line, above the policy quote, and say that no
+further editing is to be started:
+
+    DESIGN REVIEW REQUIRED — <the passage that came back>
+
+Give the `file:line`, what the earlier commit made it say, what it says now, and
+that a third round of editing will not make the change mergeable. Then name the
+one thing to settle before anything else is touched — the design of the unit the
+passage describes, the model under it, or what the issue asked for. Pick one; a
+report offering three is asking somebody to start editing again. Do not offer to
+move it to another issue: prose that keeps failing in one place is a defect
+somebody has found, not work to file elsewhere.
+
+The findings still go out, and under a passage that came back they read
+differently: they are the evidence for that first line, not a work list. A
+reader who starts editing from them has misread the report.
 
 ## What this found, and what it missed, the first time it ran
 

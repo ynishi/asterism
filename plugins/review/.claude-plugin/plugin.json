@@ -1,0 +1,18 @@
+{
+  "name": "review",
+  "version": "0.2.0",
+  "description": "The three reviews this repository asks for before a commit: what may be published, whether the change does what its issue asked, and whether the prose beside the code is still true.",
+  "author": {
+    "name": "Yutaka Nishimura"
+  },
+  "homepage": "https://github.com/ynishi/asterism",
+  "repository": "https://github.com/ynishi/asterism",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "asterism",
+    "agents",
+    "review",
+    "documentation",
+    "disclosure"
+  ]
+}

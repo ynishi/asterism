@@ -206,15 +206,35 @@ Refs #<issue>
 
 ## Working with coding agents — the recommended pattern
 
-This repository ships its agent configuration in the open: pointer memory
-(`.claude/CLAUDE.md`), guard agents (`.claude/agents/`), permission settings
-that deny push/PR to agents outright, and two plugins worth installing:
+What this repository tells an agent is `AGENTS.md`, at the root, in the open and
+under the name other coding agents already read. Claude Code reads `CLAUDE.md`
+rather than that name, so `.claude/CLAUDE.md` is committed as a symlink back to
+it — the instructions sit in one file, and a clone loads them with nothing to
+set up.
+
+That symlink is the only thing under `.claude/` this repository tracks.
+`.gitignore` takes the rest, because the directory is Claude Code's working
+directory on your machine: local settings, local memory, plugin caches, session
+state. A diff that reaches anything else there is doing something unusual, and
+the reviews say so. On Windows a clone without Developer Mode writes the symlink
+out as a text file holding the path; leave it alone — editing it dirties a
+tracked file and the `-changed` gates refuse a dirty tree — and put a
+`CLAUDE.md` containing `@AGENTS.md` at the repository root instead, which loads
+the same file by import and which `.gitignore` already keeps out of the tree.
+
+The plugins are installed rather than cloned, and the block below is the same in
+every checkout:
 
 ```text
 /plugin marketplace add ynishi/asterism
 /plugin install prose-shape@asterism
-/plugin install doc-review@asterism
+/plugin install review@asterism
 ```
+
+A `permissions.deny` list is personal and is not committed here: it is advisory
+in the checkout that has it and absent from every other, so what holds an agent
+to anything is the remote's own settings. Keep yours for the reminder rather
+than as the guard.
 
 `prose-shape` is a hook, and it covers the one width nothing else can. A commit
 message body is answered for by `commit-msg-check` and the markdown in the tree
@@ -236,8 +256,9 @@ issue -> just worktree-new -> implement -> just check
 
 Three reviews run there and they do not overlap. `reviewer` answers whether the
 change does what its issue asked; `pub-checker` answers what may be published;
-`doc-reviewer` — the `doc-review` plugin — answers whether the comments beside
-the code are still true, which is the only one of the three that owns prose. Its
+`doc-reviewer` answers whether the comments beside the code are still true,
+which is the only one of the three that owns prose. They are one plugin because
+they are one moment: nobody wants two of them and not the third. The prose
 findings are advisory: a commit may land with all of them open, and only a claim
 quoted beside the code that contradicts it is a fix. A sentence recording that a
 rule changed is not a defect to any of them, for the reason
@@ -247,8 +268,9 @@ That division has to be visible to the agent doing the work, not only true: the
 run that prompted writing it down had `reviewer` producing wording notes for a
 prose review that was not installed, and an agent that read the list as work to
 do rewrote all nine of them — including ones whose whole content was the record
-of what a rule replaced. If `doc-review` is not installed on a machine, the
-answer is to say the prose was not reviewed.
+of what a rule replaced. The three arrive together, so a machine has all of them
+or none: if `review` is not installed, the answer is to say the change was not
+reviewed rather than to review it in their place.
 
 The `pre-push` at the end is the gate: it runs after the last commit, over the
 tree that is actually handed over. It is not `check` — it adds `branch-check`,
@@ -257,15 +279,24 @@ workspace-wide clippy and test runs, so the gate before a hand-over costs what
 the change costs rather than what the workspace costs. Run it there even when a
 mid-loop run was green. A green run over a different tree is not a gate.
 
-Two agents ship with the repo, and we would appreciate a diff passing both
-before a pull request — recommended, not enforced:
+Three agents come with the `review` plugin, and we would appreciate a diff
+passing them before a pull request — recommended, not enforced:
 
 - `pub-checker` — applies the disclosure policy to the diff.
+- `doc-reviewer` — reads the prose the change touches, and the prose it makes
+  false without touching, against the code beside it. Advisory, as above.
 - `reviewer` — checks the branch against the issue's acceptance criteria,
   redistribution, gates, and the commit message format. Give it the issue number
   and it takes the rest: the diff against `main`, and its own rounds from
   `workspace/review-<issue>.md`. It stops without an issue, and it reviews a
-  branch twice — a branch too large for that is an issue to split.
+  branch twice.
+
+A defect the first round aimed at and the second finds wrong again in another
+way says the design is what is wrong rather than the lines, so both agents open
+with `DESIGN REVIEW REQUIRED`, name the one thing to settle, and leave it to a
+human. Neither offers to move what is left into another issue: splitting is for
+work that is long or whose blast radius is unknown, and a defect that could be
+fixed today is neither.
 
 The same recommendation extends past the PR: releases and publishes (crates,
 packages, the repository's own settings) are best performed by a human hand in

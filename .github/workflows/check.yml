@@ -34,7 +34,7 @@ name: check
 # The ignore list is what a change can touch without changing what
 # `just check` would answer. A pull request that edits only these gets no
 # run at all, which is the point: #57 changed eighteen lines across
-# `CONTRIBUTING.md`, `CHANGELOG.md` and `.claude/CLAUDE.md`, and bought
+# `CONTRIBUTING.md`, `CHANGELOG.md` and the pointer memory, and bought
 # a workspace test suite, a clippy pass over every crate and a rustdoc
 # pass over all of them — 710 s of macOS runner, plus a second run of
 # the same on `main` behind the merge. Nothing in it could have had
@@ -66,6 +66,11 @@ name: check
 #     and `README.md` on the list reaches only the root file, because
 #     these patterns match the whole path from the repository root. Were
 #     it otherwise, that entry would quietly defeat this one.
+#
+# `AGENTS.md` is on the list because it is prose and no step reads it.
+# `.claude/**` stays there beside it and now matches one symlink, which
+# resolves to that same file — the entry costs nothing and covers a
+# checkout that has written its own `CLAUDE.md` under the directory.
 #
 # `LICENSE-APACHE` and `LICENSE-MIT` are on the list for the same reason
 # the prose is: no step reads them. They are named rather than left to a
@@ -104,6 +109,7 @@ on:
   pull_request:
     paths-ignore:
       - '.claude/**'
+      - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
       - 'LICENSE-APACHE'
@@ -116,6 +122,7 @@ on:
     branches: [main]
     paths-ignore:
       - '.claude/**'
+      - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
       - 'LICENSE-APACHE'
