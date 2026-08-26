@@ -39,9 +39,10 @@ import { undoToastCatalog } from "./stores/undo-toast.svelte";
  * (`src-tauri/src/error.rs`), and a plain `Error` carries `message` in
  * the same place — so one property read covers both, and covers a
  * serialization failure or a panic crossing the boundary as well. Not
- * imported from `bindings.ts`: that file carries the DTOs the UI
- * consumes, and `UiError` is not among them — it arrives as a rejection
- * value rather than as a return type.
+ * imported from `bindings.ts`: that file projects `asterism-contract`,
+ * and `UiError` is not a contract type at all — it lives in
+ * `src-tauri/src/error.rs` and derives no `SchemaBridge`, because it
+ * arrives as a rejection value rather than as a return type.
  *
  * `kind` is read for exactly one variant, and it has to be. `UiError`
  * is `#[serde(tag = "kind")]` over struct variants, so `message` is a

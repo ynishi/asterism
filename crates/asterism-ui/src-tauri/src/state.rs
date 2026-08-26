@@ -122,9 +122,7 @@ pub struct AppState {
     /// metrics recorded by the UI, read back for summaries).
     pub telemetry: asterism_infra::telemetry::Telemetry,
     /// Series Strategy lifecycle — the registered derivation rules,
-    /// reached by the four `*_series_strategy` commands. No screen
-    /// consumes them yet, so their types stay out of `bindings.ts`
-    /// (see `build.rs`).
+    /// reached by the four `*_series_strategy` commands.
     pub series_strategy_service: Arc<SeriesStrategyService>,
     /// Read handle over the observation streams (`observation` view) —
     /// the single-timeline listing `list_observations` serves.
