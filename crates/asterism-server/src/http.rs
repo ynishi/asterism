@@ -48,8 +48,8 @@
 //! server — they are a member's client talking to somebody else's,
 //! carrying that server's session — so a route here would be this
 //! process proxying a connection it does not hold and cannot
-//! authenticate. The obligation is about a person not losing a verb by
-//! being on the other surface, and a socket client that wants a team
+//! authenticate. The obligation is about a person not losing a verb
+//! by being on the other surface, and a socket client that wants a team
 //! has the same client library the desktop has. Nothing forbids the
 //! edge — `asterism-teams-client` is an `asterism-*` crate and #83 §4
 //! permits it here exactly as it permits it in `asterism-ui` — so if a

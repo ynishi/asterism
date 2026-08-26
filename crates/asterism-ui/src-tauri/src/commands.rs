@@ -43,8 +43,7 @@
 //! cross a socket, and deserialise a response the process already holds
 //! in memory, on every call the window makes — including the ones a
 //! scroll makes tens of at a time. Commands take the contract's types
-//! and call the application services directly instead, which is what
-//! makes this file a translation layer with nothing in it.
+//! and call the application services directly instead.
 //!
 //! What that costs is the thing the rule above exists to bound: two
 //! transports over one service graph, either of which can gain a verb

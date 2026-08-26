@@ -204,6 +204,13 @@ fn code_lines(text: &str) -> Vec<&str> {
 
 /// Every `#[tauri::command]` function name in the desktop's command
 /// module.
+///
+/// Declarations, not registrations: what the window can invoke is the
+/// `generate_handler!` list in `lib.rs`, and a command declared without
+/// being registered would satisfy the pairing while being unreachable.
+/// The two agree today, and holding them to each other is a different
+/// question from this one — a verb the socket has and the desktop does
+/// not.
 fn tauri_commands(root: &Path) -> BTreeSet<String> {
     let path = root.join("crates/asterism-ui/src-tauri/src/commands.rs");
     let text = read(&path);
