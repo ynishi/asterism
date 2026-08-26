@@ -319,6 +319,7 @@ the domain types.
 - `GroupDto` — A user-curated Group (bucket) — the hand-picked twin of a Tag.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
+- `HeadStatusDto` — Which trained head scores tags, and what stands between the
 - `JobDto` — Job status payload.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
@@ -344,6 +345,7 @@ the domain types.
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
+- `RulingReadinessDto` — What the rulings on disk would give a training run (#130).
 - `SampledPageDto` — A random handful drawn from the set a filter describes — the answer to
 - `SavedQueryDto` — A named `(filter, sort)` snapshot pinned in the sidebar next to
 - `SeriesStrategyDto` — One registered series Strategy — a rule for reading "made the same
@@ -357,6 +359,7 @@ the domain types.
 - `TagSuggestionDto` — One model-proposed tag suggestion awaiting (or carrying) a ruling
 - `ThreadAnchorDto` — Thread anchor — what a `ThreadDto` hangs off of.
 - `ThreadDto` — Thread container payload.
+- `TrainedHeadRunDto` — The training run one head artifact records (#132).
 - `VideoPreviewDto` — Where a video's preview rendition stands
 - `VisualModelStatusDto` — The visual model a running process has bound, if any (#112).
 
@@ -1271,6 +1274,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `group_link_to_dto` — Converts a `GroupLink` to its wire DTO.
 - `group_summary_to_dto` — Converts a `GroupSummary` to its wire DTO.
 - `group_to_dto` — Converts a `Group` to its wire DTO.
+- `head_status_to_dto` — Assembles the model panel's head status (#130) out of the three
 - `index_page_to_dto` — Converts a `Page<AssetIndex>` to an `AssetIndexPageDto`.
 - `index_to_dto` — Converts an `AssetIndex` projection to its wire form.
 - `material_layer_to_dto` — Converts a `MaterialLayer` domain entity to its wire DTO.
@@ -6681,6 +6685,7 @@ projection instead of full `Asset` entities.
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
 - `SourceTextReader` — Port for reading the full text of an asset's **original source**
 - `TagEvidenceRepository` — Persistence port for scored tag suggestions (#112, P3) — the
+- `TagHeadStore` — Read port over the trained-head store (#130) — the promotion
 - `TagRepository` — Persistence port for [`Tag`] and its many-to-many link with assets.
 - `TagVectorRepository` — Persistence port for the Tag-name embedding cache (#112, P3).
 - `ThreadRepository` — Persistence port for [`Thread`] and its [`Message`] children —
@@ -7273,8 +7278,10 @@ continues.
 
 - `BoundTagHead` — The promoted head as the scoring pass holds it: a label and the
 - `HeadEval` — The whole head's eval: the per-row outcomes summed. Promotion reads
+- `PromotedHead` — What the promotion pointer names, as a reader sees it (#130).
 - `RowEval` — Held-out outcome of one tag's candidate row against the baseline,
 - `RulingExample` — One ruling as the trainer consumes it: the asset's cached vector
+- `TrainedHeadRun` — One training run's record, without the rows it trained — what a
 - `TrainedRow` — One trained row: `sigmoid(w · v + b)` is the probability the
 
 ## Constants
@@ -10901,6 +10908,7 @@ pointer.
 
 ## Types
 
+- `FsTagHeadStore` — Read adapter over a heads store directory — the
 - `TagHeadArtifact` — One training run, persisted whole: identity, rows, and the eval
 
 ## Constants
@@ -14371,6 +14379,7 @@ its own module doc explains.
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
 - `groups_of_asset` — Which Groups the asset already sits in — powers the "already
+- `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).

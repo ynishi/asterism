@@ -36,6 +36,7 @@ the domain types.
 - `GroupDto` — A user-curated Group (bucket) — the hand-picked twin of a Tag.
 - `GroupLinkDto` — One Group-in-Group connection (Are.na channel-in-channel). The
 - `GroupSummaryDto` — A group paired with the number of distinct assets attached, used
+- `HeadStatusDto` — Which trained head scores tags, and what stands between the
 - `JobDto` — Job status payload.
 - `JobKindSnapshotDto` — Per-kind slice of the background-jobs table (wire form of the
 - `JobLogDto` — One job run (`GET /asterism/jobs/log`).
@@ -61,6 +62,7 @@ the domain types.
 - `ProvenanceViewDto` — Composite response for `GET /asterism/assets/{id}/provenance` —
 - `RetrievedIdsDto` — A retrieval reduced to **order**: the ranked ids and nothing else.
 - `RetrievedPageDto` — One page of a **retrieval** — the ranked shortlist, narrowed by the
+- `RulingReadinessDto` — What the rulings on disk would give a training run (#130).
 - `SampledPageDto` — A random handful drawn from the set a filter describes — the answer to
 - `SavedQueryDto` — A named `(filter, sort)` snapshot pinned in the sidebar next to
 - `SeriesStrategyDto` — One registered series Strategy — a rule for reading "made the same
@@ -74,6 +76,7 @@ the domain types.
 - `TagSuggestionDto` — One model-proposed tag suggestion awaiting (or carrying) a ruling
 - `ThreadAnchorDto` — Thread anchor — what a `ThreadDto` hangs off of.
 - `ThreadDto` — Thread container payload.
+- `TrainedHeadRunDto` — The training run one head artifact records (#132).
 - `VideoPreviewDto` — Where a video's preview rendition stands
 - `VisualModelStatusDto` — The visual model a running process has bound, if any (#112).
 

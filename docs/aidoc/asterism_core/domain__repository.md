@@ -76,6 +76,7 @@ projection instead of full `Asset` entities.
 - `SnapshotRepository` — Persistence port for [`Snapshot`] — the immutable content-addressed
 - `SourceTextReader` — Port for reading the full text of an asset's **original source**
 - `TagEvidenceRepository` — Persistence port for scored tag suggestions (#112, P3) — the
+- `TagHeadStore` — Read port over the trained-head store (#130) — the promotion
 - `TagRepository` — Persistence port for [`Tag`] and its many-to-many link with assets.
 - `TagVectorRepository` — Persistence port for the Tag-name embedding cache (#112, P3).
 - `ThreadRepository` — Persistence port for [`Thread`] and its [`Message`] children —

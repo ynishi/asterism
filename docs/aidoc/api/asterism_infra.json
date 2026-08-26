@@ -243,6 +243,11 @@
       "docs": "File name of the promotion pointer inside the heads root."
     },
     {
+      "path": "asterism_infra::heads::FsTagHeadStore",
+      "kind": "struct",
+      "docs": "Read adapter over a heads store directory — the\n[`TagHeadStore`](asterism_core::domain::repository::TagHeadStore)\nport (#130).\n\nComposes what was already here: [`current_label`] for the pointer\nand [`load_artifact`] for what it names. The composition is the\nport's whole body, and it lives behind a port because the caller is\na screen in another crate and the artifact schema is this module's."
+    },
+    {
       "path": "asterism_infra::heads::HEAD_ARTIFACT_SCHEMA",
       "kind": "constant",
       "docs": "The artifact schema this module writes and reads."

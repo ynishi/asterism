@@ -106,6 +106,7 @@ its own module doc explains.
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
 - `groups_of_asset` — Which Groups the asset already sits in — powers the "already
+- `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
