@@ -55,6 +55,24 @@ and this project adheres to
   line already holds. Counting only what the work asked for would be silent on
   exactly that, so the warning is read off the same fold.
 
+  **A tile is a thumbnail where there is one, and what the thing is where there
+  is not.** A line refers to assets rather than pictures — the first card in
+  this repository's fixture is a recording — and an entry carrying one was an
+  empty grey box, indistinguishable from one whose thumbnail had not arrived,
+  because a thumb miss and a thumb that is never coming are the same transparent
+  pixel. The tile reads the card's own `media`, which is the field the grid
+  reads.
+
+  **With nothing picked, the add control gets out of the way rather than going
+  dead.** The drawer is an overlay, so a button telling somebody to select in
+  the grid is the thing stopping them; it steps the drawer aside instead,
+  keeping the line and the work, and the sidebar brings it back to them.
+
+  **A discard says what it needs first.** The forge refuses to drop a line while
+  any work is open against it, because dropping takes the history that work was
+  cut from — so the confirmation counts the open pursuits and names where to
+  close them, rather than promising they go with it.
+
   **A refusal to close carries a reason, and the reason is not the action.**
   `mutate` puts the message on screen and reads no further. `blocked` arrives
   both for a line that moved and for a line that is archived, and only its
