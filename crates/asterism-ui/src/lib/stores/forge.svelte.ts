@@ -111,13 +111,10 @@
 // **The line verbs** sit on the header, discard among them — and its
 // response is the only place the assets it released are ever named, so
 // a caller that ignores the body has lost them. **Threads** anchor to
-// forge work, and open with a question this catalog cannot answer for
-// them. It is not only that no app-level anchor kind is a forge node:
-// the two are separate aggregates with different shapes — a forge
-// thread carries revisions and what was first said, an app-level one
-// carries archived, role and refs. So the choice is not "teach the
-// drawer one more anchor" but whether one surface can hold two records
-// that answer to different fields.
+// forge work, and opened with a question this catalog could not answer
+// for them — whether one surface can hold two records that answer to
+// different fields, rather than whether to teach the drawer one more
+// anchor kind. `ForgeTalk` answers it, and says why where it does.
 //
 // # Two questions this left open, and how #180 answered them
 //
@@ -191,6 +188,15 @@ export interface ForgeProjectedEntry {
   name: string | null;
   assetId: string | null;
   alive: boolean;
+  /// Whether it is this work that takes it off.
+  ///
+  /// Not the same as `!alive`, and the difference decides what can
+  /// usefully be asked next. An entry the *line* is not holding can
+  /// still be renamed by this work and the rename lands; one this work
+  /// takes off cannot, because the fold gives a departing entry a row
+  /// that states existence and nothing else, so a rename beside it is
+  /// discarded rather than refused.
+  leaving: boolean;
 }
 
 class ForgeCatalog {
@@ -345,9 +351,8 @@ class ForgeCatalog {
   /// mistake to merge — so this is a list.
   ///
   /// Each arrives whole, with every message and every correction to
-  /// each. That is `ForgeThreadDto`'s decision and not this store's:
-  /// rendering only what a message says now would leave a withdrawn
-  /// sentence attributed to whoever withdrew it.
+  /// each. That is `ForgeThreadDto`'s decision and not this store's,
+  /// and it is stated there.
   threads = new Resource<ForgeTalkAnchor, ForgeThreadDto[]>(
     async (anchor) =>
       api<ForgeThreadDto[]>("list_forge_threads_about", {
@@ -415,6 +420,10 @@ class ForgeCatalog {
     // it reads as though it were about this one.
     this.released = null;
     this.history.reset();
+    // Before `clearWork`, which leaves a conversation about a change
+    // point standing on the grounds that the line has not moved. Here
+    // it has.
+    this.stopTalking();
     this.clearWork();
     await Promise.all([
       this.states.load({ lineId }),
@@ -433,11 +442,13 @@ class ForgeCatalog {
     this.pursuit.reset();
     this.collisions.reset();
     this.behind.reset();
-    // A conversation opened from a round or one of its entries is
-    // about a node of the work being let go. One opened about a change
-    // point is not, but it was opened from a chain this move drops as
-    // well, so there is nothing left on screen for it to sit under.
-    this.stopTalking();
+    // Three of the four anchors name a node of the work being let go
+    // and cannot outlive it. The fourth is a change point, which is the
+    // line's: it was landed by work that may be long closed, and the
+    // chain it sits on is still on screen. So this ends a conversation
+    // about the work and leaves one about the line alone — the moves
+    // that end *that* are the ones that change or drop the line.
+    if (this.talkingAbout?.kind !== "change") this.stopTalking();
   }
 
   /// Opens work against a line.
@@ -590,9 +601,8 @@ class ForgeCatalog {
   /// in it, so the first thing said is part of opening it rather than a
   /// message written afterwards.
   ///
-  /// The anchor is named by ids and resolved by the service against the
-  /// pursuit or the line, so this cannot open a conversation about an
-  /// entry a round never touched — the refusal is the model's.
+  /// What the anchor can and cannot be is `ForgeTalkAnchor`'s to
+  /// explain; nothing here is trusted with it.
   async openTalk(
     anchor: ForgeTalkAnchor,
     said: string,
@@ -637,9 +647,9 @@ class ForgeCatalog {
     await this.threads.load(anchor);
   }
 
-  /// Corrects something said. **Nothing is overwritten** — the model
-  /// keeps what was said first and every correction to it, and the
-  /// screen shows both, so this is an addition rather than an edit.
+  /// Corrects something said. **Nothing is overwritten** — this appends
+  /// a revision, which is why it answers with the correction rather
+  /// than with the message as it now reads.
   async amendInTalk(
     anchor: ForgeTalkAnchor,
     threadId: string,
@@ -672,6 +682,7 @@ class ForgeCatalog {
     this.states.reset();
     this.history.reset();
     this.pursuits.reset();
+    this.stopTalking();
     this.clearWork();
     this.released = null;
   }
@@ -734,10 +745,12 @@ class ForgeCatalog {
       this.selected = null;
       this.states.reset();
       this.history.reset();
-      // Every pursuit against this line went with it. What was on
-      // screen names work that no longer exists, and a read of it now
-      // answers not-found rather than a list.
+      // Every pursuit against this line went with it, and so did every
+      // change point and everything said about either. What was on
+      // screen names records that no longer exist, and a read of one
+      // now answers not-found rather than a list.
       this.pursuits.reset();
+      this.stopTalking();
       this.clearWork();
     }
     await this.lines.load();
@@ -778,7 +791,8 @@ class ForgeCatalog {
   /// the work says what it asks for, and what a close leaves is the
   /// second applied to the first. It is here rather than on a screen
   /// because a fold nobody can see is a fold each screen writes again
-  /// slightly differently, and this one has three rules to get wrong.
+  /// slightly differently, and every rule it has to get right is
+  /// somebody else's.
   ///
   /// **In two steps, because the model takes two.** `op.rs`'s `fold`
   /// reduces the whole work to one row per entry *before* anything
@@ -786,17 +800,20 @@ class ForgeCatalog {
   /// winning existence decides what the row says — present carries the
   /// content and name that won, absent says existence and nothing else,
   /// and an entry no operation placed keeps whatever axes were written.
-  /// Applying operations to a line one at a time instead gets four
-  /// cases wrong, all of them two presses away: remove-then-rename and
+  /// Applying operations to a line one at a time instead is wrong
+  /// wherever a removal has an operation after it or beside it, and
+  /// each of those is two presses away: remove-then-rename and
   /// remove-then-replace show what the landing will discard, and an
   /// entry added, removed and renamed inside one piece of work becomes
-  /// a row no close produces.
+  /// a row no close produces. The tests hold the list.
   ///
   /// Only then does the line come in, which is `change.rs`'s
   /// `normalise`: a removal of something the line is not holding has
-  /// nothing left to do, and an entry the line has never heard of is
-  /// not on this list at all — but one the line knows and let go stays
-  /// exactly as the line has it.
+  /// nothing left to do, so it leaves nothing here — while one the line
+  /// knows and let go stays exactly as the line has it. An entry the
+  /// line has never heard of is otherwise on this list like any other,
+  /// which is `table.rs`'s position rather than a choice made here: an
+  /// entry appears as soon as anything names it, on the line or off it.
   ///
   /// **Not the model's answer, and it cannot be.** A landing arriving
   /// meanwhile changes what this is folded onto — most of them touch
@@ -834,6 +851,7 @@ class ForgeCatalog {
         name: state.name,
         assetId: state.content_asset_id,
         alive: state.alive,
+        leaving: false,
       });
     }
     const touched = new Set([
@@ -849,7 +867,7 @@ class ForgeCatalog {
         // said, minus the entry — and if it was not holding it, this
         // says nothing at all.
         if (before !== undefined && before.alive) {
-          rows.set(entryId, { ...before, alive: false });
+          rows.set(entryId, { ...before, alive: false, leaving: true });
         }
         continue;
       }
@@ -858,6 +876,7 @@ class ForgeCatalog {
         name: named.get(entryId) ?? before?.name ?? null,
         assetId: content.get(entryId) ?? before?.assetId ?? null,
         alive: goes === true ? true : (before?.alive ?? false),
+        leaving: false,
       });
     }
     return [...rows.values()];
@@ -871,10 +890,11 @@ class ForgeCatalog {
   /// matters most is an added name meeting one the line already holds,
   /// and counting only what the work asked for stays silent on exactly
   /// that. Names default from filenames, and filenames repeat.
-  /// Names are compared trimmed, because `Name::new` trims before it
-  /// stores one — so `"cut 04"` and `"cut 04 "` are one name to the
-  /// rule that refuses, and would be two to anything comparing what was
-  /// typed.
+  /// Names are compared trimmed, which is agreement with `Name::new`
+  /// rather than defence against anything: every name here has already
+  /// been through it on the way out, so nothing untrimmed arrives from
+  /// this backend. It is here so the comparison cannot drift from the
+  /// rule it is predicting.
   get wouldClash(): string[] {
     const seen = new Map<string, number>();
     for (const row of this.projection) {

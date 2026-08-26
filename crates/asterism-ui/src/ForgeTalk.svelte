@@ -4,25 +4,26 @@
   // #170's fourth surface, and its first question was not whether but
   // which: teach the app's thread drawer a forge anchor, or give forge
   // conversations their own place. They are separate aggregates down to
-  // the service and they answer to different fields — a forge message
-  // carries what it said first and every correction to it, an app-level
-  // thread carries archived, role and refs — so one surface holding
+  // the service, and their messages answer to different fields — a
+  // forge message carries what it said first and every revision of it,
+  // an app-level one carries role and refs — so one surface holding
   // both would be a component with two halves that never run together.
   // This is the second answer.
   //
   // **One place, four anchors.** A conversation hangs off a piece of
   // work, a round, an entry as that round had it, or a change point on
-  // the line. Those are opened from three different screens and shown
-  // here, below the tabs, because a conversation is about something
-  // rather than beside it: opening one from a round should not move the
-  // reader away from the round.
+  // the line — the four `Anchor` has, and a fifth would not compile
+  // past the resolver. They are opened from two components and shown
+  // here, because a conversation is about something rather than beside
+  // it: opening one from a round should not move the reader away from
+  // the round.
   //
-  // **Every correction is shown, and that is the model's decision.**
-  // `ForgeThreadDto` carries `said`, `first_said` and every revision,
-  // and its doc says why: a correction the reader does not see is a
-  // sentence still attributed to somebody who withdrew it. So a
-  // corrected message says that it was corrected, and what it said
-  // before is one press away rather than gone.
+  // **Every correction is shown, and this is the surface that could
+  // have shown only the latest.** `ForgeMessageDto` carries `said`,
+  // `first_said` and every revision, and `ForgeThreadDto` says why it
+  // is shaped to carry them. So a corrected message says that it was
+  // corrected, and what it said before is one press away rather than
+  // gone.
   //
   // **A conversation cannot be opened empty**, which is the model's
   // too — it is what was said in it, so the first thing said is part of

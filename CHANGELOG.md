@@ -63,14 +63,14 @@ and this project adheres to
 
   **Conversations get their own place rather than a fifth anchor kind on the
   thread drawer**, which is the question #170's fourth surface opened with. The
-  two are separate aggregates down to the service and answer to different fields
-  — a forge message carries what it said first and every correction to it, an
-  app-level thread carries archived, role and refs — so one surface holding both
-  would be a component with two halves that never run together. One is opened
-  from a piece of work, a round, an entry as that round had it, or a change
-  point on the line, and all four are shown in one place under the tabs: a
-  conversation is about something rather than beside it, and opening one from a
-  round should not move the reader away from the round. Every correction is on
+  two are separate aggregates down to the service and their messages answer to
+  different fields — a forge message carries what it said first and every
+  revision of it, an app-level one carries role and refs — so one surface
+  holding both would be a component with two halves that never run together. One
+  is opened from a piece of work, a round, an entry as that round had it, or a
+  change point on the line, and all four are shown in one place under the tabs:
+  a conversation is about something rather than beside it, and opening one from
+  a round should not move the reader away from the round. Every correction is on
   screen, because a correction the reader does not see is a sentence still
   attributed to somebody who withdrew it.
 

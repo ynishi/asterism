@@ -450,11 +450,19 @@
           {/if}
           <span class="op-name">{row.name ?? "(unnamed)"}</span>
           <span class="row-verbs">
-            <button type="button" onclick={() => rename(row)}>rename</button>
-            {#if gridSelection.selectedIds.size === 1}
-              <button type="button" onclick={() => replace(row)}>
-                replace with the selected
-              </button>
+            <!-- A row this work is taking off is offered neither a
+                 rename nor a refill, because the fold gives a departing
+                 entry a row that states existence and nothing else:
+                 either would be written, accepted, and then discarded
+                 by the close. A row the *line* is not holding is a
+                 different case and keeps both — that rename lands. -->
+            {#if !row.leaving}
+              <button type="button" onclick={() => rename(row)}>rename</button>
+              {#if gridSelection.selectedIds.size === 1}
+                <button type="button" onclick={() => replace(row)}>
+                  replace with the selected
+                </button>
+              {/if}
             {/if}
             {#if row.alive}
               <button type="button" onclick={() => remove(row)}>remove</button>

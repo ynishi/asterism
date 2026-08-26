@@ -421,8 +421,13 @@ describe("work against a line", () => {
     expect(rows.has("fresh")).toBe(false);
     // The line's own entry stays exactly as the line has it. A
     // redundant removal is not a second letting-go, and it is not a
-    // reason for the entry to leave the list either.
-    expect(rows.get("let-go")).toMatchObject({ name: "let-go", alive: false });
+    // reason for the entry to leave the list either — nor for the
+    // screen to treat it as one this work is taking off.
+    expect(rows.get("let-go")).toMatchObject({
+      name: "let-go",
+      alive: false,
+      leaving: false,
+    });
   });
 
   it("folds the work before it meets the line", async () => {
@@ -448,7 +453,16 @@ describe("work against a line", () => {
     // verbs are on screen for a row this work has taken off, so both
     // are one press from being believed.
     expect(forgeCatalog.projection).toEqual([
-      { entryId: "held", name: "held", assetId: "asset-held", alive: false },
+      {
+        entryId: "held",
+        name: "held",
+        assetId: "asset-held",
+        alive: false,
+        // Off the line *because of this work*, which is not the same
+        // answer as off it — the screen offers a rename on one and not
+        // on the other, because only one of those renames lands.
+        leaving: true,
+      },
     ]);
   });
 
@@ -515,18 +529,32 @@ describe("work against a line", () => {
     });
   });
 
-  it("lets go of a conversation when the work under it goes", async () => {
+  it("ends a conversation about the work, and not one about the line", async () => {
     answering({ list_forge_threads_about: [] });
     await forgeCatalog.talkAbout({
       kind: "pursuit",
       about: "this work",
       pursuitId: "P1",
     });
-
     forgeCatalog.clearWork();
-
     expect(forgeCatalog.talkingAbout).toBeNull();
-    expect(forgeCatalog.threads.data).toEqual([]);
+
+    // A change point is the line's. It was landed by work that may be
+    // long closed, and the chain it sits on is still on screen, so
+    // going back to the list of work is not a reason to close it.
+    await forgeCatalog.talkAbout({
+      kind: "change",
+      about: "what landed here",
+      lineId: "L1",
+      changePointId: "c1",
+    });
+    forgeCatalog.clearWork();
+    expect(forgeCatalog.talkingAbout?.kind).toBe("change");
+
+    // Moving off the line is.
+    answering({ get_forge_line_states: [], list_forge_pursuits_of_line: [] });
+    await forgeCatalog.selectLine("L2");
+    expect(forgeCatalog.talkingAbout).toBeNull();
   });
 
   it("lets go of the work when the panel closes", async () => {

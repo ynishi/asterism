@@ -36,7 +36,8 @@ class GridSelection {
 
   /// Ends the pick. An operation that consumes the selection calls
   /// this, which is the app's convention rather than this store's
-  /// invention — App's `clearSelection` says it where it promotes.
+  /// invention — `contextPromoteSelection` in `App.svelte` states it
+  /// where it promotes.
   ///
   /// Here rather than at each caller because the anchor has to go with
   /// the set: a Shift-extend from a card nothing is selected on reads
