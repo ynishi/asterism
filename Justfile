@@ -893,7 +893,7 @@ worktree-new type slug:
 [group('check')]
 [group('allow-agent')]
 branch-check:
-    @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see .claude/CLAUDE.md)"; exit 1; }
+    @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see AGENTS.md)"; exit 1; }
     @git merge-base --is-ancestor origin/main HEAD || { echo "HEAD does not descend from origin/main: wrong base — rebuild the branch from origin/main"; exit 1; }
     @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
 
@@ -913,8 +913,7 @@ commit-msg-check *args:
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
-# being denied `git push` (.claude/settings.json) is no reason to skip
-# it. `git fetch origin` belongs immediately before it: `branch-check`
+# being denied `git push` is no reason to skip it. `git fetch origin` belongs immediately before it: `branch-check`
 # and `changed-packages`, which the two narrow gates call, both read
 # `origin/main` offline.
 #
@@ -952,9 +951,9 @@ commit-msg-check *args:
 # absent from it.
 #
 # What a prose branch is left with is the two assertions above and a
-# reading of the diff — `pub-checker` for the disclosure policy,
-# `reviewer` for the rest. Neither is a recipe, and neither is
-# something `pre-push` can stand in for.
+# reading of the diff — the three reviews, which the message this
+# recipe prints names. None is a recipe, and none is something
+# `pre-push` can stand in for.
 #
 # Run every gate over the tree being handed over.
 [group('check')]
@@ -1021,8 +1020,8 @@ pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD")
         echo "This branch edits only files the CI workflow's paths-ignore covers:"
         printf '  %s\n' $changed
         echo "No build gate starts for them in CI, so none runs here either. Read"
-        echo "the diff instead — pub-checker for the disclosure policy, reviewer"
-        echo "for the rest."
+        echo "the diff instead — pub-checker for the disclosure policy,"
+        echo "doc-reviewer for the prose, reviewer for the rest."
         exit 0
     fi
     just check-shared rust-clippy-changed rust-test-changed

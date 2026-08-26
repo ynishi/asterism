@@ -21,18 +21,19 @@
       ]
     },
     {
-      "name": "doc-review",
-      "source": "./plugins/doc-review",
-      "description": "Reads the prose a change touches against the code beside it, and the prose the change makes false without touching it.",
-      "version": "0.1.0",
+      "name": "review",
+      "source": "./plugins/review",
+      "description": "The three reviews this repository asks for before a commit: what may be published, whether the change does what its issue asked, and whether the prose beside the code is still true.",
+      "version": "0.2.0",
       "license": "MIT OR Apache-2.0",
       "homepage": "https://github.com/ynishi/asterism",
       "repository": "https://github.com/ynishi/asterism",
       "keywords": [
         "asterism",
         "agents",
+        "review",
         "documentation",
-        "review"
+        "disclosure"
       ]
     }
   ]
