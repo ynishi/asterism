@@ -45,6 +45,7 @@
   import ForgeWork from "./ForgeWork.svelte";
   import ForgeTalk from "./ForgeTalk.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
@@ -359,7 +360,18 @@
       <header>
         <h3>{current.name}</h3>
         <span class="quiet">{current.standing}</span>
-        <button type="button" onclick={() => (tab = "work")}>
+        <!-- It says open a pursuit, so it lands where one is opened.
+             Switching to the tab is not enough: a piece of work being
+             read stays showing, and the form to start another is behind
+             a "← all work" nobody was told to press. Letting go of what
+             is showing is what makes the button mean what it says. -->
+        <button
+          type="button"
+          onclick={() => {
+            forgeCatalog.clearWork();
+            tab = "work";
+          }}
+        >
           open a pursuit
         </button>
       </header>
@@ -538,9 +550,62 @@
       </section>
     </div>
   </div>
+{:else if forgeCatalog.steppedAside}
+  <!-- The way back.
+       Stepping aside is half a gesture without it: the drawer goes, and
+       somebody is left in the grid with no sign that the forge is
+       waiting and no way back that is not a guess. This says which work
+       is waiting, counts what has been picked so far, and returns to
+       it. Fixed to the corner rather than laid out in the page, because
+       what it interrupts is a person looking at the grid. -->
+  <aside class="waiting" aria-label="The forge is waiting">
+    <span>
+      Picking for <strong>{forgeCatalog.pursuit.data?.title ?? "this work"}</strong>
+      · {gridSelection.selectedIds.size} selected
+    </span>
+    <button type="button" onclick={() => forgeCatalog.openPanel()}>
+      back to the forge
+    </button>
+    <button
+      type="button"
+      class="quiet-btn"
+      onclick={() => forgeCatalog.closePanel()}
+      aria-label="Stop picking for the forge"
+    >✕</button>
+  </aside>
 {/if}
 
 <style>
+  .waiting {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.78rem;
+    background: var(--panel-bg, #1b1b1e);
+    color: var(--panel-fg, #e8e8ea);
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 0.3rem;
+    box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.4);
+    padding: 0.5rem 0.7rem;
+  }
+  .waiting button {
+    background: none;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.5rem;
+  }
+  .waiting .quiet-btn {
+    border: 0;
+    opacity: 0.7;
+    padding: 0 0.1rem;
+  }
   .drawer-backdrop {
     position: fixed;
     inset: 0;

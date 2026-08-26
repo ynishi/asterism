@@ -729,6 +729,21 @@ class ForgeCatalog {
     this.open = false;
   }
 
+  /// Whether the panel is out of the way with work still open on it.
+  ///
+  /// Derived rather than a flag, so nothing has to remember to clear
+  /// it: the two things that end it are opening the panel again and
+  /// letting go of the work, and both are already writes to what this
+  /// reads.
+  ///
+  /// It exists because stepping aside is only half a gesture. The first
+  /// build of it closed the drawer and said nothing more, which left
+  /// somebody in the grid with no sign that the forge was waiting and
+  /// no way back that was not a guess. What reads this is the way back.
+  get steppedAside(): boolean {
+    return !this.open && this.working !== null;
+  }
+
   /// Closing ends the question rather than pausing it.
   ///
   /// Everything a line's selection produced goes with it. Keeping any of that

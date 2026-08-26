@@ -60,8 +60,13 @@ const POLL_GAP_MS = 250;
 /// `Name` carries no claim of uniqueness and the model says so, so the
 /// uniqueness has to be here rather than assumed of the forge.
 const LINE_PREFIX = "e2e-forge-pursuit";
-const LINE_NAME = `${LINE_PREFIX}-${Date.now()}`;
+const RUN = Date.now();
+const LINE_NAME = `${LINE_PREFIX}-${RUN}`;
+/// The second test's line, which outlives one close and is worked
+/// again. Same prefix, so one sweep answers for both.
+const SECOND_LINE = `${LINE_PREFIX}-${RUN}-again`;
 const WORK_TITLE = "e2e first round";
+const RENAMED_ENTRY = "renamed by the second pass";
 
 const FORGE_ROW = 'aside.sidebar button[title^="Lines on this machine"]';
 const DRAWER = '[role="dialog"][aria-label="Forge"]';
@@ -135,6 +140,9 @@ interface WorkSnapshot {
   rounds: number;
   /** Operation labels across every round, in order. */
   ops: string[];
+  /// The names on the rows a close would leave, in order — the fold of
+  /// the line and the work, which is what the second test changes.
+  projected: string[];
   /** What the conversation surface is about, when one is open. */
   talkAbout: string;
   /** What each message says now, in order. */
@@ -168,6 +176,7 @@ function readDrawer(): Promise<WorkSnapshot> {
       working: "",
       rounds: 0,
       ops: [] as string[],
+      projected: [] as string[],
       talkAbout: "",
       said: [] as string[],
       corrected: 0,
@@ -201,7 +210,13 @@ function readDrawer(): Promise<WorkSnapshot> {
       working:
         drawer.querySelector(".work-head strong")?.textContent?.trim() ?? "",
       rounds: drawer.querySelectorAll(".rounds > li").length,
-      ops: Array.from(drawer.querySelectorAll(".ops .op-name")).map(
+      // Verb and name together: an operation carries its verb, unlike a
+      // change row, and a test that reads only the name cannot tell a
+      // replace from the add before it.
+      ops: Array.from(drawer.querySelectorAll(".ops li")).map((li) =>
+        (li.textContent ?? "").replace(/\s+/g, " ").trim(),
+      ),
+      projected: Array.from(drawer.querySelectorAll(".projected .op-name")).map(
         (s) => s.textContent?.trim() ?? "",
       ),
       talkAbout: drawer.querySelector(".talk h4")?.textContent?.trim() ?? "",
@@ -407,6 +422,59 @@ async function sweepLeftovers(trail: string[]): Promise<void> {
     );
   }
   throw new Error("more leftovers than this sweep is willing to remove");
+}
+
+/// Opens a pursuit against the selected line and waits for it.
+///
+/// Both tests do this and the second does it twice, which is the whole
+/// point of the second: a line is worked more than once.
+async function openWorkTitled(trail: string[], title: string): Promise<void> {
+  await stage(trail, `open a pursuit: ${title}`, DRIVER_MS, () =>
+    pressLabelled(`${DRAWER} .line header`, "open a pursuit"),
+  );
+  await stage(trail, "fill the new-work form", DRIVER_MS, () =>
+    browser.execute((wanted: string) => {
+      const form = document.querySelector(
+        '[role="dialog"][aria-label="Forge"] form.new-work',
+      );
+      const input = form?.querySelector("input");
+      if (!form || !input) return false;
+      input.value = wanted;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    }, title),
+  );
+  await stage(trail, "open it", DRIVER_MS, () =>
+    press(`${DRAWER} form.new-work button`),
+  );
+  await pollUntil(
+    trail,
+    `${title} is showing`,
+    ROUND_TRIP_MS,
+    async () => (await readDrawer()).working === title,
+    `opening ${title} did not put it on screen`,
+  );
+}
+
+/// Ends the work being shown and waits for it to say so.
+async function closeWork(trail: string[], label: string): Promise<void> {
+  await stage(trail, `press ${label}`, DRIVER_MS, () =>
+    pressLabelled(`${DRAWER} .close`, label),
+  );
+  await pollUntil(
+    trail,
+    "the work reports it ended",
+    ROUND_TRIP_MS,
+    async () =>
+      browser.execute(() => {
+        const head = document.querySelector(
+          '[role="dialog"][aria-label="Forge"] .work-head',
+        );
+        const said = head?.textContent ?? "";
+        return said.includes("satisfied") || said.includes("abandoned");
+      }),
+    "closing the work did not change what it says about itself",
+  );
 }
 
 /// Fails if anything is covering the drawer.
@@ -795,6 +863,318 @@ describe("a pursuit against a line", () => {
       },
       () =>
         `the discard did not report the one asset the line was holding; last saw ${lastSeen}`,
+    );
+
+    await stage(trail, "close the drawer", DRIVER_MS, () =>
+      press(`${DRAWER} .drawer-close`),
+    );
+  });
+
+  // A second piece of work against a line that already holds something,
+  // which is the only place three of the four verbs mean anything.
+  //
+  // The test above opens a pursuit against an empty line and adds to
+  // it. `replace`, `rename` and `remove` name an entry that already
+  // exists, so nothing there reaches them — they shipped never having
+  // been run against the real backend once. This is the loop a person
+  // actually works: put something on a line, come back later, change
+  // what is there, and land that too.
+  //
+  // It also drives the way back from a step-aside, because a second
+  // round needs a pick and the drawer is what is covering the grid.
+  // That gesture had no way back at all when it was first written.
+  it("comes back to a line that has contents, and changes them", async () => {
+    const trail: string[] = [];
+
+    await stage(trail, "pick two cards", DRIVER_MS, () =>
+      browser.execute(() => {
+        const cards = Array.from(
+          document.querySelectorAll(".card[data-asset-id]"),
+        ).slice(0, 2);
+        if (cards.length < 2) return false;
+        for (const card of cards) {
+          card.dispatchEvent(
+            new MouseEvent("click", { bubbles: true, metaKey: true }),
+          );
+        }
+        return true;
+      }),
+    );
+
+    await stage(trail, "open the forge", DRIVER_MS, () => press(FORGE_ROW));
+    await pollUntil(
+      trail,
+      "the drawer paints",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).drawerPresent,
+      "the forge drawer never appeared",
+    );
+    await sweepLeftovers(trail);
+
+    await stage(trail, "fill the new-line form", DRIVER_MS, () =>
+      browser.execute((name: string) => {
+        const form = document.querySelector(
+          '[role="dialog"][aria-label="Forge"] form.new-line',
+        );
+        const input = form?.querySelector("input");
+        const select = form?.querySelector("select");
+        if (!form || !input || !select) return false;
+        const rule = Array.from(select.options).filter((o) => o.value !== "")[0];
+        if (rule === undefined) return false;
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        select.value = rule.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }, SECOND_LINE),
+    );
+    await stage(trail, "open the line", DRIVER_MS, () =>
+      press(`${DRAWER} form.new-line button`),
+    );
+    await pollUntil(
+      trail,
+      "the line reaches the list",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).open.includes(SECOND_LINE),
+      "the opened line never appeared in the list",
+    );
+    await stage(trail, "select it", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, SECOND_LINE),
+    );
+
+    // First landing: two entries arrive from the grid.
+    await openWorkTitled(trail, "first pass");
+    await stage(trail, "add both", DRIVER_MS, () =>
+      press(`${DRAWER} .compose button`),
+    );
+    await pollUntil(
+      trail,
+      "both are asked for",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).projected.length === 2,
+      "the round did not put two entries in the projection",
+    );
+    await closeWork(trail, "close · put it on the line");
+    await stage(trail, "look at the contents", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .tabs`, "on the line"),
+    );
+    await pollUntil(
+      trail,
+      "two are on the line",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).onTheLine === "2 on the line",
+      "the first close did not land both entries",
+    );
+
+    // Second pursuit, cut from a line that now holds something. The
+    // projection is seeded from the line rather than from this work,
+    // which is the case the fold exists for.
+    await openWorkTitled(trail, "second pass");
+    await pollUntil(
+      trail,
+      "the line's own entries are what it starts from",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).projected.length === 2,
+      "a pursuit against a line with contents started from nothing",
+    );
+    const before = (await readDrawer()).projected;
+
+    // Rename. The prompt is the App's, reached through the row.
+    await stage(trail, "rename the first entry", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .projected li:first-child`, "rename"),
+    );
+    await stage(trail, "answer the prompt", DRIVER_MS, () =>
+      browser.execute((name: string) => {
+        const input = document.querySelector(
+          ".prompt-panel input.prompt-input",
+        ) as HTMLInputElement | null;
+        const ok = document.querySelector(
+          ".prompt-panel .prompt-btn.primary",
+        ) as HTMLElement | null;
+        if (input === null || ok === null) return false;
+        input.value = name;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        ok.click();
+        return true;
+      }, RENAMED_ENTRY),
+    );
+    await pollUntil(
+      trail,
+      "the new name is what the line would say",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).projected.includes(RENAMED_ENTRY),
+      "the rename never reached the projection",
+    );
+
+    // Replace, which needs exactly one asset picked — and the grid is
+    // behind the drawer, so this is the step-aside round trip.
+    await stage(trail, "step aside to pick", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .compose`, "pick in the grid — this steps aside"),
+    );
+    await pollUntil(
+      trail,
+      "the way back is on screen",
+      ROUND_TRIP_MS,
+      async () =>
+        browser.execute(
+          () => document.querySelector('[aria-label="The forge is waiting"]') !== null,
+        ),
+      "stepping aside left nothing on screen to come back with",
+    );
+    await stage(trail, "pick one card", DRIVER_MS, () =>
+      browser.execute(() => {
+        const card = document.querySelectorAll(".card[data-asset-id]")[2];
+        if (card === undefined) return false;
+        card.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, metaKey: true }),
+        );
+        return true;
+      }),
+    );
+    await stage(trail, "come back", DRIVER_MS, () =>
+      pressLabelled('[aria-label="The forge is waiting"]', "back to the forge"),
+    );
+    await pollUntil(
+      trail,
+      "it comes back to the same work",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).working === "second pass",
+      "coming back did not land on the work it stepped aside from",
+    );
+    await stage(trail, "replace the second entry", DRIVER_MS, () =>
+      pressLabelled(
+        `${DRAWER} .projected li:nth-child(2)`,
+        "replace with the selected",
+      ),
+    );
+    await pollUntil(
+      trail,
+      "the round holds a replace",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).ops.some((op) => op.startsWith("replace")),
+      "the replace never reached the log",
+    );
+
+    // Remove, and put it back, and remove it again. The middle step is
+    // what proves an entry comes back under its own id rather than as a
+    // new arrival.
+    await stage(trail, "remove the first entry", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .projected li:first-child`, "remove"),
+    );
+    await pollUntil(
+      trail,
+      "it reads as leaving",
+      ROUND_TRIP_MS,
+      async () =>
+        browser.execute(
+          () =>
+            document.querySelector(
+              '[role="dialog"][aria-label="Forge"] .projected li.gone',
+            ) !== null,
+        ),
+      "the removal did not show on the row",
+    );
+    await stage(trail, "put it back", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .projected li.gone`, "put back"),
+    );
+    await pollUntil(
+      trail,
+      "it is on the line again, and still one entry",
+      ROUND_TRIP_MS,
+      async () => {
+        const drawer = await readDrawer();
+        return (
+          drawer.projected.length === before.length &&
+          !(await browser.execute(
+            () =>
+              document.querySelector(
+                '[role="dialog"][aria-label="Forge"] .projected li.gone',
+              ) !== null,
+          ))
+        );
+      },
+      "putting it back either did not take or arrived as a second entry",
+    );
+    await stage(trail, "remove it for good", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .projected li:first-child`, "remove"),
+    );
+
+    // And land the lot.
+    await closeWork(trail, "close · put it on the line");
+    await stage(trail, "look at the contents again", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .tabs`, "on the line"),
+    );
+    await pollUntil(
+      trail,
+      "one is on the line, renamed and refilled",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).onTheLine === "1 on the line",
+      "the second close did not leave exactly the entry it kept",
+    );
+    await shot("second-pass-landed");
+
+    // The chain records both landings, and the genesis is not one of
+    // them.
+    await stage(trail, "read the history", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .tabs`, "history"),
+    );
+    await pollUntil(
+      trail,
+      "two change points",
+      ROUND_TRIP_MS,
+      async () =>
+        browser.execute(
+          () =>
+            document.querySelectorAll(
+              '[role="dialog"][aria-label="Forge"] .chain > li',
+            ).length === 2,
+        ),
+      "the chain does not hold one point per close",
+    );
+
+    // Clean up: both pursuits ended, so the drop is not refused.
+    await stage(trail, "archive it", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .verbs`, "archive"),
+    );
+    await pollUntil(
+      trail,
+      "it moves to archived",
+      ROUND_TRIP_MS,
+      async () => (await readDrawer()).archived.includes(SECOND_LINE),
+      "archiving did not move the line",
+    );
+    await stage(trail, "select it there", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, SECOND_LINE),
+    );
+    await stage(trail, "discard it", DRIVER_MS, () =>
+      press(`${DRAWER} .verbs button.danger`),
+    );
+    await stage(trail, "confirm", DRIVER_MS, () =>
+      pressLabelled("body", "Discard Forever"),
+    );
+    // Three, and not the one entry left on the line: what a drop
+    // releases is the union of every content the chain named and every
+    // content the work named — `discard.rs` says so, and says why it is
+    // one answer rather than two. This line named three assets across
+    // two pursuits (two added, one put in by the replace), and the
+    // entry removed at the end does not take its content out of that
+    // union.
+    let sawReleased = "";
+    await pollUntil(
+      trail,
+      "it is gone and the notice says what it released",
+      ROUND_TRIP_MS,
+      async () => {
+        const drawer = await readDrawer();
+        sawReleased = drawer.released;
+        return (
+          !drawer.open.includes(SECOND_LINE) &&
+          !drawer.archived.includes(SECOND_LINE) &&
+          drawer.released.startsWith("Discarded. 3 assets released")
+        );
+      },
+      () =>
+        `the discard did not report the three assets this line named; the notice read ${JSON.stringify(sawReleased)}`,
     );
 
     await stage(trail, "close the drawer", DRIVER_MS, () =>
