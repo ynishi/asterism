@@ -527,7 +527,7 @@ mod tests {
         for (refusal, remedy) in [
             (ForgeError::Archived, "reopen it"),
             (ForgeError::NotArchived, "archive it first"),
-            (ForgeError::WorkStillOpen(2), "close them first"),
+            (ForgeError::WorkStillOpen(2), "close it first"),
         ] {
             let shared: DomainError = refusal.into();
             assert!(
