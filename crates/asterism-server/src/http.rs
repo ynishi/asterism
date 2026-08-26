@@ -22,42 +22,28 @@
 //! added on the other side, so a verb landing here lands in
 //! `asterism-ui`'s `commands` too, in the same change.
 //!
-//! The tree meets it today — the debt #136 counted is paid, and what
-//! remains is 20 routed handlers with no command of the same name,
-//! every one a sanctioned difference. Ten are the same job under
-//! another name (`declare_asset_provenance` is
-//! `asset_declare_provenance`; `declare_asset_source_type` is
-//! `asset_declare_source_type`; the four `threads_about_*` reads are
-//! one `list_forge_threads_about`). Nine are what a person never
-//! invokes — the process's own controls (`health`,
-//! `shutdown_process`), byte-serving routes the app reaches through
-//! Tauri's asset protocol instead (`get_asset_file`, `put_thumb`),
-//! and diagnostics a socket client reads. One is a shape the desktop
-//! already has: `get_setting` stays without a command (#136's
-//! decision) because `list_settings` returns every registry key fully
-//! resolved and `set_setting` / `reset_setting` return the resolved
-//! row, so a single-key IPC read would be a second way to ask a
-//! question the app already has answered. (Two resolutions along the
-//! way are worth keeping: the four maintenance verbs #136 deferred on
-//! the screen question got a settings-screen Maintenance section —
-//! a section, not a screen — and `train_tag_head` / `pull_tag_head`
-//! gained commands ahead of #130's model panel, the screen that will
-//! invoke them.)
+//! What that leaves on each side is a set of sanctioned differences,
+//! and what makes one sanctioned is part of the rule. A route may
+//! stand without a command when it is the same job under another name,
+//! or when it is one a person never invokes through the app: the
+//! process's own controls, byte-serving routes the app reaches through
+//! Tauri's asset protocol instead, diagnostics a socket client reads,
+//! and a single-key read the desktop already answers with a wider one.
+//! A command may stand without a route on the same first ground, when
+//! it stages a desktop fact a socket client does not have, when it is a
+//! batch second form over a single-item route, or when it talks to a
+//! team rather than to this process.
 //!
-//! A count taken the other way — commands that have a route of the
-//! same name — is 167 of 186 and cannot answer this question, because
-//! the direction that goes short is the other one. The nineteen
-//! without one are the seven command-side names of the twins above
-//! (four `threads_about_*` routes collapse into one command, so ten
-//! route names pair with seven command names); `paste_image_import`
-//! and `rehome_dropped_path`, which stage clipboard and drag-drop
-//! material — desktop facts a socket client does not have;
-//! `get_asset_thumbs`, a batch second command over the single-thumb
-//! route; `active_profile`, a desktop-chrome read of which local
-//! data profile this process opened, with no route today; and the
-//! eight that talk to a **team** rather than to this process.
+//! Which names are on each side, and the reason each one is there,
+//! lives in `tests/transport_parity.rs`, which fails when either list
+//! stops matching the tree. No size of either is stated — not there and
+//! not here — because a count belongs in the file holding the list or
+//! nowhere, and this passage is what happens when it goes anywhere
+//! else. It carried one until the test existed, and that count went
+//! stale three times: twice while #136's debt was being paid, and once
+//! when #169 added a verb to both surfaces and left the total behind.
 //!
-//! Those eight are the one place the obligation above is deliberately
+//! The team verbs are where the obligation above is deliberately
 //! one-sided, and #153 added them. They are not verbs against this
 //! server — they are a member's client talking to somebody else's,
 //! carrying that server's session — so a route here would be this
@@ -85,14 +71,21 @@
 //! here does *not* land there, and adding one is a decision about what
 //! an agent should be offered.
 //!
-//! Nothing checks any of this. It is a rule a person applies while
-//! adding a route, which is why it is written here rather than only in
-//! `README.md`, and why "the forge already does it this way" is not
-//! evidence that a gap is deliberate. The sixteen-verb debt #136
-//! counted, and the twice this passage went stale while it was being
-//! paid, are what that reasoning costs when nobody counts — whether
-//! the count becomes a check is #124's shape of question, recorded on
-//! #136 as the open decision.
+//! `tests/transport_parity.rs` checks the first half of this and not
+//! the second: it fails on a name that gained a route or a command
+//! without the other, or on an exception list that no longer matches
+//! the tree. Whether a difference *deserves* to be on one of those
+//! lists is still a person's judgement, which is why the reasoning
+//! above is written here rather than only in `README.md`, and why "the
+//! forge already does it this way" is not evidence that a gap is
+//! deliberate. The sixteen-verb debt #136 counted is what that
+//! reasoning cost while nobody counted; the check is the answer to the
+//! question #136 left open and pointed at #124.
+//!
+//! One direction of that check runs later than the other. The test
+//! reads a file from each crate and sits in this one, so a branch
+//! touching only the desktop's commands does not select it — its own
+//! doc says why that side was chosen.
 
 use std::sync::Arc;
 
