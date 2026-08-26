@@ -1,15 +1,14 @@
 // forgeCatalog tests. The api / mutate choke points are mocked; the
-// catalog's own machinery — three Resources, two deriveds, and what
-// each write invalidates — runs for real.
+// catalog's own machinery — its Resources, its deriveds, and what each
+// write invalidates — runs for real.
 //
 // What these pin is the panel's answer to a question #180 had to settle
 // once: **closing the drawer ends the question rather than pausing
 // it**. Everything a selection produced goes with it, because the next
-// open would otherwise show a fold of a chain that moved in between —
-// and it will move, once #170's second child lands rounds on a line.
-// Three separate clears written at three call sites is how one of them
-// gets missed, which is what happened to `released` before this file
-// existed.
+// open would otherwise show a fold of a chain that moved in between,
+// and a satisfied close moves one. Separate clears written at each call
+// site is how one of them gets missed, which is what happened to
+// `released` before this file existed.
 //
 // The other rule worth a test is that an entry off the line is not
 // offered as something on it. The wire carries one boolean for two
@@ -19,10 +18,14 @@
 // markup, which is DOM and does not run here.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  ForgeCloseDto,
   ForgeDiscardedDto,
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  ForgeOpDto,
+  ForgePursuitDto,
+  ForgeRoundDto,
 } from "../../bindings";
 import { api } from "../api";
 import { mutate } from "../mutate";
@@ -59,6 +62,67 @@ function history(lineId: string): ForgeLineHistoryDto {
   };
 }
 
+function pursuit(id: string, close: ForgeCloseDto | null = null): ForgePursuitDto {
+  return {
+    id,
+    line_id: "L1",
+    parent_id: null,
+    base_id: "c1",
+    head_id: id,
+    title: id,
+    note: null,
+    opened_at_ms: 1,
+    opened_by_kind: "user",
+    opened_by_id: "u1",
+    rounds: [],
+    close,
+  };
+}
+
+function ended(id: string, outcome: string): ForgePursuitDto {
+  return pursuit(id, {
+    id: `${id}-close`,
+    parent_id: id,
+    outcome,
+    note: null,
+    at_ms: 2,
+    actor_kind: "user",
+    actor_id: "u1",
+  });
+}
+
+/** A pursuit whose single round asks for these operations. */
+function asking(id: string, ops: ForgeOpDto[]): ForgePursuitDto {
+  return { ...pursuit(id), rounds: [{ ...round("r1"), ops }] };
+}
+
+function round(id: string): ForgeRoundDto {
+  return {
+    id,
+    parent_id: "p0",
+    at_ms: 3,
+    actor_kind: "system",
+    actor_id: "u1",
+    note: null,
+    ops: [],
+  };
+}
+
+/// Answers each read by name. The work half fans several reads out at
+/// once, so which command asked is the only thing that separates them —
+/// a queue of `mockResolvedValueOnce` would pin an order that
+/// `Promise.all` does not promise.
+///
+/// The throw is a diagnostic and not an assertion: it happens inside a
+/// `Resource` fetcher, which catches, warns and carries on. A test that
+/// cares whether a read was made asserts on the calls.
+function answering(table: Record<string, unknown>): void {
+  apiMock.mockImplementation((async (cmd: string) => {
+    if (!(cmd in table)) throw new Error(`unexpected read: ${cmd}`);
+    return table[cmd];
+  }) as unknown as typeof api);
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   forgeCatalog.open = false;
@@ -68,6 +132,8 @@ beforeEach(() => {
   forgeCatalog.states.reset();
   forgeCatalog.history.reset();
   forgeCatalog.strategies.reset();
+  forgeCatalog.pursuits.reset();
+  forgeCatalog.clearWork();
 });
 
 describe("what the panel holds", () => {
@@ -188,5 +254,222 @@ describe("what each write invalidates", () => {
 
     expect(forgeCatalog.selected).toBe("L2");
     expect(forgeCatalog.states.data.map((e) => e.entry_id)).toEqual(["kept"]);
+  });
+});
+
+describe("work against a line", () => {
+  it("keeps ended work out of what a round can be written to", async () => {
+    answering({
+      list_forge_pursuits_of_line: [
+        pursuit("open-one"),
+        ended("done", "satisfied"),
+        ended("dropped", "abandoned"),
+      ],
+      get_forge_line_states: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    expect(forgeCatalog.openWork.map((w) => w.id)).toEqual(["open-one"]);
+    // Both endings stay listed, for the reason the `pursuits` read
+    // gives.
+    expect(forgeCatalog.endedWork.map((w) => w.id)).toEqual([
+      "done",
+      "dropped",
+    ]);
+  });
+
+  it("asks nothing about a pursuit it has just cut from the head", async () => {
+    mutateMock.mockResolvedValue(pursuit("P1"));
+    answering({
+      get_forge_pursuit: pursuit("P1"),
+      list_forge_pursuits_of_line: [pursuit("P1")],
+    });
+
+    await forgeCatalog.openPursuit("L1", "a title", null);
+
+    expect(forgeCatalog.working).toBe("P1");
+    // Level with the line by construction: `open` cuts from where the
+    // line is now, so both answers are empty and the two reads that
+    // would say so are not made.
+    const asked = apiMock.mock.calls.map((c) => c[0]);
+    expect(asked).not.toContain("get_forge_pursuit_collisions");
+    expect(asked).not.toContain("get_forge_pursuit_behind");
+  });
+
+  it("re-reads collisions after a round, and not how far behind it is", async () => {
+    mutateMock.mockResolvedValue(undefined);
+    answering({
+      get_forge_pursuit: pursuit("P1"),
+      get_forge_pursuit_collisions: [],
+    });
+
+    await forgeCatalog.pushRound(
+      "P1",
+      [{ entry_id: "e1", kind: "add", content_asset_id: "a1", name: "one" }],
+      null,
+    );
+
+    // What a round asks for is half of what a collision is made of, so
+    // writing one can make or clear one. How far behind the work is
+    // counts landings on the line, which no write on this side moves.
+    expect(apiMock.mock.calls.map((c) => c[0])).not.toContain(
+      "get_forge_pursuit_behind",
+    );
+  });
+
+  it("reports a rule that declined rather than raising it", async () => {
+    mutateMock.mockResolvedValue({ round: null, collisions: [] });
+    answering({
+      get_forge_pursuit: pursuit("P1"),
+      get_forge_pursuit_collisions: [],
+    });
+
+    await expect(forgeCatalog.resolve("P1")).resolves.toBe(false);
+
+    mutateMock.mockResolvedValue({ round: round("r1"), collisions: [] });
+    await expect(forgeCatalog.resolve("P1")).resolves.toBe(true);
+  });
+
+  it("lets go of the line's contents and chain when work closes", async () => {
+    apiMock.mockResolvedValue(history("L1"));
+    await forgeCatalog.history.load({ lineId: "L1" });
+
+    mutateMock.mockResolvedValue(undefined);
+    answering({
+      get_forge_pursuit: ended("P1", "satisfied"),
+      get_forge_pursuit_collisions: [],
+      list_forge_pursuits_of_line: [ended("P1", "satisfied")],
+      get_forge_line_states: [entry("landed", true)],
+    });
+
+    await forgeCatalog.closePursuit("P1", "L1", "satisfied", null);
+
+    // The one verb on this side that moves a line moves both answers
+    // about it: what it holds is re-read, and the chain is dropped so
+    // the history tab reads again rather than showing a fold from
+    // before the landing.
+    expect(forgeCatalog.states.data.map((e) => e.entry_id)).toEqual(["landed"]);
+    expect(forgeCatalog.history.data).toBeNull();
+  });
+
+  it("lets go of the work when the line under it changes", async () => {
+    mutateMock.mockResolvedValue(pursuit("P1"));
+    answering({
+      get_forge_pursuit: pursuit("P1"),
+      list_forge_pursuits_of_line: [],
+      get_forge_line_states: [],
+    });
+    await forgeCatalog.openPursuit("L1", null, null);
+    expect(forgeCatalog.working).toBe("P1");
+
+    await forgeCatalog.selectLine("L2");
+
+    // A pursuit id belongs to the line it is against. Left standing, it
+    // would name work under a line it is not against.
+    expect(forgeCatalog.working).toBeNull();
+    expect(forgeCatalog.pursuit.data).toBeNull();
+  });
+
+  it("folds what the work asks for over what the line holds", async () => {
+    answering({
+      get_forge_line_states: [entry("held", true), entry("let-go", false)],
+      list_forge_pursuits_of_line: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        { entry_id: "fresh", kind: "add", content_asset_id: "a9", name: "new" },
+        { entry_id: "held", kind: "rename", content_asset_id: null, name: "renamed" },
+        { entry_id: "held", kind: "remove", content_asset_id: null, name: null },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+
+    const rows = new Map(forgeCatalog.projection.map((r) => [r.entryId, r]));
+    // Existence arrives with the content and name it was added under.
+    expect(rows.get("fresh")).toMatchObject({ name: "new", alive: true });
+    // Existence standing alone: renaming something on its way off says
+    // nothing anybody can read back, so what the line ends up calling
+    // it is what it called it before.
+    expect(rows.get("held")).toMatchObject({ name: "held", alive: false });
+    // An entry the line already let go is in the fold and stays off it.
+    expect(rows.get("let-go")?.alive).toBe(false);
+  });
+
+  it("drops a removal of something the line is not holding", async () => {
+    answering({
+      get_forge_line_states: [entry("let-go", false)],
+      list_forge_pursuits_of_line: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        { entry_id: "fresh", kind: "add", content_asset_id: "a9", name: "new" },
+        { entry_id: "fresh", kind: "remove", content_asset_id: null, name: null },
+        { entry_id: "let-go", kind: "remove", content_asset_id: null, name: null },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+
+    // Taking off something already off has nothing left to do, and the
+    // close records no such entry — so neither reads as one this work
+    // let go. Adding and then removing within one piece of work is the
+    // way somebody reaches this, and it is two presses.
+    expect(forgeCatalog.projection.map((r) => r.entryId)).toEqual([]);
+  });
+
+  it("counts a clash against the line, not against the work's own ops", async () => {
+    answering({
+      get_forge_line_states: [entry("key-visual", true)],
+      list_forge_pursuits_of_line: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    // The case that will actually happen: a name defaulted from a
+    // filename meets one the line is already holding. Nothing in the
+    // work says it twice, so counting the work's own ops would be
+    // silent here — and the close would be refused.
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        {
+          entry_id: "fresh",
+          kind: "add",
+          content_asset_id: "a9",
+          name: "key-visual",
+        },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+    expect(forgeCatalog.wouldClash).toEqual(["key-visual"]);
+
+    // And the case the other way: a name written twice by the work but
+    // ending on one entry is not a clash, because the fold keeps the
+    // last operation per entry and axis.
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        { entry_id: "fresh", kind: "add", content_asset_id: "a9", name: "x" },
+        { entry_id: "fresh", kind: "rename", content_asset_id: null, name: "y" },
+        { entry_id: "fresh", kind: "rename", content_asset_id: null, name: "x" },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+    expect(forgeCatalog.wouldClash).toEqual([]);
+  });
+
+  it("lets go of the work when the panel closes", async () => {
+    mutateMock.mockResolvedValue(pursuit("P1"));
+    answering({
+      get_forge_pursuit: pursuit("P1"),
+      list_forge_pursuits_of_line: [pursuit("P1")],
+    });
+    await forgeCatalog.openPursuit("L1", null, null);
+
+    forgeCatalog.closePanel();
+
+    expect(forgeCatalog.working).toBeNull();
+    expect(forgeCatalog.pursuit.data).toBeNull();
+    expect(forgeCatalog.pursuits.data).toEqual([]);
   });
 });

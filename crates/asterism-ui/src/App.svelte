@@ -38,6 +38,7 @@
   import ForgePanel from "./ForgePanel.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
   import TagList from "./TagList.svelte";
+  import { baseName } from "./lib/basename";
   import { perfBaseline } from "./lib/dev/perf-baseline";
   import { recordEvent } from "./lib/telemetry";
   import { activeFilter } from "./lib/stores/filter.svelte";
@@ -4627,17 +4628,6 @@
     }
   }
 
-  /**
-   * Basename (no extension) derived from the source locator — used
-   * as the card's "content name" in clean mode when there is no
-   * cover text.
-   */
-  function baseName(locator: string | null | undefined): string {
-    if (!locator) return "";
-    const last = locator.split("/").pop() ?? locator;
-    const dot = last.lastIndexOf(".");
-    return dot > 0 ? last.slice(0, dot) : last;
-  }
   // Grid card context menu: position + target card. Opened by
   // right-click; closed by Esc / outside click / action pick.
   // W2 regrammar (Finder standard): right-clicking a card that is

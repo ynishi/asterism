@@ -6,9 +6,10 @@
 // selection instead (see App's `onCardClick`).
 //
 // Scope:
-//   - `selectedIds`: SvelteSet of selected asset ids — read by the
-//     grid card templates, the action bar, and the selection
-//     handlers.
+//   - `selectedIds`: SvelteSet of selected asset ids — the persistent
+//     multi-select snapshot. Anything that acts on "what is picked"
+//     reads it, which by now is more than the grid: dispatch, the
+//     snapshot freeze, and the forge's rounds all start here.
 //   - `lastAnchorId`: last card whose id was toggled into the
 //     selection — the Shift-extend anchor. `null` means "no anchor
 //     yet, next Shift-click is treated as a plain toggle".

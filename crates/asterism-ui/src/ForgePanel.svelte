@@ -11,32 +11,45 @@
   // — the arrangement `SharedLinesPanel` has, and the list of reads is
   // the same shape, so a reader who knows one knows this.
   //
-  // A drawer, and wider than that one. The forge answers two questions
-  // about a line at once, and the list of lines has to stay in view
-  // while either is read or selecting becomes a round trip. A
-  // single-column drawer has no room for both.
+  // A drawer, and wider than that one. The forge answers several
+  // questions about a line at once, and the list of lines has to stay
+  // in view while any of them is read or selecting becomes a round
+  // trip. A single-column drawer has no room for both.
   //
-  // Two tabs rather than two panels. Contents and history are answers
+  // Tabs rather than panels. Contents, work and history are answers
   // about one line from one place, and a person moving between them is
   // changing the question rather than the subject — so the line stays
   // named in the header while the body below it swaps.
   //
-  // One write, and it is the one that makes the rest reachable:
-  // opening a line. #170 gives the line verbs to a later child and
-  // does not name this among them — an omission that shows the moment
-  // the panel runs on a machine with no line, which is every machine
-  // until somebody calls the command by hand.
+  // Work among them rather than a surface beside this one, which is
+  // what #170 lists it as. It is a third answer about the same line
+  // rather than a different subject: what the line says, what somebody
+  // is asking it to say, and how it got here. The button in the header
+  // stays, and now goes there.
   //
-  // Everything else reads. `[open a pursuit]` is disabled and says
-  // why: a button that looks live and does nothing is worse than one
-  // that states what it is waiting for.
+  // It sits between the other two, because working a line is the common
+  // path and the chain is the occasional one — the ratio the store's
+  // header argues for, applied to an order it did not have to state
+  // while there were only two.
+  //
+  // The writes here are the ones about a line itself: opening,
+  // renaming, re-pointing, archiving, reopening, discarding. #170 gives
+  // the line verbs to a later child and does not name opening among
+  // them — an omission that shows the moment the panel runs on a
+  // machine with no line, which is every machine until somebody calls
+  // the command by hand.
+  //
+  // Work against a line is `ForgeWork`'s, and only its close touches
+  // the line at all. What this component does for it is the frame: it
+  // says which line, and hands that line down.
+  import ForgeWork from "./ForgeWork.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import type { ForgeChangeRowDto, ForgeLineDto } from "./bindings";
 
-  let tab = $state<"contents" | "history">("contents");
+  let tab = $state<"contents" | "work" | "history">("contents");
   let showOffTheLine = $state(false);
   // One change point open at a time. The chain is read to answer "what
   // happened here", and a screen that let every point stand open would
@@ -55,23 +68,15 @@
   );
 
   async function select(lineId: string) {
-    forgeCatalog.selected = lineId;
     showOffTheLine = false;
     // A point id belongs to the line it is on, so an open one from the
     // previous line matches nothing here — it would just leave the
     // first point of the new chain looking collapsed when the reader
     // had asked for one to be open.
     openPoint = null;
-    // The discard notice answers about a line that is gone. Selecting
-    // another one is a new question, and leaving the old answer above
-    // it reads as though it were about this one.
-    forgeCatalog.released = null;
-    // The chain goes with the line it belongs to. Without this, opening
-    // the history tab after switching lines renders the previous line's
-    // chain under this one's name — the store's header calls that out
-    // for writes, and a selection reaches it the same way.
-    forgeCatalog.history.reset();
-    await forgeCatalog.states.load({ lineId });
+    // Everything the *store* has to let go of on this move is
+    // `selectLine`'s, written once there.
+    await forgeCatalog.selectLine(lineId);
     if (tab === "history") await forgeCatalog.history.load({ lineId });
   }
 
@@ -293,7 +298,7 @@
       <header>
         <h3>{current.name}</h3>
         <span class="quiet">{current.standing}</span>
-        <button type="button" disabled title="Opening work is #170's second child">
+        <button type="button" onclick={() => (tab = "work")}>
           open a pursuit
         </button>
       </header>
@@ -338,6 +343,11 @@
           aria-selected={tab === "contents"}
           onclick={() => (tab = "contents")}
         >on the line</button>
+        <button
+          role="tab"
+          aria-selected={tab === "work"}
+          onclick={() => (tab = "work")}
+        >work</button>
         <button role="tab" aria-selected={tab === "history"} onclick={toHistory}>
           history
         </button>
@@ -404,6 +414,12 @@
             {/if}
           {/if}
         {/if}
+      {:else if tab === "work"}
+        <!-- The line is handed down rather than read from the store
+             again: this component has already decided which line is
+             showing, and a second read of the same selection is a
+             second place for the two to disagree. -->
+        <ForgeWork line={current} />
       {:else if forgeCatalog.history.loading}
         <p class="quiet">Reading…</p>
       {:else if forgeCatalog.history.data === null}

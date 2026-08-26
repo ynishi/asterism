@@ -35,9 +35,9 @@
 //
 // It also means the assets stay put. A discard releases what a line
 // held back to the library; this line holds nothing, so the count it
-// reports is zero and no asset moves. Proving the release count against
-// real content belongs with #170's second child, which is what puts
-// content on a line in the first place.
+// reports is zero and no asset moves. `forge-pursuit.spec.ts` is where
+// that count is checked against real content, because putting content
+// on a line is what a pursuit is for.
 import { browser } from "@wdio/globals";
 
 const DRIVER_MS = 15_000;

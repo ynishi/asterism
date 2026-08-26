@@ -65,9 +65,9 @@
 // which is a question asked after the fact rather than while working.
 //
 // That is an assumption about intended use and not a measurement.
-// Nothing here is instrumented, and no screen has existed to
-// instrument; if it turns out to be wrong the layout below is what has
-// to move, so it is written where somebody would look.
+// Nothing here is instrumented; if it turns out to be wrong the layout
+// below is what has to move, so it is written where somebody would
+// look.
 //
 // It is why `states` and `history` are separate resources rather than
 // one read of `ForgeLineHistoryDto` that a screen picks apart.
@@ -77,7 +77,7 @@
 // draft of this design did, and the reason it was redrawn:
 //
 //   ┌─ lines ──────┐┌─ ROOT ──────────────── open · mainline-first ──┐
-//   │ ▸ ROOT       ││ ● on the line │ history │      [open a pursuit]│
+//   │ ▸ ROOT       ││ ● on the line │ work │ history │[open a pursuit]│
 //   │   drafts     ││ ────────────────────────────────────────────── │
 //   │              ││ key visual                                     │
 //   │  archived    ││ cut 04                                         │
@@ -89,7 +89,7 @@
 // Drawn as a list, rendered as a grid of thumbnails: the drawing is
 // the arrangement, and what a line holds is images.
 //
-// `onTheLine` and `takenOff` are separate deriveds for the same reason
+// `onTheLine` and `offTheLine` are separate deriveds for the same reason
 // the panel draws them apart. Digital-asset tooling states the
 // constraint without solving it: something no longer held has to stay
 // findable for the record and be visually distinct so it is not reused
@@ -99,13 +99,15 @@
 // # Where #170's four surfaces attach
 //
 // A **lines panel** builds the frame above and carries a line's whole
-// lifecycle (#180): the three reads, the two tabs, the button the next
-// child fills, and the verbs that open, rename, re-point, archive,
-// reopen and discard one. #170 put the last of those in a later child
-// and named no verb for the first — a panel over lines nobody can
-// create shows an empty list forever, so both landed together.
+// lifecycle (#180): the reads, the tabs, the button the next child
+// fills, and the verbs that open, rename, re-point, archive, reopen
+// and discard one. #170 put the last of those in a later child and
+// named no verb for the first — a panel over lines nobody can create
+// shows an empty list forever, so both landed together.
 // **Working a line** fills that button: opening a pursuit, pushing a
 // round, closing it, with a grid selection becoming a round's content.
+// It landed as a tab on the frame rather than a surface beside it,
+// which `ForgePanel`'s header argues for where the tabs are.
 // **The line verbs** sit on the header, discard among them — and its
 // response is the only place the assets it released are ever named, so
 // a caller that ignores the body has lost them. **Threads** anchor to
@@ -142,15 +144,30 @@ import { api } from "../api";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
+  ForgeCollisionDto,
   ForgeDiscardedDto,
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  ForgeOpDto,
+  ForgePursuitDto,
+  ForgeResolvedDto,
   ForgeStrategyDto,
 } from "../../bindings";
 
 /// What a read of one line needs to name it.
 type LineArgs = { lineId: string };
+
+/// What a read of one piece of work needs to name it.
+type PursuitArgs = { pursuitId: string };
+
+/// One entry as a satisfied close would leave it.
+export interface ForgeProjectedEntry {
+  entryId: string;
+  name: string | null;
+  assetId: string | null;
+  alive: boolean;
+}
 
 class ForgeCatalog {
   /// Whether the panel is showing.
@@ -170,6 +187,17 @@ class ForgeCatalog {
 
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
+
+  /// The piece of work being read, if one is open.
+  ///
+  /// A second selection under the first, and it narrows rather than
+  /// replaces: work is against a line, so the line stays selected while
+  /// one of its pursuits is open and the panel keeps showing which line
+  /// this is work on. Nothing derives it from `pursuit.data` — that
+  /// resource is empty for the moment between asking and arriving, and
+  /// a screen that read emptiness as "no work open" would flash the
+  /// list of pursuits back over the one being opened.
+  working = $state<string | null>(null);
 
   /// What the last discard released, until something replaces or clears
   /// it.
@@ -221,6 +249,64 @@ class ForgeCatalog {
     "forgeCatalog.history",
   );
 
+  /// Every piece of work against the selected line, open and ended
+  /// alike. Ended work stays in the list because it is the record of
+  /// what was proposed and what became of it — an abandoned pursuit
+  /// puts nothing on the line and is still the answer to why something
+  /// is not there.
+  pursuits = new Resource<LineArgs, ForgePursuitDto[]>(
+    async (args) =>
+      api<ForgePursuitDto[]>("list_forge_pursuits_of_line", {
+        lineId: args.lineId,
+      }),
+    [] as ForgePursuitDto[],
+    "forgeCatalog.pursuits",
+  );
+
+  /// One piece of work, whole — its rounds and how it ended if it has.
+  ///
+  /// One read where the line needs two. `ForgePursuitDto`'s own doc
+  /// says why: a pursuit is an opening, a handful of rounds and at most
+  /// one close, so there is no split to make and no summary shape to
+  /// keep in step with it.
+  pursuit = new Resource<PursuitArgs, ForgePursuitDto | null>(
+    async (args) =>
+      api<ForgePursuitDto>("get_forge_pursuit", { pursuitId: args.pursuitId }),
+    null,
+    "forgeCatalog.pursuit",
+  );
+
+  /// What this work asks for that the line has already moved.
+  ///
+  /// A separate `Resource` from the work rather than a field folded
+  /// into it, because the answer is about the pair and moves when
+  /// either side does — which is also why nothing here has to be
+  /// invalidated by hand. `change.rs` defines the term and says what
+  /// ends one.
+  collisions = new Resource<PursuitArgs, ForgeCollisionDto[]>(
+    async (args) =>
+      api<ForgeCollisionDto[]>("get_forge_pursuit_collisions", {
+        pursuitId: args.pursuitId,
+      }),
+    [] as ForgeCollisionDto[],
+    "forgeCatalog.collisions",
+  );
+
+  /// The landings this work has not seen, oldest first.
+  ///
+  /// Its own `Resource` beside `collisions` rather than a count taken
+  /// off it, because they answer different questions —
+  /// `get_forge_pursuit_behind` says which, and most of what this
+  /// counts touches nothing the work is doing. A screen with only the
+  /// other one cannot explain a close that comes back asking to be
+  /// resolved first.
+  behind = new Resource<PursuitArgs, string[]>(
+    async (args) =>
+      api<string[]>("get_forge_pursuit_behind", { pursuitId: args.pursuitId }),
+    [] as string[],
+    "forgeCatalog.behind",
+  );
+
   /// Opening the panel reads the list and the rules. Nothing reloads on
   /// a timer: the lines a person opened are not something a background
   /// write moves, and a panel that refreshed under a selection would
@@ -254,14 +340,184 @@ class ForgeCatalog {
     await this.lines.load();
   }
 
+  /// Shows a line: what it holds, and the work against it.
+  ///
+  /// Every clear a move off the previous line owes is here rather than
+  /// at each site that moves. A pursuit id belongs to the line it is
+  /// against and a change point to the chain it is on, so none of what
+  /// this store holds about the previous line survives the move — and
+  /// writing that out at each call site is how one of them gets missed,
+  /// which is what happened to `released` before this store's tests
+  /// existed. What the panel holds is the panel's to clear.
+  ///
+  /// The chain is reset rather than read. It answers a question asked
+  /// after the fact, so it loads when somebody asks; what would be
+  /// wrong is leaving the previous line's chain under this line's name.
+  async selectLine(lineId: string): Promise<void> {
+    this.selected = lineId;
+    // The discard notice answers about a line that is gone. Selecting
+    // another one is a new question, and leaving the old answer above
+    // it reads as though it were about this one.
+    this.released = null;
+    this.history.reset();
+    this.clearWork();
+    await Promise.all([
+      this.states.load({ lineId }),
+      this.pursuits.load({ lineId }),
+    ]);
+  }
+
+  /// Everything the work half is showing, cleared as one.
+  ///
+  /// Called wherever the work being shown stops being the work to
+  /// show — a move off the line, a pursuit replacing the last one, a
+  /// person going back to the list. One method rather than a clear
+  /// written at each of them, for the reason `selectLine` gives.
+  clearWork(): void {
+    this.working = null;
+    this.pursuit.reset();
+    this.collisions.reset();
+    this.behind.reset();
+  }
+
+  /// Opens work against a line.
+  ///
+  /// Nothing is read back about what it collides with or how far behind
+  /// it is, and that is not an omission: `open` cuts the work from where
+  /// the line is now, so a pursuit that has just been opened is level
+  /// with the line by construction and both answers are empty. They are
+  /// cleared instead, which is the same answer without the two calls.
+  async openPursuit(
+    lineId: string,
+    title: string | null,
+    note: string | null,
+  ): Promise<void> {
+    const opened = await mutate<ForgePursuitDto>(
+      "open_forge_pursuit",
+      { command: { line_id: lineId, title, note } },
+      "open a pursuit",
+    );
+    this.clearWork();
+    this.working = opened.id;
+    await Promise.all([
+      this.pursuit.load({ pursuitId: opened.id }),
+      this.pursuits.load({ lineId }),
+    ]);
+  }
+
+  /// Shows one piece of work, and what stands between it and the line.
+  async selectPursuit(pursuitId: string): Promise<void> {
+    this.working = pursuitId;
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+      this.behind.load({ pursuitId }),
+    ]);
+  }
+
+  /// Writes a round — what this work asks the line to say.
+  ///
+  /// **Nothing lands here.** `push` does not read the line at all,
+  /// which is what lets work go on while somebody else is finishing
+  /// theirs; what a round asks for reaches the line only when the work
+  /// is closed satisfied.
+  ///
+  /// The write answers with the work whole and this re-reads it anyway.
+  /// The two are the same shape, and taking the read keeps `Resource`'s
+  /// generation guard the only thing that decides what is on screen —
+  /// assigning `data` behind it would let a read already in flight land
+  /// on top of the round that was just written.
+  ///
+  /// Collisions are re-read and `behind` is not. What a round asks for
+  /// is half of what a collision is made of, so writing one can make or
+  /// clear one; how far behind the work is says how many landings it
+  /// has not seen, which nothing this side writes can move.
+  async pushRound(
+    pursuitId: string,
+    ops: ForgeOpDto[],
+    note: string | null,
+  ): Promise<void> {
+    await mutate(
+      "push_forge_round",
+      { pursuitId, command: { pursuit_id: pursuitId, ops, note } },
+      "push a round",
+    );
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+    ]);
+  }
+
+  /// Asks the line's rule to answer whatever this work collides with.
+  ///
+  /// **Returns what the rule did rather than throwing**, because a rule
+  /// that writes nothing has not failed — `react.rs` says so at the
+  /// site, and lists the two ways it happens. A screen reporting either
+  /// as a failure would be telling somebody to retry the one thing that
+  /// cannot help.
+  async resolve(pursuitId: string): Promise<boolean> {
+    const answer = await mutate<ForgeResolvedDto>(
+      "resolve_forge_pursuit",
+      { pursuitId },
+      "let the rule settle this",
+    );
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+    ]);
+    return answer.round !== null;
+  }
+
+  /// Ends the work, and puts what it says on the line if it says
+  /// anything.
+  ///
+  /// The only verb on this side that moves a line, so it is the only
+  /// one that invalidates what the line half is showing: satisfied puts
+  /// every round on the chain as one landing, which moves the contents
+  /// and the history both. Abandoned moves neither and re-reads them
+  /// anyway — the alternative is a branch on an outcome to save one
+  /// read, and it would be wrong the first time a landing arrived from
+  /// somewhere else while this was open.
+  ///
+  /// `behind` is the one read not refreshed. A satisfied close puts a
+  /// landing on the line that the work is then behind — its own — which
+  /// is a true number about a question nobody is asking any more. The
+  /// surface stops offering it for work that has ended rather than
+  /// re-reading to say that.
+  ///
+  /// A refusal from here reaches the caller, and what to do about it
+  /// is not something `mutate` reads. The reason separates retrying
+  /// from asking for something else from neither; `blocked` covers two
+  /// situations that want different actions and only its message says
+  /// which, which `close_forge_pursuit` in `asterism-server`'s `http`
+  /// module spells out.
+  async closePursuit(
+    pursuitId: string,
+    lineId: string,
+    outcome: "satisfied" | "abandoned",
+    note: string | null,
+  ): Promise<void> {
+    await mutate(
+      "close_forge_pursuit",
+      { pursuitId, command: { pursuit_id: pursuitId, outcome, note } },
+      "close this pursuit",
+    );
+    this.history.reset();
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+      this.pursuits.load({ lineId }),
+      this.states.load({ lineId }),
+    ]);
+  }
+
   /// Closing ends the question rather than pausing it.
   ///
-  /// Everything a line's selection produced goes with it: what is on
-  /// it, its chain, and the answer a discard left. Keeping any of that
+  /// Everything a line's selection produced goes with it. Keeping any of that
   /// across a close would mean the next open shows a derivation of a
-  /// chain that may have moved in between — and it will move, because
-  /// #170's second child lands rounds on it. The alternative was to
-  /// re-read on open instead, which is the same work at a worse moment:
+  /// chain that may have moved in between, and a satisfied close is a
+  /// thing anybody can do to it. The alternative was to re-read on
+  /// open instead, which is the same work at a worse moment:
   /// a panel that opens onto a stale answer and corrects itself.
   ///
   /// The team's catalog empties on `disconnect` rather than on close,
@@ -272,6 +528,8 @@ class ForgeCatalog {
     this.selected = null;
     this.states.reset();
     this.history.reset();
+    this.pursuits.reset();
+    this.clearWork();
     this.released = null;
   }
 
@@ -333,6 +591,11 @@ class ForgeCatalog {
       this.selected = null;
       this.states.reset();
       this.history.reset();
+      // Every pursuit against this line went with it. What was on
+      // screen names work that no longer exists, and a read of it now
+      // answers not-found rather than a list.
+      this.pursuits.reset();
+      this.clearWork();
     }
     await this.lines.load();
   }
@@ -362,6 +625,108 @@ class ForgeCatalog {
   /// be made.
   get offTheLine(): ForgeEntryStateDto[] {
     return this.states.data.filter((state) => !state.alive);
+  }
+
+  /// The line as the work being read would leave it: every entry the
+  /// chain has named, with the work's operations applied over it.
+  ///
+  /// A derived over both reads because it is a question about the pair,
+  /// and neither log answers it alone — the line says what it has said,
+  /// the work says what it asks for, and what a close leaves is the
+  /// second applied to the first. It is here rather than on a screen
+  /// because a fold nobody can see is a fold each screen writes again
+  /// slightly differently, and this one has three rules to get wrong.
+  ///
+  /// **The model's rules, applied to a line rather than to the work
+  /// alone.** `op.rs` states the first two: per axis the last operation
+  /// wins, and existence absorbs the content and name it arrives with
+  /// *or stands alone* — an entry on its way off keeps nothing else,
+  /// so a rename earlier in the same work is not what the line ends up
+  /// calling it. `change.rs`'s `normalise` states the third: taking off
+  /// something the line does not hold has nothing left to do, and the
+  /// row goes rather than showing as an entry that was let go.
+  ///
+  /// **Not the model's answer, and it cannot be.** A landing arriving
+  /// meanwhile changes what this is folded onto — most of them touch
+  /// nothing this work asks for and the close lands anyway, and the
+  /// ones that collide are refused. Reading it early is what lets
+  /// somebody fix a name before the close tells them to.
+  get projection(): ForgeProjectedEntry[] {
+    const held = new Map<string, ForgeProjectedEntry>();
+    for (const state of this.states.data) {
+      held.set(state.entry_id, {
+        entryId: state.entry_id,
+        name: state.name,
+        assetId: state.content_asset_id,
+        alive: state.alive,
+      });
+    }
+    const rows = new Map([...held].map(([id, row]) => [id, { ...row }]));
+    for (const round of this.pursuit.data?.rounds ?? []) {
+      for (const op of round.ops) {
+        const row = rows.get(op.entry_id) ?? {
+          entryId: op.entry_id,
+          name: null,
+          assetId: null,
+          alive: false,
+        };
+        if (op.kind === "add") {
+          row.name = op.name;
+          row.assetId = op.content_asset_id;
+          row.alive = true;
+          rows.set(op.entry_id, row);
+        } else if (op.kind === "replace") {
+          row.assetId = op.content_asset_id;
+          rows.set(op.entry_id, row);
+        } else if (op.kind === "rename") {
+          row.name = op.name;
+          rows.set(op.entry_id, row);
+        } else if (op.kind === "remove") {
+          // Existence standing alone: what the line ends up saying is
+          // what it said before, minus the entry. An entry it was not
+          // holding is not something a removal can take off, so the row
+          // goes entirely rather than reading as one this work let go.
+          const before = held.get(op.entry_id);
+          if (before === undefined || !before.alive) rows.delete(op.entry_id);
+          else rows.set(op.entry_id, { ...before, alive: false });
+        }
+      }
+    }
+    return [...rows.values()];
+  }
+
+  /// Names that would be on the line twice if this work landed.
+  ///
+  /// A line holds one live entry per name and `History::record` refuses
+  /// the landing that would break it. Read from the fold above rather
+  /// than from the names the work happens to have typed: the case that
+  /// matters most is an added name meeting one the line already holds,
+  /// and counting only what the work asked for stays silent on exactly
+  /// that. Names default from filenames, and filenames repeat.
+  get wouldClash(): string[] {
+    const seen = new Map<string, number>();
+    for (const row of this.projection) {
+      if (!row.alive || row.name === null) continue;
+      seen.set(row.name, (seen.get(row.name) ?? 0) + 1);
+    }
+    return [...seen.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([name]) => name);
+  }
+
+  /// Work nobody has ended. The only work a round can be written to.
+  get openWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((work) => work.close === null);
+  }
+
+  /// Work that ended, satisfied or abandoned.
+  ///
+  /// Kept apart from the open work rather than flagged among it, for
+  /// the reason `offTheLine` is: a list that reads as things you can
+  /// still push to, half of which refuse every write with "settled", is
+  /// a list that has to be tried to be understood.
+  get endedWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((work) => work.close !== null);
   }
 }
 
