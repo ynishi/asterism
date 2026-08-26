@@ -45,9 +45,18 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-/** A name nothing else in the fixture answers to. */
-const LINE_NAME = "e2e-forge-line";
-const RENAMED = "e2e-forge-line renamed";
+/// A name nothing else in the fixture answers to, and unique because `clickLineNamed` clicks the first button
+/// reading it and `Name` carries no claim of uniqueness — the model
+/// says so. A fixed name meant this spec selected, renamed, archived
+/// and discarded whichever line happened to be first, which stopped
+/// being its own the moment a run left one behind. The fixture held
+/// five, all called `e2e-forge-line`, put there by the rename this
+/// spec was not performing (see "answer the prompt"). With a name
+/// nothing else answers to, the discard at the end takes what this run
+/// made and the pile stops growing.
+const RUN = Date.now();
+const LINE_NAME = `e2e-forge-line-${RUN}`;
+const RENAMED = `e2e-forge-line-${RUN} renamed`;
 
 const FORGE_ROW = 'aside.sidebar button[title^="Lines on this machine"]';
 const DRAWER = '[role="dialog"][aria-label="Forge"]';
