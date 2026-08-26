@@ -12,6 +12,18 @@
 //! — a number describing a list belongs in the file holding the list, or
 //! nowhere.
 //!
+//! # Read as syntax, not as text
+//!
+//! Both sides are parsed with `syn` and walked, which is how
+//! `asterism-core`'s `forge_boundary` reads the forge's imports. A
+//! string scan was the first attempt here and it is the wrong tool for
+//! this question, in the direction that costs: a `get(` inside a block
+//! comment or a path literal is a route that does not exist, and a call
+//! rustfmt wrapped across lines is a route that does and cannot be
+//! seen. `forge_boundary`'s own doc says why that asymmetry decides it
+//! — "an import written without one is invisible to a grep, which is
+//! exactly the case that matters".
+//!
 //! # Which direction this covers, and which it does not
 //!
 //! It reads a file from each crate, so it cannot sit in "the crate that
@@ -33,6 +45,8 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use syn::visit::Visit;
 
 /// Routed handlers with no Tauri command of the same name, each with the
 /// reason it is not one.
@@ -193,13 +207,10 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
-/// Source lines with `//` comments dropped, so a name inside prose is
-/// not mistaken for a declaration. The same filter `mutation_surface.rs`
-/// applies, and for the same reason.
-fn code_lines(text: &str) -> Vec<&str> {
-    text.lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect()
+/// Parses a source file, naming it when it will not parse.
+fn parsed(path: &Path) -> syn::File {
+    let text = read(path);
+    syn::parse_file(&text).unwrap_or_else(|err| panic!("{} does not parse: {err}", path.display()))
 }
 
 /// Every `#[tauri::command]` function name in the desktop's command
@@ -213,134 +224,158 @@ fn code_lines(text: &str) -> Vec<&str> {
 /// not.
 fn tauri_commands(root: &Path) -> BTreeSet<String> {
     let path = root.join("crates/asterism-ui/src-tauri/src/commands.rs");
-    let text = read(&path);
-    let lines = code_lines(&text);
-
-    let mut names = BTreeSet::new();
-    for (index, line) in lines.iter().enumerate() {
-        if line.trim() != "#[tauri::command]" {
-            continue;
-        }
-        // The attribute sits directly above the signature, but a
-        // `#[allow(...)]` or a second attribute can come between.
-        let name = lines[index + 1..]
-            .iter()
-            .take(5)
-            .find_map(|candidate| fn_name(candidate))
-            .unwrap_or_else(|| {
-                panic!(
-                    "`#[tauri::command]` on line {} names no function",
-                    index + 1
-                )
-            });
-        names.insert(name);
-    }
+    let mut found = Commands(BTreeSet::new());
+    found.visit_file(&parsed(&path));
     assert!(
-        !names.is_empty(),
+        !found.0.is_empty(),
         "no `#[tauri::command]` found in {} — the scan is not reading the \
          command module",
         path.display()
     );
-    names
+    found.0
 }
 
-/// The function name declared by a signature line, if it declares one.
-fn fn_name(line: &str) -> Option<String> {
-    let rest = line.trim().strip_prefix("pub ").unwrap_or(line.trim());
-    let rest = rest.strip_prefix("async ").unwrap_or(rest);
-    let rest = rest.strip_prefix("fn ")?;
-    let name: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    (!name.is_empty()).then_some(name)
+/// Collects the name of every function carrying `#[tauri::command]`.
+struct Commands(BTreeSet<String>);
+
+impl<'ast> Visit<'ast> for Commands {
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if item.attrs.iter().any(is_tauri_command) {
+            self.0.insert(item.sig.ident.to_string());
+        }
+        syn::visit::visit_item_fn(self, item);
+    }
 }
 
-/// Every handler named by a method call inside `http::router`.
+/// Is this the attribute that makes a function reachable from the
+/// window? Matched on the last path segment, so `#[tauri::command]` and
+/// a `#[command]` reached through a `use` both answer yes.
+fn is_tauri_command(attr: &syn::Attribute) -> bool {
+    attr.path()
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "command")
+}
+
+/// Every handler named by a method router inside `http::router`.
 ///
-/// Method-scoped rather than "every identifier in a call": the router
-/// body calls things that route nothing, and only a method router names
-/// a handler.
+/// Method-scoped rather than "every call in the body": the router also
+/// calls `nest_service` and `with_state`, which route nothing and name
+/// no handler.
 ///
-/// **A `method(` this cannot resolve panics rather than being skipped.**
-/// The command side already fails that way, and a scan that quietly
-/// drops what it does not recognise is fail-open in the one direction
-/// #136 says the drift comes from — an unread route is a route with no
-/// command, and both tests would pass over it. The forms it resolves
-/// are what the tree writes today; the next one that is not is a
-/// failure asking to be taught, not a silent gap.
+/// **An argument this cannot resolve panics rather than being skipped.**
+/// A route the scan does not see is a route with no command, and both
+/// pairings below would pass over it — fail-open in the one direction
+/// #136 says the drift comes from. The forms resolved are what the tree
+/// writes; the next one that is not is a failure asking to be taught.
 fn routed_handlers(root: &Path) -> BTreeSet<String> {
     let path = root.join("crates/asterism-server/src/http.rs");
-    let text = read(&path);
-    let lines = code_lines(&text);
-
-    let start = lines
+    let file = parsed(&path);
+    let router = file
+        .items
         .iter()
-        .position(|line| line.starts_with("pub fn router("))
-        .expect("http.rs declares `pub fn router(`");
-    // The router is one expression ending at the first column-zero
-    // brace after it.
-    let end = lines[start + 1..]
-        .iter()
-        .position(|line| *line == "}")
-        .map(|offset| start + 1 + offset)
-        .expect("`router` has a closing brace at column zero");
-    // Joined, so a call rustfmt wrapped across lines still reads as one
-    // call — the width at which it wraps is not something this should
-    // depend on.
-    let body = lines[start..end].join(" ");
+        .find_map(|item| match item {
+            syn::Item::Fn(item) if item.sig.ident == "router" => Some(item),
+            _ => None,
+        })
+        .expect("http.rs declares `fn router`");
 
-    let mut names = BTreeSet::new();
-    for method in ["get(", "post(", "put(", "patch(", "delete("] {
-        let mut rest = body.as_str();
-        while let Some(at) = rest.find(method) {
-            // `.get(` and `get(` both reach here; `forget(` must not.
-            let preceded_by_ident = rest[..at]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            rest = &rest[at + method.len()..];
-            if preceded_by_ident {
-                continue;
-            }
-            let arg = rest.trim_start();
-            // A closure routes a body written in place and names no
-            // handler to pair.
-            if arg.starts_with('|') {
-                continue;
-            }
-            let name = handler_name(arg).unwrap_or_else(|| {
-                panic!(
-                    "a `{method}` in {}'s router names something this scan \
-                     cannot read as a handler: `{}`. Teach it that form — \
-                     skipping it would hide a route from the pairing below",
-                    path.display(),
-                    arg.chars().take(40).collect::<String>()
-                )
-            });
-            names.insert(name);
-        }
-    }
+    let mut found = Handlers {
+        names: BTreeSet::new(),
+        path: path.clone(),
+    };
+    found.visit_block(&router.block);
     assert!(
-        !names.is_empty(),
+        !found.names.is_empty(),
         "no routed handler found in {} — the scan is not reading the router",
         path.display()
     );
-    names
+    found.names
 }
 
-/// The handler a method router's argument names, if it names one.
-///
-/// Takes the last segment of a path, so `handlers::foo` and a turbofish
-/// both answer `foo` — the pairing is by name, and a route reached
-/// through a module is the same verb as one written bare.
-fn handler_name(arg: &str) -> Option<String> {
-    let path: String = arg
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
-        .collect();
-    let last = path.rsplit("::").find(|segment| !segment.is_empty())?;
-    Some(last.to_string())
+/// The method routers a handler can be named by. `axum::routing` has
+/// more; these are what this router uses, and one it starts using
+/// reaches the panic below rather than going unread.
+const METHOD_ROUTERS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options"];
+
+/// Collects the handler named by each method router in a router body.
+struct Handlers {
+    names: BTreeSet<String>,
+    path: PathBuf,
+}
+
+impl<'ast> Visit<'ast> for Handlers {
+    /// A method router written as a free function: `get(handler)`.
+    fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(func) = &*call.func
+            && let Some(named) = func.path.segments.last()
+            && is_method_router(&named.ident)
+        {
+            self.take(&named.ident, call.args.first());
+        }
+        syn::visit::visit_expr_call(self, call);
+    }
+
+    /// The same router reached as a method on one already built:
+    /// `get(read).post(write)`. Both forms are `axum::routing`, and the
+    /// second is how every route carrying two verbs is written here —
+    /// missing it drops the *second* handler of a pair while the first
+    /// still pairs, which reads as a deliberate one-sided route rather
+    /// than as a scan that stopped early.
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if is_method_router(&call.method) {
+            self.take(&call.method, call.args.first());
+        }
+        syn::visit::visit_expr_method_call(self, call);
+    }
+}
+
+/// Is this identifier one of `axum::routing`'s method routers?
+fn is_method_router(ident: &syn::Ident) -> bool {
+    METHOD_ROUTERS.iter().any(|name| ident == name)
+}
+
+impl Handlers {
+    /// Records the handler a method router names, or refuses the whole
+    /// run when it names something this cannot read.
+    fn take(&mut self, method: &syn::Ident, arg: Option<&syn::Expr>) {
+        match arg {
+            // A closure routes a body written in place and names no
+            // handler to pair.
+            Some(syn::Expr::Closure(_)) => {}
+            Some(syn::Expr::Path(handler)) => {
+                let named = handler
+                    .path
+                    .segments
+                    .last()
+                    .expect("a path has at least one segment");
+                self.names.insert(named.ident.to_string());
+            }
+            other => panic!(
+                "a `{}` in {}'s router names something this scan cannot \
+                 read as a handler: {}. Teach it that form — skipping it \
+                 would hide a route from the pairing below",
+                method,
+                self.path.display(),
+                match other {
+                    Some(expr) => quote_shape(expr),
+                    None => "no argument at all",
+                }
+            ),
+        }
+    }
+}
+
+/// Names the shape of an expression for a panic message, since `syn`
+/// carries no source text to quote back.
+fn quote_shape(expr: &syn::Expr) -> &'static str {
+    match expr {
+        syn::Expr::Call(_) => "a nested call",
+        syn::Expr::MethodCall(_) => "a method call",
+        syn::Expr::Macro(_) => "a macro invocation",
+        syn::Expr::Reference(_) => "a reference",
+        _ => "an expression of a kind this scan has not met",
+    }
 }
 
 /// Renders a difference as sorted lines, for a message a reader can act
@@ -417,37 +452,6 @@ fn every_command_has_a_route_or_a_recorded_reason() {
          unpaired:{}\n\nEither the route arrived and the entry should go, \
          or the command did — remove them in the change that paired them.",
         listed(&stale)
-    );
-}
-
-/// Pins the argument forms the router scan resolves, and the one it
-/// refuses.
-///
-/// These are what `routed_handlers` panics or does not panic on, and
-/// the panic is the point: a form this cannot read has to stop the
-/// suite rather than drop a route out of the pairing. The bare name is
-/// what the tree writes today; the other two are here so that adopting
-/// either is not also a silent change in what gets checked.
-#[test]
-fn a_handler_is_named_by_the_last_segment_of_its_path() {
-    assert_eq!(
-        handler_name("list_forge_lines)").as_deref(),
-        Some("list_forge_lines")
-    );
-    assert_eq!(
-        handler_name("handlers::list_forge_lines)").as_deref(),
-        Some("list_forge_lines"),
-        "a route reached through a module is the same verb as a bare one"
-    );
-    assert_eq!(
-        handler_name("list_forge_lines::<Body>)").as_deref(),
-        Some("list_forge_lines"),
-        "a turbofish names the same handler"
-    );
-    assert_eq!(
-        handler_name("(something_nested())"),
-        None,
-        "what this cannot read must reach the panic rather than be skipped"
     );
 }
 
