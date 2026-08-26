@@ -22,19 +22,18 @@ workspace
 # `**/.claude/*` is the same reach for the directory itself: local settings,
 # local memory, plugin caches, session state, in a nested .claude/ as well as
 # the root one. It is `/*` rather than the bare directory because git cannot
-# re-include a file whose parent directory is excluded, and the negation has to
-# come last — git takes the last matching pattern, so a `CLAUDE*.md` written
-# below it would ignore the tracked symlink instead.
+# re-include a file whose parent directory is excluded.
 #
-# The negation is the declaration, and that is the half worth keeping in mind.
-# A tracked file that this list refuses reads exactly like somebody's
-# `git add -f` past it, and nothing in the result says which it was;
-# `!.claude/CLAUDE.md` is this repository saying that path is tracked on
-# purpose. It carries weight as well as intent: while the path is in the index
-# git consults the index rather than this file, so the file survives either way
-# — but the first add is refused without the negation, and so is a re-add after
-# `git rm --cached`, or after a Windows checkout writes the link out as a
-# regular file and somebody restores it.
+# The negation below is the declaration, and it goes last. A tracked file that
+# this list refuses reads exactly like somebody's `git add -f` past it, and
+# nothing in the result says which it was; `!.claude/CLAUDE.md` is this
+# repository saying that path is tracked on purpose. It carries weight as well
+# as intent: while the path is in the index git consults the index rather than
+# this file, so the file survives either way — but the first add is refused
+# without the negation, and so is a re-add after `git rm --cached`, or after a
+# Windows checkout writes the link out as a regular file and somebody restores
+# it. Last, because git takes the last matching pattern: a `CLAUDE*.md` written
+# below it would ignore the symlink instead.
 #
 # Everything a plugin can carry — agents, skills, commands, hooks — is installed
 # from the marketplace declared in .claude-plugin/marketplace.json, whose plugin

@@ -27,8 +27,7 @@ symlink; `.gitignore` refuses the rest, and what that symlink points at is
 - `.gitignore`, wherever the change touches the block that decides what may be
   tracked under `.claude/` or as a `CLAUDE*.md` — the patterns, the negation, or
   a line added among them. Widening what may be tracked there is the whole risk
-  in one line, and the block gains lines, so read the stanza rather than
-  matching an enumeration.
+  in one line, so read the stanza rather than matching an enumeration.
 - `.claude/CLAUDE.md` itself — its target, or its type. A symlink replaced by a
   regular file is a local file entering the tree under a tracked name.
 - `AGENTS.md`, on any edit at all. It is the file the symlink resolves to, it
