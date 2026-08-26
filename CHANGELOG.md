@@ -10,6 +10,38 @@ and this project adheres to
 
 ### Added
 
+- **The forge's catalog, and the design its four screens share** (#177). #170
+  lists four surfaces and says what each one lands; what it did not say is what
+  any of them looks like, and the first one cannot be opened without deciding
+  that — a lines panel is the frame the other three attach to, so its layout
+  fixes where a pursuit is opened from, where the line verbs sit, and whether a
+  thread has somewhere to hang. Deciding that from inside whichever piece is
+  built first is how a frame ends up shaped by that piece.
+
+  The design is the catalog's own doc rather than a document beside it. A
+  separate design file is a second place the truth lives, updated only when
+  whoever implements something remembers it exists; CONTRIBUTING says the same
+  as a rule. So `lib/stores/forge.svelte.ts` carries the reasoning and makes the
+  three reads, and `ForgePanel.svelte` is the frame — contents first with the
+  history behind a tab, because working a line is the common path and reading
+  the chain answers how it arrived, which is asked after the fact. A layout
+  leading with the chain makes the common verb something reached through a log.
+  That ordering is an assumption about intended use rather than a measurement,
+  and the doc says so where somebody would look for it.
+
+  Two shapes follow from the model rather than from taste. The chain does not
+  fork — `History::record` refuses a change point whose parent is not the head —
+  so there is no branch graph, which is the pattern most version-history UIs are
+  built around. And nothing is ever removed: `states` answers with entries that
+  are off the line as well as on it, so what a line let go is part of the
+  record. Those sit in their own section, collapsed, drawn so they cannot be
+  read as contents — findable, which is what a record is for, and distinct,
+  which is what stops one being reused as though it were still held.
+
+  Nothing here writes, and the panel is not mounted: where the forge sits in the
+  app is one of the two questions the design leaves open, and mounting it would
+  answer that by implementation rather than by decision.
+
 - **The TypeScript bindings are a projection of the contract, and a check says
   so** (#175). `bindings.ts` used to hold whatever a screen had asked for:
   `build.rs` said a type entered its list "in the change that consumes it",
