@@ -10,6 +10,34 @@ and this project adheres to
 
 ### Added
 
+- **The TypeScript bindings are a projection of the contract, and a check says
+  so** (#175). `bindings.ts` used to hold whatever a screen had asked for:
+  `build.rs` said a type entered its list "in the change that consumes it",
+  because "exporting a shape before the screen that shapes it is how a binding
+  drifts from what the screen actually needs". That ground does not hold —
+  `schema-bridge` generates the file, no line of it is hand-written, and a
+  projection has nothing to drift from. What the rule produced was a binding
+  layer waiting on the UI: a verb reachable over HTTP and over IPC could not be
+  named in TypeScript until somebody edited a build script.
+
+  The rule is withdrawn and forty-five types now reach TypeScript — the forge
+  whole (pursuits, rounds, threads, collisions, every command), tag
+  administration, series strategies, snapshots and bulk group membership, the
+  observation stream, and the sort vocabulary. `tests/export_parity.rs` reads
+  the contract for `SchemaBridge` derives and `build.rs` for its export list,
+  and fails on a type in the first and not the second unless it is on an
+  allow-list carrying a reason. Seven entries are there. Six are a diagnostics,
+  job-log or perf read that no Tauri command serves, so no TypeScript caller has
+  a path to one. The seventh is `DiagLevel`, on a different ground: the write
+  side does not take it either, because `RecordDiagCommand::level` is a `String`
+  on purpose — "so the bindings stay flat; an unknown value is a validation
+  error, not a guessed level".
+
+  The count `build.rs` used to state is gone from it — it said "three deliberate
+  omissions" while fifty-two types stayed out, twenty-one of them named nowhere
+  at all, which is what a number describing a list does in a file that does not
+  hold the list. Nothing had ever compared the two; the same paragraph said so.
+
 - **A model section in Settings: the encoder stated, the head managed** (#130).
   The encoder is app infrastructure — bundled, nothing to choose — so the
   section states it and no more: id, dimensions, preprocessing revision, or the
