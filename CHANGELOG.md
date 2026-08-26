@@ -476,6 +476,12 @@ and this project adheres to
   and a branch rule does not — `gh release`, `gh repo edit`, `gh repo delete` —
   is worth keeping in yours.
 
+  CI's ignore list moved with the file. `AGENTS.md` is prose no step reads, and
+  leaving it off both copies meant a one-line edit to it bought the workspace
+  suite, a clippy pass over every crate and a rustdoc pass over all of them —
+  the cost that list exists to refuse. `.claude/**` stays beside it, matching
+  the symlink and any `CLAUDE.md` a checkout writes there itself.
+
   A clone on Windows without Developer Mode writes the symlink out as a text
   file holding its target path. `CONTRIBUTING.md` says to leave that file alone,
   since editing it dirties a tracked path, and to put a `CLAUDE.md` holding
