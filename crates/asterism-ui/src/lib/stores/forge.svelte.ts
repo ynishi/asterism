@@ -86,8 +86,15 @@
 //   │              ││                         3 off the line  ▸      │
 //   └──────────────┘└────────────────────────────────────────────────┘
 //
-// Drawn as a list, rendered as a grid of thumbnails: the drawing is
-// the arrangement, and what a line holds is images.
+// Drawn as a list, rendered as a grid of tiles: the drawing is the
+// arrangement, and looking at what is on a line is the reason to open
+// this.
+//
+// A tile is a thumbnail where there is one to show. Most of what a
+// line holds is images and it is worth optimising for that, but *only*
+// images was an assumption this catalog made and the model does not —
+// a line refers to assets, and an asset is as likely to be a recording
+// or a conversation. `cards` is what a tile falls back to.
 //
 // `onTheLine` and `offTheLine` are separate deriveds for the same reason
 // the panel draws them apart. Digital-asset tooling states the
@@ -141,6 +148,7 @@ import { api } from "../api";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
+  AssetCardDto,
   ForgeCollisionDto,
   ForgeDiscardedDto,
   ForgeEntryStateDto,
@@ -336,6 +344,44 @@ class ForgeCatalog {
     [] as string[],
     "forgeCatalog.behind",
   );
+
+  /// What the library knows about the assets on screen, by asset id.
+  ///
+  /// **A line does not hold images.** It holds assets, and the first
+  /// card in this repository's own fixture is a video — so a panel that
+  /// draws every entry as a thumbnail draws an empty box for anything
+  /// that has none, forever: `thumbById` answers with a transparent
+  /// pixel while a thumb is being made *and* when there is never going
+  /// to be one, and those are the same grey square on screen. An e2e
+  /// waited twenty seconds at one before this existed.
+  ///
+  /// `media` is what settles it, and it is projected onto the card
+  /// precisely so a UI stops deriving it from a mime type. The forge
+  /// asks the same question the grid asks, through the same command.
+  ///
+  /// Kept as a plain map rather than a `Resource` because it is
+  /// cumulative and keyed: entries arrive as rounds are pushed, and
+  /// what has already been read stays read.
+  cards = $state<Record<string, AssetCardDto>>({});
+
+  /// Reads what it does not have yet. Safe to call on every render
+  /// pass: it fetches only the ids it is missing, and answers nothing
+  /// when it is missing none.
+  async ensureCards(ids: (string | null)[]): Promise<void> {
+    const wanted = [...new Set(ids.filter((id): id is string => id !== null))];
+    const missing = wanted.filter((id) => this.cards[id] === undefined);
+    if (missing.length === 0) return;
+    // Ids the library will not answer for drop out of the response, so
+    // a card that never arrives stays missing and the screen falls back
+    // to what it can say without one.
+    const got = await api<AssetCardDto[]>("hydrate_cards", {
+      ids: missing,
+      viewerSubject: null,
+    });
+    const next = { ...this.cards };
+    for (const card of got) next[card.id] = card;
+    this.cards = next;
+  }
 
   /// What is being talked about, if anything is.
   ///

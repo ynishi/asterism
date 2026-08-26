@@ -280,6 +280,22 @@
     return new Date(ms).toLocaleString();
   }
 
+  // The cards behind the rows. `ForgePanel` reads them for what is on
+  // the line; a round can name an asset the line has never held, so the
+  // projection asks for its own.
+  $effect(() => {
+    void forgeCatalog.ensureCards(projected.map((row) => row.assetId));
+  });
+
+  /// What a row says when there is no thumbnail coming — the card's own
+  /// `media`, empty for an image or for a card that never arrived.
+  function kindOf(assetId: string | null): string {
+    if (assetId === null) return "";
+    const card = forgeCatalog.cards[assetId];
+    if (card === undefined) return "";
+    return card.media === "image" ? "" : card.media;
+  }
+
   /** What to call an entry an operation names. The op's own name when
    *  it carries one, and otherwise whatever the fold has for it — which
    *  may be a name another round of this work asked for rather than one
@@ -439,14 +455,18 @@
     <ul class="projected">
       {#each projected as row (row.entryId)}
         <li class:gone={!row.alive}>
-          {#if row.assetId !== null}
+          <!-- A thumbnail where there is one, and what the thing is
+               where there is not. `ForgePanel`'s tile says why. -->
+          {#if row.assetId === null}
+            <span class="no-content" aria-hidden="true">—</span>
+          {:else if kindOf(row.assetId) !== ""}
+            <span class="no-content kind">{kindOf(row.assetId)}</span>
+          {:else}
             <img
               src={thumbCatalog.thumbById(row.assetId)}
               alt={row.name ?? "an entry with no name"}
               loading="lazy"
             />
-          {:else}
-            <span class="no-content" aria-hidden="true">—</span>
           {/if}
           <span class="op-name">{row.name ?? "(unnamed)"}</span>
           <span class="row-verbs">
@@ -716,6 +736,12 @@
     place-items: center;
     border: 1px dashed rgba(128, 128, 128, 0.5);
     opacity: 0.6;
+  }
+  /* Solid rather than dashed, for the reason `ForgePanel` gives. */
+  .no-content.kind {
+    border-style: solid;
+    font-size: 0.6rem;
+    opacity: 0.8;
   }
   .row-verbs {
     display: flex;

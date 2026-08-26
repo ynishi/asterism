@@ -159,6 +159,28 @@
     return new Date(ms).toLocaleString();
   }
 
+  // What the library knows about what is on the line, read when the
+  // list of ids changes rather than at each site that loads states.
+  // A line's contents move under three different verbs, and an effect
+  // over what is rendered answers for all of them.
+  $effect(() => {
+    void forgeCatalog.ensureCards(
+      forgeCatalog.states.data.map((state) => state.content_asset_id),
+    );
+  });
+
+  // What a tile says when there is no thumbnail coming.
+  //
+  // `media` is the card's own answer and the grid reads the same field.
+  // An entry whose card never arrived says nothing rather than guessing
+  // — the id is not a fact about the thing.
+  function kindOf(assetId: string | null): string {
+    if (assetId === null) return "";
+    const card = forgeCatalog.cards[assetId];
+    if (card === undefined) return "";
+    return card.media === "image" ? "" : card.media;
+  }
+
   // What a row moved, phrased from the axes it states.
   //
   // The model stores three optional axes rather than a verb, and the
@@ -182,6 +204,31 @@
     return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
   }
 </script>
+
+<!-- One tile, two lists. What is on the line and what it let go are
+     drawn apart and drawn the same way, so the difference a reader sees
+     is the dimming rather than two renderings that drifted.
+
+     A thumbnail where there is one to show, and what the thing *is*
+     where there is not: a line holds assets rather than pictures, and
+     an entry carrying a recording used to be an empty grey box that
+     never filled — indistinguishable from one still loading, because
+     `thumbById` answers both with the same transparent pixel. -->
+{#snippet tile(assetId: string | null, name: string | null)}
+  {#if assetId === null}
+    <!-- An entry can carry a name and no content: a table may name one
+         before anything fills it. -->
+    <span class="no-content" aria-hidden="true">—</span>
+  {:else if kindOf(assetId) !== ""}
+    <span class="no-content kind">{kindOf(assetId)}</span>
+  {:else}
+    <img
+      src={thumbCatalog.thumbById(assetId)}
+      alt={name ?? "an entry with no name"}
+      loading="lazy"
+    />
+  {/if}
+{/snippet}
 
 {#if forgeCatalog.open}
   <!-- Backdrop absorbs outside-click and Escape; the drawer stops
@@ -378,17 +425,7 @@
           <ul class="entries">
             {#each forgeCatalog.onTheLine as entry (entry.entry_id)}
               <li>
-                {#if entry.content_asset_id !== null}
-                  <img
-                    src={thumbCatalog.thumbById(entry.content_asset_id)}
-                    alt={entry.name ?? "an entry with no name"}
-                    loading="lazy"
-                  />
-                {:else}
-                  <!-- An entry can carry a name and no content: a table
-                       may name one before anything fills it. -->
-                  <span class="no-content" aria-hidden="true">—</span>
-                {/if}
+                {@render tile(entry.content_asset_id, entry.name)}
                 <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
               </li>
             {/each}
@@ -412,15 +449,7 @@
               <ul class="entries gone">
                 {#each forgeCatalog.offTheLine as entry (entry.entry_id)}
                   <li>
-                    {#if entry.content_asset_id !== null}
-                      <img
-                        src={thumbCatalog.thumbById(entry.content_asset_id)}
-                        alt={entry.name ?? "an entry with no name"}
-                        loading="lazy"
-                      />
-                    {:else}
-                      <span class="no-content" aria-hidden="true">—</span>
-                    {/if}
+                    {@render tile(entry.content_asset_id, entry.name)}
                     <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
                   </li>
                 {/each}
@@ -643,6 +672,13 @@
     border: 1px dashed rgba(128, 128, 128, 0.5);
     border-radius: 0.2rem;
     opacity: 0.6;
+  }
+  /* Solid rather than dashed: this entry holds something, and the
+     dashes next door mean it does not. */
+  .no-content.kind {
+    border-style: solid;
+    font-size: 0.72rem;
+    opacity: 0.8;
   }
   .entry-name {
     font-size: 0.72rem;

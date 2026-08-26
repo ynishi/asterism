@@ -709,6 +709,45 @@ describe("a pursuit against a line", () => {
       async () => (await readDrawer()).onTheLine === "1 on the line",
       "the satisfied close did not put the round's entry on the line",
     );
+
+    // And the entry can be *seen*, which is a different question from
+    // whether it is listed.
+    //
+    // A tile passes by showing a thumbnail or by saying what the thing
+    // is. What it may not do is stay an empty box, which is what it did
+    // for twenty seconds when this check was first written: the fixture
+    // asset this run picks is a recording, `thumbById` answers a miss
+    // with a transparent pixel, and "no picture yet" and "no picture
+    // ever" were the same grey square.
+    let tile = "";
+    await pollUntil(
+      trail,
+      "the entry has something to look at",
+      ROUND_TRIP_MS,
+      async () => {
+        tile = await browser.execute(() => {
+          const cell = document.querySelector(
+            '[role="dialog"][aria-label="Forge"] .entries li > :first-child',
+          );
+          if (cell === null) return "(no tile)";
+          if (cell.tagName === "IMG") {
+            return `img:${(cell as HTMLImageElement).src.slice(0, 11)}`;
+          }
+          // By class rather than by className: Svelte appends a
+          // per-component scoping class, so the attribute is never the
+          // string the markup wrote.
+          const said = cell.textContent?.trim() ?? "";
+          return `${cell.classList.contains("kind") ? "kind" : "blank"}:${said}`;
+        });
+        return (
+          tile.startsWith("img:blob:") ||
+          tile.startsWith("img:asset:") ||
+          /^kind:\S/.test(tile)
+        );
+      },
+      () =>
+        `the entry on the line is an empty box: the tile is ${JSON.stringify(tile)}`,
+    );
     await shot("landed-on-the-line");
 
     // Clean up through the panel, which is also the assertion the line
