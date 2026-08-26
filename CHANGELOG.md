@@ -465,12 +465,13 @@ and this project adheres to
 
   What `.claude/` keeps is what every contributor shares and nothing a plugin
   can carry — `CLAUDE.md`, which points at the documents here, and
-  `settings.json`, which denies push and PR outright. `agents/`, `skills/`,
-  `commands/` and `hooks/` are ignored there, so a local edit to one is not this
-  repository's to review. The prose that told agents to run `.claude/agents/`
-  moved with them, in `CLAUDE.md`, `CONTRIBUTING.md` and `README.md`: a machine
-  now has all three reviews or none, and when it has none the answer is to say
-  the change was not reviewed rather than to review it in their place.
+  `settings.json`, which denies push and PR outright. Everything a plugin can
+  carry is ignored there — `.gitignore` holds the list — so a local edit to one
+  is not this repository's to review. The prose that told agents to run
+  `.claude/agents/` moved with them, in `CLAUDE.md`, `CONTRIBUTING.md` and
+  `README.md`: a machine now has all three reviews or none, and when it has none
+  the answer is to say the change was not reviewed rather than to review it in
+  their place.
 
   `CLAUDE.md` is shorter for a second reason. Three of its bullets had grown
   into second copies of the documents it points at — which gates to run locally,
@@ -479,12 +480,14 @@ and this project adheres to
   a reader cannot get from them.
 
   `pub-checker` gained the one question about a diff that is not about its
-  contents: a change under `.claude/` edits the instructions every later agent
-  loads, so the report opens with `HUMAN REVIEW REQUIRED — .claude/ change`,
-  says what each edit does to those instructions, and asks a human to confirm in
-  their own words that they asked for it. Being small, obviously correct, or a
-  revert does not exempt it, and neither an earlier turn nor the handed-over
-  task counts as the answer — those are what a wrong edit there would come from.
+  contents: a change to a file an agent loads as instructions — under `.claude/`
+  or in a plugin's own `agents/`, `skills/`, `commands/` or `hooks/` — decides
+  what every later agent is told, so the report opens with
+  `HUMAN REVIEW REQUIRED — agent instructions changed`, says what each edit does
+  to those instructions, and asks a human to confirm in their own words that
+  they asked for it. Being small, obviously correct, or a revert does not exempt
+  it, and neither an earlier turn nor the handed-over task counts as the answer
+  — those are what a wrong edit there would come from.
 
   The last of it is where the reviews stop. `reviewer` said there is no round 3
   and then offered, in the next sentence, to split a branch that needed one into

@@ -73,22 +73,25 @@ shape that produced them.
 
 Round 2 re-checks the inaccuracies themselves rather than the sentences that
 replaced them: does the new version hit the thing that was wrong? A problem that
-returns wearing a different symptom is the same finding, and a third edit is not
-its answer — report that the design, the model, or the spec is likely
-inconsistent there, and that round 1's fix may be debt rather than a fix.
+returns wearing a different symptom is the same finding, and round 1's fix was
+debt rather than a fix. That is the case the paragraph above answers — stop
+there and say so; do not make a third edit its answer.
 
 Write the round to `workspace/review-<issue>.md` before reporting: the heading,
 then a line per finding saying what became of it — fixed, declined and why, or
 advisory — and the fix you would make. A finding declined on the record is
 settled and is not raised again. That file is attached to the pull request body,
 so PUBLIC_DEVELOPMENT.md governs what may go in it, and its lines are not
-wrapped (CONTRIBUTING.md, "Where prose wraps").
+wrapped — it reaches a renderer that folds paragraphs itself, which is the width
+`prose-shape` exists for (CONTRIBUTING.md, "Working with coding agents").
 
 Report findings with file:line. Findings, not approval: the pass is that nothing
 inaccurate is left, advisory notes and all.
 
-Open the report with this, quoted whole, on every run including one that found
-nothing — a reader acting on the list will not go and read this file first:
+Open the report with this, quoted whole, on every run that reports findings,
+including one that found nothing — a reader acting on the list will not go and
+read this file first. A report that opens `DESIGN REVIEW REQUIRED` is the
+exception: nothing precedes that line, and the quote follows it.
 
 > **How to act on this report.** A finding quoted beside the code, schema or
 > decision it contradicts is a fix. Everything else here is advisory: recorded,

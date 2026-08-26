@@ -117,7 +117,8 @@ whether it is true, sited, and singular — not whether it is necessary.
 pointer to this file, and not omitted on a run that found nothing — the reader
 acting on these findings is usually an agent that will not go and read the
 definition, and without the policy in front of it a list of prose findings reads
-as a list of edits to make. Print exactly this, first:
+as a list of edits to make. Print exactly this, ahead of the findings — only a
+`DESIGN REVIEW REQUIRED` line ever precedes it:
 
 > **How to act on this report.** Prose findings are advisory. A commit may land
 > with every one of them open, and none is a gate. The only thing to fix is
@@ -142,13 +143,15 @@ prose or the code — looks like the mistake, and leave the choice.
 ## When a passage comes back
 
 **A finding on a passage this branch already rewrote is not another finding.**
-Before reporting one, look: `git log -p main..HEAD -- <file>` says whether the
-sentence you are about to quote was corrected earlier on this branch. If it was
-— fixed once, and wrong again in another way — then the sentence is not what is
-wrong. Prose that has to be corrected twice is describing something that is
-still moving underneath it.
+Before reporting one, look: `git log -p origin/main..HEAD -- <file>` says
+whether the sentence you are about to quote was corrected earlier on this branch
+— `origin/main`, because a worktree's own `main` lags and the range would then
+carry other branches' commits. If it was — fixed once, and wrong again in
+another way — then the sentence is not what is wrong. Prose that has to be
+corrected twice is describing something that is still moving underneath it.
 
-Say that first, above the policy quote, and stop there:
+Say that in the report's first line, above the policy quote, and say that no
+further editing is to be started:
 
     DESIGN REVIEW REQUIRED — <the passage that came back>
 

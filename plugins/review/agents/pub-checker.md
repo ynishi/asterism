@@ -12,14 +12,15 @@ redistribution question (does the change commit a file that originated
 elsewhere?).
 
 Report findings with file:line and the policy section that applies. Findings,
-not approval: "no findings" is the only pass. The policy document is the sole
-authority; do not restate or extend it here.
+not approval: "no findings" is the only pass. Classification is the policy
+document's alone; do not restate or extend it here.
 
 One thing about the diff is yours to answer whatever the policy says about its
-contents. When it touches anything under `.claude/`, open the report with this
-line and nothing before it:
+contents. When it touches a file an agent loads as instructions — anything under
+`.claude/`, and the `agents/`, `skills/`, `commands/` and `hooks/` files of a
+plugin under `plugins/` — open the report with this line and nothing before it:
 
-    HUMAN REVIEW REQUIRED — .claude/ change
+    HUMAN REVIEW REQUIRED — agent instructions changed
 
 List the paths, and say in one line each what the edit does to the instructions
 an agent will load next. Then say that a human has to confirm they asked for

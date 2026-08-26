@@ -270,7 +270,14 @@ passing them before a pull request — recommended, not enforced:
   redistribution, gates, and the commit message format. Give it the issue number
   and it takes the rest: the diff against `main`, and its own rounds from
   `workspace/review-<issue>.md`. It stops without an issue, and it reviews a
-  branch twice — a branch too large for that is an issue to split.
+  branch twice.
+
+A second round landing where the first one edited says the design is what is
+wrong rather than the lines, so `reviewer` and `doc-reviewer` both open with
+`DESIGN REVIEW REQUIRED`, name the one thing to settle, and leave it to a human.
+Neither offers to move what is left into another issue: splitting is for work
+that is long or whose blast radius is unknown, and a defect that could be fixed
+today is neither.
 
 The same recommendation extends past the PR: releases and publishes (crates,
 packages, the repository's own settings) are best performed by a human hand in
