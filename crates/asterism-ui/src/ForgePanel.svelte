@@ -171,16 +171,29 @@
     );
   });
 
-  // What a tile says when there is no thumbnail coming.
+  // What a tile shows instead of a picture, and empty when a picture
+  // is what it should show.
   //
-  // `media` is the card's own answer and the grid reads the same field.
-  // An entry whose card never arrived says nothing rather than guessing
-  // — the id is not a fact about the thing.
+  // **A video has a frame.** `thumbById` names the forge as the surface
+  // that waits for one, and the first build of this asked for a
+  // thumbnail only when `media` was exactly `image` — so a video was a
+  // word where its own frame was on its way. Both kinds that carry
+  // pixels go to the thumbnail; the two that do not are what this
+  // answers for.
+  //
+  // For those two, the card's cover text is what the grid shows and is
+  // a great deal more use than a slug: `none` is `MediaKind`'s name for
+  // "no inline player", not a thing to put in front of somebody. The
+  // slug is the fallback to the fallback.
+  //
+  // An entry whose card has not arrived says nothing rather than
+  // guessing — the id is not a fact about the thing.
   function kindOf(assetId: string | null): string {
     if (assetId === null) return "";
     const card = forgeCatalog.cards[assetId];
     if (card === undefined) return "";
-    return card.media === "image" ? "" : card.media;
+    if (card.media === "image" || card.media === "video") return "";
+    return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
 
   // What a row moved, phrased from the axes it states.
@@ -454,10 +467,11 @@
         {#if forgeCatalog.states.loading}
           <p class="quiet">Reading…</p>
         {:else}
-          <!-- Images, because that is what a line holds and looking at
-               them is the reason to open this. The name goes under the
-               thumb rather than in place of it: it is the line's name
-               for the entry, not the asset's, and the two can differ. -->
+          <!-- Tiles, because looking at what is on a line is the reason
+               to open this. The name goes under the picture rather than
+               in place of it: it is the line's name for the entry, not
+               the asset's, and the two can differ — which is also what
+               the tile opens the asset to settle. -->
           <ul class="entries">
             {#each forgeCatalog.onTheLine as entry (entry.entry_id)}
               <li>
@@ -578,8 +592,12 @@
        somebody is left in the grid with no sign that the forge is
        waiting and no way back that is not a guess. This says which work
        is waiting, counts what has been picked so far, and returns to
-       it. Fixed to the corner rather than laid out in the page, because
-       what it interrupts is a person looking at the grid. -->
+       it — and carries the one control that does the opposite, because
+       somewhere has to: the ✕ ends the question rather than the
+       stepping aside, and takes the line, the work and everything
+       loaded about both with it. Fixed to the corner rather than laid
+       out in the page, because what it interrupts is a person looking
+       at the grid. -->
   <aside class="waiting" aria-label="The forge is waiting">
     <span>
       Picking for <strong>{forgeCatalog.pursuit.data?.title ?? "this work"}</strong>

@@ -12,7 +12,7 @@
 // place a command's name, its arguments and the shape of its answer
 // are checked against the app that has to answer them.
 //
-// # Why one `it` again
+// # Why each `it` is one long walk
 //
 // The order is the model's. A round needs a pursuit, a pursuit needs a
 // line, and what a satisfied close puts on the line is only visible
@@ -875,13 +875,16 @@ describe("a pursuit against a line", () => {
     );
   });
 
-  // A second piece of work against a line that already holds something,
-  // which is the only place three of the four verbs mean anything.
+  // A second piece of work against a line that already holds
+  // something, which is where three of the four verbs first get
+  // pressed.
   //
   // The test above opens a pursuit against an empty line and adds to
-  // it. `replace`, `rename` and `remove` name an entry that already
-  // exists, so nothing there reaches them — they shipped never having
-  // been run against the real backend once. This is the loop a person
+  // it, and stops. `replace`, `rename` and `remove` name an entry that
+  // already exists — the model lets that be one this work added a
+  // moment ago, so it is the *script* above that never reaches them
+  // rather than the model — and they were about to ship never having
+  // run against the real backend once. This is the loop a person
   // actually works: put something on a line, come back later, change
   // what is there, and land that too.
   //

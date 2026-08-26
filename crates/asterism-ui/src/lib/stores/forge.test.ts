@@ -419,14 +419,18 @@ describe("work against a line", () => {
     // nothing — so it is not an entry the line has, in either state.
     // Two presses away, which is why it is pinned.
     expect(rows.has("fresh")).toBe(false);
-    // The line's own entry stays exactly as the line has it. A
+    // The line's own entry stays exactly as the line has it: a
     // redundant removal is not a second letting-go, and it is not a
-    // reason for the entry to leave the list either — nor for the
-    // screen to treat it as one this work is taking off.
+    // reason for the entry to leave the list.
+    //
+    // But the *work* said absent, and that is the other step. A rename
+    // written beside a removal is discarded by the fold whether or not
+    // the line was holding the entry, so this row states it — which is
+    // what stops the screen offering a rename that cannot land.
     expect(rows.get("let-go")).toMatchObject({
       name: "let-go",
       alive: false,
-      leaving: false,
+      stated: "absent",
     });
   });
 
@@ -449,19 +453,52 @@ describe("work against a line", () => {
     // The winning existence decides what the row says, and it wins over
     // the whole work rather than over what came before it: an entry on
     // its way off states existence and nothing else, so neither the
-    // rename nor the replace after the removal reaches the line. Both
-    // verbs are on screen for a row this work has taken off, so both
-    // are one press from being believed.
+    // rename nor the replace after the removal reaches the line. What
+    // keeps a screen from writing them is `stated`, which this pins.
     expect(forgeCatalog.projection).toEqual([
       {
         entryId: "held",
         name: "held",
         assetId: "asset-held",
+        // The two steps, and they are different questions: what the
+        // line ends up holding, and what this work said about it being
+        // there. The screen draws the row from the first and decides
+        // what to offer on it from the second.
         alive: false,
-        // Off the line *because of this work*, which is not the same
-        // answer as off it — the screen offers a rename on one and not
-        // on the other, because only one of those renames lands.
-        leaving: true,
+        stated: "absent",
+      },
+    ]);
+  });
+
+  it("states absent even where the line was not holding it", async () => {
+    answering({
+      get_forge_line_states: [entry("let-go", false)],
+      list_forge_pursuits_of_line: [],
+    });
+    await forgeCatalog.selectLine("L1");
+
+    // Two presses from a row the line has already let go: put it back,
+    // take it off again. `normalise` drops the removal — the line was
+    // not holding it, so nothing changes there — while the fold still
+    // gives the entry a row stating existence and nothing else. A
+    // screen reading only the first step offers a rename here, and the
+    // close discards it.
+    apiMock.mockResolvedValue(
+      asking("P1", [
+        { entry_id: "let-go", kind: "add", content_asset_id: "a1", name: "back" },
+        { entry_id: "let-go", kind: "remove", content_asset_id: null, name: null },
+        { entry_id: "let-go", kind: "rename", content_asset_id: null, name: "late" },
+      ]),
+    );
+    await forgeCatalog.pursuit.load({ pursuitId: "P1" });
+
+    expect(forgeCatalog.projection).toEqual([
+      {
+        entryId: "let-go",
+        name: "let-go",
+        assetId: "asset-let-go",
+        alive: false,
+        stated: "absent",
       },
     ]);
   });

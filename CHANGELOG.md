@@ -39,13 +39,15 @@ and this project adheres to
   **The rows they sit on are the fold of both logs** — the line with the work
   applied over it, which is what a satisfied close would leave and what neither
   log says alone. It applies the model's rules rather than approximating them,
-  and there are three: per axis the last operation wins; existence absorbs the
-  content and name it arrives with _or stands alone_, so an entry on its way off
-  keeps the name the line already had rather than one this work gave it in
-  passing; and taking off something the line is not holding has nothing left to
-  do, so the row goes rather than reading as one this work let go. Putting a
-  removal back adds that same entry, by its own id, because an entry returning
-  under a new one is a new arrival and the record would say so.
+  and it takes the model's two steps to do it: the work folds to one row per
+  entry first — per axis the last operation wins, and then the winning existence
+  decides what the row says, so an entry on its way off keeps the name the line
+  already had rather than one this work gave it in passing — and only then does
+  the line come in, where a removal of something it is not holding leaves the
+  line's own row exactly as it was. Each row states both steps, because drawing
+  an entry as gone and offering to change it are questions about different ones.
+  Putting a removal back adds that same entry, by its own id, because an entry
+  returning under a new one is a new arrival and the record would say so.
 
   It is not the model's answer and cannot be — a landing arriving meanwhile
   changes what it is folded onto, and most landings touch nothing the work asks
@@ -56,9 +58,9 @@ and this project adheres to
   exactly that, so the warning is read off the same fold.
 
   **A tile is a thumbnail where there is one, and what the thing is where there
-  is not.** A line refers to assets rather than pictures — the first card in
-  this repository's fixture is a recording — and an entry carrying one was an
-  empty grey box, indistinguishable from one whose thumbnail had not arrived,
+  is not.** A line refers to assets rather than pictures — the first card this
+  repository's own e2e picks up is a recording — and an entry carrying one was
+  an empty grey box, indistinguishable from one whose thumbnail had not arrived,
   because a thumb miss and a thumb that is never coming are the same transparent
   pixel. The tile reads the card's own `media`, which is the field the grid
   reads.

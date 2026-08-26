@@ -1,10 +1,11 @@
 // "Show me this asset" — asked from anywhere, answered by the App.
 //
-// The detail pane's subject is `openAssetId` in `App.svelte`, and five
-// gestures already funnel through the `openDetail(id)` beside it: a
-// grid card, a provenance chip, a session drill-in, a constellation
-// burst, a Quick Look escalation. All five are inside App, so setting
-// the state directly was never a problem for them.
+// The detail pane's subject is `openAssetId` in `App.svelte`, and the
+// gestures that open one already funnel through the `openDetail(id)`
+// beside it — a grid card, a provenance chip, a session drill-in, a
+// constellation burst, a Quick Look escalation. Every one of them is
+// inside App, so setting the state directly was never a problem for
+// them.
 //
 // The forge is not inside App. It is mounted there and reads its own
 // catalog, taking nothing from whoever mounts it — the arrangement

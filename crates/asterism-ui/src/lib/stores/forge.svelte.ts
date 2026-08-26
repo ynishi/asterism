@@ -88,13 +88,8 @@
 //
 // Drawn as a list, rendered as a grid of tiles: the drawing is the
 // arrangement, and looking at what is on a line is the reason to open
-// this.
-//
-// A tile is a thumbnail where there is one to show. Most of what a
-// line holds is images and it is worth optimising for that, but *only*
-// images was an assumption this catalog made and the model does not —
-// a line refers to assets, and an asset is as likely to be a recording
-// or a conversation. `cards` is what a tile falls back to.
+// this. What a tile shows when the thing on it is not a picture is
+// `ForgePanel`'s own decision, argued where it draws one.
 //
 // `onTheLine` and `offTheLine` are separate deriveds for the same reason
 // the panel draws them apart. Digital-asset tooling states the
@@ -195,16 +190,31 @@ export interface ForgeProjectedEntry {
   entryId: string;
   name: string | null;
   assetId: string | null;
+  /// What the line ends up holding — `normalise`'s answer, and the
+  /// second of the model's two steps.
   alive: boolean;
-  /// Whether it is this work that takes it off.
+  /// What this work said about the entry being there — `fold`'s answer,
+  /// and the first of the two steps. Null when the work said nothing
+  /// about it either way.
   ///
-  /// Not the same as `!alive`, and the difference decides what can
-  /// usefully be asked next. An entry the *line* is not holding can
-  /// still be renamed by this work and the rename lands; one this work
-  /// takes off cannot, because the fold gives a departing entry a row
-  /// that states existence and nothing else, so a rename beside it is
-  /// discarded rather than refused.
-  leaving: boolean;
+  /// **Both steps, because the row has two kinds of reader and they
+  /// want different ones.** Drawing an entry as gone, and offering to
+  /// put it back, are questions about what a close leaves: `alive`.
+  /// Offering a rename or a refill is a question about what a close
+  /// will even look at: an entry whose winning existence is absent gets
+  /// a row stating existence and nothing else, so a rename beside it is
+  /// discarded rather than refused, and a screen that offers one is
+  /// offering something that cannot land.
+  ///
+  /// One boolean answered both for a while, and it answered with
+  /// `normalise`'s step. The two agree everywhere except on an entry
+  /// the line is *not* holding: there a removal survives the fold and
+  /// dies in `normalise`, so the verbs came back on a row where they
+  /// still could not land — two presses away, `put back` then `remove`.
+  /// This is the shape this catalog's header warns about for
+  /// `offTheLine`: one boolean standing for two model facts, with the
+  /// screen left to guess them apart.
+  stated: "present" | "absent" | null;
 }
 
 class ForgeCatalog {
@@ -348,12 +358,12 @@ class ForgeCatalog {
   /// What the library knows about the assets on screen, by asset id.
   ///
   /// **A line does not hold images.** It holds assets, and the first
-  /// card in this repository's own fixture is a video — so a panel that
-  /// draws every entry as a thumbnail draws an empty box for anything
-  /// that has none, forever: `thumbById` answers with a transparent
-  /// pixel while a thumb is being made *and* when there is never going
-  /// to be one, and those are the same grey square on screen. An e2e
-  /// waited twenty seconds at one before this existed.
+  /// card this repository's own e2e picks up is a recording — so a
+  /// panel that draws every entry as a thumbnail draws an empty box for
+  /// anything without one, forever: `thumbById` answers with a
+  /// transparent pixel while a thumb is being made *and* when there is
+  /// never going to be one, and those are the same grey square on
+  /// screen. An e2e waited twenty seconds at one before this existed.
   ///
   /// `media` is what settles it, and it is projected onto the card
   /// precisely so a UI stops deriving it from a mime type. The forge
@@ -938,7 +948,7 @@ class ForgeCatalog {
         name: state.name,
         assetId: state.content_asset_id,
         alive: state.alive,
-        leaving: false,
+        stated: null,
       });
     }
     const touched = new Set([
@@ -951,10 +961,14 @@ class ForgeCatalog {
       const goes = existence.get(entryId);
       if (goes === false) {
         // Existence standing alone. The line goes on saying what it
-        // said, minus the entry — and if it was not holding it, this
-        // says nothing at all.
-        if (before !== undefined && before.alive) {
-          rows.set(entryId, { ...before, alive: false, leaving: true });
+        // said, minus the entry — and if it was not holding it, the
+        // removal leaves the line's own row exactly as it was.
+        //
+        // `stated` is written either way, because the fold said absent
+        // either way: the other axes are gone from what a close will
+        // look at whether or not `normalise` keeps the row.
+        if (before !== undefined) {
+          rows.set(entryId, { ...before, alive: false, stated: "absent" });
         }
         continue;
       }
@@ -963,7 +977,7 @@ class ForgeCatalog {
         name: named.get(entryId) ?? before?.name ?? null,
         assetId: content.get(entryId) ?? before?.assetId ?? null,
         alive: goes === true ? true : (before?.alive ?? false),
-        leaving: false,
+        stated: goes === true ? "present" : null,
       });
     }
     return [...rows.values()];

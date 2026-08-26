@@ -288,13 +288,15 @@
     void forgeCatalog.ensureCards(projected.map((row) => row.assetId));
   });
 
-  /// What a row says when there is no thumbnail coming — the card's own
-  /// `media`, empty for an image or for a card that never arrived.
+  /// What a row shows instead of a picture, empty when a picture is
+  /// what it should show. `ForgePanel`'s tile says why it is this and
+  /// not the `media` slug, and why a video is not one of these.
   function kindOf(assetId: string | null): string {
     if (assetId === null) return "";
     const card = forgeCatalog.cards[assetId];
     if (card === undefined) return "";
-    return card.media === "image" ? "" : card.media;
+    if (card.media === "image" || card.media === "video") return "";
+    return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
 
   /** What to call an entry an operation names. The op's own name when
@@ -481,13 +483,14 @@
           {/if}
           <span class="op-name">{row.name ?? "(unnamed)"}</span>
           <span class="row-verbs">
-            <!-- A row this work is taking off is offered neither a
-                 rename nor a refill, because the fold gives a departing
-                 entry a row that states existence and nothing else:
-                 either would be written, accepted, and then discarded
-                 by the close. A row the *line* is not holding is a
-                 different case and keeps both — that rename lands. -->
-            {#if !row.leaving}
+            <!-- Read off what the *work* said, not off what the line
+                 ends up with. A fold that says absent gives the entry a
+                 row stating existence and nothing else, so a rename
+                 beside it is written, accepted and then discarded — and
+                 that is true whether or not the line was holding it.
+                 An entry merely off the line, which this work has said
+                 nothing about, keeps both verbs: that rename lands. -->
+            {#if row.stated !== "absent"}
               <button type="button" onclick={() => rename(row)}>rename</button>
               {#if gridSelection.selectedIds.size === 1}
                 <button type="button" onclick={() => replace(row)}>

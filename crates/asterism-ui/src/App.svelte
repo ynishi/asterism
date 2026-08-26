@@ -831,10 +831,10 @@
       payload: { asset_id: id },
     });
   }
-  // The sixth caller, and the only one from outside this component.
-  // It hands over an id and nothing else; what opening means stays
-  // here, which is why `openDetail` is what answers rather than a
-  // second write to `openAssetId`.
+  // The only caller from outside this component. It hands over an id
+  // and nothing else; what opening means stays here, which is why
+  // `openDetail` is what answers rather than a second write to
+  // `openAssetId`.
   $effect(() => {
     const asked = detailRequest.asset;
     if (asked === null) return;
