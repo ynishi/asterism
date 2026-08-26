@@ -969,7 +969,19 @@ pre-push: branch-check (commit-msg-check "--range" "origin/main..HEAD")
     fi
     # The workflow's patterns are glob, and `**` there means what `*`
     # means to bash once the path separator is not special to it.
-    mapfile -t ignored < <(
+    #
+    # Read into the array a line at a time rather than with `mapfile`,
+    # which is a bash 4 builtin. macOS ships bash 3.2 and always will —
+    # Apple stopped at the last GPLv2 release — so `mapfile` here made
+    # this recipe run on the CI runner (which has a newer bash from
+    # homebrew on its PATH) and fail on a stock Mac, where it is a
+    # `command not found` after the two assertions above have already
+    # passed. The loop below is what the rest of this recipe already
+    # uses.
+    ignored=()
+    while IFS= read -r pattern; do
+        ignored+=("$pattern")
+    done < <(
         awk '/paths-ignore:/ { f = 1; next }
              f && /^[[:space:]]*-[[:space:]]/ {
                  gsub(/^[[:space:]]*-[[:space:]]*/, "")

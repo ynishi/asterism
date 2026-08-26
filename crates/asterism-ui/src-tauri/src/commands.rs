@@ -28,6 +28,30 @@
 //!
 //! MCP is not part of that obligation. It is curated on purpose, which
 //! its own module doc explains.
+//!
+//! # Why they are mirrors and not one path
+//!
+//! This process serves that HTTP surface itself — `lib.rs` spawns the
+//! loopback listener over `asterism_server::http::router`, and
+//! `state.rs` builds its context from the same `CoreCtx` these commands
+//! hold. So a command *could* answer by calling it, and the service
+//! call each verb carries would then be written once rather than on
+//! both sides.
+//!
+//! It does not, and the reason is what the second path buys back. A
+//! command reaching the loopback surface would serialise its arguments,
+//! cross a socket, and deserialise a response the process already holds
+//! in memory, on every call the window makes — including the ones a
+//! scroll makes tens of at a time. Commands take the contract's types
+//! and call the application services directly instead.
+//!
+//! What that costs is the thing the rule above exists to bound: two
+//! transports over one service graph, either of which can gain a verb
+//! the other does not. The obligation is that a person can do the same
+//! work over HTTP — not that both take the same route to the service,
+//! which they deliberately do not. `asterism-server`'s
+//! `tests/transport_parity.rs` is what holds the two lists to each
+//! other.
 
 use asterism_contract::command::{
     AddAssetBatchCommand, AddAssetBatchResult, AddAssetCommand, AddAssetToGroupCommand,

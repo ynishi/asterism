@@ -20,6 +20,14 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3"
+# `transport_parity` reads two source files and pairs what they declare.
+# Over a string scan, a name inside a block comment or a path literal is
+# a route that does not exist, and a call rustfmt wrapped is a route that
+# does and cannot be seen — the second being the one that matters, for
+# the reason `asterism-core`'s `forge_boundary` states about greps.
+# Same features and the same version it takes: `full` for item syntax,
+# `visit` for the traversal, `parsing` to get there from a string.
+syn = { version = "2", features = ["full", "visit", "parsing"] }
 # The route e2e drives the real router through `oneshot` rather than
 # binding a port: a handler reached by the wrong method or extractor is a
 # defect no service-level test can see.
