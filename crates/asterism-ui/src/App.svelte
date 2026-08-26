@@ -35,6 +35,7 @@
   import SettingsModel from "./SettingsModel.svelte";
   import SettingsPreferences from "./SettingsPreferences.svelte";
   import SharedLinesPanel from "./SharedLinesPanel.svelte";
+  import ForgePanel from "./ForgePanel.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
   import TagList from "./TagList.svelte";
   import { perfBaseline } from "./lib/dev/perf-baseline";
@@ -45,6 +46,7 @@
   import { interaction } from "./lib/interaction/mode.svelte";
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
   import { sharedCatalog } from "./lib/stores/shared.svelte";
+  import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { groupCatalog } from "./lib/stores/group.svelte";
   import { modalityCatalog } from "./lib/stores/modality.svelte";
   import { formatCatalog } from "./lib/stores/format.svelte";
@@ -5386,11 +5388,37 @@
           ○ duplicates
         </button>
       </li>
-      <!-- Not a facet either, and for a stronger reason than the two
-           above: what it opens is not this library. A team's lines are
-           read from that team's server, so they list in their own
-           panel rather than anywhere the grid can mix them in
-           (#148 decision 16). -->
+    </ul>
+
+    <!--
+      Its own heading, because neither row under it is a facet and the
+      one they sat under was Trash.
+
+      A line is not a property an asset has. The grid narrows by
+      persona, modality and tag, which assets carry; a line refers to
+      assets and names them its own way, so one asset sits on two lines
+      under two names. Narrowing the grid by a line would replace what
+      it lists rather than filter it (#170). The team's lines are not a
+      facet for a stronger reason on top of that one: what that row
+      opens is not this library at all — they are read from that team's
+      server. It sat under Trash until #170 gave these two a heading.
+
+      Two rows under one heading is not the mixing #148 decision 16
+      refuses. That decision is about where lines are *listed*: shared
+      ones get their own panel so a surface never claims one library
+      where there are two. These are the doors to those two panels, and
+      each says which it opens.
+    -->
+    <h2>Forge</h2>
+    <ul>
+      <li>
+        <button
+          onclick={() => void forgeCatalog.openPanel()}
+          title="Lines on this machine: what each holds, and how it got there."
+        >
+          ○ lines
+        </button>
+      </li>
       <li>
         <button
           onclick={() => void sharedCatalog.openPanel()}
@@ -6319,6 +6347,8 @@
      they come from somewhere else (#148 decision 16). Store-gated and
      0-prop, like the drawer above it. -->
 <SharedLinesPanel />
+
+<ForgePanel />
 
 <SnapshotView
   onPromptName={(title, placeholder) => customPrompt(title, placeholder, "")}

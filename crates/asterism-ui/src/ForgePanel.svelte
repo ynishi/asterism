@@ -7,28 +7,41 @@
   // the reads it makes. This header says only what this component adds.
   //
   // 0-prop: it reads `forgeCatalog` directly and takes nothing from
-  // whoever mounts it. Nobody mounts it yet — where the forge sits in
-  // the app is one of the two questions the store's doc leaves open,
-  // and putting it somewhere would answer that by implementation rather
-  // than by decision. It loads its own list on mount, so wherever it
-  // lands it works without an orchestrating effect beside it.
+  // whoever mounts it. The App mounts it once and the sidebar opens it
+  // — the arrangement `SharedLinesPanel` has, and the list of reads is
+  // the same shape, so a reader who knows one knows this.
+  //
+  // A drawer, and wider than that one. The forge answers two questions
+  // about a line at once, and the list of lines has to stay in view
+  // while either is read or selecting becomes a round trip. A
+  // single-column drawer has no room for both.
   //
   // Two tabs rather than two panels. Contents and history are answers
   // about one line from one place, and a person moving between them is
   // changing the question rather than the subject — so the line stays
   // named in the header while the body below it swaps.
   //
-  // Nothing here writes. `[open a pursuit]` is disabled and says why:
-  // a button that looks live and does nothing is worse than one that
-  // states what it is waiting for.
+  // One write, and it is the one that makes the rest reachable:
+  // opening a line. #170 gives the line verbs to a later child and
+  // does not name this among them — an omission that shows the moment
+  // the panel runs on a machine with no line, which is every machine
+  // until somebody calls the command by hand.
+  //
+  // Everything else reads. `[open a pursuit]` is disabled and says
+  // why: a button that looks live and does nothing is worse than one
+  // that states what it is waiting for.
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { thumbCatalog } from "./lib/stores/thumb.svelte";
+  import { confirmCatalog } from "./lib/stores/confirm.svelte";
+  import { promptCatalog } from "./lib/stores/prompt.svelte";
+  import type { ForgeChangeRowDto, ForgeLineDto } from "./bindings";
 
   let tab = $state<"contents" | "history">("contents");
   let showOffTheLine = $state(false);
-
-  $effect(() => {
-    void forgeCatalog.lines.load();
-  });
+  // One change point open at a time. The chain is read to answer "what
+  // happened here", and a screen that let every point stand open would
+  // be the wall of table the design warns about.
+  let openPoint = $state<string | null>(null);
 
   const open = $derived(
     forgeCatalog.lines.data.filter((line) => line.standing === "open"),
@@ -44,6 +57,15 @@
   async function select(lineId: string) {
     forgeCatalog.selected = lineId;
     showOffTheLine = false;
+    // A point id belongs to the line it is on, so an open one from the
+    // previous line matches nothing here — it would just leave the
+    // first point of the new chain looking collapsed when the reader
+    // had asked for one to be open.
+    openPoint = null;
+    // The discard notice answers about a line that is gone. Selecting
+    // another one is a new question, and leaving the old answer above
+    // it reads as though it were about this one.
+    forgeCatalog.released = null;
     // The chain goes with the line it belongs to. Without this, opening
     // the history tab after switching lines renders the previous line's
     // chain under this one's name — the store's header calls that out
@@ -62,12 +84,133 @@
     }
   }
 
+  // The new-line form. Its own state rather than the store's: a
+  // half-typed name is this component's business and nobody else's.
+  let newName = $state("");
+  let newStrategy = $state("");
+  let opening = $state(false);
+
+  async function openLine(event: Event) {
+    event.preventDefault();
+    opening = true;
+    try {
+      await forgeCatalog.openLine(newName, newStrategy);
+      newName = "";
+    } finally {
+      opening = false;
+    }
+  }
+
+  // The line verbs. Rename and re-point read a value first, so they go
+  // through the prompt the App already mounts; archive and reopen are
+  // one press each.
+  async function rename(line: ForgeLineDto) {
+    const name = await promptCatalog.open(
+      "Rename this line",
+      "a name",
+      line.name,
+    );
+    if (name === null || name.trim() === "") return;
+    await forgeCatalog.rename(line.id, name);
+  }
+
+  async function repoint(line: ForgeLineDto, strategyId: string) {
+    if (strategyId === line.strategy_id) return;
+    await forgeCatalog.setStrategy(line.id, strategyId);
+  }
+
+  // Discard is the verb the confirm modal exists for: it takes the
+  // line, its whole history, and every piece of work against it. The
+  // released assets come back in the answer and are named here,
+  // because after this write nothing can derive them again.
+  async function discard(line: ForgeLineDto) {
+    const ok = await confirmCatalog.open({
+      title: `Discard ${line.name}?`,
+      body:
+        "The line, its history, and every pursuit against it go with it. " +
+        "The assets it held stay in the library. This cannot be undone.",
+      confirmLabel: "Discard Forever",
+      danger: true,
+    });
+    if (!ok) return;
+    await forgeCatalog.discard(line.id);
+  }
+
   function when(ms: number): string {
     return new Date(ms).toLocaleString();
   }
+
+  // What a row moved, phrased from the axes it states.
+  //
+  // The model stores three optional axes rather than a verb, and the
+  // familiar verbs are readings of particular combinations — `Row`'s
+  // own doc names four of them. This says what moved rather than
+  // guessing at which verb a person meant: a row touching name alone
+  // is a rename, one touching existence alone is a revival, and one
+  // touching two is neither of those words.
+  function axes(row: ForgeChangeRowDto): string {
+    const moved: string[] = [];
+    // The axis, and what it moved to. The other two say only that they
+    // moved: an asset id and a name are the values themselves, and a
+    // reader wanting them has the row beside this. Existence is the one
+    // whose value is a word — `present` / `absent` — so naming the axis
+    // without it would drop the half that says which way it went.
+    if (row.existence !== null) moved.push(`existence → ${row.existence}`);
+    if (row.content_asset_id !== null) moved.push("content");
+    if (row.name !== null) moved.push("name");
+    // `Row::new` refuses a row that states no axis, so this is
+    // unreachable — said rather than left as an empty cell.
+    return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
+  }
 </script>
 
-<section class="forge" aria-label="Forge">
+{#if forgeCatalog.open}
+  <!-- Backdrop absorbs outside-click and Escape; the drawer stops
+       propagation so an interior click never closes it. Same guard
+       SharedLinesPanel uses, for the same reason. -->
+  <div
+    class="drawer-backdrop"
+    onclick={() => forgeCatalog.closePanel()}
+    onkeydown={(e) => e.key === "Escape" && forgeCatalog.closePanel()}
+    role="button"
+    tabindex="-1"
+    aria-label="Close the forge"
+  >
+    <div
+      class="drawer"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
+      role="dialog"
+      tabindex="-1"
+      aria-label="Forge"
+    >
+      <header class="drawer-head">
+        <h2>Forge</h2>
+        <button
+          class="drawer-close"
+          onclick={() => forgeCatalog.closePanel()}
+          aria-label="Close"
+        >✕</button>
+      </header>
+
+      {#if forgeCatalog.released !== null}
+        <!-- Above the two columns rather than inside one: the line this
+             answers about is gone, so there is no line detail to sit
+             in. The only place these ids are ever named — after the
+             write nothing can derive them again — with a dismiss,
+             because a notice that cannot be cleared is one a person
+             stops reading. -->
+        <p class="released">
+          Discarded. {forgeCatalog.released.length}
+          {forgeCatalog.released.length === 1 ? "asset" : "assets"} released back
+          to the library.
+          <button type="button" onclick={() => (forgeCatalog.released = null)}>
+            dismiss
+          </button>
+        </p>
+      {/if}
+
+      <section class="forge" aria-label="Lines on this machine">
   <nav class="lines" aria-label="Lines">
     <h3>Lines</h3>
     {#if forgeCatalog.lines.loading}
@@ -105,6 +248,42 @@
         {/each}
       </ul>
     {/if}
+
+    <!-- The strategy is chosen, not defaulted. It decides how the line
+         settles a collision, and picking one on somebody's behalf is
+         picking how their work gets resolved. The list comes from the
+         route that names what this deployment carries, so a rule that
+         is not built in cannot be typed in by accident. -->
+    <form class="new-line" onsubmit={openLine}>
+      <h4>New line</h4>
+      <label>
+        Name
+        <input type="text" bind:value={newName} required />
+      </label>
+      <label>
+        Rule
+        <select bind:value={newStrategy} required>
+          <option value="" disabled>choose…</option>
+          {#each forgeCatalog.strategies.data as rule (rule.id)}
+            <option value={rule.id} title={rule.summary}>{rule.name}</option>
+          {/each}
+        </select>
+      </label>
+      {#if forgeCatalog.strategies.data.length === 0}
+        <!-- Without a rule there is nothing to open a line with, and the
+             submit below is disabled. Said rather than left as a button
+             that does not respond: `Resource` falls back to an empty
+             list on failure and puts the reason on `.error`, which
+             looks the same from here as a deployment carrying no rule
+             at all. -->
+        <p class="quiet">
+          {forgeCatalog.strategies.error ?? "This deployment carries no rule."}
+        </p>
+      {/if}
+      <button type="submit" disabled={opening || newStrategy === ""}>
+        {opening ? "Opening…" : "Open"}
+      </button>
+    </form>
   </nav>
 
   <div class="line">
@@ -113,11 +292,45 @@
     {:else}
       <header>
         <h3>{current.name}</h3>
-        <span class="quiet">{current.standing} · {current.strategy_id}</span>
+        <span class="quiet">{current.standing}</span>
         <button type="button" disabled title="Opening work is #170's second child">
           open a pursuit
         </button>
       </header>
+
+      <!-- The line's own description, and the two verbs that move it.
+           Neither is a landing: the history says what happened to what
+           the line carries, and a rename did not. -->
+      <div class="verbs">
+        <button type="button" onclick={() => rename(current)}>rename</button>
+
+        <label class="rule">
+          rule
+          <select
+            value={current.strategy_id}
+            onchange={(e) => repoint(current, e.currentTarget.value)}
+          >
+            {#each forgeCatalog.strategies.data as rule (rule.id)}
+              <option value={rule.id} title={rule.summary}>{rule.name}</option>
+            {/each}
+          </select>
+        </label>
+
+        {#if current.standing === "open"}
+          <!-- Archiving is the step before dropping as well as a state
+               of its own: a discard is only reachable from here. -->
+          <button type="button" onclick={() => forgeCatalog.archive(current.id)}>
+            archive
+          </button>
+        {:else}
+          <button type="button" onclick={() => forgeCatalog.reopen(current.id)}>
+            reopen
+          </button>
+          <button type="button" class="danger" onclick={() => discard(current)}>
+            discard
+          </button>
+        {/if}
+      </div>
 
       <div class="tabs" role="tablist">
         <button
@@ -134,9 +347,26 @@
         {#if forgeCatalog.states.loading}
           <p class="quiet">Reading…</p>
         {:else}
+          <!-- Images, because that is what a line holds and looking at
+               them is the reason to open this. The name goes under the
+               thumb rather than in place of it: it is the line's name
+               for the entry, not the asset's, and the two can differ. -->
           <ul class="entries">
             {#each forgeCatalog.onTheLine as entry (entry.entry_id)}
-              <li>{entry.name ?? "(unnamed)"}</li>
+              <li>
+                {#if entry.content_asset_id !== null}
+                  <img
+                    src={thumbCatalog.thumbById(entry.content_asset_id)}
+                    alt={entry.name ?? "an entry with no name"}
+                    loading="lazy"
+                  />
+                {:else}
+                  <!-- An entry can carry a name and no content: a table
+                       may name one before anything fills it. -->
+                  <span class="no-content" aria-hidden="true">—</span>
+                {/if}
+                <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
+              </li>
             {/each}
           </ul>
           <p class="quiet">{forgeCatalog.onTheLine.length} on the line</p>
@@ -157,7 +387,18 @@
             {#if showOffTheLine}
               <ul class="entries gone">
                 {#each forgeCatalog.offTheLine as entry (entry.entry_id)}
-                  <li>{entry.name ?? "(unnamed)"}</li>
+                  <li>
+                    {#if entry.content_asset_id !== null}
+                      <img
+                        src={thumbCatalog.thumbById(entry.content_asset_id)}
+                        alt={entry.name ?? "an entry with no name"}
+                        loading="lazy"
+                      />
+                    {:else}
+                      <span class="no-content" aria-hidden="true">—</span>
+                    {/if}
+                    <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
+                  </li>
                 {/each}
               </ul>
             {/if}
@@ -171,9 +412,37 @@
         <ol class="chain">
           {#each [...forgeCatalog.history.data.changes].reverse() as point (point.id)}
             <li>
-              <span class="rows">{point.table.length} rows</span>
-              <span>{point.actor_id}</span>
-              <span class="quiet">{when(point.at_ms)}</span>
+              <button
+                class="point"
+                aria-expanded={openPoint === point.id}
+                onclick={() =>
+                  (openPoint = openPoint === point.id ? null : point.id)}
+              >
+                <span class="rows">
+                  {openPoint === point.id ? "▾" : "▸"}
+                  {point.table.length}
+                  {point.table.length === 1 ? "row" : "rows"}
+                </span>
+                <span>{point.actor_id}</span>
+                <span class="quiet">{when(point.at_ms)}</span>
+              </button>
+
+              {#if openPoint === point.id}
+                <!-- One line per entry the point moved, phrased from
+                     the axes rather than read off a verb: the model
+                     stores which axes a row states, and "added" or
+                     "renamed" is a reading of that. A row states only
+                     what it moved, so a blank axis is silence and not
+                     a null value. -->
+                <ul class="rows-open">
+                  {#each point.table as row (row.entry_id)}
+                    <li>
+                      <span class="axes">{axes(row)}</span>
+                      <span class="quiet">{row.name ?? row.entry_id}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             </li>
           {/each}
         </ol>
@@ -186,9 +455,53 @@
       {/if}
     {/if}
   </div>
-</section>
+      </section>
+    </div>
+  </div>
+{/if}
 
 <style>
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 60;
+    border: 0;
+    padding: 0;
+  }
+  .drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    /* Wider than the team's 30rem: two columns, and the list of lines
+       stays in view while a line is read. */
+    width: min(52rem, 96vw);
+    overflow-y: auto;
+    background: var(--panel-bg, #1b1b1e);
+    color: var(--panel-fg, #e8e8ea);
+    box-shadow: -0.5rem 0 1.5rem rgba(0, 0, 0, 0.4);
+    padding: 1rem 1.15rem 2rem;
+    box-sizing: border-box;
+  }
+  .drawer-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+  }
+  .drawer-head h2 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .drawer-close {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
   .forge {
     display: flex;
     gap: 1rem;
@@ -253,15 +566,78 @@
   .tabs button[aria-selected="true"] {
     border-bottom-color: currentColor;
   }
+  .entries {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    gap: 0.6rem;
+    margin: 0.5rem 0;
+  }
+  .entries li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+  .entries img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 0.2rem;
+    background: rgba(128, 128, 128, 0.15);
+  }
+  .no-content {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 1;
+    border: 1px dashed rgba(128, 128, 128, 0.5);
+    border-radius: 0.2rem;
+    opacity: 0.6;
+  }
+  .entry-name {
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Off the line: dimmed and dashed, so it cannot be read as
+     contents while staying findable. */
   .entries.gone li {
     opacity: 0.55;
-    border-left: 2px dashed currentColor;
-    padding-left: 0.4rem;
   }
-  .chain li {
+  .entries.gone img,
+  .entries.gone .no-content {
+    outline: 2px dashed currentColor;
+    outline-offset: -2px;
+  }
+  .point {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
     display: flex;
     gap: 0.6rem;
     padding: 0.25rem 0;
+    text-align: left;
+    width: 100%;
+  }
+  .rows-open {
+    margin: 0 0 0.4rem 1.2rem;
+    border-left: 1px solid rgba(128, 128, 128, 0.3);
+    padding-left: 0.6rem;
+  }
+  .rows-open li {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    font-size: 0.78rem;
+  }
+  .axes {
+    min-width: 9rem;
+  }
+  /* Block, not flex: the row of facts is `.point`'s own layout, and
+     the expanded table sits under it rather than beside it. */
+  .chain li {
+    display: block;
   }
   .rows {
     min-width: 4.5rem;
@@ -272,6 +648,68 @@
     color: inherit;
     cursor: pointer;
     padding: 0.3rem 0;
+  }
+  .verbs {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.4rem 0;
+    font-size: 0.78rem;
+  }
+  .verbs button {
+    background: none;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    padding: 0.15rem 0.5rem;
+  }
+  .verbs button.danger {
+    border-color: rgba(220, 90, 90, 0.6);
+  }
+  .rule {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    opacity: 0.85;
+  }
+  .released {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    padding-left: 0.5rem;
+    margin: 0 0 0.8rem;
+  }
+  .released button {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 0;
+    text-decoration: underline;
+  }
+  .new-line {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 1.1rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+  }
+  .new-line label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.75rem;
+    opacity: 0.85;
+  }
+  .new-line input,
+  .new-line select {
+    width: 100%;
+    box-sizing: border-box;
   }
   .quiet {
     opacity: 0.7;

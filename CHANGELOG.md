@@ -10,6 +10,40 @@ and this project adheres to
 
 ### Added
 
+- **The forge opens from the app, and a line has its whole lifecycle** (#180).
+  #177 placed the catalog and left the panel unmounted, because where the forge
+  sits was one of two questions its design deliberately did not answer. It is a
+  place you go, not a way you filter: the grid's facets are properties an asset
+  _has_ — persona, modality, tag — and a line is not one. A line refers to
+  assets and names them its own way, so one asset sits on two lines under two
+  names, and narrowing the grid by a line would replace what it lists rather
+  than filter it. So: a drawer, opened from the sidebar under a `Forge` heading
+  of its own, with `shared lines` moved beside it out of **Trash**, which fitted
+  it no better.
+
+  Creating a line is in none of #170's four children — the first is read-only
+  and the third is rename, re-point, standing and discard — and its absence is
+  not academic: a machine that has never had a line has none, and nothing in the
+  app could make one, so a read-only panel over them showed an empty list
+  forever. The whole lifecycle is here. The rule a new line takes is chosen
+  rather than defaulted, because it decides how that line settles a collision.
+  Discard sits behind the confirm modal and only on an archived line, which is
+  the only standing it can be reached from, and it reports how many assets it
+  released — the answer no later read can reconstruct.
+
+  Closing the drawer ends the question rather than pausing it: the selection and
+  everything it produced go with it, because a fold of a chain that moved in
+  between is worse than no answer, and #170's second child will move chains.
+  What a line let go stays reachable in its own collapsed section, dimmed and
+  dashed — findable, and not mistakable for contents.
+
+  Two suites, because they answer different questions. `forge.test.ts` pins what
+  each write invalidates and what closing drops, against mocked seams.
+  `e2e/forge-line.spec.ts` drives the lifecycle through the real backend in the
+  WebView, which is the only place the seven commands' names, arguments and
+  answers are checked at all — a unit test asserts the shape its own author
+  wrote down twice.
+
 - **The forge's catalog, and the design its four screens share** (#177). #170
   lists four surfaces and says what each one lands; what it did not say is what
   any of them looks like, and the first one cannot be opened without deciding

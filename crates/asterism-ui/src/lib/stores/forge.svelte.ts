@@ -86,9 +86,8 @@
 //   │              ││                         3 off the line  ▸      │
 //   └──────────────┘└────────────────────────────────────────────────┘
 //
-// The contents are a list here because a grid is the shape of the
-// second open question below, not a decision this drawing gets to make
-// by drawing it.
+// Drawn as a list, rendered as a grid of thumbnails: the drawing is
+// the arrangement, and what a line holds is images.
 //
 // `onTheLine` and `takenOff` are separate deriveds for the same reason
 // the panel draws them apart. Digital-asset tooling states the
@@ -99,8 +98,12 @@
 //
 // # Where #170's four surfaces attach
 //
-// A **lines panel** builds the frame above and writes nothing — the
-// three reads, the two tabs, and the button the next one fills.
+// A **lines panel** builds the frame above and carries a line's whole
+// lifecycle (#180): the three reads, the two tabs, the button the next
+// child fills, and the verbs that open, rename, re-point, archive,
+// reopen and discard one. #170 put the last of those in a later child
+// and named no verb for the first — a panel over lines nobody can
+// create shows an empty list forever, so both landed together.
 // **Working a line** fills that button: opening a pursuit, pushing a
 // round, closing it, with a grid selection becoming a round's content.
 // **The line verbs** sit on the header, discard among them — and its
@@ -114,37 +117,70 @@
 // drawer one more anchor" but whether one surface can hold two records
 // that answer to different fields.
 //
-// # Two questions this does not answer
+// # Two questions this left open, and how #180 answered them
 //
-// **How a line's contents relate to the asset grid.** Both are images,
-// but an entry is a reference to an asset plus the name the line gave
-// it, and that name is the line's rather than the asset's. Whether a
-// line becomes another axis the grid narrows by, or a panel with its
-// own grid, decides whether the forge is somewhere you go or something
-// you filter to. Left open because the answer belongs with the panel
-// that has to live with it.
+// **How a line's contents relate to the asset grid.** The forge is a
+// place you go, not a way you filter. The grid's facets are properties
+// an asset *has* — persona, modality, tag — and a line is not one: it
+// refers to assets and names them its own way, so one asset sits on two
+// lines under two names. Narrowing the grid by a line would replace
+// what it lists rather than filter it, and the name under each card
+// would stop being the asset's. The panel has its own grid instead,
+// opened from the sidebar.
 //
-// **How much of a row a person sees at rest.** A change point carries a
-// table of rows and each row up to three axes. Every axis inline makes
-// a history that is mostly table; too little makes a log that has to be
-// opened to say anything. `ForgePanel` currently sits at the second
-// pole with no opening — it prints how many rows a change point moved
-// and offers no way to see them — which is where a deferred decision
-// leaves a screen rather than where one should stay.
+// **How much of a row a person sees at rest.** A change point's line
+// carries how many rows it moved, who landed it and when; the rows
+// themselves open one point at a time. Every axis inline makes a
+// history that is mostly table, and letting every point stand open is
+// the same wall reached from the other side.
+//
+// A row is phrased from the axes it states rather than as a verb,
+// because that is what the model stores — "renamed" is a reading of a
+// row and not a kind of one, and a row moving two axes is a reading no
+// single verb has.
 import { api } from "../api";
+import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
+  ForgeDiscardedDto,
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  ForgeStrategyDto,
 } from "../../bindings";
 
 /// What a read of one line needs to name it.
 type LineArgs = { lineId: string };
 
 class ForgeCatalog {
+  /// Whether the panel is showing.
+  ///
+  /// A panel rather than a facet on the grid. The grid narrows by
+  /// properties an asset *has* — persona, modality, tag — and a line is
+  /// not one of them: it is a thing that refers to assets and names
+  /// them its own way, so the same asset sits on two lines under two
+  /// names. Narrowing the grid by a line would replace what the grid
+  /// lists rather than filter it, and the name under each card would
+  /// stop being the asset's.
+  ///
+  /// `shared lines` sits beside this in the sidebar on a different
+  /// reason reaching the same place — a team's lines are not this
+  /// library either.
+  open = $state(false);
+
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
+
+  /// What the last discard released, until something replaces or clears
+  /// it.
+  ///
+  /// Held by the catalog rather than the panel because the catalog owns
+  /// when it stops being true: it answers about a line that no longer
+  /// exists, so selecting another, closing the panel, or dismissing it
+  /// all end it — and only one of those three is a thing the panel
+  /// notices. A component field would need the same clear written at
+  /// each of them, which is how one of them gets missed.
+  released = $state<string[] | null>(null);
 
   /// Every line on this machine, without its history. `get_forge_line`
   /// answers with the whole chain, which is the wrong read for a list.
@@ -165,6 +201,17 @@ class ForgeCatalog {
     "forgeCatalog.states",
   );
 
+  /// The rules a line can be pointed at, built from what this
+  /// deployment carries. Read with the list, because opening a line
+  /// needs one and there is no sensible default to offer: a strategy
+  /// decides how the line settles a collision, which is not a thing to
+  /// pick on somebody's behalf.
+  strategies = new Resource<void, ForgeStrategyDto[]>(
+    async () => api<ForgeStrategyDto[]>("list_forge_strategies", {}),
+    [] as ForgeStrategyDto[],
+    "forgeCatalog.strategies",
+  );
+
   /// The chain itself. Loaded when somebody asks for it rather than
   /// with the contents, per the ratio above.
   history = new Resource<LineArgs, ForgeLineHistoryDto | null>(
@@ -173,6 +220,122 @@ class ForgeCatalog {
     null,
     "forgeCatalog.history",
   );
+
+  /// Opening the panel reads the list and the rules. Nothing reloads on
+  /// a timer: the lines a person opened are not something a background
+  /// write moves, and a panel that refreshed under a selection would
+  /// lose it.
+  async openPanel(): Promise<void> {
+    this.open = true;
+    await Promise.all([this.lines.load(), this.strategies.load()]);
+  }
+
+  /// Opens a line.
+  ///
+  /// #170 names four children and this verb is in none of them: the
+  /// first is read-only and the third is rename, re-point, standing and
+  /// discard. Creating a line falls between them, and its absence shows
+  /// on any machine that has never had one — which is every machine
+  /// until somebody runs the command by hand. A surface that can only
+  /// read a thing nobody can create is not a surface, so it came here
+  /// with the rest of the lifecycle (#180).
+  ///
+  /// Safe to press again in the sense that matters — each press opens a
+  /// separate line, and `Name` carries no claim of uniqueness, so two
+  /// lines may share one. That is the model's position rather than an
+  /// oversight: "unique among what?" needs an owner to answer, and the
+  /// owner is outside the forge.
+  async openLine(name: string, strategyId: string): Promise<void> {
+    await mutate(
+      "open_forge_line",
+      { command: { name, strategy_id: strategyId } },
+      "open a line",
+    );
+    await this.lines.load();
+  }
+
+  /// Closing ends the question rather than pausing it.
+  ///
+  /// Everything a line's selection produced goes with it: what is on
+  /// it, its chain, and the answer a discard left. Keeping any of that
+  /// across a close would mean the next open shows a derivation of a
+  /// chain that may have moved in between — and it will move, because
+  /// #170's second child lands rounds on it. The alternative was to
+  /// re-read on open instead, which is the same work at a worse moment:
+  /// a panel that opens onto a stale answer and corrects itself.
+  ///
+  /// The team's catalog empties on `disconnect` rather than on close,
+  /// and that is a different event for a different reason — what it was
+  /// served through can vanish. Nothing here vanishes; it moves.
+  closePanel(): void {
+    this.open = false;
+    this.selected = null;
+    this.states.reset();
+    this.history.reset();
+    this.released = null;
+  }
+
+  /// Renames a line. Not a landing — the history says what happened to
+  /// what the line carries, and its own description is a separate
+  /// record, so nothing goes on the chain and the head does not move.
+  async rename(lineId: string, name: string): Promise<void> {
+    await mutate(
+      "rename_forge_line",
+      { lineId, command: { line_id: lineId, name } },
+      "rename a line",
+    );
+    await this.lines.load();
+  }
+
+  /// Points the line at a different rule, from here on. Also not a
+  /// landing, and deliberately not retroactive: what a past collision
+  /// settled to was settled under the rule in force then.
+  async setStrategy(lineId: string, strategyId: string): Promise<void> {
+    await mutate(
+      "set_forge_line_strategy",
+      { lineId, command: { line_id: lineId, strategy_id: strategyId } },
+      "re-point a line",
+    );
+    await this.lines.load();
+  }
+
+  /// Finished with. An archived line takes no landing, and it is the
+  /// only standing a discard can be reached from — so this is the step
+  /// before dropping as well as a state in its own right.
+  async archive(lineId: string): Promise<void> {
+    await mutate("archive_forge_line", { lineId }, "archive a line");
+    await this.lines.load();
+  }
+
+  /// Takes it back out of archived.
+  async reopen(lineId: string): Promise<void> {
+    await mutate("reopen_forge_line", { lineId }, "reopen a line");
+    await this.lines.load();
+  }
+
+  /// Drops the line, its history, and every piece of work against it.
+  ///
+  /// **The answer is the point.** It names the assets the forge was
+  /// holding and is not holding any more, and after this write there is
+  /// no record left to derive them from — so a caller that throws the
+  /// response away has lost the only answer there will be. It goes to
+  /// `released` rather than back to the caller, because it outlives the
+  /// call: what ends it is a selection, a close or a dismissal, none of
+  /// which the caller is in a position to notice.
+  async discard(lineId: string): Promise<void> {
+    const dropped = await mutate<ForgeDiscardedDto>(
+      "discard_forge_line",
+      { lineId },
+      "discard a line",
+    );
+    this.released = dropped.released_asset_ids;
+    if (this.selected === lineId) {
+      this.selected = null;
+      this.states.reset();
+      this.history.reset();
+    }
+    await this.lines.load();
+  }
 
   /// What the line holds now.
   get onTheLine(): ForgeEntryStateDto[] {
