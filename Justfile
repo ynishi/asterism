@@ -1519,9 +1519,6 @@ rust-test-changed:
     # obvious pattern misses. Both mistakes point the expensive way — a
     # suite that never ran, reported green.
     #
-    #   asterism-ui        `#[lib]` + `#[bin]` of Tauri DI wiring. Zero
-    #                      test attributes, zero doc examples. Tested by
-    #                      `ui-test`.
     #   asterism-importer  One `main.rs` of clap subcommands over the
     #                      importer adapters, each of which carries its
     #                      own tests. Zero test attributes.
@@ -1530,7 +1527,19 @@ rust-test-changed:
     # local catches a stale entry — `main`'s workspace run is what does,
     # which is the same net every other narrowing in this file relies
     # on.
-    testless="asterism-ui asterism-importer"
+    #
+    # `asterism-ui` came off in #175, two changes after it should have.
+    # #159 moved `mutation_surface` into that crate precisely so the
+    # guard would "run in the same pull request that moves its subject",
+    # and left this list saying the crate had zero test attributes — so
+    # the guard ran nowhere but `main`, which is the arrangement the move
+    # was undoing. `export_parity` arrived beside it and would have
+    # inherited the same silence. Both read a source file and link
+    # nothing of the crate they sit in, but `cargo test -p asterism-ui`
+    # links the Tauri stack regardless; that cost is the price of the
+    # gate answering, and it is paid only on a branch that touched this
+    # crate.
+    testless="asterism-importer"
     run=""
     skipped=""
     for pkg in $packages; do

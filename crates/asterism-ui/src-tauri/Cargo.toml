@@ -23,6 +23,16 @@ tauri-build    = { version = "2", features = [] }
 asterism-contract = { path = "../../asterism-contract" }
 schema-bridge  = { workspace = true }
 
+[dev-dependencies]
+# `export_parity` reads the contract's sources and this crate's build
+# script, and pairs what one derives against what the other exports. Both
+# halves are syntax — a `SchemaBridge` inside a doc comment is a type that
+# does not exist, and a derive list rustfmt wrapped is a type that does and
+# would go unread. Same features and version `asterism-core` takes for
+# `forge_boundary`: `full` for item syntax, `visit` for the traversal,
+# `parsing` to get there from a string.
+syn = { version = "2", features = ["full", "visit", "parsing"] }
+
 [dependencies]
 asterism-core           = { path = "../../asterism-core" }
 asterism-infra          = { path = "../../asterism-infra" }

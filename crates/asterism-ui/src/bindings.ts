@@ -334,3 +334,93 @@ export type ForgeChangePointDto = { id: string; parent_id: string; from_pursuit_
 
 export type ForgeChangeRowDto = { entry_id: string; existence: string | null; content_asset_id: string | null; name: string | null; };
 
+export type ForgePursuitDto = { id: string; line_id: string; parent_id: string | null; base_id: string; head_id: string; title: string | null; note: string | null; opened_at_ms: number; opened_by_kind: string; opened_by_id: string; rounds: { id: string; parent_id: string; at_ms: number; actor_kind: string; actor_id: string; note: string | null; ops: { entry_id: string; kind: string; content_asset_id: string | null; name: string | null; }[]; }[]; close: { id: string; parent_id: string; outcome: string; note: string | null; at_ms: number; actor_kind: string; actor_id: string; } | null; };
+
+export type ForgeRoundDto = { id: string; parent_id: string; at_ms: number; actor_kind: string; actor_id: string; note: string | null; ops: { entry_id: string; kind: string; content_asset_id: string | null; name: string | null; }[]; };
+
+export type ForgeOpDto = { entry_id: string; kind: string; content_asset_id: string | null; name: string | null; };
+
+export type ForgeCloseDto = { id: string; parent_id: string; outcome: string; note: string | null; at_ms: number; actor_kind: string; actor_id: string; };
+
+export type ForgeCollisionDto = { entry_id: string; axis: string; moved_in_id: string; };
+
+export type ForgeResolvedDto = { round: { id: string; parent_id: string; at_ms: number; actor_kind: string; actor_id: string; note: string | null; ops: { entry_id: string; kind: string; content_asset_id: string | null; name: string | null; }[]; } | null; collisions: { entry_id: string; axis: string; moved_in_id: string; }[]; };
+
+export type ForgeDiscardedDto = { line_id: string; released_asset_ids: string[]; };
+
+export type ForgeStrategyDto = { id: string; name: string; summary: string; };
+
+export type ForgeThreadDto = { id: string; anchor: { kind: string; pursuit_id: string | null; node_id: string | null; entry_id: string | null; change_point_id: string | null; }; title: string | null; messages: { id: string; parent_id: string | null; said: string; first_said: string; at_ms: number; actor_kind: string; actor_id: string; revisions: { said: string; at_ms: number; actor_kind: string; actor_id: string; }[]; }[]; };
+
+export type ForgeMessageDto = { id: string; parent_id: string | null; said: string; first_said: string; at_ms: number; actor_kind: string; actor_id: string; revisions: { said: string; at_ms: number; actor_kind: string; actor_id: string; }[]; };
+
+export type ForgeRevisionDto = { said: string; at_ms: number; actor_kind: string; actor_id: string; };
+
+export type ForgeAnchorDto = { kind: string; pursuit_id: string | null; node_id: string | null; entry_id: string | null; change_point_id: string | null; };
+
+export type OpenForgeLineCommand = { name: string; strategy_id: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type RenameForgeLineCommand = { line_id: string; name: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type SetForgeLineStrategyCommand = { line_id: string; strategy_id: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type ForgeLineActCommand = { line_id: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type OpenForgePursuitCommand = { line_id: string; parent_id: string | null; title: string | null; note: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type PushForgeRoundCommand = { pursuit_id: string; ops: { entry_id: string; kind: string; content_asset_id: string | null; name: string | null; }[]; note: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type CloseForgePursuitCommand = { pursuit_id: string; outcome: string; note: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type ForgePursuitActCommand = { pursuit_id: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type OpenForgeThreadCommand = { anchor_kind: string; pursuit_id: string | null; line_id: string | null; node_id: string | null; entry_id: string | null; change_point_id: string | null; title: string | null; said: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type SayInForgeThreadCommand = { thread_id: string; replying_to: string | null; said: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type AmendForgeMessageCommand = { thread_id: string; message_id: string; said: string; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type RenameForgeThreadCommand = { thread_id: string; title: string | null; author_kind: string | null; author_subject: string | null; operator_ai: string | null; };
+
+export type RenameTagCommand = { tag_id: string; name: string; };
+
+export type DeleteTagCommand = { tag_id: string; };
+
+export type DeleteTagResult = { deleted: boolean; detached_assets: number; };
+
+export type MergeTagsCommand = { source_tag_id: string; target_tag_id: string; dry_run: boolean; };
+
+export type MergeTagsResult = { affected_assets: number; already_tagged: number; source_removed: boolean; };
+
+export type SeriesStrategyDto = { id: string; name: string; applies_to: string; decode: string; include: string[][]; exclude: string[][]; system: boolean; created_at_ms: number; updated_at_ms: number; };
+
+export type CreateSeriesStrategyCommand = { name: string; applies_to: string; decode: string; include: string[][]; exclude: string[][]; };
+
+export type UpdateSeriesStrategyCommand = { id: string; name: string | null; applies_to: string | null; decode: string | null; include: string[][] | null; exclude: string[][] | null; };
+
+export type DeleteSeriesStrategyCommand = { id: string; };
+
+export type CreateSnapshotCommand = { persona_id: string; asset_ids: string[]; };
+
+export type BatchGroupMembershipCommand = { attach: { asset_id: string; group_id: string; }[]; detach: { asset_id: string; group_id: string; }[]; };
+
+export type GroupMembershipEntry = { asset_id: string; group_id: string; };
+
+export type MergeGroupsCommand = { from_group_id: string; into_group_id: string; };
+
+export type ConflictResolution = 'folded' | 'kept';
+
+export type OnDuplicate = 'ask' | 'fold' | 'separate';
+
+export type ObservationDto = { stream: string; id: string; occurred_at_ms: number; env: string; event: string; attrs_json: string | null; correlation_id: string | null; };
+
+export type ListObservationsQuery = { stream: string | null; since_ms: number | null; until_ms: number | null; limit: number; };
+
+export type SortTarget = 'occurred_at' | 'created_at' | 'updated_at' | 'persona' | 'modality' | 'tag' | 'group' | 'cover' | 'rating' | 'duration' | 'file_size' | 'pixels';
+
+export type SortOrder = 'alpha' | 'ordered' | 'updated';
+
+export type SortSpec = { target: 'occurred_at' | 'created_at' | 'updated_at' | 'persona' | 'modality' | 'tag' | 'group' | 'cover' | 'rating' | 'duration' | 'file_size' | 'pixels'; order: 'alpha' | 'ordered' | 'updated'; reverse: boolean; collation: string | null; };
+
+export type TagMatch = 'any' | 'all';
+
