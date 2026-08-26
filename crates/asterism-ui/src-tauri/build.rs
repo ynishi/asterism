@@ -74,13 +74,14 @@ use asterism_contract::dto::{
     AssetDto, AssetIndexEntryDto, AssetIndexPageDto, AssetPageDto, AssetSourceTypeDto,
     AssetTextDto, ChapterMarkDto, ConstellationItemDto, DirDto, DispatchDto, DuplicateAxis,
     DuplicateConflictDto, DuplicateGroupDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
-    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, JobDto, JobKindSnapshotDto, JobsSnapshotDto,
-    LineageEdgeDto, LineageNodeDto, LineageViewDto, MaterialLayerDto, MaterialLayerViewDto,
-    MaterialMarkDto, MergeAssetsDto, MergeRefusalDto, MergeTotalsDto, MergeWarningDto, MessageDto,
-    MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto, PersonaThemeDto,
-    ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SavedQueryDto,
-    SessionDto, SessionPageDto, SettingDto, SettingLayerDto, SnapshotDto, TagCountDto, TagDto,
-    TagSuggestionDto, ThreadAnchorDto, ThreadDto, VideoPreviewDto, VisualModelStatusDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, JobDto, JobKindSnapshotDto,
+    JobsSnapshotDto, LineageEdgeDto, LineageNodeDto, LineageViewDto, MaterialLayerDto,
+    MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MergeRefusalDto, MergeTotalsDto,
+    MergeWarningDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
+    PersonaThemeDto, ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, RulingReadinessDto,
+    SampledPageDto, SavedQueryDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
+    SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadAnchorDto, ThreadDto,
+    TrainedHeadRunDto, VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
     ForgeChangePointDto, ForgeChangeRowDto, ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto,
@@ -214,6 +215,11 @@ fn main() {
         TagDto,
         TagSuggestionDto,
         VisualModelStatusDto,
+        // The model panel's other half (#130): what the promotion
+        // pointer names, and what a next training run would learn from.
+        HeadStatusDto,
+        TrainedHeadRunDto,
+        RulingReadinessDto,
         TagCountDto,
         SessionDto,
         SessionPageDto,

@@ -44,6 +44,7 @@ so on) live in `asterism-contract`'s crate docs.
 - `group_link_to_dto` — Converts a `GroupLink` to its wire DTO.
 - `group_summary_to_dto` — Converts a `GroupSummary` to its wire DTO.
 - `group_to_dto` — Converts a `Group` to its wire DTO.
+- `head_status_to_dto` — Assembles the model panel's head status (#130) out of the three
 - `index_page_to_dto` — Converts a `Page<AssetIndex>` to an `AssetIndexPageDto`.
 - `index_to_dto` — Converts an `AssetIndex` projection to its wire form.
 - `material_layer_to_dto` — Converts a `MaterialLayer` domain entity to its wire DTO.

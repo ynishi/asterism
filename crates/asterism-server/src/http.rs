@@ -130,12 +130,12 @@ use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetCountEntryDto, AssetDetailDto, AssetDto, AssetIndexPageDto,
     AssetPageDto, AssetSourceTypeDto, AssetTextDto, ChapterMarkDto, ConstellationItemDto, DiagDto,
     DirDto, DispatchDto, DuplicateConflictDto, DuplicateReportDto, DuplicateResolutionDto, EdgeDto,
-    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, JobLogDto, LineageViewDto, MaterialLayerDto,
-    MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto, ModalityDefDto,
-    ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto, ProvenanceViewDto,
-    RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto, SessionDto,
-    SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto, ThreadDto,
-    VideoPreviewDto, VisualModelStatusDto,
+    EventDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, JobLogDto, LineageViewDto,
+    MaterialLayerDto, MaterialLayerViewDto, MaterialMarkDto, MergeAssetsDto, MessageDto,
+    ModalityDefDto, ObservationDto, PerfDto, PersonaDto, PersonaProfileDto, PersonaThemeDto,
+    ProvenanceViewDto, RetrievedIdsDto, RetrievedPageDto, SampledPageDto, SeriesStrategyDto,
+    SessionDto, SessionPageDto, SettingDto, SnapshotDto, TagCountDto, TagDto, TagSuggestionDto,
+    ThreadDto, VideoPreviewDto, VisualModelStatusDto,
 };
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
@@ -388,6 +388,9 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         )
         // Which visual model this process bound, if any (#112).
         .route("/asterism/models/status", get(visual_model_status))
+        // Which trained head scores, and what a next run would learn
+        // from (#130).
+        .route("/asterism/heads/status", get(head_status))
         // Train the tag head from the person's rulings (#132).
         .route("/asterism/heads/train", post(train_tag_head))
         // Install a pulled head artifact (#132 phase 3).
@@ -2994,6 +2997,16 @@ async fn reject_tag_suggestion(
 /// bound, if any (#112). All-null when the process runs without one.
 async fn visual_model_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<VisualModelStatusDto> {
     Ok(Json(ctx.asset_service.visual_model_status().await))
+}
+
+/// `GET /asterism/heads/status` — which trained head scores, and what
+/// a next training run would learn from (#130).
+///
+/// Beside `/asterism/models/status` rather than inside it: that
+/// answers which encoder this process bound, which is infrastructure
+/// nobody manages, and this answers what a person does manage.
+async fn head_status(State(ctx): State<Arc<ServerCtx>>) -> ApiResult<HeadStatusDto> {
+    Ok(Json(ctx.asset_service.head_status().await?))
 }
 
 /// `POST /asterism/heads/train` — enqueues a `HeadTrain` run (#132).

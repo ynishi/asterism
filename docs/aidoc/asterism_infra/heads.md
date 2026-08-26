@@ -42,6 +42,7 @@ pointer.
 
 ## Types
 
+- `FsTagHeadStore` — Read adapter over a heads store directory — the
 - `TagHeadArtifact` — One training run, persisted whole: identity, rows, and the eval
 
 ## Constants

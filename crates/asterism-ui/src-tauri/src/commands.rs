@@ -1393,6 +1393,16 @@ pub async fn visual_model_status(
     Ok(state.asset_service.visual_model_status().await)
 }
 
+/// Which trained head scores tags, and what a next training run would
+/// learn from — the command twin of `GET /asterism/heads/status`
+/// (#130).
+#[tauri::command]
+pub async fn head_status(
+    state: State<'_, AppState>,
+) -> Result<asterism_contract::dto::HeadStatusDto, UiError> {
+    Ok(state.asset_service.head_status().await?)
+}
+
 /// Enqueues a `HeadTrain` run over the rulings under the bound
 /// encoder — the command twin of `POST /asterism/heads/train` (#132).
 /// No input: the corpus is whatever rulings exist, so there is

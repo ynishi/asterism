@@ -44,6 +44,7 @@ use crate::domain::session::{Session, SessionMetadataPatch};
 use crate::domain::snapshot::Snapshot;
 use crate::domain::source_locator::SourceLocator;
 use crate::domain::tag::{Tag, TagCount, TagMergeOutcome};
+use crate::domain::tag_head::PromotedHead;
 use crate::domain::team_link::{AssetLink, AssetLinkKey, TeamScopedId};
 use crate::domain::thread::{Message, Thread, ThreadAnchor};
 use crate::domain::value::{
@@ -2760,6 +2761,24 @@ pub trait TagVectorRepository: Send + Sync {
 
     /// Deletes every cached vector one model produced.
     async fn clear_derived(&self, model_id: &str) -> Result<u64, DomainError>;
+}
+
+/// Read port over the trained-head store (#130) — the promotion
+/// pointer and the run it names.
+///
+/// Read-only on purpose. Writing a head is a training run's act and a
+/// pull's, both of which happen inside a job with the artifact in hand;
+/// what no caller had was a way to *ask* what the pointer says, which
+/// is what a screen needs and what this port is.
+#[async_trait]
+pub trait TagHeadStore: Send + Sync {
+    /// What the pointer names, or `None` for zero-shot.
+    ///
+    /// An unreadable artifact answers
+    /// [`PromotedHead::run`]` = None` rather than failing: a corrupt
+    /// file under `heads/` must not take out the status read, for the
+    /// same reason it does not take out startup.
+    async fn promoted(&self) -> Result<Option<PromotedHead>, DomainError>;
 }
 
 /// Persistence port for the pre-generated thumbnail cache

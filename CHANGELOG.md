@@ -10,6 +10,25 @@ and this project adheres to
 
 ### Added
 
+- **A model section in Settings: the encoder stated, the head managed** (#130).
+  The encoder is app infrastructure — bundled, nothing to choose — so the
+  section states it and no more: id, dimensions, preprocessing revision, or the
+  one honest "no model bound". What a person manages is the head, and this is
+  the first screen to reach the verbs #132 built: which head scores now, the
+  held-out eval that promoted it, how many rulings exist and how many tags clear
+  the training floor, a Train now button, and a paste box for the head a team
+  published — v0 of the pull is the artifact itself, fetched with the person's
+  own session.
+
+  A new read answers it (`GET /asterism/heads/status`, `head_status` over IPC)
+  rather than a widened `VisualModelStatusDto`, which says which encoder the
+  process bound and goes on saying only that. The restart badge is derived on
+  the server — what would bind at the next launch against what is bound now — so
+  a pointer this encoder would refuse asks for the relaunch that drops to
+  zero-shot, exactly as a cleared pointer does. Both verbs enqueue a job, and
+  the panel surfaces that job's own sentence verbatim: the promotion verdict, or
+  the refusal naming the encoder a pulled head was trained against.
+
 - **The source type is asserted from the asset detail panel** (#108). A "Source
   type" row with three states: the person's assertion (term, who, when, Edit and
   Retract), the term the container's evidence establishes (labelled as the

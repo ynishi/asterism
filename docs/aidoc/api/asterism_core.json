@@ -323,6 +323,11 @@
       "docs": "Converts a `Group` to its wire DTO."
     },
     {
+      "path": "asterism_core::application::mapping::head_status_to_dto",
+      "kind": "function",
+      "docs": "Assembles the model panel's head status (#130) out of the three\nreads it takes: the promotion pointer, the head this process bound\nat startup, and the rulings a next run would learn from.\n\nA function rather than three conversions because two of the answers\nare *relations* between the inputs. `restart_required` compares what\nwould bind at the next launch against what is bound now —\nserver-derived, so no screen has to remember that it clicked train.\n\nOne rule covers every state because \"what would bind\" is not the\nsame as \"what the pointer says\". The next launch binds the pointer\nonly where this encoder could honour it; a pointer trained against\nanother encoder, or one whose artifact will not read, binds nothing\nand the launch scores zero-shot. Beside a bound head that is a\nchange and says so, exactly as a cleared pointer does; beside\nzero-shot it is not, and does not.\n\n`rulings` is the same corpus the trainer walks — every ruled row\nunder the bound encoder — so the readiness line and the run it\npredicts cannot disagree about the floor."
+    },
+    {
       "path": "asterism_core::application::mapping::index_page_to_dto",
       "kind": "function",
       "docs": "Converts a `Page<AssetIndex>` to an `AssetIndexPageDto`."
@@ -2608,6 +2613,11 @@
       "docs": "Persistence port for scored tag suggestions (#112, P3) — the\nopen-row queue between a model's proposal and a person's ruling,\nthe `duplicate_conflict` shape."
     },
     {
+      "path": "asterism_core::domain::repository::TagHeadStore",
+      "kind": "trait",
+      "docs": "Read port over the trained-head store (#130) — the promotion\npointer and the run it names.\n\nRead-only on purpose. Writing a head is a training run's act and a\npull's, both of which happen inside a job with the artifact in hand;\nwhat no caller had was a way to *ask* what the pointer says, which\nis what a screen needs and what this port is."
+    },
+    {
       "path": "asterism_core::domain::repository::TagRepository",
       "kind": "trait",
       "docs": "Persistence port for [`Tag`] and its many-to-many link with assets."
@@ -2858,6 +2868,11 @@
       "docs": "Minimum rulings **per class** (accepted, rejected) before a tag is\ntrainable: three to learn from and one to hold out, under\n[`HOLD_OUT_EVERY`]. Below this the tag keeps its zero-shot row —\na v0 constant, expected to be re-measured once real ruling volumes\nexist."
     },
     {
+      "path": "asterism_core::domain::tag_head::PromotedHead",
+      "kind": "struct",
+      "docs": "What the promotion pointer names, as a reader sees it (#130).\n\nThe label without the run is the honest answer for a pointer that\nexists and cannot be read — dangling, or an artifact something\ncorrupted. The startup bind treats that case the same way: warn,\nand score zero-shot."
+    },
+    {
       "path": "asterism_core::domain::tag_head::RowEval",
       "kind": "struct",
       "docs": "Held-out outcome of one tag's candidate row against the baseline,\non identical examples."
@@ -2866,6 +2881,11 @@
       "path": "asterism_core::domain::tag_head::RulingExample",
       "kind": "struct",
       "docs": "One ruling as the trainer consumes it: the asset's cached vector\nand which way the person ruled."
+    },
+    {
+      "path": "asterism_core::domain::tag_head::TrainedHeadRun",
+      "kind": "struct",
+      "docs": "One training run's record, without the rows it trained — what a\nscreen shows about a head (#130)."
     },
     {
       "path": "asterism_core::domain::tag_head::TrainedRow",

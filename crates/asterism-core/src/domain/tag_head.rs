@@ -157,6 +157,40 @@ impl HeadEval {
     }
 }
 
+/// What the promotion pointer names, as a reader sees it (#130).
+///
+/// The label without the run is the honest answer for a pointer that
+/// exists and cannot be read — dangling, or an artifact something
+/// corrupted. The startup bind treats that case the same way: warn,
+/// and score zero-shot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PromotedHead {
+    /// The promoted label.
+    pub label: String,
+    /// The run behind it, when its artifact reads.
+    pub run: Option<TrainedHeadRun>,
+}
+
+/// One training run's record, without the rows it trained — what a
+/// screen shows about a head (#130).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrainedHeadRun {
+    /// The encoder identity the run trained against.
+    pub model_id: String,
+    /// The vector width it trained at.
+    pub dim: u32,
+    /// The preprocessing revision it trained under.
+    pub preprocess_ver: u32,
+    /// How many tags got a row.
+    pub trained_tags: usize,
+    /// Rulings consumed, both classes, all tags.
+    pub rulings_used: usize,
+    /// The held-out verdict that decided promotion.
+    pub eval: HeadEval,
+    /// When the run finished (epoch ms).
+    pub trained_at_ms: i64,
+}
+
 /// Splits one tag's rulings into train and held-out, per class, every
 /// [`HOLD_OUT_EVERY`]-th example held out. Refuses a tag below
 /// [`MIN_RULINGS_PER_CLASS`] on either side: with less there is

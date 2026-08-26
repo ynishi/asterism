@@ -329,6 +329,71 @@ pub fn artifact_for(
     }
 }
 
+/// Read adapter over a heads store directory — the
+/// [`TagHeadStore`](asterism_core::domain::repository::TagHeadStore)
+/// port (#130).
+///
+/// Composes what was already here: [`current_label`] for the pointer
+/// and [`load_artifact`] for what it names. The composition is the
+/// port's whole body, and it lives behind a port because the caller is
+/// a screen in another crate and the artifact schema is this module's.
+pub struct FsTagHeadStore {
+    root: PathBuf,
+}
+
+impl FsTagHeadStore {
+    /// Reads the store under `root`. A directory that does not exist
+    /// reads as zero-shot, the same answer as one holding no pointer:
+    /// the store is created by the first training run, and a library
+    /// that has never trained is the ordinary case.
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+}
+
+#[async_trait::async_trait]
+impl asterism_core::domain::repository::TagHeadStore for FsTagHeadStore {
+    async fn promoted(
+        &self,
+    ) -> Result<
+        Option<asterism_core::domain::tag_head::PromotedHead>,
+        asterism_core::error::DomainError,
+    > {
+        let root = self.root.clone();
+        tokio::task::spawn_blocking(move || {
+            let Some(label) = current_label(&root)? else {
+                return Ok(None);
+            };
+            // A pointer whose artifact will not read is the label
+            // alone. Failing the whole status read instead would take
+            // a panel down over a file the person can delete — and
+            // startup already treats this case as a warning.
+            let run = load_artifact(&root, &label).ok().map(|artifact| {
+                asterism_core::domain::tag_head::TrainedHeadRun {
+                    model_id: artifact.model_id,
+                    dim: artifact.dim,
+                    preprocess_ver: artifact.preprocess_ver,
+                    trained_tags: artifact.rows.len(),
+                    rulings_used: artifact.rulings_used,
+                    eval: artifact.eval,
+                    trained_at_ms: artifact.trained_at_ms,
+                }
+            });
+            Ok(Some(asterism_core::domain::tag_head::PromotedHead {
+                label,
+                run,
+            }))
+        })
+        .await
+        .map_err(|e| {
+            asterism_core::error::DomainError::Infra(anyhow::anyhow!(
+                "reading the heads store panicked: {e}"
+            ))
+        })?
+        .map_err(asterism_core::error::DomainError::Infra)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,6 +625,42 @@ mod tests {
             serde_json::to_string(&a).unwrap()
         };
         assert!(install_pulled(root.path(), &absolute, &identity()).is_err());
+    }
+
+    #[tokio::test]
+    async fn the_read_port_answers_the_pointer_and_survives_one_it_cannot_read() {
+        use asterism_core::domain::repository::TagHeadStore as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let store = FsTagHeadStore::new(root.path().to_path_buf());
+        assert!(store.promoted().await.unwrap().is_none(), "no pointer");
+
+        write_artifact(root.path(), &artifact("head-v1")).unwrap();
+        promote(root.path(), "head-v1").unwrap();
+        let promoted = store.promoted().await.unwrap().unwrap();
+        assert_eq!(promoted.label, "head-v1");
+        let run = promoted.run.unwrap();
+        assert_eq!(run.model_id, "test-model");
+        assert_eq!(run.dim, 3);
+        assert_eq!(run.trained_tags, 1);
+        assert_eq!(run.rulings_used, 16);
+        assert_eq!(run.eval.held_out, 4);
+        assert_eq!(run.eval.candidate_correct, 3);
+        assert_eq!(run.eval.baseline_correct, 2);
+
+        // A dangling pointer keeps its label and loses its run: the
+        // panel can say what the pointer says *and* that it cannot be
+        // honoured, which one error would have collapsed into neither.
+        std::fs::write(root.path().join(CURRENT_FILE), "head-v9").unwrap();
+        let dangling = store.promoted().await.unwrap().unwrap();
+        assert_eq!(dangling.label, "head-v9");
+        assert!(dangling.run.is_none());
+
+        // A store nothing has written yet reads as zero-shot rather
+        // than failing — the state of every library before its first
+        // training run.
+        let never_trained = FsTagHeadStore::new(root.path().join("not-created"));
+        assert!(never_trained.promoted().await.unwrap().is_none());
     }
 
     #[test]

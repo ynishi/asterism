@@ -373,6 +373,11 @@
       "docs": "Which Groups the asset already sits in — powers the \"already\nadded\" state on the detail-overlay dropdown."
     },
     {
+      "path": "asterism_ui::commands::head_status",
+      "kind": "function",
+      "docs": "Which trained head scores tags, and what a next training run would\nlearn from — the command twin of `GET /asterism/heads/status`\n(#130)."
+    },
+    {
       "path": "asterism_ui::commands::hydrate_cards",
       "kind": "function",
       "docs": "Batch-hydrates cards by id. Companion to `list_asset_index` —\nthe frontend calls this for the ~40 rows the VList is about\nto paint plus a small prefetch window. Ids that don't exist\nor are hidden from the viewer drop out of the response."

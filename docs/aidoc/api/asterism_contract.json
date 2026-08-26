@@ -713,6 +713,11 @@
       "docs": "A group paired with the number of distinct assets attached, used\nto render the sidebar Groups section and chip count badges."
     },
     {
+      "path": "asterism_contract::dto::HeadStatusDto",
+      "kind": "struct",
+      "docs": "Which trained head scores tags, and what stands between the\nrulings on disk and the next one (#130, #132).\n\nDeliberately not part of [`VisualModelStatusDto`]: that answers\nwhich encoder this process bound — app infrastructure, bundled,\nnothing to manage — and this answers what a person manages. The\ntwo are read together and stay two reads."
+    },
+    {
       "path": "asterism_contract::dto::JobDto",
       "kind": "struct",
       "docs": "Job status payload."
@@ -838,6 +843,11 @@
       "docs": "One page of a **retrieval** — the ranked shortlist, narrowed by the\nfilter and cut to a page.\n\nA separate type from [`AssetPageDto`] because it cannot answer the\nquestion that one's `total` answers. Retrieval looks at a bounded\nnumber of candidates and returns the closest of them, so \"how many\nassets match\" is not a number it holds. Reusing the page shape meant\nthe count of *survivors of the shortlist* travelled under the name\n`total` and was rendered as a library-wide count — a wrong number\nwith nothing marking it as wrong.\n\nThe exhaustive, countable question is the Query side's: the same\ntext as `ListAssetsQuery::text_match` answers it exactly."
     },
     {
+      "path": "asterism_contract::dto::RulingReadinessDto",
+      "kind": "struct",
+      "docs": "What the rulings on disk would give a training run (#130)."
+    },
+    {
       "path": "asterism_contract::dto::SampledPageDto",
       "kind": "struct",
       "docs": "A random handful drawn from the set a filter describes — the answer to\n[`RandomAssetsQuery`](crate::query::RandomAssetsQuery).\n\n**Order is the shuffle itself and carries no meaning.** Nothing here\nis reproducible: the same request answers with different picks, in a\ndifferent sequence, every time (Retrieval promises\nno determinism, and this is a Retrieval-shaped read that happens to be\nimplemented in SQL). Freezing this state into a saved query or a URL\nwould freeze something that cannot be restored.\n\nIt is also **not** an enumeration: `items` stops at the requested `k`\nhowever large the set is, so it can never be paged through to reach\nthe rest. The set's size is answerable, though, and `set_total` says\nit exactly — the filter is a SQL predicate, so this is the Query\nside's kind of count, not the shortlist-bounded number\n[`RetrievedPageDto`] deliberately withholds."
@@ -901,6 +911,11 @@
       "path": "asterism_contract::dto::ThreadDto",
       "kind": "struct",
       "docs": "Thread container payload."
+    },
+    {
+      "path": "asterism_contract::dto::TrainedHeadRunDto",
+      "kind": "struct",
+      "docs": "The training run one head artifact records (#132)."
     },
     {
       "path": "asterism_contract::dto::VideoPreviewDto",

@@ -181,6 +181,10 @@ async fn fixture() -> Fixture {
         previews.path().to_path_buf(),
         Arc::new(repo::SqliteTagEvidenceRepository::new(isle.clone())),
         Arc::new(std::sync::OnceLock::new()),
+        Arc::new(asterism_infra::heads::FsTagHeadStore::new(
+            previews.path().join("heads"),
+        )),
+        Arc::new(std::sync::OnceLock::new()),
     ));
 
     Fixture {

@@ -7,10 +7,11 @@
 
 use asterism_contract::dto::{
     AssetCardDto, AssetCommentDto, AssetDetailDto, AssetDto, AssetPageDto, ChapterMarkDto, DirDto,
-    DispatchDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, MaterialLayerDto,
+    DispatchDto, EdgeDto, GroupDto, GroupLinkDto, GroupSummaryDto, HeadStatusDto, MaterialLayerDto,
     MaterialMarkDto, MessageDto, MessageRefDto, ModalityDefDto, PersonaDto, PersonaProfileDto,
-    PersonaThemeDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto, SettingLayerDto,
-    SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
+    PersonaThemeDto, RulingReadinessDto, SeriesStrategyDto, SessionDto, SessionPageDto, SettingDto,
+    SettingLayerDto, SnapshotDto, TagCountDto, TagDto, ThreadAnchorDto, ThreadDto,
+    TrainedHeadRunDto,
 };
 use asterism_contract::forge::{
     ForgeAnchorDto, ForgeChangePointDto, ForgeChangeRowDto, ForgeCloseDto, ForgeCollisionDto,
@@ -69,6 +70,7 @@ use crate::domain::value::{
     MaterialMarkId, MessageId, MimeType, Modality, Page, PersonaId, SnapshotId, TagId, ThreadId,
     Viewer, Visibility,
 };
+use crate::domain::visual::{ModelIdentity, TagEvidence, TagHeadRef, TagSuggestionDisposition};
 use crate::error::DomainError;
 
 /// Parses a UUID from the wire representation (returns a validation error
@@ -1608,6 +1610,286 @@ pub fn forge_revision_to_dto(revision: &Revision) -> ForgeRevisionDto {
         at_ms: revision.act().at().timestamp_millis(),
         actor_kind,
         actor_id,
+    }
+}
+
+/// Assembles the model panel's head status (#130) out of the three
+/// reads it takes: the promotion pointer, the head this process bound
+/// at startup, and the rulings a next run would learn from.
+///
+/// A function rather than three conversions because two of the answers
+/// are *relations* between the inputs. `restart_required` compares what
+/// would bind at the next launch against what is bound now —
+/// server-derived, so no screen has to remember that it clicked train.
+///
+/// One rule covers every state because "what would bind" is not the
+/// same as "what the pointer says". The next launch binds the pointer
+/// only where this encoder could honour it; a pointer trained against
+/// another encoder, or one whose artifact will not read, binds nothing
+/// and the launch scores zero-shot. Beside a bound head that is a
+/// change and says so, exactly as a cleared pointer does; beside
+/// zero-shot it is not, and does not.
+///
+/// `rulings` is the same corpus the trainer walks — every ruled row
+/// under the bound encoder — so the readiness line and the run it
+/// predicts cannot disagree about the floor.
+pub fn head_status_to_dto(
+    promoted: Option<&crate::domain::tag_head::PromotedHead>,
+    bound: Option<&TagHeadRef>,
+    identity: Option<&ModelIdentity>,
+    rulings: &[TagEvidence],
+) -> HeadStatusDto {
+    let run = promoted
+        .and_then(|p| p.run.as_ref())
+        .map(|run| TrainedHeadRunDto {
+            model_id: run.model_id.clone(),
+            dim: run.dim,
+            preprocess_ver: run.preprocess_ver,
+            trained_tags: run.trained_tags as u32,
+            rulings_used: run.rulings_used as u32,
+            held_out: run.eval.held_out as u32,
+            candidate_correct: run.eval.candidate_correct as u32,
+            baseline_correct: run.eval.baseline_correct as u32,
+            trained_at_ms: run.trained_at_ms,
+        });
+    let promoted_label = promoted.map(|p| p.label.clone());
+    let bound_label = bound.map(|head| head.as_str().to_string());
+    // What the next launch would bind: the pointer where this encoder
+    // could honour it, and nothing — zero-shot — everywhere else. With
+    // no encoder there is nothing to honour it *with*, and nothing is
+    // bound now either, so the two agree and no relaunch is asked for.
+    let next_launch = identity.and_then(|identity| {
+        promoted
+            .filter(|promoted| {
+                promoted.run.as_ref().is_some_and(|run| {
+                    run.model_id == identity.model_id
+                        && run.dim == identity.dim
+                        && run.preprocess_ver == identity.preprocess_ver
+                })
+            })
+            .map(|promoted| promoted.label.clone())
+    });
+    let mut per_tag: std::collections::BTreeMap<crate::domain::value::TagId, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for ruling in rulings {
+        let counts = per_tag.entry(ruling.tag_id).or_default();
+        match ruling.disposition {
+            TagSuggestionDisposition::Accepted => counts.0 += 1,
+            TagSuggestionDisposition::Rejected => counts.1 += 1,
+            // The port answers with ruled rows only; an unruled one
+            // counts towards neither class.
+            TagSuggestionDisposition::Suggested => {}
+        }
+    }
+    let floor = crate::domain::tag_head::MIN_RULINGS_PER_CLASS;
+    let tags_ready = per_tag
+        .values()
+        .filter(|(accepted, rejected)| *accepted >= floor && *rejected >= floor)
+        .count();
+    HeadStatusDto {
+        restart_required: next_launch != bound_label,
+        promoted: promoted_label,
+        bound: bound_label,
+        run,
+        readiness: RulingReadinessDto {
+            rulings: per_tag.values().map(|(a, r)| a + r).sum::<usize>() as u32,
+            tags_with_rulings: per_tag.len() as u32,
+            tags_ready: tags_ready as u32,
+            min_rulings_per_class: floor as u32,
+        },
+    }
+}
+
+#[cfg(test)]
+mod head_status_tests {
+    use super::*;
+    use crate::domain::tag_head::{HeadEval, PromotedHead, TrainedHeadRun};
+
+    fn identity() -> ModelIdentity {
+        ModelIdentity {
+            model_id: "siglip2".into(),
+            dim: 8,
+            preprocess_ver: 1,
+        }
+    }
+
+    fn run() -> TrainedHeadRun {
+        TrainedHeadRun {
+            model_id: "siglip2".into(),
+            dim: 8,
+            preprocess_ver: 1,
+            trained_tags: 2,
+            rulings_used: 30,
+            eval: HeadEval {
+                held_out: 8,
+                candidate_correct: 7,
+                baseline_correct: 5,
+            },
+            trained_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    fn head(label: &str) -> TagHeadRef {
+        TagHeadRef::new(label).expect("a non-empty label")
+    }
+
+    /// `n` rulings on one tag, `accepted` of them accepted.
+    fn rulings(tag: TagId, n: usize, accepted: usize) -> Vec<TagEvidence> {
+        (0..n)
+            .map(|i| TagEvidence {
+                asset_id: AssetId::new(),
+                tag_id: tag,
+                model_id: "siglip2".into(),
+                head: TagHeadRef::zero_shot(),
+                score: 0.5,
+                disposition: if i < accepted {
+                    TagSuggestionDisposition::Accepted
+                } else {
+                    TagSuggestionDisposition::Rejected
+                },
+                suggested_at_ms: 1,
+                resolved_at_ms: Some(2),
+            })
+            .collect()
+    }
+
+    /// With no encoder bound there is no corpus and nothing a relaunch
+    /// would change — zeros and a quiet badge, not absence.
+    #[test]
+    fn without_an_encoder_the_panel_reads_zero_shot_and_asks_for_nothing() {
+        let status = head_status_to_dto(None, None, None, &[]);
+        assert_eq!(status.promoted, None);
+        assert_eq!(status.bound, None);
+        assert!(!status.restart_required);
+        assert!(status.run.is_none());
+        assert_eq!(status.readiness.rulings, 0);
+        assert_eq!(status.readiness.tags_with_rulings, 0);
+        assert_eq!(status.readiness.tags_ready, 0);
+        assert_eq!(
+            status.readiness.min_rulings_per_class,
+            crate::domain::tag_head::MIN_RULINGS_PER_CLASS as u32
+        );
+    }
+
+    /// The head that is bound is the head the pointer names: the run
+    /// shows, and nothing asks for a relaunch.
+    #[test]
+    fn a_promoted_head_that_is_bound_reports_its_run_and_no_restart() {
+        let promoted = PromotedHead {
+            label: "head-v2-1a2b3c4d".into(),
+            run: Some(run()),
+        };
+        let status = head_status_to_dto(
+            Some(&promoted),
+            Some(&head("head-v2-1a2b3c4d")),
+            Some(&identity()),
+            &[],
+        );
+        assert!(!status.restart_required);
+        let run = status.run.expect("the artifact read");
+        assert_eq!(run.trained_tags, 2);
+        assert_eq!(run.rulings_used, 30);
+        assert_eq!(run.held_out, 8);
+        assert_eq!(run.candidate_correct, 7);
+        assert_eq!(run.baseline_correct, 5);
+        assert_eq!(run.model_id, "siglip2");
+    }
+
+    /// Every way the next launch can land somewhere other than here,
+    /// including the two that land on zero-shot.
+    ///
+    /// The badge is not "the pointer moved". A pointer this encoder
+    /// would refuse still changes what scores when a head is bound —
+    /// the launch refuses it and falls back — so it asks for a relaunch
+    /// as loudly as a fresh win does, and stays quiet only where
+    /// zero-shot is already what scores.
+    #[test]
+    fn the_badge_asks_whenever_the_next_launch_would_score_differently() {
+        // Trained since startup: a relaunch applies it.
+        let fresh = PromotedHead {
+            label: "head-v3-deadbeef".into(),
+            run: Some(run()),
+        };
+        let status = head_status_to_dto(
+            Some(&fresh),
+            Some(&head("head-v2-1a2b3c4d")),
+            Some(&identity()),
+            &[],
+        );
+        assert!(status.restart_required);
+
+        // Trained against another encoder: the launch refuses it and
+        // scores zero-shot, so the head bound now stops scoring.
+        let foreign = PromotedHead {
+            label: "head-v3-deadbeef".into(),
+            run: Some(TrainedHeadRun {
+                model_id: "some-other-encoder".into(),
+                ..run()
+            }),
+        };
+        let status = head_status_to_dto(
+            Some(&foreign),
+            Some(&head("head-v2-1a2b3c4d")),
+            Some(&identity()),
+            &[],
+        );
+        assert!(status.restart_required);
+        assert_eq!(status.promoted.as_deref(), Some("head-v3-deadbeef"));
+
+        // The same pointer with nothing bound: the launch scores
+        // zero-shot, which is what scores already.
+        let status = head_status_to_dto(Some(&foreign), None, Some(&identity()), &[]);
+        assert!(!status.restart_required);
+
+        // A pointer whose artifact would not read, under a bound head:
+        // the label survives the read, the run does not, and the launch
+        // falls back — the same drop, so the same answer.
+        let dangling = PromotedHead {
+            label: "head-v9-cafecafe".into(),
+            run: None,
+        };
+        let status = head_status_to_dto(
+            Some(&dangling),
+            Some(&head("head-v2-1a2b3c4d")),
+            Some(&identity()),
+            &[],
+        );
+        assert!(status.restart_required);
+
+        // Unreadable with nothing bound: zero-shot either way.
+        let status = head_status_to_dto(Some(&dangling), None, Some(&identity()), &[]);
+        assert!(!status.restart_required);
+        assert_eq!(status.promoted.as_deref(), Some("head-v9-cafecafe"));
+        assert!(status.run.is_none());
+
+        // The pointer cleared under a bound head: a relaunch drops to
+        // zero-shot, which is a change worth saying.
+        let status = head_status_to_dto(
+            None,
+            Some(&head("head-v2-1a2b3c4d")),
+            Some(&identity()),
+            &[],
+        );
+        assert!(status.restart_required);
+    }
+
+    /// Readiness counts the corpus the trainer walks, and a tag counts
+    /// as ready only with the floor met on **both** sides.
+    #[test]
+    fn readiness_counts_tags_that_clear_the_floor_on_both_classes() {
+        let floor = crate::domain::tag_head::MIN_RULINGS_PER_CLASS;
+        let ready = TagId::new();
+        let lopsided = TagId::new();
+        let thin = TagId::new();
+        let mut corpus = rulings(ready, floor * 2, floor);
+        // Every ruling accepted: nothing to learn the other side from.
+        corpus.extend(rulings(lopsided, floor * 2, floor * 2));
+        corpus.extend(rulings(thin, 2, 1));
+
+        let status = head_status_to_dto(None, None, Some(&identity()), &corpus);
+        assert_eq!(status.readiness.rulings, (floor * 4 + 2) as u32);
+        assert_eq!(status.readiness.tags_with_rulings, 3);
+        assert_eq!(status.readiness.tags_ready, 1);
     }
 }
 

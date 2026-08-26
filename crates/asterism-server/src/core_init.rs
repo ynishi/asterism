@@ -979,6 +979,19 @@ pub async fn init_core_with(
         previews_dir.clone(),
         Arc::new(sqlite::repo::SqliteTagEvidenceRepository::new(isle.clone())),
         visual_encoder_cell.clone(),
+        // Beside the database like the preview renditions, and for the
+        // same reason: a test that sandboxes the db sandboxes the
+        // heads store too. In a real profile this is the directory
+        // `paths::heads_dir` resolves to — the db sits directly under
+        // the profile home — so the panel reads what the training job
+        // writes.
+        Arc::new(asterism_infra::heads::FsTagHeadStore::new(
+            db_path
+                .parent()
+                .map(|p| p.join("heads"))
+                .unwrap_or_else(|| PathBuf::from("heads")),
+        )),
+        tag_head_cell.clone(),
     ));
     let dispatch_runner_service = Arc::new(DispatchRunnerService::new(
         dispatches.clone(),
