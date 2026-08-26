@@ -455,6 +455,32 @@ and this project adheres to
 
 ### Changed
 
+- **The instructions are `AGENTS.md`, and `.claude/` is one symlink.** What a
+  repository tells an agent belongs somewhere an agent other than Claude Code
+  can find, so it is `AGENTS.md` at the root now. Claude Code reads `CLAUDE.md`
+  rather than that name, so `.claude/CLAUDE.md` is committed as a symlink back
+  to it: one file to edit, no wiring for anyone who clones, and nothing said
+  twice. `.gitignore` takes the rest of the directory, which is Claude Code's
+  working directory on a machine — local settings, local memory, plugin caches,
+  session state — and never was this repository's to carry. The pattern is
+  `.claude/*` and not `.claude/`, because git cannot re-include a file whose
+  parent directory is excluded.
+
+  `.claude/settings.json` went with it. It denied `git push` and `gh pr create`
+  to agents, and it read as enforcement while being neither: a deny list is
+  client-side and per-person, advisory where it exists and absent everywhere
+  else. What can hold an agent to anything is the remote's own settings, which
+  nothing local can switch off, and this file is not where their contents are
+  recorded. Keep a personal deny list for the reminder; committing one and
+  calling it a guard is what stops being true here. What a deny list did cover
+  and a branch rule does not — `gh release`, `gh repo edit`, `gh repo delete` —
+  is worth keeping in yours.
+
+  A clone on Windows without Developer Mode writes the symlink out as a text
+  file holding its target path. `CONTRIBUTING.md` says to leave that file alone,
+  since editing it dirties a tracked path, and to put a `CLAUDE.md` holding
+  `@AGENTS.md` at the root instead, where the ignore list already expects one.
+
 - **The three reviews are one plugin, and a checkout no longer carries agents.**
   `pub-checker` and `reviewer` sat in `.claude/agents/`, so cloning is how they
   reached a machine, while `doc-reviewer` was already installed from this
@@ -463,31 +489,30 @@ and this project adheres to
   `/plugin install review@asterism`. `doc-review` is gone as a name, and anyone
   who had it installed replaces it.
 
-  What `.claude/` keeps is what every contributor shares and nothing a plugin
-  can carry — `CLAUDE.md`, which points at the documents here, and
-  `settings.json`, which denies push and PR outright. Everything a plugin can
-  carry is ignored there — `.gitignore` holds the list — so a local edit to one
-  is not this repository's to review. The prose that told agents to run
-  `.claude/agents/` moved with them, in `CLAUDE.md`, `CONTRIBUTING.md` and
-  `README.md`: a machine now has all three reviews or none, and when it has none
-  the answer is to say the change was not reviewed rather than to review it in
-  their place.
+  An agent stopped being something a checkout carries, so the prose that sent
+  one to `.claude/agents/` went with them, in the pointer memory, in
+  `CONTRIBUTING.md` and in `README.md`: a machine now has all three reviews or
+  none, and when it has none the answer is to say the change was not reviewed
+  rather than to review it in their place.
 
-  `CLAUDE.md` is shorter for a second reason. Three of its bullets had grown
-  into second copies of the documents it points at — which gates to run locally,
-  the hand-over ordering, and the review loop before a pull request — and
-  CONTRIBUTING.md carries all three. What is left is the pointers and the facts
-  a reader cannot get from them.
+  The pointer memory is shorter for a second reason. Three of its bullets had
+  grown into second copies of the documents it points at — which gates to run
+  locally, the hand-over ordering, and the review loop before a pull request —
+  and CONTRIBUTING.md carries all three. What is left is the pointers and the
+  facts a reader cannot get from them.
 
   `pub-checker` gained the one question about a diff that is not about its
-  contents: a change to a file an agent loads as instructions — under `.claude/`
-  or in a plugin's own `agents/`, `skills/`, `commands/` or `hooks/` — decides
-  what every later agent is told, so the report opens with
-  `HUMAN REVIEW REQUIRED — agent instructions changed`, says what each edit does
-  to those instructions, and asks a human to confirm in their own words that
-  they asked for it. Being small, obviously correct, or a revert does not exempt
-  it, and neither an earlier turn nor the handed-over task counts as the answer
-  — those are what a wrong edit there would come from.
+  contents. `.claude/` is Claude Code's own directory on a machine, so anything
+  committed out of it arrives carrying that risk, and this repository tracks one
+  path there behind a `.gitignore` that refuses the rest. Two edits can widen
+  that: the ignore rules themselves, and the tracked file's own target or type.
+  When either is in a diff the report opens with
+  `HUMAN REVIEW REQUIRED — .claude/ exposure`, quotes the before and after, says
+  what could now be committed that could not be before, and asks a human to
+  confirm in their own words that they asked for it. Being small, obviously
+  correct, or a revert does not exempt it, and neither an earlier turn nor the
+  handed-over task counts as the answer — those are what a wrong edit there
+  would come from.
 
   The last of it is where the reviews stop. `reviewer` said there is no round 3
   and then offered, in the next sentence, to split a branch that needed one into
@@ -498,8 +523,8 @@ and this project adheres to
   names the one thing to settle, and leaves it to a human. `doc-reviewer` had no
   rounds at all — it owns the prose, so the churn came out of it while the only
   stopping rule sat in the agent that had recused itself — and it now reads
-  `git log -p main..HEAD -- <file>` to see whether the passage it is quoting is
-  one this branch has already rewritten.
+  `git log -p origin/main..HEAD -- <file>` to see whether the passage it is
+  quoting is one this branch has already rewritten.
 
 - **`GET /teams/{team_id}/events` answers with a page, not the whole stream**
   (#149). The response is now an object — `{ "events": [...], "next_after": N }`
