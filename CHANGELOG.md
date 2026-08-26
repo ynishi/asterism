@@ -505,14 +505,15 @@ and this project adheres to
   contents. `.claude/` is Claude Code's own directory on a machine, so anything
   committed out of it arrives carrying that risk, and this repository tracks one
   path there behind a `.gitignore` that refuses the rest. Two edits can widen
-  that: the ignore rules themselves, and the tracked file's own target or type.
-  When either is in a diff the report opens with
-  `HUMAN REVIEW REQUIRED — .claude/ exposure`, quotes the before and after, says
-  what could now be committed that could not be before, and asks a human to
-  confirm in their own words that they asked for it. Being small, obviously
-  correct, or a revert does not exempt it, and neither an earlier turn nor the
-  handed-over task counts as the answer — those are what a wrong edit there
-  would come from.
+  that — the ignore rules themselves, and the tracked file's own target or type
+  — and `AGENTS.md`, which that file resolves to and which was itself ignored
+  until this change, is the third door and is reported on any edit at all. When
+  one of them is in a diff the report opens with
+  `HUMAN REVIEW REQUIRED — <path>`, quotes the before and after, says what could
+  now be committed that could not be before, and asks a human to confirm in
+  their own words that they asked for it. Being small, obviously correct, or a
+  revert does not exempt it, and neither an earlier turn nor the handed-over
+  task counts as the answer — those are what a wrong edit there would come from.
 
   The last of it is where the reviews stop. `reviewer` said there is no round 3
   and then offered, in the next sentence, to split a branch that needed one into
