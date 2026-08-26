@@ -9,14 +9,6 @@
 - Security reports: [SECURITY.md](../SECURITY.md)
 - API detail lives in RustDoc (`cargo doc`) and `docs/aidoc/`; code
   documentation outranks stale issue text.
-- Green is `just check`, and CI is where it runs. Do not run its two
-  workspace-wide gates locally: `just rust-test` links every test binary in the
-  workspace at once, and `just rust-clippy` compiles every target in every
-  crate. Use `just rust-test-changed` and `just rust-clippy-changed` (the
-  packages this branch touched — the pair `pre-push` runs), or
-  `just rust-test-pkg <crate>…`. Never hand-roll `cargo test --workspace` or
-  `cargo clippy --workspace` — that includes reaching for either as a quick
-  check of your own edit.
 - Never work on `main`; one worktree per issue under `.worktrees/`, cut with
   `just worktree-new <type> <slug>` from the main checkout — the recipe runs
   `just branch-check` in the new worktree, so there is no second run to make.
@@ -24,23 +16,10 @@
   tree. Commit, then run them; while editing, reach for
   `just rust-test-one <crate> <cargo args>…`, which passes a filter, `--lib`, or
   `--test <name>` straight through. A whole crate is not a small unit here.
-- Agents do not push, publish, or open PRs. They do run `git fetch origin` then
-  `just pre-push` themselves, write the PR body to a file under `workspace/`,
-  and hand over the two literal commands — the ordering is in
-  [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests) and putting
-  `just pre-push` in the handed-over block is the mistake it exists to stop.
-- Run the `reviewer` and `pub-checker` agents before every commit —
-  `pub-checker` on the diff, `reviewer` with the issue number, which is all it
-  needs.
-- Prose against code is a third review, and it is the one that owns comments:
-  `doc-reviewer`, on the diff beside `pub-checker`. Neither of the other two
-  decides what a comment should say, and a sentence recording that a rule
-  changed is not a defect to any of them: it is what stops the next reader
-  undoing the rule.
-- All three are the `review` plugin, so a checkout is not how they reach this
-  machine: `/plugin install review@asterism`, same marketplace as `prose-shape`.
-  When it is not installed none of the three exist — then say the change was not
-  reviewed, rather than reviewing it by hand in their place.
+- The three reviews are the `review` plugin, so a checkout is not how they reach
+  this machine: `/plugin install review@asterism`, same marketplace as
+  `prose-shape`. When it is not installed none of the three exist — then say the
+  change was not reviewed, rather than reviewing it by hand in their place.
 - Do not carry a wrapping width from one artefact to another; three differ, and
   each has its own check to say so. `commit-msg-check` answers for commit
   messages, `just md-fmt` wraps the markdown in the tree and `just md-check`
