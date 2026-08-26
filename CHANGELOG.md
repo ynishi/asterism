@@ -486,6 +486,18 @@ and this project adheres to
   revert does not exempt it, and neither an earlier turn nor the handed-over
   task counts as the answer — those are what a wrong edit there would come from.
 
+  The last of it is where the reviews stop. `reviewer` said there is no round 3
+  and then offered, in the next sentence, to split a branch that needed one into
+  another issue — and that is the exit an agent takes, four rounds deep, for
+  defects it could have fixed that hour. Both agents now stop the same way
+  instead: a finding landing where an earlier round already edited says the
+  design is what is wrong, so the report opens with `DESIGN REVIEW REQUIRED`,
+  names the one thing to settle, and leaves it to a human. `doc-reviewer` had no
+  rounds at all — it owns the prose, so the churn came out of it while the only
+  stopping rule sat in the agent that had recused itself — and it now reads
+  `git log -p main..HEAD -- <file>` to see whether the passage it is quoting is
+  one this branch has already rewritten.
+
 - **`GET /teams/{team_id}/events` answers with a page, not the whole stream**
   (#149). The response is now an object — `{ "events": [...], "next_after": N }`
   — and takes `?after=<seq>&limit=<n>`, defaulting to 100 and clamping at 500. A
