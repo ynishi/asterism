@@ -29,17 +29,18 @@
   and hand over the two literal commands — the ordering is in
   [CONTRIBUTING.md](../CONTRIBUTING.md#pull-requests) and putting
   `just pre-push` in the handed-over block is the mistake it exists to stop.
-- Run the `reviewer` and `pub-checker` agents (`.claude/agents/`) before every
-  commit — `pub-checker` on the diff, `reviewer` with the issue number, which is
-  all it needs.
+- Run the `reviewer` and `pub-checker` agents before every commit —
+  `pub-checker` on the diff, `reviewer` with the issue number, which is all it
+  needs.
 - Prose against code is a third review, and it is the one that owns comments:
-  `doc-reviewer`, from the `doc-review` plugin
-  (`/plugin install doc-review@asterism`, same marketplace as `prose-shape`).
-  Run it on the diff beside `pub-checker`. It is a plugin, so it may not be
-  installed on this machine — then say that the prose was not reviewed, and do
-  not let `reviewer` stand in for it. Neither of the other two decides what a
-  comment should say, and a sentence recording that a rule changed is not a
-  defect to any of them: it is what stops the next reader undoing the rule.
+  `doc-reviewer`, on the diff beside `pub-checker`. Neither of the other two
+  decides what a comment should say, and a sentence recording that a rule
+  changed is not a defect to any of them: it is what stops the next reader
+  undoing the rule.
+- All three are the `review` plugin, so a checkout is not how they reach this
+  machine: `/plugin install review@asterism`, same marketplace as `prose-shape`.
+  When it is not installed none of the three exist — then say the change was not
+  reviewed, rather than reviewing it by hand in their place.
 - Do not carry a wrapping width from one artefact to another; three differ, and
   each has its own check to say so. `commit-msg-check` answers for commit
   messages, `just md-fmt` wraps the markdown in the tree and `just md-check`

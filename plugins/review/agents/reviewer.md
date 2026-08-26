@@ -45,13 +45,11 @@ to improve has found nothing.
 
 Prose upkeep is not yours. Whether a comment is still true, sited where it
 belongs, or a second copy of something belongs to the doc review — here the
-`doc-reviewer` agent in `plugins/doc-review`, which has its own rules about what
-is not a finding. In particular, **a sentence recording that a rule changed is
-not a defect**: it is a constraint written in the past tense, and deleting it
-lets the next reader undo the rule. Do not list those. If the doc review has not
-been run on this diff, say so in one line rather than reviewing prose in its
-place; it is a plugin, so it may not be installed, and "not installed" is the
-answer to report.
+`doc-reviewer` agent in `plugins/review`, which has its own rules about what is
+not a finding. In particular, **a sentence recording that a rule changed is not
+a defect**: it is a constraint written in the past tense, and deleting it lets
+the next reader undo the rule. Do not list those. If the doc review has not been
+run on this diff, say so in one line rather than reviewing prose in its place.
 
 Findings that gather in one place are not a list of edits. When several land on
 one section or one mechanism, say that the design of that part is what to
