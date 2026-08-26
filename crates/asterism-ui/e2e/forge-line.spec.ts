@@ -266,17 +266,33 @@ describe("a line's lifecycle", () => {
     await stage(trail, "start the rename", DRIVER_MS, () =>
       clickIn('[role="dialog"][aria-label="Forge"] .verbs button'),
     );
+    // The prompt by its own class, and committed through its own OK.
+    //
+    // This asked for `.prompt-modal input, [role="dialog"] input[type="text"]`
+    // and then submitted `input.closest("form")`. Neither half found the
+    // prompt: the class is `prompt-panel`, and the drawer is itself a
+    // `[role="dialog"]` mounted before it — so the match was the
+    // *new-line* Name field, and the form submitted was the new-line
+    // form. Every run of this spec opened a rename it never answered
+    // and created a second line called "…renamed" instead, which is
+    // why the fixture carried five of them and a prompt nobody could
+    // press past. The poll below passed on that new line's name.
+    //
+    // There is no form to submit either: `PromptModal` commits from a
+    // button and from Enter, so this presses the button.
     await stage(trail, "answer the prompt", DRIVER_MS, () =>
       browser.execute((name: string) => {
         const input = document.querySelector(
-          '.prompt-modal input, [role="dialog"] input[type="text"]',
+          ".prompt-panel input.prompt-input",
         ) as HTMLInputElement | null;
         if (input === null) return false;
         input.value = name;
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        const form = input.closest("form");
-        if (form === null) return false;
-        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        const ok = document.querySelector(
+          ".prompt-panel .prompt-btn.primary",
+        ) as HTMLElement | null;
+        if (ok === null) return false;
+        ok.click();
         return true;
       }, RENAMED),
     );

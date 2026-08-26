@@ -47,8 +47,20 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-/** A name nothing else in the fixture answers to. */
-const LINE_NAME = "e2e-forge-pursuit";
+/// What every line this spec has ever made is called, and what this
+/// run's is called.
+///
+/// A name unique to the run, because the first thing a failed run
+/// leaves behind is its line — and the second thing is a spec that
+/// picks the leftover instead of what it just made. That happened: a
+/// run failed before its discard, the next one archived its own line
+/// and then discarded nothing, because "the first button reading
+/// e2e-forge-pursuit" was the corpse of the run before.
+///
+/// `Name` carries no claim of uniqueness and the model says so, so the
+/// uniqueness has to be here rather than assumed of the forge.
+const LINE_PREFIX = "e2e-forge-pursuit";
+const LINE_NAME = `${LINE_PREFIX}-${Date.now()}`;
 const WORK_TITLE = "e2e first round";
 
 const FORGE_ROW = 'aside.sidebar button[title^="Lines on this machine"]';
@@ -133,6 +145,14 @@ interface WorkSnapshot {
   onTheLine: string;
   /** The discard notice, if it is showing. */
   released: string;
+  /// What the app refused, if anything.
+  ///
+  /// Outside the drawer, and read anyway: `mutate` puts every refusal
+  /// here and nowhere else, so a spec that only reads the drawer sees a
+  /// write silently not happening. That is what the sweep hit — a
+  /// discard pressed, confirmed, and refused, with the reason on screen
+  /// the whole time in a place nothing was looking at.
+  refusal: string;
 }
 
 /** One `execute` for the whole drawer: every read this spec makes is a
@@ -153,9 +173,14 @@ function readDrawer(): Promise<WorkSnapshot> {
       corrected: 0,
       onTheLine: "",
       released: "",
+      refusal: "",
     };
+    // Read before the early return: a refusal outlives the drawer, and
+    // the drawer being gone is one of the things a refusal explains.
+    const refusal =
+      document.querySelector(".refusal-toast")?.textContent?.trim() ?? "";
     const drawer = document.querySelector('[role="dialog"][aria-label="Forge"]');
-    if (drawer === null) return empty;
+    if (drawer === null) return { ...empty, refusal };
     const nav = drawer.querySelector('nav[aria-label="Lines"]');
     const lists = nav === null ? [] : Array.from(nav.querySelectorAll("ul"));
     const namesIn = (ul: Element | undefined) =>
@@ -196,24 +221,50 @@ function readDrawer(): Promise<WorkSnapshot> {
       released: (drawer.querySelector(".released")?.textContent ?? "")
         .replace(/\s+/g, " ")
         .trim(),
+      refusal,
     };
   });
 }
 
-/** Clicks by selector through `execute`. `$().click()` is a taxed
- *  driver call and this spec makes a dozen of them. */
-function clickIn(selector: string): Promise<boolean> {
-  return browser.execute((sel: string) => {
+/// Writes a PNG of the window under `workspace/`, which is gitignored.
+///
+/// Every assertion here reads `textContent`, and text that is present
+/// says nothing about whether it can be reached: this spec passed while
+/// the add control was a disabled button telling somebody to go and
+/// select in a grid the drawer was covering. A picture is what shows
+/// that, and nobody had looked at one.
+/// The path is relative to wdio's working directory, which is
+/// `crates/asterism-ui` — two levels under the `workspace/` this writes
+/// to, and `saveScreenshot` does not create a directory it is handed.
+async function shot(name: string): Promise<void> {
+  await browser.saveScreenshot(`../../workspace/forge-${name}.png`);
+}
+
+/// Clicks by selector through `execute`, and **fails when it hits
+/// nothing**. `$().click()` is a taxed driver call and this spec makes
+/// a dozen of them, so the click is done in the page — but a click in
+/// the page answers with a boolean, and a boolean nobody reads is a
+/// step that passes for pressing thin air. This spec did that: "press
+/// discard" found no discard button, returned false, and was recorded
+/// as done.
+///
+/// It also cannot see an overlay. `el.click()` reaches an element under
+/// a modal that a person could not press, which is why `noModal` is
+/// asserted rather than assumed.
+async function press(selector: string): Promise<void> {
+  const hit = await browser.execute((sel: string) => {
     const el = document.querySelector(sel);
     if (el === null) return false;
     (el as HTMLElement).click();
     return true;
   }, selector);
+  if (!hit) throw new Error(`nothing to press at ${selector}`);
 }
 
-/** Clicks the button inside the drawer whose label is exactly this. */
-function clickLabelled(within: string, label: string): Promise<boolean> {
-  return browser.execute(
+/// Clicks the button inside `within` whose label is exactly `label`,
+/// and fails when there is none, for `press`'s reason.
+async function pressLabelled(within: string, label: string): Promise<void> {
+  const hit = await browser.execute(
     (scope: string, wanted: string) => {
       const root = document.querySelector(scope);
       if (root === null) return false;
@@ -227,6 +278,156 @@ function clickLabelled(within: string, label: string): Promise<boolean> {
     within,
     label,
   );
+  if (!hit) throw new Error(`no button reading "${label}" inside ${within}`);
+}
+
+/// Every line this spec's earlier runs left behind, this run's aside.
+async function leftovers(): Promise<string[]> {
+  const drawer = await readDrawer();
+  return [...drawer.open, ...drawer.archived].filter(
+    (name) => name.startsWith(LINE_PREFIX) && name !== LINE_NAME,
+  );
+}
+
+/// Discards them, oldest first, before this run makes its own.
+///
+/// A run that fails before its cleanup leaves a line, and the fixture
+/// showed six of them. They are not inert: they carry the name the next
+/// run looks for, and the spec that finds one instead of its own line
+/// archives the right thing and then discards nothing. Unique names
+/// stop the confusion; this stops the pile.
+///
+/// Only this spec's own prefix. `e2e-forge-line` belongs to the spec
+/// next door and its leftovers are that spec's to answer for.
+async function sweepLeftovers(trail: string[]): Promise<void> {
+  for (let round = 0; round < 20; round += 1) {
+    const stale = await leftovers();
+    if (stale.length === 0) return;
+    const name = stale[0];
+    const open = (await readDrawer()).open.includes(name);
+    await stage(trail, `sweep: select ${name}`, DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, name),
+    );
+
+    // Work first, and the model is why: a drop takes the history the
+    // work was cut from, so it refuses while any is open rather than
+    // leaving a log against nothing. A leftover is exactly the line
+    // whose work never got closed, so every one of these needs it.
+    await stage(trail, "sweep: to the work", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .tabs`, "work"),
+    );
+    for (let piece = 0; piece < 10; piece += 1) {
+      const anyOpen = await browser.execute(
+        () =>
+          document.querySelector(
+            '[role="dialog"][aria-label="Forge"] .work-list:not(.ended) button',
+          ) !== null,
+      );
+      if (!anyOpen) break;
+      await stage(trail, "sweep: open the piece", DRIVER_MS, () =>
+        press(`${DRAWER} .work-list:not(.ended) button`),
+      );
+      await pollUntil(
+        trail,
+        "sweep: the piece paints",
+        ROUND_TRIP_MS,
+        async () =>
+          browser.execute(
+            () =>
+              document.querySelector(
+                '[role="dialog"][aria-label="Forge"] .work-head',
+              ) !== null,
+          ),
+        "the piece of work never opened",
+      );
+      await stage(trail, "sweep: abandon it", DRIVER_MS, () =>
+        pressLabelled(`${DRAWER} .close`, "close · abandon"),
+      );
+      await pollUntil(
+        trail,
+        "sweep: it ended",
+        ROUND_TRIP_MS,
+        async () =>
+          browser.execute(
+            () =>
+              document
+                .querySelector('[role="dialog"][aria-label="Forge"] .work-head')
+                ?.textContent?.includes("abandoned") ?? false,
+          ),
+        "abandoning the piece of work did not take",
+      );
+      await stage(trail, "sweep: back to the list", DRIVER_MS, () =>
+        pressLabelled(`${DRAWER} .work-head`, "← all work"),
+      );
+    }
+
+    if (open) {
+      // A discard is reachable only from an archived line, which is the
+      // model's order rather than the screen's.
+      await stage(trail, "sweep: archive it", DRIVER_MS, () =>
+        pressLabelled(`${DRAWER} .verbs`, "archive"),
+      );
+      await stage(trail, "sweep: select it again", DRIVER_MS, () =>
+        pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, name),
+      );
+    }
+    await stage(trail, "sweep: discard it", DRIVER_MS, () =>
+      press(`${DRAWER} .verbs button.danger`),
+    );
+    await stage(trail, "sweep: confirm", DRIVER_MS, () =>
+      pressLabelled("body", "Discard Forever"),
+    );
+    // By count rather than by name: several leftovers can share one,
+    // and `includes` would still be true with one of them gone.
+    let saw = "";
+    await pollUntil(
+      trail,
+      "sweep: one fewer",
+      ROUND_TRIP_MS,
+      async () => {
+        const drawer = await readDrawer();
+        const covering = await browser.execute(() =>
+          Array.from(
+            document.querySelectorAll('[role="dialog"], .prompt-panel, .confirm-panel'),
+          )
+            .filter((el) => el.getAttribute("aria-label") !== "Forge")
+            .map((el) => el.textContent?.trim().slice(0, 30) ?? ""),
+        );
+        saw =
+          `open=[${drawer.open.join("|")}] archived=[${drawer.archived.join("|")}] ` +
+          `heading=${JSON.stringify(drawer.heading)} released=${JSON.stringify(drawer.released)} ` +
+          `refusal=${JSON.stringify(drawer.refusal)} covering=${JSON.stringify(covering)}`;
+        return (
+          [...drawer.open, ...drawer.archived].filter(
+            (n) => n.startsWith(LINE_PREFIX) && n !== LINE_NAME,
+          ).length < stale.length
+        );
+      },
+      () => `${name} did not go; last saw ${saw}`,
+    );
+  }
+  throw new Error("more leftovers than this sweep is willing to remove");
+}
+
+/// Fails if anything is covering the drawer.
+///
+/// A modal left open by an earlier spec covered every screen this one
+/// captured, and every assertion still passed, because `execute` clicks
+/// through it. A person would have been able to press nothing at all.
+/// So the state a picture would have shown is asserted here instead of
+/// being left to whoever looks at one.
+async function noModal(where: string): Promise<void> {
+  const open = await browser.execute(() => {
+    const dialogs = Array.from(
+      document.querySelectorAll('[role="dialog"], .prompt-modal, .confirm-modal'),
+    ).filter((el) => el.getAttribute("aria-label") !== "Forge");
+    return dialogs.map((el) => el.textContent?.trim().slice(0, 40) ?? "");
+  });
+  if (open.length > 0) {
+    throw new Error(
+      `something is covering the drawer at ${where}: ${JSON.stringify(open)}`,
+    );
+  }
 }
 
 describe("a pursuit against a line", () => {
@@ -276,7 +477,7 @@ describe("a pursuit against a line", () => {
       }),
     );
 
-    await stage(trail, "open the forge", DRIVER_MS, () => clickIn(FORGE_ROW));
+    await stage(trail, "open the forge", DRIVER_MS, () => press(FORGE_ROW));
     await pollUntil(
       trail,
       "the drawer paints",
@@ -284,6 +485,14 @@ describe("a pursuit against a line", () => {
       async () => (await readDrawer()).drawerPresent,
       "the forge drawer never appeared",
     );
+    // Before anything is read off the screen. A modal left open by an
+    // earlier spec is invisible to every assertion here and fatal to a
+    // person, and this is the first moment the drawer exists to be
+    // covered.
+    await stage(trail, "nothing is covering the drawer", DRIVER_MS, () =>
+      noModal("the drawer just opened"),
+    );
+    await sweepLeftovers(trail);
 
     await stage(trail, "fill the new-line form", DRIVER_MS, () =>
       browser.execute((name: string) => {
@@ -308,7 +517,7 @@ describe("a pursuit against a line", () => {
       }, LINE_NAME),
     );
     await stage(trail, "open the line", DRIVER_MS, () =>
-      clickIn(`${DRAWER} form.new-line button`),
+      press(`${DRAWER} form.new-line button`),
     );
     await pollUntil(
       trail,
@@ -319,7 +528,7 @@ describe("a pursuit against a line", () => {
     );
 
     await stage(trail, "select the line", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} nav[aria-label="Lines"]`, LINE_NAME),
+      pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, LINE_NAME),
     );
     await pollUntil(
       trail,
@@ -332,7 +541,7 @@ describe("a pursuit against a line", () => {
     // The header button is the one #180 left disabled. Pressing it is
     // what proves the work tab is reachable the way the design says.
     await stage(trail, "press open a pursuit", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .line header`, "open a pursuit"),
+      pressLabelled(`${DRAWER} .line header`, "open a pursuit"),
     );
     await stage(trail, "fill the new-work form", DRIVER_MS, () =>
       browser.execute((title: string) => {
@@ -348,7 +557,7 @@ describe("a pursuit against a line", () => {
       }, WORK_TITLE),
     );
     await stage(trail, "open the pursuit", DRIVER_MS, () =>
-      clickIn(`${DRAWER} form.new-work button`),
+      press(`${DRAWER} form.new-work button`),
     );
     await pollUntil(
       trail,
@@ -360,6 +569,7 @@ describe("a pursuit against a line", () => {
       },
       "opening the pursuit did not put it on screen",
     );
+    await shot("work-opened");
 
     // The selection becomes a round. One operation, named from the
     // asset's locator — which is the read `hydrate_cards` answers and
@@ -384,13 +594,14 @@ describe("a pursuit against a line", () => {
       },
       "the round never appeared in the work's log",
     );
+    await shot("round-pushed");
 
     // Say something about the round, and then correct it. The
     // correction is the half worth driving through the real backend:
     // the model keeps what was said first and every revision, and a
     // surface that rendered only the latest would misreport somebody.
     await stage(trail, "open a conversation about the round", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .round-head`, "say something"),
+      pressLabelled(`${DRAWER} .round-head`, "say something"),
     );
     await pollUntil(
       trail,
@@ -420,7 +631,7 @@ describe("a pursuit against a line", () => {
       "the conversation never showed what was said in it",
     );
     await stage(trail, "start a correction", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .talk`, "correct"),
+      pressLabelled(`${DRAWER} .talk`, "correct"),
     );
     await stage(trail, "save the correction", DRIVER_MS, () =>
       browser.execute(() => {
@@ -445,8 +656,9 @@ describe("a pursuit against a line", () => {
       },
       "the correction did not reach the message, or left no trace of itself",
     );
+    await shot("conversation-corrected");
     await stage(trail, "close the conversation", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .talk header`, "close"),
+      pressLabelled(`${DRAWER} .talk header`, "close"),
     );
 
     // Nothing is on the line yet. A round is a request, and the panel
@@ -454,7 +666,7 @@ describe("a pursuit against a line", () => {
     // there, `push` is landing something and the model is not what the
     // screen was built against.
     await stage(trail, "look at the contents", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .tabs`, "on the line"),
+      pressLabelled(`${DRAWER} .tabs`, "on the line"),
     );
     await pollUntil(
       trail,
@@ -465,10 +677,10 @@ describe("a pursuit against a line", () => {
     );
 
     await stage(trail, "back to the work", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .tabs`, "work"),
+      pressLabelled(`${DRAWER} .tabs`, "work"),
     );
     await stage(trail, "close it satisfied", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .close`, "close · put it on the line"),
+      pressLabelled(`${DRAWER} .close`, "close · put it on the line"),
     );
     await pollUntil(
       trail,
@@ -488,7 +700,7 @@ describe("a pursuit against a line", () => {
     // close lands what the rounds asked for, which is the one thing
     // every read before it deliberately does not do.
     await stage(trail, "look at the contents again", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .tabs`, "on the line"),
+      pressLabelled(`${DRAWER} .tabs`, "on the line"),
     );
     await pollUntil(
       trail,
@@ -497,12 +709,13 @@ describe("a pursuit against a line", () => {
       async () => (await readDrawer()).onTheLine === "1 on the line",
       "the satisfied close did not put the round's entry on the line",
     );
+    await shot("landed-on-the-line");
 
     // Clean up through the panel, which is also the assertion the line
     // spec could not make: the discard names what it released, and now
     // there is something to release.
     await stage(trail, "archive it", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} .verbs`, "archive"),
+      pressLabelled(`${DRAWER} .verbs`, "archive"),
     );
     await pollUntil(
       trail,
@@ -512,13 +725,13 @@ describe("a pursuit against a line", () => {
       "archiving did not move the line into the archived section",
     );
     await stage(trail, "select the archived line", DRIVER_MS, () =>
-      clickLabelled(`${DRAWER} nav[aria-label="Lines"]`, LINE_NAME),
+      pressLabelled(`${DRAWER} nav[aria-label="Lines"]`, LINE_NAME),
     );
     await stage(trail, "press discard", DRIVER_MS, () =>
-      clickIn(`${DRAWER} .verbs button.danger`),
+      press(`${DRAWER} .verbs button.danger`),
     );
     await stage(trail, "confirm the discard", DRIVER_MS, () =>
-      clickLabelled("body", "Discard Forever"),
+      pressLabelled("body", "Discard Forever"),
     );
     // What this last poll saw, if it never comes true. A conjunction of
     // three that fails as one boolean says only that something went
@@ -546,7 +759,7 @@ describe("a pursuit against a line", () => {
     );
 
     await stage(trail, "close the drawer", DRIVER_MS, () =>
-      clickIn(`${DRAWER} .drawer-close`),
+      press(`${DRAWER} .drawer-close`),
     );
   });
 });

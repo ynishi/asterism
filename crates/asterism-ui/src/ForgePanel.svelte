@@ -129,12 +129,25 @@
   // line, its whole history, and every piece of work against it. The
   // released assets come back in the answer and are named here,
   // because after this write nothing can derive them again.
+  //
+  // **Every piece of work that has ended.** The model refuses the drop
+  // while any is still open, because dropping takes the history that
+  // work was cut from and would leave a log against nothing. The body
+  // said the pursuits went with it and stopped there, which is the half
+  // that reads as a warning; the half that reads as an instruction was
+  // missing until a refusal arrived on a screen and had to be explained
+  // by the toast.
   async function discard(line: ForgeLineDto) {
+    const open = forgeCatalog.openWork.length;
     const ok = await confirmCatalog.open({
       title: `Discard ${line.name}?`,
       body:
-        "The line, its history, and every pursuit against it go with it. " +
-        "The assets it held stay in the library. This cannot be undone.",
+        open > 0
+          ? `${open} ${open === 1 ? "pursuit is" : "pursuits are"} still open against this line, and the ` +
+            "forge will refuse to drop it until they are closed. Close them " +
+            "under work, then discard."
+          : "The line, its history, and every pursuit against it go with it. " +
+            "The assets it held stay in the library. This cannot be undone.",
       confirmLabel: "Discard Forever",
       danger: true,
     });

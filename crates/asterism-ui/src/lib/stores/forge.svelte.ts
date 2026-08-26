@@ -664,6 +664,25 @@ class ForgeCatalog {
     await this.threads.load(anchor);
   }
 
+  /// Gets out of the way without ending anything.
+  ///
+  /// The drawer is an overlay, so while it is up the grid cannot be
+  /// reached — and the grid is where the content of a round comes from.
+  /// A person who opens the forge before picking is therefore told to
+  /// go and select something, by a surface that is itself what stops
+  /// them. The first build of this shipped that as a disabled button
+  /// with the instruction on it, and pressing it does nothing, which is
+  /// the state the button existed to avoid.
+  ///
+  /// So: step aside, keep everything. The line, the work, what is
+  /// loaded about both — none of it is a question this answers, unlike
+  /// `closePanel`, which ends the question deliberately. Opening the
+  /// panel again lands back on the same work with the selection now
+  /// made.
+  stepAside(): void {
+    this.open = false;
+  }
+
   /// Closing ends the question rather than pausing it.
   ///
   /// Everything a line's selection produced goes with it. Keeping any of that
@@ -726,6 +745,13 @@ class ForgeCatalog {
   }
 
   /// Drops the line, its history, and every piece of work against it.
+  ///
+  /// **It refuses while any of that work is still open**, and the model
+  /// says why where it refuses: dropping takes the history the work was
+  /// cut from, so what would be left is a log against nothing. Closing
+  /// the work first is the record of what happened to it, not a
+  /// formality — which makes this the one line verb with a precondition
+  /// the screen has to state before it is pressed.
   ///
   /// **The answer is the point.** It names the assets the forge was
   /// holding and is not holding any more, and after this write there is

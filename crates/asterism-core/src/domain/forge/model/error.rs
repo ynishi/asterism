@@ -192,8 +192,12 @@ pub enum ForgeError {
     /// Dropping takes the history that work was cut from, so what is
     /// left is a log against nothing. Ending the work first is not a
     /// formality — it is the record of what happened to it.
+    ///
+    /// The count is parenthesised rather than made the subject of the
+    /// sentence, because a message reading "1 pieces of work" was what
+    /// a screen showed the first time this refusal reached one.
     #[error(
-        "{0} pieces of work are still open against this line; close them first, and the \
+        "work is still open against this line ({0} unclosed); close it first, and the \
          same drop then works"
     )]
     WorkStillOpen(usize),

@@ -537,19 +537,22 @@
 
   {#if !ended}
     <div class="compose">
-      <button
-        type="button"
-        onclick={addSelection}
-        disabled={adding || gridSelection.selectedIds.size === 0}
-      >
-        {#if adding}
-          Adding…
-        {:else if gridSelection.selectedIds.size === 0}
-          Select assets in the grid to add
-        {:else}
-          add {gridSelection.selectedIds.size} selected
-        {/if}
-      </button>
+      <!-- With nothing picked, this is not a disabled add: it is the
+           way out. The drawer is an overlay, so a person told to go
+           and select something in the grid is being told that by the
+           thing in front of it — and a button carrying that
+           instruction, disabled, is one that does nothing when
+           pressed. So it steps aside instead, keeping the line and the
+           work, and the sidebar brings the drawer back to them. -->
+      {#if gridSelection.selectedIds.size === 0}
+        <button type="button" onclick={() => forgeCatalog.stepAside()}>
+          pick in the grid — this steps aside
+        </button>
+      {:else}
+        <button type="button" onclick={addSelection} disabled={adding}>
+          {adding ? "Adding…" : `add ${gridSelection.selectedIds.size} selected`}
+        </button>
+      {/if}
     </div>
 
     <div class="close">
