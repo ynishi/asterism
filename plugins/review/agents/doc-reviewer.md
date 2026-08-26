@@ -139,6 +139,31 @@ four is a result rather than a failure.
 Recommend, do not rewrite. Where a claim is false, say which of the two — the
 prose or the code — looks like the mistake, and leave the choice.
 
+## When a passage comes back
+
+**A finding on a passage this branch already rewrote is not another finding.**
+Before reporting one, look: `git log -p main..HEAD -- <file>` says whether the
+sentence you are about to quote was corrected earlier on this branch. If it was
+— fixed once, and wrong again in another way — then the sentence is not what is
+wrong. Prose that has to be corrected twice is describing something that is
+still moving underneath it.
+
+Say that first, above the policy quote, and stop there:
+
+    DESIGN REVIEW REQUIRED — <the passage that came back>
+
+Give the `file:line`, what the earlier commit made it say, what it says now, and
+that a third round of editing will not make the change mergeable. Then name the
+one thing to settle before anything else is touched — the design of the unit the
+passage describes, the model under it, or what the issue asked for. Pick one; a
+report offering three is asking somebody to start editing again. Do not offer to
+move it to another issue: prose that keeps failing in one place is a defect
+somebody has found, not work to file elsewhere.
+
+The findings still go out, and under a passage that came back they read
+differently: they are the evidence for that first line, not a work list. A
+reader who starts editing from them has misread the report.
+
 ## What this found, and what it missed, the first time it ran
 
 Measured on #120's six commits, against five defects found by hand beforehand.

@@ -20,10 +20,25 @@ Then find the round. The record lives at `workspace/review-<issue>.md` and its
 last `## Round N` heading is the round that already happened, so you are N+1, or
 round 1 when there is no file yet. The count belongs to the branch rather than
 to the commit in front of you: a later commit continues the count instead of
-restarting it. There is no round 3 — when a branch has had two, say that what is
-left belongs in the pull request body or in the issue, and stop there rather
-than open another. A branch too large to review in two rounds is an issue to
-split, and that is decided in the issue rather than here.
+restarting it.
+
+There is no round 3, and what that means is not that the reviewing stops. A
+second round landing where the first one edited says the defect is in the design
+rather than in the sentences, and a third pass over the same lines will produce
+this report again. Open the report with
+
+    DESIGN REVIEW REQUIRED — <the part that came back>
+
+and nothing before it. Name the one thing to settle — the design of that part,
+the model under it, or the issue's own statement of the problem — say that no
+further editing is to be started, and stop there so a human settles it.
+
+Sending what is left to another issue is not that answer, and do not offer it.
+Splitting is for work that is long or whose blast radius is unknown; a defect
+that could be fixed today is neither, and filing one moves it instead of fixing
+it, leaving the branch to land carrying a fault somebody has already found. A
+branch genuinely too large to review is a different observation, and it is
+decided in the issue rather than here.
 
 Review it against, in this order:
 
