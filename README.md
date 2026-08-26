@@ -153,6 +153,12 @@ Every crate has `publish = false`; nothing is distributed via crates.io.
 
 ## Development environment
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before the first change: it carries the
+issue, branch, commit and pull request conventions, and the section on
+[working with coding agents](CONTRIBUTING.md#working-with-coding-agents--the-recommended-pattern)
+covers what a clone gives an agent — `AGENTS.md` at the root — and the two
+plugins that are not installed by cloning.
+
 `just check` is the gate. Beyond a stable Rust toolchain and Node for the UI,
 three things are installed per machine rather than per checkout:
 

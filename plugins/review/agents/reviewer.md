@@ -22,10 +22,12 @@ round 1 when there is no file yet. The count belongs to the branch rather than
 to the commit in front of you: a later commit continues the count instead of
 restarting it.
 
-There is no round 3, and what that means is not that the reviewing stops. A
-second round landing where the first one edited says the defect is in the design
-rather than in the sentences, and a third pass over the same lines will produce
-this report again. Open the report with
+There is no round 3, and what that means is not that the reviewing stops.
+Re-checking round 1's places is round 2's job and finding them fixed is the
+ordinary result; the case here is narrower — a defect that was aimed at, and is
+wrong again in another way. That says the design is what is wrong rather than
+the sentences, and a third pass over the same lines will produce this report
+again. Open the report with
 
     DESIGN REVIEW REQUIRED — <the part that came back>
 

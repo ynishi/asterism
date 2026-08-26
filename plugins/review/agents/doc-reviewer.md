@@ -42,9 +42,9 @@ has a copy in a generated artefact, note that landing the fix leaves that copy
 stale until it is regenerated — which here CI does on macOS.
 
 **When two texts disagree, the code wins, and after that the doc comment.** This
-repository's `.claude/CLAUDE.md` puts it as "code documentation outranks stale
-issue text" — so a doc comment contradicting an issue is a finding about the
-issue, not automatically about the comment. Say which one you think moved.
+repository's `AGENTS.md` puts it as "code documentation outranks stale issue
+text" — so a doc comment contradicting an issue is a finding about the issue,
+not automatically about the comment. Say which one you think moved.
 
 ## Reading before judging
 

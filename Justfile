@@ -893,7 +893,7 @@ worktree-new type slug:
 [group('check')]
 [group('allow-agent')]
 branch-check:
-    @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see .claude/CLAUDE.md)"; exit 1; }
+    @test "$(git branch --show-current)" != "main" || { echo "on main: cut a worktree branch first (see AGENTS.md)"; exit 1; }
     @git merge-base --is-ancestor origin/main HEAD || { echo "HEAD does not descend from origin/main: wrong base — rebuild the branch from origin/main"; exit 1; }
     @git merge-base --is-ancestor main origin/main || { echo "local main carries commits origin/main does not have: reset it to origin/main before cutting branches"; exit 1; }
 
@@ -913,8 +913,7 @@ commit-msg-check *args:
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
-# being denied `git push` (.claude/settings.json) is no reason to skip
-# it. `git fetch origin` belongs immediately before it: `branch-check`
+# being denied `git push` is no reason to skip it. `git fetch origin` belongs immediately before it: `branch-check`
 # and `changed-packages`, which the two narrow gates call, both read
 # `origin/main` offline.
 #

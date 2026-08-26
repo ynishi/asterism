@@ -206,16 +206,35 @@ Refs #<issue>
 
 ## Working with coding agents — the recommended pattern
 
-This repository ships its agent configuration in the open: pointer memory
-(`.claude/CLAUDE.md`), permission settings that deny push/PR to agents outright,
-and two plugins — the reviews and the hook — which are installed rather than
-cloned:
+What this repository tells an agent is `AGENTS.md`, at the root, in the open and
+under the name other coding agents already read. Claude Code reads `CLAUDE.md`
+rather than that name, so `.claude/CLAUDE.md` is committed as a symlink back to
+it — the instructions sit in one file, and a clone loads them with nothing to
+set up.
+
+That symlink is the only thing under `.claude/` this repository tracks.
+`.gitignore` takes the rest, because the directory is Claude Code's working
+directory on your machine: local settings, local memory, plugin caches, session
+state. A diff that reaches anything else there is doing something unusual, and
+the reviews say so. On Windows a clone without Developer Mode writes the symlink
+out as a text file holding the path; leave it alone — editing it dirties a
+tracked file and the `-changed` gates refuse a dirty tree — and put a
+`CLAUDE.md` containing `@AGENTS.md` at the repository root instead, which loads
+the same file by import and which `.gitignore` already keeps out of the tree.
+
+The plugins are installed rather than cloned, and the block below is the same in
+every checkout:
 
 ```text
 /plugin marketplace add ynishi/asterism
 /plugin install prose-shape@asterism
 /plugin install review@asterism
 ```
+
+A `permissions.deny` list is personal and is not committed here: it is advisory
+in the checkout that has it and absent from every other, so what holds an agent
+to anything is the remote's own settings. Keep yours for the reminder rather
+than as the guard.
 
 `prose-shape` is a hook, and it covers the one width nothing else can. A commit
 message body is answered for by `commit-msg-check` and the markdown in the tree
@@ -272,12 +291,12 @@ passing them before a pull request — recommended, not enforced:
   `workspace/review-<issue>.md`. It stops without an issue, and it reviews a
   branch twice.
 
-A second round landing where the first one edited says the design is what is
-wrong rather than the lines, so `reviewer` and `doc-reviewer` both open with
-`DESIGN REVIEW REQUIRED`, name the one thing to settle, and leave it to a human.
-Neither offers to move what is left into another issue: splitting is for work
-that is long or whose blast radius is unknown, and a defect that could be fixed
-today is neither.
+A defect the first round aimed at and the second finds wrong again in another
+way says the design is what is wrong rather than the lines, so both agents open
+with `DESIGN REVIEW REQUIRED`, name the one thing to settle, and leave it to a
+human. Neither offers to move what is left into another issue: splitting is for
+work that is long or whose blast radius is unknown, and a defect that could be
+fixed today is neither.
 
 The same recommendation extends past the PR: releases and publishes (crates,
 packages, the repository's own settings) are best performed by a human hand in

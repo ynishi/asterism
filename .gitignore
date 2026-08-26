@@ -6,19 +6,22 @@ target
 workspace
 .worktrees
 
-# What every contributor shares stays committed: .claude/CLAUDE.md, which
-# points at the documents in this repository, and settings.json. Everything a
-# plugin can carry is installed rather than cloned — agents, skills, commands
-# and hooks come from the marketplace in ./plugins, so a checkout is not how
-# they reach a machine and a local edit to one is not this repository's to
-# review. Per-person local state stays out for the same reason.
-.claude/settings.local.json
-.claude/CLAUDE.local.md
-.claude/agents/
-.claude/skills/
-.claude/commands/
-.claude/hooks/
-.claude/plugins/
+# What this repository tells an agent is AGENTS.md, at the root, under the name
+# other coding agents read. Claude Code reads CLAUDE.md instead, so the one
+# tracked file under .claude/ is a symlink pointing back at AGENTS.md — the
+# instructions live in one place and load without anyone wiring them up. The
+# rest of .claude/ is Claude Code's working directory on a machine (local
+# settings, local memory, plugin caches, session state) and is not this
+# repository's to carry; the pattern is `.claude/*` rather than `.claude/`
+# because git cannot re-include a file whose parent directory is excluded.
+# /CLAUDE.md is ignored for the same reason: a checkout that cannot make the
+# symlink writes one there by hand, and it is that person's file. Everything a
+# plugin can carry — agents, skills, commands, hooks — is installed from the
+# marketplace declared in .claude-plugin/marketplace.json, whose plugin sources
+# sit in ./plugins, rather than cloned.
+.claude/*
+!.claude/CLAUDE.md
+/CLAUDE.md
 
 # OS / editor
 .DS_Store
@@ -32,9 +35,9 @@ crates/asterism-ui/dist/
 crates/asterism-ui/gen/
 .mcp.json
 
-# Coexisting AI CLI scratch (codex CLI local state / AGENTS.md sidecar)
+# Coexisting AI CLI scratch. AGENTS.md was here as a codex sidecar; it is the
+# committed instructions now, and a tool that rewrites it is rewriting them.
 .codex/
-AGENTS.md
 
 logs
 
