@@ -336,6 +336,29 @@ and this project adheres to
   carries a message body or content, because the ledger is append-only and a
   copy there is one nothing can act on later.
 
+- **A check that the two transports still owe each other every verb** (#173).
+  `asterism-server`'s `tests/transport_parity.rs` reads the router and the
+  desktop's command module, pairs them by name, and fails when either direction
+  goes short: a route with no command, a command with no route, or an allow-list
+  entry that no longer matches the tree. Each exception carries the reason it is
+  one, because a difference with a reason is a decision and one without is the
+  defect.
+
+  The rule itself was already written, in `http`'s module doc. What it lacked
+  was anything that re-measured it, and the count stated there went stale three
+  times — twice while #136's sixteen-verb debt was being paid, and once when
+  #169 added a verb to both surfaces and left the total behind. That is what
+  CONTRIBUTING's third documentation rule says happens to a number describing a
+  list kept somewhere else, and the rule's other branch is what this took: no
+  count is stated anywhere now, and the prose points at the lists. The check
+  covers the direction the drift has actually come from, which #136 recorded:
+  every one of its sixteen verbs landed in a change whose scope said routes.
+  `changed-packages` selects one crate per changed path, so a branch touching
+  only the desktop's commands is caught by `main`'s run rather than its own, and
+  the test's doc says so. `commands.rs` gains the section that was missing
+  beside it — why there are two transports over one service graph at all, rather
+  than the desktop calling the loopback surface its own process serves.
+
 ### Changed
 
 - **`GET /teams/{team_id}/events` answers with a page, not the whole stream**
