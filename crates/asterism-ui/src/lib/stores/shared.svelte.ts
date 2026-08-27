@@ -1,9 +1,18 @@
-// Shared lines — the lines a team hosts, which are not this machine's.
+// A team, from inside somebody's own library — the lines it hosts, who
+// is in it, and what it recorded.
 //
 // This catalog exists because #148 decision 16 says a shared line is
 // served through rather than mirrored: reads go to the server, there is
-// no local copy, and therefore no staleness to reason about. Everything
-// here follows from that one sentence.
+// no local copy, and therefore no staleness to reason about. The three
+// sections after this one follow from that sentence alone, and were
+// written when the lines were all this plane showed.
+//
+// What follows them is the frame #171's surfaces attach to, written
+// ahead of them for the reason `forge.svelte.ts` gives for its own: a
+// frame decided from inside whichever surface is built first ends up
+// shaped by that one. As each surface lands, what it decides for itself
+// belongs in its own header — what stays here is what all of them stand
+// on.
 //
 // # Why it is a catalog of its own rather than more fields on another
 //
@@ -35,6 +44,161 @@
 // The re-enactment option is chosen here at init and can never be
 // chosen later, which is why the panel states its two costs before
 // offering it rather than after.
+//
+// # Three subjects under a team, and the frame that follows
+//
+// #148's model puts three things under a team: the lines it hosts, the
+// memberships that say who may work them, and the ledger recording what
+// was done in what capacity. That is where this frame parts from
+// `forge.svelte.ts`'s, which answers about a line because a line is all
+// the local plane has. A frame here that answered only about lines
+// would leave two of the three nowhere to be.
+//
+// They are three answers about one team, so they are tabs on one frame
+// rather than three places to go: somebody moving between them is
+// changing the question rather than the subject, which is the reading
+// `ForgePanel` gives its own three.
+//
+// Selecting a line inside the first of them brings the forge's frame
+// with it — contents, work, history — because decision 19 mirrors the
+// local surface path for path and the same DTOs come back, so a shared
+// line is the same subject a local one is. Two levels of tab, because
+// the model has two subjects here and not one.
+//
+//   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
+//   │ lines │ members │ ledger                                      │
+//   │ ───────────────────────────────────────────────────────────── │
+//   │ ┌─ lines ────┐┌─ ROOT ────────── open · mainline-first ─────┐ │
+//   │ │ ▸ ROOT     ││ ● on the line │ work │ history              │ │
+//   │ │   drafts   ││ ──────────────────────────────────────────  │ │
+//   │ │            ││ key visual                                  │ │
+//   │ └────────────┘└─────────────────────────────────────────────┘ │
+//   └───────────────────────────────────────────────────────────────┘
+//
+// Which of the three leads is a choice rather than a consequence.
+// Lines lead because a team is joined in order to work with what it
+// holds, and the roster and the ledger answer about the team rather
+// than about the work. **That is an assumption about intended use and
+// not a measurement** — nothing here is instrumented, and no screen
+// over a roster or a ledger has existed to instrument. If it is wrong,
+// the order of the tabs is what moves.
+//
+// # Two kinds of empty, and what tells them apart
+//
+// Every read here is a request to a server, which gives "nothing to
+// show" two meanings a screen must not merge: nobody has been asked
+// yet, and there is nobody to ask. The forge has only the first, so
+// its panel can let an empty list speak for itself and this one cannot
+// — an empty list under a dropped connection would say the team hosts
+// nothing, which is a claim about a team nobody is talking to.
+//
+// `phase` is where they are told apart, and it is the frame's own
+// state rather than a per-resource one. Each resource already knows
+// whether it is loading and whether it failed; what none of them can
+// know is whether there is a server behind it at all, because that is
+// a fact about the connection rather than about any read. A screen
+// deriving it from `lines.data.length` would be reading the answer to
+// a question nobody asked.
+//
+// # What a picker changes, and what it does not
+//
+// The team id is typed because the member's client has no verb for
+// "the teams I am in". When that verb lands, the same field becomes a
+// choice from a list, and `teamId` stops being something a person
+// fills and starts being state every surface reads — which it already
+// is here, so the picker replaces a form control and nothing else.
+//
+// The phase between — connected, with no team chosen — is not
+// something a picker introduces. A window that has just connected is
+// already in it, because the field it would fill starts empty, and it
+// stays in it until somebody names a team. What a picker changes is
+// what that phase shows: a list to choose from where there is a field
+// to fill. It is where every session begins either way, which is why
+// the frame draws it as a state rather than passing through it.
+//
+// # Where #171's surfaces attach
+//
+// **The roster** — create a team, see who is in it, invite and join
+// under `RegistrationPolicy`, leave — is the second tab, over the
+// member's client's `roster`. **The ledger** is the third, over
+// `events`. Each arrives with whatever desktop command it needs,
+// brought by the child that builds it: what a surface asks of a
+// command is known where the surface is written and guessed anywhere
+// else.
+//
+// **Working a shared line** is the forge's `work` tab, in the inner
+// frame above. Decision 10 is why there is no copy step in front of
+// it: working on a shared line needs no clone, so the verb a person
+// reaches for is the same one they reach for on a line of their own.
+//
+// **The promotion** is not on this frame at all — see below.
+//
+// # A promotion does not start here
+//
+// #152's client converts a local Asset into a TeamAsset, so the
+// subject is the asset and the team is where it goes. A verb placed on
+// this frame would ask somebody to name their asset from a screen that
+// is not showing it. The asset detail pane is where it belongs, which
+// is #171's own answer.
+//
+// What the model adds is that it cannot be started from there either
+// without work already open: decision 5 gives content exactly one
+// entry point, a verb scoped to an open pursuit, so that the team
+// never holds an Asset that is not attached to work. So a promotion is
+// offered against the pursuit this frame has open, and is not offered
+// when there is none — the same direction `ForgeWork` established when
+// it stepped the drawer aside for a grid selection rather than taking
+// a typed id, run the other way.
+//
+// It is also the third write on this plane that is not safe to press
+// twice, and the one where that is least visible: decision 7 mints a
+// TeamAsset per promotion, so a second press makes a second one over
+// one stored copy rather than finding the first. `publish` carries the
+// same asymmetry and `clone` does not.
+//
+// # The ledger is paged rather than listed
+//
+// #149 gave the read a keyset cursor over `seq`, because #148 turns a
+// table that grew by the occasional membership gesture into one that
+// gains a row per push. A surface over it is therefore a page through
+// a log and not a list, and a resource holding "the events" would be
+// holding the first page while claiming the name of all of them.
+//
+// Which control pages it — a `more` at the foot, an infinite scroll, a
+// range — is taste, and unsettled until the tab is built. What is not
+// taste is that the cursor is part of what the read takes, so it
+// cannot be added to a resource shaped without it.
+//
+// # Where a credential lives is not settled
+//
+// #167 kept the connection to the window because a stored credential
+// has no designed home yet, and #171 makes designing that home its
+// own. It is deferred here rather than answered, because the answer
+// interacts with a provider path this plane does not have: #163 adds
+// one to the connect form, and a home chosen before it lands is a home
+// chosen for one of the two kinds of credential.
+//
+// The alternatives, so the deferral names them: the OS keychain
+// through Tauri's own plugin, which is where a password belongs; the
+// profile directory, which is where this app's state lives and which
+// would therefore put a password beside it; and the window, which is
+// what #167 chose and what the deferral leaves in place.
+//
+// What the frame does meanwhile is meet a person with a connection
+// form every time it opens, and `phase` says so as its first state.
+//
+// # Why this grows rather than a second catalog beside it
+//
+// `forge.svelte.ts` was written before any screen read it, so its
+// frame could arrive with the first one. A panel reads this catalog,
+// so a second catalog carrying the frame would be two stores answering
+// about one team — the shape the first section of this file refuses
+// one layer down. The panel is what grows into the frame.
+//
+// Where it sits is not among the questions this design opens. #181
+// moved `shared lines` beside the forge in the sidebar and named
+// revisiting that as this umbrella's, and revisiting a placement is a
+// different act from choosing one.
 import { api } from "../api";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
@@ -108,15 +272,33 @@ class SharedCatalog {
     return this.history.data?.changes.length ?? null;
   }
 
+  /// Which of the frame's three states this window is in: there is
+  /// nobody to ask, there is somebody to ask and no team chosen, or a
+  /// team is chosen and its reads can be made.
+  ///
+  /// The frame reads this rather than reading a resource, because the
+  /// two kinds of empty a served-through view has are not a resource's
+  /// to tell apart — a `Resource` knows whether it is loading and
+  /// whether it failed, and neither answers whether there is a server
+  /// behind it. See the header.
+  ///
+  /// `no-team` is where a session begins: the field starts empty, so a
+  /// window that has just connected is in it and stays in it until
+  /// somebody names a team. A picker populates that state rather than
+  /// introducing it.
+  get phase(): "disconnected" | "no-team" | "ready" {
+    if (this.session === null) return "disconnected";
+    if (this.teamId === "") return "no-team";
+    return "ready";
+  }
+
   /// Opening the panel reads. A served-through view that showed the
   /// last answer it happened to have would be a mirror with extra
   /// steps, which is the thing decision 16 refuses.
   async openPanel(): Promise<void> {
     this.open = true;
     await this.refreshSession();
-    if (this.session !== null && this.teamId !== "") {
-      await this.lines.load({ teamId: this.teamId });
-    }
+    if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
 
   closePanel(): void {
