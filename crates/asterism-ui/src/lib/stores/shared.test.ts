@@ -142,6 +142,70 @@ describe("what the panel shows", () => {
   });
 });
 
+describe("the frame's three states", () => {
+  // Worth pinning here rather than left to the markup for the reason
+  // the catalog's header gives: the difference between "nobody has been
+  // asked" and "there is nobody to ask" is not visible in a resource,
+  // and a screen that merged them would report on a team it is not
+  // talking to. Each of the three is what some surface renders instead
+  // of a list.
+
+  it("has nobody to ask before a connection", () => {
+    expect(sharedCatalog.phase).toBe("disconnected");
+  });
+
+  it("has no team chosen once there is somebody to ask", () => {
+    sharedCatalog.session = "u1";
+    sharedCatalog.teamId = "";
+
+    expect(sharedCatalog.phase).toBe("no-team");
+  });
+
+  it("is ready only once a team is named", () => {
+    sharedCatalog.session = "u1";
+
+    expect(sharedCatalog.phase).toBe("ready");
+  });
+
+  it("does not read a team's lines before one is chosen", async () => {
+    // Connected is not the same as ready, and opening the panel in
+    // between must not ask for the lines of the empty string.
+    sharedCatalog.teamId = "";
+    apiMock.mockResolvedValueOnce("u1"); // refreshSession
+
+    await sharedCatalog.openPanel();
+
+    expect(sharedCatalog.phase).toBe("no-team");
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "list_shared_lines",
+      expect.anything(),
+    );
+  });
+
+  it("goes back to having nobody to ask when the connection drops", async () => {
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.phase).toBe("disconnected");
+  });
+
+  it("keeps the team across a disconnect, so connecting again skips no-team", async () => {
+    // Which is why the header calls this where a *window* begins
+    // rather than where every session does. Dropping the id because a
+    // connection dropped would make somebody type it twice.
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce(undefined);
+    await sharedCatalog.disconnect();
+
+    sharedCatalog.session = "u1";
+
+    expect(sharedCatalog.teamId).toBe("t1");
+    expect(sharedCatalog.phase).toBe("ready");
+  });
+});
+
 describe("the two writes", () => {
   it("clones the entry of the line that is open", async () => {
     apiMock.mockResolvedValue([entry("e1", "a.png", true)]);
