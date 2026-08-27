@@ -11,32 +11,48 @@
   // — the arrangement `SharedLinesPanel` has, and the list of reads is
   // the same shape, so a reader who knows one knows this.
   //
-  // A drawer, and wider than that one. The forge answers two questions
-  // about a line at once, and the list of lines has to stay in view
-  // while either is read or selecting becomes a round trip. A
-  // single-column drawer has no room for both.
+  // A drawer, and wider than that one. The forge answers several
+  // questions about a line at once, and the list of lines has to stay
+  // in view while any of them is read or selecting becomes a round
+  // trip. A single-column drawer has no room for both.
   //
-  // Two tabs rather than two panels. Contents and history are answers
+  // Tabs rather than panels. Contents, work and history are answers
   // about one line from one place, and a person moving between them is
   // changing the question rather than the subject — so the line stays
   // named in the header while the body below it swaps.
   //
-  // One write, and it is the one that makes the rest reachable:
-  // opening a line. #170 gives the line verbs to a later child and
-  // does not name this among them — an omission that shows the moment
-  // the panel runs on a machine with no line, which is every machine
-  // until somebody calls the command by hand.
+  // Work among them rather than a surface beside this one, which is
+  // what #170 lists it as. It is a third answer about the same line
+  // rather than a different subject: what the line says, what somebody
+  // is asking it to say, and how it got here. The button in the header
+  // stays, and now goes there.
   //
-  // Everything else reads. `[open a pursuit]` is disabled and says
-  // why: a button that looks live and does nothing is worse than one
-  // that states what it is waiting for.
+  // It sits between the other two, because working a line is the common
+  // path and the chain is the occasional one — the ratio the store's
+  // header argues for, applied to an order it did not have to state
+  // while there were only two.
+  //
+  // The writes here are the ones about a line itself: opening,
+  // renaming, re-pointing, archiving, reopening, discarding. #170 gives
+  // the line verbs to a later child and does not name opening among
+  // them — an omission that shows the moment the panel runs on a
+  // machine with no line, which is every machine until somebody calls
+  // the command by hand.
+  //
+  // Work against a line is `ForgeWork`'s, and only its close touches
+  // the line at all. What this component does for it is the frame: it
+  // says which line, and hands that line down.
+  import ForgeWork from "./ForgeWork.svelte";
+  import ForgeTalk from "./ForgeTalk.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
+  import { detailRequest } from "./lib/stores/detail-request.svelte";
+  import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import type { ForgeChangeRowDto, ForgeLineDto } from "./bindings";
 
-  let tab = $state<"contents" | "history">("contents");
+  let tab = $state<"contents" | "work" | "history">("contents");
   let showOffTheLine = $state(false);
   // One change point open at a time. The chain is read to answer "what
   // happened here", and a screen that let every point stand open would
@@ -55,23 +71,15 @@
   );
 
   async function select(lineId: string) {
-    forgeCatalog.selected = lineId;
     showOffTheLine = false;
     // A point id belongs to the line it is on, so an open one from the
     // previous line matches nothing here — it would just leave the
     // first point of the new chain looking collapsed when the reader
     // had asked for one to be open.
     openPoint = null;
-    // The discard notice answers about a line that is gone. Selecting
-    // another one is a new question, and leaving the old answer above
-    // it reads as though it were about this one.
-    forgeCatalog.released = null;
-    // The chain goes with the line it belongs to. Without this, opening
-    // the history tab after switching lines renders the previous line's
-    // chain under this one's name — the store's header calls that out
-    // for writes, and a selection reaches it the same way.
-    forgeCatalog.history.reset();
-    await forgeCatalog.states.load({ lineId });
+    // Everything the *store* has to let go of on this move is
+    // `selectLine`'s, written once there.
+    await forgeCatalog.selectLine(lineId);
     if (tab === "history") await forgeCatalog.history.load({ lineId });
   }
 
@@ -123,12 +131,25 @@
   // line, its whole history, and every piece of work against it. The
   // released assets come back in the answer and are named here,
   // because after this write nothing can derive them again.
+  //
+  // **Every piece of work that has ended.** The model refuses the drop
+  // while any is still open, because dropping takes the history that
+  // work was cut from and would leave a log against nothing. The body
+  // said the pursuits went with it and stopped there, which is the half
+  // that reads as a warning; the half that reads as an instruction was
+  // missing until a refusal arrived on a screen and had to be explained
+  // by the toast.
   async function discard(line: ForgeLineDto) {
+    const open = forgeCatalog.openWork.length;
     const ok = await confirmCatalog.open({
       title: `Discard ${line.name}?`,
       body:
-        "The line, its history, and every pursuit against it go with it. " +
-        "The assets it held stay in the library. This cannot be undone.",
+        open > 0
+          ? `${open} ${open === 1 ? "pursuit is" : "pursuits are"} still open against this line, and the ` +
+            "forge will refuse to drop it until they are closed. Close them " +
+            "under work, then discard."
+          : "The line, its history, and every pursuit against it go with it. " +
+            "The assets it held stay in the library. This cannot be undone.",
       confirmLabel: "Discard Forever",
       danger: true,
     });
@@ -138,6 +159,41 @@
 
   function when(ms: number): string {
     return new Date(ms).toLocaleString();
+  }
+
+  // What the library knows about what is on the line, read when the
+  // list of ids changes rather than at each site that loads states.
+  // A line's contents move under three different verbs, and an effect
+  // over what is rendered answers for all of them.
+  $effect(() => {
+    void forgeCatalog.ensureCards(
+      forgeCatalog.states.data.map((state) => state.content_asset_id),
+    );
+  });
+
+  // What a tile shows instead of a picture, and empty when a picture
+  // is what it should show.
+  //
+  // **A video has a frame.** `thumbById` names the forge as the surface
+  // that waits for one, and the first build of this asked for a
+  // thumbnail only when `media` was exactly `image` — so a video was a
+  // word where its own frame was on its way. Both kinds that carry
+  // pixels go to the thumbnail; the two that do not are what this
+  // answers for.
+  //
+  // For those two, the card's cover text is what the grid shows and is
+  // a great deal more use than a slug: `none` is `MediaKind`'s name for
+  // "no inline player", not a thing to put in front of somebody. The
+  // slug is the fallback to the fallback.
+  //
+  // An entry whose card has not arrived says nothing rather than
+  // guessing — the id is not a fact about the thing.
+  function kindOf(assetId: string | null): string {
+    if (assetId === null) return "";
+    const card = forgeCatalog.cards[assetId];
+    if (card === undefined) return "";
+    if (card.media === "image" || card.media === "video") return "";
+    return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
 
   // What a row moved, phrased from the axes it states.
@@ -163,6 +219,54 @@
     return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
   }
 </script>
+
+<!-- One tile, two lists. What is on the line and what it let go are
+     drawn apart and drawn the same way, so the difference a reader sees
+     is the dimming rather than two renderings that drifted.
+
+     A thumbnail where there is one to show, and what the thing *is*
+     where there is not: a line holds assets rather than pictures, and
+     an entry carrying a recording used to be an empty grey box that
+     never filled — indistinguishable from one still loading, because
+     `thumbById` answers both with the same transparent pixel. -->
+{#snippet tile(assetId: string | null, name: string | null)}
+  {#if assetId === null}
+    <!-- An entry can carry a name and no content: a table may name one
+         before anything fills it. Nothing to open, so not a button. -->
+    <span class="no-content" aria-hidden="true">—</span>
+    <span class="entry-name">{name ?? "(unnamed)"}</span>
+  {:else}
+    <!-- A tile opens the asset properly.
+         What a line shows of an entry is a thumbnail and the name the
+         *line* gives it, which is deliberately not the asset's — so
+         "what is this actually" is a question the forge raises and
+         cannot answer. The detail pane answers it, and comes up over
+         the drawer rather than instead of it, so closing it leaves the
+         line exactly where it was.
+
+         The picture and the name are one button rather than a picture
+         that happens to be clickable. The first build made only the
+         image one, with the affordance carried by the cursor and a
+         tooltip, and the first person to meet it asked where to press.
+         The whole cell is the target now, and it says so at rest. -->
+    <button
+      class="tile"
+      onclick={() => detailRequest.open(assetId)}
+      title={`Open ${name ?? "this entry"}`}
+    >
+      {#if kindOf(assetId) !== ""}
+        <span class="no-content kind">{kindOf(assetId)}</span>
+      {:else}
+        <img
+          src={thumbCatalog.thumbById(assetId)}
+          alt={name ?? "an entry with no name"}
+          loading="lazy"
+        />
+      {/if}
+      <span class="entry-name">{name ?? "(unnamed)"}<span class="open-hint">↗</span></span>
+    </button>
+  {/if}
+{/snippet}
 
 {#if forgeCatalog.open}
   <!-- Backdrop absorbs outside-click and Escape; the drawer stops
@@ -293,7 +397,18 @@
       <header>
         <h3>{current.name}</h3>
         <span class="quiet">{current.standing}</span>
-        <button type="button" disabled title="Opening work is #170's second child">
+        <!-- It says open a pursuit, so it lands where one is opened.
+             Switching to the tab is not enough: a piece of work being
+             read stays showing, and the form to start another is behind
+             a "← all work" nobody was told to press. Letting go of what
+             is showing is what makes the button mean what it says. -->
+        <button
+          type="button"
+          onclick={() => {
+            forgeCatalog.clearWork();
+            tab = "work";
+          }}
+        >
           open a pursuit
         </button>
       </header>
@@ -338,6 +453,11 @@
           aria-selected={tab === "contents"}
           onclick={() => (tab = "contents")}
         >on the line</button>
+        <button
+          role="tab"
+          aria-selected={tab === "work"}
+          onclick={() => (tab = "work")}
+        >work</button>
         <button role="tab" aria-selected={tab === "history"} onclick={toHistory}>
           history
         </button>
@@ -347,25 +467,15 @@
         {#if forgeCatalog.states.loading}
           <p class="quiet">Reading…</p>
         {:else}
-          <!-- Images, because that is what a line holds and looking at
-               them is the reason to open this. The name goes under the
-               thumb rather than in place of it: it is the line's name
-               for the entry, not the asset's, and the two can differ. -->
+          <!-- Tiles, because looking at what is on a line is the reason
+               to open this. The name goes under the picture rather than
+               in place of it: it is the line's name for the entry, not
+               the asset's, and the two can differ — which is also what
+               the tile opens the asset to settle. -->
           <ul class="entries">
             {#each forgeCatalog.onTheLine as entry (entry.entry_id)}
               <li>
-                {#if entry.content_asset_id !== null}
-                  <img
-                    src={thumbCatalog.thumbById(entry.content_asset_id)}
-                    alt={entry.name ?? "an entry with no name"}
-                    loading="lazy"
-                  />
-                {:else}
-                  <!-- An entry can carry a name and no content: a table
-                       may name one before anything fills it. -->
-                  <span class="no-content" aria-hidden="true">—</span>
-                {/if}
-                <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
+                {@render tile(entry.content_asset_id, entry.name)}
               </li>
             {/each}
           </ul>
@@ -388,22 +498,19 @@
               <ul class="entries gone">
                 {#each forgeCatalog.offTheLine as entry (entry.entry_id)}
                   <li>
-                    {#if entry.content_asset_id !== null}
-                      <img
-                        src={thumbCatalog.thumbById(entry.content_asset_id)}
-                        alt={entry.name ?? "an entry with no name"}
-                        loading="lazy"
-                      />
-                    {:else}
-                      <span class="no-content" aria-hidden="true">—</span>
-                    {/if}
-                    <span class="entry-name">{entry.name ?? "(unnamed)"}</span>
+                    {@render tile(entry.content_asset_id, entry.name)}
                   </li>
                 {/each}
               </ul>
             {/if}
           {/if}
         {/if}
+      {:else if tab === "work"}
+        <!-- The line is handed down rather than read from the store
+             again: this component has already decided which line is
+             showing, and a second read of the same selection is a
+             second place for the two to disagree. -->
+        <ForgeWork line={current} />
       {:else if forgeCatalog.history.loading}
         <p class="quiet">Reading…</p>
       {:else if forgeCatalog.history.data === null}
@@ -426,6 +533,20 @@
                 <span>{point.actor_id}</span>
                 <span class="quiet">{when(point.at_ms)}</span>
               </button>
+              <!-- A conversation about what landed rather than about
+                   the work it came out of. The model keeps those as
+                   separate anchors, and a change point outlives the
+                   pursuit that produced it. -->
+              <button
+                class="talk-about"
+                onclick={() =>
+                  forgeCatalog.talkAbout({
+                    kind: "change",
+                    about: "what landed here",
+                    lineId: current.id,
+                    changePointId: point.id,
+                  })}
+              >say something</button>
 
               {#if openPoint === point.id}
                 <!-- One line per entry the point moved, phrased from
@@ -453,14 +574,78 @@
           genesis · {when(forgeCatalog.history.data.genesis_at_ms)}
         </p>
       {/if}
+
+      <!-- Mounted once, under whichever tab is showing, because a
+           conversation is about something on one of them and moving the
+           reader to a fourth tab to read it would be moving them away
+           from what it is about. Renders nothing until somebody opens
+           one. -->
+      <ForgeTalk />
     {/if}
   </div>
       </section>
     </div>
   </div>
+{:else if forgeCatalog.steppedAside}
+  <!-- The way back.
+       Stepping aside is half a gesture without it: the drawer goes, and
+       somebody is left in the grid with no sign that the forge is
+       waiting and no way back that is not a guess. This says which work
+       is waiting, counts what has been picked so far, and returns to
+       it — and carries the one control that does the opposite, because
+       somewhere has to: the ✕ ends the question rather than the
+       stepping aside, and takes the line, the work and everything
+       loaded about both with it. Fixed to the corner rather than laid
+       out in the page, because what it interrupts is a person looking
+       at the grid. -->
+  <aside class="waiting" aria-label="The forge is waiting">
+    <span>
+      Picking for <strong>{forgeCatalog.pursuit.data?.title ?? "this work"}</strong>
+      · {gridSelection.selectedIds.size} selected
+    </span>
+    <button type="button" onclick={() => forgeCatalog.openPanel()}>
+      back to the forge
+    </button>
+    <button
+      type="button"
+      class="quiet-btn"
+      onclick={() => forgeCatalog.closePanel()}
+      aria-label="Stop picking for the forge"
+    >✕</button>
+  </aside>
 {/if}
 
 <style>
+  .waiting {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.78rem;
+    background: var(--panel-bg, #1b1b1e);
+    color: var(--panel-fg, #e8e8ea);
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 0.3rem;
+    box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.4);
+    padding: 0.5rem 0.7rem;
+  }
+  .waiting button {
+    background: none;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.5rem;
+  }
+  .waiting .quiet-btn {
+    border: 0;
+    opacity: 0.7;
+    padding: 0 0.1rem;
+  }
   .drawer-backdrop {
     position: fixed;
     inset: 0;
@@ -585,6 +770,37 @@
     border-radius: 0.2rem;
     background: rgba(128, 128, 128, 0.15);
   }
+  /* The button is the whole cell — picture and name — and it says at
+     rest that it is one: an arrow beside the name, and a frame that
+     answers to hover and to the keyboard. A cursor and a tooltip were
+     what it had first, and neither is visible until somebody has
+     already guessed. */
+  .tile {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.15rem;
+    text-align: left;
+    width: 100%;
+  }
+  .tile:hover,
+  .tile:focus-visible {
+    border-color: rgba(128, 128, 128, 0.55);
+    background: rgba(128, 128, 128, 0.12);
+  }
+  .open-hint {
+    opacity: 0.55;
+    margin-left: 0.25rem;
+  }
+  .tile:hover .open-hint,
+  .tile:focus-visible .open-hint {
+    opacity: 1;
+  }
   .no-content {
     display: grid;
     place-items: center;
@@ -592,6 +808,13 @@
     border: 1px dashed rgba(128, 128, 128, 0.5);
     border-radius: 0.2rem;
     opacity: 0.6;
+  }
+  /* Solid rather than dashed: this entry holds something, and the
+     dashes next door mean it does not. */
+  .no-content.kind {
+    border-style: solid;
+    font-size: 0.72rem;
+    opacity: 0.8;
   }
   .entry-name {
     font-size: 0.72rem;
@@ -648,6 +871,16 @@
     color: inherit;
     cursor: pointer;
     padding: 0.3rem 0;
+  }
+  .talk-about {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    opacity: 0.7;
+    padding: 0 0 0.2rem 1.2rem;
+    text-decoration: underline;
   }
   .verbs {
     display: flex;

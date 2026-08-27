@@ -38,10 +38,12 @@
   import ForgePanel from "./ForgePanel.svelte";
   import SidebarSearch from "./SidebarSearch.svelte";
   import TagList from "./TagList.svelte";
+  import { baseName } from "./lib/basename";
   import { perfBaseline } from "./lib/dev/perf-baseline";
   import { recordEvent } from "./lib/telemetry";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { assetPageCatalog } from "./lib/stores/asset-page.svelte";
+  import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { interaction } from "./lib/interaction/mode.svelte";
   import { dispatchCatalog } from "./lib/stores/dispatch.svelte";
@@ -829,6 +831,17 @@
       payload: { asset_id: id },
     });
   }
+  // The only caller from outside this component. It hands over an id
+  // and nothing else; what opening means stays here, which is why
+  // `openDetail` is what answers rather than a second write to
+  // `openAssetId`.
+  $effect(() => {
+    const asked = detailRequest.asset;
+    if (asked === null) return;
+    detailRequest.take();
+    openDetail(asked);
+  });
+
   function closeDetail() {
     openAssetId = null;
     interaction.remove("detail");
@@ -2887,8 +2900,7 @@
   }
 
   function clearSelection() {
-    gridSelection.selectedIds.clear();
-    gridSelection.lastAnchorId = null;
+    gridSelection.clear();
     bulkModalityOpen = false;
     bulkTagOpen = false;
   }
@@ -4627,17 +4639,6 @@
     }
   }
 
-  /**
-   * Basename (no extension) derived from the source locator — used
-   * as the card's "content name" in clean mode when there is no
-   * cover text.
-   */
-  function baseName(locator: string | null | undefined): string {
-    if (!locator) return "";
-    const last = locator.split("/").pop() ?? locator;
-    const dot = last.lastIndexOf(".");
-    return dot > 0 ? last.slice(0, dot) : last;
-  }
   // Grid card context menu: position + target card. Opened by
   // right-click; closed by Esc / outside click / action pick.
   // W2 regrammar (Finder standard): right-clicking a card that is

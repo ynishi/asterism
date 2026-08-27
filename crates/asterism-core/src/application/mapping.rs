@@ -1449,8 +1449,12 @@ pub fn forge_body(raw: impl Into<String>) -> Result<Body, DomainError> {
 
 /// Reads which thing a conversation is about.
 ///
-/// The ids a kind needs are required and the rest are ignored, so a
+/// The ids a kind needs are required and the rest are **refused**, so a
 /// caller cannot describe a round anchor while handing over an entry.
+/// Ignoring the extras is what would let it: the anchor would come back
+/// as the round, and the caller that named an entry would be answered
+/// about something else. The body says which refusal each one is.
+///
 /// Over HTTP the kind is fixed by the route as well, and this is what
 /// answers for the transports where it is not.
 pub fn forge_anchored(

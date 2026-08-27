@@ -35,9 +35,9 @@
 //
 // It also means the assets stay put. A discard releases what a line
 // held back to the library; this line holds nothing, so the count it
-// reports is zero and no asset moves. Proving the release count against
-// real content belongs with #170's second child, which is what puts
-// content on a line in the first place.
+// reports is zero and no asset moves. `forge-pursuit.spec.ts` is where
+// that count is checked against real content, because putting content
+// on a line is what a pursuit is for.
 import { browser } from "@wdio/globals";
 
 const DRIVER_MS = 15_000;
@@ -45,9 +45,18 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-/** A name nothing else in the fixture answers to. */
-const LINE_NAME = "e2e-forge-line";
-const RENAMED = "e2e-forge-line renamed";
+/// A name nothing else in the fixture answers to, and unique because `clickLineNamed` clicks the first button
+/// reading it and `Name` carries no claim of uniqueness — the model
+/// says so. A fixed name meant this spec selected, renamed, archived
+/// and discarded whichever line happened to be first, which stopped
+/// being its own the moment a run left one behind. The fixture held
+/// five, all called `e2e-forge-line`, put there by the rename this
+/// spec was not performing (see "answer the prompt"). With a name
+/// nothing else answers to, the discard at the end takes what this run
+/// made and the pile stops growing.
+const RUN = Date.now();
+const LINE_NAME = `e2e-forge-line-${RUN}`;
+const RENAMED = `e2e-forge-line-${RUN} renamed`;
 
 const FORGE_ROW = 'aside.sidebar button[title^="Lines on this machine"]';
 const DRAWER = '[role="dialog"][aria-label="Forge"]';
@@ -266,17 +275,33 @@ describe("a line's lifecycle", () => {
     await stage(trail, "start the rename", DRIVER_MS, () =>
       clickIn('[role="dialog"][aria-label="Forge"] .verbs button'),
     );
+    // The prompt by its own class, and committed through its own OK.
+    //
+    // This asked for `.prompt-modal input, [role="dialog"] input[type="text"]`
+    // and then submitted `input.closest("form")`. Neither half found the
+    // prompt: the class is `prompt-panel`, and the drawer is itself a
+    // `[role="dialog"]` mounted before it — so the match was the
+    // *new-line* Name field, and the form submitted was the new-line
+    // form. Every run of this spec opened a rename it never answered
+    // and created a second line called "…renamed" instead, which is
+    // why the fixture carried five of them and a prompt nobody could
+    // press past. The poll below passed on that new line's name.
+    //
+    // There is no form to submit either: `PromptModal` commits from a
+    // button and from Enter, so this presses the button.
     await stage(trail, "answer the prompt", DRIVER_MS, () =>
       browser.execute((name: string) => {
         const input = document.querySelector(
-          '.prompt-modal input, [role="dialog"] input[type="text"]',
+          ".prompt-panel input.prompt-input",
         ) as HTMLInputElement | null;
         if (input === null) return false;
         input.value = name;
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        const form = input.closest("form");
-        if (form === null) return false;
-        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        const ok = document.querySelector(
+          ".prompt-panel .prompt-btn.primary",
+        ) as HTMLElement | null;
+        if (ok === null) return false;
+        ok.click();
         return true;
       }, RENAMED),
     );

@@ -10,6 +10,96 @@ and this project adheres to
 
 ### Added
 
+- **A line can be worked from the screen: a pursuit from open to close** (#170).
+  #180 left one button disabled, and it was the one that made the rest of the
+  forge reachable. What it opens is a third tab beside contents and history,
+  because work is a third answer about the same line rather than a different
+  subject — what the line says, what somebody is asking it to say, and how it
+  got here. It sits between the two, since working a line is the common path and
+  reading the chain is the occasional one.
+
+  **Nothing a round asks for is on the line.** `push` does not read the line at
+  all, which is what lets two people work against one line without contending,
+  and the only moment anything lands is a close with `satisfied`. So the rounds
+  are drawn as a log and the contents tab stays the answer to what the line
+  holds — a distinction the e2e spec asserts from both sides, reading the
+  contents once before the close and once after.
+
+  **The log is the editor.** There is no staging area between picking images and
+  writing a round: pressing add writes one, and a correction is another round,
+  which is what the model stores anyway. A grid selection is where content comes
+  from — the same set dispatch and snapshot read, so the gesture is one somebody
+  already knows — and because the forge is an overlay, the picking happens
+  before it opens. Names default to the basename under the card, which is now
+  shared rather than copied, so the name on a new entry is the one the person
+  saw. The other three verbs name something that already exists, which a
+  selection cannot express, so rename, replace and remove sit on the row
+  instead.
+
+  **The rows they sit on are the fold of both logs** — the line with the work
+  applied over it, which is what a satisfied close would leave and what neither
+  log says alone. It applies the model's rules rather than approximating them,
+  and it takes the model's two steps to do it: the work folds to one row per
+  entry first — per axis the last operation wins, and then the winning existence
+  decides what the row says, so an entry on its way off keeps the name the line
+  already had rather than one this work gave it in passing — and only then does
+  the line come in, where a removal of something it is not holding leaves the
+  line's own row exactly as it was. Each row states both steps, because drawing
+  an entry as gone and offering to change it are questions about different ones.
+  Putting a removal back adds that same entry, by its own id, because an entry
+  returning under a new one is a new arrival and the record would say so.
+
+  It is not the model's answer and cannot be — a landing arriving meanwhile
+  changes what it is folded onto, and most landings touch nothing the work asks
+  for. Reading it early is what lets somebody fix a name before the close tells
+  them to: two live entries under one name is a refused landing, and the case
+  that will actually happen is a name defaulted from a filename meeting one the
+  line already holds. Counting only what the work asked for would be silent on
+  exactly that, so the warning is read off the same fold.
+
+  **A tile is a thumbnail where there is one, and what the thing is where there
+  is not.** A line refers to assets rather than pictures — the first card this
+  repository's own e2e picks up is a recording — and an entry carrying one was
+  an empty grey box, indistinguishable from one whose thumbnail had not arrived,
+  because a thumb miss and a thumb that is never coming are the same transparent
+  pixel. The tile reads the card's own `media`, which is the field the grid
+  reads.
+
+  **With nothing picked, the add control gets out of the way rather than going
+  dead.** The drawer is an overlay, so a button telling somebody to select in
+  the grid is the thing stopping them; it steps the drawer aside instead,
+  keeping the line and the work, and the sidebar brings it back to them.
+
+  **A discard says what it needs first.** The forge refuses to drop a line while
+  any work is open against it, because dropping takes the history that work was
+  cut from — so the confirmation counts the open pursuits and names where to
+  close them, rather than promising they go with it.
+
+  **A refusal to close carries a reason, and the reason is not the action.**
+  `mutate` puts the message on screen and reads no further. `blocked` arrives
+  both for a line that moved and for a line that is archived, and only its
+  message separates them, so both actions are offered; `settled` has no action
+  at all.
+
+  **Conversations get their own place rather than a fifth anchor kind on the
+  thread drawer**, which is the question #170's fourth surface opened with. The
+  two are separate aggregates down to the service and their messages answer to
+  different fields — a forge message carries what it said first and every
+  revision of it, an app-level one carries role and refs — so one surface
+  holding both would be a component with two halves that never run together. One
+  is opened from a piece of work, a round, an entry as that round had it, or a
+  change point on the line, and all four are shown in one place under the tabs:
+  a conversation is about something rather than beside it, and opening one from
+  a round should not move the reader away from the round. Every correction is on
+  screen, because a correction the reader does not see is a sentence still
+  attributed to somebody who withdrew it.
+
+  `e2e/forge-pursuit.spec.ts` drives it through the real backend, which is the
+  only place a command's name, arguments and answer are checked against the app
+  that has to answer them. It also makes the assertion `forge-line.spec.ts` said
+  it could not: its line held nothing, so its discard reported zero. This one
+  puts an asset on a line and reads the release count against real content.
+
 - **The forge opens from the app, and a line has its whole lifecycle** (#180).
   #177 placed the catalog and left the panel unmounted, because where the forge
   sits was one of two questions its design deliberately did not answer. It is a

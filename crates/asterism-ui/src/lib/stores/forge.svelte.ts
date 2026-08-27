@@ -65,9 +65,9 @@
 // which is a question asked after the fact rather than while working.
 //
 // That is an assumption about intended use and not a measurement.
-// Nothing here is instrumented, and no screen has existed to
-// instrument; if it turns out to be wrong the layout below is what has
-// to move, so it is written where somebody would look.
+// Nothing here is instrumented; if it turns out to be wrong the layout
+// below is what has to move, so it is written where somebody would
+// look.
 //
 // It is why `states` and `history` are separate resources rather than
 // one read of `ForgeLineHistoryDto` that a screen picks apart.
@@ -77,7 +77,7 @@
 // draft of this design did, and the reason it was redrawn:
 //
 //   ┌─ lines ──────┐┌─ ROOT ──────────────── open · mainline-first ──┐
-//   │ ▸ ROOT       ││ ● on the line │ history │      [open a pursuit]│
+//   │ ▸ ROOT       ││ ● on the line │ work │ history │[open a pursuit]│
 //   │   drafts     ││ ────────────────────────────────────────────── │
 //   │              ││ key visual                                     │
 //   │  archived    ││ cut 04                                         │
@@ -86,10 +86,12 @@
 //   │              ││                         3 off the line  ▸      │
 //   └──────────────┘└────────────────────────────────────────────────┘
 //
-// Drawn as a list, rendered as a grid of thumbnails: the drawing is
-// the arrangement, and what a line holds is images.
+// Drawn as a list, rendered as a grid of tiles: the drawing is the
+// arrangement, and looking at what is on a line is the reason to open
+// this. What a tile shows when the thing on it is not a picture is
+// `ForgePanel`'s own decision, argued where it draws one.
 //
-// `onTheLine` and `takenOff` are separate deriveds for the same reason
+// `onTheLine` and `offTheLine` are separate deriveds for the same reason
 // the panel draws them apart. Digital-asset tooling states the
 // constraint without solving it: something no longer held has to stay
 // findable for the record and be visually distinct so it is not reused
@@ -99,23 +101,22 @@
 // # Where #170's four surfaces attach
 //
 // A **lines panel** builds the frame above and carries a line's whole
-// lifecycle (#180): the three reads, the two tabs, the button the next
-// child fills, and the verbs that open, rename, re-point, archive,
-// reopen and discard one. #170 put the last of those in a later child
-// and named no verb for the first — a panel over lines nobody can
-// create shows an empty list forever, so both landed together.
+// lifecycle (#180): the reads, the tabs, the button the next child
+// fills, and the verbs that open, rename, re-point, archive, reopen
+// and discard one. #170 put the last of those in a later child and
+// named no verb for the first — a panel over lines nobody can create
+// shows an empty list forever, so both landed together.
 // **Working a line** fills that button: opening a pursuit, pushing a
 // round, closing it, with a grid selection becoming a round's content.
+// It landed as a tab on the frame rather than a surface beside it,
+// which `ForgePanel`'s header argues for where the tabs are.
 // **The line verbs** sit on the header, discard among them — and its
 // response is the only place the assets it released are ever named, so
 // a caller that ignores the body has lost them. **Threads** anchor to
-// forge work, and open with a question this catalog cannot answer for
-// them. It is not only that no app-level anchor kind is a forge node:
-// the two are separate aggregates with different shapes — a forge
-// thread carries revisions and what was first said, an app-level one
-// carries archived, role and refs. So the choice is not "teach the
-// drawer one more anchor" but whether one surface can hold two records
-// that answer to different fields.
+// forge work, and opened with a question this catalog could not answer
+// for them — whether one surface can hold two records that answer to
+// different fields, rather than whether to teach the drawer one more
+// anchor kind. `ForgeTalk` answers it, and says why where it does.
 //
 // # Two questions this left open, and how #180 answered them
 //
@@ -142,15 +143,79 @@ import { api } from "../api";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
+  AssetCardDto,
+  ForgeCollisionDto,
   ForgeDiscardedDto,
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  ForgeOpDto,
+  ForgePursuitDto,
+  ForgeResolvedDto,
   ForgeStrategyDto,
+  ForgeThreadDto,
 } from "../../bindings";
 
 /// What a read of one line needs to name it.
 type LineArgs = { lineId: string };
+
+/// What a read of one piece of work needs to name it.
+type PursuitArgs = { pursuitId: string };
+
+/// What a conversation is being held about, as a caller names it.
+///
+/// Ids and a kind rather than a `ForgeAnchorDto`: that shape is what a
+/// read answers with, and `ForgeAnchorDto`'s own doc says a caller does
+/// not build one — the service resolves an anchor from the ids and the
+/// model makes it, so an entry a round never touched is refused rather
+/// than recorded.
+///
+/// `about` is the one field that is not an id. A conversation is opened
+/// from wherever it is about — a round in the log, an entry in a row, a
+/// change point in the chain — and shown in one place below, which
+/// would otherwise have to work out what it is looking at from ids
+/// alone.
+export interface ForgeTalkAnchor {
+  kind: "pursuit" | "round" | "entry" | "change";
+  about: string;
+  pursuitId?: string;
+  lineId?: string;
+  nodeId?: string;
+  entryId?: string;
+  changePointId?: string;
+}
+
+/// One entry as a satisfied close would leave it.
+export interface ForgeProjectedEntry {
+  entryId: string;
+  name: string | null;
+  assetId: string | null;
+  /// What the line ends up holding — `normalise`'s answer, and the
+  /// second of the model's two steps.
+  alive: boolean;
+  /// What this work said about the entry being there — `fold`'s answer,
+  /// and the first of the two steps. Null when the work said nothing
+  /// about it either way.
+  ///
+  /// **Both steps, because the row has two kinds of reader and they
+  /// want different ones.** Drawing an entry as gone, and offering to
+  /// put it back, are questions about what a close leaves: `alive`.
+  /// Offering a rename or a refill is a question about what a close
+  /// will even look at: an entry whose winning existence is absent gets
+  /// a row stating existence and nothing else, so a rename beside it is
+  /// discarded rather than refused, and a screen that offers one is
+  /// offering something that cannot land.
+  ///
+  /// One boolean answered both for a while, and it answered with
+  /// `normalise`'s step. The two agree everywhere except on an entry
+  /// the line is *not* holding: there a removal survives the fold and
+  /// dies in `normalise`, so the verbs came back on a row where they
+  /// still could not land — two presses away, `put back` then `remove`.
+  /// This is the shape this catalog's header warns about for
+  /// `offTheLine`: one boolean standing for two model facts, with the
+  /// screen left to guess them apart.
+  stated: "present" | "absent" | null;
+}
 
 class ForgeCatalog {
   /// Whether the panel is showing.
@@ -170,6 +235,17 @@ class ForgeCatalog {
 
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
+
+  /// The piece of work being read, if one is open.
+  ///
+  /// A second selection under the first, and it narrows rather than
+  /// replaces: work is against a line, so the line stays selected while
+  /// one of its pursuits is open and the panel keeps showing which line
+  /// this is work on. Nothing derives it from `pursuit.data` — that
+  /// resource is empty for the moment between asking and arriving, and
+  /// a screen that read emptiness as "no work open" would flash the
+  /// list of pursuits back over the one being opened.
+  working = $state<string | null>(null);
 
   /// What the last discard released, until something replaces or clears
   /// it.
@@ -221,6 +297,132 @@ class ForgeCatalog {
     "forgeCatalog.history",
   );
 
+  /// Every piece of work against the selected line, open and ended
+  /// alike. Ended work stays in the list because it is the record of
+  /// what was proposed and what became of it — an abandoned pursuit
+  /// puts nothing on the line and is still the answer to why something
+  /// is not there.
+  pursuits = new Resource<LineArgs, ForgePursuitDto[]>(
+    async (args) =>
+      api<ForgePursuitDto[]>("list_forge_pursuits_of_line", {
+        lineId: args.lineId,
+      }),
+    [] as ForgePursuitDto[],
+    "forgeCatalog.pursuits",
+  );
+
+  /// One piece of work, whole — its rounds and how it ended if it has.
+  ///
+  /// One read where the line needs two. `ForgePursuitDto`'s own doc
+  /// says why: a pursuit is an opening, a handful of rounds and at most
+  /// one close, so there is no split to make and no summary shape to
+  /// keep in step with it.
+  pursuit = new Resource<PursuitArgs, ForgePursuitDto | null>(
+    async (args) =>
+      api<ForgePursuitDto>("get_forge_pursuit", { pursuitId: args.pursuitId }),
+    null,
+    "forgeCatalog.pursuit",
+  );
+
+  /// What this work asks for that the line has already moved.
+  ///
+  /// A separate `Resource` from the work rather than a field folded
+  /// into it, because the answer is about the pair and moves when
+  /// either side does — which is also why nothing here has to be
+  /// invalidated by hand. `change.rs` defines the term and says what
+  /// ends one.
+  collisions = new Resource<PursuitArgs, ForgeCollisionDto[]>(
+    async (args) =>
+      api<ForgeCollisionDto[]>("get_forge_pursuit_collisions", {
+        pursuitId: args.pursuitId,
+      }),
+    [] as ForgeCollisionDto[],
+    "forgeCatalog.collisions",
+  );
+
+  /// The landings this work has not seen, oldest first.
+  ///
+  /// Its own `Resource` beside `collisions` rather than a count taken
+  /// off it, because they answer different questions —
+  /// `get_forge_pursuit_behind` says which, and most of what this
+  /// counts touches nothing the work is doing. A screen with only the
+  /// other one cannot explain a close that comes back asking to be
+  /// resolved first.
+  behind = new Resource<PursuitArgs, string[]>(
+    async (args) =>
+      api<string[]>("get_forge_pursuit_behind", { pursuitId: args.pursuitId }),
+    [] as string[],
+    "forgeCatalog.behind",
+  );
+
+  /// What the library knows about the assets on screen, by asset id.
+  ///
+  /// **A line does not hold images.** It holds assets, and the first
+  /// card this repository's own e2e picks up is a recording — so a
+  /// panel that draws every entry as a thumbnail draws an empty box for
+  /// anything without one, forever: `thumbById` answers with a
+  /// transparent pixel while a thumb is being made *and* when there is
+  /// never going to be one, and those are the same grey square on
+  /// screen. An e2e waited twenty seconds at one before this existed.
+  ///
+  /// `media` is what settles it, and it is projected onto the card
+  /// precisely so a UI stops deriving it from a mime type. The forge
+  /// asks the same question the grid asks, through the same command.
+  ///
+  /// Kept as a plain map rather than a `Resource` because it is
+  /// cumulative and keyed: entries arrive as rounds are pushed, and
+  /// what has already been read stays read.
+  cards = $state<Record<string, AssetCardDto>>({});
+
+  /// Reads what it does not have yet. Safe to call on every render
+  /// pass: it fetches only the ids it is missing, and answers nothing
+  /// when it is missing none.
+  async ensureCards(ids: (string | null)[]): Promise<void> {
+    const wanted = [...new Set(ids.filter((id): id is string => id !== null))];
+    const missing = wanted.filter((id) => this.cards[id] === undefined);
+    if (missing.length === 0) return;
+    // Ids the library will not answer for drop out of the response, so
+    // a card that never arrives stays missing and the screen falls back
+    // to what it can say without one.
+    const got = await api<AssetCardDto[]>("hydrate_cards", {
+      ids: missing,
+      viewerSubject: null,
+    });
+    const next = { ...this.cards };
+    for (const card of got) next[card.id] = card;
+    this.cards = next;
+  }
+
+  /// What is being talked about, if anything is.
+  ///
+  /// One at a time, and held here rather than in whichever component
+  /// offered it: the conversations are shown in one place below the
+  /// tabs, and what they are about is opened from three different ones
+  /// — a piece of work, a round or one of its entries, a change point
+  /// in the chain.
+  talkingAbout = $state<ForgeTalkAnchor | null>(null);
+
+  /// The conversations about it. More than one can hang off the same
+  /// thing — two people starting separate ones about a round is not a
+  /// mistake to merge — so this is a list.
+  ///
+  /// Each arrives whole, with every message and every correction to
+  /// each. That is `ForgeThreadDto`'s decision and not this store's,
+  /// and it is stated there.
+  threads = new Resource<ForgeTalkAnchor, ForgeThreadDto[]>(
+    async (anchor) =>
+      api<ForgeThreadDto[]>("list_forge_threads_about", {
+        anchorKind: anchor.kind,
+        pursuitId: anchor.pursuitId ?? null,
+        lineId: anchor.lineId ?? null,
+        nodeId: anchor.nodeId ?? null,
+        entryId: anchor.entryId ?? null,
+        changePointId: anchor.changePointId ?? null,
+      }),
+    [] as ForgeThreadDto[],
+    "forgeCatalog.threads",
+  );
+
   /// Opening the panel reads the list and the rules. Nothing reloads on
   /// a timer: the lines a person opened are not something a background
   /// write moves, and a panel that refreshed under a selection would
@@ -254,14 +456,311 @@ class ForgeCatalog {
     await this.lines.load();
   }
 
+  /// Shows a line: what it holds, and the work against it.
+  ///
+  /// Every clear a move off the previous line owes is here rather than
+  /// at each site that moves. A pursuit id belongs to the line it is
+  /// against and a change point to the chain it is on, so none of what
+  /// this store holds about the previous line survives the move — and
+  /// writing that out at each call site is how one of them gets missed,
+  /// which is what happened to `released` before this store's tests
+  /// existed. What the panel holds is the panel's to clear.
+  ///
+  /// The chain is reset rather than read. It answers a question asked
+  /// after the fact, so it loads when somebody asks; what would be
+  /// wrong is leaving the previous line's chain under this line's name.
+  async selectLine(lineId: string): Promise<void> {
+    this.selected = lineId;
+    // The discard notice answers about a line that is gone. Selecting
+    // another one is a new question, and leaving the old answer above
+    // it reads as though it were about this one.
+    this.released = null;
+    this.history.reset();
+    // Before `clearWork`, which leaves a conversation about a change
+    // point standing on the grounds that the line has not moved. Here
+    // it has.
+    this.stopTalking();
+    this.clearWork();
+    await Promise.all([
+      this.states.load({ lineId }),
+      this.pursuits.load({ lineId }),
+    ]);
+  }
+
+  /// Everything the work half is showing, cleared as one.
+  ///
+  /// Called wherever the work being shown stops being the work to
+  /// show — a move off the line, a pursuit replacing the last one, a
+  /// person going back to the list. One method rather than a clear
+  /// written at each of them, for the reason `selectLine` gives.
+  clearWork(): void {
+    this.working = null;
+    this.pursuit.reset();
+    this.collisions.reset();
+    this.behind.reset();
+    // Three of the four anchors name a node of the work being let go
+    // and cannot outlive it. The fourth is a change point, which is the
+    // line's: it was landed by work that may be long closed, and the
+    // chain it sits on is still on screen. So this ends a conversation
+    // about the work and leaves one about the line alone — the moves
+    // that end *that* are the ones that change or drop the line.
+    if (this.talkingAbout?.kind !== "change") this.stopTalking();
+  }
+
+  /// Opens work against a line.
+  ///
+  /// Nothing is read back about what it collides with or how far behind
+  /// it is, and that is not an omission: `open` cuts the work from where
+  /// the line is now, so a pursuit that has just been opened is level
+  /// with the line by construction and both answers are empty. They are
+  /// cleared instead, which is the same answer without the two calls.
+  async openPursuit(
+    lineId: string,
+    title: string | null,
+    note: string | null,
+  ): Promise<void> {
+    const opened = await mutate<ForgePursuitDto>(
+      "open_forge_pursuit",
+      { command: { line_id: lineId, title, note } },
+      "open a pursuit",
+    );
+    this.clearWork();
+    this.working = opened.id;
+    await Promise.all([
+      this.pursuit.load({ pursuitId: opened.id }),
+      this.pursuits.load({ lineId }),
+    ]);
+  }
+
+  /// Shows one piece of work, and what stands between it and the line.
+  async selectPursuit(pursuitId: string): Promise<void> {
+    this.working = pursuitId;
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+      this.behind.load({ pursuitId }),
+    ]);
+  }
+
+  /// Writes a round — what this work asks the line to say.
+  ///
+  /// **Nothing lands here.** `push` does not read the line at all,
+  /// which is what lets work go on while somebody else is finishing
+  /// theirs; what a round asks for reaches the line only when the work
+  /// is closed satisfied.
+  ///
+  /// The write answers with the work whole and this re-reads it anyway.
+  /// The two are the same shape, and taking the read keeps `Resource`'s
+  /// generation guard the only thing that decides what is on screen —
+  /// assigning `data` behind it would let a read already in flight land
+  /// on top of the round that was just written.
+  ///
+  /// Collisions are re-read and `behind` is not. What a round asks for
+  /// is half of what a collision is made of, so writing one can make or
+  /// clear one; how far behind the work is says how many landings it
+  /// has not seen, which nothing this side writes can move.
+  async pushRound(
+    pursuitId: string,
+    ops: ForgeOpDto[],
+    note: string | null,
+  ): Promise<void> {
+    await mutate(
+      "push_forge_round",
+      { pursuitId, command: { pursuit_id: pursuitId, ops, note } },
+      "push a round",
+    );
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+    ]);
+  }
+
+  /// Asks the line's rule to answer whatever this work collides with.
+  ///
+  /// **Returns what the rule did rather than throwing**, because a rule
+  /// that writes nothing has not failed — `react.rs` says so at the
+  /// site, and lists the two ways it happens. A screen reporting either
+  /// as a failure would be telling somebody to retry the one thing that
+  /// cannot help.
+  async resolve(pursuitId: string): Promise<boolean> {
+    const answer = await mutate<ForgeResolvedDto>(
+      "resolve_forge_pursuit",
+      { pursuitId },
+      "let the rule settle this",
+    );
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+    ]);
+    return answer.round !== null;
+  }
+
+  /// Ends the work, and puts what it says on the line if it says
+  /// anything.
+  ///
+  /// The only verb on this side that moves a line, so it is the only
+  /// one that invalidates what the line half is showing: satisfied puts
+  /// every round on the chain as one landing, which moves the contents
+  /// and the history both. Abandoned moves neither and re-reads them
+  /// anyway — the alternative is a branch on an outcome to save one
+  /// read, and it would be wrong the first time a landing arrived from
+  /// somewhere else while this was open.
+  ///
+  /// `behind` is the one read not refreshed. A satisfied close puts a
+  /// landing on the line that the work is then behind — its own — which
+  /// is a true number about a question nobody is asking any more. The
+  /// surface stops offering it for work that has ended rather than
+  /// re-reading to say that.
+  ///
+  /// A refusal from here reaches the caller, and what to do about it
+  /// is not something `mutate` reads. The reason separates retrying
+  /// from asking for something else from neither; `blocked` covers two
+  /// situations that want different actions and only its message says
+  /// which, which `close_forge_pursuit` in `asterism-server`'s `http`
+  /// module spells out.
+  async closePursuit(
+    pursuitId: string,
+    lineId: string,
+    outcome: "satisfied" | "abandoned",
+    note: string | null,
+  ): Promise<void> {
+    await mutate(
+      "close_forge_pursuit",
+      { pursuitId, command: { pursuit_id: pursuitId, outcome, note } },
+      "close this pursuit",
+    );
+    this.history.reset();
+    await Promise.all([
+      this.pursuit.load({ pursuitId }),
+      this.collisions.load({ pursuitId }),
+      this.pursuits.load({ lineId }),
+      this.states.load({ lineId }),
+    ]);
+  }
+
+  /// Shows what is said about one thing, and reads it.
+  async talkAbout(anchor: ForgeTalkAnchor): Promise<void> {
+    this.talkingAbout = anchor;
+    await this.threads.load(anchor);
+  }
+
+  /// Stops showing it. Not a write of any kind — a conversation is
+  /// there whether or not anybody has it open.
+  stopTalking(): void {
+    this.talkingAbout = null;
+    this.threads.reset();
+  }
+
+  /// Starts a conversation about it.
+  ///
+  /// **There is no opening one empty.** A conversation is what was said
+  /// in it, so the first thing said is part of opening it rather than a
+  /// message written afterwards.
+  ///
+  /// What the anchor can and cannot be is `ForgeTalkAnchor`'s to
+  /// explain; nothing here is trusted with it.
+  async openTalk(
+    anchor: ForgeTalkAnchor,
+    said: string,
+    title: string | null,
+  ): Promise<void> {
+    await mutate(
+      "open_forge_thread",
+      {
+        command: {
+          anchor_kind: anchor.kind,
+          pursuit_id: anchor.pursuitId ?? null,
+          line_id: anchor.lineId ?? null,
+          node_id: anchor.nodeId ?? null,
+          entry_id: anchor.entryId ?? null,
+          change_point_id: anchor.changePointId ?? null,
+          title,
+          said,
+        },
+      },
+      "start a conversation",
+    );
+    await this.threads.load(anchor);
+  }
+
+  /// Says something in one.
+  ///
+  /// The write answers with the message it wrote and this re-reads the
+  /// list, for the reason `pushRound` re-reads the work: `Resource`'s
+  /// generation guard is what decides what is on screen, and a message
+  /// spliced in beside it would be a second answer nothing arbitrates.
+  async sayInTalk(
+    anchor: ForgeTalkAnchor,
+    threadId: string,
+    said: string,
+    replyingTo: string | null,
+  ): Promise<void> {
+    await mutate(
+      "say_in_forge_thread",
+      { threadId, command: { thread_id: threadId, replying_to: replyingTo, said } },
+      "say this",
+    );
+    await this.threads.load(anchor);
+  }
+
+  /// Corrects something said. **Nothing is overwritten** — this appends
+  /// a revision, which is why it answers with the correction rather
+  /// than with the message as it now reads.
+  async amendInTalk(
+    anchor: ForgeTalkAnchor,
+    threadId: string,
+    messageId: string,
+    said: string,
+  ): Promise<void> {
+    await mutate(
+      "amend_forge_message",
+      { threadId, command: { thread_id: threadId, message_id: messageId, said } },
+      "correct this",
+    );
+    await this.threads.load(anchor);
+  }
+
+  /// Gets out of the way without ending anything.
+  ///
+  /// The drawer is an overlay, so while it is up the grid cannot be
+  /// reached — and the grid is where the content of a round comes from.
+  /// A person who opens the forge before picking is therefore told to
+  /// go and select something, by a surface that is itself what stops
+  /// them. The first build of this shipped that as a disabled button
+  /// with the instruction on it, and pressing it does nothing, which is
+  /// the state the button existed to avoid.
+  ///
+  /// So: step aside, keep everything. The line, the work, what is
+  /// loaded about both — none of it is a question this answers, unlike
+  /// `closePanel`, which ends the question deliberately. Opening the
+  /// panel again lands back on the same work with the selection now
+  /// made.
+  stepAside(): void {
+    this.open = false;
+  }
+
+  /// Whether the panel is out of the way with work still open on it.
+  ///
+  /// Derived rather than a flag, so nothing has to remember to clear
+  /// it: the two things that end it are opening the panel again and
+  /// letting go of the work, and both are already writes to what this
+  /// reads.
+  ///
+  /// It exists because stepping aside is only half a gesture. The first
+  /// build of it closed the drawer and said nothing more, which left
+  /// somebody in the grid with no sign that the forge was waiting and
+  /// no way back that was not a guess. What reads this is the way back.
+  get steppedAside(): boolean {
+    return !this.open && this.working !== null;
+  }
+
   /// Closing ends the question rather than pausing it.
   ///
-  /// Everything a line's selection produced goes with it: what is on
-  /// it, its chain, and the answer a discard left. Keeping any of that
+  /// Everything a line's selection produced goes with it. Keeping any of that
   /// across a close would mean the next open shows a derivation of a
-  /// chain that may have moved in between — and it will move, because
-  /// #170's second child lands rounds on it. The alternative was to
-  /// re-read on open instead, which is the same work at a worse moment:
+  /// chain that may have moved in between, and a satisfied close is a
+  /// thing anybody can do to it. The alternative was to re-read on
+  /// open instead, which is the same work at a worse moment:
   /// a panel that opens onto a stale answer and corrects itself.
   ///
   /// The team's catalog empties on `disconnect` rather than on close,
@@ -272,6 +771,9 @@ class ForgeCatalog {
     this.selected = null;
     this.states.reset();
     this.history.reset();
+    this.pursuits.reset();
+    this.stopTalking();
+    this.clearWork();
     this.released = null;
   }
 
@@ -315,6 +817,13 @@ class ForgeCatalog {
 
   /// Drops the line, its history, and every piece of work against it.
   ///
+  /// **It refuses while any of that work is still open**, and the model
+  /// says why where it refuses: dropping takes the history the work was
+  /// cut from, so what would be left is a log against nothing. Closing
+  /// the work first is the record of what happened to it, not a
+  /// formality — which makes this the one line verb with a precondition
+  /// the screen has to state before it is pressed.
+  ///
   /// **The answer is the point.** It names the assets the forge was
   /// holding and is not holding any more, and after this write there is
   /// no record left to derive them from — so a caller that throws the
@@ -333,6 +842,13 @@ class ForgeCatalog {
       this.selected = null;
       this.states.reset();
       this.history.reset();
+      // Every pursuit against this line went with it, and so did every
+      // change point and everything said about either. What was on
+      // screen names records that no longer exist, and a read of one
+      // now answers not-found rather than a list.
+      this.pursuits.reset();
+      this.stopTalking();
+      this.clearWork();
     }
     await this.lines.load();
   }
@@ -362,6 +878,149 @@ class ForgeCatalog {
   /// be made.
   get offTheLine(): ForgeEntryStateDto[] {
     return this.states.data.filter((state) => !state.alive);
+  }
+
+  /// The line as the work being read would leave it: every entry the
+  /// chain has named, with the work's operations applied over it.
+  ///
+  /// A derived over both reads because it is a question about the pair,
+  /// and neither log answers it alone — the line says what it has said,
+  /// the work says what it asks for, and what a close leaves is the
+  /// second applied to the first. It is here rather than on a screen
+  /// because a fold nobody can see is a fold each screen writes again
+  /// slightly differently, and every rule it has to get right is
+  /// somebody else's.
+  ///
+  /// **In two steps, because the model takes two.** `op.rs`'s `fold`
+  /// reduces the whole work to one row per entry *before* anything
+  /// meets the line: per axis the last operation wins, and then the
+  /// winning existence decides what the row says — present carries the
+  /// content and name that won, absent says existence and nothing else,
+  /// and an entry no operation placed keeps whatever axes were written.
+  /// Applying operations to a line one at a time instead is wrong
+  /// wherever a removal has an operation after it or beside it, and
+  /// each of those is two presses away: remove-then-rename and
+  /// remove-then-replace show what the landing will discard, and an
+  /// entry added, removed and renamed inside one piece of work becomes
+  /// a row no close produces. The tests hold the list.
+  ///
+  /// Only then does the line come in, which is `change.rs`'s
+  /// `normalise`: a removal of something the line is not holding has
+  /// nothing left to do, so it leaves nothing here — while one the line
+  /// knows and let go stays exactly as the line has it. An entry the
+  /// line has never heard of is otherwise on this list like any other,
+  /// which is `table.rs`'s position rather than a choice made here: an
+  /// entry appears as soon as anything names it, on the line or off it.
+  ///
+  /// **Not the model's answer, and it cannot be.** A landing arriving
+  /// meanwhile changes what this is folded onto — most of them touch
+  /// nothing this work asks for and the close lands anyway, and the
+  /// ones that collide are refused. Reading it early is what lets
+  /// somebody fix a name before the close tells them to.
+  get projection(): ForgeProjectedEntry[] {
+    // Step one: the work alone, per axis, last operation winning.
+    const existence = new Map<string, boolean>();
+    const content = new Map<string, string | null>();
+    const named = new Map<string, string | null>();
+    for (const round of this.pursuit.data?.rounds ?? []) {
+      for (const op of round.ops) {
+        if (op.kind === "add") {
+          existence.set(op.entry_id, true);
+          content.set(op.entry_id, op.content_asset_id);
+          named.set(op.entry_id, op.name);
+        } else if (op.kind === "replace") {
+          content.set(op.entry_id, op.content_asset_id);
+        } else if (op.kind === "rename") {
+          named.set(op.entry_id, op.name);
+        } else if (op.kind === "remove") {
+          existence.set(op.entry_id, false);
+        }
+      }
+    }
+
+    // Step two: over the line, which is where an entry gets a name this
+    // work never mentioned and where a removal of something already off
+    // stops being anything at all.
+    const rows = new Map<string, ForgeProjectedEntry>();
+    for (const state of this.states.data) {
+      rows.set(state.entry_id, {
+        entryId: state.entry_id,
+        name: state.name,
+        assetId: state.content_asset_id,
+        alive: state.alive,
+        stated: null,
+      });
+    }
+    const touched = new Set([
+      ...existence.keys(),
+      ...content.keys(),
+      ...named.keys(),
+    ]);
+    for (const entryId of touched) {
+      const before = rows.get(entryId);
+      const goes = existence.get(entryId);
+      if (goes === false) {
+        // Existence standing alone. The line goes on saying what it
+        // said, minus the entry — and if it was not holding it, the
+        // removal leaves the line's own row exactly as it was.
+        //
+        // `stated` is written either way, because the fold said absent
+        // either way: the other axes are gone from what a close will
+        // look at whether or not `normalise` keeps the row.
+        if (before !== undefined) {
+          rows.set(entryId, { ...before, alive: false, stated: "absent" });
+        }
+        continue;
+      }
+      rows.set(entryId, {
+        entryId,
+        name: named.get(entryId) ?? before?.name ?? null,
+        assetId: content.get(entryId) ?? before?.assetId ?? null,
+        alive: goes === true ? true : (before?.alive ?? false),
+        stated: goes === true ? "present" : null,
+      });
+    }
+    return [...rows.values()];
+  }
+
+  /// Names that would be on the line twice if this work landed.
+  ///
+  /// A line holds one live entry per name and `History::record` refuses
+  /// the landing that would break it. Read from the fold above rather
+  /// than from the names the work happens to have typed: the case that
+  /// matters most is an added name meeting one the line already holds,
+  /// and counting only what the work asked for stays silent on exactly
+  /// that. Names default from filenames, and filenames repeat.
+  /// Names are compared trimmed, which is agreement with `Name::new`
+  /// rather than defence against anything: every name here has already
+  /// been through it on the way out, so nothing untrimmed arrives from
+  /// this backend. It is here so the comparison cannot drift from the
+  /// rule it is predicting.
+  get wouldClash(): string[] {
+    const seen = new Map<string, number>();
+    for (const row of this.projection) {
+      if (!row.alive || row.name === null) continue;
+      const name = row.name.trim();
+      seen.set(name, (seen.get(name) ?? 0) + 1);
+    }
+    return [...seen.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([name]) => name);
+  }
+
+  /// Work nobody has ended. The only work a round can be written to.
+  get openWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((work) => work.close === null);
+  }
+
+  /// Work that ended, satisfied or abandoned.
+  ///
+  /// Kept apart from the open work rather than flagged among it, for
+  /// the reason `offTheLine` is: a list that reads as things you can
+  /// still push to, half of which refuse every write with "settled", is
+  /// a list that has to be tried to be understood.
+  get endedWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((work) => work.close !== null);
   }
 }
 

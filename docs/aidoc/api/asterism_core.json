@@ -205,7 +205,7 @@
     {
       "path": "asterism_core::application::mapping::forge_anchored",
       "kind": "function",
-      "docs": "Reads which thing a conversation is about.\n\nThe ids a kind needs are required and the rest are ignored, so a\ncaller cannot describe a round anchor while handing over an entry.\nOver HTTP the kind is fixed by the route as well, and this is what\nanswers for the transports where it is not."
+      "docs": "Reads which thing a conversation is about.\n\nThe ids a kind needs are required and the rest are **refused**, so a\ncaller cannot describe a round anchor while handing over an entry.\nIgnoring the extras is what would let it: the anchor would come back\nas the round, and the caller that named an entry would be answered\nabout something else. The body says which refusal each one is.\n\nOver HTTP the kind is fixed by the route as well, and this is what\nanswers for the transports where it is not."
     },
     {
       "path": "asterism_core::application::mapping::forge_body",
