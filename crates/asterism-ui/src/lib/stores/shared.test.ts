@@ -190,6 +190,20 @@ describe("the frame's three states", () => {
 
     expect(sharedCatalog.phase).toBe("disconnected");
   });
+
+  it("keeps the team across a disconnect, so connecting again skips no-team", async () => {
+    // Which is why the header calls this where a *window* begins
+    // rather than where every session does. Dropping the id because a
+    // connection dropped would make somebody type it twice.
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce(undefined);
+    await sharedCatalog.disconnect();
+
+    sharedCatalog.session = "u1";
+
+    expect(sharedCatalog.teamId).toBe("t1");
+    expect(sharedCatalog.phase).toBe("ready");
+  });
 });
 
 describe("the two writes", () => {

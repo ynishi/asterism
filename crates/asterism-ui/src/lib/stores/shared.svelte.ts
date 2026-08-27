@@ -4,8 +4,8 @@
 // This catalog exists because #148 decision 16 says a shared line is
 // served through rather than mirrored: reads go to the server, there is
 // no local copy, and therefore no staleness to reason about. The three
-// sections after this one follow from that sentence alone, and were
-// written when the lines were all this plane showed.
+// sections after this one were written when the lines were all this
+// plane showed.
 //
 // What follows them is the frame #171's surfaces attach to, written
 // ahead of them for the reason `forge.svelte.ts` gives for its own: a
@@ -47,12 +47,14 @@
 //
 // # Three subjects under a team, and the frame that follows
 //
-// #148's model puts three things under a team: the lines it hosts, the
-// memberships that say who may work them, and the ledger recording what
-// was done in what capacity. That is where this frame parts from
-// `forge.svelte.ts`'s, which answers about a line because a line is all
-// the local plane has. A frame here that answered only about lines
-// would leave two of the three nowhere to be.
+// Three things sit under a team. #148's model draws two of them — the
+// memberships that say who is in it, and the lines it hosts — and its
+// decisions 17 and 18 keep the third, #83's ledger of what was done in
+// what capacity, putting a cursor on the read rather than introducing
+// the table. That is where this frame parts from `forge.svelte.ts`'s,
+// which answers about a line because a line is all the local plane
+// has. A frame here that answered only about lines would leave two of
+// the three nowhere to be.
 //
 // They are three answers about one team, so they are tabs on one frame
 // rather than three places to go: somebody moving between them is
@@ -60,10 +62,19 @@
 // `ForgePanel` gives its own three.
 //
 // Selecting a line inside the first of them brings the forge's frame
-// with it — contents, work, history — because decision 19 mirrors the
-// local surface path for path and the same DTOs come back, so a shared
-// line is the same subject a local one is. Two levels of tab, because
-// the model has two subjects here and not one.
+// with it, because decision 19 mirrors the local surface path for path
+// and the same DTOs come back, so a shared line is the same subject a
+// local one is. Two levels of tab, because the model has two subjects
+// here and not one.
+//
+// A subset of that frame, and the subset is part of the design rather
+// than an omission in it. `ForgePanel` mounts `ForgeTalk` under
+// whichever of its tabs is showing, and the member's client states of
+// itself that the conversation verbs are not among what it carries.
+// The server mirrors the thread routes; nothing on this side calls
+// them. So contents, work and history come across and conversations do
+// not, and whether they should is a question for whichever child wants
+// one rather than something this frame has already answered.
 //
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
@@ -79,9 +90,8 @@
 // Lines lead because a team is joined in order to work with what it
 // holds, and the roster and the ledger answer about the team rather
 // than about the work. **That is an assumption about intended use and
-// not a measurement** — nothing here is instrumented, and no screen
-// over a roster or a ledger has existed to instrument. If it is wrong,
-// the order of the tabs is what moves.
+// not a measurement**; if it is wrong, the order of the tabs is what
+// moves.
 //
 // # Two kinds of empty, and what tells them apart
 //
@@ -113,18 +123,33 @@
 // already in it, because the field it would fill starts empty, and it
 // stays in it until somebody names a team. What a picker changes is
 // what that phase shows: a list to choose from where there is a field
-// to fill. It is where every session begins either way, which is why
-// the frame draws it as a state rather than passing through it.
+// to fill.
+//
+// It is where a window begins rather than where every session does.
+// `disconnect` leaves `teamId` alone, so connecting again in the same
+// window returns to the team it was last looking at — the id is what
+// somebody typed, and dropping it because a connection dropped would
+// be making them type it twice. That is why the frame draws this as a
+// state rather than a moment it passes through: it is the first thing
+// a window shows and the one thing a reconnection skips.
 //
 // # Where #171's surfaces attach
 //
-// **The roster** — create a team, see who is in it, invite and join
-// under `RegistrationPolicy`, leave — is the second tab, over the
-// member's client's `roster`. **The ledger** is the third, over
-// `events`. Each arrives with whatever desktop command it needs,
-// brought by the child that builds it: what a surface asks of a
-// command is known where the surface is written and guessed anywhere
-// else.
+// **The roster** — create a team, see who is in it, invite, leave — is
+// the second tab, over the member's client's `roster`. Four rules
+// govern those four verbs and a surface built from one sentence would
+// flatten them: `RegistrationPolicy` decides who may create a team,
+// the authority table puts `Invite` behind an owner, and leaving is
+// held by the last-owner rule. **Joining has no verb at all** — the
+// membership routes are invite, remove, grant and revoke — so a tab
+// offering one would be offering something with nothing behind it.
+// #171's body hangs all four on `RegistrationPolicy`, and this is the
+// finding about that sentence rather than a restatement of it.
+//
+// **The ledger** is the third tab, over `events`. Each of the two
+// arrives with whatever desktop command it needs, brought by the child
+// that builds it: what a surface asks of a command is known where the
+// surface is written and guessed anywhere else.
 //
 // **Working a shared line** is the forge's `work` tab, in the inner
 // frame above. Decision 10 is why there is no copy step in front of
@@ -144,17 +169,17 @@
 // What the model adds is that it cannot be started from there either
 // without work already open: decision 5 gives content exactly one
 // entry point, a verb scoped to an open pursuit, so that the team
-// never holds an Asset that is not attached to work. So a promotion is
-// offered against the pursuit this frame has open, and is not offered
-// when there is none — the same direction `ForgeWork` established when
-// it stepped the drawer aside for a grid selection rather than taking
-// a typed id, run the other way.
+// never holds an Asset that is not attached to work. Which pursuit,
+// and what the detail pane does when there is none, is that surface's
+// to decide and belongs in its header. What belongs here is that the
+// open pursuit is a read over the member's client, and like the
+// roster's and the ledger's it arrives with the child that needs it.
 //
-// It is also the third write on this plane that is not safe to press
-// twice, and the one where that is least visible: decision 7 mints a
-// TeamAsset per promotion, so a second press makes a second one over
-// one stored copy rather than finding the first. `publish` carries the
-// same asymmetry and `clone` does not.
+// It is also a write that is not safe to press twice, and the one
+// where that is least visible: decision 7 mints a TeamAsset per
+// promotion, so a second press makes a second one over one stored copy
+// rather than finding the first. `publish` carries the same asymmetry
+// and `clone` does not.
 //
 // # The ledger is paged rather than listed
 //
@@ -185,7 +210,21 @@
 // what #167 chose and what the deferral leaves in place.
 //
 // What the frame does meanwhile is meet a person with a connection
-// form every time it opens, and `phase` says so as its first state.
+// form once per window rather than once per opening: the session lives
+// in the backend for as long as the window does, so reopening the
+// drawer while connected shows lines rather than the form again.
+// `phase` is what says which of the two somebody is looking at.
+//
+// # The head pull is not a tab here
+//
+// #171 carries #130's fetch-for-me — the head a model panel pastes as
+// an artifact today should be fetchable from the team holding it. That
+// is a verb the model panel gains rather than a subject this frame
+// grows: what somebody is looking at is the encoder they are training,
+// and the team is where the bytes come from, which is the promotion's
+// direction read backwards. It attaches to `SettingsModel`, and what
+// it needs from this plane is the connection the first section of this
+// frame is about.
 //
 // # Why this grows rather than a second catalog beside it
 //
@@ -193,7 +232,11 @@
 // frame could arrive with the first one. A panel reads this catalog,
 // so a second catalog carrying the frame would be two stores answering
 // about one team — the shape the first section of this file refuses
-// one layer down. The panel is what grows into the frame.
+// one layer down. The panel is what grows into the frame, and it has
+// not grown yet: everything above is a design and not a component, and
+// the first surface to land is what builds the tabs. What did land
+// with the design is `phase`, because the panel was already able to
+// merge the two kinds of empty and now does not.
 //
 // Where it sits is not among the questions this design opens. #181
 // moved `shared lines` beside the forge in the sidebar and named
@@ -220,8 +263,10 @@ class SharedCatalog {
   /// The user id the server answered with, or `null` when this window
   /// is talking to no team.
   session = $state<string | null>(null);
-  /// Which team is being looked at. Typed in, because there is no verb
-  /// on the member's client for "the teams I am in" — see the panel.
+  /// Which team is being looked at. Typed in rather than picked,
+  /// because there is no verb on the member's client for "the teams I
+  /// am in" — what a picker would and would not change is in the
+  /// header. Kept across a disconnect on purpose; see `phase`.
   teamId = $state("");
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
@@ -282,10 +327,12 @@ class SharedCatalog {
   /// whether it failed, and neither answers whether there is a server
   /// behind it. See the header.
   ///
-  /// `no-team` is where a session begins: the field starts empty, so a
-  /// window that has just connected is in it and stays in it until
-  /// somebody names a team. A picker populates that state rather than
-  /// introducing it.
+  /// `no-team` is where a window begins: the field starts empty, so a
+  /// window that has just connected is in it until somebody names a
+  /// team. It is not where every session begins — `disconnect` leaves
+  /// the field alone, so connecting again in the same window goes
+  /// straight back to `ready` on the team it was last looking at. A
+  /// picker populates this state rather than introducing it.
   get phase(): "disconnected" | "no-team" | "ready" {
     if (this.session === null) return "disconnected";
     if (this.teamId === "") return "no-team";

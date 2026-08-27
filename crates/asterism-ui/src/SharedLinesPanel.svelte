@@ -12,10 +12,16 @@
   // `sharedCatalog` and `activeFilter.activePersona` directly, and the
   // App only mounts it.
   //
-  // The team id is typed in. That is not a placeholder for a picker —
-  // the member's client has no verb for "the teams I am in", so there
-  // is nothing to populate a picker from yet, and a select box built on
-  // a guess would be worse than a field that says what it wants.
+  // The team id is typed in because the member's client has no verb
+  // for "the teams I am in". What a picker would change when that verb
+  // lands, and what it would not, is argued in the catalog's header
+  // rather than restated here.
+  //
+  // What this panel reads from that header is `phase`: there is nobody
+  // to ask, there is nobody chosen to ask about, or there is. The three
+  // branches below are those three, and the empty list belongs to the
+  // last of them alone — under either of the others it would be
+  // answering for a team on nobody's behalf.
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
 
@@ -86,7 +92,7 @@
         stored on this machine — cloning is how you take a copy.
       </p>
 
-      {#if sharedCatalog.session === null}
+      {#if sharedCatalog.phase === "disconnected"}
         <form class="drawer-form" onsubmit={connect}>
           <label>
             Server
@@ -132,7 +138,11 @@
           <p class="drawer-said">{sharedCatalog.said}</p>
         {/if}
 
-        {#if sharedCatalog.lines.loading}
+        {#if sharedCatalog.phase === "no-team"}
+          <p class="drawer-empty">
+            Name a team above to see the lines it hosts.
+          </p>
+        {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
           <p class="drawer-empty drawer-error">
@@ -205,36 +215,47 @@
 
         <!-- Publishing. The re-enactment is chosen here or never:
              a line seeded with its current state cannot be given its
-             history afterwards. -->
-        <form class="drawer-form drawer-publish" onsubmit={publish}>
-          <h4>Publish a line of mine</h4>
-          <label>
-            Local line
-            <input type="text" bind:value={publishLineId} placeholder="line id" required />
-          </label>
-          <label>
-            Call it
-            <input type="text" bind:value={publishName} required />
-          </label>
-          <label class="drawer-check">
-            <input type="checkbox" bind:checked={reenact} />
-            Re-enact the whole chain
-          </label>
-          <p class="drawer-cost">
-            {#if reenact}
-              The team's line will be <strong>re-enacted</strong>: one
-              change point for each of mine, every act stamped to me
-              rather than to whoever made the work, and every content
-              the line ever named sent — including what has since been
-              replaced. Work logs and conversations do not go.
-            {:else}
-              The team gets what the line holds now, as a single change
-              point. Choose re-enactment before publishing if you want
-              the chain; it cannot be added to the line afterwards.
-            {/if}
-          </p>
-          <button type="submit">Publish</button>
-        </form>
+             history afterwards.
+
+             Behind `ready` for the same reason the list above is: it
+             seeds a line on the team in the field, and with no team
+             named it would be offering to publish to nobody. -->
+        {#if sharedCatalog.phase === "ready"}
+          <form class="drawer-form drawer-publish" onsubmit={publish}>
+            <h4>Publish a line of mine</h4>
+            <label>
+              Local line
+              <input
+                type="text"
+                bind:value={publishLineId}
+                placeholder="line id"
+                required
+              />
+            </label>
+            <label>
+              Call it
+              <input type="text" bind:value={publishName} required />
+            </label>
+            <label class="drawer-check">
+              <input type="checkbox" bind:checked={reenact} />
+              Re-enact the whole chain
+            </label>
+            <p class="drawer-cost">
+              {#if reenact}
+                The team's line will be <strong>re-enacted</strong>: one
+                change point for each of mine, every act stamped to me
+                rather than to whoever made the work, and every content
+                the line ever named sent — including what has since been
+                replaced. Work logs and conversations do not go.
+              {:else}
+                The team gets what the line holds now, as a single change
+                point. Choose re-enactment before publishing if you want
+                the chain; it cannot be added to the line afterwards.
+              {/if}
+            </p>
+            <button type="submit">Publish</button>
+          </form>
+        {/if}
       {/if}
     </div>
   </div>
