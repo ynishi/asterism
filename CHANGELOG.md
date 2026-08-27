@@ -455,6 +455,29 @@ and this project adheres to
 
 ### Changed
 
+- **A `CLAUDE*.md` is ignored wherever it sits, and so is a nested `.claude/`.**
+  The ignore list named the root `CLAUDE.md`, which is not where the risk lives.
+  Claude Code reads a `CLAUDE.md` or a `CLAUDE.local.md` from the directory it
+  starts in and every directory above it, and a session starts wherever somebody
+  is working — so a personal file can sit beside any crate, and the tree would
+  have taken it. `CLAUDE*.md` matches by basename at every depth. The same
+  correction applies to the directory: `**/.claude/*` reaches a `.claude/`
+  beside a crate, which the root-anchored `.claude/*` did not, and neither
+  tracked nor ignored is not a state that directory should be in.
+
+  `.claude/CLAUDE.md` stays tracked through the negation, which has to come last
+  — git takes the last matching pattern, so `CLAUDE*.md` below it would ignore
+  the symlink instead. The negation is the declaration: a tracked file the
+  ignore list refuses reads exactly like somebody's `git add -f` past it, and
+  nothing in the result says which it was. It is also what makes the path
+  addable at all — git consults the index while the file is in it, so the file
+  survives either way, but the first add is refused without the negation, and so
+  is a re-add after `git rm --cached` or after a Windows checkout writes the
+  link out as a regular file.
+
+  `AGENTS.md` is deliberately not treated the same way. A subdirectory can carry
+  one, and it is repository content rather than a machine's local state.
+
 - **The instructions are `AGENTS.md`, and `.claude/` is one symlink.** What a
   repository tells an agent belongs somewhere an agent other than Claude Code
   can find, so it is `AGENTS.md` at the root now. Claude Code reads `CLAUDE.md`

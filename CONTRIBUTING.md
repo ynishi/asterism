@@ -212,15 +212,19 @@ rather than that name, so `.claude/CLAUDE.md` is committed as a symlink back to
 it — the instructions sit in one file, and a clone loads them with nothing to
 set up.
 
-That symlink is the only thing under `.claude/` this repository tracks.
-`.gitignore` takes the rest, because the directory is Claude Code's working
-directory on your machine: local settings, local memory, plugin caches, session
-state. A diff that reaches anything else there is doing something unusual, and
-the reviews say so. On Windows a clone without Developer Mode writes the symlink
-out as a text file holding the path; leave it alone — editing it dirties a
-tracked file and the `-changed` gates refuse a dirty tree — and put a
-`CLAUDE.md` containing `@AGENTS.md` at the repository root instead, which loads
-the same file by import and which `.gitignore` already keeps out of the tree.
+That symlink is the only thing under `.claude/` this repository tracks, and the
+negation that re-includes it is how the tree says so: a tracked file the ignore
+list refuses is indistinguishable from one somebody forced past it. `.gitignore`
+takes everything else — the rest of that directory wherever it appears, because
+it is Claude Code's working directory on your machine, and any `CLAUDE*.md` at
+any depth, because Claude Code reads one from the directory it starts in and
+every directory above it, so your own notes can land beside any crate. A diff
+that reaches anything else there is doing something unusual, and the reviews say
+so. On Windows a clone without Developer Mode writes the symlink out as a text
+file holding the path; leave it alone — editing it dirties a tracked file and
+the `-changed` gates refuse a dirty tree — and put a `CLAUDE.md` containing
+`@AGENTS.md` at the repository root instead, which loads the same file by import
+and which `.gitignore` already keeps out of the tree.
 
 The plugins are installed rather than cloned, and the block below is the same in
 every checkout:

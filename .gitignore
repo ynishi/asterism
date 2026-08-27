@@ -9,19 +9,38 @@ workspace
 # What this repository tells an agent is AGENTS.md, at the root, under the name
 # other coding agents read. Claude Code reads CLAUDE.md instead, so the one
 # tracked file under .claude/ is a symlink pointing back at AGENTS.md — the
-# instructions live in one place and load without anyone wiring them up. The
-# rest of .claude/ is Claude Code's working directory on a machine (local
-# settings, local memory, plugin caches, session state) and is not this
-# repository's to carry; the pattern is `.claude/*` rather than `.claude/`
-# because git cannot re-include a file whose parent directory is excluded.
-# /CLAUDE.md is ignored for the same reason: a checkout that cannot make the
-# symlink writes one there by hand, and it is that person's file. Everything a
-# plugin can carry — agents, skills, commands, hooks — is installed from the
-# marketplace declared in .claude-plugin/marketplace.json, whose plugin sources
-# sit in ./plugins, rather than cloned.
-.claude/*
+# instructions live in one place and load without anyone wiring them up.
+#
+# Everything else a session leaves behind is somebody's local state and none of
+# it is this repository's to carry. A CLAUDE.md written by hand at the root
+# where the symlink could not be made, a personal CLAUDE.local.md, a memory file
+# beside whichever crate a session was started in — Claude Code reads one from
+# the directory it starts in and every directory above it, so any of them can
+# appear anywhere in the tree. `CLAUDE*.md` matches by basename at every depth
+# and is what refuses them.
+#
+# `**/.claude/*` is the same reach for the directory itself: local settings,
+# local memory, plugin caches, session state, in a nested .claude/ as well as
+# the root one. It is `/*` rather than the bare directory because git cannot
+# re-include a file whose parent directory is excluded.
+#
+# The negation below is the declaration, and it goes last. A tracked file that
+# this list refuses reads exactly like somebody's `git add -f` past it, and
+# nothing in the result says which it was; `!.claude/CLAUDE.md` is this
+# repository saying that path is tracked on purpose. It carries weight as well
+# as intent: while the path is in the index git consults the index rather than
+# this file, so the file survives either way — but the first add is refused
+# without the negation, and so is a re-add after `git rm --cached`, or after a
+# Windows checkout writes the link out as a regular file and somebody restores
+# it. Last, because git takes the last matching pattern: a `CLAUDE*.md` written
+# below it would ignore the symlink instead.
+#
+# Everything a plugin can carry — agents, skills, commands, hooks — is installed
+# from the marketplace declared in .claude-plugin/marketplace.json, whose plugin
+# sources sit in ./plugins, rather than cloned.
+CLAUDE*.md
+**/.claude/*
 !.claude/CLAUDE.md
-/CLAUDE.md
 
 # OS / editor
 .DS_Store
