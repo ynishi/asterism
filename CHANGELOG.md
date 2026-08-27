@@ -20,13 +20,15 @@ and this project adheres to
   for what exists there.
 
   Three things keep it from being the forge's frame with a base URL. **A team is
-  not only its lines** — #148 puts the lines it hosts, the memberships that say
-  who may work them, and the ledger of what was done in what capacity all under
-  one team, where the local plane has only lines. They are three answers about
-  one team, so they are tabs on one frame, and selecting a line inside the first
-  brings the forge's own frame with it, because decision 19 mirrors the local
-  surface path for path and a shared line is the same subject a local one is.
-  Which of the three leads is taste, and the doc says so.
+  not only its lines** — the memberships that say who is in it, the lines it
+  hosts and the ledger of what was done in what capacity all sit under one team,
+  where the local plane has only lines. They are three answers about one team,
+  so they are tabs on one frame, and selecting a line inside the first brings
+  the forge's own frame with it, because decision 19 mirrors the local surface
+  path for path and a shared line is the same subject a local one is. A subset
+  of that frame: the member's client does not carry the conversation verbs, so
+  contents, work and history cross and threads do not. Which of the three tabs
+  leads is taste, and the doc says so.
 
   **There is a connection, and before it there is nothing.** Every read here is
   a request to a server, which gives "nothing to show" two meanings a screen
@@ -35,9 +37,16 @@ and this project adheres to
   is a claim about a team nobody is talking to. `phase` tells them apart, as the
   frame's own state rather than a resource's — a `Resource` knows whether it is
   loading and whether it failed, and neither answers whether there is a server
-  behind it. Its middle state, connected with no team chosen, is where a session
+  behind it. Its middle state, connected with no team chosen, is where a window
   already begins: the field starts empty. A picker for "the teams I am in"
   populates that state rather than introducing it.
+
+  **The panel reads it, so the two are told apart on screen and not only in the
+  doc.** It was showing "This team hosts no lines." with no team named, and
+  offering to publish a line to whichever team the empty field meant. The list
+  now belongs to the state where a team is chosen, the connection form to the
+  state where there is none, and a person with no team named is asked to name
+  one.
 
   **A promotion does not start from a team.** #152's client converts a local
   Asset, so the subject is the asset and the team is where it goes; a verb on
@@ -45,9 +54,19 @@ and this project adheres to
   showing it. It belongs to the asset detail pane, and the model adds that it
   cannot start there either without work already open — decision 5 gives content
   exactly one entry point, scoped to an open pursuit, so the team never holds an
-  Asset that is not attached to work. It is also the second write here that is
-  not safe to press twice: decision 7 mints a TeamAsset per promotion rather
-  than finding the first.
+  Asset that is not attached to work. It is also a write that is not safe to
+  press twice: decision 7 mints a TeamAsset per promotion rather than finding
+  the first, which is the asymmetry `publish` carries and `clone` does not.
+
+  Two things the design corrects rather than inherits. The roster's verbs answer
+  to four rules and not one: #171's body hangs create, invite, join and leave on
+  `RegistrationPolicy`, where the code puts create there, invite behind an
+  owner, leave behind the last-owner rule — and **offers no join verb at all**,
+  so a tab built from that sentence would have grown a button with nothing
+  behind it. And #130's fetch-for-me, which #171 places under this umbrella, is
+  a verb the model panel gains rather than a tab here: the subject is the
+  encoder somebody is training, which is the promotion's direction read
+  backwards.
 
   Where a stored credential lives is deferred rather than answered, with its
   alternatives named — the OS keychain, the profile directory, or the window
