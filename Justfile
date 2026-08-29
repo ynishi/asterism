@@ -1820,23 +1820,24 @@ ui-e2e: ffmpeg-sidecar
         --features wdio --config src-tauri/tauri.e2e.conf.json
     npx wdio run wdio.conf.ts
 
-# Drive the team plane end to end, against a teams-server of its own.
-#
 # The suite `ui-e2e` cannot hold. Every read on the team plane is a
 # request to a second binary, and this is the recipe that builds it;
 # `wdio.teams.conf.ts` is what starts it, seeds a database nothing has
 # touched, and stops it — including when the run fails.
 #
-# A run of its own rather than more specs under `ui-e2e`, because a run
-# may hold one stateful fixture or two, and #188 is what two looks
-# like: a spec that fails in a full run and passes alone, with the
-# signature of a fixture left in one of two states. The separation is
-# free here — the teams database is made empty per run and thrown away,
-# which the app's own profile can never be.
+# A run of its own rather than more specs under `ui-e2e`, and the
+# argument for that is in `wdio.teams.conf.ts` beside the spec glob
+# that enacts it. The short of it is #188: a run may hold one stateful
+# fixture or two, and two is what a spec failing in a full run and
+# passing alone looks like.
 #
 # Same `allow-agent` terms as `ui-e2e`, and the same reason: an agent
 # without it can only report that it did not verify, and this is the
-# only surface that can check the team plane at all.
+# only surface that can check the app's team-plane screens. What the
+# server does is answered for by its own suites, which run under
+# `rust-test`.
+
+# Drive the team plane end to end, against a teams-server of its own.
 [group('check')]
 [group('allow-agent')]
 ui-e2e-teams: ffmpeg-sidecar

@@ -12,11 +12,12 @@
 // shape `bindings.ts` does not claim, every one of them stays green and
 // the panel is dead on arrival.
 //
-// Five commands are reached here — `team_server_session`,
+// Four commands are reached here — `team_server_session`,
 // `connect_team_server`, `list_shared_lines` and, through the
 // disconnect at the end, `disconnect_team_server` — none of them
 // exercised anywhere before. That is the whole reason this suite needs
-// a server rather than a mock.
+// a server rather than a mock. The reads behind a selected line, and
+// both writes, wait for a fixture that has something on it.
 //
 // # What it walks
 //
@@ -26,12 +27,14 @@
 // lines." — which is the assertion that matters most here, because it
 // is the sentence that used to appear in the second phase too.
 //
-// # What it leaves behind
+// # What it leaves of the team's
 //
-// Nothing. The team and the account live in a database `onPrepare`
-// creates and `onComplete` removes, and the app's own profile is never
-// written to: connecting is the only write this spec performs, and it
-// lives in the window.
+// Nothing. The account and the team live in a database `onPrepare`
+// creates and `onComplete` removes. What does survive a run is the
+// app's own profile directory — opening a home creates it and stamps
+// its marker before any store is touched — and the retained
+// screenshots. Neither holds anything this spec put there: connecting
+// is the only write it performs, and that one lives in the window.
 import { browser } from "@wdio/globals";
 import fs from "node:fs";
 import path from "node:path";
@@ -51,14 +54,6 @@ function fixture(): {
   password: string;
   teamId: string;
 } {
-  // A hook rejection does not stop a wdio run, so a fixture that never
-  // came up arrives here as four missing variables. The config puts the
-  // reason in a fifth, and it leads — an unset variable names the
-  // symptom, and the port that was already taken names the cause.
-  const failure = process.env.E2E_TEAMS_FAILURE;
-  if (failure) {
-    throw new Error(`the fixture never came up: ${failure}`);
-  }
   const read = (name: string): string => {
     const value = process.env[name];
     if (!value) {

@@ -3,7 +3,7 @@
 // A sibling of `wdio.conf.ts` and `wdio.bench.conf.ts` rather than a
 // variant of either. What makes it one is that this run needs a second
 // process: every read on the team plane is a request to a
-// `teams-server`, and the other two configs start one binary.
+// `teams-server`, and a sibling config starts the app and nothing else.
 //
 // # Why the specs do not join the e2e suite's run
 //
@@ -11,17 +11,20 @@
 // two looks like: `card-trash.spec.ts` fails in a full run and passes
 // alone, with the signature of a fixture left in one of two states. A
 // second fixture in the same run turns one error message into two
-// causes. Here the separation costs nothing — this fixture is created
-// empty per run and thrown away, which the app's profile can never be,
-// because a real library is what the app's specs drive.
+// causes.
+//
+// Here the separation costs nothing, because this fixture is created
+// empty per run and thrown away. The app's profile cannot be: the
+// e2e suite's specs provoke verbs against seeded content and put back
+// what they take, which is the arrangement `card-trash.spec.ts`
+// argues for where it restores what it trashed.
 //
 // # What `onPrepare` puts up, and how a spec reaches it
 //
 // A database of its own, an account, and a team, in that order,
-// because `teams-server` has no verb that makes a team: `init`,
-// `bootstrap-admin`, `create-user`, `serve`, `gc` and `backup` are the
-// whole CLI, and `POST /teams/create` is behind a session. So the
-// fixture logs in over HTTP before the app is ever driven.
+// because `teams-server` has no verb that makes a team and
+// `POST /teams/create` is behind a session. So the fixture logs in
+// over HTTP before the app is ever driven.
 //
 // A spec reads the four values it needs from `process.env`. That is
 // the channel that works: the worker re-evaluates this module, so
@@ -58,6 +61,7 @@
 // answering: see `waitForServer`.
 
 import type { TauriCapabilities } from "@wdio/tauri-service";
+import { SevereServiceError } from "webdriverio";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -147,18 +151,25 @@ function waitForServer(child: ChildProcess, deadlineMs: number): Promise<void> {
         ),
       deadlineMs,
     );
+    // The last thing it said, so the rejection can name the cause
+    // rather than guess at it. A taken port is the likely reason to
+    // exit early and not the only one — a migration the binary refuses
+    // and a blob root it cannot open leave through the same door, and
+    // the server has already said which on this stream.
+    let lastSaid = "";
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       // The stream is piped so this can read it; forwarding keeps the
       // server's own log where an `inherit` would have put it.
       process.stderr.write(text);
+      lastSaid = text.trim() || lastSaid;
       if (text.includes(SERVING_MARK)) settle();
     });
     child.once("exit", (code) =>
       settle(
         new Error(
-          `teams-server exited ${code} before it began serving — most ` +
-            `likely ${SERVER_HOST}:${SERVER_PORT} is already taken.`,
+          `teams-server exited ${code} before it began serving on ` +
+            `${SERVER_HOST}:${SERVER_PORT}: ${lastSaid || "(it said nothing)"}`,
         ),
       ),
     );
@@ -194,10 +205,16 @@ function stopServer(): void {
   child.kill("SIGTERM");
 }
 
-// The child is spawned attached, so an orderly exit takes it with us.
-// This covers the disorderly ones — `onComplete` does not run when the
-// launcher is interrupted, and a survivor would hold the port against
-// the next run.
+// Two hooks, because neither covers the other's case — and the belief
+// that spawning attached is enough covers neither. A child spawned
+// with the default `detached: false` is not killed when its parent
+// exits; it is reparented. So the orderly exits are the `exit` hook's,
+// which is exactly where Node fires it. A Ctrl-C in the terminal
+// reaches the child directly, because it shares the process group, and
+// the `SIGINT` hook is what keeps this side from outliving it. A
+// `SIGTERM` or `SIGKILL` of the launcher is covered by neither, which
+// is why `onPrepare` removes the database before making one rather
+// than trusting the run before it to have finished.
 process.on("exit", stopServer);
 process.on("SIGINT", () => {
   stopServer();
@@ -260,23 +277,24 @@ export const config: WebdriverIO.Config & {
     }
   },
 
-  // Wrapped, because a rejection here does not stop the run.
+  // Wrapped, because the class of the error decides whether the run
+  // stops.
   //
-  // wdio logs a hook failure and starts the specs regardless [measured
-  // 2026-08-29, against a port held by another `teams-server`: the
-  // launcher printed `Error in hook: … 19989 is already taken` and then
-  // opened a window]. The run does end red, so nothing passes on a
-  // fixture that never came up — but without the line below the first
-  // thing a person reads is a spec complaining about an unset variable,
-  // which names the symptom and not the cause. The reason travels to
-  // the spec instead, and the spec leads with it.
+  // A launcher hook that rejects with anything else is logged and the
+  // specs start regardless — `Error in hook: …`, and then a window
+  // opens against a fixture that was never built [measured 2026-08-29
+  // against a port held by another `teams-server`]. `SevereServiceError`
+  // is the one the launcher rethrows, which rejects the awaited call
+  // before any worker spawns, so no spec runs at all. `onComplete`
+  // still runs from the launcher's `finally`, so the server is stopped
+  // and the database removed on this path exactly as on the other.
   onPrepare: async () => {
     try {
       await prepareFixture();
     } catch (error) {
-      process.env.E2E_TEAMS_FAILURE =
-        error instanceof Error ? error.message : String(error);
-      throw error;
+      throw new SevereServiceError(
+        error instanceof Error ? error.message : String(error),
+      );
     }
   },
 
@@ -299,55 +317,53 @@ export const config: WebdriverIO.Config & {
 
 /** Everything the run needs before a window opens. */
 async function prepareFixture(): Promise<void> {
-  {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const dir = path.join(screensRoot, stamp);
-    fs.mkdirSync(dir, { recursive: true });
-    process.env.E2E_TEAMS_SCREENS_DIR = dir;
-    const runs = fs
-      .readdirSync(screensRoot)
-      .filter((name) => !name.startsWith("."))
-      .sort();
-    for (const old of runs.slice(0, Math.max(0, runs.length - 10))) {
-      fs.rmSync(path.join(screensRoot, old), { recursive: true, force: true });
-    }
-
-    // A database nothing has touched. Removing it first rather than
-    // afterwards is what makes a killed run harmless to the next one.
-    fs.rmSync(serverHome, { recursive: true, force: true });
-    fs.mkdirSync(serverHome, { recursive: true });
-    const db = path.join(serverHome, "teams.db");
-    const blobs = path.join(serverHome, "blobs");
-    const password = randomBytes(18).toString("base64url");
-
-    serverCli(["init", "--db", db]);
-    serverCli(["create-user", "--db", db, "--login", LOGIN], {
-      ASTERISM_TEAMS_USER_PASSWORD: password,
-    });
-
-    const child = spawn(
-      serverBinary,
-      ["serve", "--db", db, "--blobs", blobs, "--port", SERVER_PORT],
-      // stderr piped so the readiness line can be read; the handler
-      // forwards it, so nothing is lost by not inheriting.
-      { stdio: ["ignore", "inherit", "pipe"] },
-    );
-    server = child;
-    await waitForServer(child, 30_000);
-
-    const session = await postJson<{ token: string }>("/teams/auth/login", {
-      login: LOGIN,
-      password,
-    });
-    const team = await postJson<{ team_id: string }>(
-      "/teams/create",
-      { owner_user_id: null },
-      session.token,
-    );
-
-    process.env.E2E_TEAMS_BASE_URL = BASE_URL;
-    process.env.E2E_TEAMS_LOGIN = LOGIN;
-    process.env.E2E_TEAMS_PASSWORD = password;
-    process.env.E2E_TEAMS_ID = team.team_id;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dir = path.join(screensRoot, stamp);
+  fs.mkdirSync(dir, { recursive: true });
+  process.env.E2E_TEAMS_SCREENS_DIR = dir;
+  const runs = fs
+    .readdirSync(screensRoot)
+    .filter((name) => !name.startsWith("."))
+    .sort();
+  for (const old of runs.slice(0, Math.max(0, runs.length - 10))) {
+    fs.rmSync(path.join(screensRoot, old), { recursive: true, force: true });
   }
+
+  // A database nothing has touched. Removing it first rather than
+  // afterwards is what makes a killed run harmless to the next one.
+  fs.rmSync(serverHome, { recursive: true, force: true });
+  fs.mkdirSync(serverHome, { recursive: true });
+  const db = path.join(serverHome, "teams.db");
+  const blobs = path.join(serverHome, "blobs");
+  const password = randomBytes(18).toString("base64url");
+
+  serverCli(["init", "--db", db]);
+  serverCli(["create-user", "--db", db, "--login", LOGIN], {
+    ASTERISM_TEAMS_USER_PASSWORD: password,
+  });
+
+  const child = spawn(
+    serverBinary,
+    ["serve", "--db", db, "--blobs", blobs, "--port", SERVER_PORT],
+    // stderr piped so the readiness line can be read; the handler
+    // forwards it, so nothing is lost by not inheriting.
+    { stdio: ["ignore", "inherit", "pipe"] },
+  );
+  server = child;
+  await waitForServer(child, 30_000);
+
+  const session = await postJson<{ token: string }>("/teams/auth/login", {
+    login: LOGIN,
+    password,
+  });
+  const team = await postJson<{ team_id: string }>(
+    "/teams/create",
+    { owner_user_id: null },
+    session.token,
+  );
+
+  process.env.E2E_TEAMS_BASE_URL = BASE_URL;
+  process.env.E2E_TEAMS_LOGIN = LOGIN;
+  process.env.E2E_TEAMS_PASSWORD = password;
+  process.env.E2E_TEAMS_ID = team.team_id;
 }
