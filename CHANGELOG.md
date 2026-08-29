@@ -10,6 +10,38 @@ and this project adheres to
 
 ### Added
 
+- **The team plane can be driven end to end, against a `teams-server` of its
+  own** (#192). Every read on that plane is a request to a second binary, and
+  `just ui-e2e` builds and launches one — so the surfaces #171 is about had no
+  way to be tested at all. `just ui-e2e-teams` is the run that can: it builds
+  the server, and `wdio.teams.conf.ts` starts it against a database nothing has
+  touched, provisions an account and a team, and stops it afterwards.
+
+  **Why it is a separate run rather than more specs.** A run may hold one
+  stateful fixture or two, and #188 is what two looks like — a spec that fails
+  in a full run and passes alone, with the signature of a fixture left in one of
+  two states. The separation costs nothing here: this database is made empty per
+  run and thrown away, which the app's own profile can never be, because a real
+  library is what the app's specs drive.
+
+  **What the smoke spec reaches.** Five commands that no test had ever called —
+  the session read, connect, the team's lines, and disconnect — over the real
+  wire, and the three phases in the order a person meets them: nobody to ask,
+  somebody to ask with no team named, and a team whose lines are read. The
+  middle one is the assertion that matters, because "This team hosts no lines."
+  used to appear there too (#190 fixed the panel; nothing until now could
+  confirm it from the outside).
+
+  **Two things the first run got wrong**, both found by running it rather than
+  by reading it. Readiness was a TCP probe, which answers "somebody is
+  listening" — exactly what is true when the port is already taken, so another
+  process holding it read as the fixture coming up. It waits for the server's
+  own line now. And a hook rejection does not stop a wdio run: the launcher logs
+  it and opens a window anyway, so a fixture that never came up reached the spec
+  as four missing variables. The reason travels to the spec now and leads the
+  failure, which is the difference between naming the cause and naming a
+  symptom.
+
 - **The team catalog, and the design the team plane's surfaces share** (#190).
   #171 lists what the team plane has no surface for; what it did not say is what
   any of those surfaces looks like, and the drawer they attach to holds a
