@@ -21,10 +21,10 @@ and this project adheres to
   stateful fixture or two, and #188 is what two looks like — a spec that fails
   in a full run and passes alone, with the signature of a fixture left in one of
   two states. The separation costs nothing here: this database is made empty per
-  run and thrown away, which the app's own profile can never be, because a real
-  library is what the app's specs drive.
+  run and thrown away, which the app's own profile cannot be, since the e2e
+  suite provokes verbs against seeded content and puts back what it takes.
 
-  **What the smoke spec reaches.** Five commands that no test had ever called —
+  **What the smoke spec reaches.** Four commands that no test had ever called —
   the session read, connect, the team's lines, and disconnect — over the real
   wire, and the three phases in the order a person meets them: nobody to ask,
   somebody to ask with no team named, and a team whose lines are read. The
@@ -32,15 +32,13 @@ and this project adheres to
   used to appear there too (#190 fixed the panel; nothing until now could
   confirm it from the outside).
 
-  **Two things the first run got wrong**, both found by running it rather than
-  by reading it. Readiness was a TCP probe, which answers "somebody is
-  listening" — exactly what is true when the port is already taken, so another
-  process holding it read as the fixture coming up. It waits for the server's
-  own line now. And a hook rejection does not stop a wdio run: the launcher logs
-  it and opens a window anyway, so a fixture that never came up reached the spec
-  as four missing variables. The reason travels to the spec now and leads the
-  failure, which is the difference between naming the cause and naming a
-  symptom.
+  **A fixture that does not come up stops the run.** Readiness is the server's
+  own line rather than the port answering, so another process holding the port
+  is not mistaken for this server starting, and the rejection carries what the
+  server last said rather than guessing at a cause. No spec runs after it: the
+  launcher rethrows exactly one class of hook failure, and that is the one
+  `onPrepare` raises — while the teardown still runs, so the server is stopped
+  and the database removed on that path too.
 
 - **The team catalog, and the design the team plane's surfaces share** (#190).
   #171 lists what the team plane has no surface for; what it did not say is what
