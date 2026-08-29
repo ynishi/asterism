@@ -60,7 +60,9 @@
   "include": [
     "e2e/**/*.ts",
     "e2e-bench/**/*.ts",
+    "e2e-teams/**/*.ts",
     "wdio.conf.ts",
-    "wdio.bench.conf.ts"
+    "wdio.bench.conf.ts",
+    "wdio.teams.conf.ts"
   ]
 }

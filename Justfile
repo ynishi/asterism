@@ -1820,6 +1820,38 @@ ui-e2e: ffmpeg-sidecar
         --features wdio --config src-tauri/tauri.e2e.conf.json
     npx wdio run wdio.conf.ts
 
+# Drive the team plane end to end, against a teams-server of its own.
+#
+# The suite `ui-e2e` cannot hold. Every read on the team plane is a
+# request to a second binary, and this is the recipe that builds it;
+# `wdio.teams.conf.ts` is what starts it, seeds a database nothing has
+# touched, and stops it — including when the run fails.
+#
+# A run of its own rather than more specs under `ui-e2e`, because a run
+# may hold one stateful fixture or two, and #188 is what two looks
+# like: a spec that fails in a full run and passes alone, with the
+# signature of a fixture left in one of two states. The separation is
+# free here — the teams database is made empty per run and thrown away,
+# which the app's own profile can never be.
+#
+# Same `allow-agent` terms as `ui-e2e`, and the same reason: an agent
+# without it can only report that it did not verify, and this is the
+# only surface that can check the team plane at all.
+[group('check')]
+[group('allow-agent')]
+ui-e2e-teams: ffmpeg-sidecar
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The second binary. Debug, because the config looks for it under
+    # `target/debug/` beside the app the next command builds.
+    cargo build -p teams-server
+    cd "{{ ui_dir }}"
+    # Same build shape as `ui-e2e` — see its comment for why `tauri
+    # build` rather than `cargo build`.
+    VITE_WDIO=1 npx tauri build --debug --no-bundle \
+        --features wdio --config src-tauri/tauri.e2e.conf.json
+    npx wdio run wdio.teams.conf.ts
+
 # Check that JavaScriptCore agrees with the collation golden (macOS).
 #
 # The grid sort is a two-sided contract and its order gets frozen into
