@@ -226,11 +226,11 @@ impl Exported {
     /// Reads the macro's arguments. The first is the output path as a
     /// string literal; the rest name types.
     fn take(&mut self, mac: &syn::Macro) {
-        if !mac
+        if mac
             .path
             .segments
             .last()
-            .is_some_and(|s| s.ident == "export_types")
+            .is_none_or(|s| s.ident != "export_types")
         {
             return;
         }
