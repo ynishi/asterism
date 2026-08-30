@@ -233,6 +233,7 @@ other.
 - `shared_line_history` — A shared line and its whole history.
 - `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).

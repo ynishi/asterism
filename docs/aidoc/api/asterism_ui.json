@@ -888,6 +888,11 @@
       "docs": "Snapshot view members (`snapshot_members`): renderable cards\nin frozen `position` order (later-deleted assets are absent)."
     },
     {
+      "path": "asterism_ui::commands::team_ledger_page",
+      "kind": "function",
+      "docs": "One page of a team's ledger, seq ascending (#148 decision 18).\n\n`after` is the `next_after` of the page before, or nothing for the\nfirst. What comes back can carry a cursor even when it happened to\nend on the last event there is — the page shape's own doc says why,\nand a caller that reads a null cursor as \"that was everything\" is\nclaiming something this read cannot answer.\n\nThe limit is the caller's rather than this command's: a screen\npaging by hand and one following the stream want different sizes,\nand neither is the desktop surface's to pick."
+    },
+    {
       "path": "asterism_ui::commands::team_server_session",
       "kind": "function",
       "docs": "Whether this window is talking to a team server."
