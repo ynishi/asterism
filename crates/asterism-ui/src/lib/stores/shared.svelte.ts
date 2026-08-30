@@ -279,6 +279,7 @@ import type {
   ForgeLineHistoryDto,
   ForgeOpDto,
   ForgePursuitDto,
+  PromotedAssetDto,
   TeamCreatedDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
@@ -732,6 +733,38 @@ class SharedCatalog {
   private requireWork(): string {
     if (this.working === null) throw new Error("no work is open");
     return this.working;
+  }
+
+  /// Hands one of this library's assets to the team, onto the open
+  /// work.
+  ///
+  /// The verb the detail pane reaches for, and it is here rather than
+  /// there because the three ids it needs are this catalog's: the
+  /// team, the line, and the pursuit content may enter against (#148
+  /// decision 5). A pane holding its own copies of those would be a
+  /// second answer to a question this frame already answers, and the
+  /// place they could disagree.
+  ///
+  /// What comes back is what only the promotion knows. The work is
+  /// re-read here rather than taken from what the write answered, on
+  /// the rule the rest of this catalog follows — a pursuit belongs to
+  /// a line somebody else may also be working. Nothing re-reads the
+  /// contents, because a round is a request: the entry this pushed is
+  /// on the line when the work is closed satisfied and not before.
+  async promote(assetId: string, named: string): Promise<PromotedAssetDto> {
+    const lineId = this.requireLine();
+    const pursuitId = this.requireWork();
+    this.said = null;
+    const promoted = await mutate<PromotedAssetDto>(
+      "promote_asset_to_team",
+      { teamIdRaw: this.teamId, lineId, pursuitId, assetId, named },
+      "promote that asset to the team",
+    );
+    this.said = promoted.already_promoted
+      ? "This machine had already promoted that asset onto this line, so nothing was sent."
+      : "Promoted. It is on the work — closing it as satisfied is what puts it on the line.";
+    await this.reloadWork();
+    return promoted;
   }
 
   /// Copies one entry onto this machine.

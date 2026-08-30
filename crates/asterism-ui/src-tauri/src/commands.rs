@@ -103,8 +103,8 @@ use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
 use asterism_contract::teams::{
-    TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto,
-    TeamSubjectRefDto,
+    PromotedAssetDto, TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto,
+    TeamRosterMemberDto, TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3593,6 +3593,84 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
             .await?;
         parse_asset_id(&added.id)
     }
+}
+
+/// Hands one of this library's assets to a team, against open work.
+///
+/// The act #66 exists for, and the one entry point content has (#148
+/// decision 5): the pursuit is named because a team never holds an
+/// asset that is not attached to work.
+///
+/// **What travels is decision 4's and is decided below this command.**
+/// The material's bytes and the marks whose layer origin is `User`;
+/// thumbnails, indexed bodies and `Imported` / `Machine` marks stay
+/// home because the receiving side can make them again. `PromotedMark::
+/// gather` is the only thing that can say which is which, because the
+/// filter is over the layer a mark sits in and the mark DTO drops the
+/// id that join is made of — which is why the two reads below are the
+/// domain's rather than the two services' DTOs.
+///
+/// **Not safe to press twice, and the answer says so rather than the
+/// command refusing.** Decision 7 mints a `TeamAsset` per promotion.
+/// What stops a second one is a relation row this machine wrote, which
+/// the client reads before anything is sent — so a repeat is answered
+/// from here with `already_promoted` and nothing crosses the wire.
+/// That is a fact about this machine and not about the team: another
+/// member promoting the same bytes gets their own `TeamAsset`, and
+/// nothing here can see it.
+///
+/// `named` is the caller's rather than the asset's title, because a
+/// line's names are the team's namespace. The title travels anyway, in
+/// the projection, where it reads as what the promoter said rather than
+/// as the line's own name for the entry.
+#[tauri::command]
+pub async fn promote_asset_to_team(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+    pursuit_id: String,
+    asset_id: String,
+    named: String,
+) -> Result<PromotedAssetDto, UiError> {
+    let client = teams_client(&state).await?;
+    let asset_id = parse_asset_id(&asset_id)?;
+    let asset = state
+        .assets
+        .find(&asset_id)
+        .await?
+        .ok_or_else(|| DomainError::not_found("asset", asset_id))?;
+    let layers = state
+        .material_layer_service
+        .list_by_asset(&asset_id)
+        .await?;
+    let marks = state.material_marks.list_by_asset(&asset_id).await?;
+    let user_marks = asterism_teams_client::PromotedMark::gather(&layers, &marks);
+
+    let outcome = asterism_teams_client::promotion::promote(
+        &client,
+        state.asset_links.as_ref(),
+        asterism_teams_client::promotion::Promotion {
+            team_id: team_id(&team_id_raw, "team id")?,
+            line_id: team_id(&line_id, "line id")?,
+            pursuit_id: team_id(&pursuit_id, "pursuit id")?,
+            subject: asterism_teams_client::mapper::LocalSubject {
+                asset: &asset,
+                user_marks: &user_marks,
+            },
+            named: &named,
+        },
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .await
+    .map_err(teams_error)?;
+
+    Ok(PromotedAssetDto {
+        entry_id: outcome.key.entry_id.to_string(),
+        team_asset_id: outcome.team_asset_id.map(|id| id.to_string()),
+        digest: outcome.digest,
+        bytes_already_held: outcome.bytes_already_held,
+        already_promoted: outcome.already_promoted,
+    })
 }
 
 /// What a line's content is, on this machine.

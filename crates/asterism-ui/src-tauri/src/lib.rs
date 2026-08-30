@@ -444,6 +444,7 @@ pub fn run() {
             commands::push_shared_round,
             commands::close_shared_pursuit,
             commands::clone_shared_entry,
+            commands::promote_asset_to_team,
             commands::publish_line_to_team,
             commands::team_ledger_page,
             commands::team_roster,

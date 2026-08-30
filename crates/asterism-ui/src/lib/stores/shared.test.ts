@@ -32,6 +32,7 @@ import type {
   ForgeOpDto,
   ForgePursuitDto,
   ForgeRoundDto,
+  PromotedAssetDto,
   TeamLedgerEventDto,
 } from "../../bindings";
 import { api } from "../api";
@@ -320,6 +321,124 @@ describe("the two writes", () => {
 
     expect(apiMock).toHaveBeenCalledWith("list_shared_lines", { teamIdRaw: "t1" });
     expect(sharedCatalog.lines.data.map((l) => l.id)).toEqual(["l9"]);
+  });
+});
+
+describe("promoting an asset onto the open work", () => {
+  // The act #66 exists for, and the one entry point content has (#148
+  // decision 5). What these pin is that the verb names the three ids
+  // the catalog holds rather than any a screen passed, and that what
+  // follows a promotion is a re-read of the work and of nothing else:
+  // a round is a request, so the line has not moved.
+
+  function promoted(over: Partial<PromotedAssetDto> = {}): PromotedAssetDto {
+    return {
+      entry_id: "e9",
+      team_asset_id: "ta9",
+      digest: "sha256:abc",
+      bytes_already_held: false,
+      already_promoted: false,
+      ...over,
+    };
+  }
+
+  it("names the team, the line and the work the catalog has open", async () => {
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(promoted());
+    apiMock.mockReset();
+    apiMock.mockResolvedValueOnce([]);
+
+    await sharedCatalog.promote("asset-1", "cut-01");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "promote_asset_to_team",
+      {
+        teamIdRaw: "t1",
+        lineId: "l1",
+        pursuitId: "p1",
+        assetId: "asset-1",
+        named: "cut-01",
+      },
+      "promote that asset to the team",
+    );
+  });
+
+  it("re-reads the work and not what the line holds", async () => {
+    // Nothing has landed. Re-reading the contents would be asking a
+    // question whose answer cannot have changed, and drawing the
+    // answer as if it had is how a screen says a line moved when it
+    // did not.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(promoted());
+    apiMock.mockReset();
+    apiMock.mockResolvedValueOnce([]);
+
+    await sharedCatalog.promote("asset-1", "cut-01");
+
+    expect(apiMock).toHaveBeenCalledWith("shared_line_pursuits", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "shared_line_states",
+      expect.anything(),
+    );
+  });
+
+  it("refuses when no work is open", async () => {
+    // Decision 5 again: content enters against open work, so there is
+    // nothing to promote to.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses when no line is open", async () => {
+    sharedCatalog.working = "p1";
+
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("says a repeat sent nothing, and does not call it a landing", async () => {
+    // A repeat is answered from this machine, before anything is
+    // uploaded. The sentence has to say that rather than read like a
+    // second promotion that worked.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(
+      promoted({
+        team_asset_id: null,
+        bytes_already_held: null,
+        already_promoted: true,
+      }),
+    );
+
+    await sharedCatalog.promote("asset-1", "cut-01");
+
+    expect(sharedCatalog.said).toContain("nothing was sent");
+    expect(sharedCatalog.said).not.toContain("on the line");
+  });
+
+  it("says what a promotion is and is not, when one was sent", async () => {
+    // On the work, not on the line: the entry reaches the line when
+    // the work closes satisfied.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(promoted());
+
+    await sharedCatalog.promote("asset-1", "cut-01");
+
+    expect(sharedCatalog.said).toContain("on the work");
+    expect(sharedCatalog.said).toContain("satisfied");
   });
 });
 

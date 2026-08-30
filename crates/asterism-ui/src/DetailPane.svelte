@@ -37,6 +37,8 @@
   import { readAlbumMeta } from "./lib/album-meta";
   import MaterialChapters from "./MaterialChapters.svelte";
   import MaterialMarks from "./MaterialMarks.svelte";
+  import PromoteToTeam from "./PromoteToTeam.svelte";
+  import { baseName } from "./lib/basename";
   import {
     fmtBytes,
     fmtDateTime,
@@ -2144,6 +2146,18 @@
                 {/each}
               </div>
             {/if}
+
+            <!-- Last of the column, because it is the one act here that
+                 sends this asset somewhere else. Everything above says
+                 what the asset is to this library; this hands it to a
+                 team. It owns itself for the reason `MaterialMarks`
+                 does — what it needs from this pane is the id and a
+                 name to start from, and the three ids a promotion goes
+                 to are the shared catalog's. -->
+            <PromoteToTeam
+              assetId={detail.asset.id}
+              defaultName={detail.asset.title ?? baseName(detail.asset.locator)}
+            />
           </aside>
         </div>
       {/if}

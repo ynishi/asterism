@@ -150,3 +150,57 @@ pub struct TeamCreatedDto {
     /// The new team's id — the path segment of every team-scoped read.
     pub team_id: String,
 }
+
+/// What a promotion left behind, as a screen needs to read it.
+///
+/// The client's own outcome carries more — the relation key whole, and
+/// the pursuit as it now reads — and neither crosses. The key's team
+/// and line are what the caller passed in, so answering with them
+/// would be handing back an argument; the pursuit is a `ForgePursuitDto`
+/// the work surface re-reads for itself, and returning a second copy
+/// would give two screens two answers about one piece of work.
+///
+/// What is here is what only the promotion knows.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct PromotedAssetDto {
+    /// The entry the round named, minted by this client (#148
+    /// decision 8). What the relation row at home is keyed on, and
+    /// what a screen would need to find this entry on the line again.
+    pub entry_id: String,
+    /// The `TeamAsset` the team minted, or nothing when this was a
+    /// repeat and nothing was sent.
+    ///
+    /// An opaque handle, never read as a local asset id (#148
+    /// decision 6).
+    pub team_asset_id: Option<String>,
+    /// What the material hashed to when it was read for sending.
+    ///
+    /// Read at promote time rather than taken from what was stored,
+    /// because the declared digest is what the server verifies while
+    /// it writes.
+    pub digest: String,
+    /// Whether the team already held those bytes when asked, or
+    /// nothing when the question was never put.
+    ///
+    /// Three states rather than two, and a screen has to keep them
+    /// apart: "the team already has these", "the team did not", and
+    /// "nobody asked" — the last on a repeat, where nothing was going
+    /// to be sent. Reported rather than acted on: the content verb
+    /// mints a `TeamAsset` from bytes and there is no verb that mints
+    /// one over a digest the team already holds, so a held digest
+    /// saves nothing yet.
+    pub bytes_already_held: Option<bool>,
+    /// Whether this machine had already promoted this asset onto this
+    /// line, in which case nothing was sent and nothing was written.
+    ///
+    /// **Not a guarantee that the team holds it once.** It is a read
+    /// of a relation row this machine wrote, so it says what this
+    /// machine did rather than what the team has: another member's
+    /// promotion of the same asset is a second `TeamAsset` by
+    /// decision 7, and this cannot see it.
+    ///
+    /// A repeat also carries nothing across. A description edited
+    /// since the first promotion stays home, because replacing a
+    /// projection is a forge op and needs a round of its own.
+    pub already_promoted: bool,
+}

@@ -658,6 +658,11 @@
       "docs": "Places a new mark. See [`PostMaterialMarkCommand`] for the anchor and\nauthor_kind / author_persona_id semantics."
     },
     {
+      "path": "asterism_ui::commands::promote_asset_to_team",
+      "kind": "function",
+      "docs": "Hands one of this library's assets to a team, against open work.\n\nThe act #66 exists for, and the one entry point content has (#148\ndecision 5): the pursuit is named because a team never holds an\nasset that is not attached to work.\n\n**What travels is decision 4's and is decided below this command.**\nThe material's bytes and the marks whose layer origin is `User`;\nthumbnails, indexed bodies and `Imported` / `Machine` marks stay\nhome because the receiving side can make them again. `PromotedMark::\ngather` is the only thing that can say which is which, because the\nfilter is over the layer a mark sits in and the mark DTO drops the\nid that join is made of — which is why the two reads below are the\ndomain's rather than the two services' DTOs.\n\n**Not safe to press twice, and the answer says so rather than the\ncommand refusing.** Decision 7 mints a `TeamAsset` per promotion.\nWhat stops a second one is a relation row this machine wrote, which\nthe client reads before anything is sent — so a repeat is answered\nfrom here with `already_promoted` and nothing crosses the wire.\nThat is a fact about this machine and not about the team: another\nmember promoting the same bytes gets their own `TeamAsset`, and\nnothing here can see it.\n\n`named` is the caller's rather than the asset's title, because a\nline's names are the team's namespace. The title travels anyway, in\nthe projection, where it reads as what the promoter said rather than\nas the line's own name for the entry."
+    },
+    {
       "path": "asterism_ui::commands::promote_snapshot_to_group",
       "kind": "function",
       "docs": "Promotes a Snapshot into a hand-owned Group (mirror of\n`PromoteTagToGroup`): bulk-attaches every member in frozen order\nand stamps `origin_snapshot_id` as the Group's birth record."
