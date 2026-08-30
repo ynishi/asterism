@@ -3120,26 +3120,6 @@ pub async fn list_shared_lines(
         .map_err(teams_error)
 }
 
-/// One page of a team's ledger, seq ascending (#148 decision 18).
-///
-/// `after` is the `next_after` of the page before, or nothing for the
-/// first. What comes back can carry a cursor even when it happened to
-/// end on the last event there is — [`TeamLedgerPageDto::next_after`]
-/// says why, and a caller reading a null cursor as "that was
-/// everything" is claiming something this read cannot answer.
-///
-/// The page size is the caller's: a screen paging by hand and one
-/// following the stream want different ones, and the server's own
-/// maximum is the only ceiling either has.
-///
-/// **This is where the two vocabularies meet.** The wire's shapes are
-/// what a member's client and a team server say to each other; the
-/// contract's are what this app says to its own frontend, and
-/// `bindings.ts` is a projection of the contract alone. So the mapping
-/// happens here rather than by handing a wire type to a screen, which
-/// would give every caller of this command a second vocabulary to
-/// know. `asterism-contract::teams` argues the same boundary from its
-/// own side.
 /// Who is in a team, and in what role.
 ///
 /// Ids rather than names, because that is what a membership row holds
@@ -3186,6 +3166,26 @@ pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, U
     })
 }
 
+/// One page of a team's ledger, seq ascending (#148 decision 18).
+///
+/// `after` is the `next_after` of the page before, or nothing for the
+/// first. What comes back can carry a cursor even when it happened to
+/// end on the last event there is — [`TeamLedgerPageDto::next_after`]
+/// says why, and a caller reading a null cursor as "that was
+/// everything" is claiming something this read cannot answer.
+///
+/// The page size is the caller's: a screen paging by hand and one
+/// following the stream want different ones, and the server's own
+/// maximum is the only ceiling either has.
+///
+/// **This is where the two vocabularies meet.** The wire's shapes are
+/// what a member's client and a team server say to each other; the
+/// contract's are what this app says to its own frontend, and
+/// `bindings.ts` is a projection of the contract alone. So the mapping
+/// happens here rather than by handing a wire type to a screen, which
+/// would give every caller of this command a second vocabulary to
+/// know. `asterism-contract::teams` argues the same boundary from its
+/// own side, and `tests/boundary.rs` holds it.
 #[tauri::command]
 pub async fn team_ledger_page(
     state: State<'_, AppState>,
