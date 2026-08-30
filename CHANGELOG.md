@@ -10,6 +10,36 @@ and this project adheres to
 
 ### Added
 
+- **The team plane can be driven end to end, against a `teams-server` of its
+  own** (#192). Every read on that plane is a request to a second binary, and
+  `just ui-e2e` builds and launches one — so the surfaces #171 is about had no
+  way to be tested at all. `just ui-e2e-teams` is the run that can: it builds
+  the server, and `wdio.teams.conf.ts` starts it against a database nothing has
+  touched, provisions an account and a team, and stops it afterwards.
+
+  **Why it is a separate run rather than more specs.** A run may hold one
+  stateful fixture or two, and #188 is what two looks like — a spec that fails
+  in a full run and passes alone, with the signature of a fixture left in one of
+  two states. The separation costs nothing here: this database is made empty per
+  run and thrown away, which the app's own profile cannot be, since the e2e
+  suite provokes verbs against seeded content and puts back what it takes.
+
+  **What the smoke spec reaches.** Four commands that no test had ever called —
+  the session read, connect, the team's lines, and disconnect — over the real
+  wire, and the three phases in the order a person meets them: nobody to ask,
+  somebody to ask with no team named, and a team whose lines are read. The
+  middle one is the assertion that matters, because "This team hosts no lines."
+  used to appear there too (#190 fixed the panel; nothing until now could
+  confirm it from the outside).
+
+  **A fixture that does not come up stops the run.** Readiness is the server's
+  own line rather than the port answering, so another process holding the port
+  is not mistaken for this server starting, and the rejection carries what the
+  server last said rather than guessing at a cause. No spec runs after it: the
+  launcher rethrows exactly one class of hook failure, and that is the one
+  `onPrepare` raises — while the teardown still runs, so the server is stopped
+  and the database removed on that path too.
+
 - **The team catalog, and the design the team plane's surfaces share** (#190).
   #171 lists what the team plane has no surface for; what it did not say is what
   any of those surfaces looks like, and the drawer they attach to holds a

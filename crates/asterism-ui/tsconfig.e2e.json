@@ -1,10 +1,10 @@
 // TypeScript diagnostics for the test-runner half of the frontend.
 //
-// The e2e specs and the two WebdriverIO configs used to sit outside
-// every tsconfig in this package: `tsconfig.json` includes `src/**`
-// only, `tsconfig.node.json` includes `vite.config.ts` only, and
-// nothing named `e2e/`, `e2e-bench/`, `wdio.conf.ts` or
-// `wdio.bench.conf.ts`. `just ui-e2e` does not close that gap — the
+// The e2e specs and the WebdriverIO configs used to sit outside every
+// tsconfig in this package: `tsconfig.json` includes `src/**` only,
+// `tsconfig.node.json` includes `vite.config.ts` only, and nothing
+// named any of what the `include` below now does. `just ui-e2e` does
+// not close that gap either — the
 // runner hands the specs to tsx/esbuild, which erases types without
 // checking them. So `just ui-check` reported zero errors over ~4200
 // lines it had never looked at, and the first run under this config
@@ -60,7 +60,9 @@
   "include": [
     "e2e/**/*.ts",
     "e2e-bench/**/*.ts",
+    "e2e-teams/**/*.ts",
     "wdio.conf.ts",
-    "wdio.bench.conf.ts"
+    "wdio.bench.conf.ts",
+    "wdio.teams.conf.ts"
   ]
 }
