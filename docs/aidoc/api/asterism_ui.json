@@ -138,6 +138,11 @@
       "docs": "Ends the work, and puts what it says on the line if it says\nanything.\n\n**A [`UiError::Conflict`] from here is not always worth retrying,\nand its `reason` says which kind it is:** `\"blocked\"` wants\nsomething done first and the message says what, `\"raced\"` will\nusually win on a retry, `\"settled\"` never helps, and `\"clashes\"` has\nto ask for something different. They are spelled out on\n`close_forge_pursuit` in `asterism-server`'s `http` module,\nincluding why `\"blocked\"` arrives for two different reasons."
     },
     {
+      "path": "asterism_ui::commands::close_shared_pursuit",
+      "kind": "function",
+      "docs": "Ends work on a shared line, landing it or abandoning it.\n\n`outcome` is the forge's word — a satisfied close is the only\nmoment anything a round asked for reaches the line."
+    },
+    {
       "path": "asterism_ui::commands::connect_team_server",
       "kind": "function",
       "docs": "Logs this window in to a team server and holds the session.\n\nNothing is stored. The URL and the session live for as long as the\nwindow does — see `AppState::teams` for why a credential has no home\non disk yet."
@@ -618,6 +623,11 @@
       "docs": "Opens a conversation about something in the forge.\n\n**The anchor is resolved, not accepted.** The command names ids and\na kind; the service reads the pursuit or the line and the model\nbuilds the anchor from what it finds, so a pursuit nobody opened and\nan entry the round never touched are two different refusals."
     },
     {
+      "path": "asterism_ui::commands::open_shared_pursuit",
+      "kind": "function",
+      "docs": "Opens work against a shared line.\n\nDecision 10 is why nothing is copied first: working on a shared\nline needs no clone, so this is the verb a member reaches for\nrather than the one that takes a copy home."
+    },
+    {
       "path": "asterism_ui::commands::organize_by_location",
       "kind": "function",
       "docs": "Backfill: auto-organises existing assets under a Dir tree derived\nfrom `source_locator` — the command twin of\n`POST /asterism/organize/by-location`. Synchronous rather than a\njob: the summary comes back when the pass finishes, and a large\nlibrary is a multi-minute wait (the service doc carries the cost)."
@@ -691,6 +701,11 @@
       "path": "asterism_ui::commands::push_forge_round",
       "kind": "function",
       "docs": "Writes a round.\n\nThe line is not read, which is what makes this the operation that\ncan run all day without touching anything anybody else is using.\nWhat it does check is that the content each operation names exists."
+    },
+    {
+      "path": "asterism_ui::commands::push_shared_round",
+      "kind": "function",
+      "docs": "Writes a round into open work on a shared line.\n\nA round is a request rather than a landing: `push` does not read\nthe line, which is what lets two members work against one line\nwithout contending, and nothing reaches the line until a close with\n`satisfied`.\n\nThe projections a round may carry ride beside content entering the\nteam (#148 decision 12), and this surface has no verb that brings\nany in — so it passes an empty set. The two callers that fill the\nargument are the ones that do: the promotion, and publishing a line."
     },
     {
       "path": "asterism_ui::commands::random_assets",
@@ -883,9 +898,19 @@
       "docs": "A shared line and its whole history."
     },
     {
+      "path": "asterism_ui::commands::shared_line_pursuits",
+      "kind": "function",
+      "docs": "The work against a shared line, open and ended alike.\n\nNo mapping, unlike the ledger's and the roster's: the forge is the\nsame on both planes, so a shared line answers with the contract's\nown `ForgePursuitDto` and there is no second vocabulary to cross.\nThat is #148 decision 19 showing through — the mirror is path for\npath and shape for shape."
+    },
+    {
       "path": "asterism_ui::commands::shared_line_states",
       "kind": "function",
       "docs": "What is on a shared line, folded from its chain by the server."
+    },
+    {
+      "path": "asterism_ui::commands::shared_pursuit",
+      "kind": "function",
+      "docs": "One piece of work on a shared line, as it stands."
     },
     {
       "path": "asterism_ui::commands::snapshot_members",

@@ -28,10 +28,11 @@
   //
   // **The projection is what those rows are.** A person deciding
   // whether to close needs to see what closing would leave, which
-  // neither log answers on its own. The fold is `forgeCatalog`'s, made
-  // where both reads are; what it means here is that the rows are a
-  // picture of a line that has not moved, and the two answers above
-  // them are how far that assumption has drifted.
+  // neither log answers on its own. `forgeCatalog` makes it over both
+  // its reads, out of the fold in `lib/forge-projection.ts`; what it
+  // means here is that the rows are a picture of a line that has not
+  // moved, and the two answers above them are how far that assumption
+  // has drifted.
   //
   // **Where a refusal carries a reason, the reason is not the action.**
   // `mutate` puts the message on screen and reads no further, and what
@@ -42,7 +43,7 @@
   import { api } from "./lib/api";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
-  import type { ForgeProjectedEntry } from "./lib/stores/forge.svelte";
+  import type { ForgeProjectedEntry } from "./lib/forge-projection";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";

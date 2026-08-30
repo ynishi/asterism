@@ -26,7 +26,11 @@
 // `POST /teams/create` is behind a session. So the fixture logs in
 // over HTTP before the app is ever driven.
 //
-// A spec reads the four values it needs from `process.env`. That is
+// Then a second team, with a line holding one entry, for the work
+// spec — `seedWorkableTeam` says why it is a second one and why the
+// app cannot seed it.
+//
+// A spec reads the values it needs from `process.env`. That is
 // the channel that works: the worker re-evaluates this module, so
 // anything written into the exported `config` object here is not what
 // the worker runs — the screenshot directory already travels by
@@ -64,7 +68,7 @@ import type { TauriCapabilities } from "@wdio/tauri-service";
 import { SevereServiceError } from "webdriverio";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -79,6 +83,17 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
 
 /** The account this fixture provisions. Its password is generated. */
 const LOGIN = "e2e-member";
+
+/** What the second team's line and its one entry are called. Named
+ *  here because the spec asserts on both. */
+const WORK_LINE_NAME = "ROOT";
+const WORK_ENTRY_NAME = "cut-01";
+
+/** The specs this suite runs, in the order the header argues for. */
+const SPECS = [
+  "./e2e-teams/teams-connect.spec.ts",
+  "./e2e-teams/teams-work.spec.ts",
+];
 
 /** Everything the server owns, removed and remade on every run. */
 const serverHome = path.join(repoRoot, "workspace/runtime/e2e-teams-server");
@@ -176,6 +191,27 @@ function waitForServer(child: ChildProcess, deadlineMs: number): Promise<void> {
   });
 }
 
+async function putBytes<T>(
+  route: string,
+  bytes: Buffer,
+  token: string,
+): Promise<T> {
+  const response = await fetch(`${BASE_URL}${route}`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/octet-stream",
+      authorization: `Bearer ${token}`,
+    },
+    body: new Uint8Array(bytes),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `PUT ${route} answered ${response.status}: ${(await response.text()).trim()}`,
+    );
+  }
+  return (await response.json()) as T;
+}
+
 async function postJson<T>(
   route: string,
   body: unknown,
@@ -225,7 +261,27 @@ export const config: WebdriverIO.Config & {
   capabilities: TauriCapabilities[];
 } = {
   runner: "local",
-  specs: ["./e2e-teams/**/*.spec.ts"],
+  // Named and ordered rather than globbed, because the order is load
+  // bearing and a glob would decide it by filename.
+  //
+  // The two specs share one app process — the service starts the binary
+  // once and hands each spec a session against it — so what one leaves
+  // in the window, the next one meets. Two things survive: the backend
+  // holds the team-server session for as long as the window does, and
+  // the catalog keeps the team id across a disconnect on purpose.
+  //
+  // The first of those each spec can undo, and both do: they disconnect
+  // at the end. The second has no undo on this surface — the team field
+  // is `required`, so naming a team is a one-way trip and there is no
+  // gesture that returns a window to having named none. `no-team` is
+  // therefore reachable only by the spec that meets the window first,
+  // and `teams-connect.spec.ts` is the one that asserts about it.
+  //
+  // A spec added here goes in this list. One that needs `no-team` goes
+  // first, or gets a window of its own — and `assertEverySpecIsListed`
+  // in `onPrepare` is what says so, because a list is the one shape
+  // where forgetting to add a file is a spec that silently never runs.
+  specs: SPECS,
   maxInstances: 1,
 
   services: ["@wdio/tauri-service"],
@@ -315,8 +371,44 @@ export const config: WebdriverIO.Config & {
   },
 };
 
+/**
+ * Fails the run when a spec file is not in `SPECS`.
+ *
+ * The list replaced a glob because the order is load bearing, and it
+ * took a failure mode with it: a glob cannot miss a file and a list
+ * can. An unlisted spec does not fail — it does not run, and
+ * `just ui-e2e-teams` reports the suite green, which is the worst
+ * shape a gate has.
+ *
+ * Named rather than counted, so the message says which file.
+ *
+ * Recursive, and compared on the path rather than the basename,
+ * because the glob it replaced was `**` — a spec in a subdirectory was
+ * covered before and has to stay covered, and two files of one name in
+ * two directories are two specs.
+ */
+function assertEverySpecIsListed(): void {
+  const dir = path.join(here, "e2e-teams");
+  const listed = new Set(
+    SPECS.map((spec) => path.relative(dir, path.resolve(here, spec))),
+  );
+  const missing = fs
+    .readdirSync(dir, { recursive: true })
+    .map((entry) => String(entry))
+    .filter((name) => name.endsWith(".spec.ts"))
+    .filter((name) => !listed.has(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `e2e-teams/${missing.join(", ")} is not in this config's \`specs\` list, ` +
+        `so it would not run. The list is ordered on purpose — see the ` +
+        `comment above it — so add the file where its fixture needs it.`,
+    );
+  }
+}
+
 /** Everything the run needs before a window opens. */
 async function prepareFixture(): Promise<void> {
+  assertEverySpecIsListed();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const dir = path.join(screensRoot, stamp);
   fs.mkdirSync(dir, { recursive: true });
@@ -366,4 +458,78 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_LOGIN = LOGIN;
   process.env.E2E_TEAMS_PASSWORD = password;
   process.env.E2E_TEAMS_ID = team.team_id;
+
+  const worked = await seedWorkableTeam(session.token);
+  process.env.E2E_TEAMS_WORK_ID = worked.teamId;
+  process.env.E2E_TEAMS_WORK_LINE = WORK_LINE_NAME;
+  process.env.E2E_TEAMS_WORK_ENTRY = WORK_ENTRY_NAME;
+}
+
+/**
+ * A second team, with a line holding one entry, for the work spec.
+ *
+ * A second team rather than content on the first, because the first
+ * team's emptiness is what `teams-connect.spec.ts` is about: it asserts
+ * "This team hosts no lines." to tell the two kinds of empty apart, and
+ * a line seeded into it would take that assertion away and leave the
+ * bug it guards unwatched.
+ *
+ * Seeded over HTTP rather than through the app, because the app cannot
+ * do this: putting content on a team's line is `enter_content`, which
+ * is the promotion — #198's sibling and out of its scope. The work
+ * surface under test moves entries the line already holds, so the
+ * fixture is what puts one there.
+ *
+ * The order is decision 5's rather than a choice: content enters
+ * against open work, and only then can a round name it. The same walk
+ * is made in Rust by `forge_routes_e2e.rs`'s
+ * `a_member_works_a_line_from_login_to_landing`, which reads more
+ * around it than this needs.
+ */
+async function seedWorkableTeam(token: string): Promise<{ teamId: string }> {
+  const team = await postJson<{ team_id: string }>(
+    "/teams/create",
+    { owner_user_id: null },
+    token,
+  );
+  const teamId = team.team_id;
+  const line = await postJson<{ id: string }>(
+    `/teams/${teamId}/forge/lines`,
+    { name: WORK_LINE_NAME, strategy_id: "mainline-first" },
+    token,
+  );
+  const pursuit = await postJson<{ id: string }>(
+    `/teams/${teamId}/forge/pursuits`,
+    { line_id: line.id },
+    token,
+  );
+
+  const bytes = Buffer.from("the seeded artefact");
+  const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const entered = await putBytes<{ asset_id: string }>(
+    `/teams/${teamId}/forge/pursuits/${pursuit.id}/content?digest=${digest}`,
+    bytes,
+    token,
+  );
+
+  await postJson(
+    `/teams/${teamId}/forge/pursuits/${pursuit.id}/push`,
+    {
+      ops: [
+        {
+          entry_id: randomUUID(),
+          kind: "add",
+          content_asset_id: entered.asset_id,
+          name: WORK_ENTRY_NAME,
+        },
+      ],
+    },
+    token,
+  );
+  await postJson(
+    `/teams/${teamId}/forge/pursuits/${pursuit.id}/close`,
+    { outcome: "satisfied" },
+    token,
+  );
+  return { teamId };
 }

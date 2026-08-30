@@ -93,10 +93,11 @@ use asterism_contract::dto::{
 };
 use asterism_contract::forge::{
     AmendForgeMessageCommand, CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto,
-    ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgePursuitDto,
-    ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto, ForgeThreadDto, OpenForgeLineCommand,
-    OpenForgePursuitCommand, OpenForgeThreadCommand, PushForgeRoundCommand, RenameForgeLineCommand,
-    RenameForgeThreadCommand, SayInForgeThreadCommand, SetForgeLineStrategyCommand,
+    ForgeEntryStateDto, ForgeLineDto, ForgeLineHistoryDto, ForgeMessageDto, ForgeOpDto,
+    ForgePursuitDto, ForgeResolvedDto, ForgeRevisionDto, ForgeStrategyDto, ForgeThreadDto,
+    OpenForgeLineCommand, OpenForgePursuitCommand, OpenForgeThreadCommand, PushForgeRoundCommand,
+    RenameForgeLineCommand, RenameForgeThreadCommand, SayInForgeThreadCommand,
+    SetForgeLineStrategyCommand,
 };
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
@@ -3234,6 +3235,127 @@ pub async fn team_ledger_page(
             .collect(),
         next_after: page.next_after,
     })
+}
+
+/// The work against a shared line, open and ended alike.
+///
+/// No mapping, unlike the ledger's and the roster's: the forge is the
+/// same on both planes, so a shared line answers with the contract's
+/// own `ForgePursuitDto` and there is no second vocabulary to cross.
+/// That is #148 decision 19 showing through — the mirror is path for
+/// path and shape for shape.
+#[tauri::command]
+pub async fn shared_line_pursuits(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+) -> Result<Vec<ForgePursuitDto>, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .pursuits_of_line(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&line_id, "line id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// One piece of work on a shared line, as it stands.
+#[tauri::command]
+pub async fn shared_pursuit(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    pursuit_id: String,
+) -> Result<ForgePursuitDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .pursuit(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&pursuit_id, "pursuit id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// Opens work against a shared line.
+///
+/// Decision 10 is why nothing is copied first: working on a shared
+/// line needs no clone, so this is the verb a member reaches for
+/// rather than the one that takes a copy home.
+#[tauri::command]
+pub async fn open_shared_pursuit(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    line_id: String,
+    title: Option<String>,
+    note: Option<String>,
+) -> Result<ForgePursuitDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .open_pursuit(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&line_id, "line id")?,
+            title.as_deref(),
+            note.as_deref(),
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// Writes a round into open work on a shared line.
+///
+/// A round is a request rather than a landing: `push` does not read
+/// the line, which is what lets two members work against one line
+/// without contending, and nothing reaches the line until a close with
+/// `satisfied`.
+///
+/// The projections a round may carry ride beside content entering the
+/// team (#148 decision 12), and this surface has no verb that brings
+/// any in — so it passes an empty set. The two callers that fill the
+/// argument are the ones that do: the promotion, and publishing a line.
+#[tauri::command]
+pub async fn push_shared_round(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    pursuit_id: String,
+    ops: Vec<ForgeOpDto>,
+    note: Option<String>,
+) -> Result<ForgePursuitDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .push_round(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&pursuit_id, "pursuit id")?,
+            ops,
+            note.as_deref(),
+            Vec::new(),
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// Ends work on a shared line, landing it or abandoning it.
+///
+/// `outcome` is the forge's word — a satisfied close is the only
+/// moment anything a round asked for reaches the line.
+#[tauri::command]
+pub async fn close_shared_pursuit(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    pursuit_id: String,
+    outcome: String,
+    note: Option<String>,
+) -> Result<ForgePursuitDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .close_pursuit(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&pursuit_id, "pursuit id")?,
+            &outcome,
+            note.as_deref(),
+        )
+        .await
+        .map_err(teams_error)
 }
 
 /// What is on a shared line, folded from its chain by the server.

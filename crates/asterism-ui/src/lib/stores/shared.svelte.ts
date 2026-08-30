@@ -76,17 +76,22 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
-// The frame:
+// The frame, with a line open:
 //
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
 //   │ ───────────────────────────────────────────────────────────── │
-//   │ ┌─ lines ────┐┌─ ROOT ────────── open · mainline-first ─────┐ │
-//   │ │ ▸ ROOT     ││ ● on the line │ work │ history              │ │
-//   │ │   drafts   ││ ──────────────────────────────────────────  │ │
-//   │ │            ││ key visual                                  │ │
-//   │ └────────────┘└─────────────────────────────────────────────┘ │
+//   │ ← the team's lines   ROOT   open                              │
+//   │ 1 change point since this line began                          │
+//   │ on the line │ work │ history                                  │
+//   │ ───────────────────────────────────────────────────────────── │
+//   │ key visual                                          [ Clone ] │
 //   └───────────────────────────────────────────────────────────────┘
+//
+// The list is not beside it: whether the two share the width or take
+// turns is the panel's to decide, and its header decides it — this
+// drawer is narrow, so a line takes the place of the list and the
+// header carries the way back.
 //
 // Which of the three leads is a choice rather than a consequence.
 // Lines lead because a team is joined in order to work with what it
@@ -263,6 +268,8 @@
 // revisiting that as this umbrella's, and revisiting a placement is a
 // different act from choosing one.
 import { api } from "../api";
+import { clashingNames, projectWork } from "../forge-projection";
+import type { ForgeProjectedEntry } from "../forge-projection";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
@@ -270,6 +277,8 @@ import type {
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  ForgeOpDto,
+  ForgePursuitDto,
   TeamCreatedDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
@@ -344,6 +353,97 @@ class SharedCatalog {
     null,
     "sharedCatalog.roster",
   );
+
+  /// The work against the open line, open and ended alike.
+  ///
+  /// Read from the server like everything else here. A pursuit on this
+  /// plane belongs to a line somebody else may also be working, so
+  /// what this held a moment ago is not what the line has been asked
+  /// for now — the list is re-read after every write rather than
+  /// patched from what a write answered.
+  pursuits = new Resource<LineArgs, ForgePursuitDto[]>(
+    async (args) =>
+      api<ForgePursuitDto[]>("shared_line_pursuits", {
+        teamIdRaw: args.teamId,
+        lineId: args.lineId,
+      }),
+    [] as ForgePursuitDto[],
+    "sharedCatalog.pursuits",
+  );
+
+  /// The piece of work being read, if one is open.
+  ///
+  /// A second selection under the line, and it narrows rather than
+  /// replaces: work is against a line, so the line stays selected
+  /// while one of its pursuits is open. Nothing derives it from the
+  /// list — a screen reading emptiness as "no work open" would flash
+  /// the whole list back over the one being opened, which is the trap
+  /// `forge.svelte.ts` names at its own `working`.
+  working = $state<string | null>(null);
+
+  /// The open piece of work as the list has it, or `null`.
+  ///
+  /// Read out of `pursuits` rather than through a read of one pursuit.
+  /// The list answers with whole pursuits — rounds and close included
+  /// — so a second read of one of them would be a second copy of what
+  /// is already here, and the two would disagree for as long as one of
+  /// them was in flight. A read of one is what a surface that arrives
+  /// at a pursuit without its line would need; this one always has the
+  /// line.
+  get work(): ForgePursuitDto | null {
+    return this.pursuits.data.find((item) => item.id === this.working) ?? null;
+  }
+
+  /// Work nobody has ended. The only work a round can be written to.
+  get openWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((item) => item.close === null);
+  }
+
+  /// Work that has ended, either way. Kept and shown apart, because
+  /// what was asked for is readable after it stops being askable.
+  get endedWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((item) => item.close !== null);
+  }
+
+  /// The line as the open work would leave it.
+  ///
+  /// The fold is `lib/forge-projection`, which argues why it is one
+  /// copy. What this site adds is which two reads it is made of: the
+  /// open pursuit's rounds, and the states of the line it is against.
+  get projection(): ForgeProjectedEntry[] {
+    return projectWork(this.work?.rounds ?? [], this.states.data);
+  }
+
+  /// Names that would be on the line twice if the open work landed.
+  get wouldClash(): string[] {
+    return clashingNames(this.projection);
+  }
+
+  /// Reads one of the line's pursuits.
+  ///
+  /// Nothing is fetched: the list carries whole pursuits, so opening
+  /// one is choosing which of them the surface is about.
+  selectPursuit(pursuitId: string): void {
+    this.working = pursuitId;
+    this.said = null;
+  }
+
+  /// Lets go of the work being read, keeping the line.
+  clearWork(): void {
+    this.working = null;
+    this.said = null;
+  }
+
+  /// Lets go of the line, and of the work under it.
+  ///
+  /// Here rather than on the panel for the reason `lookAt` gives: a
+  /// piece of work belongs to the line it is against, so the two are
+  /// let go together, and a screen writing both fields is a second
+  /// place that pairing has to be remembered.
+  closeLine(): void {
+    this.selected = null;
+    this.clearWork();
+  }
 
   /// What is on the line, and only what is on it. An entry the line
   /// took off is in the answer and is not something to show under
@@ -460,6 +560,8 @@ class SharedCatalog {
     this.states.reset();
     this.history.reset();
     this.roster.reset();
+    this.pursuits.reset();
+    this.working = null;
     this.forgetLedger();
   }
 
@@ -528,19 +630,108 @@ class SharedCatalog {
   async lookAt(teamId: string): Promise<void> {
     this.teamId = teamId;
     this.selected = null;
+    this.working = null;
     this.forgetLedger();
     this.states.reset();
     this.history.reset();
     this.roster.reset();
+    this.pursuits.reset();
     await this.lines.load({ teamId });
   }
 
   async show(lineId: string): Promise<void> {
     this.selected = lineId;
+    // A piece of work belongs to the line it is against, so opening
+    // another line ends whatever was open under the last one.
+    this.working = null;
     await Promise.all([
       this.states.load({ teamId: this.teamId, lineId }),
       this.history.load({ teamId: this.teamId, lineId }),
+      this.pursuits.load({ teamId: this.teamId, lineId }),
     ]);
+  }
+
+  /// Opens work against the line now showing.
+  ///
+  /// Decision 10 is why nothing is copied first: working on a shared
+  /// line needs no clone.
+  async openPursuit(title: string, note: string): Promise<ForgePursuitDto> {
+    const lineId = this.requireLine();
+    this.said = null;
+    const pursuit = await mutate<ForgePursuitDto>(
+      "open_shared_pursuit",
+      {
+        teamIdRaw: this.teamId,
+        lineId,
+        title: title || null,
+        note: note || null,
+      },
+      "open work against that line",
+    );
+    await this.pursuits.load({ teamId: this.teamId, lineId });
+    this.working = pursuit.id;
+    return pursuit;
+  }
+
+  /// Writes a round into the open work.
+  ///
+  /// Nothing reaches the line here. A round is a request, and the only
+  /// moment anything lands is a satisfied close — which is what lets
+  /// two members work one line without contending, and why the
+  /// contents are not re-read after this.
+  async pushRound(ops: ForgeOpDto[], note: string): Promise<void> {
+    const pursuitId = this.requireWork();
+    this.said = null;
+    await mutate<ForgePursuitDto>(
+      "push_shared_round",
+      { teamIdRaw: this.teamId, pursuitId, ops, note: note || null },
+      "push that round",
+    );
+    await this.reloadWork();
+  }
+
+  /// Ends the open work, landing it or abandoning it.
+  ///
+  /// A satisfied close is the one moment the line moves, so the
+  /// contents and the chain are re-read after it and not before.
+  async closePursuit(outcome: string, note: string): Promise<void> {
+    const lineId = this.requireLine();
+    const pursuitId = this.requireWork();
+    this.said = null;
+    await mutate<ForgePursuitDto>(
+      "close_shared_pursuit",
+      { teamIdRaw: this.teamId, pursuitId, outcome, note: note || null },
+      "close that work",
+    );
+    this.said =
+      outcome === "satisfied"
+        ? "Closed as satisfied — what the work asked for is on the line."
+        : "Abandoned. The line did not move.";
+    this.working = null;
+    await Promise.all([
+      this.states.load({ teamId: this.teamId, lineId }),
+      this.history.load({ teamId: this.teamId, lineId }),
+      this.pursuits.load({ teamId: this.teamId, lineId }),
+    ]);
+  }
+
+  /// Re-reads the work list, which is where a pursuit's own state
+  /// lives once it is written.
+  async reloadWork(): Promise<void> {
+    const lineId = this.requireLine();
+    await this.pursuits.load({ teamId: this.teamId, lineId });
+  }
+
+  /// The open line, or a refusal naming what is missing.
+  private requireLine(): string {
+    if (this.selected === null) throw new Error("no line is open");
+    return this.selected;
+  }
+
+  /// The open work, or a refusal naming what is missing.
+  private requireWork(): string {
+    if (this.working === null) throw new Error("no work is open");
+    return this.working;
   }
 
   /// Copies one entry onto this machine.
