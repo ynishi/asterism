@@ -101,7 +101,10 @@ use asterism_contract::forge::{
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
-use asterism_contract::teams::{TeamLedgerEventDto, TeamLedgerPageDto, TeamSubjectRefDto};
+use asterism_contract::teams::{
+    TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto,
+    TeamSubjectRefDto,
+};
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
     asset_to_dto, forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
@@ -3117,6 +3120,62 @@ pub async fn list_shared_lines(
         .map_err(teams_error)
 }
 
+/// Who is in a team, and in what role.
+///
+/// Ids rather than names, because that is what a membership row holds
+/// — see [`TeamRosterMemberDto`]. The mapping is here for the reason
+/// the ledger's is: the wire is what a member's client and a team
+/// server say to each other, and a screen holds the contract's
+/// vocabulary alone.
+#[tauri::command]
+pub async fn team_roster(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+) -> Result<TeamRosterDto, UiError> {
+    let client = teams_client(&state).await?;
+    let roster = client
+        .roster(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?;
+    Ok(TeamRosterDto {
+        team_id: roster.team_id,
+        members: roster
+            .members
+            .into_iter()
+            .map(|member| TeamRosterMemberDto {
+                user_id: member.user_id,
+                role: member.role,
+            })
+            .collect(),
+    })
+}
+
+/// Founds a team on the connected server, owned by the signed-in
+/// account.
+///
+/// Answers with the id alone. The wire also returns the ledger event
+/// the creation appended, and a screen reads that where every other
+/// act of the team's is read rather than out of a write's response.
+#[tauri::command]
+pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, UiError> {
+    let client = teams_client(&state).await?;
+    // The owner is named rather than left implicit, and that is the
+    // one form that works for whoever is signed in. The server refuses
+    // an implicit owner from an admin session outright — an admin is
+    // never implicitly a member (#83 §1) — and permits any account to
+    // name itself. Passing `None` would work for a member and fail for
+    // an admin with a message about a field this surface has no way to
+    // fill.
+    let owner = client.user_id().map(str::to_string);
+    let created = client
+        .create_team(owner.as_deref())
+        .await
+        .map_err(teams_error)?;
+    Ok(TeamCreatedDto {
+        team_id: created.team_id,
+    })
+}
+
 /// One page of a team's ledger, seq ascending (#148 decision 18).
 ///
 /// `after` is the `next_after` of the page before, or nothing for the
@@ -3136,7 +3195,7 @@ pub async fn list_shared_lines(
 /// happens here rather than by handing a wire type to a screen, which
 /// would give every caller of this command a second vocabulary to
 /// know. `asterism-contract::teams` argues the same boundary from its
-/// own side.
+/// own side, and `tests/boundary.rs` holds it.
 #[tauri::command]
 pub async fn team_ledger_page(
     state: State<'_, AppState>,

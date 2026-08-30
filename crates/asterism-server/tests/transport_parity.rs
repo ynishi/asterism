@@ -168,6 +168,7 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     // itself is stated: a verb against somebody else's server is not a
     // verb against this one.
     ("clone_shared_entry", "talks to a team, not to this process"),
+    ("create_team", "talks to a team, not to this process"),
     (
         "connect_team_server",
         "talks to a team, not to this process",
@@ -187,6 +188,7 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("shared_line_states", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
+    ("team_roster", "talks to a team, not to this process"),
     (
         "team_server_session",
         "talks to a team, not to this process",

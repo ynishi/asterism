@@ -22,15 +22,17 @@
   // branches below are those three, and the empty list belongs to the
   // last of them alone — under either of the others it would be
   // answering for a team on nobody's behalf.
-  // Tabs rather than one column, and the reasoning is the catalog's:
-  // the lines a team hosts, its roster and its ledger are three answers
-  // about one team, so moving between them changes the question rather
-  // than the subject. Two of the three are here; the roster is a later
-  // child of #171 and lands beside them.
+  // Tabs rather than one column, argued in the catalog: the lines a
+  // team hosts, its roster and its ledger are three answers about one
+  // team, so moving between them changes the question rather than the
+  // subject.
   //
-  // The connection and the team sit *above* the tabs, because they are
-  // what the tabs are answers about. Publishing sits *inside* the lines
-  // tab, because it seeds a line and a line is what that tab is for.
+  // What this component adds is where everything else goes. The
+  // connection and the team sit *above* the tabs, because they are
+  // what the tabs are answers about. Publishing sits *inside* the
+  // lines tab, because it seeds a line and a line is what that tab is
+  // for. Founding a team sits beside the field, argued where the
+  // control is.
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { fmtDateTime } from "./lib/formatters";
@@ -52,7 +54,7 @@
   // and reopening it should show the team it was last looking at.
   let teamField = $state(sharedCatalog.teamId);
 
-  let tab = $state<"lines" | "ledger">("lines");
+  let tab = $state<"lines" | "roster" | "ledger">("lines");
   // One event's payload open at a time, by `event_id`.
   let openPayload = $state<string | null>(null);
 
@@ -75,7 +77,18 @@
     // Everything naming a team has to let go of is `lookAt`'s, written
     // once there rather than at each caller.
     await sharedCatalog.lookAt(teamField);
+    await refreshOpenTab();
+  }
+
+  // Naming a team drops what the on-demand tabs held, because what they
+  // held was about the team that was named before. Whichever of them is
+  // showing has to ask again, or it shows an unread state under a tab
+  // the reader never left.
+  async function refreshOpenTab() {
     if (tab === "ledger") await sharedCatalog.readLedgerPage();
+    if (tab === "roster") {
+      await sharedCatalog.roster.load({ teamId: sharedCatalog.teamId });
+    }
   }
 
   // The ledger reads on demand rather than beside the lines: it answers
@@ -84,6 +97,25 @@
   async function toLedger() {
     tab = "ledger";
     if (!sharedCatalog.ledgerRead) await sharedCatalog.readLedgerPage();
+  }
+
+  // The roster reads on demand for the same reason: who is in a team
+  // is a question about the team rather than about the work.
+  async function toRoster() {
+    tab = "roster";
+    if (sharedCatalog.roster.data === null) {
+      await sharedCatalog.roster.load({ teamId: sharedCatalog.teamId });
+    }
+  }
+
+  // Founding a team names it too. Somebody who just made one wants to
+  // be looking at it, and the alternative is copying an id out of a
+  // message into the field directly above.
+  async function makeTeam() {
+    const teamId = await sharedCatalog.createTeam();
+    teamField = teamId;
+    await sharedCatalog.lookAt(teamId);
+    await refreshOpenTab();
   }
 
 
@@ -173,6 +205,19 @@
           <button type="submit">List its lines</button>
         </form>
 
+        <!-- Founding a team sits beside the field rather than on a tab,
+             because every tab is an answer about the team named above
+             and this is the one act about no team in particular.
+             Beside the field in every phase with a connection, not only
+             in `no-team`: naming a team is a one-way trip on this
+             surface — the field is `required`, so there is no way back
+             to having named none — and an offer that only appeared
+             there would be an offer somebody could take exactly once
+             per window. -->
+        <button type="button" class="make-team" onclick={makeTeam}>
+          Start a team of your own
+        </button>
+
         {#if sharedCatalog.said}
           <p class="drawer-said">{sharedCatalog.said}</p>
         {/if}
@@ -190,6 +235,11 @@
             >lines</button>
             <button
               type="button"
+              class:active={tab === "roster"}
+              onclick={toRoster}
+            >members</button>
+            <button
+              type="button"
               class:active={tab === "ledger"}
               onclick={toLedger}
             >ledger</button>
@@ -198,8 +248,8 @@
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
           <!-- The lines list is what this chain renders, and this arm
-               is what keeps it off the ledger. The publish form below
-               carries its own condition. -->
+               is what keeps it off the other tabs. The publish form
+               below carries its own condition. -->
         {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
@@ -313,6 +363,50 @@
             </p>
             <button type="submit">Publish</button>
           </form>
+        {/if}
+
+        {#if sharedCatalog.phase === "ready" && tab === "roster"}
+          <!-- Ids rather than names, and the note says so where a
+               reader would otherwise compare this tab with the ledger
+               and wonder. A membership row holds a user id and a role;
+               the name on a ledger event is a snapshot the act took,
+               and there is no equivalent to read here. -->
+          <p class="drawer-note">
+            Who is in this team. Accounts are shown by id — a membership
+            row carries no name, unlike an act in the ledger, which
+            keeps the name it read when it happened.
+          </p>
+
+          {#if sharedCatalog.roster.loading}
+            <p class="drawer-empty">loading…</p>
+          {:else if sharedCatalog.roster.error}
+            <p class="drawer-empty drawer-error">
+              Could not read the team's roster: {sharedCatalog.roster.error}
+            </p>
+          {:else if sharedCatalog.roster.data === null}
+            <!-- An unread state with a way out of it, the same as the
+                 ledger's foot. Reachable when a read failed and was
+                 dismissed, or if the tab is ever shown without the
+                 load its opening performs. -->
+            <p class="drawer-empty">Nothing read yet.</p>
+            <button
+              type="button"
+              onclick={() =>
+                sharedCatalog.roster.load({ teamId: sharedCatalog.teamId })}
+            >Read the roster</button>
+          {:else}
+            <ul class="drawer-list roster" role="list">
+              {#each sharedCatalog.roster.data.members as member (member.user_id)}
+                <li class="member" class:you={member.user_id === sharedCatalog.session}>
+                  <span class="member-id">{member.user_id}</span>
+                  <span class="member-role">
+                    {member.role}{#if member.user_id === sharedCatalog.session}
+                      &nbsp;· you{/if}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
 
         {#if sharedCatalog.phase === "ready" && tab === "ledger"}
@@ -522,6 +616,38 @@
   .drawer-tabs button.active {
     opacity: 1;
     border-bottom-color: currentColor;
+  }
+  .make-team {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 0.2rem;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.35rem 0.6rem;
+  }
+  .roster .member {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.4rem 0.1rem;
+    font-size: 0.78rem;
+  }
+  .roster .member.you {
+    font-weight: 600;
+  }
+  .member-id {
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .member-role {
+    opacity: 0.6;
+    font-size: 0.72rem;
+    white-space: nowrap;
   }
   .ledger .event {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);

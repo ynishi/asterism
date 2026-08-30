@@ -107,7 +107,10 @@ use asterism_contract::query::{
     ListObservationsQuery, RandomAssetsQuery, SearchAssetsQuery, TagMatch,
 };
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
-use asterism_contract::teams::{TeamLedgerEventDto, TeamLedgerPageDto, TeamSubjectRefDto};
+use asterism_contract::teams::{
+    TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto,
+    TeamSubjectRefDto,
+};
 use schema_bridge::{SchemaBridge as _, export_types};
 
 fn main() {
@@ -367,6 +370,9 @@ fn main() {
         TeamLedgerPageDto,
         TeamLedgerEventDto,
         TeamSubjectRefDto,
+        TeamRosterDto,
+        TeamRosterMemberDto,
+        TeamCreatedDto,
     )
     .expect("failed to export TS bindings from asterism-contract");
     tauri_build::build()
