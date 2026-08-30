@@ -38,7 +38,10 @@ and an actor's display name is a snapshot rather than a lookup.
 
 ## Types
 
+- `TeamCreatedDto` — What founding a team answers with.
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
+- `TeamRosterDto` — Who is in a team, and in what role.
+- `TeamRosterMemberDto` — One membership row.
 - `TeamSubjectRefDto` — One typed reference an act makes.
 

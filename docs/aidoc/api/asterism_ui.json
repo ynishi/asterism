@@ -183,6 +183,11 @@
       "docs": "Freezes a picked asset list into a Snapshot and stops there\n(content-hash deduped).\n\nThe freeze half of `promote_volatile_selection` without the promote.\nBoth other Snapshot-consuming commands (`create_dispatch`,\n`get_snapshot`) take a snapshot id, and until this existed the only\nway to obtain one was to also create a Group — so \"keep this exact\nset for now\" had to go through a side effect nobody asked for."
     },
     {
+      "path": "asterism_ui::commands::create_team",
+      "kind": "function",
+      "docs": "Founds a team on the connected server, with the caller as its owner.\n\nAnswers with the id alone. The wire also returns the ledger event\nthe creation appended, and a screen reads that where every other\nact of the team's is read rather than out of a write's response."
+    },
+    {
       "path": "asterism_ui::commands::create_thread",
       "kind": "function",
       "docs": "Creates a Thread."
@@ -889,8 +894,12 @@
     },
     {
       "path": "asterism_ui::commands::team_ledger_page",
+      "kind": "function"
+    },
+    {
+      "path": "asterism_ui::commands::team_roster",
       "kind": "function",
-      "docs": "One page of a team's ledger, seq ascending (#148 decision 18).\n\n`after` is the `next_after` of the page before, or nothing for the\nfirst. What comes back can carry a cursor even when it happened to\nend on the last event there is — [`TeamLedgerPageDto::next_after`]\nsays why, and a caller reading a null cursor as \"that was\neverything\" is claiming something this read cannot answer.\n\nThe page size is the caller's: a screen paging by hand and one\nfollowing the stream want different ones, and the server's own\nmaximum is the only ceiling either has.\n\n**This is where the two vocabularies meet.** The wire's shapes are\nwhat a member's client and a team server say to each other; the\ncontract's are what this app says to its own frontend, and\n`bindings.ts` is a projection of the contract alone. So the mapping\nhappens here rather than by handing a wire type to a screen, which\nwould give every caller of this command a second vocabulary to\nknow. `asterism-contract::teams` argues the same boundary from its\nown side."
+      "docs": "One page of a team's ledger, seq ascending (#148 decision 18).\n\n`after` is the `next_after` of the page before, or nothing for the\nfirst. What comes back can carry a cursor even when it happened to\nend on the last event there is — [`TeamLedgerPageDto::next_after`]\nsays why, and a caller reading a null cursor as \"that was\neverything\" is claiming something this read cannot answer.\n\nThe page size is the caller's: a screen paging by hand and one\nfollowing the stream want different ones, and the server's own\nmaximum is the only ceiling either has.\n\n**This is where the two vocabularies meet.** The wire's shapes are\nwhat a member's client and a team server say to each other; the\ncontract's are what this app says to its own frontend, and\n`bindings.ts` is a projection of the contract alone. So the mapping\nhappens here rather than by handing a wire type to a screen, which\nwould give every caller of this command a second vocabulary to\nknow. `asterism-contract::teams` argues the same boundary from its\nown side.\nWho is in a team, and in what role.\n\nIds rather than names, because that is what a membership row holds\n— see [`TeamRosterMemberDto`]. The mapping is here for the reason\nthe ledger's is: the wire is what a member's client and a team\nserver say to each other, and a screen holds the contract's\nvocabulary alone."
     },
     {
       "path": "asterism_ui::commands::team_server_session",

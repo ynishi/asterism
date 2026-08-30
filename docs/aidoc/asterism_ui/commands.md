@@ -92,6 +92,7 @@ other.
 - `create_query_group` — "Save as Group": mints a `kind='query'` Group from a `query_json`
 - `create_series_strategy` — Registers a series rule and asks for the keys it implies — the
 - `create_snapshot` — Freezes a picked asset list into a Snapshot and stops there
+- `create_team` — Founds a team on the connected server, with the caller as its owner.
 - `create_thread` — Creates a Thread.
 - `delete_asset_comment` — Deletes a comment. Idempotent.
 - `delete_chapter_mark` — Removes one section. **Not** idempotent, unlike deleting a mark: a
@@ -233,7 +234,8 @@ other.
 - `shared_line_history` — A shared line and its whole history.
 - `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
-- `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
+- `team_ledger_page` — (no documentation)
+- `team_roster` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
