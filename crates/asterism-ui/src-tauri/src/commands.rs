@@ -3150,7 +3150,8 @@ pub async fn team_roster(
     })
 }
 
-/// Founds a team on the connected server, with the caller as its owner.
+/// Founds a team on the connected server, owned by the signed-in
+/// account.
 ///
 /// Answers with the id alone. The wire also returns the ledger event
 /// the creation appended, and a screen reads that where every other
@@ -3158,9 +3159,18 @@ pub async fn team_roster(
 #[tauri::command]
 pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, UiError> {
     let client = teams_client(&state).await?;
-    // `None` leaves the owner implicit — the session's own account.
-    // Naming one is an admin's move, and this surface has no admin.
-    let created = client.create_team(None).await.map_err(teams_error)?;
+    // The owner is named rather than left implicit, and that is the
+    // one form that works for whoever is signed in. The server refuses
+    // an implicit owner from an admin session outright — an admin is
+    // never implicitly a member (#83 §1) — and permits any account to
+    // name itself. Passing `None` would work for a member and fail for
+    // an admin with a message about a field this surface has no way to
+    // fill.
+    let owner = client.user_id().map(str::to_string);
+    let created = client
+        .create_team(owner.as_deref())
+        .await
+        .map_err(teams_error)?;
     Ok(TeamCreatedDto {
         team_id: created.team_id,
     })

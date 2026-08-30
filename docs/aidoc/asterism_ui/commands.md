@@ -92,7 +92,7 @@ other.
 - `create_query_group` — "Save as Group": mints a `kind='query'` Group from a `query_json`
 - `create_series_strategy` — Registers a series rule and asks for the keys it implies — the
 - `create_snapshot` — Freezes a picked asset list into a Snapshot and stops there
-- `create_team` — Founds a team on the connected server, with the caller as its owner.
+- `create_team` — Founds a team on the connected server, owned by the signed-in
 - `create_thread` — Creates a Thread.
 - `delete_asset_comment` — Deletes a comment. Idempotent.
 - `delete_chapter_mark` — Removes one section. **Not** idempotent, unlike deleting a mark: a

@@ -301,9 +301,6 @@ describe("the team plane", () => {
       }
     });
 
-    // The ledger. A team that exists has at least the event that
-    // founded it, so this is the one read on the plane whose answer
-    // cannot legitimately be empty.
     // The roster. The fixture's team was founded by the account this
     // window is signed in as, so it holds exactly one row and that row
     // is the reader's — which is the case the "you" marking exists for.
@@ -329,6 +326,10 @@ describe("the team plane", () => {
     });
     await snap("04-roster");
 
+    // The ledger. Neither read on this plane can legitimately answer
+    // with nothing — a team is created with a founding owner and with
+    // the event recording that — so an empty answer from either is a
+    // server misbehaving rather than a team nothing has happened to.
     await stage(trail, "read the team's ledger", ROUND_TRIP_MS, async () => {
       await clickTab("ledger");
       await pollUntil(
@@ -377,31 +378,39 @@ describe("the team plane", () => {
     // rather than merely asserted present: a control nobody presses is
     // a control nobody has checked. It lands the reader on the team it
     // just made — a roster of one, and no lines.
+    //
+    // Pressed from the members tab on purpose. Founding drops what the
+    // on-demand tabs held, because what they held was about the team
+    // named before; a tab that did not ask again would sit on its
+    // unread state under a tab the reader never left.
     await stage(trail, "found a team and land on it", ROUND_TRIP_MS, async () => {
+      await clickTab("members");
       await clickIn(`${DRAWER} .make-team`);
       await pollUntil(
         async () => ((await drawerText()) ?? "").includes("Created team "),
         "founding a team said nothing",
         ROUND_TRIP_MS,
       );
-      await pollUntil(
-        async () =>
-          ((await drawerText()) ?? "").includes("This team hosts no lines."),
-        "the new team's lines were never read",
-        ROUND_TRIP_MS,
-      );
       const after = (await drawerText()) ?? "";
       if (after.includes(teamId)) {
         throw new Error("founding a team left the reader on the old one");
       }
+      if (after.includes("Nothing read yet")) {
+        throw new Error(
+          "the members tab kept its unread state after the team under it changed",
+        );
+      }
     });
-    await snap("07-founded");
+    await snap("08-founded");
 
+    // Still on the members tab, which never moved: the roster showing
+    // now is the new team's, read because founding one dropped the
+    // last.
+    //
+    // "· you" alone, not "owner · you": the markup puts a non-breaking
+    // space before it, so the joined form never matches what
+    // `textContent` returns.
     await stage(trail, "the new team holds only its founder", ROUND_TRIP_MS, async () => {
-      await clickTab("members");
-      // "· you" alone, not "owner · you": the markup puts a
-      // non-breaking space before it, so the joined form never matches
-      // what `textContent` returns.
       await pollUntil(
         async () => {
           const text = (await drawerText()) ?? "";
@@ -429,6 +438,6 @@ describe("the team plane", () => {
         );
       }
     });
-    await snap("07-disconnected");
+    await snap("09-disconnected");
   });
 });

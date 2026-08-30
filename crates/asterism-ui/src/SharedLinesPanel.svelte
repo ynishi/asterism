@@ -22,15 +22,17 @@
   // branches below are those three, and the empty list belongs to the
   // last of them alone — under either of the others it would be
   // answering for a team on nobody's behalf.
-  // Tabs rather than one column, and the reasoning is the catalog's:
-  // the lines a team hosts, its roster and its ledger are three answers
-  // about one team, so moving between them changes the question rather
-  // than the subject. Two of the three are here; the roster is a later
-  // child of #171 and lands beside them.
+  // Tabs rather than one column, argued in the catalog: the lines a
+  // team hosts, its roster and its ledger are three answers about one
+  // team, so moving between them changes the question rather than the
+  // subject.
   //
-  // The connection and the team sit *above* the tabs, because they are
-  // what the tabs are answers about. Publishing sits *inside* the lines
-  // tab, because it seeds a line and a line is what that tab is for.
+  // What this component adds is where everything else goes. The
+  // connection and the team sit *above* the tabs, because they are
+  // what the tabs are answers about. Publishing sits *inside* the
+  // lines tab, because it seeds a line and a line is what that tab is
+  // for. Founding a team sits beside the field, argued where the
+  // control is.
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { fmtDateTime } from "./lib/formatters";
@@ -75,7 +77,18 @@
     // Everything naming a team has to let go of is `lookAt`'s, written
     // once there rather than at each caller.
     await sharedCatalog.lookAt(teamField);
+    await refreshOpenTab();
+  }
+
+  // Naming a team drops what the on-demand tabs held, because what they
+  // held was about the team that was named before. Whichever of them is
+  // showing has to ask again, or it shows an unread state under a tab
+  // the reader never left.
+  async function refreshOpenTab() {
     if (tab === "ledger") await sharedCatalog.readLedgerPage();
+    if (tab === "roster") {
+      await sharedCatalog.roster.load({ teamId: sharedCatalog.teamId });
+    }
   }
 
   // The ledger reads on demand rather than beside the lines: it answers
@@ -102,6 +115,7 @@
     const teamId = await sharedCatalog.createTeam();
     teamField = teamId;
     await sharedCatalog.lookAt(teamId);
+    await refreshOpenTab();
   }
 
 
@@ -234,8 +248,8 @@
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
           <!-- The lines list is what this chain renders, and this arm
-               is what keeps it off the ledger. The publish form below
-               carries its own condition. -->
+               is what keeps it off the other tabs. The publish form
+               below carries its own condition. -->
         {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
@@ -370,7 +384,16 @@
               Could not read the team's roster: {sharedCatalog.roster.error}
             </p>
           {:else if sharedCatalog.roster.data === null}
+            <!-- An unread state with a way out of it, the same as the
+                 ledger's foot. Reachable when a read failed and was
+                 dismissed, or if the tab is ever shown without the
+                 load its opening performs. -->
             <p class="drawer-empty">Nothing read yet.</p>
+            <button
+              type="button"
+              onclick={() =>
+                sharedCatalog.roster.load({ teamId: sharedCatalog.teamId })}
+            >Read the roster</button>
           {:else}
             <ul class="drawer-list roster" role="list">
               {#each sharedCatalog.roster.data.members as member (member.user_id)}

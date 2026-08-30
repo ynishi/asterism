@@ -76,8 +76,7 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
-// The frame as designed — the roster is a tab this drawing places and
-// a later child builds:
+// The frame:
 //
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
@@ -138,26 +137,30 @@
 //
 // # Where #171's surfaces attach
 //
-// **The roster** — create a team, see who is in it, invite, leave — is
-// the second tab, over the member's client's `roster`. Four rules
-// govern those four verbs and a surface built from one sentence would
-// flatten them: `RegistrationPolicy` decides who may create a team,
-// the authority table puts `Invite` behind an owner, and leaving is
-// held by the last-owner rule. **Joining has no verb at all** — the
-// membership routes are invite, remove, grant and revoke — so a tab
-// offering one would be offering something with nothing behind it.
-// #171's body hangs all four on `RegistrationPolicy`, and this is the
-// finding about that sentence rather than a restatement of it.
+// **The roster** — who is in the team — is the second tab, over the
+// member's client's `roster`. It is a read and nothing more, and that
+// is the routes' doing rather than a scope somebody chose: #171's body
+// asks for four verbs beside it, and they answer to four different
+// rules at four different depths. Only the read and team creation are
+// wired end to end. **Joining has no verb at all**, so a tab offering
+// one would be offering something with nothing behind it, and
+// `RegistrationPolicy` — which #171 hangs all four on — is consulted
+// by exactly one of them.
+//
+// Founding a team is the write that came with this tab and does not
+// sit on it. Every tab is an answer about the team named above them,
+// and founding is about none; the panel's header argues where the
+// control goes.
 //
 // **The ledger** is the last of the three, over `events`. What it
 // decides for itself is in the panel's header; what it leaves here is
 // the walk, below.
 //
-// The rule that governed it, and that governs the roster next: a
-// surface arrives with whatever desktop command it needs, because what
-// a surface asks of a command is known where the surface is written
-// and guessed anywhere else. A command that fetches from the team
-// server maps the wire's shapes to `asterism-contract::teams` on the
+// The rule that governed both: a surface arrives with whatever desktop
+// command it needs, because what a surface asks of a command is known
+// where the surface is written and guessed anywhere else. A command
+// that fetches from the team server maps the wire's shapes to
+// `asterism-contract::teams` on the
 // way, so a screen holds one vocabulary rather than two — the rule the
 // boundary test in `src-tauri/tests/boundary.rs` enforces.
 //
@@ -385,11 +388,13 @@ class SharedCatalog {
   /// steps, which is the thing decision 16 refuses.
   async openPanel(): Promise<void> {
     this.open = true;
-    // The walk goes with the panel, on the same rule as the lines: a
-    // served-through view that showed what it last had would be a
-    // mirror, and a ledger is the one read here that grows while
-    // nobody is looking.
+    // Everything an on-demand tab holds goes with the panel, on the
+    // same rule as the lines: a served-through view that showed what
+    // it last had would be a mirror. The panel is mounted for the
+    // window's lifetime rather than for the drawer's, so nothing is
+    // dropped by the component going away — there is no such moment.
     this.forgetLedger();
+    this.roster.reset();
     await this.refreshSession();
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
@@ -458,12 +463,12 @@ class SharedCatalog {
     this.forgetLedger();
   }
 
-  /// Founds a team, with the session's own account as its owner.
+  /// Founds a team owned by the signed-in account.
   ///
   /// Answers with the id so a caller can name what it made. The one
   /// write here that is about no team in particular, which is why the
-  /// form for it does not sit on a tab — every tab is an answer about
-  /// the team named above them.
+  /// control for it does not sit on a tab — every tab is an answer
+  /// about the team named above them.
   async createTeam(): Promise<string> {
     this.said = null;
     const created = await mutate<TeamCreatedDto>(

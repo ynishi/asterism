@@ -32,10 +32,11 @@ and this project adheres to
   team, see the members, invite and join under `RegistrationPolicy`, leave", and
   those five verbs sit at four different depths: creating and reading are wired
   end to end, the membership writes have no client half, `leave` has no route,
-  and **`join` does not exist anywhere**. `RegistrationPolicy` governs none of
-  the four it is attached to — its only consumer is team creation. This lands
-  the two that were ready; the rest are siblings, and `join` is a finding about
-  the issue rather than a specification.
+  and **`join` does not exist anywhere**. `RegistrationPolicy` is consulted by
+  exactly one of them — its only consumer is `may_create_team` — so inviting and
+  leaving answer to the authority table and the last-owner rule instead. This
+  lands the two that were ready; the rest are siblings, and `join` is a finding
+  about the issue rather than a specification.
 
 - **The team's ledger on screen, and the frame its tabs land in** (#194). Who
   did what, in what capacity, is the team's own record, and #171 asks that a

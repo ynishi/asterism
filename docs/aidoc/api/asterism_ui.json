@@ -185,7 +185,7 @@
     {
       "path": "asterism_ui::commands::create_team",
       "kind": "function",
-      "docs": "Founds a team on the connected server, with the caller as its owner.\n\nAnswers with the id alone. The wire also returns the ledger event\nthe creation appended, and a screen reads that where every other\nact of the team's is read rather than out of a write's response."
+      "docs": "Founds a team on the connected server, owned by the signed-in\naccount.\n\nAnswers with the id alone. The wire also returns the ledger event\nthe creation appended, and a screen reads that where every other\nact of the team's is read rather than out of a write's response."
     },
     {
       "path": "asterism_ui::commands::create_thread",
