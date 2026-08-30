@@ -22,12 +22,39 @@
   // branches below are those three, and the empty list belongs to the
   // last of them alone — under either of the others it would be
   // answering for a team on nobody's behalf.
+  // Tabs rather than one column, and the reasoning is the catalog's:
+  // the lines a team hosts, its roster and its ledger are three answers
+  // about one team, so moving between them changes the question rather
+  // than the subject. Two of the three are here; the roster is a later
+  // child of #171 and lands beside them.
+  //
+  // The connection and the team sit *above* the tabs, because they are
+  // what the tabs are answers about. Publishing sits *inside* the lines
+  // tab, because it seeds a line and a line is what that tab is for.
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
+  import { fmtDateTime } from "./lib/formatters";
 
   let baseUrl = $state("http://127.0.0.1:8787");
   let login = $state("");
   let password = $state("");
+
+  // The field is this component's, not the catalog's.
+  //
+  // Bound straight to `sharedCatalog.teamId` it changed the team every
+  // read is made against as somebody typed, so a ledger walk started on
+  // one team would continue against another — the next page requested
+  // from team B with team A's cursor, and its answer appended to team
+  // A's list. Naming a team is a submit, and `lookAt` is what a submit
+  // reaches; between the two the catalog does not move.
+  //
+  // Seeded from the catalog, because a connection outlives this drawer
+  // and reopening it should show the team it was last looking at.
+  let teamField = $state(sharedCatalog.teamId);
+
+  let tab = $state<"lines" | "ledger">("lines");
+  // One event's payload open at a time, by `event_id`.
+  let openPayload = $state<string | null>(null);
 
   // Publishing asks for more than a click, and all of it is init-time.
   let publishLineId = $state("");
@@ -40,13 +67,25 @@
     event.preventDefault();
     await sharedCatalog.connect(baseUrl, login, password);
     password = "";
-    if (sharedCatalog.teamId) await sharedCatalog.lines.load({ teamId: sharedCatalog.teamId });
+    if (teamField) await sharedCatalog.lookAt(teamField);
   }
 
   async function look(event: Event) {
     event.preventDefault();
-    await sharedCatalog.lines.load({ teamId: sharedCatalog.teamId });
+    // Everything naming a team has to let go of is `lookAt`'s, written
+    // once there rather than at each caller.
+    await sharedCatalog.lookAt(teamField);
+    if (tab === "ledger") await sharedCatalog.readLedgerPage();
   }
+
+  // The ledger reads on demand rather than beside the lines: it answers
+  // what the team did, which is a question asked apart from working
+  // with what it holds.
+  async function toLedger() {
+    tab = "ledger";
+    if (!sharedCatalog.ledgerRead) await sharedCatalog.readLedgerPage();
+  }
+
 
   async function publish(event: Event) {
     event.preventDefault();
@@ -126,7 +165,7 @@
             Team
             <input
               type="text"
-              bind:value={sharedCatalog.teamId}
+              bind:value={teamField}
               placeholder="team id"
               required
             />
@@ -142,6 +181,25 @@
           <p class="drawer-empty">
             Name a team above to see the lines it hosts.
           </p>
+        {:else}
+          <nav class="drawer-tabs" aria-label="What to read about this team">
+            <button
+              type="button"
+              class:active={tab === "lines"}
+              onclick={() => (tab = "lines")}
+            >lines</button>
+            <button
+              type="button"
+              class:active={tab === "ledger"}
+              onclick={toLedger}
+            >ledger</button>
+          </nav>
+        {/if}
+
+        {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
+          <!-- The lines list is what this chain renders, and this arm
+               is what keeps it off the ledger. The publish form below
+               carries its own condition. -->
         {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
@@ -220,7 +278,7 @@
              Behind `ready` for the same reason the list above is: it
              seeds a line on the team in the field, and with no team
              named it would be offering to publish to nobody. -->
-        {#if sharedCatalog.phase === "ready"}
+        {#if sharedCatalog.phase === "ready" && tab === "lines"}
           <form class="drawer-form drawer-publish" onsubmit={publish}>
             <h4>Publish a line of mine</h4>
             <label>
@@ -255,6 +313,99 @@
             </p>
             <button type="submit">Publish</button>
           </form>
+        {/if}
+
+        {#if sharedCatalog.phase === "ready" && tab === "ledger"}
+          <p class="drawer-note">
+            What this team did, and in what capacity. Oldest first, and
+            the names are as they read when each act was recorded.
+          </p>
+
+          {#if sharedCatalog.ledgerError}
+            <p class="drawer-empty drawer-error">
+              Could not read the team's ledger: {sharedCatalog.ledgerError}
+            </p>
+          {/if}
+
+          {#if sharedCatalog.ledger.length > 0}
+            <ul class="drawer-list ledger" role="list">
+              <!-- `kind` and `payload_json` are rendered as stored, and
+                   that is a decision rather than an omission. The kinds
+                   are namespaced and versioned by the server and
+                   `forge.*` is still growing them, so a screen mapping
+                   each to a sentence would be a second place every new
+                   kind has to be learned — going stale where nobody is
+                   looking, which is the trap #148 decision 14 names for
+                   the projection. It costs a reader some fluency, and
+                   means a kind this screen has never seen still arrives
+                   intact. -->
+              {#each sharedCatalog.ledger as event (event.event_id)}
+                <li class="event">
+                  <div class="event-head">
+                    <span class="event-kind">{event.kind}</span>
+                    <span class="event-when"
+                      >{fmtDateTime(event.occurred_at_ms)}</span
+                    >
+                  </div>
+                  <div class="event-who">
+                    {event.actor_display_name}
+                    <!-- The capacity, not just the name. An admin acting
+                         inside a team without a membership row is stamped
+                         as one and never disguised as a member (#83 §1). -->
+                    <span class="event-kind-of-actor">{event.actor_kind}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="event-payload-toggle"
+                    onclick={() =>
+                      (openPayload =
+                        openPayload === event.event_id ? null : event.event_id)}
+                  >
+                    {openPayload === event.event_id ? "hide" : "what it says"}
+                  </button>
+                  {#if openPayload === event.event_id}
+                    <pre class="event-payload">{event.payload_json}</pre>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {:else if sharedCatalog.ledgerRead && !sharedCatalog.ledgerLoading}
+            <!-- Unreachable against a server behaving itself: founding a
+                 team appends its own event, so a team that answered with
+                 nothing answered wrongly. -->
+            <p class="drawer-empty drawer-error">
+              This team's ledger came back empty, which should not be
+              possible — creating a team records itself.
+            </p>
+          {/if}
+
+          <!-- The foot. A null cursor is not an end: the read says only
+               that nothing lay past here when the page was taken, and a
+               ledger has no final page. So neither branch below claims
+               one. -->
+          <div class="ledger-foot">
+            {#if sharedCatalog.ledgerLoading}
+              <p class="drawer-empty">reading…</p>
+            {:else if !sharedCatalog.ledgerRead}
+              <!-- Nothing has come back, so there is nothing to say
+                   about what lies past it. A page that failed lands
+                   here, under the error above. -->
+              <button type="button" onclick={() => sharedCatalog.readLedgerPage()}>
+                Read the ledger
+              </button>
+            {:else if sharedCatalog.ledgerCursor !== null}
+              <button type="button" onclick={() => sharedCatalog.readLedgerPage()}>
+                Read more
+              </button>
+            {:else}
+              <button type="button" onclick={() => sharedCatalog.readLedgerPage()}>
+                Ask again
+              </button>
+              <span class="drawer-empty">
+                Nothing more had been recorded when this was read.
+              </span>
+            {/if}
+          </div>
         {/if}
       {/if}
     </div>
@@ -351,6 +502,75 @@
   }
   .drawer-error {
     color: #ff9d9d;
+  }
+  .drawer-tabs {
+    display: flex;
+    gap: 0.15rem;
+    margin: 0.8rem 0 0.2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .drawer-tabs button {
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.3rem 0.55rem;
+    opacity: 0.6;
+  }
+  .drawer-tabs button.active {
+    opacity: 1;
+    border-bottom-color: currentColor;
+  }
+  .ledger .event {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.45rem 0.1rem;
+    font-size: 0.78rem;
+  }
+  .event-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .event-kind {
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+  }
+  .event-when,
+  .event-kind-of-actor {
+    opacity: 0.6;
+    font-size: 0.72rem;
+  }
+  .event-who {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+    opacity: 0.85;
+  }
+  .event-payload-toggle {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.72rem;
+    opacity: 0.6;
+    padding: 0.1rem 0;
+  }
+  .event-payload {
+    font-size: 0.7rem;
+    margin: 0.2rem 0 0;
+    padding: 0.35rem 0.45rem;
+    background: rgba(255, 255, 255, 0.05);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .ledger-foot {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.7rem;
   }
   .drawer-list,
   .drawer-entries {

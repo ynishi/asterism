@@ -1206,6 +1206,26 @@
       "path": "asterism_contract::sort::SortTarget",
       "kind": "enum",
       "docs": "Which asset dimension the grid sorts on.\n\nMirrors `SortTarget` in\n`crates/asterism-ui/src/lib/stores/filter.svelte.ts`. The\n`snake_case` wire tokens are `occurred_at` / `created_at` /\n`updated_at` / `persona` / `modality` / `tag` / `group` / `cover` /\n`rating` / `duration` / `file_size` / `pixels`.\n\n[`UpdatedAt`](Self::UpdatedAt) and [`Rating`](Self::Rating) are the\nvariants the UI union does not carry: each was wired server-side\nfirst (the grid's own comparator has no branch for either), so such a\nspec is answerable over the wire and inert client-side. They are\nnamed here rather than left implicit so the drift is a documented gap\ninstead of a surprise.\n\n[`Duration`](Self::Duration) and [`FileSize`](Self::FileSize) were in\nthat list until the UI union took them: `card-cmp.ts` carries both\nbranches now and `card-cmp.test.ts` pins them against the evaluator\nbelow. The grid's Sort dropdown withheld them for one wave after\nthat, for a reason one layer down from this enum — the index rows it\nsorts carried neither column, a row-shape question rather than an\naxis one. Both are on the row now\n(`AssetIndexEntryDto::duration_ms` / `file_size_bytes`) and the\npicker offers them, so the two unions and the two comparators agree\nend to end.\n\nA `msg_count` token used to sit on both unions with a comparator on\nneither: the UI declined it (`buildCardCmp` returned `null`) and the\nevaluator answered `Equal`, so naming the axis produced the order the\ncaller would have got by naming nothing. The grid retired it from the\npicker when the Session tiles left the grid (asset-model v4 P3), and\nthe token went with it — a spec naming it now fails to parse, which\nis the same answer a misspelled axis gets and the only honest one for\nan axis nothing implements. A `query_json` v1 blob frozen with it\nfails its own refresh loudly (`RefreshAllOutcome::failures`, one\ngroup, keep-going) rather than materialising a position under a\ndifferent order; re-saving the group from the picker mints a live\naxis. One legacy path stays quiet: the V19 migration transcribing\npre-Query-Group `saved_query.sort_json` reads with\n`unwrap_or_default()`, so a retired token there falls to the default\naxis — which orders identically to what `MsgCount`'s `Equal`\ncomparator produced, so the silence is harmless there and only there."
+    },
+    {
+      "path": "asterism_contract::teams",
+      "kind": "module",
+      "docs": "The team plane's shapes, as they cross this app's own boundary.\n\nA topic module for the same reason [`forge`](crate::forge) is one:\nthe team plane answers to a model of its own, and a reader of\n[`TeamLedgerPageDto`] needs the types beside it rather than the\nasset DTOs two hundred lines up.\n\n# Why these exist here as well as on the wire\n\nTwo boundaries, not one. `asterism-teams-wire` carries what a\nmember's client and a team server say to each other over HTTP; this\ncarries what the desktop app says to its own frontend. They meet at\none place — the Tauri command — and the shapes look alike there\nbecause the same facts cross both.\n\nAlike is not the same as shared. This crate imports no other\nAsterism crate, which is what keeps it a leaf and what stops a\ndependency cycle; and the frontend has one vocabulary rather than\ntwo, which is what `bindings.ts` being a projection of *this* crate\nmeans. A command that returned a wire type would hand the second\nvocabulary to every screen that called it.\n\nSo the duplication is the boundary, and the mapping lives in the\ncommand that crosses it.\n\n# What the ledger's shape carries\n\nAn append-only record of what a team did, in what capacity. The\nread is paged over `seq` rather than whole, because the forge\nwrites a row per push and a table that grew by the occasional\nmembership gesture does not any more.\n\nTwo properties of it decide how a screen may read it, and both are\nstated on the fields they belong to: a null cursor is not an end,\nand an actor's display name is a snapshot rather than a lookup."
+    },
+    {
+      "path": "asterism_contract::teams::TeamLedgerEventDto",
+      "kind": "struct",
+      "docs": "One act, as the ledger recorded it."
+    },
+    {
+      "path": "asterism_contract::teams::TeamLedgerPageDto",
+      "kind": "struct",
+      "docs": "One page of a team's ledger, oldest first."
+    },
+    {
+      "path": "asterism_contract::teams::TeamSubjectRefDto",
+      "kind": "struct",
+      "docs": "One typed reference an act makes."
     }
   ]
 }

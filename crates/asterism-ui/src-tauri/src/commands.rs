@@ -101,6 +101,7 @@ use asterism_contract::forge::{
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
+use asterism_contract::teams::{TeamLedgerEventDto, TeamLedgerPageDto, TeamSubjectRefDto};
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
     asset_to_dto, forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
@@ -3114,6 +3115,66 @@ pub async fn list_shared_lines(
         .lines(team_id(&team_id_raw, "team id")?)
         .await
         .map_err(teams_error)
+}
+
+/// One page of a team's ledger, seq ascending (#148 decision 18).
+///
+/// `after` is the `next_after` of the page before, or nothing for the
+/// first. What comes back can carry a cursor even when it happened to
+/// end on the last event there is — [`TeamLedgerPageDto::next_after`]
+/// says why, and a caller reading a null cursor as "that was
+/// everything" is claiming something this read cannot answer.
+///
+/// The page size is the caller's: a screen paging by hand and one
+/// following the stream want different ones, and the server's own
+/// maximum is the only ceiling either has.
+///
+/// **This is where the two vocabularies meet.** The wire's shapes are
+/// what a member's client and a team server say to each other; the
+/// contract's are what this app says to its own frontend, and
+/// `bindings.ts` is a projection of the contract alone. So the mapping
+/// happens here rather than by handing a wire type to a screen, which
+/// would give every caller of this command a second vocabulary to
+/// know. `asterism-contract::teams` argues the same boundary from its
+/// own side.
+#[tauri::command]
+pub async fn team_ledger_page(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    after: Option<i64>,
+    limit: Option<u32>,
+) -> Result<TeamLedgerPageDto, UiError> {
+    let client = teams_client(&state).await?;
+    let page = client
+        .events(team_id(&team_id_raw, "team id")?, after, limit)
+        .await
+        .map_err(teams_error)?;
+    Ok(TeamLedgerPageDto {
+        events: page
+            .events
+            .into_iter()
+            .map(|event| TeamLedgerEventDto {
+                seq: event.seq,
+                event_id: event.event_id,
+                team_id: event.team_id,
+                actor_kind: event.actor_kind,
+                actor_user_id: event.actor_user_id,
+                actor_display_name: event.actor_display_name,
+                occurred_at_ms: event.occurred_at_ms,
+                kind: event.kind,
+                subjects: event
+                    .subjects
+                    .into_iter()
+                    .map(|subject| TeamSubjectRefDto {
+                        ref_type: subject.ref_type,
+                        value: subject.value,
+                    })
+                    .collect(),
+                payload_json: event.payload_json,
+            })
+            .collect(),
+        next_after: page.next_after,
+    })
 }
 
 /// What is on a shared line, folded from its chain by the server.

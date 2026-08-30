@@ -440,6 +440,7 @@ pub fn run() {
             commands::shared_line_history,
             commands::clone_shared_entry,
             commands::publish_line_to_team,
+            commands::team_ledger_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

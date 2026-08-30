@@ -76,6 +76,9 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
+// The frame as designed — the roster is a tab this drawing places and
+// a later child builds:
+//
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
 //   │ ───────────────────────────────────────────────────────────── │
@@ -146,10 +149,17 @@
 // #171's body hangs all four on `RegistrationPolicy`, and this is the
 // finding about that sentence rather than a restatement of it.
 //
-// **The ledger** is the third tab, over `events`. Each of the two
-// arrives with whatever desktop command it needs, brought by the child
-// that builds it: what a surface asks of a command is known where the
-// surface is written and guessed anywhere else.
+// **The ledger** is the last of the three, over `events`. What it
+// decides for itself is in the panel's header; what it leaves here is
+// the walk, below.
+//
+// The rule that governed it, and that governs the roster next: a
+// surface arrives with whatever desktop command it needs, because what
+// a surface asks of a command is known where the surface is written
+// and guessed anywhere else. A command that fetches from the team
+// server maps the wire's shapes to `asterism-contract::teams` on the
+// way, so a screen holds one vocabulary rather than two — the rule the
+// boundary test in `src-tauri/tests/boundary.rs` enforces.
 //
 // **Working a shared line** is the forge's `work` tab, in the inner
 // frame above. Decision 10 is why there is no copy step in front of
@@ -189,10 +199,17 @@
 // a log and not a list, and a resource holding "the events" would be
 // holding the first page while claiming the name of all of them.
 //
-// Which control pages it — a `more` at the foot, an infinite scroll, a
-// range — is taste, and unsettled until the tab is built. What is not
-// taste is that the cursor is part of what the read takes, so it
-// cannot be added to a resource shaped without it.
+// Which control pages it was taste, and the tab settled it: one
+// control at the foot, bringing `LEDGER_PAGE` more. An infinite scroll
+// would keep asking a server on somebody's behalf for a record they
+// may only have glanced at, and a range needs a total this read has no
+// way to give.
+//
+// What was never taste is that the cursor is part of what the read
+// takes, so it cannot be added to a resource shaped without it — which
+// is why the walk below is fields on this catalog rather than a
+// `Resource`. A `Resource` holds one answer; this holds a sequence of
+// them, and only the caller knows they are the same walk.
 //
 // # Where a credential lives is not settled
 //
@@ -232,11 +249,11 @@
 // frame could arrive with the first one. A panel reads this catalog,
 // so a second catalog carrying the frame would be two stores answering
 // about one team — the shape the first section of this file refuses
-// one layer down. The panel is what grows into the frame, and it has
-// not grown yet: everything above is a design and not a component, and
-// the first surface to land is what builds the tabs. What did land
-// with the design is `phase`, because the panel was already able to
-// merge the two kinds of empty and now does not.
+// one layer down. The panel is what grew into the frame, and the
+// ledger is what grew it: the design said the first surface to land
+// would build the tabs, and this is that surface. What each tab
+// decides for itself is in the panel's header from here on; what stays
+// above is what all of them stand on.
 //
 // Where it sits is not among the questions this design opens. #181
 // moved `shared lines` beside the forge in the sidebar and named
@@ -250,11 +267,21 @@ import type {
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  TeamLedgerEventDto,
+  TeamLedgerPageDto,
 } from "../../bindings";
 
 /// What the two reads need to name a line on a server.
 type TeamArgs = { teamId: string };
 type LineArgs = { teamId: string; lineId: string };
+
+/// How many events one press of the ledger's foot control brings back.
+///
+/// Stated here rather than left to the server's default because the
+/// number is what the control means to a person: press once, get this
+/// many more. Small enough that a first page arrives while somebody is
+/// still looking at the tab.
+const LEDGER_PAGE = 50;
 
 class SharedCatalog {
   /// Whether the panel is showing. The panel reads this itself; the
@@ -344,6 +371,11 @@ class SharedCatalog {
   /// steps, which is the thing decision 16 refuses.
   async openPanel(): Promise<void> {
     this.open = true;
+    // The walk goes with the panel, on the same rule as the lines: a
+    // served-through view that showed what it last had would be a
+    // mirror, and a ledger is the one read here that grows while
+    // nobody is looking.
+    this.forgetLedger();
     await this.refreshSession();
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
@@ -369,6 +401,36 @@ class SharedCatalog {
     );
   }
 
+  /// The ledger as far as it has been read, oldest first.
+  ///
+  /// Not a `Resource`, because a `Resource` holds one answer and this
+  /// holds a walk: each page is appended to what came before, and the
+  /// cursor below says where the next one resumes. Read afresh on every
+  /// team, since a ledger belongs to one.
+  ledger = $state<TeamLedgerEventDto[]>([]);
+
+  /// Where the next page resumes, or `null`.
+  ///
+  /// **`null` is not "that was the end".** The read's own shape says
+  /// so: a page that filled its limit always carries a cursor, and a
+  /// short page carries none — which means nothing lay past there *when
+  /// the page was taken*, rather than that nothing ever will. A ledger
+  /// has no final page. Whatever a screen puts at the foot has to be
+  /// phrased as asking again.
+  ledgerCursor = $state<number | null>(null);
+
+  /// Whether a page is in flight, and what the last one failed with.
+  ledgerLoading = $state(false);
+  ledgerError = $state<string | null>(null);
+
+  /// Whether any page has come back for the team now named.
+  ///
+  /// Distinct from `ledger.length === 0`, which is unreachable for a
+  /// team that answered: creating one appends its own event, so a team
+  /// with an empty first page is a team that answered wrongly rather
+  /// than one nothing has happened to.
+  ledgerRead = $state(false);
+
   async disconnect(): Promise<void> {
     await api("disconnect_team_server");
     this.session = null;
@@ -378,6 +440,61 @@ class SharedCatalog {
     this.lines.reset();
     this.states.reset();
     this.history.reset();
+    this.forgetLedger();
+  }
+
+  /// Drops the walk. The ledger belongs to a team and to a connection,
+  /// so both losing one and naming another end it.
+  forgetLedger(): void {
+    this.ledger = [];
+    this.ledgerCursor = null;
+    this.ledgerError = null;
+    this.ledgerRead = false;
+  }
+
+  /// Reads the next page, or the first when the walk has not started.
+  ///
+  /// The page size is `LEDGER_PAGE`, argued where it is defined.
+  async readLedgerPage(): Promise<void> {
+    if (this.ledgerLoading) return;
+    this.ledgerLoading = true;
+    this.ledgerError = null;
+    try {
+      // Where to resume when there is no cursor is the last seq this
+      // walk saw, which is what the read's own doc prescribes for a
+      // caller following a live stream. Passing nothing would re-read
+      // from the beginning and append a second copy of everything —
+      // the cost of reading a null cursor as a starting point rather
+      // than as "nothing had been recorded past here".
+      const after = this.ledgerCursor ?? this.ledger.at(-1)?.seq ?? null;
+      const page = await api<TeamLedgerPageDto>("team_ledger_page", {
+        teamIdRaw: this.teamId,
+        after,
+        limit: LEDGER_PAGE,
+      });
+      this.ledger = [...this.ledger, ...page.events];
+      this.ledgerCursor = page.next_after;
+      this.ledgerRead = true;
+    } catch (err) {
+      this.ledgerError = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.ledgerLoading = false;
+    }
+  }
+
+  /// Names a team and reads the lines it hosts.
+  ///
+  /// The catalog owns what naming a team ends, rather than the panel:
+  /// a ledger walk and a line selection both belong to the team that
+  /// was named, and three clears written at three call sites is how one
+  /// gets missed — which `forge.svelte.ts` learned the same way.
+  async lookAt(teamId: string): Promise<void> {
+    this.teamId = teamId;
+    this.selected = null;
+    this.forgetLedger();
+    this.states.reset();
+    this.history.reset();
+    await this.lines.load({ teamId });
   }
 
   async show(lineId: string): Promise<void> {

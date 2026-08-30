@@ -52,3 +52,4 @@ pub mod query;
 pub mod query_group;
 pub mod sidecar;
 pub mod sort;
+pub mod teams;

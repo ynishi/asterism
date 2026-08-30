@@ -6,6 +6,16 @@
 //! few `tests/export_parity.rs` records a reason against. Hand-written
 //! TypeScript types are avoided so the two sides never drift apart.
 //!
+//! **One crate, and that is the point.** The frontend has one
+//! vocabulary because there is one boundary between it and this
+//! binary. A shape arriving from a boundary further out — the teams
+//! wire, which a member's client and a team server speak — is mapped
+//! to a contract type by the command that fetches it, rather than
+//! exported from here as a second source. Exporting one would hand
+//! every screen a second vocabulary and leave `export_parity` guarding
+//! half a list, which is what `asterism-contract::teams` exists to
+//! avoid.
+//!
 //! **The list is a projection of the contract, not a subset a screen
 //! asked for.** It used to be the second: a type entered the list in
 //! the change that consumed it, on the ground that "exporting a shape
@@ -97,6 +107,7 @@ use asterism_contract::query::{
     ListObservationsQuery, RandomAssetsQuery, SearchAssetsQuery, TagMatch,
 };
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
+use asterism_contract::teams::{TeamLedgerEventDto, TeamLedgerPageDto, TeamSubjectRefDto};
 use schema_bridge::{SchemaBridge as _, export_types};
 
 fn main() {
@@ -349,6 +360,13 @@ fn main() {
         SortOrder,
         SortSpec,
         TagMatch,
+        // The team plane, as this app's own boundary carries it. What
+        // the wire carries is what a member's client and a team server
+        // say to each other; these are what a command hands a screen,
+        // and the mapping between them is the command's.
+        TeamLedgerPageDto,
+        TeamLedgerEventDto,
+        TeamSubjectRefDto,
     )
     .expect("failed to export TS bindings from asterism-contract");
     tauri_build::build()
