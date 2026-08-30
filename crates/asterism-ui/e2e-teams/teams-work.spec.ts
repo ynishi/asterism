@@ -15,10 +15,10 @@
 // lands. All of it against mocked `api` and `mutate`, which is the hole
 // this fills: those tests assert that the catalog called
 // `"push_shared_round"` with a shape their own author wrote down twice.
-// Five commands are reached here for the first time —
-// `shared_line_pursuits`, `open_shared_pursuit`, `push_shared_round`,
-// `close_shared_pursuit`, and `shared_line_states` behind a line that
-// actually holds something.
+// This is where the work verbs — `shared_line_pursuits`,
+// `open_shared_pursuit`, `push_shared_round`, `close_shared_pursuit` —
+// meet a server rather than a mock, and where `shared_line_states`
+// answers for a line that actually holds something.
 //
 // # What it walks
 //
@@ -64,7 +64,8 @@ const DRAWER = '[role="dialog"][aria-label="Shared lines"]';
 const TEAM_TABS = `${DRAWER} .drawer-tabs`;
 const LINE_TABS = `${DRAWER} .line-tabs`;
 
-/** What the seeded entry is called before this spec renames it. */
+/** What this spec renames the seeded entry to. The name it starts
+ *  with is the fixture's, and arrives as `entryName`. */
 const RENAMED = "cut-02";
 
 /** What `onPrepare` put up for this spec, or a failure saying it did not. */

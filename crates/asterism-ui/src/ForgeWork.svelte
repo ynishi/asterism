@@ -29,11 +29,10 @@
   // **The projection is what those rows are.** A person deciding
   // whether to close needs to see what closing would leave, which
   // neither log answers on its own. `forgeCatalog` makes it over both
-  // its reads — the fold itself is `lib/forge-projection.ts`, because
-  // the shared plane asks the same of its own two; what it means here
-  // is that the rows are a
-  // picture of a line that has not moved, and the two answers above
-  // them are how far that assumption has drifted.
+  // its reads, out of the fold in `lib/forge-projection.ts`; what it
+  // means here is that the rows are a picture of a line that has not
+  // moved, and the two answers above them are how far that assumption
+  // has drifted.
   //
   // **Where a refusal carries a reason, the reason is not the action.**
   // `mutate` puts the message on screen and reads no further, and what

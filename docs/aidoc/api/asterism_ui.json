@@ -705,7 +705,7 @@
     {
       "path": "asterism_ui::commands::push_shared_round",
       "kind": "function",
-      "docs": "Writes a round into open work on a shared line.\n\nA round is a request rather than a landing: `push` does not read\nthe line, which is what lets two members work against one line\nwithout contending, and nothing reaches the line until a close with\n`satisfied`.\n\nThe projections a round may carry are the promotion's, and this\nsurface has none — it passes an empty set. What rides beside a\nround is what the promoter said about content entering the team,\nand content entering the team is the verb this surface does not\nhave."
+      "docs": "Writes a round into open work on a shared line.\n\nA round is a request rather than a landing: `push` does not read\nthe line, which is what lets two members work against one line\nwithout contending, and nothing reaches the line until a close with\n`satisfied`.\n\nThe projections a round may carry ride beside content entering the\nteam (#148 decision 12), and this surface has no verb that brings\nany in — so it passes an empty set. The two callers that fill the\nargument are the ones that do: the promotion, and publishing a line."
     },
     {
       "path": "asterism_ui::commands::random_assets",

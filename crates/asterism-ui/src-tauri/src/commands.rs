@@ -3309,11 +3309,10 @@ pub async fn open_shared_pursuit(
 /// without contending, and nothing reaches the line until a close with
 /// `satisfied`.
 ///
-/// The projections a round may carry are the promotion's, and this
-/// surface has none — it passes an empty set. What rides beside a
-/// round is what the promoter said about content entering the team,
-/// and content entering the team is the verb this surface does not
-/// have.
+/// The projections a round may carry ride beside content entering the
+/// team (#148 decision 12), and this surface has no verb that brings
+/// any in — so it passes an empty set. The two callers that fill the
+/// argument are the ones that do: the promotion, and publishing a line.
 #[tauri::command]
 pub async fn push_shared_round(
     state: State<'_, AppState>,

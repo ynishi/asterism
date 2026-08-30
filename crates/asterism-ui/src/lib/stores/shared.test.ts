@@ -11,9 +11,15 @@
 // something on the line. All three would be invisible in the markup,
 // which is DOM and does not run here.
 //
-// The last is the word. Decision 11 says the UI has to say
+// The third of them is the word. Decision 11 says the UI has to say
 // "re-enacted" when the chain was replayed, and a message that quietly
 // stopped saying it would still be a passing publish.
+//
+// Working a line is the fourth section and the largest, and what it
+// pins is of the same kind: which read follows which write. A round is
+// a request and a satisfied close is the one moment the line moves, so
+// re-reading the contents after the first — or not after the second —
+// is a screen telling somebody the line is somewhere it is not.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssetDto,
@@ -454,6 +460,20 @@ describe("working a shared line", () => {
 
     await sharedCatalog.show("l2");
 
+    expect(sharedCatalog.working).toBeNull();
+  });
+
+  it("ends the work under a line when the line is let go", async () => {
+    // The pairing is the catalog's rather than the panel's, on the
+    // rule `lookAt` follows: a screen writing both fields is a second
+    // place to remember that one belongs to the other.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+
+    sharedCatalog.closeLine();
+
+    expect(sharedCatalog.selected).toBeNull();
     expect(sharedCatalog.working).toBeNull();
   });
 

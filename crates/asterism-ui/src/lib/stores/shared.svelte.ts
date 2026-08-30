@@ -383,13 +383,13 @@ class SharedCatalog {
 
   /// The open piece of work as the list has it, or `null`.
   ///
-  /// Read out of `pursuits` rather than through `shared_pursuit`,
-  /// which the desktop also carries. The list answers with whole
-  /// pursuits — rounds and close included — so a second read of one of
-  /// them would be a second copy of what is already here, and the two
-  /// would disagree for as long as one of them was in flight. The
-  /// single read is what a surface that arrives at a pursuit without
-  /// its line would need; this one always has the line.
+  /// Read out of `pursuits` rather than through a read of one pursuit.
+  /// The list answers with whole pursuits — rounds and close included
+  /// — so a second read of one of them would be a second copy of what
+  /// is already here, and the two would disagree for as long as one of
+  /// them was in flight. A read of one is what a surface that arrives
+  /// at a pursuit without its line would need; this one always has the
+  /// line.
   get work(): ForgePursuitDto | null {
     return this.pursuits.data.find((item) => item.id === this.working) ?? null;
   }
@@ -407,12 +407,9 @@ class SharedCatalog {
 
   /// The line as the open work would leave it.
   ///
-  /// The same fold the local plane uses, from `lib/forge-projection`,
-  /// over this plane's two reads. Decision 19 is why it is the same
-  /// one: the forge is mirrored path for path, so the rounds and the
-  /// states are the shapes the local forge folds and the answer is
-  /// arrived at the same way. What is different here is only where the
-  /// two reads came from.
+  /// The fold is `lib/forge-projection`, which argues why it is one
+  /// copy. What this site adds is which two reads it is made of: the
+  /// open pursuit's rounds, and the states of the line it is against.
   get projection(): ForgeProjectedEntry[] {
     return projectWork(this.work?.rounds ?? [], this.states.data);
   }
@@ -435,6 +432,17 @@ class SharedCatalog {
   clearWork(): void {
     this.working = null;
     this.said = null;
+  }
+
+  /// Lets go of the line, and of the work under it.
+  ///
+  /// Here rather than on the panel for the reason `lookAt` gives: a
+  /// piece of work belongs to the line it is against, so the two are
+  /// let go together, and a screen writing both fields is a second
+  /// place that pairing has to be remembered.
+  closeLine(): void {
+    this.selected = null;
+    this.clearWork();
   }
 
   /// What is on the line, and only what is on it. An entry the line

@@ -25,9 +25,11 @@
   // scoped to open work by #148 decision 5 — which is the promotion,
   // #198's sibling and out of its scope. So the verbs here are the
   // three that name entries the line already holds: rename, remove,
-  // and the add that puts a removal back. `replace` is absent for the
-  // same reason as `add`: it names content, and naming content is what
-  // this plane cannot do yet.
+  // and the add that puts a removal back, which names content the line
+  // is already holding for that entry rather than anything new.
+  // `replace` is absent because it has nothing to name: choosing what
+  // an entry becomes means choosing from the team's own content, and
+  // this plane has no read of that to choose from.
   //
   // **The two answers above the rows are not read.** `ForgeWork` shows
   // how many landings have arrived since the work was cut and what it
@@ -38,20 +40,20 @@
   //
   // **A refusal is its message and nothing more.** `ForgeWork` reads a
   // `reason` off the error and says what to do about it. A refusal
-  // from a team server crosses as a validation error carrying the
-  // server's sentence (`teams_error` in `commands.rs`), so there is no
-  // reason to key on, and inventing advice from the prose would be
-  // guessing at which of them arrived.
+  // from a team server carries no such field on any arm — `teams_error`
+  // in `commands.rs` maps every refusal it can name to the server's
+  // own sentence — so there is nothing to key on, and inventing advice
+  // from the prose would be guessing at which refusal arrived.
   //
   // **No pictures, and no conversations.** An entry names content the
   // team holds, which this machine has no copy of — the contents tab
   // is where cloning takes one. And the member's client does not carry
   // the thread verbs, which the catalog's header records.
   // No `line` prop, unlike `ForgeWork`. Every write here names the
-  // line through the catalog's own `selected`, because that is where
-  // the two writes that need it read it — a prop would be a second
-  // answer to a question the catalog already answers, and the panel
-  // would be the place they could disagree.
+  // line through the catalog's own `selected`, which is where the
+  // catalog itself reads it — a prop would be a second answer to a
+  // question the catalog already answers, and the panel would be the
+  // place they could disagree.
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
@@ -70,6 +72,13 @@
   let closeNote = $state("");
   let closing = $state(false);
 
+  // Every write here is awaited inside a `catch` that does nothing,
+  // and the nothing is the point: `mutate` has already put the refusal
+  // on screen, and this plane has no second half to add to it — the
+  // header says why there is no action behind a reason here. What the
+  // catch buys is that a refusal is not also an unhandled rejection,
+  // which `mutate` re-throws for callers that roll something back.
+  // These have nothing to roll back: the list is re-read either way.
   async function open(event: Event) {
     event.preventDefault();
     opening = true;
@@ -77,6 +86,8 @@
       await sharedCatalog.openPursuit(newTitle.trim(), newNote.trim());
       newTitle = "";
       newNote = "";
+    } catch {
+      // Said by `mutate`.
     } finally {
       opening = false;
     }
@@ -84,7 +95,11 @@
 
   /** One operation, its own round — the log is the editor. */
   async function ask(op: ForgeOpDto) {
-    await sharedCatalog.pushRound([op], "");
+    try {
+      await sharedCatalog.pushRound([op], "");
+    } catch {
+      // Said by `mutate`.
+    }
   }
 
   async function rename(row: ForgeProjectedEntry) {
@@ -132,6 +147,9 @@
     try {
       await sharedCatalog.closePursuit(outcome, closeNote.trim());
       closeNote = "";
+    } catch {
+      // Said by `mutate`. The note is kept, because a close that was
+      // refused is one somebody will press again.
     } finally {
       closing = false;
     }
@@ -215,10 +233,25 @@
       </button>
     </form>
   {/if}
+{:else if sharedCatalog.pursuits.loading && work === null}
+  <p class="quiet">Reading…</p>
+{:else if work === null && sharedCatalog.pursuits.error}
+  <!-- The list emptied because the read failed, which is the other way
+       `Resource` answers with nothing: it puts the reason on `.error`
+       and the data back to its initial. Asked before the sentence
+       below, because that one is a claim about what the line has and
+       this is a read that never got an answer. -->
+  <p class="quiet error">
+    Could not re-read the work against this line: {sharedCatalog.pursuits
+      .error}
+    <button type="button" onclick={() => sharedCatalog.clearWork()}>
+      back to all work
+    </button>
+  </p>
 {:else if work === null}
-  <!-- Selected out of the list, so this is reachable only if the list
-       stopped carrying it — a re-read that answered without it, which
-       means somebody else's write moved what this line has. -->
+  <!-- Selected out of the list, and the read that emptied it succeeded,
+       so the list stopped carrying it — somebody else's write moved
+       what this line has. -->
   <p class="quiet">
     That work is no longer in this line's list.
     <button type="button" onclick={() => sharedCatalog.clearWork()}>
@@ -240,7 +273,11 @@
     <p class="quiet note">{work.note}</p>
   {/if}
 
-  {#if clashing.length > 0}
+  <!-- Only for work that can still move. The sentence is about a close
+       that has not happened, and on ended work there is none to refuse
+       — an abandoned pursuit can carry two names for one entry and
+       nothing is waiting to reject it. -->
+  {#if !ended && clashing.length > 0}
     <p class="quiet warn">
       Two entries would be named {clashing.join(", ")}. A line holds one live
       entry per name, so closing this will be refused until one is renamed.
@@ -262,11 +299,10 @@
         <li class:gone={!row.alive}>
           <span class="op-name">{row.name ?? "(unnamed)"}</span>
           <span class="row-verbs">
-            <!-- Read off what the *work* said rather than off what the
-                 line ends up with: an entry whose winning existence is
-                 absent gets a row stating existence and nothing else,
-                 so a rename beside it would be written, accepted and
-                 then discarded. -->
+            <!-- `stated` rather than `alive`, which is the distinction
+                 `ForgeProjectedEntry` is defined on: this asks what a
+                 close will look at, and a rename on a row the work has
+                 said absent is not among it. -->
             {#if row.stated !== "absent"}
               <button type="button" onclick={() => rename(row)}>rename</button>
             {/if}

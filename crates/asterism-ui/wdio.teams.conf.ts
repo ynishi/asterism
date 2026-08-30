@@ -89,6 +89,12 @@ const LOGIN = "e2e-member";
 const WORK_LINE_NAME = "ROOT";
 const WORK_ENTRY_NAME = "cut-01";
 
+/** The specs this suite runs, in the order the header argues for. */
+const SPECS = [
+  "./e2e-teams/teams-connect.spec.ts",
+  "./e2e-teams/teams-work.spec.ts",
+];
+
 /** Everything the server owns, removed and remade on every run. */
 const serverHome = path.join(repoRoot, "workspace/runtime/e2e-teams-server");
 /** The app's profile home, kept apart from the e2e suite's own. */
@@ -272,11 +278,10 @@ export const config: WebdriverIO.Config & {
   // and `teams-connect.spec.ts` is the one that asserts about it.
   //
   // A spec added here goes in this list. One that needs `no-team` goes
-  // first, or gets a window of its own.
-  specs: [
-    "./e2e-teams/teams-connect.spec.ts",
-    "./e2e-teams/teams-work.spec.ts",
-  ],
+  // first, or gets a window of its own — and `assertEverySpecIsListed`
+  // in `onPrepare` is what says so, because a list is the one shape
+  // where forgetting to add a file is a spec that silently never runs.
+  specs: SPECS,
   maxInstances: 1,
 
   services: ["@wdio/tauri-service"],
@@ -366,8 +371,36 @@ export const config: WebdriverIO.Config & {
   },
 };
 
+/**
+ * Fails the run when a spec file is not in `SPECS`.
+ *
+ * The list replaced a glob because the order is load bearing, and it
+ * took a failure mode with it: a glob cannot miss a file and a list
+ * can. An unlisted spec does not fail — it does not run, and
+ * `just ui-e2e-teams` reports the suite green, which is the worst
+ * shape a gate has.
+ *
+ * Named rather than counted, so the message says which file.
+ */
+function assertEverySpecIsListed(): void {
+  const dir = path.join(here, "e2e-teams");
+  const listed = new Set(SPECS.map((spec) => path.basename(spec)));
+  const missing = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".spec.ts"))
+    .filter((name) => !listed.has(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `e2e-teams/${missing.join(", ")} is not in this config's \`specs\` list, ` +
+        `so it would not run. The list is ordered on purpose — see the ` +
+        `comment above it — so add the file where its fixture needs it.`,
+    );
+  }
+}
+
 /** Everything the run needs before a window opens. */
 async function prepareFixture(): Promise<void> {
+  assertEverySpecIsListed();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const dir = path.join(screensRoot, stamp);
   fs.mkdirSync(dir, { recursive: true });
@@ -437,10 +470,13 @@ async function prepareFixture(): Promise<void> {
  * do this: putting content on a team's line is `enter_content`, which
  * is the promotion — #198's sibling and out of its scope. The work
  * surface under test moves entries the line already holds, so the
- * fixture is what puts one there. The five calls below are the walk
- * `forge_routes_e2e.rs` makes in Rust, in the order decision 5
- * requires: content enters against open work, and only then can a round
- * name it.
+ * fixture is what puts one there.
+ *
+ * The order is decision 5's rather than a choice: content enters
+ * against open work, and only then can a round name it. The same walk
+ * is made in Rust by `forge_routes_e2e.rs`'s
+ * `a_member_works_a_line_from_login_to_landing`, which reads more
+ * around it than this needs.
  */
 async function seedWorkableTeam(token: string): Promise<{ teamId: string }> {
   const team = await postJson<{ team_id: string }>(

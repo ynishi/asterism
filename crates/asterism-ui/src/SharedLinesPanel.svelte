@@ -36,13 +36,13 @@
   //
   // # A line replaces the list rather than opening beside it
   //
-  // The catalog's frame draws the lines tab as a list and a line's own
-  // frame side by side, which is `ForgePanel`'s arrangement — and
-  // `ForgePanel` says in its own header that it is wider than this
+  // A list beside a line's own frame is `ForgePanel`'s arrangement,
+  // and `ForgePanel` says in its own header that it is wider than this
   // drawer for exactly that reason. This one is `min(30rem, 92vw)`, so
   // the two columns would be two narrow ones. Pressing a line puts its
   // frame where the list was, and the frame's header carries the way
-  // back.
+  // back. The catalog leaves the choice here rather than making it,
+  // and says so where it draws the frame.
   //
   // The cost is that the list is not visible while a line is open, so
   // moving between two lines is two presses rather than one. That is
@@ -171,15 +171,6 @@
     lineTab = "contents";
     openPoint = null;
     await sharedCatalog.show(lineId);
-  }
-
-  // Back to the list. The selection is what the frame is drawn from,
-  // so dropping it is the whole gesture — and the work open under the
-  // line goes with it, because a piece of work belongs to the line it
-  // is against.
-  function closeLine() {
-    sharedCatalog.selected = null;
-    sharedCatalog.working = null;
   }
 
   /// What a change row moved, phrased from the axes rather than as a
@@ -326,20 +317,26 @@
                is what keeps it off the other tabs. The publish form
                below carries its own condition. -->
         {:else if current !== null}
-          <!-- A line, in place of the list rather than beside it.
-               Two columns is what `ForgePanel` does, and its own header
-               says it is wider than this drawer for exactly that: this
-               is `min(30rem, 92vw)`, and a list and a line's three tabs
-               do not both fit in it. So the list steps out of the way
-               and the header carries the way back.
+          <!-- A line, in place of the list rather than beside it,
+               argued in this component's header.
 
                The three tabs are the forge's three answers about one
                line, which decision 19 makes the same three here — a
-               shared line is the same subject a local one is. Four
-               there and three here, because the conversation verbs do
-               not cross; the catalog's header records that. -->
+               shared line is the same subject a local one is. What
+               does not come across is the conversation `ForgePanel`
+               mounts under whichever of its tabs is showing: the
+               member's client carries no thread verbs, which the
+               catalog's header records. -->
           <header class="line-head">
-            <button type="button" class="back" onclick={closeLine}>
+            <!-- Back to the list. What letting go of a line ends is
+                 the catalog's, written once there: the work open under
+                 it goes too, because a piece of work belongs to the
+                 line it is against. -->
+            <button
+              type="button"
+              class="back"
+              onclick={() => sharedCatalog.closeLine()}
+            >
               ← the team's lines
             </button>
             <strong>{current.name}</strong>
@@ -416,9 +413,12 @@
               Could not read this line's history: {sharedCatalog.history.error}
             </p>
           {:else if sharedCatalog.history.data === null}
-            <!-- Reachable when a read failed and was dismissed. Opening
-                 a line reads all three of its answers, so nothing else
-                 arrives here. -->
+            <!-- Opening a line reads all three of its answers, and a
+                 read that failed is caught above, so nothing arrives
+                 here today. It is the arm a `Resource` has whether or
+                 not anything reaches it: `null` is what it holds
+                 before a first answer, and a branch that assumed
+                 otherwise would be reading a state as a promise. -->
             <p class="drawer-empty">No history read yet.</p>
           {:else}
             <!-- Newest first, which is the question a history answers:
