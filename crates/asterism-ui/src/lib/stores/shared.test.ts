@@ -19,7 +19,7 @@ import type {
   AssetDto,
   ForgeEntryStateDto,
   ForgeLineDto,
-  LedgerEventDto,
+  TeamLedgerEventDto,
 } from "../../bindings";
 import { api } from "../api";
 import { mutate } from "../mutate";
@@ -281,7 +281,7 @@ describe("walking the ledger", () => {
   // extends, a resume that starts over, a walk that survives the team
   // it belongs to.
 
-  function event(seq: number): LedgerEventDto {
+  function event(seq: number): TeamLedgerEventDto {
     return {
       seq,
       event_id: `e${seq}`,
@@ -356,6 +356,23 @@ describe("walking the ledger", () => {
 
     expect(sharedCatalog.ledger).toEqual([]);
     expect(sharedCatalog.ledgerCursor).toBeNull();
+    expect(sharedCatalog.ledgerRead).toBe(false);
+  });
+
+  it("drops the walk when the panel is opened again", async () => {
+    // The same decision the lines are held to: opening reads rather
+    // than showing what it last had. A ledger is the one read here
+    // that grows while nobody is looking, so a kept walk would be the
+    // staleness decision 16 says does not exist.
+    apiMock.mockResolvedValueOnce({ events: [event(1)], next_after: 1 });
+    await sharedCatalog.readLedgerPage();
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce([]); // lines
+
+    await sharedCatalog.openPanel();
+
+    expect(sharedCatalog.ledger).toEqual([]);
     expect(sharedCatalog.ledgerRead).toBe(false);
   });
 

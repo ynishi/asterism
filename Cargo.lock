@@ -713,7 +713,6 @@ dependencies = [
  "asterism-infra",
  "asterism-server",
  "asterism-teams-client",
- "asterism-teams-wire",
  "async-trait",
  "axum",
  "chrono",

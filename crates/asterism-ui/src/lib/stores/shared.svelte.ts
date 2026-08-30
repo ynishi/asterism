@@ -76,6 +76,9 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
+// The frame as designed — the roster is a tab this drawing places and
+// a later child builds:
+//
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
 //   │ ───────────────────────────────────────────────────────────── │
@@ -146,15 +149,17 @@
 // #171's body hangs all four on `RegistrationPolicy`, and this is the
 // finding about that sentence rather than a restatement of it.
 //
-// **The ledger** is the third tab, over `events`, and it is the one
-// that has landed — with `team_ledger_page`, which it brought, and
-// with the tabs, which the first surface to arrive was always going to
-// build. What it decides for itself is in the panel's header; what it
-// leaves here is the walk, below.
+// **The ledger** is the last of the three, over `events`. What it
+// decides for itself is in the panel's header; what it leaves here is
+// the walk, below.
 //
-// The rule that governed both: a surface arrives with whatever desktop
-// command it needs, because what a surface asks of a command is known
-// where the surface is written and guessed anywhere else.
+// The rule that governed it, and that governs the roster next: a
+// surface arrives with whatever desktop command it needs, because what
+// a surface asks of a command is known where the surface is written
+// and guessed anywhere else. A command that fetches from the team
+// server maps the wire's shapes to `asterism-contract::teams` on the
+// way, so a screen holds one vocabulary rather than two — the rule the
+// boundary test in `src-tauri/tests/boundary.rs` enforces.
 //
 // **Working a shared line** is the forge's `work` tab, in the inner
 // frame above. Decision 10 is why there is no copy step in front of
@@ -262,8 +267,8 @@ import type {
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
-  LedgerEventDto,
-  LedgerPageDto,
+  TeamLedgerEventDto,
+  TeamLedgerPageDto,
 } from "../../bindings";
 
 /// What the two reads need to name a line on a server.
@@ -366,6 +371,11 @@ class SharedCatalog {
   /// steps, which is the thing decision 16 refuses.
   async openPanel(): Promise<void> {
     this.open = true;
+    // The walk goes with the panel, on the same rule as the lines: a
+    // served-through view that showed what it last had would be a
+    // mirror, and a ledger is the one read here that grows while
+    // nobody is looking.
+    this.forgetLedger();
     await this.refreshSession();
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
@@ -397,7 +407,7 @@ class SharedCatalog {
   /// holds a walk: each page is appended to what came before, and the
   /// cursor below says where the next one resumes. Read afresh on every
   /// team, since a ledger belongs to one.
-  ledger = $state<LedgerEventDto[]>([]);
+  ledger = $state<TeamLedgerEventDto[]>([]);
 
   /// Where the next page resumes, or `null`.
   ///
@@ -444,9 +454,7 @@ class SharedCatalog {
 
   /// Reads the next page, or the first when the walk has not started.
   ///
-  /// The limit is stated here rather than left to the server, because
-  /// the page size is what the foot control means: a person pressing
-  /// once gets this many more.
+  /// The page size is `LEDGER_PAGE`, argued where it is defined.
   async readLedgerPage(): Promise<void> {
     if (this.ledgerLoading) return;
     this.ledgerLoading = true;
@@ -459,7 +467,7 @@ class SharedCatalog {
       // the cost of reading a null cursor as a starting point rather
       // than as "nothing had been recorded past here".
       const after = this.ledgerCursor ?? this.ledger.at(-1)?.seq ?? null;
-      const page = await api<LedgerPageDto>("team_ledger_page", {
+      const page = await api<TeamLedgerPageDto>("team_ledger_page", {
         teamIdRaw: this.teamId,
         after,
         limit: LEDGER_PAGE,

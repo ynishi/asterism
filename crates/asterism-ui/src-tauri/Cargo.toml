@@ -21,13 +21,6 @@ path = "src/main.rs"
 [build-dependencies]
 tauri-build    = { version = "2", features = [] }
 asterism-contract = { path = "../../asterism-contract" }
-# The team plane's own vocabulary. `asterism-contract` carries the forge
-# DTOs a shared line answers with, because the forge is the same on both
-# planes (#148 decision 19) — but a session, a roster and a ledger page
-# are the teams wire's, and a screen over any of them needs the shape
-# named in TypeScript. The leaf is MIT/Apache and depends on neither
-# plane, which is the arrangement #83 §4 prescribes for exactly this.
-asterism-teams-wire = { path = "../../asterism-teams-wire" }
 schema-bridge  = { workspace = true }
 
 [dev-dependencies]
@@ -58,10 +51,6 @@ asterism-exporter-http  = { path = "../../asterism-exporter-http" }
 # `teams-infra`, `teams-contract` or `teams-server` here would be the
 # forbidden edge; this is not.
 asterism-teams-client   = { path = "../../asterism-teams-client" }
-# Named directly as well as through the client, because a command's
-# signature is one of the wire's own types and the client re-exports
-# only what it wraps.
-asterism-teams-wire     = { path = "../../asterism-teams-wire" }
 
 serde       = { workspace = true }
 serde_json  = { workspace = true }

@@ -39,6 +39,19 @@
   let login = $state("");
   let password = $state("");
 
+  // The field is this component's, not the catalog's.
+  //
+  // Bound straight to `sharedCatalog.teamId` it changed the team every
+  // read is made against as somebody typed, so a ledger walk started on
+  // one team would continue against another — the next page requested
+  // from team B with team A's cursor, and its answer appended to team
+  // A's list. Naming a team is a submit, and `lookAt` is what a submit
+  // reaches; between the two the catalog does not move.
+  //
+  // Seeded from the catalog, because a connection outlives this drawer
+  // and reopening it should show the team it was last looking at.
+  let teamField = $state(sharedCatalog.teamId);
+
   let tab = $state<"lines" | "ledger">("lines");
   // One event's payload open at a time, by `event_id`.
   let openPayload = $state<string | null>(null);
@@ -54,14 +67,14 @@
     event.preventDefault();
     await sharedCatalog.connect(baseUrl, login, password);
     password = "";
-    if (sharedCatalog.teamId) await sharedCatalog.lookAt(sharedCatalog.teamId);
+    if (teamField) await sharedCatalog.lookAt(teamField);
   }
 
   async function look(event: Event) {
     event.preventDefault();
     // Everything naming a team has to let go of is `lookAt`'s, written
     // once there rather than at each caller.
-    await sharedCatalog.lookAt(sharedCatalog.teamId);
+    await sharedCatalog.lookAt(teamField);
     if (tab === "ledger") await sharedCatalog.readLedgerPage();
   }
 
@@ -73,15 +86,6 @@
     if (!sharedCatalog.ledgerRead) await sharedCatalog.readLedgerPage();
   }
 
-  // An event's `kind` and `payload_json` are rendered as stored, and
-  // that is a decision rather than an omission. The kinds are
-  // namespaced and versioned by the server and `forge.*` is still
-  // growing them, so a screen that mapped each to a sentence would be a
-  // second place every new kind has to be learned — going stale where
-  // nobody is looking, which is the trap #148 decision 14 names for the
-  // projection. Rendering them as themselves costs a reader some
-  // fluency and means a kind this screen has never seen still arrives
-  // intact.
 
   async function publish(event: Event) {
     event.preventDefault();
@@ -161,7 +165,7 @@
             Team
             <input
               type="text"
-              bind:value={sharedCatalog.teamId}
+              bind:value={teamField}
               placeholder="team id"
               required
             />
@@ -193,9 +197,9 @@
         {/if}
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
-          <!-- The lines tab's body, and the publish form under it, are
-               both below; this branch is what keeps them off the other
-               tab. -->
+          <!-- The lines list is what this chain renders, and this arm
+               is what keeps it off the ledger. The publish form below
+               carries its own condition. -->
         {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
@@ -325,6 +329,16 @@
 
           {#if sharedCatalog.ledger.length > 0}
             <ul class="drawer-list ledger" role="list">
+              <!-- `kind` and `payload_json` are rendered as stored, and
+                   that is a decision rather than an omission. The kinds
+                   are namespaced and versioned by the server and
+                   `forge.*` is still growing them, so a screen mapping
+                   each to a sentence would be a second place every new
+                   kind has to be learned — going stale where nobody is
+                   looking, which is the trap #148 decision 14 names for
+                   the projection. It costs a reader some fluency, and
+                   means a kind this screen has never seen still arrives
+                   intact. -->
               {#each sharedCatalog.ledger as event (event.event_id)}
                 <li class="event">
                   <div class="event-head">
@@ -372,6 +386,13 @@
           <div class="ledger-foot">
             {#if sharedCatalog.ledgerLoading}
               <p class="drawer-empty">reading…</p>
+            {:else if !sharedCatalog.ledgerRead}
+              <!-- Nothing has come back, so there is nothing to say
+                   about what lies past it. A page that failed lands
+                   here, under the error above. -->
+              <button type="button" onclick={() => sharedCatalog.readLedgerPage()}>
+                Read the ledger
+              </button>
             {:else if sharedCatalog.ledgerCursor !== null}
               <button type="button" onclick={() => sharedCatalog.readLedgerPage()}>
                 Read more
