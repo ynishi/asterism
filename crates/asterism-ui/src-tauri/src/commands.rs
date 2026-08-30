@@ -101,7 +101,10 @@ use asterism_contract::forge::{
 use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
-use asterism_contract::teams::{TeamLedgerEventDto, TeamLedgerPageDto, TeamSubjectRefDto};
+use asterism_contract::teams::{
+    TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto,
+    TeamSubjectRefDto,
+};
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
     asset_to_dto, forge_anchored, forge_body, forge_collisions_to_dto, forge_discarded_to_dto,
@@ -3137,6 +3140,52 @@ pub async fn list_shared_lines(
 /// would give every caller of this command a second vocabulary to
 /// know. `asterism-contract::teams` argues the same boundary from its
 /// own side.
+/// Who is in a team, and in what role.
+///
+/// Ids rather than names, because that is what a membership row holds
+/// — see [`TeamRosterMemberDto`]. The mapping is here for the reason
+/// the ledger's is: the wire is what a member's client and a team
+/// server say to each other, and a screen holds the contract's
+/// vocabulary alone.
+#[tauri::command]
+pub async fn team_roster(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+) -> Result<TeamRosterDto, UiError> {
+    let client = teams_client(&state).await?;
+    let roster = client
+        .roster(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?;
+    Ok(TeamRosterDto {
+        team_id: roster.team_id,
+        members: roster
+            .members
+            .into_iter()
+            .map(|member| TeamRosterMemberDto {
+                user_id: member.user_id,
+                role: member.role,
+            })
+            .collect(),
+    })
+}
+
+/// Founds a team on the connected server, with the caller as its owner.
+///
+/// Answers with the id alone. The wire also returns the ledger event
+/// the creation appended, and a screen reads that where every other
+/// act of the team's is read rather than out of a write's response.
+#[tauri::command]
+pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, UiError> {
+    let client = teams_client(&state).await?;
+    // `None` leaves the owner implicit — the session's own account.
+    // Naming one is an admin's move, and this surface has no admin.
+    let created = client.create_team(None).await.map_err(teams_error)?;
+    Ok(TeamCreatedDto {
+        team_id: created.team_id,
+    })
+}
+
 #[tauri::command]
 pub async fn team_ledger_page(
     state: State<'_, AppState>,

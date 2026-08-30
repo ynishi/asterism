@@ -108,3 +108,45 @@ pub struct TeamSubjectRefDto {
     /// The reference's value in its storage spelling.
     pub value: String,
 }
+
+/// Who is in a team, and in what role.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamRosterDto {
+    /// The team the roster describes.
+    pub team_id: String,
+    /// One row per member.
+    pub members: Vec<TeamRosterMemberDto>,
+}
+
+/// One membership row.
+///
+/// **No display name.** A membership is a row about an account rather
+/// than about a person, and the name a ledger event carries is a
+/// snapshot the *act* took — there is nothing equivalent to read here.
+/// A surface listing these shows ids, and saying why is cheaper than
+/// leaving a reader to wonder how one screen has names and the other
+/// does not.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamRosterMemberDto {
+    /// The member.
+    pub user_id: String,
+    /// `"owner"` or `"member"`.
+    ///
+    /// The authority table's distinction, and what decides which
+    /// membership verbs a viewer may reach: an owner's are not a
+    /// member's.
+    pub role: String,
+}
+
+/// What founding a team answers with.
+///
+/// The id alone. The wire's version carries the ledger event the
+/// creation appended as well, and a screen has somewhere better to
+/// read that — the ledger tab, where every act of the team's is. What
+/// a create form needs is the id, because that is what the field above
+/// the tabs wants next.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamCreatedDto {
+    /// The new team's id — the path segment of every team-scoped read.
+    pub team_id: String,
+}

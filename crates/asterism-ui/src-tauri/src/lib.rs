@@ -441,6 +441,8 @@ pub fn run() {
             commands::clone_shared_entry,
             commands::publish_line_to_team,
             commands::team_ledger_page,
+            commands::team_roster,
+            commands::create_team,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

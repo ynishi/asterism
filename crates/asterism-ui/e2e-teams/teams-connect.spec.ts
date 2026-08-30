@@ -153,6 +153,33 @@ async function clickIn(selector: string): Promise<void> {
 }
 
 /**
+ * Presses a tab by the word on it.
+ *
+ * By label rather than by position, because position is a fact about
+ * how many tabs exist: this spec named them `:first-child` and
+ * `:last-child` while there were two, and the roster landing between
+ * them would have moved one of those onto a different surface with
+ * nothing failing to say so.
+ */
+async function clickTab(label: string): Promise<void> {
+  const hit = await browser.execute(
+    (sel: string, want: string) => {
+      const nav = document.querySelector(sel);
+      if (nav === null) return false;
+      const button = Array.from(nav.querySelectorAll("button")).find(
+        (candidate) => (candidate.textContent ?? "").trim() === want,
+      );
+      if (button === undefined) return false;
+      (button as HTMLElement).click();
+      return true;
+    },
+    `${DRAWER} .drawer-tabs`,
+    label,
+  );
+  if (!hit) throw new Error(`no tab reads "${label}"`);
+}
+
+/**
  * Types into a field the way a person does.
  *
  * Not `element.value = …`: the panel binds with Svelte's `bind:value`,
@@ -246,6 +273,11 @@ describe("the team plane", () => {
       if (text.includes("Publish a line of mine")) {
         throw new Error("the drawer offered to publish to no team");
       }
+      // The way out of having no team, offered wherever there is a
+      // connection rather than only here.
+      if (!text.includes("Start a team of your own")) {
+        throw new Error("no way out of having no team");
+      }
     });
 
     await stage(trail, "name the team and read its lines", ROUND_TRIP_MS, async () => {
@@ -272,8 +304,33 @@ describe("the team plane", () => {
     // The ledger. A team that exists has at least the event that
     // founded it, so this is the one read on the plane whose answer
     // cannot legitimately be empty.
+    // The roster. The fixture's team was founded by the account this
+    // window is signed in as, so it holds exactly one row and that row
+    // is the reader's — which is the case the "you" marking exists for.
+    await stage(trail, "read the team's roster", ROUND_TRIP_MS, async () => {
+      await clickTab("members");
+      await pollUntil(
+        async () => ((await drawerText()) ?? "").includes("owner"),
+        "the roster never showed a member",
+        ROUND_TRIP_MS,
+      );
+      const text = (await drawerText()) ?? "";
+      if (!text.includes("· you")) {
+        throw new Error(`the roster did not mark the reader's own row: ${text}`);
+      }
+      // Why ids and not names, said where a reader would compare this
+      // tab with the ledger and wonder.
+      if (!text.includes("carries no name")) {
+        throw new Error("the roster did not say why it shows ids");
+      }
+      if (text.includes("Publish a line of mine")) {
+        throw new Error("the publish form followed the reader onto the roster");
+      }
+    });
+    await snap("04-roster");
+
     await stage(trail, "read the team's ledger", ROUND_TRIP_MS, async () => {
-      await clickIn(`${DRAWER} .drawer-tabs button:last-child`);
+      await clickTab("ledger");
       await pollUntil(
         async () => ((await drawerText()) ?? "").includes("teams.team.created"),
         "the ledger never showed the event that founded the team",
@@ -294,7 +351,7 @@ describe("the team plane", () => {
         throw new Error("the publish form followed the reader onto the ledger");
       }
     });
-    await snap("04-ledger");
+    await snap("05-ledger");
 
     await stage(trail, "an event says what it carries", DRIVER_MS, async () => {
       await clickIn(`${DRAWER} .ledger .event-payload-toggle`);
@@ -304,15 +361,54 @@ describe("the team plane", () => {
         DRIVER_MS,
       );
     });
-    await snap("05-payload");
+    await snap("06-payload");
 
     await stage(trail, "the lines tab is still there", DRIVER_MS, async () => {
-      await clickIn(`${DRAWER} .drawer-tabs button:first-child`);
+      await clickTab("lines");
       await pollUntil(
         async () =>
           ((await drawerText()) ?? "").includes("This team hosts no lines."),
         "going back to the lines tab did not show the lines",
         DRIVER_MS,
+      );
+    });
+
+    // Founding one, which is the only write on this walk. Pressed
+    // rather than merely asserted present: a control nobody presses is
+    // a control nobody has checked. It lands the reader on the team it
+    // just made — a roster of one, and no lines.
+    await stage(trail, "found a team and land on it", ROUND_TRIP_MS, async () => {
+      await clickIn(`${DRAWER} .make-team`);
+      await pollUntil(
+        async () => ((await drawerText()) ?? "").includes("Created team "),
+        "founding a team said nothing",
+        ROUND_TRIP_MS,
+      );
+      await pollUntil(
+        async () =>
+          ((await drawerText()) ?? "").includes("This team hosts no lines."),
+        "the new team's lines were never read",
+        ROUND_TRIP_MS,
+      );
+      const after = (await drawerText()) ?? "";
+      if (after.includes(teamId)) {
+        throw new Error("founding a team left the reader on the old one");
+      }
+    });
+    await snap("07-founded");
+
+    await stage(trail, "the new team holds only its founder", ROUND_TRIP_MS, async () => {
+      await clickTab("members");
+      // "· you" alone, not "owner · you": the markup puts a
+      // non-breaking space before it, so the joined form never matches
+      // what `textContent` returns.
+      await pollUntil(
+        async () => {
+          const text = (await drawerText()) ?? "";
+          return text.includes("owner") && text.includes("· you");
+        },
+        "the founder is not in the team they founded",
+        ROUND_TRIP_MS,
       );
     });
 
@@ -333,6 +429,6 @@ describe("the team plane", () => {
         );
       }
     });
-    await snap("06-disconnected");
+    await snap("07-disconnected");
   });
 });

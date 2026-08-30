@@ -398,3 +398,65 @@ describe("walking the ledger", () => {
     expect(sharedCatalog.ledger.map((e) => e.seq)).toEqual([1]);
   });
 });
+
+describe("the roster", () => {
+  beforeEach(() => {
+    sharedCatalog.roster.reset();
+  });
+
+  it("reads the members of the team now named", async () => {
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "member" },
+      ],
+    });
+
+    await sharedCatalog.roster.load({ teamId: "t1" });
+
+    expect(apiMock).toHaveBeenCalledWith("team_roster", { teamIdRaw: "t1" });
+    expect(sharedCatalog.roster.data?.members.map((m) => m.role)).toEqual([
+      "owner",
+      "member",
+    ]);
+  });
+
+  it("drops it when another team is named", async () => {
+    // A roster belongs to one team, on the same rule as the walk: what
+    // naming a team ends is `lookAt`'s, written once.
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    apiMock.mockResolvedValueOnce([]); // lines for the new team
+
+    await sharedCatalog.lookAt("t2");
+
+    expect(sharedCatalog.roster.data).toBeNull();
+  });
+
+  it("drops it when the connection goes", async () => {
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.roster.data).toBeNull();
+  });
+
+  it("answers a new team with its id, so a caller can name it", async () => {
+    mutateMock.mockResolvedValueOnce({ team_id: "t9" });
+
+    const made = await sharedCatalog.createTeam();
+
+    expect(mutateMock).toHaveBeenCalledWith("create_team", {}, "create a team");
+    expect(made).toBe("t9");
+    expect(sharedCatalog.said).toContain("t9");
+  });
+});

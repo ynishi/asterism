@@ -186,7 +186,9 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "talks to a team, not to this process",
     ),
     ("shared_line_states", "talks to a team, not to this process"),
+    ("create_team", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
+    ("team_roster", "talks to a team, not to this process"),
     (
         "team_server_session",
         "talks to a team, not to this process",

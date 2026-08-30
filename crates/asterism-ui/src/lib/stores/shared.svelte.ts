@@ -267,8 +267,10 @@ import type {
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
+  TeamCreatedDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
+  TeamRosterDto,
 } from "../../bindings";
 
 /// What the two reads need to name a line on a server.
@@ -326,6 +328,18 @@ class SharedCatalog {
       }),
     null,
     "sharedCatalog.history",
+  );
+
+  /// Who is in the team now named.
+  ///
+  /// A `Resource` rather than a walk, because a roster is one answer:
+  /// the whole membership set comes back at once, and the read has no
+  /// cursor because a team's members are not a stream.
+  roster = new Resource<TeamArgs, TeamRosterDto | null>(
+    async (args) =>
+      api<TeamRosterDto>("team_roster", { teamIdRaw: args.teamId }),
+    null,
+    "sharedCatalog.roster",
   );
 
   /// What is on the line, and only what is on it. An entry the line
@@ -440,7 +454,25 @@ class SharedCatalog {
     this.lines.reset();
     this.states.reset();
     this.history.reset();
+    this.roster.reset();
     this.forgetLedger();
+  }
+
+  /// Founds a team, with the session's own account as its owner.
+  ///
+  /// Answers with the id so a caller can name what it made. The one
+  /// write here that is about no team in particular, which is why the
+  /// form for it does not sit on a tab — every tab is an answer about
+  /// the team named above them.
+  async createTeam(): Promise<string> {
+    this.said = null;
+    const created = await mutate<TeamCreatedDto>(
+      "create_team",
+      {},
+      "create a team",
+    );
+    this.said = `Created team ${created.team_id}.`;
+    return created.team_id;
   }
 
   /// Drops the walk. The ledger belongs to a team and to a connection,
@@ -494,6 +526,7 @@ class SharedCatalog {
     this.forgetLedger();
     this.states.reset();
     this.history.reset();
+    this.roster.reset();
     await this.lines.load({ teamId });
   }
 
