@@ -12,19 +12,19 @@ and this project adheres to
 
 - **Work a team's line from the app: open a pursuit, push a round, close it**
   (#198). #148 decision 10 says working on a shared line needs no copy, and the
-  five verbs the member's client carries for it now reach a screen. Nothing was
-  added to `asterism-contract`: the forge is mirrored path for path (decision
-  19), so a shared line answers with the same `ForgePursuitDto` the local one
-  does and the commands map nothing.
+  four verbs that take one from opening to closing now reach a screen. Nothing
+  was added to `asterism-contract`: the forge is mirrored path for path
+  (decision 19), so a shared line answers with the same `ForgePursuitDto` the
+  local one does and the commands map nothing.
 
   **A line replaces the list rather than opening beside it.** `ForgePanel` puts
   a list and a line's tabs side by side and says in its own header that it is
   wider than this drawer for exactly that; this one is `min(30rem, 92vw)`.
   Pressing a line puts its frame where the list was, with the way back in its
   header, and the three tabs under it — contents, work, history — are the
-  forge's three answers about one line. Three rather than four, because the
-  conversation verbs do not cross: the server mirrors the thread routes and the
-  member's client does not carry them.
+  forge's three answers about one line. What does not come across is the
+  conversation the forge mounts under whichever of its tabs is showing: the
+  server mirrors the thread routes and the member's client does not carry them.
 
   **What a round can carry here, and what it cannot.** Rename, remove, and the
   add that puts a removal back — the operations that name entries the line
