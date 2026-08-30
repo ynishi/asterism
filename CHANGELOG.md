@@ -41,6 +41,17 @@ and this project adheres to
   a team appends its own event, so a team that answers with nothing has answered
   wrongly.
 
+  **The shapes cross a boundary, and the crossing has a place.** A fact reaching
+  this screen passes two — the wire a member's client and a team server speak,
+  and the contract this app speaks to its own frontend — and `bindings.ts` is a
+  projection of the contract alone, which is what gives every screen one set of
+  types to know. So `asterism-contract::teams` carries the ledger's shapes and
+  the command maps to them, rather than handing a screen a type belonging to a
+  server it never talks to. A test holds that boundary now
+  (`src-tauri/tests/boundary.rs`), because the first draft of this change
+  crossed it and nothing said so: what refused the crossing could only report
+  that three names were not the contract's, not that a layer had been skipped.
+
 - **The team plane can be driven end to end, against a `teams-server` of its
   own** (#192). Every read on that plane is a request to a second binary, and
   `just ui-e2e` builds and launches one — so the surfaces #171 is about had no
