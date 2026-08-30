@@ -33,9 +33,32 @@
   // lines tab, because it seeds a line and a line is what that tab is
   // for. Founding a team sits beside the field, argued where the
   // control is.
+  //
+  // # A line replaces the list rather than opening beside it
+  //
+  // The catalog's frame draws the lines tab as a list and a line's own
+  // frame side by side, which is `ForgePanel`'s arrangement — and
+  // `ForgePanel` says in its own header that it is wider than this
+  // drawer for exactly that reason. This one is `min(30rem, 92vw)`, so
+  // the two columns would be two narrow ones. Pressing a line puts its
+  // frame where the list was, and the frame's header carries the way
+  // back.
+  //
+  // The cost is that the list is not visible while a line is open, so
+  // moving between two lines is two presses rather than one. That is
+  // the trade the width forces, and it is the same one the entries
+  // list used to make in miniature — before this, a selected line
+  // expanded *inside* its row, which is a third arrangement and the
+  // one that scales worst: the tabs would have opened inside a list
+  // item.
+  //
+  // Publishing goes with the list for the same reason. It seeds
+  // another line, which is a thing to do from where the lines are.
+  import SharedLineWork from "./SharedLineWork.svelte";
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { fmtDateTime } from "./lib/formatters";
+  import type { ForgeChangeRowDto } from "./bindings";
 
   let baseUrl = $state("http://127.0.0.1:8787");
   let login = $state("");
@@ -55,8 +78,31 @@
   let teamField = $state(sharedCatalog.teamId);
 
   let tab = $state<"lines" | "roster" | "ledger">("lines");
+  // Which of the line's three answers is showing, once one is open.
+  //
+  // Component state rather than the catalog's, and reset when a line
+  // is opened rather than remembered per line: the reads behind all
+  // three arrive together, so this says which is drawn and nothing
+  // more. A reader who left the last line on its history is not asking
+  // to meet the next one there.
+  let lineTab = $state<"contents" | "work" | "history">("contents");
   // One event's payload open at a time, by `event_id`.
   let openPayload = $state<string | null>(null);
+  // One change point's rows open at a time, by change point id.
+  let openPoint = $state<string | null>(null);
+
+  /// The line the frame is about, or null when the list is showing.
+  ///
+  /// Found in the list rather than held beside the selection, so a
+  /// re-read that no longer carries it takes the frame down with it
+  /// rather than leaving a header over somebody else's line.
+  const current = $derived(
+    sharedCatalog.selected === null
+      ? null
+      : (sharedCatalog.lines.data.find(
+          (line) => line.id === sharedCatalog.selected,
+        ) ?? null),
+  );
 
   // Publishing asks for more than a click, and all of it is init-time.
   let publishLineId = $state("");
@@ -118,6 +164,35 @@
     await refreshOpenTab();
   }
 
+
+  // Opening a line lands on its contents, which is what somebody
+  // pressed a line to see. `show` is what reads all three.
+  async function openLine(lineId: string) {
+    lineTab = "contents";
+    openPoint = null;
+    await sharedCatalog.show(lineId);
+  }
+
+  // Back to the list. The selection is what the frame is drawn from,
+  // so dropping it is the whole gesture — and the work open under the
+  // line goes with it, because a piece of work belongs to the line it
+  // is against.
+  function closeLine() {
+    sharedCatalog.selected = null;
+    sharedCatalog.working = null;
+  }
+
+  /// What a change row moved, phrased from the axes rather than as a
+  /// verb — the reading `ForgePanel` gives its own chain, and for its
+  /// reason: the model stores which axes a row states, and "renamed"
+  /// is a reading of that rather than a kind of row.
+  function axes(row: ForgeChangeRowDto): string {
+    const moved: string[] = [];
+    if (row.existence !== null) moved.push(`existence → ${row.existence}`);
+    if (row.content_asset_id !== null) moved.push("content");
+    if (row.name !== null) moved.push("name");
+    return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
+  }
 
   async function publish(event: Event) {
     event.preventDefault();
@@ -250,6 +325,146 @@
           <!-- The lines list is what this chain renders, and this arm
                is what keeps it off the other tabs. The publish form
                below carries its own condition. -->
+        {:else if current !== null}
+          <!-- A line, in place of the list rather than beside it.
+               Two columns is what `ForgePanel` does, and its own header
+               says it is wider than this drawer for exactly that: this
+               is `min(30rem, 92vw)`, and a list and a line's three tabs
+               do not both fit in it. So the list steps out of the way
+               and the header carries the way back.
+
+               The three tabs are the forge's three answers about one
+               line, which decision 19 makes the same three here — a
+               shared line is the same subject a local one is. Four
+               there and three here, because the conversation verbs do
+               not cross; the catalog's header records that. -->
+          <header class="line-head">
+            <button type="button" class="back" onclick={closeLine}>
+              ← the team's lines
+            </button>
+            <strong>{current.name}</strong>
+            <span class="row-standing">{current.standing}</span>
+          </header>
+
+          <!-- How the chain reads is the visible difference between the
+               two seedings: published as it stands is one change point
+               however long the private line was, re-enacted is as many
+               as it had. -->
+          {#if sharedCatalog.changePoints !== null}
+            <p class="drawer-chain">
+              {sharedCatalog.changePoints} change point{sharedCatalog.changePoints ===
+              1
+                ? ""
+                : "s"} since this line began
+            </p>
+          {/if}
+
+          <nav class="drawer-tabs line-tabs" aria-label="What to read about this line">
+            <button
+              type="button"
+              class:active={lineTab === "contents"}
+              onclick={() => (lineTab = "contents")}
+            >on the line</button>
+            <button
+              type="button"
+              class:active={lineTab === "work"}
+              onclick={() => (lineTab = "work")}
+            >work</button>
+            <button
+              type="button"
+              class:active={lineTab === "history"}
+              onclick={() => (lineTab = "history")}
+            >history</button>
+          </nav>
+
+          {#if lineTab === "contents"}
+            {#if sharedCatalog.states.loading}
+              <p class="drawer-empty">loading…</p>
+            {:else if sharedCatalog.states.error}
+              <p class="drawer-empty drawer-error">
+                {sharedCatalog.states.error}
+              </p>
+            {:else if sharedCatalog.onTheLine.length === 0}
+              <p class="drawer-empty">Nothing is on this line.</p>
+            {:else}
+              <ul class="drawer-entries" role="list">
+                {#each sharedCatalog.onTheLine as entry (entry.entry_id)}
+                  <li class="entry">
+                    <span class="entry-name">{entry.name ?? entry.entry_id}</span>
+                    <button
+                      type="button"
+                      disabled={activeFilter.activePersona === null}
+                      title={activeFilter.activePersona === null
+                        ? "Pick a single persona to clone into"
+                        : "Take a detached copy into this library"}
+                      onclick={() =>
+                        sharedCatalog.clone(
+                          entry.entry_id,
+                          activeFilter.activePersona!,
+                        )}
+                    >Clone</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          {:else if lineTab === "work"}
+            <SharedLineWork />
+          {:else if sharedCatalog.history.loading}
+            <p class="drawer-empty">loading…</p>
+          {:else if sharedCatalog.history.error}
+            <p class="drawer-empty drawer-error">
+              Could not read this line's history: {sharedCatalog.history.error}
+            </p>
+          {:else if sharedCatalog.history.data === null}
+            <!-- Reachable when a read failed and was dismissed. Opening
+                 a line reads all three of its answers, so nothing else
+                 arrives here. -->
+            <p class="drawer-empty">No history read yet.</p>
+          {:else}
+            <!-- Newest first, which is the question a history answers:
+                 what happened last. The work log next door is oldest
+                 first, and `ForgeWork`'s header says why the two
+                 differ. -->
+            <ol class="drawer-list chain" role="list">
+              {#each [...sharedCatalog.history.data.changes].reverse() as point (point.id)}
+                <li>
+                  <button
+                    type="button"
+                    class="point"
+                    aria-expanded={openPoint === point.id}
+                    onclick={() =>
+                      (openPoint = openPoint === point.id ? null : point.id)}
+                  >
+                    <span>
+                      {openPoint === point.id ? "▾" : "▸"}
+                      {point.table.length}
+                      {point.table.length === 1 ? "row" : "rows"}
+                    </span>
+                    <span class="row-standing">{point.actor_id}</span>
+                    <span class="row-standing">{fmtDateTime(point.at_ms)}</span>
+                  </button>
+                  {#if openPoint === point.id}
+                    <ul class="drawer-entries" role="list">
+                      {#each point.table as row (row.entry_id)}
+                        <li class="entry">
+                          <span class="entry-name">{axes(row)}</span>
+                          <span class="row-standing">
+                            {row.name ?? row.entry_id}
+                          </span>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </li>
+              {/each}
+            </ol>
+            <!-- The genesis is not a change point and the model keeps
+                 the two apart, so folding it into the chain would claim
+                 something the record does not. -->
+            <p class="drawer-empty">
+              genesis · {fmtDateTime(sharedCatalog.history.data.genesis_at_ms)}
+            </p>
+          {/if}
         {:else if sharedCatalog.lines.loading}
           <p class="drawer-empty">loading…</p>
         {:else if sharedCatalog.lines.error}
@@ -265,57 +480,12 @@
                 <button
                   type="button"
                   class="drawer-row"
-                  class:active={sharedCatalog.selected === line.id}
-                  onclick={() => sharedCatalog.show(line.id)}
-                  title="Read what is on this line"
+                  onclick={() => openLine(line.id)}
+                  title="Open this line"
                 >
                   <span class="row-title">{line.name}</span>
                   <span class="row-standing">{line.standing}</span>
                 </button>
-
-                {#if sharedCatalog.selected === line.id}
-                  <!-- How the chain reads is the visible difference
-                       between the two seedings: published as it stands
-                       is one change point however long the private
-                       line was, re-enacted is as many as it had. -->
-                  {#if sharedCatalog.changePoints !== null}
-                    <p class="drawer-chain">
-                      {sharedCatalog.changePoints} change point{sharedCatalog.changePoints ===
-                      1
-                        ? ""
-                        : "s"} since this line began
-                    </p>
-                  {/if}
-                  {#if sharedCatalog.states.loading}
-                    <p class="drawer-empty">loading…</p>
-                  {:else if sharedCatalog.states.error}
-                    <p class="drawer-empty drawer-error">
-                      {sharedCatalog.states.error}
-                    </p>
-                  {:else if sharedCatalog.onTheLine.length === 0}
-                    <p class="drawer-empty">Nothing is on this line.</p>
-                  {:else}
-                    <ul class="drawer-entries" role="list">
-                      {#each sharedCatalog.onTheLine as entry (entry.entry_id)}
-                        <li class="entry">
-                          <span class="entry-name">{entry.name ?? entry.entry_id}</span>
-                          <button
-                            type="button"
-                            disabled={activeFilter.activePersona === null}
-                            title={activeFilter.activePersona === null
-                              ? "Pick a single persona to clone into"
-                              : "Take a detached copy into this library"}
-                            onclick={() =>
-                              sharedCatalog.clone(
-                                entry.entry_id,
-                                activeFilter.activePersona!,
-                              )}
-                          >Clone</button>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
-                {/if}
               </li>
             {/each}
           </ul>
@@ -327,8 +497,12 @@
 
              Behind `ready` for the same reason the list above is: it
              seeds a line on the team in the field, and with no team
-             named it would be offering to publish to nobody. -->
-        {#if sharedCatalog.phase === "ready" && tab === "lines"}
+             named it would be offering to publish to nobody. It goes
+             with the list when a line is open, because it is one of
+             the things the list is for: seeding another line is a
+             thing to do from where the lines are, and this drawer
+             shows one place at a time. -->
+        {#if sharedCatalog.phase === "ready" && tab === "lines" && current === null}
           <form class="drawer-form drawer-publish" onsubmit={publish}>
             <h4>Publish a line of mine</h4>
             <label>
@@ -718,8 +892,40 @@
     text-align: left;
     font-size: 0.82rem;
   }
-  .drawer-row.active {
-    font-weight: 600;
+  .line-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+  }
+  .line-head strong {
+    font-size: 0.9rem;
+  }
+  .back {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.78rem;
+    opacity: 0.75;
+    padding: 0;
+  }
+  .line-tabs {
+    margin-top: 0.4rem;
+  }
+  .chain .point {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.4rem 0.1rem;
+    text-align: left;
   }
   .row-standing {
     opacity: 0.6;

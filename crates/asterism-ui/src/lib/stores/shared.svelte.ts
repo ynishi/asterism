@@ -76,17 +76,22 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
-// The frame:
+// The frame, with a line open:
 //
 //   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
 //   │ lines │ members │ ledger                                      │
 //   │ ───────────────────────────────────────────────────────────── │
-//   │ ┌─ lines ────┐┌─ ROOT ────────── open · mainline-first ─────┐ │
-//   │ │ ▸ ROOT     ││ ● on the line │ work │ history              │ │
-//   │ │   drafts   ││ ──────────────────────────────────────────  │ │
-//   │ │            ││ key visual                                  │ │
-//   │ └────────────┘└─────────────────────────────────────────────┘ │
+//   │ ← the team's lines   ROOT   open                              │
+//   │ 1 change point since this line began                          │
+//   │ on the line │ work │ history                                  │
+//   │ ───────────────────────────────────────────────────────────── │
+//   │ key visual                                          [ Clone ] │
 //   └───────────────────────────────────────────────────────────────┘
+//
+// The list is not beside it: whether the two share the width or take
+// turns is the panel's to decide, and its header decides it — this
+// drawer is narrow, so a line takes the place of the list and the
+// header carries the way back.
 //
 // Which of the three leads is a choice rather than a consequence.
 // Lines lead because a team is joined in order to work with what it
@@ -263,6 +268,8 @@
 // revisiting that as this umbrella's, and revisiting a placement is a
 // different act from choosing one.
 import { api } from "../api";
+import { clashingNames, projectWork } from "../forge-projection";
+import type { ForgeProjectedEntry } from "../forge-projection";
 import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
@@ -373,6 +380,62 @@ class SharedCatalog {
   /// the whole list back over the one being opened, which is the trap
   /// `forge.svelte.ts` names at its own `working`.
   working = $state<string | null>(null);
+
+  /// The open piece of work as the list has it, or `null`.
+  ///
+  /// Read out of `pursuits` rather than through `shared_pursuit`,
+  /// which the desktop also carries. The list answers with whole
+  /// pursuits — rounds and close included — so a second read of one of
+  /// them would be a second copy of what is already here, and the two
+  /// would disagree for as long as one of them was in flight. The
+  /// single read is what a surface that arrives at a pursuit without
+  /// its line would need; this one always has the line.
+  get work(): ForgePursuitDto | null {
+    return this.pursuits.data.find((item) => item.id === this.working) ?? null;
+  }
+
+  /// Work nobody has ended. The only work a round can be written to.
+  get openWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((item) => item.close === null);
+  }
+
+  /// Work that has ended, either way. Kept and shown apart, because
+  /// what was asked for is readable after it stops being askable.
+  get endedWork(): ForgePursuitDto[] {
+    return this.pursuits.data.filter((item) => item.close !== null);
+  }
+
+  /// The line as the open work would leave it.
+  ///
+  /// The same fold the local plane uses, from `lib/forge-projection`,
+  /// over this plane's two reads. Decision 19 is why it is the same
+  /// one: the forge is mirrored path for path, so the rounds and the
+  /// states are the shapes the local forge folds and the answer is
+  /// arrived at the same way. What is different here is only where the
+  /// two reads came from.
+  get projection(): ForgeProjectedEntry[] {
+    return projectWork(this.work?.rounds ?? [], this.states.data);
+  }
+
+  /// Names that would be on the line twice if the open work landed.
+  get wouldClash(): string[] {
+    return clashingNames(this.projection);
+  }
+
+  /// Reads one of the line's pursuits.
+  ///
+  /// Nothing is fetched: the list carries whole pursuits, so opening
+  /// one is choosing which of them the surface is about.
+  selectPursuit(pursuitId: string): void {
+    this.working = pursuitId;
+    this.said = null;
+  }
+
+  /// Lets go of the work being read, keeping the line.
+  clearWork(): void {
+    this.working = null;
+    this.said = null;
+  }
 
   /// What is on the line, and only what is on it. An entry the line
   /// took off is in the answer and is not something to show under

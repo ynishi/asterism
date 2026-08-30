@@ -19,6 +19,9 @@ import type {
   AssetDto,
   ForgeEntryStateDto,
   ForgeLineDto,
+  ForgeOpDto,
+  ForgePursuitDto,
+  ForgeRoundDto,
   TeamLedgerEventDto,
 } from "../../bindings";
 import { api } from "../api";
@@ -47,16 +50,51 @@ function entry(id: string, name: string, alive: boolean): ForgeEntryStateDto {
   return { entry_id: id, alive, name, content_asset_id: "a1" };
 }
 
+function pursuit(
+  id: string,
+  rounds: ForgeRoundDto[] = [],
+  close: ForgePursuitDto["close"] = null,
+): ForgePursuitDto {
+  return {
+    id,
+    line_id: "l1",
+    parent_id: null,
+    base_id: "b1",
+    head_id: rounds.at(-1)?.id ?? "b1",
+    title: "some work",
+    note: null,
+    opened_at_ms: 10,
+    opened_by_kind: "member",
+    opened_by_id: "u1",
+    rounds,
+    close,
+  };
+}
+
+function round(id: string, ops: ForgeOpDto[]): ForgeRoundDto {
+  return {
+    id,
+    parent_id: "b1",
+    at_ms: 20,
+    actor_kind: "member",
+    actor_id: "u1",
+    note: null,
+    ops,
+  };
+}
+
 beforeEach(() => {
   apiMock.mockReset();
   mutateMock.mockReset();
   sharedCatalog.session = null;
   sharedCatalog.teamId = "t1";
   sharedCatalog.selected = null;
+  sharedCatalog.working = null;
   sharedCatalog.said = null;
   sharedCatalog.lines.reset();
   sharedCatalog.states.reset();
   sharedCatalog.history.reset();
+  sharedCatalog.pursuits.reset();
 });
 
 describe("what the panel shows", () => {
@@ -272,6 +310,256 @@ describe("the two writes", () => {
 
     expect(apiMock).toHaveBeenCalledWith("list_shared_lines", { teamIdRaw: "t1" });
     expect(sharedCatalog.lines.data.map((l) => l.id)).toEqual(["l9"]);
+  });
+});
+
+describe("working a shared line", () => {
+  // The four verbs #198 wires, and what each of them is allowed to
+  // assume. Two rules run through all of them: a pursuit here belongs
+  // to a line somebody else may also be working, so the list is
+  // re-read rather than patched from what a write answered; and
+  // nothing reaches the line until a satisfied close, so the contents
+  // are re-read after that one and after no other.
+
+  it("reads the work against a line beside its contents and its chain", async () => {
+    // All three arrive with the line, which is what lets the inner
+    // tabs be a choice of what to draw rather than three more reads.
+    apiMock.mockResolvedValue([]);
+
+    await sharedCatalog.show("l1");
+
+    expect(apiMock).toHaveBeenCalledWith("shared_line_pursuits", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+  });
+
+  it("opens work against the line that is showing, and leaves it open", async () => {
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    mutateMock.mockResolvedValueOnce(pursuit("p1"));
+    apiMock.mockResolvedValueOnce([pursuit("p1")]);
+
+    await sharedCatalog.openPursuit("a name", "");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "open_shared_pursuit",
+      {
+        teamIdRaw: "t1",
+        lineId: "l1",
+        title: "a name",
+        // Empty is nothing said, not an empty note.
+        note: null,
+      },
+      "open work against that line",
+    );
+    expect(sharedCatalog.working).toBe("p1");
+    expect(sharedCatalog.work?.id).toBe("p1");
+  });
+
+  it("refuses to open work when no line is open", async () => {
+    await expect(sharedCatalog.openPursuit("t", "")).rejects.toThrow();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("pushes a round into the open work and re-reads the work list", async () => {
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    mutateMock.mockResolvedValueOnce(pursuit("p1"));
+    apiMock.mockResolvedValueOnce([pursuit("p1")]);
+    await sharedCatalog.openPursuit("", "");
+    apiMock.mockReset();
+    apiMock.mockResolvedValueOnce([pursuit("p1")]);
+
+    const op: ForgeOpDto = {
+      entry_id: "e1",
+      kind: "rename",
+      content_asset_id: null,
+      name: "cut-02",
+    };
+    await sharedCatalog.pushRound([op], "");
+
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "push_shared_round",
+      { teamIdRaw: "t1", pursuitId: "p1", ops: [op], note: null },
+      "push that round",
+    );
+    // A round is a request. Nothing has reached the line, so re-reading
+    // what the line holds would be asking a question whose answer
+    // cannot have changed.
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "shared_line_states",
+      expect.anything(),
+    );
+    expect(apiMock).toHaveBeenCalledWith("shared_line_pursuits", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+  });
+
+  it("refuses to push a round when no work is open", async () => {
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+
+    await expect(sharedCatalog.pushRound([], "")).rejects.toThrow();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("re-reads what the line holds when work closes satisfied", async () => {
+    // The one moment the line moves.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(pursuit("p1"));
+    apiMock.mockReset();
+    apiMock.mockResolvedValue([]);
+
+    await sharedCatalog.closePursuit("satisfied", "done");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "close_shared_pursuit",
+      { teamIdRaw: "t1", pursuitId: "p1", outcome: "satisfied", note: "done" },
+      "close that work",
+    );
+    expect(apiMock).toHaveBeenCalledWith("shared_line_states", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+    expect(apiMock).toHaveBeenCalledWith("shared_line_history", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+    expect(sharedCatalog.working).toBeNull();
+    expect(sharedCatalog.said).toContain("on the line");
+  });
+
+  it("says the line did not move when work is abandoned", async () => {
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    mutateMock.mockResolvedValueOnce(pursuit("p1"));
+
+    await sharedCatalog.closePursuit("abandoned", "");
+
+    expect(sharedCatalog.said).toContain("did not move");
+    expect(sharedCatalog.said).not.toContain("on the line");
+  });
+
+  it("ends the work under a line when another line is opened", async () => {
+    // A piece of work belongs to the line it is against, so it cannot
+    // survive the line going.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+
+    await sharedCatalog.show("l2");
+
+    expect(sharedCatalog.working).toBeNull();
+  });
+
+  it("drops the work when the connection goes, rather than going stale", async () => {
+    apiMock.mockResolvedValue([pursuit("p1")]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.working).toBeNull();
+    expect(sharedCatalog.pursuits.data).toEqual([]);
+    expect(sharedCatalog.work).toBeNull();
+  });
+
+  it("drops the work when another team is named", async () => {
+    apiMock.mockResolvedValue([pursuit("p1")]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+    apiMock.mockResolvedValueOnce([]); // lines for the new team
+
+    await sharedCatalog.lookAt("t2");
+
+    expect(sharedCatalog.working).toBeNull();
+    expect(sharedCatalog.pursuits.data).toEqual([]);
+  });
+
+  it("keeps open and ended work apart", async () => {
+    apiMock.mockResolvedValueOnce([]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockResolvedValueOnce([
+      pursuit("p1"),
+      pursuit("p2", [], {
+        id: "c1",
+        parent_id: "b1",
+        outcome: "satisfied",
+        note: null,
+        at_ms: 30,
+        actor_kind: "member",
+        actor_id: "u1",
+      }),
+    ]);
+    await sharedCatalog.show("l1");
+
+    expect(sharedCatalog.openWork.map((w) => w.id)).toEqual(["p1"]);
+    expect(sharedCatalog.endedWork.map((w) => w.id)).toEqual(["p2"]);
+  });
+
+  it("folds the open work over the line, so a rename shows before it lands", async () => {
+    // The same fold the local plane uses (`lib/forge-projection`), over
+    // this plane's two reads. What it buys is the reason the fold
+    // exists at all: the states still say the old name, because nothing
+    // has landed, and a person deciding whether to close has to see
+    // what closing would leave.
+    apiMock.mockResolvedValueOnce([entry("e1", "cut-01", true)]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockResolvedValueOnce([
+      pursuit("p1", [
+        round("r1", [
+          {
+            entry_id: "e1",
+            kind: "rename",
+            content_asset_id: null,
+            name: "cut-02",
+          },
+        ]),
+      ]),
+    ]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.selectPursuit("p1");
+
+    expect(sharedCatalog.states.data[0].name).toBe("cut-01");
+    expect(sharedCatalog.projection).toEqual([
+      {
+        entryId: "e1",
+        name: "cut-02",
+        assetId: "a1",
+        alive: true,
+        stated: null,
+      },
+    ]);
+  });
+
+  it("says nothing of a fold when no work is open", async () => {
+    // `working` is its own state rather than derived from the list, so
+    // an unopened pursuit's rounds are not folded onto the line behind
+    // somebody's back.
+    apiMock.mockResolvedValueOnce([entry("e1", "cut-01", true)]);
+    apiMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([
+      pursuit("p1", [
+        round("r1", [
+          {
+            entry_id: "e1",
+            kind: "remove",
+            content_asset_id: null,
+            name: null,
+          },
+        ]),
+      ]),
+    ]);
+    await sharedCatalog.show("l1");
+
+    expect(sharedCatalog.work).toBeNull();
+    expect(sharedCatalog.projection.map((row) => row.alive)).toEqual([true]);
   });
 });
 

@@ -28,8 +28,10 @@
   //
   // **The projection is what those rows are.** A person deciding
   // whether to close needs to see what closing would leave, which
-  // neither log answers on its own. The fold is `forgeCatalog`'s, made
-  // where both reads are; what it means here is that the rows are a
+  // neither log answers on its own. `forgeCatalog` makes it over both
+  // its reads — the fold itself is `lib/forge-projection.ts`, because
+  // the shared plane asks the same of its own two; what it means here
+  // is that the rows are a
   // picture of a line that has not moved, and the two answers above
   // them are how far that assumption has drifted.
   //
@@ -42,7 +44,7 @@
   import { api } from "./lib/api";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
-  import type { ForgeProjectedEntry } from "./lib/stores/forge.svelte";
+  import type { ForgeProjectedEntry } from "./lib/forge-projection";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
