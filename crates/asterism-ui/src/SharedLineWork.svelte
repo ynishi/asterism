@@ -25,8 +25,8 @@
   // scoped to open work by #148 decision 5 — which is the promotion,
   // #198's sibling and out of its scope. So the verbs here are the
   // three that name entries the line already holds: rename, remove,
-  // and the add that puts a removal back, which names content the line
-  // is already holding for that entry rather than anything new.
+  // and the add that puts a removal back, which names the content the
+  // row already carries rather than anything new to the team.
   // `replace` is absent because it has nothing to name: choosing what
   // an entry becomes means choosing from the team's own content, and
   // this plane has no read of that to choose from.
@@ -38,12 +38,14 @@
   // something this surface never showed. That is a gap and is written
   // down as one — what closes it is two more commands, not a decision.
   //
-  // **A refusal is its message and nothing more.** `ForgeWork` reads a
-  // `reason` off the error and says what to do about it. A refusal
-  // from a team server carries no such field on any arm — `teams_error`
-  // in `commands.rs` maps every refusal it can name to the server's
-  // own sentence — so there is nothing to key on, and inventing advice
-  // from the prose would be guessing at which refusal arrived.
+  // **A refusal reaches this surface as its message and nothing
+  // more.** `ForgeWork` reads a `reason` off the error and says what
+  // to do about it. The wire carries one here too — the forge's
+  // conflicts answer with `blocked` / `raced` / `settled` / `clashes`
+  // and `TeamsClientError::Refused` holds it — but `teams_error` in
+  // `commands.rs` keeps the message and drops the token on the way
+  // across, so what arrives is a sentence. Advice invented from that
+  // sentence would be guessing at which refusal it was.
   //
   // **No pictures, and no conversations.** An entry names content the
   // team holds, which this machine has no copy of — the contents tab
@@ -78,7 +80,9 @@
   // header says why there is no action behind a reason here. What the
   // catch buys is that a refusal is not also an unhandled rejection,
   // which `mutate` re-throws for callers that roll something back.
-  // These have nothing to roll back: the list is re-read either way.
+  // These have nothing to roll back: every write here reaches the
+  // catalog before it touches anything on screen, so a refused one
+  // leaves the surface exactly as it was.
   async function open(event: Event) {
     event.preventDefault();
     opening = true;
@@ -130,8 +134,10 @@
   // sends the row's own id rather than minting one: an entry that comes
   // back under a new id is a new arrival, and the record would say so.
   // It needs something to hold, so a row the line never filled has no
-  // way back and is not offered one — and on this plane it could not
-  // be given one either, since that would be naming content.
+  // way back and is not offered one — and this plane has nothing to
+  // give it, for the reason `replace` is absent: choosing content for
+  // a row means choosing from the team's own, and there is no read of
+  // that here.
   async function putBack(row: ForgeProjectedEntry) {
     if (row.assetId === null) return;
     await ask({
@@ -274,9 +280,9 @@
   {/if}
 
   <!-- Only for work that can still move. The sentence is about a close
-       that has not happened, and on ended work there is none to refuse
-       — an abandoned pursuit can carry two names for one entry and
-       nothing is waiting to reject it. -->
+       that has not happened, and ended work has none coming — an
+       abandoned pursuit can leave two entries under one name, with
+       nothing left to refuse it. -->
   {#if !ended && clashing.length > 0}
     <p class="quiet warn">
       Two entries would be named {clashing.join(", ")}. A line holds one live

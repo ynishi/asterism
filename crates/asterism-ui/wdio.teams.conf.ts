@@ -381,12 +381,20 @@ export const config: WebdriverIO.Config & {
  * shape a gate has.
  *
  * Named rather than counted, so the message says which file.
+ *
+ * Recursive, and compared on the path rather than the basename,
+ * because the glob it replaced was `**` — a spec in a subdirectory was
+ * covered before and has to stay covered, and two files of one name in
+ * two directories are two specs.
  */
 function assertEverySpecIsListed(): void {
   const dir = path.join(here, "e2e-teams");
-  const listed = new Set(SPECS.map((spec) => path.basename(spec)));
+  const listed = new Set(
+    SPECS.map((spec) => path.relative(dir, path.resolve(here, spec))),
+  );
   const missing = fs
-    .readdirSync(dir)
+    .readdirSync(dir, { recursive: true })
+    .map((entry) => String(entry))
     .filter((name) => name.endsWith(".spec.ts"))
     .filter((name) => !listed.has(name));
   if (missing.length > 0) {

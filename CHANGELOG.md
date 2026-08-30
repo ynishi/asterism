@@ -43,9 +43,10 @@ and this project adheres to
   landings have arrived since the work was cut and what it collides with; the
   team server mirrors both routes and the desktop has no command for either, so
   a close here can be refused by something the screen never showed. That is a
-  gap rather than a decision. A refusal is also its message and nothing more: a
-  team server's refusal crosses as a validation error carrying the server's
-  sentence, so there is no reason code to turn into advice.
+  gap rather than a decision. A refusal also arrives as its message and nothing
+  more: the forge's conflicts answer with a reason token and the desktop keeps
+  the sentence and drops the token, so there is nothing here to turn into
+  advice.
 
   `just ui-e2e-teams` drives it end to end against a real `teams-server` — the
   fixture seeds a second team with a line holding one entry, because the first
