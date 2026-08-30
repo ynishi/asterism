@@ -4,22 +4,26 @@
 //
 // What these pin is the panel's honesty about where its contents come
 // from (#148 decision 16). A shared line is served through rather than
-// mirrored, so three of the rules worth a test are that opening the
-// panel reads rather than showing whatever it last had, that
-// disconnecting empties the view rather than leaving the last answer on
-// screen, and that an entry the line took off is not offered as
-// something on the line. All three would be invisible in the markup,
-// which is DOM and does not run here.
+// mirrored, and every rule that follows from it is invisible in the
+// markup, which is DOM and does not run here: that opening the panel
+// reads rather than showing whatever it last had, that disconnecting
+// empties the view rather than leaving the last answer on screen, and
+// that an entry the line took off is not offered as something on the
+// line.
 //
-// The third of them is the word. Decision 11 says the UI has to say
-// "re-enacted" when the chain was replayed, and a message that quietly
-// stopped saying it would still be a passing publish.
+// Which read follows which write is the same question asked of the
+// verbs. A round is a request and a satisfied close is the one moment
+// the line moves, so re-reading the contents after the first — or not
+// after the second — is a screen telling somebody the line is
+// somewhere it is not.
 //
-// Working a line is the fourth section and the largest, and what it
-// pins is of the same kind: which read follows which write. A round is
-// a request and a satisfied close is the one moment the line moves, so
-// re-reading the contents after the first — or not after the second —
-// is a screen telling somebody the line is somewhere it is not.
+// And one word. Decision 11 says the UI has to say "re-enacted" when
+// the chain was replayed, and a message that quietly stopped saying it
+// would still be a passing publish.
+//
+// The sections below are where each of those lives, and this paragraph
+// does not index them: it said which section held what twice, and both
+// times a section landed that made the sentence false.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssetDto,
