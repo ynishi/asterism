@@ -10,6 +10,33 @@ and this project adheres to
 
 ### Added
 
+- **The team's roster on screen, and a team you can make from the app** (#196).
+  The frame #194 built gains its second tab, and the connection gains the one
+  act that is about no team in particular.
+
+  **Ids rather than names, and the tab says why.** A membership row carries a
+  user id and a role and nothing else; the name on a ledger event is a snapshot
+  the act took, and there is no equivalent to read here. A reader comparing the
+  two tabs would otherwise be left to work that out. The viewer's own row is
+  marked, which is what turns a list of strangers into a place the reader is in.
+
+  **Founding a team sits beside the field, not on a tab.** Every tab is an
+  answer about the team named above them, and this is the act that is about
+  none. It shows wherever there is a connection rather than only where no team
+  is named: the field is `required`, so naming a team is a one-way trip on this
+  surface, and an offer that appeared only before the first trip could be taken
+  once per window. Founding also lands the reader on what they made, rather than
+  printing an id to copy into the field directly above.
+
+  **What #171's roster bullet asks for is not one thing.** It reads "Create a
+  team, see the members, invite and join under `RegistrationPolicy`, leave", and
+  those five verbs sit at four different depths: creating and reading are wired
+  end to end, the membership writes have no client half, `leave` has no route,
+  and **`join` does not exist anywhere**. `RegistrationPolicy` governs none of
+  the four it is attached to — its only consumer is team creation. This lands
+  the two that were ready; the rest are siblings, and `join` is a finding about
+  the issue rather than a specification.
+
 - **The team's ledger on screen, and the frame its tabs land in** (#194). Who
   did what, in what capacity, is the team's own record, and #171 asks that a
   member be able to read it from the app. This is the first of that umbrella's
