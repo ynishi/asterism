@@ -10,6 +10,48 @@ and this project adheres to
 
 ### Added
 
+- **Work a team's line from the app: open a pursuit, push a round, close it**
+  (#198). #148 decision 10 says working on a shared line needs no copy, and the
+  five verbs the member's client carries for it now reach a screen. Nothing was
+  added to `asterism-contract`: the forge is mirrored path for path (decision
+  19), so a shared line answers with the same `ForgePursuitDto` the local one
+  does and the commands map nothing.
+
+  **A line replaces the list rather than opening beside it.** `ForgePanel` puts
+  a list and a line's tabs side by side and says in its own header that it is
+  wider than this drawer for exactly that; this one is `min(30rem, 92vw)`.
+  Pressing a line puts its frame where the list was, with the way back in its
+  header, and the three tabs under it — contents, work, history — are the
+  forge's three answers about one line. Three rather than four, because the
+  conversation verbs do not cross: the server mirrors the thread routes and the
+  member's client does not carry them.
+
+  **What a round can carry here, and what it cannot.** Rename, remove, and the
+  add that puts a removal back — the operations that name entries the line
+  already holds. Putting something new on a team's line is content entering the
+  team, which is the promotion and #198's sibling; until that lands, this
+  surface moves what is there and brings nothing to it. It says so where
+  somebody would otherwise look for the control.
+
+  **One fold, both planes.** What a close would leave is folded from the line
+  and the work together, and that fold is now `lib/forge-projection.ts` rather
+  than a second copy written against the second catalog. The two stores stay
+  apart, which is what decision 16 asks for — the fold reads nothing and holds
+  nothing, it takes two shapes and returns rows.
+
+  **Two answers this surface does not have.** `ForgeWork` shows how many
+  landings have arrived since the work was cut and what it collides with; the
+  team server mirrors both routes and the desktop has no command for either, so
+  a close here can be refused by something the screen never showed. That is a
+  gap rather than a decision. A refusal is also its message and nothing more: a
+  team server's refusal crosses as a validation error carrying the server's
+  sentence, so there is no reason code to turn into advice.
+
+  `just ui-e2e-teams` drives it end to end against a real `teams-server` — the
+  fixture seeds a second team with a line holding one entry, because the first
+  team's emptiness is what the connect spec is about, and the app itself cannot
+  seed one.
+
 - **The team's roster on screen, and a team you can make from the app** (#196).
   The frame #194 built gains its second tab, and the connection gains the one
   act that is about no team in particular.
