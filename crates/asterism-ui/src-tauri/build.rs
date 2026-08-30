@@ -6,6 +6,11 @@
 //! few `tests/export_parity.rs` records a reason against. Hand-written
 //! TypeScript types are avoided so the two sides never drift apart.
 //!
+//! A second source joins it at the end of the list: `asterism-teams-wire`,
+//! whose shapes the team plane's screens name and which the contract has
+//! no equivalent for. The two are exported on opposite rules, and the
+//! next paragraph is why the contract's is what it is.
+//!
 //! **The list is a projection of the contract, not a subset a screen
 //! asked for.** It used to be the second: a type entered the list in
 //! the change that consumed it, on the ground that "exporting a shape
@@ -97,6 +102,7 @@ use asterism_contract::query::{
     ListObservationsQuery, RandomAssetsQuery, SearchAssetsQuery, TagMatch,
 };
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
+use asterism_teams_wire::dto::{LedgerEventDto, LedgerPageDto, SubjectRefDto};
 use schema_bridge::{SchemaBridge as _, export_types};
 
 fn main() {
@@ -349,7 +355,21 @@ fn main() {
         SortOrder,
         SortSpec,
         TagMatch,
+        // The teams wire, for the surfaces over the team plane. The
+        // forge DTOs a shared line answers with are the contract's,
+        // because decision 19 mirrors the forge path for path; what a
+        // session, a roster or a ledger page carries is this leaf's and
+        // has no equivalent there.
+        //
+        // `NOT_PROJECTED`'s rule does not reach here — it answers for
+        // types the *contract* derives — so what is exported from this
+        // crate is what a screen names, and a shape nothing can call is
+        // not owed a line. That is the reach test the parity doc
+        // states, applied to a second source.
+        LedgerPageDto,
+        LedgerEventDto,
+        SubjectRefDto,
     )
-    .expect("failed to export TS bindings from asterism-contract");
+    .expect("failed to export TS bindings");
     tauri_build::build()
 }

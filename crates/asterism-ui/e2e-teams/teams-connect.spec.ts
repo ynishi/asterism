@@ -12,20 +12,28 @@
 // shape `bindings.ts` does not claim, every one of them stays green and
 // the panel is dead on arrival.
 //
-// Four commands are reached here — `team_server_session`,
-// `connect_team_server`, `list_shared_lines` and, through the
-// disconnect at the end, `disconnect_team_server` — none of them
-// exercised anywhere before. That is the whole reason this suite needs
-// a server rather than a mock. The reads behind a selected line, and
-// both writes, wait for a fixture that has something on it.
+// Five commands are reached here — `team_server_session`,
+// `connect_team_server`, `list_shared_lines`, `team_ledger_page` and,
+// through the disconnect at the end, `disconnect_team_server` — none of
+// them exercised anywhere before. That is the whole reason this suite
+// needs a server rather than a mock. The reads behind a selected line,
+// and both writes, wait for a fixture that has something on it.
 //
 // # What it walks
 //
 // The three phases, in the order a person meets them: nobody to ask,
 // somebody to ask and no team named, and a team whose lines are read.
-// The fixture's team is empty, so the third ends on "This team hosts no
-// lines." — which is the assertion that matters most here, because it
-// is the sentence that used to appear in the second phase too.
+// The fixture's team is empty, so the third arrives at "This team hosts
+// no lines." — which is the assertion that matters most here, because
+// it is the sentence that used to appear in the second phase too.
+//
+// Then across the tabs. The ledger is the one read on this plane whose
+// answer cannot legitimately be empty: founding a team appends its own
+// event, so an empty ledger is a server misbehaving rather than a team
+// nothing has happened to. And its foot is checked for the word it
+// must not say — with one event and a page size well above it there is
+// no cursor, which is exactly the branch that has to offer to ask
+// again rather than announce an end.
 //
 // # What it leaves of the team's
 //
@@ -261,6 +269,53 @@ describe("the team plane", () => {
       }
     });
 
+    // The ledger. A team that exists has at least the event that
+    // founded it, so this is the one read on the plane whose answer
+    // cannot legitimately be empty.
+    await stage(trail, "read the team's ledger", ROUND_TRIP_MS, async () => {
+      await clickIn(`${DRAWER} .drawer-tabs button:last-child`);
+      await pollUntil(
+        async () => ((await drawerText()) ?? "").includes("teams.team.created"),
+        "the ledger never showed the event that founded the team",
+        ROUND_TRIP_MS,
+      );
+      const text = (await drawerText()) ?? "";
+      if (text.includes("came back empty")) {
+        throw new Error("the ledger reported itself empty");
+      }
+      // The foot never claims an end. With one event and a page size
+      // well above it the cursor is null, which is the branch that has
+      // to say "ask again" rather than "that was everything".
+      if (!text.includes("Ask again")) {
+        throw new Error(`the ledger's foot did not offer to ask again: ${text}`);
+      }
+      // Publishing belongs to a line, so it is not on this tab.
+      if (text.includes("Publish a line of mine")) {
+        throw new Error("the publish form followed the reader onto the ledger");
+      }
+    });
+    await snap("04-ledger");
+
+    await stage(trail, "an event says what it carries", DRIVER_MS, async () => {
+      await clickIn(`${DRAWER} .ledger .event-payload-toggle`);
+      await pollUntil(
+        async () => ((await drawerText()) ?? "").includes("hide"),
+        "the payload never opened",
+        DRIVER_MS,
+      );
+    });
+    await snap("05-payload");
+
+    await stage(trail, "the lines tab is still there", DRIVER_MS, async () => {
+      await clickIn(`${DRAWER} .drawer-tabs button:first-child`);
+      await pollUntil(
+        async () =>
+          ((await drawerText()) ?? "").includes("This team hosts no lines."),
+        "going back to the lines tab did not show the lines",
+        DRIVER_MS,
+      );
+    });
+
     await stage(trail, "disconnect empties the view", ROUND_TRIP_MS, async () => {
       await clickIn(`${DRAWER} .drawer-session button`);
       await pollUntil(
@@ -278,6 +333,6 @@ describe("the team plane", () => {
         );
       }
     });
-    await snap("04-disconnected");
+    await snap("06-disconnected");
   });
 });

@@ -424,3 +424,9 @@ export type SortSpec = { target: 'occurred_at' | 'created_at' | 'updated_at' | '
 
 export type TagMatch = 'any' | 'all';
 
+export type LedgerPageDto = { events: { seq: number; event_id: string; team_id: string; actor_kind: string; actor_user_id: string; actor_display_name: string; occurred_at_ms: number; kind: string; subjects: { ref_type: string; value: string; }[]; payload_json: string; }[]; next_after: number | null; };
+
+export type LedgerEventDto = { seq: number; event_id: string; team_id: string; actor_kind: string; actor_user_id: string; actor_display_name: string; occurred_at_ms: number; kind: string; subjects: { ref_type: string; value: string; }[]; payload_json: string; };
+
+export type SubjectRefDto = { ref_type: string; value: string; };
+

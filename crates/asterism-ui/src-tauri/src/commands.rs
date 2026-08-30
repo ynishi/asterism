@@ -3116,6 +3116,31 @@ pub async fn list_shared_lines(
         .map_err(teams_error)
 }
 
+/// One page of a team's ledger, seq ascending (#148 decision 18).
+///
+/// `after` is the `next_after` of the page before, or nothing for the
+/// first. What comes back can carry a cursor even when it happened to
+/// end on the last event there is — the page shape's own doc says why,
+/// and a caller that reads a null cursor as "that was everything" is
+/// claiming something this read cannot answer.
+///
+/// The limit is the caller's rather than this command's: a screen
+/// paging by hand and one following the stream want different sizes,
+/// and neither is the desktop surface's to pick.
+#[tauri::command]
+pub async fn team_ledger_page(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    after: Option<i64>,
+    limit: Option<u32>,
+) -> Result<asterism_teams_wire::dto::LedgerPageDto, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .events(team_id(&team_id_raw, "team id")?, after, limit)
+        .await
+        .map_err(teams_error)
+}
+
 /// What is on a shared line, folded from its chain by the server.
 #[tauri::command]
 pub async fn shared_line_states(

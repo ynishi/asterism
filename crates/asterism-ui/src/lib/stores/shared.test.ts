@@ -15,7 +15,12 @@
 // "re-enacted" when the chain was replayed, and a message that quietly
 // stopped saying it would still be a passing publish.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssetDto, ForgeEntryStateDto, ForgeLineDto } from "../../bindings";
+import type {
+  AssetDto,
+  ForgeEntryStateDto,
+  ForgeLineDto,
+  LedgerEventDto,
+} from "../../bindings";
 import { api } from "../api";
 import { mutate } from "../mutate";
 import { sharedCatalog } from "./shared.svelte";
@@ -267,5 +272,112 @@ describe("the two writes", () => {
 
     expect(apiMock).toHaveBeenCalledWith("list_shared_lines", { teamIdRaw: "t1" });
     expect(sharedCatalog.lines.data.map((l) => l.id)).toEqual(["l9"]);
+  });
+});
+
+describe("walking the ledger", () => {
+  // What these pin is that the walk is a walk. Every one of them is a
+  // way the same read stops being one: a page that replaces instead of
+  // extends, a resume that starts over, a walk that survives the team
+  // it belongs to.
+
+  function event(seq: number): LedgerEventDto {
+    return {
+      seq,
+      event_id: `e${seq}`,
+      team_id: "t1",
+      actor_kind: "member",
+      actor_user_id: "u1",
+      actor_display_name: "someone",
+      occurred_at_ms: 1000 + seq,
+      kind: "teams.team.created/1",
+      subjects: [],
+      payload_json: "{}",
+    };
+  }
+
+  beforeEach(() => {
+    sharedCatalog.forgetLedger();
+  });
+
+  it("asks for the first page with no cursor", async () => {
+    apiMock.mockResolvedValueOnce({ events: [event(1)], next_after: null });
+
+    await sharedCatalog.readLedgerPage();
+
+    expect(apiMock).toHaveBeenCalledWith("team_ledger_page", {
+      teamIdRaw: "t1",
+      after: null,
+      limit: 50,
+    });
+    expect(sharedCatalog.ledger.map((e) => e.seq)).toEqual([1]);
+  });
+
+  it("appends the next page rather than replacing what it has", async () => {
+    apiMock.mockResolvedValueOnce({ events: [event(1), event(2)], next_after: 2 });
+    await sharedCatalog.readLedgerPage();
+    apiMock.mockResolvedValueOnce({ events: [event(3)], next_after: null });
+
+    await sharedCatalog.readLedgerPage();
+
+    expect(apiMock).toHaveBeenLastCalledWith("team_ledger_page", {
+      teamIdRaw: "t1",
+      after: 2,
+      limit: 50,
+    });
+    expect(sharedCatalog.ledger.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("resumes from the last seq it saw when the cursor is null", async () => {
+    // A null cursor says nothing lay past there *when the page was
+    // taken*, not that the walk is over — so asking again has to ask
+    // about what comes after the last event, not about the beginning.
+    // Passing nothing would append a second copy of the whole ledger.
+    apiMock.mockResolvedValueOnce({ events: [event(1), event(2)], next_after: null });
+    await sharedCatalog.readLedgerPage();
+    apiMock.mockResolvedValueOnce({ events: [], next_after: null });
+
+    await sharedCatalog.readLedgerPage();
+
+    expect(apiMock).toHaveBeenLastCalledWith("team_ledger_page", {
+      teamIdRaw: "t1",
+      after: 2,
+      limit: 50,
+    });
+    expect(sharedCatalog.ledger.map((e) => e.seq)).toEqual([1, 2]);
+  });
+
+  it("drops the walk when another team is named", async () => {
+    apiMock.mockResolvedValueOnce({ events: [event(1)], next_after: 1 });
+    await sharedCatalog.readLedgerPage();
+    apiMock.mockResolvedValueOnce([]); // lines for the new team
+
+    await sharedCatalog.lookAt("t2");
+
+    expect(sharedCatalog.ledger).toEqual([]);
+    expect(sharedCatalog.ledgerCursor).toBeNull();
+    expect(sharedCatalog.ledgerRead).toBe(false);
+  });
+
+  it("drops the walk when the connection goes", async () => {
+    apiMock.mockResolvedValueOnce({ events: [event(1)], next_after: 1 });
+    await sharedCatalog.readLedgerPage();
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.ledger).toEqual([]);
+    expect(sharedCatalog.ledgerRead).toBe(false);
+  });
+
+  it("keeps what it has when a page fails", async () => {
+    apiMock.mockResolvedValueOnce({ events: [event(1)], next_after: 1 });
+    await sharedCatalog.readLedgerPage();
+    apiMock.mockRejectedValueOnce(new Error("the server said no"));
+
+    await sharedCatalog.readLedgerPage();
+
+    expect(sharedCatalog.ledgerError).toContain("the server said no");
+    expect(sharedCatalog.ledger.map((e) => e.seq)).toEqual([1]);
   });
 });
