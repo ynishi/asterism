@@ -10,6 +10,37 @@ and this project adheres to
 
 ### Added
 
+- **The team's ledger on screen, and the frame its tabs land in** (#194). Who
+  did what, in what capacity, is the team's own record, and #171 asks that a
+  member be able to read it from the app. This is the first of that umbrella's
+  surfaces, so it builds the frame as well: #190's design said the tabs were a
+  design and not a component and that the first surface to land would build
+  them, and this is that surface. The connection and the team sit above the
+  tabs, because they are what the tabs are answers about; publishing sits inside
+  the lines tab, because it seeds a line.
+
+  **The read's shape decides more than taste does.** A ledger has no final page
+  and the wire says so: a page that fills its limit always carries a cursor, and
+  a short page carries none — meaning nothing lay past there _when the page was
+  taken_. So the foot never announces an end. It offers to read more where there
+  is a cursor and to ask again where there is not, and asking again resumes from
+  the last seq the walk saw rather than from the beginning, which would append a
+  second copy of everything. The actor's name is shown as stored rather than
+  resolved, because it is a snapshot taken at write time and a later rename must
+  not change a past record under its reader. The capacity is shown beside it,
+  which is the distinction #83 §1 exists to keep.
+
+  **Kinds and payloads are rendered as themselves.** A screen that mapped each
+  kind to a sentence would be a second place every new kind has to be learned,
+  going stale where nobody is looking — the trap #148 decision 14 names for the
+  projection. `forge.*` is still growing them. So a kind this screen has never
+  seen arrives intact, and what an event carries is one press away as the JSON
+  it is.
+
+  An empty ledger is reported as a fault rather than as a quiet state: founding
+  a team appends its own event, so a team that answers with nothing has answered
+  wrongly.
+
 - **The team plane can be driven end to end, against a `teams-server` of its
   own** (#192). Every read on that plane is a request to a second binary, and
   `just ui-e2e` builds and launches one — so the surfaces #171 is about had no
