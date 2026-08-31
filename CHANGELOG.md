@@ -15,7 +15,7 @@ and this project adheres to
   verb scoped to open work, so a team never holds an asset that is not attached
   to work — and #152 built the whole of it as a client function that no screen
   offered as an act of its own. Publishing a line has called it per content
-  since #199; handing over one asset, deliberately, is what the detail pane does
+  since #153; handing over one asset, deliberately, is what the detail pane does
   now.
 
   **What travels is said before it goes.** The file itself and the marks a
@@ -237,8 +237,9 @@ and this project adheres to
   cannot start there either without work already open — decision 5 gives content
   exactly one entry point, scoped to an open pursuit, so the team never holds an
   Asset that is not attached to work. It is also a write that is not safe to
-  press twice: decision 7 mints a TeamAsset per promotion rather than finding
-  the first, which is the asymmetry `publish` carries and `clone` does not.
+  press twice: decision 7 mints a TeamAsset per promotion, so what keeps a
+  second press from making a second one is a relation row the promoting machine
+  wrote — which is the asymmetry `publish` carries and `clone` does not.
 
   Two things the design corrects rather than inherits. The roster's verbs answer
   to four rules and not one: #171's body hangs create, invite, join and leave on

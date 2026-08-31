@@ -13,8 +13,11 @@
 //
 // # What it needs that the other two specs do not
 //
-// An asset. The teams profile is its own `ASTERISM_HOME` and starts
-// empty, so this seeds one over the app's own loopback HTTP surface —
+// An asset. The teams profile is its own `ASTERISM_HOME` and carries
+// no content of its own — it persists between runs, but nothing seeds
+// it the way the e2e suite's profile is seeded, so a run that needed
+// an asset and found one was looking at what an earlier run of this
+// spec left. This seeds over the app's own loopback HTTP surface —
 // `POST /asterism/assets/add`, the command the importers use — exactly
 // as `e2e/metric-sort.spec.ts` seeds the rows it measures. Seeding is
 // idempotent: the persona and the asset are found by their natural key
@@ -25,6 +28,16 @@
 // and the asset — so the repeat path the store tests cover is not
 // reachable from here, and the assertion that bytes were sent holds on
 // the second run as on the first.
+//
+// # What it meets, and what it leaves
+//
+// It runs last, so it meets a window the other two have used. What
+// mattered was not the session — each spec disconnects — but the
+// shared-lines drawer, which `teams-work.spec.ts` leaves open: its
+// backdrop covers everything, and a spec that types into the sidebar
+// under it waits for a driver that retries rather than refuses. So
+// this one closes the drawer before it touches anything, and
+// disconnects at the end.
 //
 // # What it walks
 //

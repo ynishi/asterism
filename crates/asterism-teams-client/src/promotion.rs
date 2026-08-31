@@ -343,13 +343,13 @@ mod tests {
         assert!(sole_material(&asset).is_ok(), "an ordinary asset promotes");
     }
 
-    /// The three refusals, and each says which it is.
-    ///
-    /// Worth pinning because the surfaces above this one deliberately
-    /// do not pre-empt them: the pane hands the client an asset and
-    /// shows whatever comes back, so this message *is* what a person
-    /// reads. A refusal that stopped naming which case it was would
-    /// leave them with "no" and nowhere to go.
+    // The three refusals below are pinned on their messages because the
+    // surfaces above this crate deliberately do not pre-empt them: a
+    // pane hands the client an asset and shows whatever comes back, so
+    // what these say *is* what a person reads. A refusal that stopped
+    // naming which case it was would leave them with "no" and nowhere
+    // to go.
+
     #[test]
     fn a_collection_is_refused_as_one() {
         let mut asset = an_asset();

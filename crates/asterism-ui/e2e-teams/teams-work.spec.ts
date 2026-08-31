@@ -36,12 +36,16 @@
 //
 // # What it meets, and what it leaves
 //
-// The two specs share one app process, so this one runs second and
-// meets a window `teams-connect.spec.ts` has already used — the config
-// says why the order is that way round and not the other. It connects
-// if the window is not connected and takes over the session if it is,
-// and it disconnects at the end, which is what keeps the arrangement
-// from depending on which of the two ran.
+// The specs share one app process, so this one meets a window
+// `teams-connect.spec.ts` has already used — the config says why the
+// order is that way round and not the other. It connects if the window
+// is not connected and takes over the session if it is, and it
+// disconnects at the end, which is what keeps the arrangement from
+// depending on which spec ran before it.
+//
+// It leaves the drawer open, which `teams-promote.spec.ts` meets and
+// closes: an overlay's backdrop covers the sidebar, and a spec typing
+// under one waits on a driver that retries rather than refuses.
 //
 // Of the team's own it leaves the rename, which is the point: the
 // fixture's second team exists for this spec and goes with the

@@ -89,7 +89,8 @@ const LOGIN = "e2e-member";
 const WORK_LINE_NAME = "ROOT";
 const WORK_ENTRY_NAME = "cut-01";
 
-/** The specs this suite runs, in the order the header argues for. */
+/** The specs this suite runs, in the order argued for where `specs`
+ *  is set below. */
 const SPECS = [
   "./e2e-teams/teams-connect.spec.ts",
   "./e2e-teams/teams-work.spec.ts",

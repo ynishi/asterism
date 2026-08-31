@@ -3,16 +3,16 @@
 // Shared rather than local because the places that use it have to
 // agree: the grid labels a visual card with it in clean mode when there
 // is no cover text, the forge offers it as the default name for an
-// entry added from a selection, and the detail pane offers it as the
-// default name for an asset handed to a team. Somebody selecting three
-// images and putting them on a line should see the names that were
-// under them.
+// entry added from a selection, and the detail pane falls back to it
+// when an asset handed to a team has no title of its own. Somebody
+// selecting three images and putting them on a line should see the
+// names that were under them.
 //
-// Agreement is the point rather than reuse. What the forge does with
-// the result is not what the grid does: the string is sent as an
-// operation's name, lands on the line, and is what the model's
-// uniqueness rule compares — two live entries under one name is a
-// refused landing. So a second implementation here would not be a
+// Agreement is the point rather than reuse. What the two forge uses do
+// with the result is not what the grid does — and the promotion is one
+// of them, local plane or team's: the string is sent as an operation's
+// name, lands on the line, and is what the model's uniqueness rule
+// compares — two live entries under one name is a refused landing. So a second implementation here would not be a
 // duplicated label, it would be a line whose entries are named one way
 // and shown another. Several screens cut a locator down inline for a
 // label, each in its own spelling; those are labels nothing compares.

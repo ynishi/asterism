@@ -405,14 +405,18 @@ describe("promoting an asset onto the open work", () => {
     apiMock.mockResolvedValue([]);
     await sharedCatalog.show("l1");
 
-    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
+      /no work is open/,
+    );
     expect(mutateMock).not.toHaveBeenCalled();
   });
 
   it("refuses when no line is open", async () => {
     sharedCatalog.working = "p1";
 
-    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
+      /no line is open/,
+    );
     expect(mutateMock).not.toHaveBeenCalled();
   });
 

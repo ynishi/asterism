@@ -201,10 +201,11 @@
 // where that is least visible: decision 7 mints a TeamAsset per
 // promotion. What stops a second press from making a second one is a
 // relation row this machine wrote, which the client reads before
-// anything is sent — so a repeat costs nothing here and says so, and
-// two *members* promoting the same bytes still get one each, which no
-// row on this machine can see. `publish` carries the same asymmetry
-// and `clone` does not.
+// anything is sent — so a repeat costs nothing on the wire and says
+// so, though it still reads and hashes the material, which is why it
+// can report a digest at all. Two *members* promoting the same bytes
+// still get one each, which no row on this machine can see. `publish`
+// carries the same asymmetry and `clone` does not.
 //
 // # The ledger is paged rather than listed
 //
@@ -750,8 +751,9 @@ class SharedCatalog {
   /// set for one as readily as for an open one, and the verbs that
   /// write to it are kept apart on the screen instead.
   ///
-  /// That is enough for a round, which is refused before it costs
-  /// anything. It is not enough for a promotion: `enter_content`
+  /// That is enough for a round, where nothing but the op list crosses
+  /// before the model refuses it. It is not enough for a promotion:
+  /// `enter_content`
   /// streams the body into the team's blob store and only then asks
   /// whether the work is still open, so a promotion onto ended work
   /// sends the whole file and is told afterwards. This refuses here,
