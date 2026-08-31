@@ -757,10 +757,19 @@ class SharedCatalog {
   /// sends the whole file and is told afterwards. This refuses here,
   /// where nothing has been read off disk yet.
   /// Two refusals rather than one, because "not in the list" and
-  /// "ended" are different facts and a caller shows a person which.
-  /// The first is reachable while a re-read is in flight or after one
-  /// failed — a moment when this catalog cannot say the work is open,
-  /// which is not the same as saying it has closed.
+  /// "ended" are different facts. The first is what a failed re-read
+  /// leaves — `Resource` puts its data back to the initial and the
+  /// reason on `.error` — and not what one in flight leaves, which
+  /// keeps the previous list until it resolves.
+  ///
+  /// **These three `require`s are backstops and their messages reach
+  /// nobody.** They throw before `mutate` is called, and `mutate` is
+  /// the only thing that puts a refusal in front of a person. That is
+  /// the arrangement rather than a gap: a screen offers this verb only
+  /// when it has a line, work, and work that has not ended, so a guard
+  /// firing means a caller skipped what the screen checks. The message
+  /// is for whoever is reading the stack, and the tests assert which
+  /// of them fired.
   private requireOpenWork(): string {
     const pursuitId = this.requireWork();
     const work = this.work;

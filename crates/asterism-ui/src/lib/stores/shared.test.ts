@@ -460,7 +460,27 @@ describe("promoting an asset onto the open work", () => {
     await sharedCatalog.show("l1");
     sharedCatalog.selectPursuit("p1");
 
-    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    // Which refusal, not merely that one happened: the guard has two,
+    // and the other one ("not in this line's list") would pass a bare
+    // `toThrow` while saying something else entirely.
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
+      /has ended/,
+    );
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the selected work is not in the line's list", async () => {
+    // What a failed re-read leaves: `Resource` puts its data back to
+    // the initial, so the pursuit a screen selected is no longer
+    // there. Not the same fact as ended work, and not the same
+    // sentence.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.working = "p1";
+
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
+      /not in this line's list/,
+    );
     expect(mutateMock).not.toHaveBeenCalled();
   });
 

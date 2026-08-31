@@ -96,10 +96,13 @@
     try {
       promoted = await sharedCatalog.promote(assetId, named.trim());
     } catch {
-      // `mutate` has already put the refusal on screen, and this plane
-      // has nothing to add to it — the client's message names which
-      // refusal it is. Caught so a refusal is not also an unhandled
-      // rejection.
+      // Two kinds of failure arrive here and neither wants anything
+      // added. A refusal from the team is already on screen — `mutate`
+      // puts it there, and the client's message names which refusal it
+      // is. A refusal from the catalog's own guards is not, and cannot
+      // be: those fire when a caller skipped what this surface checks
+      // above, so what they say is for a stack trace rather than for a
+      // person. Caught so that neither becomes an unhandled rejection.
     } finally {
       sending = false;
     }
