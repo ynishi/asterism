@@ -187,6 +187,7 @@ other.
 - `post_asset_comment` — Posts a new comment. See [`PostAssetCommentCommand`] for the
 - `post_chapter_mark` — Adds a section to a band the person owns.
 - `post_material_mark` — Places a new mark. See [`PostMaterialMarkCommand`] for the anchor and
+- `promote_asset_to_team` — Hands one of this library's assets to a team, against open work.
 - `promote_snapshot_to_group` — Promotes a Snapshot into a hand-owned Group (mirror of
 - `promote_tag_to_group` — Snapshots every asset carrying a tag into a newly-created Group.
 - `promote_volatile_selection` — Fuses freeze + promote for the grid's volatile pick (W5-d):

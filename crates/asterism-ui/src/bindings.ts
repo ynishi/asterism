@@ -436,3 +436,5 @@ export type TeamRosterMemberDto = { user_id: string; role: string; };
 
 export type TeamCreatedDto = { team_id: string; };
 
+export type PromotedAssetDto = { entry_id: string; team_asset_id: string | null; digest: string; bytes_already_held: boolean | null; already_promoted: boolean; };
+

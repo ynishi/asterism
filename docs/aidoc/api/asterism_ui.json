@@ -658,6 +658,11 @@
       "docs": "Places a new mark. See [`PostMaterialMarkCommand`] for the anchor and\nauthor_kind / author_persona_id semantics."
     },
     {
+      "path": "asterism_ui::commands::promote_asset_to_team",
+      "kind": "function",
+      "docs": "Hands one of this library's assets to a team, against open work.\n\nThe act #66 exists for, and the one entry point content has (#148\ndecision 5): the pursuit is named because a team never holds an\nasset that is not attached to work.\n\n**What travels is decision 4's and is decided below this command**,\nin `PromotedMark::gather`, which is the only thing that can say\nwhich marks qualify: the filter is over the layer a mark sits in,\nand `MaterialMarkDto` drops the `layer_id` that join is made of.\nSo the marks are read through their repository rather than their\nservice, which is the same arrangement `publish` makes one screen\nover and for the same reason.\n\n**Not safe to press twice, and the answer says so rather than the\ncommand refusing.** Decision 7 mints a `TeamAsset` per promotion.\nWhat stops a second one is a relation row this machine wrote, which\nthe client reads before anything is sent — so a repeat is answered\nfrom here with `already_promoted` and nothing crosses the wire.\nThat is a fact about this machine and not about the team: another\nmember promoting the same bytes gets their own `TeamAsset`, and\nnothing here can see it.\n\n`named` is the caller's rather than the asset's title, and\n`Promotion::named` says why."
+    },
+    {
       "path": "asterism_ui::commands::promote_snapshot_to_group",
       "kind": "function",
       "docs": "Promotes a Snapshot into a hand-owned Group (mirror of\n`PromoteTagToGroup`): bulk-attaches every member in frozen order\nand stamps `origin_snapshot_id` as the Group's birth record."

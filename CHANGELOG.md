@@ -10,6 +10,45 @@ and this project adheres to
 
 ### Added
 
+- **Hand an asset to a team, from the pane that is showing it** (#200). The act
+  #66 exists for. #148 decision 5 gives content one way onto a team's line — a
+  verb scoped to open work, so a team never holds an asset that is not attached
+  to work — and #152 built the whole of it as a client function that no screen
+  offered as an act of its own. Publishing a line has called it per content
+  since #153; handing over one asset, deliberately, is what the detail pane does
+  now.
+
+  **What travels is said before it goes.** The file itself and the marks a
+  person wrote on it; not the thumbnails, not what was indexed from the file,
+  not the marks an import or a machine made — the receiving side can make those
+  again (decision 4). It reads above the control rather than beside the result,
+  because it is a thing to know before pressing.
+
+  **It goes onto whichever work the shared-lines drawer has open.** The team,
+  the line and the pursuit are the shared catalog's already, and it holds them
+  whether or not the drawer is showing — so work is opened once and promoted to
+  from as many assets as you like. With none open the pane says where to go and
+  offers to open the drawer, rather than showing a control that cannot act.
+
+  **A promotion is not a landing.** What it pushes is a round, and a round is a
+  request: the entry reaches the line when the work is closed as satisfied.
+  Pressing twice is not safe either — decision 7 mints a team asset per
+  promotion — and what stops a second one is a relation row this machine wrote,
+  so the answer says "this machine had already promoted it" rather than claiming
+  the team holds it once.
+
+  Three answers come back that a screen has to keep apart: the entry and the
+  team's copy of the bytes, the digest read at promote time, and whether the
+  team already held those bytes — where "nobody asked" is a third state and not
+  a no. A Collection and a multi-material asset are refused, each with a message
+  saying which: what a team holds for one is a conversion whose composition
+  decision 3 leaves open.
+
+  `just ui-e2e-teams` drives it against a real `teams-server`: an asset is
+  seeded into the profile over the app's own loopback HTTP surface, promoted
+  from its pane onto work opened in the drawer, and the round it pushed is read
+  back off that work rather than off the answer the write returned.
+
 - **Work a team's line from the app: open a pursuit, push a round, close it**
   (#198). #148 decision 10 says working on a shared line needs no copy, and the
   four verbs that take one from opening to closing now reach a screen. Nothing
@@ -198,8 +237,9 @@ and this project adheres to
   cannot start there either without work already open — decision 5 gives content
   exactly one entry point, scoped to an open pursuit, so the team never holds an
   Asset that is not attached to work. It is also a write that is not safe to
-  press twice: decision 7 mints a TeamAsset per promotion rather than finding
-  the first, which is the asymmetry `publish` carries and `clone` does not.
+  press twice: decision 7 mints a TeamAsset per promotion, so what keeps a
+  second press from making a second one is a relation row the promoting machine
+  wrote — which is the asymmetry `publish` carries and `clone` does not.
 
   Two things the design corrects rather than inherits. The roster's verbs answer
   to four rules and not one: #171's body hangs create, invite, join and leave on

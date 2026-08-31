@@ -89,10 +89,12 @@ const LOGIN = "e2e-member";
 const WORK_LINE_NAME = "ROOT";
 const WORK_ENTRY_NAME = "cut-01";
 
-/** The specs this suite runs, in the order the header argues for. */
+/** The specs this suite runs, in the order argued for where `specs`
+ *  is set below. */
 const SPECS = [
   "./e2e-teams/teams-connect.spec.ts",
   "./e2e-teams/teams-work.spec.ts",
+  "./e2e-teams/teams-promote.spec.ts",
 ];
 
 /** Everything the server owns, removed and remade on every run. */
@@ -264,14 +266,16 @@ export const config: WebdriverIO.Config & {
   // Named and ordered rather than globbed, because the order is load
   // bearing and a glob would decide it by filename.
   //
-  // The two specs share one app process — the service starts the binary
+  // The specs share one app process — the service starts the binary
   // once and hands each spec a session against it — so what one leaves
-  // in the window, the next one meets. Two things survive: the backend
-  // holds the team-server session for as long as the window does, and
-  // the catalog keeps the team id across a disconnect on purpose.
+  // in the window, the next one meets. What survives is everything the
+  // window holds rather than a list somebody keeps here: the backend's
+  // team-server session, the catalog's team id, which panel is open,
+  // which tab it is on. Each spec puts back what it can and states at
+  // its head what it met.
   //
-  // The first of those each spec can undo, and both do: they disconnect
-  // at the end. The second has no undo on this surface — the team field
+  // The session every spec can undo, and each does: they disconnect at
+  // the end. The team id has no undo on this surface — the team field
   // is `required`, so naming a team is a one-way trip and there is no
   // gesture that returns a window to having named none. `no-team` is
   // therefore reachable only by the spec that meets the window first,
@@ -463,6 +467,13 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_WORK_ID = worked.teamId;
   process.env.E2E_TEAMS_WORK_LINE = WORK_LINE_NAME;
   process.env.E2E_TEAMS_WORK_ENTRY = WORK_ENTRY_NAME;
+
+  // The app's own loopback HTTP surface, which is how the promotion
+  // spec seeds the one asset it hands over. Passed by environment like
+  // everything else here, and it is the app's port rather than the
+  // team server's: the two processes this suite runs both serve HTTP,
+  // and a spec reaching the wrong one gets a 404 that says nothing.
+  process.env.E2E_TEAMS_APP_URL = `http://${SERVER_HOST}:${APP_PORT}`;
 }
 
 /**
@@ -474,11 +485,12 @@ async function prepareFixture(): Promise<void> {
  * a line seeded into it would take that assertion away and leave the
  * bug it guards unwatched.
  *
- * Seeded over HTTP rather than through the app, because the app cannot
- * do this: putting content on a team's line is `enter_content`, which
- * is the promotion — #198's sibling and out of its scope. The work
- * surface under test moves entries the line already holds, so the
- * fixture is what puts one there.
+ * Seeded over HTTP rather than through the app, because of when it is
+ * needed rather than what the app can do: the work spec runs before
+ * anything has promoted anything, and it needs a line that already
+ * holds an entry to rename. The app grew the promotion in #200, and
+ * `teams-promote.spec.ts` drives it — but that is the spec after this
+ * fixture, not a way to build it.
  *
  * The order is decision 5's rather than a choice: content enters
  * against open work, and only then can a round name it. The same walk

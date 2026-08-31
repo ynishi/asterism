@@ -33,7 +33,7 @@
 // the panel is not showing a stale copy; it is showing the answer to
 // the last question somebody asked.
 //
-// # Two writes, and they are not symmetrical
+// # Writes, and whether pressing one again is safe
 //
 // `clone` copies one entry onto this machine (decision 10). It is an
 // import: the answer is an ordinary asset, and asking twice gets the
@@ -44,6 +44,10 @@
 // The re-enactment option is chosen here at init and can never be
 // chosen later, which is why the panel states its two costs before
 // offering it rather than after.
+//
+// The writes that came after these two answer the same question where
+// they are defined: the work verbs below, and `promote`, which the
+// promotion section further down is about.
 //
 // # Three subjects under a team, and the frame that follows
 //
@@ -195,9 +199,13 @@
 //
 // It is also a write that is not safe to press twice, and the one
 // where that is least visible: decision 7 mints a TeamAsset per
-// promotion, so a second press makes a second one over one stored copy
-// rather than finding the first. `publish` carries the same asymmetry
-// and `clone` does not.
+// promotion. What stops a second press from making a second one is a
+// relation row this machine wrote, which the client reads before
+// anything is sent — so a repeat costs nothing on the wire and says
+// so, though it still reads and hashes the material, which is why it
+// can report a digest at all. Two *members* promoting the same bytes
+// still get one each, which no row on this machine can see. `publish`
+// carries the same asymmetry and `clone` does not.
 //
 // # The ledger is paged rather than listed
 //
@@ -279,6 +287,7 @@ import type {
   ForgeLineHistoryDto,
   ForgeOpDto,
   ForgePursuitDto,
+  PromotedAssetDto,
   TeamCreatedDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
@@ -732,6 +741,79 @@ class SharedCatalog {
   private requireWork(): string {
     if (this.working === null) throw new Error("no work is open");
     return this.working;
+  }
+
+  /// Work that is being read *and* has not ended, or a refusal.
+  ///
+  /// Stricter than `requireWork` because one caller has more to lose
+  /// than a refusal. Reading an ended pursuit is ordinary — the drawer
+  /// lists ended work and shows what was asked for — so `working` is
+  /// set for one as readily as for an open one, and the verbs that
+  /// write to it are kept apart on the screen instead.
+  ///
+  /// That is enough for a round, where nothing but the op list crosses
+  /// before the model refuses it. It is not enough for a promotion:
+  /// `enter_content`
+  /// streams the body into the team's blob store and only then asks
+  /// whether the work is still open, so a promotion onto ended work
+  /// sends the whole file and is told afterwards. This refuses here,
+  /// where nothing has been read off disk yet.
+  /// Two refusals rather than one, because "not in the list" and
+  /// "ended" are different facts. The first is what a failed re-read
+  /// leaves — `Resource` puts its data back to the initial and the
+  /// reason on `.error` — and not what one in flight leaves, which
+  /// keeps the previous list until it resolves.
+  ///
+  /// **These three `require`s are backstops and their messages reach
+  /// nobody.** They throw before `mutate` is called, and `mutate` is
+  /// the only thing that puts a refusal in front of a person. That is
+  /// the arrangement rather than a gap: a screen offers this verb only
+  /// when it has a line, work, and work that has not ended, so a guard
+  /// firing means a caller skipped what the screen checks. The message
+  /// is for whoever is reading the stack, and the tests assert which
+  /// of them fired.
+  private requireOpenWork(): string {
+    const pursuitId = this.requireWork();
+    const work = this.work;
+    if (work === null) {
+      throw new Error("the work being read is not in this line's list");
+    }
+    if (work.close !== null) {
+      throw new Error("that work has ended, so nothing can enter against it");
+    }
+    return pursuitId;
+  }
+
+  /// Hands one of this library's assets to the team, onto the open
+  /// work.
+  ///
+  /// The verb the detail pane reaches for, and it is here rather than
+  /// there because the three ids it needs are this catalog's: the
+  /// team, the line, and the pursuit content may enter against (#148
+  /// decision 5). A pane holding its own copies of those would be a
+  /// second answer to a question this frame already answers, and the
+  /// place they could disagree.
+  ///
+  /// What comes back is what only the promotion knows. The work is
+  /// re-read here rather than taken from what the write answered, on
+  /// the rule the rest of this catalog follows — a pursuit belongs to
+  /// a line somebody else may also be working. Nothing re-reads the
+  /// contents, because a round is a request: the entry this pushed is
+  /// on the line when the work is closed satisfied and not before.
+  async promote(assetId: string, named: string): Promise<PromotedAssetDto> {
+    const lineId = this.requireLine();
+    const pursuitId = this.requireOpenWork();
+    this.said = null;
+    const promoted = await mutate<PromotedAssetDto>(
+      "promote_asset_to_team",
+      { teamIdRaw: this.teamId, lineId, pursuitId, assetId, named },
+      "promote that asset to the team",
+    );
+    this.said = promoted.already_promoted
+      ? "This machine had already promoted that asset onto this line, so nothing was sent."
+      : "Promoted. It is on the work — closing it as satisfied is what puts it on the line.";
+    await this.reloadWork();
+    return promoted;
   }
 
   /// Copies one entry onto this machine.
