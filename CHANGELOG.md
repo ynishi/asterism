@@ -13,8 +13,10 @@ and this project adheres to
 - **Hand an asset to a team, from the pane that is showing it** (#200). The act
   #66 exists for. #148 decision 5 gives content one way onto a team's line — a
   verb scoped to open work, so a team never holds an asset that is not attached
-  to work — and #152 built the whole of it as a client function that nothing on
-  screen called. The asset detail pane calls it now.
+  to work — and #152 built the whole of it as a client function that no screen
+  offered as an act of its own. Publishing a line has called it per content
+  since #199; handing over one asset, deliberately, is what the detail pane does
+  now.
 
   **What travels is said before it goes.** The file itself and the marks a
   person wrote on it; not the thumbnails, not what was indexed from the file,
