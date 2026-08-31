@@ -42,6 +42,11 @@ and this project adheres to
   saying which: what a team holds for one is a conversion whose composition
   decision 3 leaves open.
 
+  `just ui-e2e-teams` drives it against a real `teams-server`: an asset is
+  seeded into the profile over the app's own loopback HTTP surface, promoted
+  from its pane onto work opened in the drawer, and the round it pushed is read
+  back off that work rather than off the answer the write returned.
+
 - **Work a team's line from the app: open a pursuit, push a round, close it**
   (#198). #148 decision 10 says working on a shared line needs no copy, and the
   four verbs that take one from opening to closing now reach a screen. Nothing
