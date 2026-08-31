@@ -889,6 +889,100 @@ describe("walking the ledger", () => {
   });
 });
 
+describe("the teams to pick from", () => {
+  // The read the typed team id was waiting for. What these pin is that
+  // it belongs to the connection rather than to a team — it is read
+  // when there is somebody to ask and dropped when there is not — and
+  // that an empty answer is not the same statement as "no way in".
+
+  beforeEach(() => {
+    sharedCatalog.teams.reset();
+  });
+
+  it("reads them when the panel opens on a connection", async () => {
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce({
+      teams: [
+        { team_id: "t1", role: "owner", created_at_ms: 1 },
+        { team_id: "t2", role: "member", created_at_ms: 2 },
+      ],
+    });
+    apiMock.mockResolvedValueOnce([]); // lines, since a team is named
+
+    await sharedCatalog.openPanel();
+
+    expect(apiMock).toHaveBeenCalledWith("my_teams");
+    expect(sharedCatalog.teams.data.map((one) => one.team_id)).toEqual([
+      "t1",
+      "t2",
+    ]);
+  });
+
+  it("does not ask a server it is not connected to", async () => {
+    // The list is about the account, so with nobody to ask there is
+    // nothing to answer — and asking would be the panel reporting on a
+    // connection it does not have.
+    apiMock.mockResolvedValueOnce(null); // refreshSession answers nobody
+
+    await sharedCatalog.openPanel();
+
+    expect(apiMock).not.toHaveBeenCalledWith("my_teams");
+  });
+
+  it("reads them on connecting, which is the phase they are for", async () => {
+    mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce({
+      teams: [{ team_id: "t1", role: "owner", created_at_ms: 1 }],
+    });
+
+    await sharedCatalog.connect("http://x", "who", "secret");
+
+    expect(apiMock).toHaveBeenCalledWith("my_teams");
+    expect(sharedCatalog.teams.data).toHaveLength(1);
+  });
+
+  it("reads them again after founding one", async () => {
+    // The list is one shorter than the truth until it does, and the
+    // person who just founded a team is the likeliest to pick it.
+    mutateMock.mockResolvedValueOnce({ team_id: "t9" });
+    apiMock.mockResolvedValueOnce({
+      teams: [{ team_id: "t9", role: "owner", created_at_ms: 3 }],
+    });
+
+    await sharedCatalog.createTeam();
+
+    expect(sharedCatalog.teams.data.map((one) => one.team_id)).toEqual(["t9"]);
+  });
+
+  it("drops them when the connection goes", async () => {
+    apiMock.mockResolvedValueOnce({
+      teams: [{ team_id: "t1", role: "owner", created_at_ms: 1 }],
+    });
+    await sharedCatalog.teams.load({});
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.teams.data).toEqual([]);
+  });
+
+  it("keeps them when another team is named", async () => {
+    // Naming a team says nothing about which teams the account is in.
+    // `lookAt` drops what belonged to the team named before; this
+    // belongs to the connection.
+    apiMock.mockResolvedValueOnce({
+      teams: [{ team_id: "t1", role: "owner", created_at_ms: 1 }],
+    });
+    await sharedCatalog.teams.load({});
+    apiMock.mockResolvedValueOnce([]); // lines for the new team
+
+    await sharedCatalog.lookAt("t2");
+
+    expect(sharedCatalog.teams.data).toHaveLength(1);
+  });
+});
+
 describe("the roster", () => {
   beforeEach(() => {
     sharedCatalog.roster.reset();

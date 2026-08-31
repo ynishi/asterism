@@ -126,6 +126,17 @@
     await refreshOpenTab();
   }
 
+  // Picking from the list is the same act as submitting the field, and
+  // goes the same way — `lookAt` and then whichever tab is open. The
+  // field is written too, so the two never disagree about which team
+  // this window is on and pressing a row leaves the field showing what
+  // was picked rather than what was typed last.
+  async function choose(teamId: string) {
+    teamField = teamId;
+    await sharedCatalog.lookAt(teamId);
+    await refreshOpenTab();
+  }
+
   // Naming a team drops what the on-demand tabs held, because what they
   // held was about the team that was named before. Whichever of them is
   // showing has to ask again, or it shows an unread state under a tab
@@ -258,9 +269,53 @@
           </button>
         </div>
 
+        <!-- The teams this account is in, which is what the field
+             below used to be the only way to name. Ids rather than
+             names because a team has none — the model carries an id
+             and a creation time, the same shape the roster tab meets
+             and says so about. The role is the one fact that tells one
+             row from another today. -->
+        {#if sharedCatalog.teams.loading}
+          <p class="drawer-empty">reading your teams…</p>
+        {:else if sharedCatalog.teams.error}
+          <p class="drawer-empty drawer-error">
+            Could not read your teams: {sharedCatalog.teams.error}
+          </p>
+        {:else if sharedCatalog.teams.data.length > 0}
+          <ul class="drawer-list teams" role="list">
+            {#each sharedCatalog.teams.data as team (team.team_id)}
+              <li>
+                <button
+                  type="button"
+                  class="drawer-row"
+                  class:active={sharedCatalog.teamId === team.team_id}
+                  onclick={() => choose(team.team_id)}
+                  title="Read the lines this team hosts"
+                >
+                  <span class="row-title mono">{team.team_id}</span>
+                  <span class="row-standing">{team.role}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <!-- Empty is not "no way in". The read answers membership
+               and an instance admin belongs to nothing by being one
+               (#83 §1), so the field below is the whole surface for
+               that reader. -->
+          <p class="drawer-empty">
+            You are not a member of any team on this server.
+          </p>
+        {/if}
+
+        <!-- Kept, and demoted. A team you are a member of is in the
+             list above; this names one that is not, which is what an
+             admin's every team looks like from here — they act inside
+             teams without a membership row, so their list is empty
+             while their reach is not. -->
         <form class="drawer-form" onsubmit={look}>
           <label>
-            Team
+            Or name a team directly
             <input
               type="text"
               bind:value={teamField}
@@ -474,7 +529,11 @@
         {:else if sharedCatalog.lines.data.length === 0}
           <p class="drawer-empty">This team hosts no lines.</p>
         {:else}
-          <ul class="drawer-list" role="list">
+          <!-- Named `lines`, because this drawer now holds two lists
+               that share the styling: the teams to pick from and the
+               lines the picked one hosts. The roster and the ledger
+               were already distinguished this way. -->
+          <ul class="drawer-list lines" role="list">
             {#each sharedCatalog.lines.data as line (line.id)}
               <li>
                 <button
@@ -891,6 +950,15 @@
     padding: 0.45rem 0.1rem;
     text-align: left;
     font-size: 0.82rem;
+  }
+  .teams .drawer-row.active {
+    font-weight: 600;
+  }
+  .mono {
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .line-head {
     display: flex;

@@ -296,7 +296,10 @@ describe("work against a team's line", () => {
     // it, so the way back is what says the frame is open — and the
     // publish form, which belongs to the list, has to be gone with it.
     await stage(trail, "open the line", ROUND_TRIP_MS, async () => {
-      await clickCarrying(`${DRAWER} .drawer-list`, lineName);
+      // `.lines` rather than `.drawer-list`: the drawer holds two
+      // lists that share the styling since #202 put the teams to pick
+      // from above these, and the looser selector finds the first.
+      await clickCarrying(`${DRAWER} .drawer-list.lines`, lineName);
       await pollUntil(
         async () => ((await drawerText()) ?? "").includes("the team's lines"),
         "opening a line did not show its frame",

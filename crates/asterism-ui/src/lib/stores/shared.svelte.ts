@@ -287,6 +287,8 @@ import type {
   ForgeLineHistoryDto,
   ForgeOpDto,
   ForgePursuitDto,
+  MyTeamDto,
+  MyTeamsDto,
   PromotedAssetDto,
   TeamCreatedDto,
   TeamLedgerEventDto,
@@ -349,6 +351,26 @@ class SharedCatalog {
       }),
     null,
     "sharedCatalog.history",
+  );
+
+  /// The teams this window's account belongs to.
+  ///
+  /// The read the typed team id was waiting for, and the only one here
+  /// that names no team — it is what a caller asks before they have
+  /// one, so it belongs to the connection rather than to a team.
+  /// Loaded when a connection is made and dropped when it goes; it
+  /// says nothing about the team currently named, and naming another
+  /// does not change it.
+  ///
+  /// **It answers membership, not reach**, which the route and the
+  /// command both state. An admin who joined nothing gets an empty
+  /// list while retaining every capacity they had — so a screen must
+  /// not read an empty list as "no way in", and the panel keeps the
+  /// field that names a team directly for exactly that reader.
+  teams = new Resource<Record<string, never>, MyTeamDto[]>(
+    async () => (await api<MyTeamsDto>("my_teams")).teams,
+    [] as MyTeamDto[],
+    "sharedCatalog.teams",
   );
 
   /// Who is in the team now named.
@@ -505,6 +527,13 @@ class SharedCatalog {
     this.forgetLedger();
     this.roster.reset();
     await this.refreshSession();
+    if (this.session === null) return;
+    // The teams a person may choose from, on the same rule as the
+    // lines: a served-through view that showed what it last had would
+    // be a mirror. Read whenever there is somebody to ask, which is
+    // before a team is named rather than after — it is what the
+    // `no-team` phase shows.
+    await this.teams.load({});
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
 
@@ -527,6 +556,10 @@ class SharedCatalog {
       { baseUrl, login, password },
       "connect to that team server",
     );
+    // A connection is what makes this answerable, so it is read here
+    // rather than left for the next time the panel opens — the phase
+    // this lands in is the one the list is for.
+    await this.teams.load({});
   }
 
   /// The ledger as far as it has been read, oldest first.
@@ -570,6 +603,7 @@ class SharedCatalog {
     this.history.reset();
     this.roster.reset();
     this.pursuits.reset();
+    this.teams.reset();
     this.working = null;
     this.forgetLedger();
   }
@@ -588,6 +622,9 @@ class SharedCatalog {
       "create a team",
     );
     this.said = `Created team ${created.team_id}.`;
+    // The list is one shorter than the truth until this lands, and the
+    // person who just founded a team is the likeliest to pick it.
+    await this.teams.load({});
     return created.team_id;
   }
 

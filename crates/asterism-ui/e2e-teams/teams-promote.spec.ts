@@ -94,6 +94,9 @@ interface PersonaDto {
 interface CardDto {
   id: string;
   cover: string | null;
+  /** Where the material is. Read because a row outlives the path it
+   *  remembers — see `ensureAsset`. */
+  source_locator: string;
 }
 
 interface PageDto {
@@ -275,6 +278,24 @@ async function snap(name: string): Promise<void> {
   }
 }
 
+/**
+ * Whether the bytes a card names are still on disk.
+ *
+ * A card carries its locator in the display spelling — `to_display`,
+ * which for a file is the bare path and for anything else is a URL or
+ * a name. So this is `existsSync` of the string, and a locator that is
+ * not a path answers false, which is the honest answer to the question
+ * being asked: a promotion reads the material's bytes off disk.
+ *
+ * Stored, the same locator is a typed shape (`{"kind":"file",…}`).
+ * Reading the card's spelling as that one is what an earlier draft of
+ * this did, and it answered "gone" for every row — including the ones
+ * it had just written.
+ */
+function materialIsThere(displayLocator: string): boolean {
+  return fs.existsSync(displayLocator);
+}
+
 async function api<T>(
   appUrl: string,
   method: string,
@@ -328,11 +349,44 @@ async function ensureAsset(appUrl: string): Promise<string> {
     "GET",
     `/asterism/assets?persona_id=${encodeURIComponent(persona.id)}&limit=500`,
   );
-  const seen = live.items.find((card) => card.cover === COVER);
+  // A row whose material is still there is the one to reuse. One
+  // whose material is gone is not: a promotion reads the bytes, so
+  // reusing it fails at the read rather than at anything this spec is
+  // about. That is a state the profile has actually been left in —
+  // the rows outlive the paths they remember — and repairing it is
+  // the fixture's job rather than a person's.
+  const ours = live.items.filter((card) => card.cover === COVER);
+  const seen = ours.find((card) => materialIsThere(card.source_locator));
   if (seen) return seen.id;
 
-  const dir = path.join(repoRoot, "workspace/runtime/e2e-fixtures/promote");
-  fs.mkdirSync(dir, { recursive: true });
+  // Trashed rather than left beside the new row. The seeded material
+  // is the same bytes every time, so a live row pointing at a missing
+  // copy of them folds with the one about to be added and the grid
+  // shows a card whose asset id is not the one this spec then looks
+  // for. Trashing is reversible and this profile is disposable.
+  for (const dead of ours) {
+    await api<unknown>(appUrl, "POST", "/asterism/assets/trash", {
+      asset_id: dead.id,
+      comment: "e2e-teams: its material is gone; reseeding",
+    });
+  }
+
+  // Through `realpath`, and that is the whole of why this line is not
+  // a `path.join`. `workspace/` is a symlink into the main checkout,
+  // so every worktree writes this file to the same place — but the
+  // path *this* worktree reaches it by runs through its own symlink,
+  // and that is what the asset row would remember. The row outlives
+  // the worktree: a later run from anywhere else finds a locator
+  // through a directory that no longer exists, and the promotion
+  // fails reading bytes rather than doing anything this spec is about.
+  // Measured on 2026-09-01, one worktree after the row was seeded.
+  const dir = fs.realpathSync(
+    (() => {
+      const under = path.join(repoRoot, "workspace/runtime/e2e-fixtures/promote");
+      fs.mkdirSync(under, { recursive: true });
+      return under;
+    })(),
+  );
   const file = path.join(dir, "promoted.md");
   if (!fs.existsSync(file)) {
     fs.writeFileSync(
@@ -454,7 +508,9 @@ describe("promoting an asset to a team", () => {
     // else — #148 decision 5, and the reason the pane refuses when
     // there is none.
     await stage(trail, "open work on the line", ROUND_TRIP_MS, async () => {
-      await clickCarrying(`${DRAWER} .drawer-list`, lineName);
+      // `.lines` rather than `.drawer-list`: two lists share that
+      // class since #202, and the looser selector finds the teams.
+      await clickCarrying(`${DRAWER} .drawer-list.lines`, lineName);
       await pollUntil(
         async () => ((await textOf(DRAWER)) ?? "").includes("the team's lines"),
         "opening a line did not show its frame",
@@ -509,11 +565,22 @@ describe("promoting an asset to a team", () => {
     await stage(trail, "hand it over", ROUND_TRIP_MS, async () => {
       await fill(`${PROMOTE} input[type="text"]`, NAMED);
       await clickLabelled(PROMOTE, "Promote");
+      // A refusal is shown by `mutate` as a toast and by nothing else
+      // — the surface's own catch adds nothing to it — so the wait is
+      // for either answer. Without this, a refused promotion times out
+      // saying only that no digest arrived, which is the least useful
+      // half of what the screen is showing.
       await pollUntil(
-        async () => (await proseOf(PROMOTE)).includes("sha256:"),
-        "the promotion never reported a digest",
+        async () =>
+          (await proseOf(PROMOTE)).includes("sha256:") ||
+          (await textOf(".refusal-toast")) !== null,
+        "the promotion neither reported a digest nor a refusal",
         ROUND_TRIP_MS,
       );
+      const refused = await proseOf(".refusal-toast");
+      if (refused !== "") {
+        throw new Error(`the promotion was refused: ${refused}`);
+      }
       const text = await proseOf(PROMOTE);
       // The team is new this run, so this promotion is new: the bytes
       // were sent, and the answer must not read as a repeat.
