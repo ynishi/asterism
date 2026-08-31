@@ -608,6 +608,11 @@
       "docs": "Files a Group under a Dir (`None` = back to the root)."
     },
     {
+      "path": "asterism_ui::commands::my_teams",
+      "kind": "function",
+      "docs": "The teams this window's account belongs to.\n\nThe read a picker is over, and the one team read that names no\nteam: it is what a caller asks before they have one. Mapped to the\ncontract for the reason the roster's and the ledger's are — the\nwire is what a member's client and a team server say to each other,\nand a screen holds one vocabulary.\n\nAnswers membership rather than reach, which the route and the\nclient both state on their own side: an admin who is a member of\nnothing gets an empty list and keeps every capacity they had."
+    },
+    {
       "path": "asterism_ui::commands::open_forge_line",
       "kind": "function",
       "docs": "Opens a line."

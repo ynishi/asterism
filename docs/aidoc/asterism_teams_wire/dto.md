@@ -14,6 +14,8 @@ its own (#83 §1).
 - `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
+- `MyTeamDto` — One team the caller belongs to.
+- `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.

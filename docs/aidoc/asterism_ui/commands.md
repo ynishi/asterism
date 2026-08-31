@@ -177,6 +177,7 @@ other.
 - `merge_tags` — Folds one tag channel into another and deletes the source — the
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
+- `my_teams` — The teams this window's account belongs to.
 - `open_forge_line` — Opens a line.
 - `open_forge_pursuit` — Opens work against a line.
 - `open_forge_thread` — Opens a conversation about something in the forge.

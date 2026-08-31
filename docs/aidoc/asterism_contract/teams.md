@@ -38,6 +38,8 @@ and an actor's display name is a snapshot rather than a lookup.
 
 ## Types
 
+- `MyTeamDto` — One team the account belongs to.
+- `MyTeamsDto` — The teams this window's account belongs to.
 - `PromotedAssetDto` — What a promotion left behind, as a screen needs to read it.
 - `TeamCreatedDto` — What founding a team answers with.
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.

@@ -63,6 +63,16 @@
       "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
     },
     {
+      "path": "asterism_teams_wire::dto::MyTeamDto",
+      "kind": "struct",
+      "docs": "One team the caller belongs to.\n\n**No name, because a team has none.** The `team` table is an id and\na creation time; nothing in the model, the ledger's kinds or this\nwire carries a label for one. So a picker over these rows shows\nids, the way the roster shows user ids and says why. Naming a team\nis a change to the model rather than a field this DTO is missing."
+    },
+    {
+      "path": "asterism_teams_wire::dto::MyTeamsDto",
+      "kind": "struct",
+      "docs": "The teams the caller is a member of (`GET /teams`).\n\nThe roster read turned around: that one takes a team and answers\nwith users, this one takes the caller and answers with teams. It is\nthe only team read that names no team in its path, because the\nquestion is not about one."
+    },
+    {
       "path": "asterism_teams_wire::dto::ResolvedContentDto",
       "kind": "struct",
       "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
