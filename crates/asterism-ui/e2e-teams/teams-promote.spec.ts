@@ -291,9 +291,8 @@ async function api<T>(
  * builds a row this app can read.
  *
  * The material is a real file on disk because a promotion reads its
- * bytes — the client hashes at promote time rather than trusting a
- * stored digest, since the declared digest is what the server verifies
- * while it writes.
+ * bytes: the client hashes at promote time rather than trusting a
+ * stored digest, for the reason its own `hash_at_promote_time` gives.
  */
 async function ensureAsset(appUrl: string): Promise<string> {
   await api<unknown>(appUrl, "GET", "/asterism/health").catch((err) => {

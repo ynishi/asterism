@@ -33,7 +33,7 @@
 // the panel is not showing a stale copy; it is showing the answer to
 // the last question somebody asked.
 //
-// # Two writes, and they are not symmetrical
+// # Writes, and whether pressing one again is safe
 //
 // `clone` copies one entry onto this machine (decision 10). It is an
 // import: the answer is an ordinary asset, and asking twice gets the
@@ -44,6 +44,10 @@
 // The re-enactment option is chosen here at init and can never be
 // chosen later, which is why the panel states its two costs before
 // offering it rather than after.
+//
+// The writes that came after these two answer the same question where
+// they are defined: the work verbs below, and `promote`, which the
+// promotion section further down is about.
 //
 // # Three subjects under a team, and the frame that follows
 //
@@ -195,8 +199,11 @@
 //
 // It is also a write that is not safe to press twice, and the one
 // where that is least visible: decision 7 mints a TeamAsset per
-// promotion, so a second press makes a second one over one stored copy
-// rather than finding the first. `publish` carries the same asymmetry
+// promotion. What stops a second press from making a second one is a
+// relation row this machine wrote, which the client reads before
+// anything is sent — so a repeat costs nothing here and says so, and
+// two *members* promoting the same bytes still get one each, which no
+// row on this machine can see. `publish` carries the same asymmetry
 // and `clone` does not.
 //
 // # The ledger is paged rather than listed
@@ -735,6 +742,37 @@ class SharedCatalog {
     return this.working;
   }
 
+  /// Work that is being read *and* has not ended, or a refusal.
+  ///
+  /// Stricter than `requireWork` because one caller has more to lose
+  /// than a refusal. Reading an ended pursuit is ordinary — the drawer
+  /// lists ended work and shows what was asked for — so `working` is
+  /// set for one as readily as for an open one, and the verbs that
+  /// write to it are kept apart on the screen instead.
+  ///
+  /// That is enough for a round, which is refused before it costs
+  /// anything. It is not enough for a promotion: `enter_content`
+  /// streams the body into the team's blob store and only then asks
+  /// whether the work is still open, so a promotion onto ended work
+  /// sends the whole file and is told afterwards. This refuses here,
+  /// where nothing has been read off disk yet.
+  /// Two refusals rather than one, because "not in the list" and
+  /// "ended" are different facts and a caller shows a person which.
+  /// The first is reachable while a re-read is in flight or after one
+  /// failed — a moment when this catalog cannot say the work is open,
+  /// which is not the same as saying it has closed.
+  private requireOpenWork(): string {
+    const pursuitId = this.requireWork();
+    const work = this.work;
+    if (work === null) {
+      throw new Error("the work being read is not in this line's list");
+    }
+    if (work.close !== null) {
+      throw new Error("that work has ended, so nothing can enter against it");
+    }
+    return pursuitId;
+  }
+
   /// Hands one of this library's assets to the team, onto the open
   /// work.
   ///
@@ -753,7 +791,7 @@ class SharedCatalog {
   /// on the line when the work is closed satisfied and not before.
   async promote(assetId: string, named: string): Promise<PromotedAssetDto> {
     const lineId = this.requireLine();
-    const pursuitId = this.requireWork();
+    const pursuitId = this.requireOpenWork();
     this.said = null;
     const promoted = await mutate<PromotedAssetDto>(
       "promote_asset_to_team",

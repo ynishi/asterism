@@ -307,3 +307,108 @@ pub(crate) async fn hash_at_promote_time(path: &Path) -> Result<String, DomainEr
     }
     Ok(hasher.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use asterism_core::domain::attribution::AttributionContext;
+    use asterism_core::domain::value::{PersonaId, SourceKind, SourceRef};
+    use chrono::Utc;
+
+    /// One ordinary asset: one material, one local file.
+    ///
+    /// The material is added rather than assumed — `Asset::new` records
+    /// the source and leaves the materials to the ingest path, so an
+    /// asset fresh from the constructor is the *no material* case.
+    fn an_asset() -> Asset {
+        let source = SourceRef::new(SourceKind::new(SourceKind::FS).unwrap(), "/tmp/x.png")
+            .expect("a source");
+        let mut asset = Asset::new(
+            PersonaId::new(),
+            source.clone(),
+            None,
+            Utc::now(),
+            &AttributionContext::asserted(None, None).expect("stating nobody is always valid"),
+        );
+        asset
+            .materials
+            .push(Material::primary(source.locator, Some(1), Utc::now()));
+        asset
+    }
+
+    /// What a v0 promotion carries, over the asset it is meant for.
+    #[test]
+    fn one_material_is_what_a_promotion_carries() {
+        let asset = an_asset();
+        assert!(sole_material(&asset).is_ok(), "an ordinary asset promotes");
+    }
+
+    /// The three refusals, and each says which it is.
+    ///
+    /// Worth pinning because the surfaces above this one deliberately
+    /// do not pre-empt them: the pane hands the client an asset and
+    /// shows whatever comes back, so this message *is* what a person
+    /// reads. A refusal that stopped naming which case it was would
+    /// leave them with "no" and nowhere to go.
+    #[test]
+    fn a_collection_is_refused_as_one() {
+        let mut asset = an_asset();
+        asset.role = AssetRole::Collection;
+
+        let said = sole_material(&asset)
+            .expect_err("a Collection is refused")
+            .to_string();
+
+        assert!(
+            said.contains("Collection"),
+            "the refusal says which case this is: {said}"
+        );
+        // And why it is undecided rather than unsupported, which is
+        // what makes it an answer instead of a wall.
+        assert!(
+            said.contains("decision 3"),
+            "the refusal points at the decision that leaves the composition open: {said}"
+        );
+    }
+
+    #[test]
+    fn several_materials_are_refused_with_their_count() {
+        let mut asset = an_asset();
+        let one = asset.materials[0].clone();
+        asset.materials.push(one);
+
+        let said = sole_material(&asset)
+            .expect_err("a multi-material asset is refused")
+            .to_string();
+
+        assert!(
+            said.contains("2 materials"),
+            "the refusal says how many it found: {said}"
+        );
+        assert!(
+            said.contains("decision 3"),
+            "and why one of them is not the answer: {said}"
+        );
+    }
+
+    #[test]
+    fn nothing_to_send_is_refused_as_that() {
+        let mut asset = an_asset();
+        asset.materials.clear();
+
+        let said = sole_material(&asset)
+            .expect_err("an asset with no material is refused")
+            .to_string();
+
+        assert!(
+            said.contains("no material"),
+            "the refusal says what is missing: {said}"
+        );
+        // Decision 4 rather than 3: this one is not about composition,
+        // it is about there being nothing that cannot be re-derived.
+        assert!(
+            said.contains("decision 4"),
+            "and which rule makes that fatal: {said}"
+        );
+    }
+}

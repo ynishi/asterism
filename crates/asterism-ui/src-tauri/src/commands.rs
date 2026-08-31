@@ -3601,14 +3601,13 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
 /// decision 5): the pursuit is named because a team never holds an
 /// asset that is not attached to work.
 ///
-/// **What travels is decision 4's and is decided below this command.**
-/// The material's bytes and the marks whose layer origin is `User`;
-/// thumbnails, indexed bodies and `Imported` / `Machine` marks stay
-/// home because the receiving side can make them again. `PromotedMark::
-/// gather` is the only thing that can say which is which, because the
-/// filter is over the layer a mark sits in and the mark DTO drops the
-/// id that join is made of — which is why the two reads below are the
-/// domain's rather than the two services' DTOs.
+/// **What travels is decision 4's and is decided below this command**,
+/// in `PromotedMark::gather`, which is the only thing that can say
+/// which marks qualify: the filter is over the layer a mark sits in,
+/// and `MaterialMarkDto` drops the `layer_id` that join is made of.
+/// So the marks are read through their repository rather than their
+/// service, which is the same arrangement `publish` makes one screen
+/// over and for the same reason.
 ///
 /// **Not safe to press twice, and the answer says so rather than the
 /// command refusing.** Decision 7 mints a `TeamAsset` per promotion.
@@ -3619,10 +3618,8 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
 /// member promoting the same bytes gets their own `TeamAsset`, and
 /// nothing here can see it.
 ///
-/// `named` is the caller's rather than the asset's title, because a
-/// line's names are the team's namespace. The title travels anyway, in
-/// the projection, where it reads as what the promoter said rather than
-/// as the line's own name for the entry.
+/// `named` is the caller's rather than the asset's title, and
+/// `Promotion::named` says why.
 #[tauri::command]
 pub async fn promote_asset_to_team(
     state: State<'_, AppState>,

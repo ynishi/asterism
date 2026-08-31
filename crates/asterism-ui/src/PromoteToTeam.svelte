@@ -9,18 +9,15 @@
   //
   // # Why it is here and not on the shared-lines drawer
   //
-  // The subject is the asset. #152's client converts a local Asset into
-  // a TeamAsset, and a verb placed on the drawer would ask somebody to
-  // name their asset from a screen that is not showing it — which is
-  // the catalog's own argument, and #171's answer.
-  //
-  // The alternative worth naming is the local plane's: `ForgeWork`
+  // `shared.svelte.ts` argues the placement under "A promotion does not
+  // start here" and leaves this surface the rest. What it does not
+  // consider is the arrangement the local plane uses: `ForgeWork`
   // builds a round out of the grid selection, and the drawer could have
-  // done the same. It would have made one gesture where this makes two.
-  // What decided it against is decision 7 — a `TeamAsset` is minted per
-  // promotion — so a selection of five behind one press is five acts
-  // that cannot be pressed twice, and nothing on the way would have
-  // said so.
+  // taken a promotion the same way, making one gesture where this makes
+  // two. What decided against it is decision 7 — a `TeamAsset` is
+  // minted per promotion — so a selection of five behind one press is
+  // five acts that cannot be pressed twice, and nothing on the way
+  // would have said so.
   //
   // # Which pursuit, and what this shows when there is none
   //
@@ -28,9 +25,9 @@
   // promotion needs — team, line, pursuit — are `sharedCatalog`'s
   // already, and it holds them whether or not the drawer is showing, so
   // a person opens work once and promotes from as many assets as they
-  // like. This surface reads them and never sets them: a picker here
-  // would be a second place that names a team, which is the shape
-  // decision 16 refuses one layer down.
+  // like. This surface reads them and never sets them; a picker here
+  // would be a second place naming the same three, and then two places
+  // could disagree about which team an asset was going to.
   //
   // With no work open there is nothing to promote *to*, and this says
   // so rather than offering a disabled button — a control that cannot
@@ -39,12 +36,10 @@
   //
   // # What travels is said before it goes
   //
-  // #171 asks for this in as many words, and decision 4 is the rule:
-  // the material's bytes and the marks whose layer origin is `User`.
-  // Thumbnails, indexed bodies and `Imported` / `Machine` marks stay
-  // home because the receiving side can make them again. It is stated
-  // above the control rather than beside the result, because it is a
-  // thing to know before pressing.
+  // #171 asks for this in as many words. The rule is decision 4's and
+  // the client's promotion module states it; what is new here is that
+  // a person reads it, in their own words, **above** the control rather
+  // than beside the result — it is a thing to know before pressing.
   //
   // # What this does not pre-empt
   //
@@ -87,6 +82,13 @@
       null,
   );
   const work = $derived(sharedCatalog.work);
+  // Ended work is read like any other — the drawer lists it and shows
+  // what was asked for — so a pursuit being selected does not mean
+  // anything may enter against it. Kept apart here because the cost of
+  // getting it wrong is not a refusal: the content verb streams the
+  // whole body into the team's blob store and only then asks whether
+  // the work has closed.
+  const ended = $derived(work !== null && work.close !== null);
 
   async function promote(event: Event) {
     event.preventDefault();
@@ -121,6 +123,18 @@
       in the shared-lines drawer and open a pursuit against it. What is
       promoted lands on that work, and reaches the line when it closes
       satisfied.
+    </p>
+    <button type="button" onclick={() => sharedCatalog.openPanel()}>
+      open shared lines
+    </button>
+  {:else if ended}
+    <!-- Its own sentence rather than the one above, because the reader
+         is not in the same place: something *is* selected, and what is
+         wrong with it is that it has ended. -->
+    <p class="quiet">
+      The work showing in the shared-lines drawer has ended, and nothing
+      enters against work that has. Open another pursuit against
+      <strong>{line.name}</strong> to hand this over.
     </p>
     <button type="button" onclick={() => sharedCatalog.openPanel()}>
       open shared lines
@@ -163,6 +177,14 @@
               holds.
             </dd>
           </div>
+          <!-- Labelled for what it is on this path. The client hashes
+               before it reads the relation, so this is the file as it
+               is now — not what the team took, which was hashed
+               whenever the first promotion happened. -->
+          <div>
+            <dt>This file, now</dt>
+            <dd class="mono">{promoted.digest}</dd>
+          </div>
         {:else}
           <div>
             <dt>Entry</dt>
@@ -172,11 +194,11 @@
             <dt>The team's copy</dt>
             <dd class="mono">{promoted.team_asset_id ?? "—"}</dd>
           </div>
+          <div>
+            <dt>Digest</dt>
+            <dd class="mono">{promoted.digest}</dd>
+          </div>
         {/if}
-        <div>
-          <dt>Digest</dt>
-          <dd class="mono">{promoted.digest}</dd>
-        </div>
         <div>
           <dt>Already there</dt>
           <dd>

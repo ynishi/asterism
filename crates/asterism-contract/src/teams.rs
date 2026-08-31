@@ -173,11 +173,13 @@ pub struct PromotedAssetDto {
     /// An opaque handle, never read as a local asset id (#148
     /// decision 6).
     pub team_asset_id: Option<String>,
-    /// What the material hashed to when it was read for sending.
+    /// What the material hashed to at promote time.
     ///
-    /// Read at promote time rather than taken from what was stored,
-    /// because the declared digest is what the server verifies while
-    /// it writes.
+    /// Read then rather than taken from what was stored, for the
+    /// reason `promotion::hash_at_promote_time` gives. It is read
+    /// before the client knows whether anything will be sent, so on a
+    /// repeat this is the file as it is now and not what the team
+    /// took.
     pub digest: String,
     /// Whether the team already held those bytes when asked, or
     /// nothing when the question was never put.
@@ -185,10 +187,9 @@ pub struct PromotedAssetDto {
     /// Three states rather than two, and a screen has to keep them
     /// apart: "the team already has these", "the team did not", and
     /// "nobody asked" — the last on a repeat, where nothing was going
-    /// to be sent. Reported rather than acted on: the content verb
-    /// mints a `TeamAsset` from bytes and there is no verb that mints
-    /// one over a digest the team already holds, so a held digest
-    /// saves nothing yet.
+    /// to be sent. Reported rather than acted on, for the reason
+    /// `asterism-teams-client`'s promotion module sets out under "The
+    /// have-check, honestly".
     pub bytes_already_held: Option<bool>,
     /// Whether this machine had already promoted this asset onto this
     /// line, in which case nothing was sent and nothing was written.

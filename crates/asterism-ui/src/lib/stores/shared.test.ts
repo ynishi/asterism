@@ -1,6 +1,6 @@
 // sharedCatalog tests. The api / mutate choke points are mocked; the
-// catalog's own machinery — the two Resources, the alive filter and
-// the command shapes — runs for real.
+// catalog's own machinery — its Resources, the alive filter and the
+// command shapes — runs for real.
 //
 // What these pin is the panel's honesty about where its contents come
 // from (#148 decision 16). A shared line is served through rather than
@@ -342,10 +342,22 @@ describe("promoting an asset onto the open work", () => {
     };
   }
 
-  it("names the team, the line and the work the catalog has open", async () => {
-    apiMock.mockResolvedValue([]);
+  /// A line showing, with one open pursuit selected on it.
+  ///
+  /// Selected out of the list rather than assigned, because that is
+  /// how a screen gets there and because the verb asks the list what
+  /// the selected work is: a pursuit id set beside an empty list is a
+  /// state the catalog reads as "not in this line's list".
+  async function withOpenWork(): Promise<void> {
+    apiMock.mockResolvedValueOnce([]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockResolvedValueOnce([pursuit("p1")]); // pursuits
     await sharedCatalog.show("l1");
-    sharedCatalog.working = "p1";
+    sharedCatalog.selectPursuit("p1");
+  }
+
+  it("names the team, the line and the work the catalog has open", async () => {
+    await withOpenWork();
     mutateMock.mockResolvedValueOnce(promoted());
     apiMock.mockReset();
     apiMock.mockResolvedValueOnce([]);
@@ -370,9 +382,7 @@ describe("promoting an asset onto the open work", () => {
     // question whose answer cannot have changed, and drawing the
     // answer as if it had is how a screen says a line moved when it
     // did not.
-    apiMock.mockResolvedValue([]);
-    await sharedCatalog.show("l1");
-    sharedCatalog.working = "p1";
+    await withOpenWork();
     mutateMock.mockResolvedValueOnce(promoted());
     apiMock.mockReset();
     apiMock.mockResolvedValueOnce([]);
@@ -410,9 +420,7 @@ describe("promoting an asset onto the open work", () => {
     // A repeat is answered from this machine, before anything is
     // uploaded. The sentence has to say that rather than read like a
     // second promotion that worked.
-    apiMock.mockResolvedValue([]);
-    await sharedCatalog.show("l1");
-    sharedCatalog.working = "p1";
+    await withOpenWork();
     mutateMock.mockResolvedValueOnce(
       promoted({
         team_asset_id: null,
@@ -424,15 +432,42 @@ describe("promoting an asset onto the open work", () => {
     await sharedCatalog.promote("asset-1", "cut-01");
 
     expect(sharedCatalog.said).toContain("nothing was sent");
-    expect(sharedCatalog.said).not.toContain("on the line");
+    // The clause only the sent path has. Asserting the absence of "on
+    // the line" passed on a technicality — the repeat sentence says
+    // "onto this line", which is a different string and the same
+    // subject.
+    expect(sharedCatalog.said).not.toContain("closing it as satisfied");
+  });
+
+  it("refuses when the work being read has ended", async () => {
+    // Reading ended work is ordinary, so `working` is set for one as
+    // readily as for an open one. Nothing may enter against it — and
+    // the refusal belongs here rather than at the server, because
+    // `enter_content` streams the body before it asks.
+    apiMock.mockResolvedValueOnce([]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockResolvedValueOnce([
+      pursuit("p1", [], {
+        id: "c1",
+        parent_id: "b1",
+        outcome: "satisfied",
+        note: null,
+        at_ms: 30,
+        actor_kind: "member",
+        actor_id: "u1",
+      }),
+    ]);
+    await sharedCatalog.show("l1");
+    sharedCatalog.selectPursuit("p1");
+
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow();
+    expect(mutateMock).not.toHaveBeenCalled();
   });
 
   it("says what a promotion is and is not, when one was sent", async () => {
     // On the work, not on the line: the entry reaches the line when
     // the work closes satisfied.
-    apiMock.mockResolvedValue([]);
-    await sharedCatalog.show("l1");
-    sharedCatalog.working = "p1";
+    await withOpenWork();
     mutateMock.mockResolvedValueOnce(promoted());
 
     await sharedCatalog.promote("asset-1", "cut-01");

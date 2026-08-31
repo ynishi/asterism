@@ -1,10 +1,12 @@
 // The name a person reads off a card.
 //
-// Shared rather than local because two places have to agree: the grid
-// labels a visual card with it in clean mode when there is no cover
-// text, and the forge offers it as the default name for an entry added
-// from a selection. Somebody selecting three images and putting them on
-// a line should see the names that were under them.
+// Shared rather than local because the places that use it have to
+// agree: the grid labels a visual card with it in clean mode when there
+// is no cover text, the forge offers it as the default name for an
+// entry added from a selection, and the detail pane offers it as the
+// default name for an asset handed to a team. Somebody selecting three
+// images and putting them on a line should see the names that were
+// under them.
 //
 // Agreement is the point rather than reuse. What the forge does with
 // the result is not what the grid does: the string is sent as an

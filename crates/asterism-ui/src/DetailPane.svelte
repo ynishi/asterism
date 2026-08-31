@@ -2150,10 +2150,10 @@
             <!-- Last of the column, because it is the one act here that
                  sends this asset somewhere else. Everything above says
                  what the asset is to this library; this hands it to a
-                 team. It owns itself for the reason `MaterialMarks`
-                 does — what it needs from this pane is the id and a
-                 name to start from, and the three ids a promotion goes
-                 to are the shared catalog's. -->
+                 team. What it takes from this pane is the id and a name
+                 to start from — the three ids a promotion goes to are
+                 the shared catalog's, so this pane neither holds nor
+                 passes them. -->
             <PromoteToTeam
               assetId={detail.asset.id}
               defaultName={detail.asset.title ?? baseName(detail.asset.locator)}
