@@ -93,6 +93,7 @@ const WORK_ENTRY_NAME = "cut-01";
 const SPECS = [
   "./e2e-teams/teams-connect.spec.ts",
   "./e2e-teams/teams-work.spec.ts",
+  "./e2e-teams/teams-promote.spec.ts",
 ];
 
 /** Everything the server owns, removed and remade on every run. */
@@ -463,6 +464,13 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_WORK_ID = worked.teamId;
   process.env.E2E_TEAMS_WORK_LINE = WORK_LINE_NAME;
   process.env.E2E_TEAMS_WORK_ENTRY = WORK_ENTRY_NAME;
+
+  // The app's own loopback HTTP surface, which is how the promotion
+  // spec seeds the one asset it hands over. Passed by environment like
+  // everything else here, and it is the app's port rather than the
+  // team server's: the two processes this suite runs both serve HTTP,
+  // and a spec reaching the wrong one gets a 404 that says nothing.
+  process.env.E2E_TEAMS_APP_URL = `http://${SERVER_HOST}:${APP_PORT}`;
 }
 
 /**
