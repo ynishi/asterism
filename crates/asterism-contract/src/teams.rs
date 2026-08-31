@@ -109,6 +109,43 @@ pub struct TeamSubjectRefDto {
     pub value: String,
 }
 
+/// The teams this window's account belongs to.
+///
+/// What a picker is over, and the read the typed team id was waiting
+/// for. The roster's question turned around: that one takes a team and
+/// answers with users, this takes the account and answers with teams.
+///
+/// **Membership rather than reach**, which matters for one caller: an
+/// admin acts inside a team without a membership row (#83 §1), so an
+/// admin who joined nothing sees an empty list while keeping every
+/// capacity they had. A surface must not read "no teams" as "no
+/// access".
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MyTeamsDto {
+    /// One row per membership, oldest team first.
+    pub teams: Vec<MyTeamDto>,
+}
+
+/// One team the account belongs to.
+///
+/// **No name, because a team has none** — the model carries an id and
+/// a creation time and nothing else, so a picker over these shows ids
+/// the way the roster shows user ids. Naming a team is a change to the
+/// team plane's model rather than a field this shape is missing, and
+/// this DTO gains one when that lands rather than before.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MyTeamDto {
+    /// The team, and what every team-scoped read is named by.
+    pub team_id: String,
+    /// What this account is in it: `"owner"` or `"member"`.
+    pub role: String,
+    /// When the team was created, unix epoch milliseconds.
+    ///
+    /// The team's own, not the membership's — a membership row carries
+    /// no time, so this is the only order these rows have.
+    pub created_at_ms: i64,
+}
+
 /// Who is in a team, and in what role.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamRosterDto {

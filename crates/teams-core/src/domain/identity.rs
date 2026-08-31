@@ -173,6 +173,32 @@ pub struct Membership {
     pub role: Role,
 }
 
+/// One team a given user belongs to, read from that user's side.
+///
+/// [`Membership`] with the user dropped and the team's creation time
+/// added, which is what the two directions of the same table are for:
+/// a roster is asked about a team and answers with users, this is
+/// asked about a user and answers with teams, so neither carries the
+/// subject it was asked about.
+///
+/// **The team is an id and a time, because that is all a team is.**
+/// Nothing in this model names one. A surface listing these shows ids,
+/// and giving a team a name is a change to the model rather than a
+/// field this struct forgot.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TeamMembership {
+    /// The team.
+    pub team_id: Uuid,
+    /// What this user is in it, already validated ([`Role::parse`]).
+    pub role: Role,
+    /// When the team was created, unix epoch milliseconds.
+    ///
+    /// The team's rather than the membership's: a membership row
+    /// carries no timestamp, so this is the only time these rows can
+    /// be ordered by.
+    pub created_at: i64,
+}
+
 /// The env/CLI bootstrap identity — a distinct actor kind, **not** a
 /// membership (#83 §1).
 ///

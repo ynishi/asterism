@@ -47,7 +47,7 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::DomainError;
 use teams_core::domain::head_registry::TagHeadEntry;
-use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamRoster};
+use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamMembership, TeamRoster};
 use teams_core::domain::ledger::{
     BLOB_COPY_COMPLETED, BLOB_LINK_PURGE_MARKED, BLOB_LINK_PURGE_UNMARKED, BLOB_LINK_RECLAIMED,
     EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED, ROLE_CHANGED,
@@ -760,6 +760,49 @@ impl SqliteTeamsRepository {
             .await
             .map_err(infra_err)?;
         promote_roster(team_id, rows)
+    }
+
+    /// The teams a user is a member of, oldest team first.
+    ///
+    /// [`Self::roster`] turned around: that one takes a team and reads
+    /// its members, this takes a user and reads their teams. The
+    /// `membership` primary key leads with `team_id`, so this
+    /// direction is what `idx_membership_user` exists for — it has
+    /// been in the schema since v1, ahead of any caller.
+    ///
+    /// Ordered by the team's creation time because that is the only
+    /// order these rows carry a fact for: a membership has no
+    /// timestamp of its own, and ordering by id would be ordering by a
+    /// UUID. The role goes through [`Role::parse`] on the way out for
+    /// the reason the roster's does — a word the domain does not admit
+    /// is a validation error rather than a guessed authority.
+    pub async fn teams_of_user(&self, user_id: Uuid) -> Result<Vec<TeamMembership>, DomainError> {
+        let rows: Vec<(Uuid, String, i64)> = self
+            .isle
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT m.team_id, m.role, t.created_at
+                     FROM membership m
+                     JOIN team t ON t.id = m.team_id
+                     WHERE m.user_id = ?1
+                     ORDER BY t.created_at, m.team_id",
+                )?;
+                let rows = stmt.query_map(params![user_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?;
+                rows.collect()
+            })
+            .await
+            .map_err(infra_err)?;
+        rows.into_iter()
+            .map(|(team_id, role, created_at)| {
+                Ok(TeamMembership {
+                    team_id,
+                    role: Role::parse(&role)?,
+                    created_at,
+                })
+            })
+            .collect()
     }
 
     /// Whether `digest` is linked to `team_id` — the visibility

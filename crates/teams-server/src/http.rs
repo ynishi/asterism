@@ -122,8 +122,8 @@ use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // any of them.
 use asterism_teams_wire::command::{CreateTeamCommand, LoginCommand};
 use asterism_teams_wire::dto::{
-    LedgerEventDto, LedgerPageDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto,
-    TeamCreatedDto,
+    LedgerEventDto, LedgerPageDto, MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto,
+    SubjectRefDto, TeamCreatedDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -351,6 +351,13 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
 
     let authed = Router::new()
         .route("/teams/create", post(create_team))
+        // The one team read that names no team, because the question
+        // is about the caller rather than about a team: everything
+        // under `team_scoped` needs an id to gate on and this is what
+        // a caller asks *before* they have one. `teams` is a static
+        // segment, which axum prefers over the `{team_id}` capture —
+        // the same grammar note as `purge` and `heads` below.
+        .route("/teams", get(my_teams))
         // Deliberately outside `team_gate`: the blob read answers one
         // `404` for every miss instead of the gate's 403/404 split —
         // the module doc's "one deliberate exception".
@@ -763,6 +770,38 @@ async fn change_role(
 // ----------------------------------------------------------------------
 
 /// `GET /teams/{team_id}/roster` — the current membership state.
+/// `GET /teams` — the teams the caller is a member of.
+///
+/// The roster read turned around, and the only team read outside
+/// [`team_gate`]: it answers before a caller has a team to be gated
+/// on, which is the whole reason it exists — the app's team id is
+/// typed today because nothing answers this.
+///
+/// **Membership, not reach.** An admin acts inside any team without a
+/// membership row (#83 §1), and this route does not widen for one: an
+/// admin who is a member of nothing gets an empty list while retaining
+/// every capacity they had. That is the honest answer to the question
+/// as named, and the alternative — folding "teams I may act in" into
+/// the same list — would make the route mean two things and match
+/// neither. A surface that wants the admin's reach is asking a
+/// different question and needs its own read.
+async fn my_teams(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+) -> Result<Json<MyTeamsDto>, ApiError> {
+    let teams = ctx.repo.teams_of_user(account.user_id).await?;
+    Ok(Json(MyTeamsDto {
+        teams: teams
+            .into_iter()
+            .map(|row| MyTeamDto {
+                team_id: row.team_id.to_string(),
+                role: row.role.as_str().to_string(),
+                created_at_ms: row.created_at,
+            })
+            .collect(),
+    }))
+}
+
 async fn roster(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(access): Extension<TeamAccess>,

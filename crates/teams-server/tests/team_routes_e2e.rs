@@ -664,3 +664,110 @@ async fn the_events_route_pages_and_hands_back_where_to_resume() {
 
     h.driver.shutdown().await.unwrap();
 }
+
+/// `GET /teams` answers the caller's memberships and nobody else's.
+///
+/// The read a picker is over. Two accounts with overlapping teams is
+/// the case that matters: a list built from the wrong side of the
+/// membership table would hand one person the other's teams, and a
+/// list that ignored the caller entirely would hand everyone every
+/// team.
+#[tokio::test]
+async fn my_teams_answers_the_callers_memberships() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (bob_id, bob) = user(&h, "bob", false).await;
+
+    let hers = create_team(&h, &alice).await;
+    let shared = create_team(&h, &alice).await;
+    let his = create_team(&h, &bob).await;
+
+    let (status, body) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{shared}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": bob_id.to_string(), "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invite: {body}");
+
+    let (status, mine) = call(&h.router, get_authed("/teams", &alice)).await;
+    assert_eq!(status, StatusCode::OK, "my teams: {mine}");
+    let rows = mine["teams"].as_array().expect("a teams array");
+    let ids: Vec<&str> = rows
+        .iter()
+        .map(|row| row["team_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![hers.as_str(), shared.as_str()],
+        "her own two, oldest first, and not the one she is not in"
+    );
+    assert!(
+        rows.iter().all(|row| row["role"] == "owner"),
+        "she founded both, so she owns both: {mine}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row["created_at_ms"].as_i64().is_some()),
+        "each row carries the team's creation time: {mine}"
+    );
+
+    let (status, theirs) = call(&h.router, get_authed("/teams", &bob)).await;
+    assert_eq!(status, StatusCode::OK, "my teams: {theirs}");
+    let rows = theirs["teams"].as_array().expect("a teams array");
+    let ids: Vec<&str> = rows
+        .iter()
+        .map(|row| row["team_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![shared.as_str(), his.as_str()],
+        "the team he was invited to and the one he founded"
+    );
+    // The same team, two callers, two roles — which is the one fact
+    // beyond the id these rows carry.
+    let role_of = |rows: &[serde_json::Value], id: &str| -> String {
+        rows.iter()
+            .find(|row| row["team_id"] == id)
+            .expect("the row")["role"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(role_of(rows, &shared), "member");
+
+    h.driver.shutdown().await.unwrap();
+}
+
+/// An admin is not a member of anything by being an admin (#83 §1).
+///
+/// The route answers membership rather than reach, and this is the
+/// caller that makes the two differ: an admin may act inside every
+/// team on the instance and still belong to none. A list that widened
+/// for them would be answering a question nobody asked, and a surface
+/// reading "no teams" as "no access" would be wrong about a different
+/// thing.
+#[tokio::test]
+async fn an_admin_belongs_to_no_team_by_being_an_admin() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (_op_id, op) = user(&h, "op", true).await;
+    let hers = create_team(&h, &alice).await;
+
+    // The admin can read that team's roster — reach, established.
+    let (status, roster) = call(&h.router, get_authed(&format!("/teams/{hers}/roster"), &op)).await;
+    assert_eq!(status, StatusCode::OK, "admin reads a roster: {roster}");
+
+    let (status, mine) = call(&h.router, get_authed("/teams", &op)).await;
+    assert_eq!(status, StatusCode::OK, "my teams: {mine}");
+    assert_eq!(
+        mine["teams"].as_array().expect("a teams array").len(),
+        0,
+        "reach is not membership: {mine}"
+    );
+
+    h.driver.shutdown().await.unwrap();
+}
