@@ -327,6 +327,28 @@ type LineArgs = { teamId: string; lineId: string };
 /// still looking at the tab.
 const LEDGER_PAGE = 50;
 
+/// Whether a membership event records somebody going of their own
+/// accord rather than being taken out (#210).
+///
+/// Read off the two things the entry already carries. The kind covers
+/// both — `teams.membership.removed/1`'s own doc says "a member left or
+/// was removed" and has said so since it was written — and what
+/// separates them is whether the actor is also the subject.
+///
+/// A kind of its own was the alternative and it costs more than it
+/// gives: the stream is append-only, so a second spelling would split
+/// one act at the point it was added, leaving every departure before
+/// it reading as a removal and every reader needing both. Nothing here
+/// has that problem, and it answers the same about a row written a
+/// year ago.
+export function isDeparture(event: TeamLedgerEventDto): boolean {
+  if (event.kind !== "teams.membership.removed/1") return false;
+  return event.subjects.some(
+    (subject) =>
+      subject.ref_type === "user" && subject.value === event.actor_user_id,
+  );
+}
+
 class SharedCatalog {
   /// Whether the panel is showing. The panel reads this itself; the
   /// App only mounts it.

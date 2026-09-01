@@ -37,7 +37,7 @@ import type {
 } from "../../bindings";
 import { api } from "../api";
 import { mutate } from "../mutate";
-import { sharedCatalog } from "./shared.svelte";
+import { isDeparture, sharedCatalog } from "./shared.svelte";
 
 vi.mock("../api", () => ({ api: vi.fn() }));
 vi.mock("../mutate", () => ({ mutate: vi.fn() }));
@@ -1385,5 +1385,51 @@ describe("the connection this machine remembers", () => {
     );
     expect(sharedCatalog.stored).toBeNull();
     expect(sharedCatalog.deviceTokens.data).toEqual([]);
+  });
+});
+
+describe("telling a departure from a removal", () => {
+  // One kind carries both, which is what its own doc says, so the
+  // reading is off the actor and the subject rather than off a second
+  // kind that would split the act at the point it was added.
+  const act = {
+    seq: 1,
+    event_id: "e1",
+    team_id: "t1",
+    actor_kind: "member",
+    actor_user_id: "u1",
+    actor_display_name: "u1",
+    occurred_at_ms: 0,
+    payload_json: "{}",
+  };
+
+  it("reads one when the actor is the subject", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.removed/1",
+        subjects: [{ ref_type: "user", value: "u1" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("reads a removal when somebody else was taken out", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.removed/1",
+        subjects: [{ ref_type: "user", value: "u2" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("reads nothing into a kind that is neither", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.added/1",
+        subjects: [{ ref_type: "user", value: "u1" }],
+      }),
+    ).toBe(false);
   });
 });
