@@ -50,13 +50,24 @@ and this project adheres to
   desktop's error conversion answers a 404 on its own and turns every other 4xx
   into one shape on the way to a screen. #211 is that conversion.
 
-  **`leave` is not here, and taking yourself out is not it.** The issue asked
-  for a departure verb and this does not carry one: `TeamRoster::check_leave`
-  still has no caller, there is no route for a member to reach, and what an
-  owner can do from their own row is remove themself — which the ledger records
-  as a removal, by them, of them. A member who is not an owner cannot depart at
-  all. The panel does let go of the team afterwards, the way deleting one makes
-  it let go, so the window is not left pointed at something it has left.
+  **Leaving is its own verb, and it asks no authority over anybody.** Every
+  other write here asks whether the caller may act on somebody else's row; this
+  one asks nothing, because a member acting on their own membership needs no
+  standing over anyone. So it sits outside the authority table, and what it asks
+  instead is that there is a membership to leave: an instance admin passes the
+  gate on their standing and holds no row, so they meet the same refusal a
+  stranger does. The reader's own row offers it whether or not they own the
+  team, with the step down beside it when they do.
+
+  The ledger records it under the kind a removal takes, which is what that
+  kind's own doc has said since it was written — an entry reads as a departure
+  rather than a removal when its actor and its subject are the same account.
+  `TeamRoster::check_leave` finally has a caller: the domain spelled that rule
+  twice so a write could say which of the two acts it is making, and the two
+  spellings answer identically, because a departure is refused on the state of
+  the roster rather than on whose hand is on it. The last owner cannot go by
+  either, and the panel lets go of the team afterwards the way deleting one
+  makes it let go.
 
   `join` is not part of this either, and the model says why: an invitation
   writes a membership row directly, so there is nothing to accept, and a verb by
