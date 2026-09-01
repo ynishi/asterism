@@ -74,9 +74,13 @@ type TxOutcome<T> = Result<Result<T, DomainError>, rusqlite::Error>;
 /// domain already carries it as two method names.
 #[derive(Clone, Copy)]
 enum Departure {
-    /// Somebody else took them out.
+    /// Reached through `remove_member`, which the route offers an
+    /// owner against any row including their own — so this arm does
+    /// not guarantee the going was somebody else's doing, only that
+    /// the caller spelled it that way.
     Removed,
-    /// They took themself out.
+    /// Reached through `leave_team`, which acts on the caller's own
+    /// row and nothing else.
     Voluntary,
 }
 
@@ -294,9 +298,9 @@ impl SqliteTeamsRepository {
     /// answer identically — a departure is refused on the state of the
     /// roster rather than on whose hand is on it.
     ///
-    /// The kind is the same for both, which the constant's own doc
-    /// says: an entry reads as a departure rather than a removal when
-    /// its actor and its subject are the same account.
+    /// The kind is the same for both — `MEMBERSHIP_REMOVED` covers a
+    /// member leaving and being removed alike, and its doc is where
+    /// the reading that separates them lives.
     pub async fn leave_team(
         &self,
         team_id: Uuid,

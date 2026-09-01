@@ -3555,8 +3555,8 @@ pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, U
     })
 }
 
-// The roster writes (#210). None of the five answers with anything,
-// and that is the same decision `create_team` made for the half of its
+// The roster writes (#210). None of them answers with anything, and
+// that is the same decision `create_team` made for the half of its
 // response it drops: what the server hands back is the ledger event
 // the write appended, and a screen reads the team's acts in the ledger
 // tab rather than out of a write. What a caller wants after one of
@@ -3644,9 +3644,9 @@ pub async fn revoke_team_owner(
 /// Takes the signed-in account out of the team.
 ///
 /// Reachable by any member, because leaving asks no authority over
-/// anybody. An instance admin holds no membership to leave and is
-/// refused; the last owner is refused too, and that refusal reaches a
-/// screen the way [`remove_team_member`]'s does.
+/// anybody. A caller holding no membership row has nothing to leave
+/// and is refused; the last owner is refused too, and that refusal
+/// reaches a screen the way [`remove_team_member`]'s does.
 #[tauri::command]
 pub async fn leave_team(state: State<'_, AppState>, team_id_raw: String) -> Result<(), UiError> {
     let client = teams_client(&state).await?;

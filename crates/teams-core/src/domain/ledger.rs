@@ -211,6 +211,18 @@ pub const TEAM_DELETED: &str = "teams.team.deleted/1";
 /// A user became a member.
 pub const MEMBERSHIP_ADDED: &str = "teams.membership.added/1";
 /// A member left or was removed.
+///
+/// **One kind for both, and what separates them is inside the entry**:
+/// it reads as a departure when the actor is also the subject, and as
+/// a removal when it is not. Every reader that needs to tell the two
+/// apart reads it here rather than off a second kind.
+///
+/// A second kind was the alternative and costs more than it gives.
+/// The stream is append-only, so a new spelling separates the two only
+/// from the moment it is added: every departure written before it goes
+/// on reading as a removal, and every reader carries both kinds
+/// forever to cover a distinction one of them already makes. This one
+/// answers the same about a row written before anybody thought to ask.
 pub const MEMBERSHIP_REMOVED: &str = "teams.membership.removed/1";
 /// A member's role changed — the payload carries **both** the old and
 /// the new value (#83 §1: role changes are first-class events carrying

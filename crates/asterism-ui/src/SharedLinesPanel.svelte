@@ -257,9 +257,11 @@
     });
     if (!ok) return;
     await sharedCatalog.removeMember(userId);
-    // Removing yourself ends the connection to this team, and the
-    // field above still holds its id — the same tidy leaving and
-    // deleting do, for the same reason.
+    // The reader's own row offers `leave` instead of this, so the
+    // branch is unreachable from the roster as it stands. It is here
+    // because the store handles the same case for the same reason —
+    // the server permits an owner to remove themself, and a path
+    // nobody draws today is still a path.
     if (userId === sharedCatalog.session) teamField = "";
   }
 
@@ -984,13 +986,13 @@
                   <div class="event-head">
                     <span class="event-kind">{event.kind}</span>
                     <!-- The kind covers leaving and being removed
-                         alike, so the reading that separates them is
-                         said here rather than left to somebody
-                         comparing two ids in the payload: the actor is
-                         also the subject. The kind itself stays
-                         verbatim beside it — a screen rewriting one
-                         would be answering for a stream it does not
-                         own. -->
+                         alike, and neither of the two fields that
+                         separate them is drawn on this row — the actor
+                         shows as a name, and the subjects not at all —
+                         so a reader could not tell without being told.
+                         The kind itself stays verbatim beside the
+                         note: a screen rewriting one would be
+                         answering for a stream it does not own. -->
                     {#if isDeparture(event)}
                       <span class="event-note">left of their own accord</span>
                     {/if}

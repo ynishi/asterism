@@ -402,11 +402,14 @@ describe("the team plane", () => {
     // so they are its owner and the controls are drawn — a member
     // would see the rows and nothing to press.
     //
-    // Inviting and removing rather than every write the tab now
-    // offers: the two role changes and the delete are covered where
-    // the store is, and what only a window can answer is whether the
-    // form reaches the roster and whether the confirmation stands
-    // between a person and a removal.
+    // Inviting and removing, and not the rest of what the tab offers.
+    // The others are covered where the store is; what only a window
+    // can answer is whether the form reaches the roster at all, and
+    // whether a confirmation stands between a person and a write that
+    // cannot be undone. Two writes answer both, and naming the set
+    // here would be a copy of it that goes stale the next time one is
+    // added — which is what happened to the sentence this replaces,
+    // twice.
     await stage(
       trail,
       "let somebody in and take them out again",

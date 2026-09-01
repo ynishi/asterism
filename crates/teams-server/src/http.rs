@@ -19,6 +19,7 @@
 //! | — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 //! | POST | `/teams/{team_id}/members/invite` | owner |
 //! | POST | `/teams/{team_id}/members/remove` | owner |
+//! | POST | `/teams/{team_id}/members/leave` | any caller holding a row, of themself |
 //! | POST | `/teams/{team_id}/owners/grant` | owner |
 //! | POST | `/teams/{team_id}/owners/revoke` | owner |
 //! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |
@@ -327,12 +328,29 @@ impl IntoResponse for ApiError {
 pub(crate) struct AuthedAccount(pub(crate) AccountRecord);
 
 /// What [`team_gate`] established about the caller in the `{team_id}`
-/// team: their current role (from state), and whether the admin
-/// capacity is available as a fallback.
+/// team.
+///
+/// **Two axes, not one value.** A role is a membership row in this
+/// team; being an instance admin is a standing outside every roster.
+/// A caller may hold both — an admin who founded a team holds a row in
+/// it like anybody else — so neither field is derivable from the
+/// other, and the pair is what [`decide`] needs to ask the row first:
+/// an act inside a team is stamped with the membership capacity when
+/// there is one, and the admin capacity is the fallback for a caller
+/// standing outside the roster (#83 §1).
+///
+/// **This is the sentence the rest of the surface leaves to this
+/// site.** A route refusing a caller who holds no row says *that* —
+/// the absence of a row — rather than naming an instance admin, who is
+/// only the commonest caller in that state and not the condition
+/// anything tests.
 #[derive(Clone)]
 pub(crate) struct TeamAccess {
+    /// The team the gate resolved from the path.
     pub(crate) team_id: Uuid,
+    /// The caller's role in it, or nothing when they hold no row.
     pub(crate) role: Option<Role>,
+    /// Whether the caller is an instance admin. Independent of `role`.
     pub(crate) admin: bool,
 }
 
@@ -894,18 +912,17 @@ async fn remove_member(
 /// `POST /teams/{team_id}/members/leave` — any member, of themself
 /// (#210).
 ///
-/// Not in the authority table, and that is the point of it. Every
-/// other verb here asks whether the caller may act on somebody else's
-/// row; this one asks nothing, because a member acting on their own
-/// membership needs no authority over anyone. What it does need is a
-/// membership: an instance admin passes the gate on their standing
-/// and holds no row, so there is nothing there to leave, and they get
-/// the same `403` the gate gives a stranger.
+/// Not in the authority table, and that is the point of it. The verbs
+/// that act on somebody else's row ask whether the caller may; this
+/// one asks nothing, because a member acting on their own membership
+/// needs no authority over anyone. What it does need is a row to act
+/// on, so a caller holding none is refused — see [`TeamAccess`] for
+/// why that is the condition rather than any statement about who the
+/// caller is.
 ///
 /// The last owner cannot go, the same refusal removing them raises,
-/// and the ledger appends the same kind — an entry reads as a
-/// departure rather than a removal when its actor and its subject are
-/// the same account.
+/// and the ledger appends [`MEMBERSHIP_REMOVED`], whose doc says how
+/// an entry reads as a departure rather than a removal.
 async fn leave_team(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
@@ -1028,7 +1045,8 @@ async fn my_teams(
     }))
 }
 
-/// `GET /teams/{team_id}/roster` — the current membership state.
+/// `GET /teams/{team_id}/roster` — the current membership state, and
+/// what the caller may do in it.
 async fn roster(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(access): Extension<TeamAccess>,

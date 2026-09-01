@@ -330,17 +330,11 @@ const LEDGER_PAGE = 50;
 /// Whether a membership event records somebody going of their own
 /// accord rather than being taken out (#210).
 ///
-/// Read off the two things the entry already carries. The kind covers
-/// both — `teams.membership.removed/1`'s own doc says "a member left or
-/// was removed" and has said so since it was written — and what
-/// separates them is whether the actor is also the subject.
-///
-/// A kind of its own was the alternative and it costs more than it
-/// gives: the stream is append-only, so a second spelling would split
-/// one act at the point it was added, leaving every departure before
-/// it reading as a removal and every reader needing both. Nothing here
-/// has that problem, and it answers the same about a row written a
-/// year ago.
+/// The one implementation of a rule stated on the kind itself:
+/// `teams.membership.removed/1` covers a member leaving and being
+/// removed alike, and its doc is where the reading lives and where the
+/// argument against a second kind is kept. This is that reading in
+/// TypeScript, over the two fields the entry already carries.
 export function isDeparture(event: TeamLedgerEventDto): boolean {
   if (event.kind !== "teams.membership.removed/1") return false;
   return event.subjects.some(
@@ -441,7 +435,7 @@ class SharedCatalog {
     "sharedCatalog.teams",
   );
 
-  /// Who is in the team now named.
+  /// Who is in the team now named, and what the reader may do there.
   ///
   /// A `Resource` rather than a walk, because a roster is one answer:
   /// the whole membership set comes back at once, and the read has no
@@ -939,12 +933,12 @@ class SharedCatalog {
   /// Lets go of everything read about the team now named, and stops
   /// naming it.
   ///
-  /// Two acts end a reader's relationship with a team — deleting it,
-  /// and being taken out of it — and what the panel has to forget is
-  /// the same either way: it would otherwise keep drawing a roster, a
-  /// line list and a ledger belonging to something it can no longer
-  /// ask about. Written once because the second caller arrived after
-  /// the first, and having only one of them do it is the defect.
+  /// Whatever ends a reader's relationship with a team, what the panel
+  /// has to forget is the same: it would otherwise keep drawing a
+  /// roster, a line list and a ledger belonging to something it can no
+  /// longer ask about. Written once because each new way of ending it
+  /// arrives after the last, and a caller that skips the forgetting is
+  /// the defect this exists to make impossible.
   stopReading(): void {
     this.teamId = "";
     this.closeLine();

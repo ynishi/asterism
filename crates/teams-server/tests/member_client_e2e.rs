@@ -1008,8 +1008,8 @@ async fn the_roster_writes_go_over_the_client() {
     assert_eq!(deleted.kind, "teams.team.deleted/1");
 }
 
-/// A member takes themself out through the client, and an admin has
-/// nothing there to take out.
+/// A member takes themself out through the client, and the last owner
+/// cannot.
 #[tokio::test]
 async fn a_member_leaves_through_the_client() {
     let h = harness().await;
