@@ -232,26 +232,35 @@
 // `Resource`. A `Resource` holds one answer; this holds a sequence of
 // them, and only the caller knows they are the same walk.
 //
-// # Where a credential lives is not settled
+// # Where a credential lives, and why the answer is not a password
 //
-// #167 kept the connection to the window because a stored credential
-// has no designed home yet, and #171 makes designing that home its
-// own. It is deferred here rather than answered, because the answer
-// interacts with a provider path this plane does not have: #163 adds
-// one to the connect form, and a home chosen before it lands is a home
-// chosen for one of the two kinds of credential.
+// #204 settled it by fixing the invariant instead of picking a store:
+// **the disk never holds a primary credential.** What it may hold is
+// one thing, a device token the server minted — expiring, listable,
+// revocable — and that shape is the same whichever verifier said yes,
+// which is what made the question answerable before #163's provider
+// path exists rather than after it.
 //
-// The alternatives, so the deferral names them: the OS keychain
-// through Tauri's own plugin, which is where a password belongs; the
-// profile directory, which is where this app's state lives and which
-// would therefore put a password beside it; and the window, which is
-// what #167 chose and what the deferral leaves in place.
+// So both alternatives #167 weighed are used, for different halves.
+// The OS keychain holds the token. The profile directory holds the
+// server, the login and the token's revocation handle, none of which
+// authenticates anybody. The password is in neither, in any encoding.
+// Which half is where, and what each store does when it fails, is on
+// `stored_connection` in the desktop binary; this catalog only calls
+// the commands over it.
 //
-// What the frame does meanwhile is meet a person with a connection
-// form once per window rather than once per opening: the session lives
-// in the backend for as long as the window does, so reopening the
-// drawer while connected shows lines rather than the form again.
-// `phase` is what says which of the two somebody is looking at.
+// This section used to record the opposite — that the home was
+// deferred, and that the window was where a connection stayed — and
+// the sentence is kept in the past tense because the reason for the
+// deferral is what #204 answered rather than worked around.
+//
+// What the frame does with it is `resume`: a panel opening with no
+// session tries what this machine remembers, silently, and falls back
+// to the form when there is nothing or when the server refuses it.
+// The session itself is still the window's — a device token opens a
+// new one rather than being one — so reopening the drawer while
+// connected shows lines rather than the form again. `phase` is what
+// says which of the two somebody is looking at.
 //
 // # The head pull is not a tab here
 //
@@ -295,7 +304,11 @@ import type {
   MyTeamDto,
   MyTeamsDto,
   PromotedAssetDto,
+  StoredTeamConnectDto,
+  StoredTeamConnectionDto,
   TeamCreatedDto,
+  TeamDeviceTokenDto,
+  TeamDeviceTokensDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
   TeamRosterDto,
@@ -329,6 +342,34 @@ class SharedCatalog {
   /// What the last write said, for the panel to report. Cleared when a
   /// new one starts.
   said = $state<string | null>(null);
+
+  /// What this machine remembers about a server, or `null` (#204).
+  ///
+  /// Not a credential: the device token is in the OS keychain and
+  /// never crosses to a window. What is here is the server, the login
+  /// and the stored token's revocation handle, which the connect form
+  /// pre-fills from and the token list marks a row with.
+  stored = $state<StoredTeamConnectionDto | null>(null);
+
+  /// Whether the stored connection was tried and refused.
+  ///
+  /// A fact worth keeping apart from "nothing was stored", because the
+  /// two look identical on screen — the password form — and only one
+  /// of them is worth a sentence. Cleared by a connection, since what
+  /// it describes is over.
+  storedRejected = $state(false);
+
+  /// The device tokens this account holds, on whatever machines.
+  ///
+  /// Read from the server on demand like everything else here: what
+  /// another machine minted or revoked since this window opened is not
+  /// something a copy could know.
+  deviceTokens = new Resource<Record<string, never>, TeamDeviceTokenDto[]>(
+    async () =>
+      (await api<TeamDeviceTokensDto>("list_team_device_tokens")).tokens,
+    [] as TeamDeviceTokenDto[],
+    "sharedCatalog.deviceTokens",
+  );
 
   lines = new Resource<TeamArgs, ForgeLineDto[]>(
     async (args) =>
@@ -530,7 +571,13 @@ class SharedCatalog {
     // dropped by the component going away — there is no such moment.
     this.forgetLedger();
     this.roster.reset();
+    this.deviceTokens.reset();
     await this.refreshSession();
+    // Nothing stored is read for, and nothing silent is attempted
+    // against, a window that is already connected — the session it has
+    // is the one it keeps, and a second login would replace it with an
+    // identical one for no reason.
+    if (this.session === null) await this.resume();
     if (this.session === null) return;
     // The teams a person may choose from, on the same rule as the
     // lines: a served-through view that showed what it last had would
@@ -549,21 +596,105 @@ class SharedCatalog {
     this.session = await api<string | null>("team_server_session");
   }
 
+  /// Re-reads what this machine remembers.
+  ///
+  /// Read back rather than inferred at each of the three sites that
+  /// change it — a connection that minted, a revoke that may have
+  /// been this machine's own row, and the silent attempt — because
+  /// only the command knows which of them left anything behind.
+  ///
+  /// `?? null` because absent and null are the same fact here and
+  /// only one of them is a value the rest of this file tests for.
+  private async readStored(): Promise<void> {
+    this.stored =
+      (await api<StoredTeamConnectionDto | null>("stored_team_connection")) ??
+      null;
+  }
+
+  /// Reads what this machine remembers and, if there is anything,
+  /// tries it — without asking anybody anything (#204).
+  ///
+  /// `api` rather than `mutate`: nobody asked for this, so a refusal
+  /// has nothing to report to. The three ends it can reach are all
+  /// ordinary, and the command's `outcome` is what tells them apart —
+  /// only a server that is unreachable or shouting throws, and that
+  /// one is swallowed here for the same reason. A window whose silent
+  /// attempt failed is a window showing the connect form, which is
+  /// where it would have been anyway.
+  async resume(): Promise<void> {
+    await this.readStored();
+    if (this.stored === null) return;
+    let attempt: StoredTeamConnectDto;
+    try {
+      attempt = await api<StoredTeamConnectDto>("connect_team_server_stored");
+    } catch {
+      return;
+    }
+    if (attempt?.outcome === "connected") {
+      this.session = attempt.user;
+      this.storedRejected = false;
+      return;
+    }
+    // `rejected` forgot both halves before answering, and `stored` is
+    // kept anyway: the login it carries is what the person is about to
+    // type a password beside.
+    this.storedRejected = attempt?.outcome === "rejected";
+    if (this.storedRejected) return;
+    // `nothing` is the one that has to be read back rather than
+    // inferred. It covers a file that was dropped — its entry was
+    // gone — and a file that was kept because the keychain would not
+    // answer, and the command carries no field saying which, on the
+    // reasoning `StoredTeamConnectOutcome` gives. Assuming the first
+    // would make one dismissed keychain prompt empty the form of a
+    // connection this machine still remembers.
+    await this.readStored();
+  }
+
+  /// Logs in with a password, and optionally asks to be remembered.
+  ///
+  /// `remember` is the mint: the session this opens is used once more
+  /// to ask for a device token, which lands in this machine's
+  /// keychain. What it stores and why the password is not part of it
+  /// is on the command.
   async connect(
     baseUrl: string,
     login: string,
     password: string,
+    remember: boolean,
   ): Promise<void> {
     this.said = null;
     this.session = await mutate<string>(
       "connect_team_server",
-      { baseUrl, login, password },
+      { baseUrl, login, password, remember },
       "connect to that team server",
     );
+    this.storedRejected = false;
+    // What the mint wrote, read back rather than assumed: a connection
+    // made without ticking the box leaves whatever was stored before
+    // exactly as it was, and this is the one read that says which.
+    await this.readStored();
     // A connection is what makes this answerable, so it is read here
     // rather than left for the next time the panel opens — the phase
     // this lands in is the one the list is for.
     await this.teams.load({});
+  }
+
+  /// Revokes one device token, which may be this machine's own.
+  ///
+  /// The listing is re-read rather than patched, on the rule the rest
+  /// of this catalog follows: what the server holds is the answer, and
+  /// a row removed here would be this side guessing at it. `stored` is
+  /// re-read for the same reason — revoking this machine's own row
+  /// forgets it on this side too, and the form has to know.
+  async revokeDevice(tokenId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "revoke_team_device_token",
+      { tokenId },
+      "revoke that device",
+    );
+    await this.readStored();
+    await this.deviceTokens.load({});
   }
 
   /// The ledger as far as it has been read, oldest first.
@@ -596,9 +727,28 @@ class SharedCatalog {
   /// than one nothing has happened to.
   ledgerRead = $state(false);
 
+  /// Signs out, which also gives up being remembered.
+  ///
+  /// The command revokes this machine's device token and drops both
+  /// halves of what was stored — when what was stored is the
+  /// connection being ended, which its own doc is where that rule is
+  /// argued. `stored` goes with the session here either way: it is
+  /// this store's copy of an answer that is now at best stale, and the
+  /// next `readStored` is what it comes back from.
+  ///
+  /// That is a statement about the store and not about the screen. The
+  /// panel's server and login fields are its own `$state`, seeded from
+  /// `stored` by an effect that only writes when there is something to
+  /// write, so clearing this leaves what was typed where it was — and
+  /// a person signing out to sign in elsewhere is not helped by a form
+  /// that empties itself. Closing the window does none of this, which
+  /// the command's own doc argues.
   async disconnect(): Promise<void> {
     await api("disconnect_team_server");
     this.session = null;
+    this.stored = null;
+    this.storedRejected = false;
+    this.deviceTokens.reset();
     this.selected = null;
     // Not a cache being invalidated — a served-through view losing the
     // thing it was served through.

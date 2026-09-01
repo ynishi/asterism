@@ -44,6 +44,7 @@
 pub mod commands;
 pub mod error;
 pub mod state;
+pub mod stored_connection;
 
 /// Startup mode parsed from the process arguments.
 ///
@@ -435,6 +436,14 @@ pub fn run() {
             commands::connect_team_server,
             commands::disconnect_team_server,
             commands::team_server_session,
+            // The one credential this machine may keep, and what it
+            // costs to keep it (#204). `stored_connection` owns both
+            // stores; these are the four verbs a window reaches them
+            // through.
+            commands::stored_team_connection,
+            commands::connect_team_server_stored,
+            commands::list_team_device_tokens,
+            commands::revoke_team_device_token,
             commands::list_shared_lines,
             commands::shared_line_states,
             commands::shared_line_history,

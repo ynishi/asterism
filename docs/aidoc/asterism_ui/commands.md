@@ -85,6 +85,7 @@ other.
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `close_shared_pursuit` — Ends work on a shared line, landing it or abandoning it.
 - `connect_team_server` — Logs this window in to a team server and holds the session.
+- `connect_team_server_stored` — Reconnects from the device token this machine holds, without asking
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -111,7 +112,7 @@ other.
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
 - `detach_tag_batch` — Detaches one tag from many assets in one call.
 - `discard_forge_line` — Takes the line, its history and every piece of work against it.
-- `disconnect_team_server` — Drops the session. The panel goes empty rather than stale.
+- `disconnect_team_server` — Drops the session, and drops what this machine was keeping.
 - `dispatch_run` — Live-source dispatch (`dispatch_run`): freezes a Group (query
 - `edit_asset_comment` — Rewrites the body of an existing comment (stamps `edited_at`).
 - `edit_chapter_mark` — Retitles a section and, unlike the mark face, may move it: the reason
@@ -170,6 +171,7 @@ other.
 - `list_streams` — The stream names [`list_observations`]'s `stream` filter accepts —
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
 - `list_tag_suggestions` — Lists what the bound visual model proposed for one asset (#112),
+- `list_team_device_tokens` — The device tokens this account holds, on whatever machines.
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
@@ -228,6 +230,7 @@ other.
 - `restore_asset` — Returns a trashed asset to the live set.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
+- `revoke_team_device_token` — Revokes one of this account's device tokens.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
@@ -241,6 +244,7 @@ other.
 - `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `shared_pursuit` — One piece of work on a shared line, as it stands.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_roster` — Who is in a team, and in what role.
 - `team_server_session` — Whether this window is talking to a team server.

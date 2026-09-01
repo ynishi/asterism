@@ -716,6 +716,58 @@ CREATE TABLE asset_projection (
 CREATE INDEX idx_asset_projection_team ON asset_projection(team_id);
 "#;
 
+/// V10 — the one credential a disk may hold (#204).
+///
+/// A device token is [`auth_session`](V2_AUTH_TABLES) with a longer
+/// life and a name, so this table is that one plus the three columns
+/// the difference needs. The hash-at-rest rule is `V2`'s and is not
+/// restated: the client holds the random bytes, this table holds their
+/// SHA-256, and a leaked database therefore contains no usable
+/// credential of either kind.
+///
+/// **`id` is the revocation handle, and it exists so the hash never
+/// travels.** Revoking has to name a row, and the row's own key is the
+/// digest a verifier compares against — handing that to a client would
+/// put the stored value of a live credential on the wire, where
+/// whoever holds a listing can test candidate tokens against it
+/// offline. So a v7 uuid names the row, says nothing about the secret,
+/// and is what the list answers with and the revoke takes.
+///
+/// **`last_used_at` is nullable, and null means never.** Stamping the
+/// mint instant there would make a token nobody has presented look
+/// like one somebody used — which is the single fact this column
+/// exists for a person to read before deciding whether to revoke.
+///
+/// **Expiry is enforced the way sessions enforce it**, on touch and by
+/// the bulk sweep that walks `expires_at`. What differs is where the
+/// lifetime comes from: a session's rides on the server's context
+/// (`teams_server::state::TeamsCtx::session_ttl_ms`, which the binary
+/// fills from a default and the route suites shorten), a device
+/// token's is a constant in the adapter (`DEVICE_TOKEN_TTL_MS`) that
+/// nothing varies, and the reasoning for fixing it is stated there
+/// rather than here.
+///
+/// The `user_id` key cascades, matching `auth_session`: whatever
+/// removes an account takes its stored credentials with it, and a
+/// device token outliving the account it authenticates would be a row
+/// that can only resolve to nothing.
+const V10_DEVICE_TOKEN: &str = r#"
+CREATE TABLE device_token (
+    token_hash   TEXT NOT NULL,
+    id           BLOB NOT NULL,
+    user_id      BLOB NOT NULL REFERENCES user_account(user_id) ON DELETE CASCADE,
+    label        TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER,
+    expires_at   INTEGER NOT NULL,
+    PRIMARY KEY (token_hash)
+) STRICT, WITHOUT ROWID;
+
+CREATE UNIQUE INDEX idx_device_token_id      ON device_token(id);
+CREATE INDEX        idx_device_token_user    ON device_token(user_id, created_at);
+CREATE INDEX        idx_device_token_expires ON device_token(expires_at);
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -728,6 +780,7 @@ const MIGRATIONS: &[&str] = &[
     V7_FORGE_TABLES,
     V8_TEAM_ASSET_CONTENT,
     V9_ASSET_PROJECTION,
+    V10_DEVICE_TOKEN,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -1042,6 +1095,58 @@ mod tests {
         assert_eq!(indexed.len(), 1, "{indexed:?}");
         assert!(indexed[0].contains("team_id"), "{indexed:?}");
         assert!(!indexed[0].contains("body"), "{indexed:?}");
+    }
+
+    #[test]
+    fn v10_keys_a_device_token_by_its_hash_and_hands_out_a_separate_handle() {
+        let conn = migrated();
+        conn.execute(
+            "INSERT INTO user_account
+             (user_id, login, display_name, password_hash, is_admin, created_at)
+             VALUES (X'01', 'hoshino', 'Hoshino', 'phc', 0, 0)",
+            [],
+        )
+        .unwrap();
+        let mint = |token_hash: &str, id: Uuid| {
+            conn.execute(
+                "INSERT INTO device_token
+                 (token_hash, id, user_id, label, created_at, last_used_at, expires_at)
+                 VALUES (?1, ?2, X'01', 'MacBook', 0, NULL, 1)",
+                rusqlite::params![token_hash, id],
+            )
+        };
+        let first = Uuid::now_v7();
+        mint("hash-one", first).expect("the first device");
+        // The handle is unique, because revoking names one row and a
+        // second row answering to the same name would make the verb
+        // ambiguous.
+        assert!(mint("hash-two", first).is_err());
+        mint("hash-two", Uuid::now_v7()).expect("a second device");
+
+        // A minted token has never been used, and the column says so
+        // rather than borrowing the mint instant.
+        let unused: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM device_token WHERE last_used_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unused, 2);
+
+        // The table stores a digest, and carries no column that could
+        // hold the value a client presents.
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'device_token'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(ddl.contains("token_hash"), "{ddl}");
+        for forbidden in ["secret", "plaintext", "token TEXT"] {
+            assert!(!ddl.contains(forbidden), "{forbidden} in: {ddl}");
+        }
     }
 
     #[test]

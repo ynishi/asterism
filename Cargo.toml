@@ -89,6 +89,24 @@ edition       = "2024"
 # not coexist with `rusqlite 0.37` under a single `links = "sqlite3"`.
 tauri = "2"
 
+# The OS credential store, and the only home a device token has (#204).
+#
+# The crate directly, not a Tauri plugin. #204's Shape says "the OS
+# keychain (Tauri plugin)", and there is no first-party v2 plugin for
+# one to reach — the parenthetical was a sketch of where the token
+# goes, not a decision about what gets it there. `keyring` is the
+# established cross-platform crate for this and is what a plugin would
+# be wrapping, so taking it directly is one dependency rather than two.
+#
+# Default features rather than a list, which is the whole difference
+# from the 3.x line: there, every backend was named by the depending
+# crate and a platform left out of the list silently had no store. In 4
+# the `v1` default selects one per platform — Keychain Services,
+# Windows Credential Manager, Secret Service — so naming them here
+# would be restating the crate's own default and would go stale the day
+# it grows a fourth.
+keyring = "4"
+
 # --- asterism-server: HTTP API ---
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }

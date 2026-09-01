@@ -3,7 +3,7 @@
 `auth::password` — the v0 instance-local credential adapter
 (#83 §5).
 
-Three decisions carry this module:
+The decisions that carry this module:
 
 - **Hashing is argon2id through RustCrypto's `argon2`** (OWASP's
   current first choice), default parameters, PHC-string storage —
@@ -22,6 +22,15 @@ Three decisions carry this module:
   [`PasswordAuth::cleanup_expired`] sweeps in bulk (the server runs
   it on every login, so the table cannot accumulate dead rows
   faster than logins happen).
+- **A device token is that construction with a longer life and a
+  name** (#204). Same bytes, same hash-at-rest rule, same two-sided
+  expiry — [`PasswordAuth::mint_device_token`] and its four
+  siblings differ from the session verbs in what the row carries
+  (a label, a handle, a last-use stamp) rather than in how the
+  secret is handled. What it is *for* is the invariant #204 fixes:
+  the disk may hold this and no primary credential, whichever
+  verifier said yes — so the mint takes a `user_id` and never asks
+  how the caller proved they were one.
 - **No default credentials exist** ([`reject_default_credential`]):
   the bootstrap admin (#83 §5, the §1
   [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
@@ -42,5 +51,11 @@ process-local dummy hash so the two answers cost the same work
 ## Types
 
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
+- `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
+- `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
+
+## Constants
+
+- `DEVICE_TOKEN_TTL_MS` — How long a device token lives from the mint: **90 days** (#204).
 

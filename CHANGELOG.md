@@ -10,6 +10,40 @@ and this project adheres to
 
 ### Added
 
+- **Sign in to a team once, and this machine can do it again without the
+  password** (#204). Tick "Remember this device" on the connect form and the
+  server mints a device token — the session construction with a longer life and
+  a name: the same 32 CSPRNG bytes held as a SHA-256, so a leaked database
+  contains nothing anybody can present. It expires ninety days from the mint and
+  is not slid forward on use, because a list that cannot say a date is not one
+  somebody revokes from. The next window presents it and gets an ordinary
+  session back, the same shape the password arm returns, so nothing downstream
+  of the gate can tell which arm opened it.
+
+  **The disk never holds a primary credential.** The token lives in the OS
+  keychain and has no path to a file; the profile home holds the server, the
+  login, the revocation handle and the label this device asked to be called,
+  none of which authenticates anybody. The password is stored under no key.
+
+  **The mint asks for a live session and nothing more**, which is what leaves a
+  later OIDC adapter (#163) free: a verified ID token reaches it exactly as a
+  password does, and the minting path never learns which verifier answered. What
+  that costs is that a stolen session can mint one, and the bound on it is the
+  owner's — a list in the drawer of every token the account holds, each with its
+  device's label, when it was minted and when it was last used, and a revoke
+  beside it. The values are never in that list; the instance does not have them
+  to give.
+
+  **Signing out revokes it; closing the window does not.** That is the whole
+  difference between the two gestures. Each verb acts on the connection it is
+  holding rather than on whatever the profile file names, so signing in
+  somewhere else never revokes the first server's token or drops its keychain
+  entry.
+
+  Being remembered is not a condition of connecting. A keychain that refuses
+  leaves a window signed in and a box to tick again, which is the honest outcome
+  — the alternative takes away the thing that did work.
+
 - **Pick a team instead of typing its id** (#202). The team id was typed into a
   field because nothing answered "the teams I am in" — #171 has named that gap
   since it was opened, and it was missing from the storage read up: the

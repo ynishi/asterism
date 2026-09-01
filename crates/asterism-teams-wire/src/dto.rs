@@ -8,10 +8,13 @@
 use schema_bridge::SchemaBridge;
 use serde::{Deserialize, Serialize};
 
-/// A freshly minted session (`POST /teams/auth/login`).
+/// A freshly minted session (`POST /teams/auth/login`, and
+/// `POST /teams/auth/device/login` — one session shape, whichever arm
+/// issued it).
 ///
-/// **No derived `Debug`** — see the hand-written one below. This is
-/// the one shape in this crate carrying a live credential.
+/// **No derived `Debug`** — see the hand-written one below, which is
+/// where this crate's rule about formatting a live credential is
+/// stated.
 #[derive(Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct SessionDto {
     /// The opaque bearer token — present it as
@@ -50,6 +53,71 @@ impl std::fmt::Debug for SessionDto {
             .field("expires_at_ms", &self.expires_at_ms)
             .finish()
     }
+}
+
+/// A freshly minted device token (`POST /teams/auth/device`, #204).
+///
+/// **No derived `Debug`**, for the reason [`SessionDto`]'s
+/// hand-written one gives. The difference worth stating here is how
+/// long the value is useful for: a session dies in hours, this is the
+/// credential a client puts in an OS keychain and presents after a
+/// restart, so a copy of it that leaked into a log is a copy that
+/// works for months.
+#[derive(Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeviceTokenMintedDto {
+    /// The token. **This response is the only time it exists outside
+    /// the client** — the server stores its SHA-256, so nothing can
+    /// answer with it again and a client that loses it mints another.
+    pub token: String,
+    /// The handle the listing names this token by and the revoke takes
+    /// (`DELETE /teams/auth/device/{id}`). Safe to store beside the
+    /// token or in place of it: it authenticates nobody.
+    pub id: String,
+    /// When it stops resolving, epoch ms.
+    pub expires_at_ms: i64,
+}
+
+impl std::fmt::Debug for DeviceTokenMintedDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceTokenMintedDto")
+            .field("token", &"<not shown>")
+            .field("id", &self.id)
+            .field("expires_at_ms", &self.expires_at_ms)
+            .finish()
+    }
+}
+
+/// The caller's own device tokens (`GET /teams/auth/device`, #204).
+///
+/// Owner-scoped, and there is no admin-facing sibling: what an
+/// instance's other accounts have stored on their machines is theirs
+/// to see and revoke.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeviceTokensDto {
+    /// One row per live token, oldest mint first.
+    pub tokens: Vec<DeviceTokenDto>,
+}
+
+/// One device token as its owner sees it.
+///
+/// **`Debug` is derived, and that is the property worth checking:**
+/// nothing on this shape authenticates anybody — not the token, not
+/// its hash, not a prefix of either — which is what lets the listing
+/// exist at all.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeviceTokenDto {
+    /// The handle to revoke by.
+    pub id: String,
+    /// What the client called this device when it asked.
+    pub label: String,
+    /// When it was minted, epoch ms.
+    pub created_at_ms: i64,
+    /// When it was last presented, epoch ms — absent for a token
+    /// nobody has used yet, which is a different fact from "used at
+    /// the moment it was made".
+    pub last_used_at_ms: Option<i64>,
+    /// When it stops resolving, epoch ms.
+    pub expires_at_ms: i64,
 }
 
 /// The result of `POST /teams/create`.

@@ -16,4 +16,5 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+- `TeamsConnection` — A live team session, and the pair that names it.
 

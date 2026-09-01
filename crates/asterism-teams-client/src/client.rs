@@ -41,11 +41,12 @@ use asterism_contract::forge::{
 use asterism_core::domain::team_link::TeamScopedId;
 use asterism_core::error::DomainError;
 use asterism_teams_wire::command::{
-    CreateTeamCommand, HaveContentCommand, LoginCommand, ResolveContentCommand,
+    CreateTeamCommand, DeviceLoginCommand, HaveContentCommand, LoginCommand,
+    MintDeviceTokenCommand, ResolveContentCommand,
 };
 use asterism_teams_wire::dto::{
-    ContentEnteredDto, HeldContentDto, LedgerPageDto, MyTeamsDto, ResolvedContentDto, RosterDto,
-    SessionDto, TeamCreatedDto,
+    ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto, LedgerPageDto,
+    MyTeamsDto, ResolvedContentDto, RosterDto, SessionDto, TeamCreatedDto,
 };
 use asterism_teams_wire::projection::{
     EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
@@ -155,8 +156,9 @@ impl TeamsClient {
         }
     }
 
-    /// The session, if there is one. Its token is the one value in
-    /// this crate that must not be logged.
+    /// The session, if there is one. Its token must not be logged, and
+    /// [`SessionDto`]'s hand-written `Debug` is what keeps it out of
+    /// the places a value gets copied from by accident.
     pub const fn session(&self) -> Option<&SessionDto> {
         self.session.as_ref()
     }
@@ -182,7 +184,8 @@ impl TeamsClient {
     }
 
     // ------------------------------------------------------------------
-    // Session (#83 §5).
+    // Session (#83 §5), and the device token that makes one without a
+    // password (#204).
     // ------------------------------------------------------------------
 
     /// Logs in, and keeps the session for every call after this one.
@@ -211,6 +214,96 @@ impl TeamsClient {
         let session: SessionDto = read_json("POST", &url, response).await?;
         self.session = Some(session.clone());
         Ok(session)
+    }
+
+    /// Logs in from a stored device token, and keeps the session for
+    /// every call after this one (#204).
+    ///
+    /// The other half of [`Self::mint_device_token`], and the reason
+    /// the pair exists: a restart reconnects from what the keychain
+    /// held instead of asking for a password. What comes back is an
+    /// ordinary session — the same shape [`Self::login`] returns — so
+    /// nothing below this method knows which arm was used.
+    ///
+    /// An unknown, revoked and expired token are the same `401`. That
+    /// is the client's cue to fall back to the password form, and the
+    /// one thing it must not do on that path is keep the stored token:
+    /// deciding when a stored credential is discarded belongs to
+    /// whoever owns the keychain entry, so this method changes nothing
+    /// on disk in either direction.
+    pub async fn login_with_device_token(
+        &mut self,
+        token: &str,
+    ) -> Result<SessionDto, TeamsClientError> {
+        let url = self.url("/teams/auth/device/login");
+        let response = self
+            .http
+            .post(&url)
+            .json(&DeviceLoginCommand {
+                token: token.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        let session: SessionDto = read_json("POST", &url, response).await?;
+        self.session = Some(session.clone());
+        Ok(session)
+    }
+
+    /// Asks the server for a device token this machine may keep
+    /// (#204).
+    ///
+    /// Needs a session, and any live one will do — which is what lets
+    /// a client reach this after logging in whichever way the instance
+    /// verifies people.
+    ///
+    /// **The returned token is the only copy that will ever exist
+    /// outside this process.** The server holds its SHA-256 and can
+    /// answer with it again as little as the caller can recover it, so
+    /// a caller that means to keep it has to store it before dropping
+    /// the response. Where is the caller's own question, and this
+    /// crate does not answer it — the desktop puts it in the OS
+    /// keychain and states why in `stored_connection`; another caller
+    /// may have somewhere else, or nowhere.
+    pub async fn mint_device_token(
+        &self,
+        label: &str,
+    ) -> Result<DeviceTokenMintedDto, TeamsClientError> {
+        self.post(
+            "/teams/auth/device",
+            "mint_device_token",
+            &MintDeviceTokenCommand {
+                label: label.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// The device tokens this session's account holds — labels,
+    /// handles and times, never a value.
+    ///
+    /// Owner-scoped by the route: there is no argument for whose
+    /// tokens to list, because the answer is always the caller's.
+    pub async fn list_device_tokens(&self) -> Result<DeviceTokensDto, TeamsClientError> {
+        self.get("/teams/auth/device", "list_device_tokens").await
+    }
+
+    /// Revokes one of this account's device tokens by the handle
+    /// [`list_device_tokens`](Self::list_device_tokens) named it by.
+    ///
+    /// Succeeds for a handle that names nothing, exactly as the route
+    /// does — so a client reconciling a keychain against a listing can
+    /// revoke without first checking, and learns nothing about ids
+    /// that are not its own.
+    ///
+    /// Sessions already minted from the token live out their own TTL;
+    /// revoking stops the next one.
+    pub async fn revoke_device_token(&self, id: &str) -> Result<(), TeamsClientError> {
+        self.delete(&format!("/teams/auth/device/{id}"), "revoke_device_token")
+            .await
     }
 
     /// Ends the session, here and on the server.
@@ -743,7 +836,9 @@ impl TeamsClient {
     }
 
     // ------------------------------------------------------------------
-    // The two shapes every call above is one of.
+    // The shared request shapes. Most calls above go through one of
+    // these; `enter_content` and `fetch_content` build their own,
+    // because bytes are neither JSON in nor JSON out.
     // ------------------------------------------------------------------
 
     async fn get<T: DeserializeOwned>(
@@ -786,6 +881,24 @@ impl TeamsClient {
                 source,
             })?;
         read_json("POST", &url, response).await
+    }
+
+    /// A verb that answers with nothing — the only one of these whose
+    /// success has no body to decode.
+    async fn delete(&self, path: &str, what: &'static str) -> Result<(), TeamsClientError> {
+        let token = self.token(what)?.to_string();
+        let url = self.url(path);
+        let response = self
+            .http
+            .delete(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        refusal("DELETE", &url, response).await
     }
 }
 

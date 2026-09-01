@@ -10,6 +10,9 @@ its own (#83 §1).
 ## Types
 
 - `ContentEnteredDto` — What the team minted for content that entered it
+- `DeviceTokenDto` — One device token as its owner sees it.
+- `DeviceTokenMintedDto` — A freshly minted device token (`POST /teams/auth/device`, #204).
+- `DeviceTokensDto` — The caller's own device tokens (`GET /teams/auth/device`, #204).
 - `HeldAssetDto` — One asset a team holds, as the bulk resolve answers about it.
 - `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
@@ -19,7 +22,7 @@ its own (#83 §1).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
-- `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
 

@@ -19,6 +19,45 @@ pub struct LoginCommand {
     pub password: String,
 }
 
+/// Presents a device token to `POST /teams/auth/device/login` (#204).
+///
+/// Answers with the same session the password arm answers with —
+/// device tokens sit in front of sessions rather than replacing them,
+/// so a client that has logged in this way is holding an ordinary
+/// session and everything downstream of the gate is unchanged.
+///
+/// **No derived `Debug`**, for the reason
+/// [`SessionDto`](crate::dto::SessionDto)'s hand-written one gives:
+/// this body carries the one credential a client's disk is allowed to
+/// hold.
+#[derive(Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct DeviceLoginCommand {
+    /// The device token, as the mint answered with it. An unknown,
+    /// revoked and expired token are the same `401`.
+    pub token: String,
+}
+
+impl std::fmt::Debug for DeviceLoginCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceLoginCommand")
+            .field("token", &"<not shown>")
+            .finish()
+    }
+}
+
+/// Asks for a device token (`POST /teams/auth/device`, #204).
+///
+/// Carries no account: whose token it is comes from the session the
+/// gate resolved, which is what keeps the mint from being a way to
+/// issue a credential for somebody else.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MintDeviceTokenCommand {
+    /// What to call this device in the owner's listing — "Yutaka's
+    /// MacBook". Blank is refused; the label is how a person tells one
+    /// row from another when deciding what to revoke.
+    pub label: String,
+}
+
 /// Creates a team (`POST /teams/create`).
 ///
 /// Who may call this follows the registration policy (#83 §1): any

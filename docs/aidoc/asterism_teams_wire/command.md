@@ -11,8 +11,10 @@ session token → user_id → membership gate).
 ## Types
 
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
+- `DeviceLoginCommand` — Presents a device token to `POST /teams/auth/device/login` (#204).
 - `EnterContentCommand` — Brings content into a team against open work
 - `HaveContentCommand` — Asks which digests a team already has
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
+- `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 
