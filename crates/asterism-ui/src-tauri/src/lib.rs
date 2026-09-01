@@ -447,6 +447,7 @@ pub fn run() {
             commands::promote_asset_to_team,
             commands::publish_line_to_team,
             commands::team_ledger_page,
+            commands::my_teams,
             commands::team_roster,
             commands::create_team,
         ])

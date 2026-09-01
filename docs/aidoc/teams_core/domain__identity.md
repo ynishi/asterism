@@ -38,6 +38,7 @@ same three lines instead of re-deriving them.
 - `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
 - `Role` — A member's role within one team.
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
+- `TeamMembership` — One team a given user belongs to, read from that user's side.
 - `TeamRoster` — One team's membership set — the value every membership invariant is
 - `TeamVerb` — The verbs an authority table answers for — everything
 - `User` — A person known to the instance — the identity teams are built from.

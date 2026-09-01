@@ -44,8 +44,8 @@ use asterism_teams_wire::command::{
     CreateTeamCommand, HaveContentCommand, LoginCommand, ResolveContentCommand,
 };
 use asterism_teams_wire::dto::{
-    ContentEnteredDto, HeldContentDto, LedgerPageDto, ResolvedContentDto, RosterDto, SessionDto,
-    TeamCreatedDto,
+    ContentEnteredDto, HeldContentDto, LedgerPageDto, MyTeamsDto, ResolvedContentDto, RosterDto,
+    SessionDto, TeamCreatedDto,
 };
 use asterism_teams_wire::projection::{
     EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
@@ -254,6 +254,15 @@ impl TeamsClient {
             },
         )
         .await
+    }
+
+    /// The teams this session's account is a member of.
+    ///
+    /// Takes no [`TeamScopedId`], because it is what a caller asks
+    /// before they have one. What it answers — membership rather than
+    /// reach — is the route's decision and is argued there.
+    pub async fn my_teams(&self) -> Result<MyTeamsDto, TeamsClientError> {
+        self.get("/teams", "my_teams").await
     }
 
     /// The team's current membership set.

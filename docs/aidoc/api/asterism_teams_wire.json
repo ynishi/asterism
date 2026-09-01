@@ -63,6 +63,16 @@
       "docs": "One page of a team's stream (`GET /teams/{team_id}/events`).\n\nThe stream only grows, so the read is paged rather than whole and\nthe caller is handed where to resume rather than an offset to\ncount from."
     },
     {
+      "path": "asterism_teams_wire::dto::MyTeamDto",
+      "kind": "struct",
+      "docs": "One team the caller belongs to.\n\n**No name, because a team has none** — `TeamMembership` in the\ndomain is where that is argued. Nothing on this wire carries a\nlabel for a team either, so a row is an id, a role and a time."
+    },
+    {
+      "path": "asterism_teams_wire::dto::MyTeamsDto",
+      "kind": "struct",
+      "docs": "The teams the caller is a member of (`GET /teams`).\n\nThe roster read turned around: that one takes a team and answers\nwith users, this one takes the caller and answers with teams. Its\npath names no team because the question is not about one."
+    },
+    {
       "path": "asterism_teams_wire::dto::ResolvedContentDto",
       "kind": "struct",
       "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."

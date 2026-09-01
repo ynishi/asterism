@@ -151,10 +151,14 @@ pub struct AssetCardDto {
     /// as a plain string for other formats so downstream views
     /// (detail panels, jump-to-source links) can reuse it.
     ///
-    /// Not the stored form, deliberately. Every consumer renders this —
-    /// a basename label, a tooltip, a clipboard copy — and none reads it
-    /// back, so the wire type is not coupled to the storage encoding
-    /// and does not change when that does.
+    /// Not the stored form, deliberately. Consumers render this — a
+    /// basename label, a tooltip, a clipboard copy — and nothing parses
+    /// it as the stored encoding, so the wire type is not coupled to
+    /// that encoding and does not change when it does. What a consumer
+    /// may do is take the string as what it says it is — a file
+    /// locator's path is a path, and asking the filesystem about it is
+    /// reading the display spelling at its word rather than parsing
+    /// the stored one.
     pub source_locator: String,
     /// Group ids the asset is filed into (m:n `asset_bucket`). The
     /// UI uses this for the `Group` sort axis and the group-lane

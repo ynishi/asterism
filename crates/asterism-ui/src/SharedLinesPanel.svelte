@@ -12,10 +12,11 @@
   // `sharedCatalog` and `activeFilter.activePersona` directly, and the
   // App only mounts it.
   //
-  // The team id is typed in because the member's client has no verb
-  // for "the teams I am in". What a picker would change when that verb
-  // lands, and what it would not, is argued in the catalog's header
-  // rather than restated here.
+  // A team is picked from the ones this account is in, or named in the
+  // field below them. What the picker changed and what it did not is
+  // argued in the catalog's header; what this panel decides is where
+  // the two go — the list first, the field under it, and why the field
+  // is still here at all.
   //
   // What this panel reads from that header is `phase`: there is nobody
   // to ask, there is nobody chosen to ask about, or there is. The three
@@ -70,8 +71,8 @@
   // read is made against as somebody typed, so a ledger walk started on
   // one team would continue against another — the next page requested
   // from team B with team A's cursor, and its answer appended to team
-  // A's list. Naming a team is a submit, and `lookAt` is what a submit
-  // reaches; between the two the catalog does not move.
+  // A's list. Typing is not the naming act — `lookAt` is, and says so
+  // — so what is half-typed here reaches nothing until a gesture does.
   //
   // Seeded from the catalog, because a connection outlives this drawer
   // and reopening it should show the team it was last looking at.
@@ -123,6 +124,17 @@
     // Everything naming a team has to let go of is `lookAt`'s, written
     // once there rather than at each caller.
     await sharedCatalog.lookAt(teamField);
+    await refreshOpenTab();
+  }
+
+  // The second gesture that reaches the naming act, and `lookAt` says
+  // the two are equal. It goes the same way `look` does — `lookAt`,
+  // then whichever tab is open — and writes the field as well, so
+  // pressing a row leaves it showing what was picked rather than what
+  // somebody typed last.
+  async function choose(teamId: string) {
+    teamField = teamId;
+    await sharedCatalog.lookAt(teamId);
     await refreshOpenTab();
   }
 
@@ -258,9 +270,63 @@
           </button>
         </div>
 
+        <!-- The teams this account is in, which is what the field
+             below used to be the only way to name. Ids rather than
+             names because a team has none, which `TeamMembership` in
+             the team plane's domain argues — a different shortage from
+             the roster's, where the person has a name and the row does
+             not carry it. The role is shown beside each because
+             it is the fact a reader chooses on; the creation time is
+             what the rows are ordered by and is not drawn. -->
+        {#if sharedCatalog.teams.loading}
+          <p class="drawer-empty">reading your teams…</p>
+        {:else if sharedCatalog.teams.error}
+          <p class="drawer-empty drawer-error">
+            Could not read your teams: {sharedCatalog.teams.error}
+          </p>
+        {:else if sharedCatalog.teams.data.length > 0}
+          <ul class="drawer-list teams" role="list">
+            {#each sharedCatalog.teams.data as team (team.team_id)}
+              <li>
+                <!-- `aria-current` beside the weight, because the
+                     marking is the answer to "which team is this
+                     window on" and weight alone says that to one kind
+                     of reader. The e2e reads the class for the same
+                     fact. -->
+                <button
+                  type="button"
+                  class="drawer-row"
+                  class:active={sharedCatalog.teamId === team.team_id}
+                  aria-current={sharedCatalog.teamId === team.team_id
+                    ? "true"
+                    : undefined}
+                  onclick={() => choose(team.team_id)}
+                  title="Read the lines this team hosts"
+                >
+                  <span class="row-title mono">{team.team_id}</span>
+                  <span class="row-standing">{team.role}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <!-- Empty is not "no way in". The read answers membership
+               and an instance admin belongs to nothing by being one
+               (#83 §1), so the field below is the whole surface for
+               that reader. -->
+          <p class="drawer-empty">
+            You are not a member of any team on this server.
+          </p>
+        {/if}
+
+        <!-- Kept, and demoted. It names a team the list above does not
+             hold, and the reader that has is the instance admin: they
+             act inside teams without a membership row, so their list
+             is empty while their reach is not. Without this the plane
+             would have no entrance for them at all. -->
         <form class="drawer-form" onsubmit={look}>
           <label>
-            Team
+            Or name a team directly
             <input
               type="text"
               bind:value={teamField}
@@ -271,15 +337,15 @@
           <button type="submit">List its lines</button>
         </form>
 
-        <!-- Founding a team sits beside the field rather than on a tab,
-             because every tab is an answer about the team named above
-             and this is the one act about no team in particular.
-             Beside the field in every phase with a connection, not only
-             in `no-team`: naming a team is a one-way trip on this
-             surface — the field is `required`, so there is no way back
-             to having named none — and an offer that only appeared
-             there would be an offer somebody could take exactly once
-             per window. -->
+        <!-- Founding a team sits under the list and the field rather
+             than on a tab, because every tab is an answer about the
+             team named above and this is the one act about no team in
+             particular. Shown in every phase with a connection, not
+             only in `no-team`: naming a team is still a one-way trip
+             on this surface — picking a row or submitting the field
+             both name one, and neither has an undo — so an offer that
+             only appeared before the first would be an offer somebody
+             could take exactly once per window. -->
         <button type="button" class="make-team" onclick={makeTeam}>
           Start a team of your own
         </button>
@@ -290,7 +356,7 @@
 
         {#if sharedCatalog.phase === "no-team"}
           <p class="drawer-empty">
-            Name a team above to see the lines it hosts.
+            Pick a team above, or name one, to see the lines it hosts.
           </p>
         {:else}
           <nav class="drawer-tabs" aria-label="What to read about this team">
@@ -474,7 +540,13 @@
         {:else if sharedCatalog.lines.data.length === 0}
           <p class="drawer-empty">This team hosts no lines.</p>
         {:else}
-          <ul class="drawer-list" role="list">
+          <!-- Named `lines` so a selector can name this one. Every
+               list in this drawer carries `drawer-list` for the
+               styling and a modifier for the naming — the roster and
+               the ledger already did, and the teams above made the
+               difference matter for the lines too. The class has no
+               CSS of its own; the e2e specs are what read it. -->
+          <ul class="drawer-list lines" role="list">
             {#each sharedCatalog.lines.data as line (line.id)}
               <li>
                 <button
@@ -891,6 +963,15 @@
     padding: 0.45rem 0.1rem;
     text-align: left;
     font-size: 0.82rem;
+  }
+  .teams .drawer-row.active {
+    font-weight: 600;
+  }
+  .mono {
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .line-head {
     display: flex;

@@ -180,6 +180,31 @@ async function clickTab(label: string): Promise<void> {
 }
 
 /**
+ * Presses the first control inside `container` carrying `text`.
+ *
+ * For rows rather than labels: a team row is an id and a role in two
+ * spans, so its text is the two with the markup's whitespace between
+ * them and an exact match never lands.
+ */
+async function clickCarrying(container: string, text: string): Promise<void> {
+  const hit = await browser.execute(
+    (sel: string, want: string) => {
+      const scope = document.querySelector(sel);
+      if (scope === null) return false;
+      const button = Array.from(scope.querySelectorAll("button")).find(
+        (candidate) => (candidate.textContent ?? "").includes(want),
+      );
+      if (button === undefined) return false;
+      (button as HTMLElement).click();
+      return true;
+    },
+    container,
+    text,
+  );
+  if (!hit) throw new Error(`nothing in ${container} carries "${text}"`);
+}
+
+/**
  * Types into a field the way a person does.
  *
  * Not `element.value = …`: the panel binds with Svelte's `bind:value`,
@@ -267,7 +292,7 @@ describe("the team plane", () => {
             "kinds of empty are merged again (#190)",
         );
       }
-      if (!text.includes("Name a team above")) {
+      if (!text.includes("Pick a team above")) {
         throw new Error(`the drawer did not ask for a team; it read: ${text}`);
       }
       if (text.includes("Publish a line of mine")) {
@@ -280,9 +305,19 @@ describe("the team plane", () => {
       }
     });
 
-    await stage(trail, "name the team and read its lines", ROUND_TRIP_MS, async () => {
-      await fill(`${DRAWER} form input[type="text"]`, teamId);
-      await clickIn(`${DRAWER} form button[type="submit"]`);
+    // Picked rather than typed, which is what a person does now that
+    // something answers "the teams I am in" (#202). The account was
+    // made for this run, so every team in the list is one the fixture
+    // or this spec founded — nothing else could be in it. Typing an id
+    // still works, and the specs that name a team this window has not
+    // been on still do it that way.
+    await stage(trail, "pick the team and read its lines", ROUND_TRIP_MS, async () => {
+      await pollUntil(
+        async () => ((await drawerText()) ?? "").includes(teamId),
+        "the account's own teams were never listed",
+        ROUND_TRIP_MS,
+      );
+      await clickCarrying(`${DRAWER} .teams`, teamId);
       await pollUntil(
         async () =>
           ((await drawerText()) ?? "").includes("This team hosts no lines."),
@@ -386,15 +421,35 @@ describe("the team plane", () => {
     await stage(trail, "found a team and land on it", ROUND_TRIP_MS, async () => {
       await clickTab("members");
       await clickIn(`${DRAWER} .make-team`);
+      // Which team this window is on is the marked row in the picker,
+      // not whether an id appears in the drawer: since #202 the drawer
+      // lists every team the account is in, so the old id is on screen
+      // whether or not it is the one being read.
+      //
+      // Polled rather than checked once, and the two conditions are
+      // one wait rather than two: `createTeam` says "Created team"
+      // before it re-reads the list, and `makeTeam` names the new team
+      // only after that returns — so the sentence arrives while the
+      // marked row is still the previous team's, and a check that ran
+      // there would fail saying the reader was left behind when they
+      // were about to be moved.
+      const markedTeam = async (): Promise<string | null> =>
+        browser.execute((sel: string) => {
+          const row = document.querySelector(sel);
+          return row === null ? null : (row.textContent ?? "");
+        }, `${DRAWER} .teams .drawer-row.active`);
       await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("Created team "),
-        "founding a team said nothing",
+        async () => {
+          if (!((await drawerText()) ?? "").includes("Created team ")) {
+            return false;
+          }
+          const on = await markedTeam();
+          return on !== null && !on.includes(teamId);
+        },
+        "founding a team did not land the reader on the team it made",
         ROUND_TRIP_MS,
       );
       const after = (await drawerText()) ?? "";
-      if (after.includes(teamId)) {
-        throw new Error("founding a team left the reader on the old one");
-      }
       if (after.includes("Nothing read yet")) {
         throw new Error(
           "the members tab kept its unread state after the team under it changed",

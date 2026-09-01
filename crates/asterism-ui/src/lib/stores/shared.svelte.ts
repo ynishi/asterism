@@ -121,20 +121,25 @@
 // deriving it from `lines.data.length` would be reading the answer to
 // a question nobody asked.
 //
-// # What a picker changes, and what it does not
+// # What the picker changed, and what it did not
 //
-// The team id is typed because the member's client has no verb for
-// "the teams I am in". When that verb lands, the same field becomes a
-// choice from a list, and `teamId` stops being something a person
-// fills and starts being state every surface reads — which it already
-// is here, so the picker replaces a form control and nothing else.
+// The team id was typed because nothing answered "the teams I am in".
+// `teams` below is that read (#202), and a team can be chosen from a
+// list now: `lookAt` gained a second gesture and is where the two are
+// argued to be equal. `teamId` was already state every surface reads,
+// so it did not move.
+//
+// **The field to type an id stayed.** The read answers membership and
+// not reach, so an instance admin — who acts inside teams without a
+// membership row — gets an empty list, and a surface with only a list
+// would have no way in for them. The panel argues where it put the
+// two.
 //
 // The phase between — connected, with no team chosen — is not
-// something a picker introduces. A window that has just connected is
-// already in it, because the field it would fill starts empty, and it
-// stays in it until somebody names a team. What a picker changes is
-// what that phase shows: a list to choose from where there is a field
-// to fill.
+// something the picker introduced. A window that has just connected is
+// already in it, because `teamId` starts empty, and it stays in it
+// until somebody names a team either way. What the picker changed is
+// what that phase shows: a list to choose from above the field.
 //
 // It is where a window begins rather than where every session does.
 // `disconnect` leaves `teamId` alone, so connecting again in the same
@@ -287,6 +292,8 @@ import type {
   ForgeLineHistoryDto,
   ForgeOpDto,
   ForgePursuitDto,
+  MyTeamDto,
+  MyTeamsDto,
   PromotedAssetDto,
   TeamCreatedDto,
   TeamLedgerEventDto,
@@ -313,10 +320,9 @@ class SharedCatalog {
   /// The user id the server answered with, or `null` when this window
   /// is talking to no team.
   session = $state<string | null>(null);
-  /// Which team is being looked at. Typed in rather than picked,
-  /// because there is no verb on the member's client for "the teams I
-  /// am in" — what a picker would and would not change is in the
-  /// header. Kept across a disconnect on purpose; see `phase`.
+  /// Which team is being looked at — picked from `teams` or typed,
+  /// which the header and the panel argue between them. Kept across a
+  /// disconnect on purpose; see `phase`.
   teamId = $state("");
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
@@ -349,6 +355,26 @@ class SharedCatalog {
       }),
     null,
     "sharedCatalog.history",
+  );
+
+  /// The teams this window's account belongs to.
+  ///
+  /// The read the typed team id was waiting for. It names no team,
+  /// because it is what a caller asks before they have one — so it
+  /// belongs to the connection rather than to a team: read on
+  /// connecting, on opening the panel, and after founding a team,
+  /// dropped when the connection goes, and left alone when another
+  /// team is named.
+  ///
+  /// **It answers membership, not reach**, which the route decides and
+  /// `MyTeamsDto` restates for screens. An admin who joined nothing gets an empty
+  /// list while retaining every capacity they had — so a screen must
+  /// not read an empty list as "no way in", and the panel keeps the
+  /// field that names a team directly for exactly that reader.
+  teams = new Resource<Record<string, never>, MyTeamDto[]>(
+    async () => (await api<MyTeamsDto>("my_teams")).teams,
+    [] as MyTeamDto[],
+    "sharedCatalog.teams",
   );
 
   /// Who is in the team now named.
@@ -505,6 +531,13 @@ class SharedCatalog {
     this.forgetLedger();
     this.roster.reset();
     await this.refreshSession();
+    if (this.session === null) return;
+    // The teams a person may choose from, on the same rule as the
+    // lines: a served-through view that showed what it last had would
+    // be a mirror. Read whenever there is somebody to ask rather than
+    // only where a team is missing — the list stays on screen after
+    // one is named, marking which.
+    await this.teams.load({});
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }
 
@@ -527,6 +560,10 @@ class SharedCatalog {
       { baseUrl, login, password },
       "connect to that team server",
     );
+    // A connection is what makes this answerable, so it is read here
+    // rather than left for the next time the panel opens — the phase
+    // this lands in is the one the list is for.
+    await this.teams.load({});
   }
 
   /// The ledger as far as it has been read, oldest first.
@@ -570,6 +607,7 @@ class SharedCatalog {
     this.history.reset();
     this.roster.reset();
     this.pursuits.reset();
+    this.teams.reset();
     this.working = null;
     this.forgetLedger();
   }
@@ -588,6 +626,9 @@ class SharedCatalog {
       "create a team",
     );
     this.said = `Created team ${created.team_id}.`;
+    // The list is one shorter than the truth until this lands, and the
+    // person who just founded a team is the likeliest to pick it.
+    await this.teams.load({});
     return created.team_id;
   }
 
@@ -631,6 +672,18 @@ class SharedCatalog {
   }
 
   /// Names a team and reads the lines it hosts.
+  ///
+  /// **This is the naming act, and the gestures that reach it are
+  /// equal.** A screen may offer several — pressing a team in the
+  /// picker and submitting the id field are the two today — and
+  /// neither is more the act than the other: what makes a team named
+  /// is arriving here. A surface that treated one gesture as the act
+  /// would have to answer what the other one is.
+  ///
+  /// What that means for a field: it may hold what somebody is typing
+  /// without the catalog moving, because typing is not a gesture that
+  /// arrives here. The panel's `teamField` is that, and says what it
+  /// costs to bind it straight to `teamId` instead.
   ///
   /// The catalog owns what naming a team ends, rather than the panel:
   /// a ledger walk and a line selection both belong to the team that

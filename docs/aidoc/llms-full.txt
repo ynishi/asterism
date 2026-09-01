@@ -606,6 +606,8 @@ and an actor's display name is a snapshot rather than a lookup.
 
 ## Types
 
+- `MyTeamDto` — One team the account belongs to.
+- `MyTeamsDto` — The teams this window's account belongs to.
 - `PromotedAssetDto` — What a promotion left behind, as a screen needs to read it.
 - `TeamCreatedDto` — What founding a team answers with.
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
@@ -14221,6 +14223,8 @@ its own (#83 §1).
 - `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
 - `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
+- `MyTeamDto` — One team the caller belongs to.
+- `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
@@ -14494,6 +14498,7 @@ other.
 - `merge_tags` — Folds one tag channel into another and deletes the source — the
 - `move_dir` — Re-parents a Dir (`None` = to the root); cycle-guarded.
 - `move_group_to_dir` — Files a Group under a Dir (`None` = back to the root).
+- `my_teams` — The teams this window's account belongs to.
 - `open_forge_line` — Opens a line.
 - `open_forge_pursuit` — Opens work against a line.
 - `open_forge_thread` — Opens a conversation about something in the forge.
@@ -14917,6 +14922,7 @@ same three lines instead of re-deriving them.
 - `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
 - `Role` — A member's role within one team.
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
+- `TeamMembership` — One team a given user belongs to, read from that user's side.
 - `TeamRoster` — One team's membership set — the value every membership invariant is
 - `TeamVerb` — The verbs an authority table answers for — everything
 - `User` — A person known to the instance — the identity teams are built from.

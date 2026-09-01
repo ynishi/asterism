@@ -103,8 +103,8 @@ use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
 use asterism_contract::teams::{
-    PromotedAssetDto, TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto,
-    TeamRosterMemberDto, TeamSubjectRefDto,
+    MyTeamDto, MyTeamsDto, PromotedAssetDto, TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto,
+    TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3119,6 +3119,32 @@ pub async fn list_shared_lines(
         .lines(team_id(&team_id_raw, "team id")?)
         .await
         .map_err(teams_error)
+}
+
+/// The teams this window's account belongs to.
+///
+/// The read a picker is over, and one a caller makes before they have
+/// a team to name. Mapped to the contract for the reason the roster's
+/// and the ledger's are — the wire is what a member's client and a
+/// team server say to each other, and a screen holds one vocabulary.
+///
+/// What it answers, and what a screen must not conclude from an empty
+/// list, is on `MyTeamsDto`.
+#[tauri::command]
+pub async fn my_teams(state: State<'_, AppState>) -> Result<MyTeamsDto, UiError> {
+    let client = teams_client(&state).await?;
+    let mine = client.my_teams().await.map_err(teams_error)?;
+    Ok(MyTeamsDto {
+        teams: mine
+            .teams
+            .into_iter()
+            .map(|team| MyTeamDto {
+                team_id: team.team_id,
+                role: team.role,
+                created_at_ms: team.created_at_ms,
+            })
+            .collect(),
+    })
 }
 
 /// Who is in a team, and in what role.

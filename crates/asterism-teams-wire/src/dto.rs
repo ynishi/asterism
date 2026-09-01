@@ -80,6 +80,37 @@ pub struct RosterMemberDto {
     pub role: String,
 }
 
+/// The teams the caller is a member of (`GET /teams`).
+///
+/// The roster read turned around: that one takes a team and answers
+/// with users, this one takes the caller and answers with teams. Its
+/// path names no team because the question is not about one.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MyTeamsDto {
+    /// One row per membership the caller holds, ordered oldest team
+    /// first — the order the teams were created in, which is the only
+    /// order the rows carry a fact for.
+    pub teams: Vec<MyTeamDto>,
+}
+
+/// One team the caller belongs to.
+///
+/// **No name, because a team has none** — `TeamMembership` in the
+/// domain is where that is argued. Nothing on this wire carries a
+/// label for a team either, so a row is an id, a role and a time.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct MyTeamDto {
+    /// The team, and what its scoped routes are named by.
+    pub team_id: String,
+    /// What the caller is in it: `"owner"` or `"member"`.
+    ///
+    /// Free, in the sense that costs a read nothing: the membership
+    /// row the query already reads is where it lives.
+    pub role: String,
+    /// When the team was created, unix epoch milliseconds.
+    pub created_at_ms: i64,
+}
+
 /// One entry of a team's append-only stream
 /// (`GET /teams/{team_id}/events`, and the receipt every mutation
 /// route returns).

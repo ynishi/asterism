@@ -68,6 +68,11 @@
       "docs": "Who is asking, reduced to what the authority table cares about:\nthe actor's current role in *this* team, or the fact that the\nactor is an instance admin."
     },
     {
+      "path": "teams_core::domain::identity::TeamMembership",
+      "kind": "struct",
+      "docs": "One team a given user belongs to, read from that user's side.\n\n[`Membership`] with the user dropped and the team's creation time\nadded, which is what the two directions of the same table are for:\na roster is asked about a team and answers with users, this is\nasked about a user and answers with teams. This one drops the\nsubject it was asked about; [`TeamRoster`] keeps its `team_id`,\nbecause that is what its rows are validated against.\n\n**The team is an id and a time, because that is all a team is.**\nNothing in this model names one — not the `team` row, not an event\nkind — so a surface listing these shows ids. That is a different\nshortage from the roster's: a user *has* a display name and the\nledger stamps it, and the roster shows ids only because a\nmembership row does not carry one. Giving a team a name is a change\nto this model rather than a field this struct forgot."
+    },
+    {
       "path": "teams_core::domain::identity::TeamRoster",
       "kind": "struct",
       "docs": "One team's membership set — the value every membership invariant is\nevaluated over.\n\nBuilt from the current state rows (never from the ledger — #83 §1:\nauthorization always reads current membership state) and consulted\nbefore a write. The `check_*` methods answer for the write without\nperforming it: this crate has no storage to perform it on, and\nkeeping the decision pure is what makes the last-owner rule\ntestable here rather than in an integration suite."
