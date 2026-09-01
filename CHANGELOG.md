@@ -10,6 +10,17 @@ and this project adheres to
 
 ### Added
 
+- **The cross-member reader list, held to the tree** (#208). `changed-packages`
+  reads `scripts/cross-member-readers.txt` — which tests read files under
+  another member's directory — and selects the reading crate for a branch that
+  changes what it reads; `cross-member-check`, in `check-shared`, fails when
+  that list and the tree disagree in either direction — within the literal
+  shapes its doc names — so a reader landing off the list is caught on its own
+  branch rather than on `main`'s full run, which is how #206 happened. The
+  fixture-reading tests join the list the "sources" wording had left out, and a
+  `Justfile`-only change now runs the full suite on CI's run, where before it
+  got no clippy pass and linked no test binary.
+
 - **Sign in to a team once, and this machine can do it again without the
   password** (#204). Tick "Remember this device" on the connect form and the
   server mints a device token — the session construction with a longer life and

@@ -1,0 +1,20 @@
+# Tests that read files inside another workspace member's directory.
+#
+# One line per read: <path prefix the test reads>|<package holding the test>.
+# `changed-packages` (Justfile) selects the right-hand package whenever a
+# changed path starts with the left-hand prefix, so the reading test runs
+# on the branch that changed what it reads. Announced there when it fires.
+#
+# scripts/check-cross-member-readers.py holds this list to the tree from
+# both sides — a cross-member read with no covering line here fails, and a
+# line no test witnesses any more fails — and check-shared runs it on any
+# branch that starts a build. Add the line and the read in the same change.
+crates/asterism-ui/src-tauri/src/commands.rs|asterism-server
+crates/asterism-server/src/|asterism-core
+crates/asterism-ui/src-tauri/src/|asterism-core
+crates/asterism-contract/src/command.rs|asterism-core
+crates/asterism-contract/src/|asterism-ui
+crates/asterism-importer-video/tests/fixtures/|asterism-infra
+crates/asterism-importer-audio/tests/fixtures/|asterism-infra
+crates/asterism-importer-sdk/tests/fixtures/|asterism-infra
+crates/asterism-importer-image/tests/fixtures/|asterism-infra

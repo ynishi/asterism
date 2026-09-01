@@ -39,9 +39,10 @@
 //! `http.rs` selects this crate. The opposite gap was first left open
 //! as a documented trade — a command arriving without its route caught
 //! one merge later, on `main`'s full run — and it collected.
-//! `changed-packages` now names `commands.rs` as a file this test
-//! reads and selects this crate for it too; the case for that rule
-//! sits with the rule, in the recipe.
+//! `changed-packages` now selects this crate for a branch touching
+//! `commands.rs`: the cross-member reader list under `scripts/`
+//! carries that pair, and the check beside the list holds it to the
+//! tree.
 
 use std::collections::BTreeSet;
 use std::fs;

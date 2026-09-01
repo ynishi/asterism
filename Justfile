@@ -471,7 +471,8 @@ aidoc-guard:
 # What is *not* in here is exactly what scales with the size of the
 # workspace rather than the size of the change. `rust-fmt-check` reads
 # files and compiles nothing; `bindings-check` builds one package;
-# `ui-test`, `ui-check` and `ui-build` are seconds of Node. The two
+# `ui-test`, `ui-check` and `ui-build` are seconds of Node;
+# `cross-member-check` reads text and compiles nothing. The two
 # left out — clippy and the test suite — compile every crate, and one
 # of them links every test binary.
 #
@@ -481,7 +482,7 @@ aidoc-guard:
 #
 # Every gate whose cost does not scale with the workspace.
 [group('check')]
-check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard
+check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard cross-member-check
 
 # Run all Rust and frontend checks. The definition of green, and what
 # `main` gets.
@@ -910,6 +911,19 @@ branch-check:
 [group('allow-agent')]
 commit-msg-check *args:
     python3 "{{ project_root }}/scripts/check-commit-msg.py" {{ args }}
+
+# Hold `scripts/cross-member-readers.txt` to the tree, both ways. The
+# list is how `changed-packages` selects a test that reads another
+# member's files for the branch changing what it reads; the script's
+# doc carries the reasoning and the scan's boundary, and #206 is the
+# merge that shows what having no such list cost. In `check-shared`,
+# so any branch that starts a build runs it.
+
+# Check the cross-member reader list against the tree.
+[group('check')]
+[group('allow-agent')]
+cross-member-check:
+    python3 "{{ project_root }}/scripts/check-cross-member-readers.py"
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
@@ -1405,9 +1419,13 @@ changed-packages:
     # need what `scripts/gen-test-fixtures.py` produces. Neither lives
     # under a member, so without this line a branch editing the corpus
     # would run nothing that reads it.
-    if printf '%s\n' "$attributable" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)'; then
-        echo "Workspace-wide change (manifest, lockfile or toolchain):" >&2
-        printf '%s\n' "$attributable" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/)' | sed 's/^/  /' >&2
+    # `Justfile` itself is on the list since #208: it decides what every
+    # gate runs — the reader selection below included — so a change to
+    # it is answerable to the whole workspace, and before this line a
+    # Justfile-only branch ran no clippy pass and linked no test binary.
+    if printf '%s\n' "$attributable" | grep -qE '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/|Justfile$)'; then
+        echo "Workspace-wide change (manifest, lockfile, toolchain or the gates):" >&2
+        printf '%s\n' "$attributable" | grep -E '^(Cargo\.(toml|lock)|rust-toolchain(\.toml)?|\.cargo/|fixtures/|scripts/|Justfile$)' | sed 's/^/  /' >&2
         echo "--workspace"
         exit 0
     fi
@@ -1453,31 +1471,23 @@ changed-packages:
 
     # Where that proxy is wrong *across* members, the way `fixtures/`
     # and `scripts/` are where it is wrong outside them: a test that
-    # scans another member's sources runs only when its own crate is
-    # selected, so each such reader is named here beside what it
-    # reads. Team verbs landed across #199, #201 and #203 with
-    # `main`'s full run as the first thing to say so (#206), and the
-    # review of that fix found the other pairs, the same shape:
-    # `transport_parity` (asterism-server) parses the desktop's
-    # command module, `attribution_guards` (asterism-core) scans the
-    # server's and the desktop's sources and the contract's
-    # `command.rs`, and `export_parity` (asterism-ui) walks the
-    # contract's sources. Announced when one fires, because a package
+    # reads another member's files runs only when its own crate is
+    # selected, so each such reader is on a line of the list read
+    # here. Team verbs landed across #199, #201 and #203 with `main`'s
+    # full run as the first thing to say so (#206). The list lives in
+    # a file rather than in this recipe because two things read it —
+    # this loop, and `cross-member-check`'s script, which fails in
+    # `check-shared` when the list and the tree disagree in either
+    # direction (#208). Announced when one fires, because a package
     # with no changed path under it would otherwise read as a bug in
     # this recipe.
-    for pair in \
-        'crates/asterism-ui/src-tauri/src/commands.rs|asterism-server' \
-        'crates/asterism-server/src/|asterism-core' \
-        'crates/asterism-ui/src-tauri/src/|asterism-core' \
-        'crates/asterism-contract/src/command.rs|asterism-core' \
-        'crates/asterism-contract/src/|asterism-ui'; do
-        read_path=${pair%|*}
-        reader=${pair#*|}
+    while IFS='|' read -r read_path reader; do
+        case "$read_path" in ''|'#'*) continue ;; esac
         if printf '%s\n' "$attributable" | grep -q "^$read_path"; then
             echo "$read_path is read by a test in $reader; selecting it too." >&2
             packages="$packages $reader"
         fi
-    done
+    done < "{{ project_root }}/scripts/cross-member-readers.txt"
 
     if [ -z "${packages// /}" ]; then
         echo "No workspace member changed. Changed paths:" >&2

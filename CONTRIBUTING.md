@@ -112,19 +112,19 @@ The recipes to actually use:
 
 These are narrower than the workspace gates, not weaker: they cover what a
 change edited — plus the crates `changed-packages` names for the tests that read
-another member's sources — not what depends on it. `main` closes that gap on
-every merge.
+another member's files, a list `cross-member-check` holds to the tree — not what
+depends on it. `main` closes that gap on every merge.
 
 **Opening a pull request does not wait on a full local run**, and it does not
 wait on a full CI run either. A pull request runs `just check-changed`, which is
 `check` with the same two substitutions `pre-push` makes — so the hosted answer
 covers the crates the branch edited, and a branch that edits no crate links no
 test binary. A change no single crate owns (the manifest, the lockfile, the
-toolchain, `fixtures/`, `scripts/`) runs the full suite instead, since there is
-nothing narrower to run and no later run to defer to. `main` runs `just check`
-in full on every push, and that is where a dependent broken without being
-touched surfaces: one merge later than if every pull request had linked the
-whole workspace to look for it.
+toolchain, `fixtures/`, `scripts/`, the `Justfile`) runs the full suite instead,
+since there is nothing narrower to run and no later run to defer to. `main` runs
+`just check` in full on every push, and that is where a dependent broken without
+being touched surfaces: one merge later than if every pull request had linked
+the whole workspace to look for it.
 
 That backstop assumes the merge reaches `main` with a run of its own, which is
 why the skip-keyword rule below matters more than it used to: a keyword in a
