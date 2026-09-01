@@ -41,12 +41,13 @@ use asterism_contract::forge::{
 use asterism_core::domain::team_link::TeamScopedId;
 use asterism_core::error::DomainError;
 use asterism_teams_wire::command::{
-    CreateTeamCommand, DeviceLoginCommand, HaveContentCommand, LoginCommand,
-    MintDeviceTokenCommand, ResolveContentCommand,
+    CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand, HaveContentCommand,
+    InviteMemberCommand, LoginCommand, MintDeviceTokenCommand, RemoveMemberCommand,
+    ResolveContentCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
-    ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto, LedgerPageDto,
-    MyTeamsDto, ResolvedContentDto, RosterDto, SessionDto, TeamCreatedDto,
+    ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto, LedgerEventDto,
+    LedgerPageDto, MyTeamsDto, ResolvedContentDto, RosterDto, SessionDto, TeamCreatedDto,
 };
 use asterism_teams_wire::projection::{
     EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
@@ -361,6 +362,109 @@ impl TeamsClient {
     /// The team's current membership set.
     pub async fn roster(&self, team: TeamScopedId) -> Result<RosterDto, TeamsClientError> {
         self.get(&format!("/teams/{team}/roster"), "roster").await
+    }
+
+    /// Invites a user into the team
+    /// (`POST /teams/{team_id}/members/invite`, owner only).
+    ///
+    /// The invitee must already hold an account on the instance. A
+    /// team is entered by invitation and an invitation names somebody
+    /// who exists, so inviting an unknown id is a `400` about the
+    /// request rather than a provisioning act.
+    ///
+    /// `role` is `"owner"` or `"member"`, parsed by whichever plane
+    /// receives it — a third word is a `400` from the server, not a
+    /// type error here.
+    pub async fn invite_member(
+        &self,
+        team: TeamScopedId,
+        user_id: &str,
+        role: &str,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/members/invite"),
+            "invite_member",
+            &InviteMemberCommand {
+                user_id: user_id.to_string(),
+                role: role.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Removes a member (`POST /teams/{team_id}/members/remove`, owner
+    /// only).
+    ///
+    /// Removing the last owner is a `409` carrying `LastOwner` and
+    /// leaves the roster exactly as it was — the team's state refuses
+    /// it, rather than the request being malformed.
+    pub async fn remove_member(
+        &self,
+        team: TeamScopedId,
+        user_id: &str,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/members/remove"),
+            "remove_member",
+            &RemoveMemberCommand {
+                user_id: user_id.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Grants the owner role (`POST /teams/{team_id}/owners/grant`,
+    /// owner only). The event's payload carries both the old role and
+    /// the new one.
+    pub async fn grant_owner(
+        &self,
+        team: TeamScopedId,
+        user_id: &str,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/owners/grant"),
+            "grant_owner",
+            &GrantOwnerCommand {
+                user_id: user_id.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
+    /// owner only).
+    ///
+    /// Revoking the last owner is the same `409` as removing them,
+    /// and it does not matter whose hand is on it: an owner cannot
+    /// demote themself out of being the only one.
+    pub async fn revoke_owner(
+        &self,
+        team: TeamScopedId,
+        user_id: &str,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/owners/revoke"),
+            "revoke_owner",
+            &RevokeOwnerCommand {
+                user_id: user_id.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Deletes the team (`POST /teams/{team_id}/delete`), which an
+    /// owner may do and so may an instance admin — the one verb in
+    /// this group where standing outside the roster is enough.
+    ///
+    /// The route reads no body: what is being deleted is in the path,
+    /// so there is nothing to say but who is asking, and the bearer
+    /// says that.
+    pub async fn delete_team(
+        &self,
+        team: TeamScopedId,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(&format!("/teams/{team}/delete"), "delete_team", &())
+            .await
     }
 
     /// One page of the team's stream, seq ascending (#148 decision 18).
