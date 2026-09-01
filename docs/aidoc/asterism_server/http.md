@@ -86,9 +86,10 @@ question #136 left open and pointed at #124.
 
 Both directions of that check run on the branch that owes them:
 the test reads a file from each crate and sits in this one, and
-`changed-packages` names the desktop's command module so a branch
-touching only that file selects this crate too. The test's own doc
-says why it sits on this side.
+the cross-member reader list `changed-packages` selects from pairs
+the desktop's command module with this crate, so a branch touching
+only that file selects this crate too. The test's own doc says why
+it sits on this side.
 
 ## Functions
 
