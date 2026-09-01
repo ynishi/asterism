@@ -111,9 +111,9 @@ The recipes to actually use:
   above when the change is wide enough that naming tests stops helping.
 
 These are narrower than the workspace gates, not weaker: they cover what a
-change edited — plus the one cross-member file `changed-packages` names for the
-transport-parity test — not what depends on it. `main` closes that gap on every
-merge.
+change edited — plus the crates `changed-packages` names for the tests that read
+another member's sources — not what depends on it. `main` closes that gap on
+every merge.
 
 **Opening a pull request does not wait on a full local run**, and it does not
 wait on a full CI run either. A pull request runs `just check-changed`, which is
