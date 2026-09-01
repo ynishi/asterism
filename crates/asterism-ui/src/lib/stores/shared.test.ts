@@ -1002,6 +1002,7 @@ describe("the roster", () => {
         { user_id: "u1", role: "owner" },
         { user_id: "u2", role: "member" },
       ],
+      viewer: { role: "owner", admin: false },
     });
 
     await sharedCatalog.roster.load({ teamId: "t1" });
@@ -1019,6 +1020,7 @@ describe("the roster", () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     apiMock.mockResolvedValueOnce([]); // lines for the new team
@@ -1032,6 +1034,7 @@ describe("the roster", () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     apiMock.mockResolvedValueOnce(undefined);
@@ -1051,35 +1054,37 @@ describe("the roster", () => {
     expect(sharedCatalog.said).toContain("t9");
   });
 
-  it("reads the caller's own role off the rows it already has", async () => {
-    sharedCatalog.session = "u1";
+  it("takes the reader's own standing from what the read said", async () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [
         { user_id: "u1", role: "owner" },
         { user_id: "u2", role: "member" },
       ],
+      viewer: { role: "owner", admin: false },
     });
 
     await sharedCatalog.roster.load({ teamId: "t1" });
 
     expect(sharedCatalog.myRole).toBe("owner");
+    expect(sharedCatalog.iAmAdmin).toBe(false);
   });
 
-  it("says nothing about a reader the roster has no row for", async () => {
-    // Which is what an instance admin looks like: they reach a team by
-    // standing outside it, so a membership set has nothing to say
-    // about them. An unread roster answers the same `null`, and this
-    // getter cannot tell the two apart.
-    sharedCatalog.session = "an-admin";
+  it("says an admin holds no role and is an admin anyway", async () => {
+    // The case the rows cannot answer. An instance admin reaches a
+    // team by standing outside it, so no membership row describes
+    // them; derived from the rows this would read as "nothing you may
+    // do", and what they may do is delete the team.
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: null, admin: true },
     });
 
     await sharedCatalog.roster.load({ teamId: "t1" });
 
     expect(sharedCatalog.myRole).toBeNull();
+    expect(sharedCatalog.iAmAdmin).toBe(true);
   });
 
   it("re-reads the roster after letting somebody in", async () => {
@@ -1091,6 +1096,7 @@ describe("the roster", () => {
         { user_id: "u1", role: "owner" },
         { user_id: "u2", role: "member" },
       ],
+      viewer: { role: "owner", admin: false },
     });
 
     await sharedCatalog.inviteMember("u2", "member");
@@ -1108,6 +1114,7 @@ describe("the roster", () => {
     const rows = {
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     };
 
     mutateMock.mockResolvedValueOnce(null);
@@ -1143,6 +1150,7 @@ describe("the roster", () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);
@@ -1173,6 +1181,7 @@ describe("the roster", () => {
         { user_id: "u1", role: "owner" },
         { user_id: "u2", role: "owner" },
       ],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);

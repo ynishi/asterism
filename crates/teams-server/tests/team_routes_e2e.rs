@@ -771,3 +771,64 @@ async fn an_admin_belongs_to_no_team_by_being_an_admin() {
 
     h.driver.shutdown().await.unwrap();
 }
+
+/// The roster says what the reader may do, and the admin is why it has
+/// to (#210).
+///
+/// A caller deriving a role from the rows gets the owner's right and
+/// the admin's wrong: an admin holds no row at all, so their absence
+/// reads as "nothing you may do" while what they may do is delete the
+/// team. The gate has already worked this out to let the request
+/// through, so the answer says it rather than leaving each surface to
+/// guess.
+#[tokio::test]
+async fn the_roster_says_what_the_reader_may_do() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (bob_id, bob) = user(&h, "bob", false).await;
+    let (_op_id, op) = user(&h, "op", true).await;
+    let team = create_team(&h, &alice).await;
+
+    let (_, _) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": bob_id.to_string(), "role": "member" }),
+        ),
+    )
+    .await;
+
+    let (status, hers) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "the owner reads it: {hers}");
+    assert_eq!(hers["viewer"]["role"], "owner");
+    assert_eq!(hers["viewer"]["admin"], false);
+
+    let (_, his) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &bob),
+    )
+    .await;
+    assert_eq!(his["viewer"]["role"], "member");
+
+    let (_, theirs) = call(&h.router, get_authed(&format!("/teams/{team}/roster"), &op)).await;
+    assert!(
+        theirs["viewer"]["role"].is_null(),
+        "an admin holds no membership row: {theirs}"
+    );
+    assert_eq!(
+        theirs["viewer"]["admin"], true,
+        "and the answer says what their standing is instead: {theirs}"
+    );
+    assert_eq!(
+        theirs["members"].as_array().expect("members").len(),
+        2,
+        "the rows are the team's, the same for every reader: {theirs}"
+    );
+
+    h.driver.shutdown().await.unwrap();
+}

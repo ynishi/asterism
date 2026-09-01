@@ -137,6 +137,29 @@ pub struct RosterDto {
     pub team_id: String,
     /// The membership rows, one per member.
     pub members: Vec<RosterMemberDto>,
+    /// What the caller may do here, said by the gate that already
+    /// worked it out rather than derived from the rows (#210).
+    ///
+    /// A reader cannot get this from `members` alone. An instance
+    /// admin reaches a team by standing outside it (#83 §1), so they
+    /// hold no row — and a client deriving a role from rows reads
+    /// their absence as "nothing you may do" when what they may do is
+    /// delete the team. This field is the gate's own answer to the
+    /// question the rows cannot be asked.
+    pub viewer: ViewerDto,
+}
+
+/// The caller's standing in the team whose roster this is.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct ViewerDto {
+    /// The caller's role, or nothing when they hold no membership row.
+    /// `"owner"` or `"member"`.
+    pub role: Option<String>,
+    /// Whether the caller is an instance admin. Independent of `role`
+    /// rather than a third value of it: an admin may also be a member
+    /// of the team they are administering, and the two say different
+    /// things about what they may do.
+    pub admin: bool,
 }
 
 /// One membership row as the roster lists it.

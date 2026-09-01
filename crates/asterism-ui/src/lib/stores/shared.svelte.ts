@@ -431,21 +431,30 @@ class SharedCatalog {
     "sharedCatalog.roster",
   );
 
-  /// The role the reader holds in the team now named, read off the
-  /// roster they are looking at.
+  /// The role the reader holds in the team now named, as the roster
+  /// read said it.
   ///
-  /// `null` covers two situations this cannot tell apart: the roster
-  /// has not been read, and the reader holds no row in it. The second
-  /// is what an instance admin looks like — they reach a team by
-  /// standing outside it rather than by joining it (#83 §1), so no
-  /// membership set describes them. The server decides every one of
-  /// these verbs regardless of what this says; hiding a control is
-  /// about not offering somebody a refusal, not about enforcement.
+  /// Said rather than derived from the rows, and the difference is an
+  /// instance admin: they reach a team by standing outside it rather
+  /// than by joining it (#83 §1), so no membership set describes them,
+  /// and a getter searching the rows would read their absence as
+  /// "nothing you may do" while what they may do is delete the team.
+  /// `null` here means the reader holds no membership row, or the
+  /// roster has not been read yet — for what an admin may still do,
+  /// ask `iAmAdmin`.
+  ///
+  /// The server decides every one of these verbs regardless of what
+  /// this says. Hiding a control is about not offering somebody a
+  /// refusal, not about enforcement.
   get myRole(): string | null {
-    if (this.session === null) return null;
-    const rows = this.roster.data?.members;
-    if (!rows) return null;
-    return rows.find((member) => member.user_id === this.session)?.role ?? null;
+    return this.roster.data?.viewer.role ?? null;
+  }
+
+  /// Whether the reader is an instance admin, as the roster read said
+  /// it. Independent of `myRole`: an admin may also be a member of the
+  /// team they are administering.
+  get iAmAdmin(): boolean {
+    return this.roster.data?.viewer.admin ?? false;
   }
 
   /// The work against the open line, open and ended alike.

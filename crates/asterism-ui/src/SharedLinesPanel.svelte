@@ -222,12 +222,13 @@
   // member shown a control it cannot press is being offered a refusal.
   // The server decides regardless — this only decides what to offer.
   //
-  // An instance admin holds no membership row, so this is false for
-  // them and the roster shows them nothing to press. The verb their
-  // standing carries in this group is deleting the team, and they lose
-  // it here: what would fix that is the roster answering with the
-  // caller's capacity rather than the reader deriving what it can.
+  // An instance admin holds no membership row, so `iOwn` is false for
+  // them and the four member-shaped controls stay off their screen —
+  // which is right, because §1 grants an admin no implicit invite,
+  // remove or role change inside a team they do not own. Deleting is
+  // the one their standing does carry, so it asks a second question.
   const iOwn = $derived(sharedCatalog.myRole === "owner");
+  const mayDelete = $derived(iOwn || sharedCatalog.iAmAdmin);
 
   let inviteId = $state("");
   let inviteRole = $state("member");
@@ -895,13 +896,18 @@
             </ul>
           {/if}
 
-          {#if iOwn}
+          {#if mayDelete}
             <!-- Under the roster rather than on a tab of its own. Every
                  tab is an answer about the team named above, and this
-                 is an act about that same team — the one an owner is
+                 is an act about that same team — the one somebody is
                  looking at when they are administering it rather than
                  working it. Founding sits outside the tabs because it
-                 is about no team in particular; this is not that. -->
+                 is about no team in particular; this is not that.
+
+                 The one control here an instance admin reaches, and
+                 the only place on this tab where their standing shows:
+                 the rows above offer them nothing, because §1 gives an
+                 admin no implicit membership verbs. -->
             <button type="button" class="delete-team" onclick={askDeleteTeam}>
               Delete this team
             </button>

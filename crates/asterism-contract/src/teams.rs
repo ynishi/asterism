@@ -152,6 +152,25 @@ pub struct TeamRosterDto {
     pub team_id: String,
     /// One row per member.
     pub members: Vec<TeamRosterMemberDto>,
+    /// What the reader may do here (#210).
+    pub viewer: TeamRosterViewerDto,
+}
+
+/// The reader's own standing in the team whose roster this is.
+///
+/// Here because the rows cannot answer it. An instance admin reaches a
+/// team by standing outside it, so they hold no row, and a screen
+/// deriving a role from the rows reads that absence as "nothing you
+/// may do" — while what they may do is delete the team. The server's
+/// gate works this out to let the request through and says it here
+/// rather than leaving each surface to guess.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamRosterViewerDto {
+    /// The reader's role, or nothing when they hold no membership row.
+    pub role: Option<String>,
+    /// Whether the reader is an instance admin. Independent of `role`:
+    /// an admin may also be a member of the team they administer.
+    pub admin: bool,
 }
 
 /// One membership row.

@@ -165,6 +165,7 @@ use asterism_teams_wire::command::{
 use asterism_teams_wire::dto::{
     DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto, LedgerEventDto, LedgerPageDto,
     MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
+    ViewerDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -1005,6 +1006,13 @@ async fn roster(
                 role: row.role.as_str().to_string(),
             })
             .collect(),
+        // Said rather than left to be derived. The gate worked this
+        // out to let the request through, and a caller with no row —
+        // an admin — cannot be found in the rows at all.
+        viewer: ViewerDto {
+            role: access.role.map(|role| role.as_str().to_string()),
+            admin: access.admin,
+        },
     }))
 }
 

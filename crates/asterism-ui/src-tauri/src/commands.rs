@@ -105,7 +105,8 @@ use asterism_contract::query::{
 use asterism_contract::teams::{
     MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
     StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
-    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamRosterViewerDto,
+    TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3521,6 +3522,10 @@ pub async fn team_roster(
                 role: member.role,
             })
             .collect(),
+        viewer: TeamRosterViewerDto {
+            role: roster.viewer.role,
+            admin: roster.viewer.admin,
+        },
     })
 }
 
