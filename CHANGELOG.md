@@ -41,36 +41,34 @@ and this project adheres to
   what they may reach is deleting the team. The read carries the role the gate
   resolved and whether the caller is an admin — not a third value of the role,
   since an admin may also be a member of the team they administer — and the
-  delete asks both. An admin standing outside a team is offered the delete and
-  nothing else, which is right: §1 grants them no implicit invite, remove or
-  role change inside a team not theirs. One who is also a member of it is an
-  ordinary member there, and the controls follow their role.
+  delete asks both. On this tab an admin standing outside a team is offered the
+  delete and nothing beside it, which is right: §1 grants them no implicit
+  invite, remove or role change inside a team not theirs. One who is also a
+  member of it is an ordinary member there, and the controls follow their role.
 
   **A last-owner refusal still arrives as a sentence.** The server answers 409
   carrying the token that separates it from a malformed request, and the
   desktop's error conversion answers a 404 on its own and turns every other 4xx
   into one shape on the way to a screen. #211 is that conversion.
 
-  **Leaving is its own verb, and it asks no authority over anybody.** Every
-  other write here asks whether the caller may act on somebody else's row; this
-  one asks nothing, because a member acting on their own membership needs no
-  standing over anyone. So it sits outside the authority table, and what it asks
-  instead is that there is a membership to leave: an instance admin passes the
-  gate on their standing and holds no row, so they meet the same refusal a
-  stranger does. The reader's own row offers it whether or not they own the
-  team, with the step down beside it when they do.
+  **Leaving is its own verb, and it asks no authority over anybody.** The writes
+  that act on somebody else's row ask whether the caller may; this one asks
+  nothing, because a member acting on their own membership needs no standing
+  over anyone. So it sits outside the authority table, and what it asks instead
+  is a row to act on — a caller holding none is refused, which is the condition
+  rather than any statement about who they are. The reader's own row offers it
+  whether or not they own the team, with the step down beside it when they do.
 
-  The ledger records it under the kind a removal takes, which is what that
-  kind's own doc has said since it was written — an entry reads as a departure
-  rather than a removal when its actor and its subject are the same account, and
-  the ledger tab now says which of the two it read. A kind of its own was the
-  alternative and costs more than it gives: the stream is append-only, so a
-  second spelling would split one act at the point it was added, leaving every
-  departure before it reading as a removal and every reader needing both.
-  `TeamRoster::check_leave` finally has a caller: the domain spelled that rule
-  twice so a write could say which of the two acts it is making, and the two
-  spellings answer identically, because a departure is refused on the state of
-  the roster rather than on whose hand is on it. The last owner cannot go by
+  The ledger records it under the kind a removal takes, and that kind's own doc
+  is now where the reading that separates the two lives: an entry is a departure
+  when its actor is also its subject. The ledger tab says which of the two it
+  read. A second kind was the alternative and costs more than it gives, which
+  the same doc argues where the choice would be reopened — the stream is
+  append-only, so a new spelling separates them only from the moment it is
+  added. `TeamRoster::check_leave` finally has a caller: the domain spelled that
+  rule twice so a write could say which of the two acts it is making, and the
+  two spellings answer identically, because a departure is refused on the state
+  of the roster rather than on whose hand is on it. The last owner cannot go by
   either, and the panel lets go of the team afterwards the way deleting one
   makes it let go.
 
