@@ -188,10 +188,13 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "talks to a team, not to this process",
     ),
     ("create_team", "talks to a team, not to this process"),
+    ("delete_team", "talks to a team, not to this process"),
     (
         "disconnect_team_server",
         "talks to a team, not to this process",
     ),
+    ("grant_team_owner", "talks to a team, not to this process"),
+    ("invite_team_member", "talks to a team, not to this process"),
     ("list_shared_lines", "talks to a team, not to this process"),
     (
         "list_team_device_tokens",
@@ -211,10 +214,12 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "talks to a team, not to this process",
     ),
     ("push_shared_round", "talks to a team, not to this process"),
+    ("remove_team_member", "talks to a team, not to this process"),
     (
         "revoke_team_device_token",
         "talks to a team, not to this process",
     ),
+    ("revoke_team_owner", "talks to a team, not to this process"),
     (
         "shared_line_history",
         "talks to a team, not to this process",
@@ -231,25 +236,6 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "team_server_session",
         "talks to a team, not to this process",
     ),
-    (
-        "close_shared_pursuit",
-        "talks to a team, not to this process",
-    ),
-    ("my_teams", "talks to a team, not to this process"),
-    (
-        "open_shared_pursuit",
-        "talks to a team, not to this process",
-    ),
-    (
-        "promote_asset_to_team",
-        "talks to a team, not to this process",
-    ),
-    ("push_shared_round", "talks to a team, not to this process"),
-    (
-        "shared_line_pursuits",
-        "talks to a team, not to this process",
-    ),
-    ("shared_pursuit", "talks to a team, not to this process"),
 ];
 
 /// The workspace root, from this crate's manifest directory.
