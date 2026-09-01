@@ -155,9 +155,10 @@ pub struct AssetCardDto {
     /// basename label, a tooltip, a clipboard copy — and nothing parses
     /// it as the stored encoding, so the wire type is not coupled to
     /// that encoding and does not change when it does. What a consumer
-    /// may do with the string is use it as what it says it is: the
-    /// teams e2e asks the filesystem whether a file locator's path is
-    /// still there, which is the display spelling taken at its word.
+    /// may do is take the string as what it says it is — a file
+    /// locator's path is a path, and asking the filesystem about it is
+    /// reading the display spelling at its word rather than parsing
+    /// the stored one.
     pub source_locator: String,
     /// Group ids the asset is filed into (m:n `asset_bucket`). The
     /// UI uses this for the `Group` sort axis and the group-lane

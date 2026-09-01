@@ -13,9 +13,9 @@ and this project adheres to
 - **Pick a team instead of typing its id** (#202). The team id was typed into a
   field because nothing answered "the teams I am in" — #171 has named that gap
   since it was opened, and it was missing from the storage read up: the
-  repository, the domain shape, the wire, the client, the contract, the command
-  and the screen. `GET /teams` answers it now, and the drawer lists the teams
-  the signed-in account belongs to, with the role it holds in each.
+  repository, the domain shape, the route, the wire, the client, the contract,
+  the command and the screen. `GET /teams` answers it now, and the drawer lists
+  the teams the signed-in account belongs to, with the role it holds in each.
 
   **It answers membership rather than reach.** An instance admin acts inside
   every team without a membership row (#83 §1), so an admin who joined nothing
@@ -25,10 +25,11 @@ and this project adheres to
   in".
 
   **Ids, because a team has no name.** The model carries an id and a creation
-  time and nothing else, which is the same wall the roster tab meets and says
-  why at. Giving a team a name is a change to the team plane's model — a column,
-  a rename verb, an authority rule for who may, and an event kind — and it is
-  deliberately its own issue rather than something a picker decided.
+  time and nothing else — a harder shortage than the roster's, where a person
+  has a display name and it is the membership row that does not carry it. Giving
+  a team a name is a change to the team plane's model — a column, a rename verb,
+  an authority rule for who may, and an event kind — and it is deliberately its
+  own issue rather than something a picker decided.
 
   The list belongs to the connection rather than to a team: read on connecting
   and whenever the drawer opens, dropped when the connection goes, and left

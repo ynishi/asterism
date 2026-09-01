@@ -771,9 +771,10 @@ impl SqliteTeamsRepository {
     ///
     /// Ordered by the team's creation time because a membership row
     /// carries no time of its own, so the team's is the only one these
-    /// rows have. The id breaks ties rather than leading, and would
-    /// order them much the same way — the ids are UUID v7 — but on the
-    /// team's minting rather than on anything this read is about.
+    /// rows have. The id breaks ties rather than leading: v7 ids would
+    /// order them much the same way, but that is an encoding the
+    /// schema does not promise, and `created_at` is a column that
+    /// means what it says.
     ///
     /// The role goes through [`Role::parse`] on the way out for the
     /// reason [`Self::roster`] gives.

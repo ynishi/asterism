@@ -309,7 +309,8 @@ describe("the team plane", () => {
     // something answers "the teams I am in" (#202). The account was
     // made for this run, so every team in the list is one the fixture
     // or this spec founded — nothing else could be in it. Typing an id
-    // still works and the two specs after this one still do it.
+    // still works, and the specs that name a team this window has not
+    // been on still do it that way.
     await stage(trail, "pick the team and read its lines", ROUND_TRIP_MS, async () => {
       await pollUntil(
         async () => ((await drawerText()) ?? "").includes(teamId),

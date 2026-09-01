@@ -124,10 +124,10 @@
 // # What the picker changed, and what it did not
 //
 // The team id was typed because nothing answered "the teams I am in".
-// `teams` below is that read (#202), and naming a team is a choice
-// from a list now — `teamId` is set by pressing a row rather than by
-// filling a field, and it was already state every surface reads, so
-// nothing else moved.
+// `teams` below is that read (#202), and a team can be chosen from a
+// list now: `lookAt` gained a second gesture and is where the two are
+// argued to be equal. `teamId` was already state every surface reads,
+// so it did not move.
 //
 // **The field to type an id stayed.** The read answers membership and
 // not reach, so an instance admin — who acts inside teams without a
@@ -366,8 +366,8 @@ class SharedCatalog {
   /// dropped when the connection goes, and left alone when another
   /// team is named.
   ///
-  /// **It answers membership, not reach**, which the route and the
-  /// command both state. An admin who joined nothing gets an empty
+  /// **It answers membership, not reach**, which the route decides and
+  /// `MyTeamsDto` restates for screens. An admin who joined nothing gets an empty
   /// list while retaining every capacity they had — so a screen must
   /// not read an empty list as "no way in", and the panel keeps the
   /// field that names a team directly for exactly that reader.
@@ -672,6 +672,18 @@ class SharedCatalog {
   }
 
   /// Names a team and reads the lines it hosts.
+  ///
+  /// **This is the naming act, and the gestures that reach it are
+  /// equal.** A screen may offer several — pressing a team in the
+  /// picker and submitting the id field are the two today — and
+  /// neither is more the act than the other: what makes a team named
+  /// is arriving here. A surface that treated one gesture as the act
+  /// would have to answer what the other one is.
+  ///
+  /// What that means for a field: it may hold what somebody is typing
+  /// without the catalog moving, because typing is not a gesture that
+  /// arrives here. The panel's `teamField` is that, and says what it
+  /// costs to bind it straight to `teamId` instead.
   ///
   /// The catalog owns what naming a team ends, rather than the panel:
   /// a ledger walk and a line selection both belong to the team that

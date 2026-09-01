@@ -275,9 +275,10 @@ export const config: WebdriverIO.Config & {
   // its head what it met.
   //
   // The session every spec can undo, and each does: they disconnect at
-  // the end. The team id has no undo on this surface — the team field
-  // is `required`, so naming a team is a one-way trip and there is no
-  // gesture that returns a window to having named none. `no-team` is
+  // the end. The team id has no undo on this surface — picking a team
+  // and submitting the field both name one, and neither has a reverse,
+  // so there is no gesture that returns a window to having named none.
+  // `no-team` is
   // therefore reachable only by the spec that meets the window first,
   // and `teams-connect.spec.ts` is the one that asserts about it.
   //

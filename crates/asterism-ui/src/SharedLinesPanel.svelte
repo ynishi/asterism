@@ -71,8 +71,8 @@
   // read is made against as somebody typed, so a ledger walk started on
   // one team would continue against another — the next page requested
   // from team B with team A's cursor, and its answer appended to team
-  // A's list. Naming a team is a submit, and `lookAt` is what a submit
-  // reaches; between the two the catalog does not move.
+  // A's list. Typing is not the naming act — `lookAt` is, and says so
+  // — so what is half-typed here reaches nothing until a gesture does.
   //
   // Seeded from the catalog, because a connection outlives this drawer
   // and reopening it should show the team it was last looking at.
@@ -127,12 +127,11 @@
     await refreshOpenTab();
   }
 
-  // Picking from the list is the same act as submitting the field, and
-  // goes the same way — `lookAt` and then whichever tab is open. The
-  // field is written too, so pressing a row leaves it showing what was
-  // picked rather than what somebody typed last. It is still the
-  // component's own state between edits, for the reason `teamField`
-  // gives: a submit is what moves the catalog.
+  // The second gesture that reaches the naming act, and `lookAt` says
+  // the two are equal. It goes the same way `look` does — `lookAt`,
+  // then whichever tab is open — and writes the field as well, so
+  // pressing a row leaves it showing what was picked rather than what
+  // somebody typed last.
   async function choose(teamId: string) {
     teamField = teamId;
     await sharedCatalog.lookAt(teamId);
@@ -273,9 +272,10 @@
 
         <!-- The teams this account is in, which is what the field
              below used to be the only way to name. Ids rather than
-             names because a team has none — the model carries an id
-             and a creation time, the same shape the roster tab meets
-             and says so about. The role is shown beside each because
+             names because a team has none, which `TeamMembership` in
+             the team plane's domain argues — a different shortage from
+             the roster's, where the person has a name and the row does
+             not carry it. The role is shown beside each because
              it is the fact a reader chooses on; the creation time is
              what the rows are ordered by and is not drawn. -->
         {#if sharedCatalog.teams.loading}
@@ -319,11 +319,11 @@
           </p>
         {/if}
 
-        <!-- Kept, and demoted. A team you are a member of is in the
-             list above; this names one that is not, which is what an
-             admin's every team looks like from here — they act inside
-             teams without a membership row, so their list is empty
-             while their reach is not. -->
+        <!-- Kept, and demoted. It names a team the list above does not
+             hold, and the reader that has is the instance admin: they
+             act inside teams without a membership row, so their list
+             is empty while their reach is not. Without this the plane
+             would have no entrance for them at all. -->
         <form class="drawer-form" onsubmit={look}>
           <label>
             Or name a team directly
