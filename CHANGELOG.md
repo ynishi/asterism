@@ -809,11 +809,13 @@ and this project adheres to
   count is stated anywhere now, and the prose points at the lists. The check
   covers the direction the drift has actually come from, which #136 recorded:
   every one of its sixteen verbs landed in a change whose scope said routes.
-  `changed-packages` selects one crate per changed path, so a branch touching
-  only the desktop's commands is caught by `main`'s run rather than its own, and
-  the test's doc says so. `commands.rs` gains the section that was missing
-  beside it — why there are two transports over one service graph at all, rather
-  than the desktop calling the loopback surface its own process serves.
+  `changed-packages` maps each changed path to the member holding it, and names
+  the desktop's command module for `asterism-server` besides, so this check runs
+  on a branch touching either file it reads; it first shipped without that rule,
+  and three red merges of `main` were what said so. `commands.rs` gains the
+  section that was missing beside it — why there are two transports over one
+  service graph at all, rather than the desktop calling the loopback surface its
+  own process serves.
 
 ### Changed
 
