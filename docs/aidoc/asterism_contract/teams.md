@@ -51,5 +51,6 @@ and an actor's display name is a snapshot rather than a lookup.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
 - `TeamRosterDto` — Who is in a team, and in what role.
 - `TeamRosterMemberDto` — One membership row.
+- `TeamRosterViewerDto` — The reader's own standing in the team whose roster this is.
 - `TeamSubjectRefDto` — One typed reference an act makes.
 

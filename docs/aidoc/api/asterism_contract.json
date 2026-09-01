@@ -1278,6 +1278,11 @@
       "docs": "One membership row.\n\n**No display name.** A membership is a row about an account rather\nthan about a person, and the name a ledger event carries is a\nsnapshot the *act* took — there is nothing equivalent to read here.\nA surface listing these shows ids, and saying why is cheaper than\nleaving a reader to wonder how one screen has names and the other\ndoes not."
     },
     {
+      "path": "asterism_contract::teams::TeamRosterViewerDto",
+      "kind": "struct",
+      "docs": "The reader's own standing in the team whose roster this is.\n\nHere because the rows cannot answer it. An instance admin reaches a\nteam by standing outside it, so they hold no row, and a screen\nderiving a role from the rows reads that absence as \"nothing you\nmay do\" — while what they may do is delete the team. The server's\ngate works this out to let the request through and says it here\nrather than leaving each surface to guess."
+    },
+    {
       "path": "asterism_contract::teams::TeamSubjectRefDto",
       "kind": "struct",
       "docs": "One typed reference an act makes."

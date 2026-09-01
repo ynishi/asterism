@@ -148,6 +148,11 @@
       "docs": "The result of `POST /teams/create`."
     },
     {
+      "path": "asterism_teams_wire::dto::ViewerDto",
+      "kind": "struct",
+      "docs": "The caller's standing in the team whose roster this is."
+    },
+    {
       "path": "asterism_teams_wire::projection",
       "kind": "module",
       "docs": "The captured projection — descriptive metadata a promoter said at\nthe time (#148 decisions 12, 13 and 14).\n\n## What this crate's part in it is\n\nDecision 14 keeps the body opaque, and the transport's share of\nthat is small and absolute: **the body is a `String` here and no\nshape in this crate has a field that came from inside it.** Why the\nrule exists, and why\n[`EntryProjectionEnvelope::version`] is a fact about the envelope\nrather than a breach of it, are argued once in\n`teams_core::domain::projection`.\n\nDecision 13's declaration is likewise settled before a body reaches\nhere — it lives at the member's mapper, the only place that knows\nboth the local model and the body. By the time this crate sees one,\nthe answer is a string. A filter expressed on the wire would be a\nsecond place to forget something, and forgetting there fails in the\nunsafe direction."

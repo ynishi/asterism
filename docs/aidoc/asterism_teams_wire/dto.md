@@ -25,4 +25,5 @@ its own (#83 §1).
 - `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
+- `ViewerDto` — The caller's standing in the team whose roster this is.
 

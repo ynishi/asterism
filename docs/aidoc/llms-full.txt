@@ -619,6 +619,7 @@ and an actor's display name is a snapshot rather than a lookup.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
 - `TeamRosterDto` — Who is in a team, and in what role.
 - `TeamRosterMemberDto` — One membership row.
+- `TeamRosterViewerDto` — The reader's own standing in the team whose roster this is.
 - `TeamSubjectRefDto` — One typed reference an act makes.
 
 
@@ -14256,6 +14257,7 @@ its own (#83 §1).
 - `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
+- `ViewerDto` — The caller's standing in the team whose roster this is.
 
 
 <!-- asterism_teams_wire/projection.md -->
