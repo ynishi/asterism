@@ -10,6 +10,44 @@ and this project adheres to
 
 ### Added
 
+- **Invite somebody into a team, and take them out, from the app** (#210). The
+  five roster writes had a route, an authority rule, a repository method and
+  route-level tests, and stopped there: no client verb, no desktop command, no
+  control. They reach the screen now — an invite form above the roster's rows,
+  promote or demote and remove on each row, and deleting the team under them.
+
+  **The command shapes moved to the leaf**, where the member's client can reach
+  them. They sat in `teams-contract`, which a client may never link, and copying
+  them across would have been the second home for one type that
+  `asterism-teams-wire` exists to prevent. The server already read the leaf, so
+  nothing gained a dependency and no handler changed. What the move settles is
+  the line the leaf draws: an owner inviting from the app is a member's client
+  saying it, while what an operator says from outside a team — the substrate's
+  upload — stays where no client speaks it.
+
+  **Only an owner is shown any of it.** A member sees the rows and nothing to
+  press, because a control somebody cannot use is a refusal offered in advance.
+  The reader's own row carries the controls too: stepping down is theirs to do,
+  and the case that is not — the last owner, by either verb — is the team's
+  state to refuse rather than a row's to guess ahead of.
+
+  **An instance admin sees nothing here**, including the delete their standing
+  does carry. They hold no membership row, so the role the screen derives from
+  the roster is empty, and the roster is all it has to derive from. What would
+  close that is the read answering with the caller's own capacity instead.
+
+  **A last-owner refusal still arrives as a sentence.** The server answers 409
+  carrying the token that separates it from a malformed request, and the
+  desktop's error conversion flattens every 4xx into one shape on the way to a
+  screen. #211 is that conversion.
+
+  `join` is not part of this, and the model says why: an invitation writes a
+  membership row directly, so there is nothing to accept, and a verb by which
+  somebody asks to enter would be a request, an approval, and a ledger kind for
+  both. #171's bullet read "invite and join under `RegistrationPolicy`", and
+  that policy gates who may found a team rather than who may enter one — its one
+  consumer is the create-team handler.
+
 - **The cross-member reader list, held to the tree** (#208). `changed-packages`
   reads `scripts/cross-member-readers.txt` — which tests read files under
   another member's directory — and selects the reading crate for a branch that
