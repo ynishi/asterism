@@ -5,7 +5,7 @@
     {
       "path": "teams_contract::command",
       "kind": "module",
-      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes an\nadmin or an operator's tooling calls.\n\nWhat a **member's client** sends is in `asterism-teams-wire`, which\nthe client may link and this crate it may not (#148 decision 15):\nlogin, team creation, the three content verbs, and — since #210\ngave an owner a screen to say them from — the roster writes. What\nstays here is what no client says at all: the substrate's own\nupload.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
+      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes no\nclient sends.\n\nWhat a **member's client** sends is in `asterism-teams-wire`, which\nthe client may link and this crate it may not (#148 decision 15):\nlogin, team creation, the three content verbs, and — since #210\ngave an owner a screen to say them from — the roster writes.\n\nWhat stays is the substrate's own upload, and the line it is on is\nwho sends it rather than whose act it is: uploading into a team's\nstore is a member's act, and the route refuses an admin's implicit\none. No client sends it because content reaches a team through the\npromotion path instead.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "teams_contract::command::UploadBlobCommand",

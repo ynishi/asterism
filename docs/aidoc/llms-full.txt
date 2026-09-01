@@ -14154,8 +14154,9 @@ second choice for exactly this case is a leaf, and this is it.
 ## What lives here, and what does not
 
 Here: the shapes that are **teams-shaped** — a session, a team and
-its roster, a page of the ledger, the three content verbs hosting
-adds, and the projection envelope (#148 decisions 12 to 14).
+its roster, the roster's own writes (#210), a page of the ledger,
+the three content verbs hosting adds, and the projection envelope
+(#148 decisions 12 to 14).
 
 Not here, and each for a stated reason:
 
@@ -14202,10 +14203,10 @@ calls.
 An owner's roster writes are here too, and that is not an exception
 to the line above. They moved from `teams-contract` when an owner
 gained a screen to say them from (#210), and an owner saying them
-is a member's client saying them. The dividing line stays *who says
-it*: what an operator or an admin says from outside a team — the
-substrate's own upload, the purge, the head registry — stays where
-it was, because no client speaks it.
+is a member's client saying them. What stayed behind stayed for the
+reason the crate doc gives — no client sends it — and not for
+anything about whose act it is: the substrate's own upload is a
+member's act that no client happens to send.
 
 The session token is **not** a field on any of these: it travels in
 the `Authorization: Bearer` header, resolved by the server's gate
@@ -14898,10 +14899,10 @@ than served.
 
 # teams-contract — wire contract for the teams plane
 
-What is left here after #148 decision 15: the `/teams/*` shapes a
-member's client does not speak. The roster verbs, which are an
-owner's; the substrate's own blob upload and its purge two-step;
-the instance head registry. Everything a client says or reads moved
+What is left here after #148 decision 15, and after #210 took the
+roster verbs the same way: the `/teams/*` shapes no client sends.
+The substrate's own blob upload and its purge two-step; the
+instance head registry. Everything a client says or reads moved
 to `asterism-teams-wire`, the MIT/Apache leaf both planes may link — this
 crate cannot be that leaf, for the two reasons #148 gives: its
 licence is AGPL-3.0-or-later (#162), which the local plane may not
@@ -14937,22 +14938,26 @@ Validation is not here: role words go through
 
 ## Modules
 
-- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes an
+- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes no
 - [`dto`](dto.md): Response DTOs of the `/teams/*` surfaces a member's client does not
 
 
 <!-- teams_contract/command.md -->
 # teams-contract::command
 
-Command DTOs — inputs of the state-changing `/teams/*` routes an
-admin or an operator's tooling calls.
+Command DTOs — inputs of the state-changing `/teams/*` routes no
+client sends.
 
 What a **member's client** sends is in `asterism-teams-wire`, which
 the client may link and this crate it may not (#148 decision 15):
 login, team creation, the three content verbs, and — since #210
-gave an owner a screen to say them from — the roster writes. What
-stays here is what no client says at all: the substrate's own
-upload.
+gave an owner a screen to say them from — the roster writes.
+
+What stays is the substrate's own upload, and the line it is on is
+who sends it rather than whose act it is: uploading into a team's
+store is a member's act, and the route refuses an admin's implicit
+one. No client sends it because content reaches a team through the
+promotion path instead.
 
 The session token is **not** a field on any of these: it travels in
 the `Authorization: Bearer` header, resolved by the server's gate

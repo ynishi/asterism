@@ -354,7 +354,7 @@
 ## teams-contract 0.0.0
 
 - [teams-contract overview](teams_contract/index.md): # teams-contract — wire contract for the teams plane
-- [teams-contract::command](teams_contract/command.md): Command DTOs — inputs of the state-changing `/teams/*` routes an
+- [teams-contract::command](teams_contract/command.md): Command DTOs — inputs of the state-changing `/teams/*` routes no
 - [teams-contract::dto](teams_contract/dto.md): Response DTOs of the `/teams/*` surfaces a member's client does not
 
 ## teams-core 0.0.0

@@ -5,7 +5,7 @@
     {
       "path": "asterism_teams_wire::command",
       "kind": "module",
-      "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nAn owner's roster writes are here too, and that is not an exception\nto the line above. They moved from `teams-contract` when an owner\ngained a screen to say them from (#210), and an owner saying them\nis a member's client saying them. The dividing line stays *who says\nit*: what an operator or an admin says from outside a team — the\nsubstrate's own upload, the purge, the head registry — stays where\nit was, because no client speaks it.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
+      "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nAn owner's roster writes are here too, and that is not an exception\nto the line above. They moved from `teams-contract` when an owner\ngained a screen to say them from (#210), and an owner saying them\nis a member's client saying them. What stayed behind stayed for the\nreason the crate doc gives — no client sends it — and not for\nanything about whose act it is: the substrate's own upload is a\nmember's act that no client happens to send.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "asterism_teams_wire::command::CreateTeamCommand",
