@@ -100,6 +100,7 @@ const SPECS = [
   "./e2e-teams/teams-connect.spec.ts",
   "./e2e-teams/teams-work.spec.ts",
   "./e2e-teams/teams-promote.spec.ts",
+  "./e2e-teams/teams-roster.spec.ts",
 ];
 
 /** Everything the server owns, removed and remade on every run. */
@@ -458,10 +459,10 @@ async function prepareFixture(): Promise<void> {
   server = child;
   await waitForServer(child, 30_000);
 
-  const session = await postJson<{ token: string }>("/teams/auth/login", {
-    login: LOGIN,
-    password,
-  });
+  const session = await postJson<{ token: string; user_id: string }>(
+    "/teams/auth/login",
+    { login: LOGIN, password },
+  );
   const team = await postJson<{ team_id: string }>(
     "/teams/create",
     { owner_user_id: null },
@@ -476,11 +477,27 @@ async function prepareFixture(): Promise<void> {
   // The invitee's id rather than its login. A membership row names an
   // account by id, so that is what the invite form asks for, and a
   // login is not something the roster could show back.
-  const other = await postJson<{ user_id: string }>("/teams/auth/login", {
-    login: OTHER_LOGIN,
-    password: otherPassword,
-  });
+  const other = await postJson<{ token: string; user_id: string }>(
+    "/teams/auth/login",
+    { login: OTHER_LOGIN, password: otherPassword },
+  );
   process.env.E2E_TEAMS_OTHER_ID = other.user_id;
+
+  // A team the window's account is a member of rather than the owner
+  // of. The roster spec needs one to leave from, and founding a team
+  // makes you its owner — the last of which cannot go, by either verb.
+  // So the second account founds this one and invites the first.
+  const theirs = await postJson<{ team_id: string }>(
+    "/teams/create",
+    { owner_user_id: null },
+    other.token,
+  );
+  await postJson(
+    `/teams/${theirs.team_id}/members/invite`,
+    { user_id: session.user_id, role: "member" },
+    other.token,
+  );
+  process.env.E2E_TEAMS_LEAVE_ID = theirs.team_id;
 
   const worked = await seedWorkableTeam(session.token);
   process.env.E2E_TEAMS_WORK_ID = worked.teamId;

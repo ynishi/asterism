@@ -61,7 +61,6 @@ function fixture(): {
   login: string;
   password: string;
   teamId: string;
-  otherId: string;
 } {
   const read = (name: string): string => {
     const value = process.env[name];
@@ -78,7 +77,6 @@ function fixture(): {
     login: read("E2E_TEAMS_LOGIN"),
     password: read("E2E_TEAMS_PASSWORD"),
     teamId: read("E2E_TEAMS_ID"),
-    otherId: read("E2E_TEAMS_OTHER_ID"),
   };
 }
 
@@ -220,41 +218,6 @@ async function fill(selector: string, value: string): Promise<void> {
   await field.setValue(value);
 }
 
-/**
- * Presses a button on the row carrying a given text.
- *
- * `clickCarrying` takes the first button in a container, which is the
- * wrong tool once a list has two rows offering the same verb: since
- * #210 an owner's remove sits on every row, so "the first one" would
- * be whichever row the server happened to list first.
- */
-async function clickOnRow(
-  container: string,
-  rowText: string,
-  buttonText: string,
-): Promise<void> {
-  const hit = await browser.execute(
-    (sel: string, row: string, want: string) => {
-      const found = Array.from(document.querySelectorAll(sel)).find(
-        (candidate) => (candidate.textContent ?? "").includes(row),
-      );
-      if (found === undefined) return false;
-      const button = Array.from(found.querySelectorAll("button")).find(
-        (candidate) => (candidate.textContent ?? "").trim() === want,
-      );
-      if (button === undefined) return false;
-      (button as HTMLElement).click();
-      return true;
-    },
-    container,
-    rowText,
-    buttonText,
-  );
-  if (!hit) {
-    throw new Error(`no "${buttonText}" on the row carrying "${rowText}"`);
-  }
-}
-
 /** One frame, named for the step, on the path a person will read. */
 async function snap(name: string): Promise<void> {
   const dir = process.env.E2E_TEAMS_SCREENS_DIR;
@@ -270,7 +233,7 @@ async function snap(name: string): Promise<void> {
 describe("the team plane", () => {
   it("connects, names a team, and reads what it hosts", async () => {
     const trail: string[] = [];
-    const { baseUrl, login, password, teamId, otherId } = fixture();
+    const { baseUrl, login, password, teamId } = fixture();
 
     await stage(trail, "the app paints its sidebar", COLD_MS, () =>
       pollUntil(
@@ -397,44 +360,6 @@ describe("the team plane", () => {
       }
     });
     await snap("04-roster");
-
-    // The writes the roster grew (#210). The reader founded this team,
-    // so they are its owner and the controls are drawn — a member
-    // would see the rows and nothing to press.
-    //
-    // Inviting and removing, and not the rest of what the tab offers.
-    // The others are covered where the store is; what only a window
-    // can answer is whether the form reaches the roster at all, and
-    // whether a confirmation stands between a person and a write that
-    // cannot be undone. Two writes answer both, and naming the set
-    // here would be a copy of it that goes stale the next time one is
-    // added — which is what happened to the sentence this replaces,
-    // twice.
-    await stage(
-      trail,
-      "let somebody in and take them out again",
-      ROUND_TRIP_MS * 3,
-      async () => {
-        await fill(`${DRAWER} .drawer-invite input[type="text"]`, otherId);
-        await clickIn(`${DRAWER} .drawer-invite button[type="submit"]`);
-        await pollUntil(
-          async () => ((await drawerText()) ?? "").includes(otherId),
-          "the invited account never reached the roster",
-          ROUND_TRIP_MS,
-        );
-
-        await clickOnRow(`${DRAWER} .roster li`, otherId, "remove");
-        // The modal focuses Cancel, so the destructive answer is one
-        // deliberate move away and a spec has to make that move.
-        await clickCarrying(".confirm-panel", "Remove");
-        await pollUntil(
-          async () => !((await drawerText()) ?? "").includes(otherId),
-          "the removed account stayed on the roster",
-          ROUND_TRIP_MS,
-        );
-      },
-    );
-    await snap("05-roster-writes");
 
     // The ledger. Neither read on this plane can legitimately answer
     // with nothing — a team is created with a founding owner and with
