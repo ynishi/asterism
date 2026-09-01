@@ -193,6 +193,25 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "team_server_session",
         "talks to a team, not to this process",
     ),
+    (
+        "close_shared_pursuit",
+        "talks to a team, not to this process",
+    ),
+    ("my_teams", "talks to a team, not to this process"),
+    (
+        "open_shared_pursuit",
+        "talks to a team, not to this process",
+    ),
+    (
+        "promote_asset_to_team",
+        "talks to a team, not to this process",
+    ),
+    ("push_shared_round", "talks to a team, not to this process"),
+    (
+        "shared_line_pursuits",
+        "talks to a team, not to this process",
+    ),
+    ("shared_pursuit", "talks to a team, not to this process"),
 ];
 
 /// The workspace root, from this crate's manifest directory.
