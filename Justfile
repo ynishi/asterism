@@ -1451,6 +1451,34 @@ changed-packages:
         fi
     done
 
+    # Where that proxy is wrong *across* members, the way `fixtures/`
+    # and `scripts/` are where it is wrong outside them: a test that
+    # scans another member's sources runs only when its own crate is
+    # selected, so each such reader is named here beside what it
+    # reads. Team verbs landed across #199, #201 and #203 with
+    # `main`'s full run as the first thing to say so (#206), and the
+    # review of that fix found the other pairs, the same shape:
+    # `transport_parity` (asterism-server) parses the desktop's
+    # command module, `attribution_guards` (asterism-core) scans the
+    # server's and the desktop's sources and the contract's
+    # `command.rs`, and `export_parity` (asterism-ui) walks the
+    # contract's sources. Announced when one fires, because a package
+    # with no changed path under it would otherwise read as a bug in
+    # this recipe.
+    for pair in \
+        'crates/asterism-ui/src-tauri/src/commands.rs|asterism-server' \
+        'crates/asterism-server/src/|asterism-core' \
+        'crates/asterism-ui/src-tauri/src/|asterism-core' \
+        'crates/asterism-contract/src/command.rs|asterism-core' \
+        'crates/asterism-contract/src/|asterism-ui'; do
+        read_path=${pair%|*}
+        reader=${pair#*|}
+        if printf '%s\n' "$attributable" | grep -q "^$read_path"; then
+            echo "$read_path is read by a test in $reader; selecting it too." >&2
+            packages="$packages $reader"
+        fi
+    done
+
     if [ -z "${packages// /}" ]; then
         echo "No workspace member changed. Changed paths:" >&2
         printf '%s\n' "$attributable" | sed 's/^/  /' >&2
@@ -1462,7 +1490,8 @@ changed-packages:
 # Test the packages this branch touched (pre-push's narrow suite).
 #
 # One limit, stated because a narrower gate that reads as a full one is
-# worse than no gate: it names packages a change *edited*, not packages
+# worse than no gate: it names packages a change *edited* — plus the
+# cross-member readers `changed-packages` names — not packages
 # that depend on them. Editing `asterism-core` does not test
 # `asterism-server` here, and it is `main`'s own run that catches what
 # that misses — a pull request's run asks this same narrow question.
@@ -1556,7 +1585,7 @@ rust-test-changed:
         echo "That is every member this branch touched; no Rust test to run."
         exit 0
     fi
-    echo "Testing what this branch touched:$(printf ' %s' $run)"
+    echo "Testing what this branch's diff calls for:$(printf ' %s' $run)"
     echo "Dependents of these are not run here — main's run covers them."
     just rust-test-pkg $run
 
@@ -1591,7 +1620,7 @@ rust-clippy-changed:
         echo "No workspace member changed; no Rust lint to run."
         exit 0
     fi
-    echo "Linting what this branch touched:$(printf ' %s' $packages)"
+    echo "Linting what this branch's diff calls for:$(printf ' %s' $packages)"
     status=0
     for pkg in $packages; do
         echo
