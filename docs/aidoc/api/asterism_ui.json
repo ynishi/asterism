@@ -260,7 +260,7 @@
     {
       "path": "asterism_ui::commands::delete_team",
       "kind": "function",
-      "docs": "Deletes the team, which an owner may do and so may an instance\nadmin — the one verb in this group that standing outside the roster\nis enough for.\n\nIt takes the team's ledger with it. The confirmation that says so\nbelongs on the screen offering the act, not here."
+      "docs": "Deletes the team, which an owner may do and so may an instance\nadmin: standing outside the roster is enough here, which the client\nverb it calls says where the routes are named.\n\nIt takes the team's ledger with it. The confirmation that says so\nbelongs on the screen offering the act, not here."
     },
     {
       "path": "asterism_ui::commands::delete_thread",
