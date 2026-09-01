@@ -44,7 +44,8 @@ and this project adheres to
   delete asks both. On this tab an admin standing outside a team is offered the
   delete and nothing beside it, which is right: §1 grants them no implicit
   invite, remove or role change inside a team not theirs. One who is also a
-  member of it is an ordinary member there, and the controls follow their role.
+  member gets what their role gives above and the delete besides, since the
+  server grants that verb to the standing whether or not a row is held.
 
   **A last-owner refusal still arrives as a sentence.** The server answers 409
   carrying the token that separates it from a malformed request, and the
