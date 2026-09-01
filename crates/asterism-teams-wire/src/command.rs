@@ -4,10 +4,10 @@
 //! An owner's roster writes are here too, and that is not an exception
 //! to the line above. They moved from `teams-contract` when an owner
 //! gained a screen to say them from (#210), and an owner saying them
-//! is a member's client saying them. The dividing line stays *who says
-//! it*: what an operator or an admin says from outside a team — the
-//! substrate's own upload, the purge, the head registry — stays where
-//! it was, because no client speaks it.
+//! is a member's client saying them. What stayed behind stayed for the
+//! reason the crate doc gives — no client sends it — and not for
+//! anything about whose act it is: the substrate's own upload is a
+//! member's act that no client happens to send.
 //!
 //! The session token is **not** a field on any of these: it travels in
 //! the `Authorization: Bearer` header, resolved by the server's gate

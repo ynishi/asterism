@@ -223,9 +223,9 @@
   // The server decides regardless — this only decides what to offer.
   //
   // An instance admin holds no membership row, so this is false for
-  // them and the roster shows them nothing to press. The one verb
-  // their standing carries is deleting the team, and they lose it
-  // here: what would fix that is the roster answering with the
+  // them and the roster shows them nothing to press. The verb their
+  // standing carries in this group is deleting the team, and they lose
+  // it here: what would fix that is the roster answering with the
   // caller's capacity rather than the reader deriving what it can.
   const iOwn = $derived(sharedCatalog.myRole === "owner");
 
@@ -807,9 +807,10 @@
           {#if iOwn}
             <!-- Above the rows because it adds one, and the rows are
                  what it adds to. An id rather than a name to invite
-                 by, for the reason the note above gives: the instance
-                 knows accounts by id, and a team has no directory to
-                 search for somebody who is not in it yet. -->
+                 by, and not for the reason the note above gives: that
+                 one is about rows that already exist. An invitee has
+                 none, and a team has no directory to search for
+                 somebody who is not in it yet. -->
             <form class="drawer-form drawer-invite" onsubmit={invite}>
               <label>
                 Let somebody in
@@ -858,10 +859,13 @@
                       &nbsp;· you{/if}
                   </span>
                   {#if iOwn}
-                    <!-- The reader's own row carries them too. An owner
-                         stepping down or leaving is a thing they may
-                         do, and the one case that is not — the last
-                         owner, either way — is the team's state to
+                    <!-- The reader's own row carries them too: an
+                         owner may step down, and may take themself
+                         out. The second is a removal rather than a
+                         departure — the ledger records it as one, and
+                         `leave` has no route — so the button says what
+                         it does. The case neither may reach is the
+                         last owner, and that is the team's state to
                          refuse rather than this row's to guess at. -->
                     <span class="member-acts">
                       {#if member.role === "owner"}

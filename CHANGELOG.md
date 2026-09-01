@@ -21,9 +21,12 @@ and this project adheres to
   them across would have been the second home for one type that
   `asterism-teams-wire` exists to prevent. The server already read the leaf, so
   nothing gained a dependency and no handler changed. What the move settles is
-  the line the leaf draws: an owner inviting from the app is a member's client
-  saying it, while what an operator says from outside a team — the substrate's
-  upload — stays where no client speaks it.
+  the line the leaf draws, and it is who sends a shape rather than whose act it
+  is: an owner inviting from the app is a member's client sending it, while the
+  substrate's upload stays behind because no client sends it at all. The four
+  shapes changed licence by moving, AGPL-3.0-or-later to MIT OR Apache-2.0,
+  which is what the leaf is for and what #148 decision 15 did with the shapes
+  that went before them.
 
   **Only an owner is shown any of it.** A member sees the rows and nothing to
   press, because a control somebody cannot use is a refusal offered in advance.
@@ -38,15 +41,22 @@ and this project adheres to
 
   **A last-owner refusal still arrives as a sentence.** The server answers 409
   carrying the token that separates it from a malformed request, and the
-  desktop's error conversion flattens every 4xx into one shape on the way to a
-  screen. #211 is that conversion.
+  desktop's error conversion answers a 404 on its own and turns every other 4xx
+  into one shape on the way to a screen. #211 is that conversion.
 
-  `join` is not part of this, and the model says why: an invitation writes a
-  membership row directly, so there is nothing to accept, and a verb by which
-  somebody asks to enter would be a request, an approval, and a ledger kind for
-  both. #171's bullet read "invite and join under `RegistrationPolicy`", and
-  that policy gates who may found a team rather than who may enter one — its one
-  consumer is the create-team handler.
+  **`leave` is not here, and taking yourself out is not it.** The issue asked
+  for a departure verb and this does not carry one: `TeamRoster::check_leave`
+  still has no caller, there is no route for a member to reach, and what an
+  owner can do from their own row is remove themself — which the ledger records
+  as a removal, by them, of them. A member who is not an owner cannot depart at
+  all. The panel does let go of the team afterwards, the way deleting one makes
+  it let go, so the window is not left pointed at something it has left.
+
+  `join` is not part of this either, and the model says why: an invitation
+  writes a membership row directly, so there is nothing to accept, and a verb by
+  which somebody asks to enter would be a request, an approval, and a ledger
+  kind for both. #171's bullet read "invite and join under `RegistrationPolicy`"
+  and that policy gates who may found a team rather than who may enter one.
 
 - **The cross-member reader list, held to the tree** (#208). `changed-packages`
   reads `scripts/cross-member-readers.txt` — which tests read files under

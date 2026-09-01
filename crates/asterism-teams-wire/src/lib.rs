@@ -10,8 +10,9 @@
 //! ## What lives here, and what does not
 //!
 //! Here: the shapes that are **teams-shaped** — a session, a team and
-//! its roster, a page of the ledger, the three content verbs hosting
-//! adds, and the projection envelope (#148 decisions 12 to 14).
+//! its roster, the roster's own writes (#210), a page of the ledger,
+//! the three content verbs hosting adds, and the projection envelope
+//! (#148 decisions 12 to 14).
 //!
 //! Not here, and each for a stated reason:
 //!

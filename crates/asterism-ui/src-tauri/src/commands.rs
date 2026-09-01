@@ -3584,10 +3584,11 @@ pub async fn invite_team_member(
 ///
 /// Removing the last owner is refused with a `409`, which is a
 /// different thing from a malformed request and arrives here as the
-/// same `UiError` anyway: [`teams_error`] flattens every 4xx into a
-/// validation error and drops the token that separated them. So the
-/// screen can say what happened only as far as the server's own
-/// sentence carries it. That flattening is #211's, not this command's.
+/// same `UiError` anyway: [`teams_error`] answers a `404` on its own
+/// and turns every other 4xx into a validation error, dropping the
+/// token that told a conflict from a bad field. So the screen can say
+/// what happened only as far as the server's own sentence carries it.
+/// That flattening is #211's, not this command's.
 #[tauri::command]
 pub async fn remove_team_member(
     state: State<'_, AppState>,

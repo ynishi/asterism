@@ -152,14 +152,15 @@
 // # Where #171's surfaces attach
 //
 // **The roster** — who is in the team — is the second tab, over the
-// member's client's `roster`. It is a read and nothing more, and that
-// is the routes' doing rather than a scope somebody chose: #171's body
-// asks for four verbs beside it, and they answer to four different
-// rules at four different depths. Only the read and team creation are
-// wired end to end. **Joining has no verb at all**, so a tab offering
-// one would be offering something with nothing behind it, and
-// `RegistrationPolicy` — which #171 hangs all four on — is consulted
-// by exactly one of them.
+// member's client's `roster`. It reads and it writes: #210 brought the
+// five roster writes up from the routes they had stopped at, so
+// inviting, removing and the two role changes sit on the tab beside
+// the read, and deleting the team sits under them. **Joining has no
+// verb at all**, so a tab offering one would be offering something
+// with nothing behind it, and `RegistrationPolicy` — which #171 hung
+// it on — gates who may found a team rather than who may enter one.
+// Leaving has no verb either: an owner may take themself out, which
+// the ledger records as a removal.
 //
 // Founding a team is the write that came with this tab and does not
 // sit on it. Every tab is an answer about the team named above them,

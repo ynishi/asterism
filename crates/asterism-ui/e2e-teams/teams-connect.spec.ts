@@ -214,6 +214,12 @@ async function clickCarrying(container: string, text: string): Promise<void> {
  * hears an assignment. A field set the other way looks filled in a
  * screenshot and submits empty.
  */
+async function fill(selector: string, value: string): Promise<void> {
+  const field = await $(selector);
+  await field.waitForExist({ timeout: DRIVER_MS });
+  await field.setValue(value);
+}
+
 /**
  * Presses a button on the row carrying a given text.
  *
@@ -247,12 +253,6 @@ async function clickOnRow(
   if (!hit) {
     throw new Error(`no "${buttonText}" on the row carrying "${rowText}"`);
   }
-}
-
-async function fill(selector: string, value: string): Promise<void> {
-  const field = await $(selector);
-  await field.waitForExist({ timeout: DRIVER_MS });
-  await field.setValue(value);
 }
 
 /** One frame, named for the step, on the path a person will read. */
@@ -402,10 +402,11 @@ describe("the team plane", () => {
     // so they are its owner and the controls are drawn — a member
     // would see the rows and nothing to press.
     //
-    // Inviting and removing rather than all four: promoting and
-    // demoting are covered where the store is, and what only a window
-    // can answer is whether the form reaches the roster and whether
-    // the confirmation stands between a person and a removal.
+    // Inviting and removing rather than every write the tab now
+    // offers: the two role changes and the delete are covered where
+    // the store is, and what only a window can answer is whether the
+    // form reaches the roster and whether the confirmation stands
+    // between a person and a removal.
     await stage(
       trail,
       "let somebody in and take them out again",

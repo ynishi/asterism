@@ -134,10 +134,10 @@ async fn member(h: &Harness, login: &str) -> (Uuid, TeamsClient) {
 /// Puts a second account on the roster.
 ///
 /// Straight at the repository rather than over the invite route. The
-/// client speaks that route since #210 and a test below drives it, so
-/// this is a fixture's shortcut rather than the only way in: the
-/// suites that call this are about what a member does once a roster
-/// holds them, not about how it came to.
+/// client speaks that route since #210, so this is a fixture's
+/// shortcut rather than the only way in: the suites that call this are
+/// about what a member does once a roster holds them, not about how it
+/// came to.
 async fn join(h: &Harness, team: Uuid, owner: Uuid, joining: Uuid) {
     let owner = h
         .ctx
