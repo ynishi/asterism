@@ -3123,15 +3123,13 @@ pub async fn list_shared_lines(
 
 /// The teams this window's account belongs to.
 ///
-/// The read a picker is over, and the one team read that names no
-/// team: it is what a caller asks before they have one. Mapped to the
-/// contract for the reason the roster's and the ledger's are — the
-/// wire is what a member's client and a team server say to each other,
-/// and a screen holds one vocabulary.
+/// The read a picker is over, and one a caller makes before they have
+/// a team to name. Mapped to the contract for the reason the roster's
+/// and the ledger's are — the wire is what a member's client and a
+/// team server say to each other, and a screen holds one vocabulary.
 ///
-/// Answers membership rather than reach, which the route and the
-/// client both state on their own side: an admin who is a member of
-/// nothing gets an empty list and keeps every capacity they had.
+/// What it answers, and what a screen must not conclude from an empty
+/// list, is on `MyTeamsDto`.
 #[tauri::command]
 pub async fn my_teams(state: State<'_, AppState>) -> Result<MyTeamsDto, UiError> {
     let client = teams_client(&state).await?;

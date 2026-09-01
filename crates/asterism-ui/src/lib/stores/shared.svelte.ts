@@ -121,20 +121,25 @@
 // deriving it from `lines.data.length` would be reading the answer to
 // a question nobody asked.
 //
-// # What a picker changes, and what it does not
+// # What the picker changed, and what it did not
 //
-// The team id is typed because the member's client has no verb for
-// "the teams I am in". When that verb lands, the same field becomes a
-// choice from a list, and `teamId` stops being something a person
-// fills and starts being state every surface reads — which it already
-// is here, so the picker replaces a form control and nothing else.
+// The team id was typed because nothing answered "the teams I am in".
+// `teams` below is that read (#202), and naming a team is a choice
+// from a list now — `teamId` is set by pressing a row rather than by
+// filling a field, and it was already state every surface reads, so
+// nothing else moved.
+//
+// **The field to type an id stayed.** The read answers membership and
+// not reach, so an instance admin — who acts inside teams without a
+// membership row — gets an empty list, and a surface with only a list
+// would have no way in for them. The panel argues where it put the
+// two.
 //
 // The phase between — connected, with no team chosen — is not
-// something a picker introduces. A window that has just connected is
-// already in it, because the field it would fill starts empty, and it
-// stays in it until somebody names a team. What a picker changes is
-// what that phase shows: a list to choose from where there is a field
-// to fill.
+// something the picker introduced. A window that has just connected is
+// already in it, because `teamId` starts empty, and it stays in it
+// until somebody names a team either way. What the picker changed is
+// what that phase shows: a list to choose from above the field.
 //
 // It is where a window begins rather than where every session does.
 // `disconnect` leaves `teamId` alone, so connecting again in the same
@@ -315,10 +320,9 @@ class SharedCatalog {
   /// The user id the server answered with, or `null` when this window
   /// is talking to no team.
   session = $state<string | null>(null);
-  /// Which team is being looked at. Typed in rather than picked,
-  /// because there is no verb on the member's client for "the teams I
-  /// am in" — what a picker would and would not change is in the
-  /// header. Kept across a disconnect on purpose; see `phase`.
+  /// Which team is being looked at — picked from `teams` or typed,
+  /// which the header and the panel argue between them. Kept across a
+  /// disconnect on purpose; see `phase`.
   teamId = $state("");
   /// The line whose contents are showing, if one is open.
   selected = $state<string | null>(null);
@@ -355,12 +359,12 @@ class SharedCatalog {
 
   /// The teams this window's account belongs to.
   ///
-  /// The read the typed team id was waiting for, and the only one here
-  /// that names no team — it is what a caller asks before they have
-  /// one, so it belongs to the connection rather than to a team.
-  /// Loaded when a connection is made and dropped when it goes; it
-  /// says nothing about the team currently named, and naming another
-  /// does not change it.
+  /// The read the typed team id was waiting for. It names no team,
+  /// because it is what a caller asks before they have one — so it
+  /// belongs to the connection rather than to a team: read on
+  /// connecting, on opening the panel, and after founding a team,
+  /// dropped when the connection goes, and left alone when another
+  /// team is named.
   ///
   /// **It answers membership, not reach**, which the route and the
   /// command both state. An admin who joined nothing gets an empty
@@ -530,9 +534,9 @@ class SharedCatalog {
     if (this.session === null) return;
     // The teams a person may choose from, on the same rule as the
     // lines: a served-through view that showed what it last had would
-    // be a mirror. Read whenever there is somebody to ask, which is
-    // before a team is named rather than after — it is what the
-    // `no-team` phase shows.
+    // be a mirror. Read whenever there is somebody to ask rather than
+    // only where a team is missing — the list stays on screen after
+    // one is named, marking which.
     await this.teams.load({});
     if (this.phase === "ready") await this.lines.load({ teamId: this.teamId });
   }

@@ -70,7 +70,7 @@
     {
       "path": "teams_core::domain::identity::TeamMembership",
       "kind": "struct",
-      "docs": "One team a given user belongs to, read from that user's side.\n\n[`Membership`] with the user dropped and the team's creation time\nadded, which is what the two directions of the same table are for:\na roster is asked about a team and answers with users, this is\nasked about a user and answers with teams, so neither carries the\nsubject it was asked about.\n\n**The team is an id and a time, because that is all a team is.**\nNothing in this model names one. A surface listing these shows ids,\nand giving a team a name is a change to the model rather than a\nfield this struct forgot."
+      "docs": "One team a given user belongs to, read from that user's side.\n\n[`Membership`] with the user dropped and the team's creation time\nadded, which is what the two directions of the same table are for:\na roster is asked about a team and answers with users, this is\nasked about a user and answers with teams. This one drops the\nsubject it was asked about; [`TeamRoster`] keeps its `team_id`,\nbecause that is what its rows are validated against.\n\n**The team is an id and a time, because that is all a team is.**\nNothing in this model names one — not the `team` row, not an event\nkind — so a surface listing these shows ids. That is a different\nshortage from the roster's: a user *has* a display name and the\nledger stamps it, and the roster shows ids only because a\nmembership row does not carry one. Giving a team a name is a change\nto this model rather than a field this struct forgot."
     },
     {
       "path": "teams_core::domain::identity::TeamRoster",

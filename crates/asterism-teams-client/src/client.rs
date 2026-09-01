@@ -258,11 +258,9 @@ impl TeamsClient {
 
     /// The teams this session's account is a member of.
     ///
-    /// The one team read that takes no [`TeamScopedId`], because it is
-    /// what a caller asks before they have one. It answers membership
-    /// rather than reach: an admin acts inside teams without a
-    /// membership row (#83 §1) and this list does not widen for one,
-    /// which the route says on its own side too.
+    /// Takes no [`TeamScopedId`], because it is what a caller asks
+    /// before they have one. What it answers — membership rather than
+    /// reach — is the route's decision and is argued there.
     pub async fn my_teams(&self) -> Result<MyTeamsDto, TeamsClientError> {
         self.get("/teams", "my_teams").await
     }

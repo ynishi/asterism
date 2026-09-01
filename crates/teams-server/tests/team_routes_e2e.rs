@@ -727,8 +727,8 @@ async fn my_teams_answers_the_callers_memberships() {
         vec![shared.as_str(), his.as_str()],
         "the team he was invited to and the one he founded"
     );
-    // The same team, two callers, two roles — which is the one fact
-    // beyond the id these rows carry.
+    // The same team, two callers, two roles — the field that answers
+    // about the caller rather than about the team.
     let role_of = |rows: &[serde_json::Value], id: &str| -> String {
         rows.iter()
             .find(|row| row["team_id"] == id)

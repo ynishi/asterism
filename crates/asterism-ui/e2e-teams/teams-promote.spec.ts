@@ -282,10 +282,12 @@ async function snap(name: string): Promise<void> {
  * Whether the bytes a card names are still on disk.
  *
  * A card carries its locator in the display spelling — `to_display`,
- * which for a file is the bare path and for anything else is a URL or
- * a name. So this is `existsSync` of the string, and a locator that is
- * not a path answers false, which is the honest answer to the question
- * being asked: a promotion reads the material's bytes off disk.
+ * which for a file is the bare path, and for the other kinds is a
+ * container, an address or a name. So this is `existsSync` of the
+ * string: a file answers for itself, and anything else answers
+ * whatever the filesystem says about its spelling, which is the
+ * honest reading of the question being asked — a promotion reads the
+ * material's bytes off disk, and this fixture only ever seeds files.
  *
  * Stored, the same locator is a typed shape (`{"kind":"file",…}`).
  * Reading the card's spelling as that one is what an earlier draft of
@@ -380,14 +382,9 @@ async function ensureAsset(appUrl: string): Promise<string> {
   // through a directory that no longer exists, and the promotion
   // fails reading bytes rather than doing anything this spec is about.
   // Measured on 2026-09-01, one worktree after the row was seeded.
-  const dir = fs.realpathSync(
-    (() => {
-      const under = path.join(repoRoot, "workspace/runtime/e2e-fixtures/promote");
-      fs.mkdirSync(under, { recursive: true });
-      return under;
-    })(),
-  );
-  const file = path.join(dir, "promoted.md");
+  const under = path.join(repoRoot, "workspace/runtime/e2e-fixtures/promote");
+  fs.mkdirSync(under, { recursive: true });
+  const file = path.join(fs.realpathSync(under), "promoted.md");
   if (!fs.existsSync(file)) {
     fs.writeFileSync(
       file,
@@ -565,11 +562,14 @@ describe("promoting an asset to a team", () => {
     await stage(trail, "hand it over", ROUND_TRIP_MS, async () => {
       await fill(`${PROMOTE} input[type="text"]`, NAMED);
       await clickLabelled(PROMOTE, "Promote");
-      // A refusal is shown by `mutate` as a toast and by nothing else
-      // — the surface's own catch adds nothing to it — so the wait is
-      // for either answer. Without this, a refused promotion times out
-      // saying only that no digest arrived, which is the least useful
-      // half of what the screen is showing.
+      // A refusal from the team is shown by `mutate` as a toast and by
+      // nothing else — the surface's own catch adds nothing to it — so
+      // the wait is for either answer. Without this, a refused
+      // promotion times out saying only that no digest arrived, which
+      // is the least useful half of what the screen is showing. A
+      // refusal from the catalog's guards reaches neither, by design,
+      // and times out here: unreachable from this walk, and the store
+      // tests are where those are pinned.
       await pollUntil(
         async () =>
           (await proseOf(PROMOTE)).includes("sha256:") ||

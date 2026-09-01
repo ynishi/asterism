@@ -767,15 +767,16 @@ impl SqliteTeamsRepository {
     /// [`Self::roster`] turned around: that one takes a team and reads
     /// its members, this takes a user and reads their teams. The
     /// `membership` primary key leads with `team_id`, so this
-    /// direction is what `idx_membership_user` exists for — it has
-    /// been in the schema since v1, ahead of any caller.
+    /// direction is what `idx_membership_user` exists for.
     ///
-    /// Ordered by the team's creation time because that is the only
-    /// order these rows carry a fact for: a membership has no
-    /// timestamp of its own, and ordering by id would be ordering by a
-    /// UUID. The role goes through [`Role::parse`] on the way out for
-    /// the reason the roster's does — a word the domain does not admit
-    /// is a validation error rather than a guessed authority.
+    /// Ordered by the team's creation time because a membership row
+    /// carries no time of its own, so the team's is the only one these
+    /// rows have. The id breaks ties rather than leading, and would
+    /// order them much the same way — the ids are UUID v7 — but on the
+    /// team's minting rather than on anything this read is about.
+    ///
+    /// The role goes through [`Role::parse`] on the way out for the
+    /// reason [`Self::roster`] gives.
     pub async fn teams_of_user(&self, user_id: Uuid) -> Result<Vec<TeamMembership>, DomainError> {
         let rows: Vec<(Uuid, String, i64)> = self
             .isle

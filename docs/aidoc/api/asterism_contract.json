@@ -1215,12 +1215,12 @@
     {
       "path": "asterism_contract::teams::MyTeamDto",
       "kind": "struct",
-      "docs": "One team the account belongs to.\n\n**No name, because a team has none** — the model carries an id and\na creation time and nothing else, so a picker over these shows ids\nthe way the roster shows user ids. Naming a team is a change to the\nteam plane's model rather than a field this shape is missing, and\nthis DTO gains one when that lands rather than before."
+      "docs": "One team the account belongs to.\n\n**No name, because a team has none**, which the team plane's own\n`TeamMembership` argues: naming one is a change to that model\nrather than a field this shape is missing. What follows here is\nthat a screen over these rows shows ids."
     },
     {
       "path": "asterism_contract::teams::MyTeamsDto",
       "kind": "struct",
-      "docs": "The teams this window's account belongs to.\n\nWhat a picker is over, and the read the typed team id was waiting\nfor. The roster's question turned around: that one takes a team and\nanswers with users, this takes the account and answers with teams.\n\n**Membership rather than reach**, which matters for one caller: an\nadmin acts inside a team without a membership row (#83 §1), so an\nadmin who joined nothing sees an empty list while keeping every\ncapacity they had. A surface must not read \"no teams\" as \"no\naccess\"."
+      "docs": "The teams this window's account belongs to.\n\nThe roster's question turned around: that one takes a team and\nanswers with users, this takes the account and answers with teams.\n\n**Membership rather than reach**, which matters for one caller: an\nadmin acts inside a team without a membership row (#83 §1), so an\nadmin who joined nothing sees an empty list while keeping every\ncapacity they had. Stated here rather than left to the route\nbecause it is a screen that draws the wrong conclusion: an empty\nlist must not be read as \"no access\"."
     },
     {
       "path": "asterism_contract::teams::PromotedAssetDto",

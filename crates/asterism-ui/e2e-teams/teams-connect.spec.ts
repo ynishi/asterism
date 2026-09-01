@@ -292,7 +292,7 @@ describe("the team plane", () => {
             "kinds of empty are merged again (#190)",
         );
       }
-      if (!text.includes("Name a team above")) {
+      if (!text.includes("Pick a team above")) {
         throw new Error(`the drawer did not ask for a team; it read: ${text}`);
       }
       if (text.includes("Publish a line of mine")) {
@@ -305,12 +305,11 @@ describe("the team plane", () => {
       }
     });
 
-    // Picked rather than typed. The fixture's account was made for
-    // this run and founded both of its teams, so they are the list —
-    // and picking is what a person does now that something answers
-    // "the teams I am in" (#202). Typing an id is still possible and
-    // still tested, by `teams-work.spec.ts`, which names a team this
-    // window has not been on.
+    // Picked rather than typed, which is what a person does now that
+    // something answers "the teams I am in" (#202). The account was
+    // made for this run, so every team in the list is one the fixture
+    // or this spec founded — nothing else could be in it. Typing an id
+    // still works and the two specs after this one still do it.
     await stage(trail, "pick the team and read its lines", ROUND_TRIP_MS, async () => {
       await pollUntil(
         async () => ((await drawerText()) ?? "").includes(teamId),
@@ -421,25 +420,34 @@ describe("the team plane", () => {
     await stage(trail, "found a team and land on it", ROUND_TRIP_MS, async () => {
       await clickTab("members");
       await clickIn(`${DRAWER} .make-team`);
-      await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("Created team "),
-        "founding a team said nothing",
-        ROUND_TRIP_MS,
-      );
       // Which team this window is on is the marked row in the picker,
       // not whether an id appears in the drawer: since #202 the drawer
       // lists every team the account is in, so the old id is on screen
       // whether or not it is the one being read.
-      const on = await browser.execute((sel: string) => {
-        const row = document.querySelector(sel);
-        return row === null ? null : (row.textContent ?? "");
-      }, `${DRAWER} .teams .drawer-row.active`);
-      if (on === null) {
-        throw new Error("no team is marked as the one being read");
-      }
-      if (on.includes(teamId)) {
-        throw new Error("founding a team left the reader on the old one");
-      }
+      //
+      // Polled rather than checked once, and the two conditions are
+      // one wait rather than two: `createTeam` says "Created team"
+      // before it re-reads the list, and `makeTeam` names the new team
+      // only after that returns — so the sentence arrives while the
+      // marked row is still the previous team's, and a check that ran
+      // there would fail saying the reader was left behind when they
+      // were about to be moved.
+      const markedTeam = async (): Promise<string | null> =>
+        browser.execute((sel: string) => {
+          const row = document.querySelector(sel);
+          return row === null ? null : (row.textContent ?? "");
+        }, `${DRAWER} .teams .drawer-row.active`);
+      await pollUntil(
+        async () => {
+          if (!((await drawerText()) ?? "").includes("Created team ")) {
+            return false;
+          }
+          const on = await markedTeam();
+          return on !== null && !on.includes(teamId);
+        },
+        "founding a team did not land the reader on the team it made",
+        ROUND_TRIP_MS,
+      );
       const after = (await drawerText()) ?? "";
       if (after.includes("Nothing read yet")) {
         throw new Error(

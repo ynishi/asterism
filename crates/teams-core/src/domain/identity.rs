@@ -178,13 +178,17 @@ pub struct Membership {
 /// [`Membership`] with the user dropped and the team's creation time
 /// added, which is what the two directions of the same table are for:
 /// a roster is asked about a team and answers with users, this is
-/// asked about a user and answers with teams, so neither carries the
-/// subject it was asked about.
+/// asked about a user and answers with teams. This one drops the
+/// subject it was asked about; [`TeamRoster`] keeps its `team_id`,
+/// because that is what its rows are validated against.
 ///
 /// **The team is an id and a time, because that is all a team is.**
-/// Nothing in this model names one. A surface listing these shows ids,
-/// and giving a team a name is a change to the model rather than a
-/// field this struct forgot.
+/// Nothing in this model names one — not the `team` row, not an event
+/// kind — so a surface listing these shows ids. That is a different
+/// shortage from the roster's: a user *has* a display name and the
+/// ledger stamps it, and the roster shows ids only because a
+/// membership row does not carry one. Giving a team a name is a change
+/// to this model rather than a field this struct forgot.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TeamMembership {
     /// The team.

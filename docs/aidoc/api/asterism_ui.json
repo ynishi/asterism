@@ -610,7 +610,7 @@
     {
       "path": "asterism_ui::commands::my_teams",
       "kind": "function",
-      "docs": "The teams this window's account belongs to.\n\nThe read a picker is over, and the one team read that names no\nteam: it is what a caller asks before they have one. Mapped to the\ncontract for the reason the roster's and the ledger's are — the\nwire is what a member's client and a team server say to each other,\nand a screen holds one vocabulary.\n\nAnswers membership rather than reach, which the route and the\nclient both state on their own side: an admin who is a member of\nnothing gets an empty list and keeps every capacity they had."
+      "docs": "The teams this window's account belongs to.\n\nThe read a picker is over, and one a caller makes before they have\na team to name. Mapped to the contract for the reason the roster's\nand the ledger's are — the wire is what a member's client and a\nteam server say to each other, and a screen holds one vocabulary.\n\nWhat it answers, and what a screen must not conclude from an empty\nlist, is on `MyTeamsDto`."
     },
     {
       "path": "asterism_ui::commands::open_forge_line",

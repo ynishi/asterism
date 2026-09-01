@@ -12,9 +12,10 @@ and this project adheres to
 
 - **Pick a team instead of typing its id** (#202). The team id was typed into a
   field because nothing answered "the teams I am in" — #171 has named that gap
-  since it was opened, and it was missing on every layer: server, client,
-  contract and command. `GET /teams` answers it now, and the drawer lists the
-  teams the signed-in account belongs to, with the role it holds in each.
+  since it was opened, and it was missing from the storage read up: the
+  repository, the domain shape, the wire, the client, the contract, the command
+  and the screen. `GET /teams` answers it now, and the drawer lists the teams
+  the signed-in account belongs to, with the role it holds in each.
 
   **It answers membership rather than reach.** An instance admin acts inside
   every team without a membership row (#83 §1), so an admin who joined nothing
@@ -29,10 +30,10 @@ and this project adheres to
   a rename verb, an authority rule for who may, and an event kind — and it is
   deliberately its own issue rather than something a picker decided.
 
-  The list belongs to the connection rather than to a team: read on connecting,
-  dropped when the connection goes, and left alone when another team is named.
-  Founding a team re-reads it, since the person who just made one is the
-  likeliest to pick it.
+  The list belongs to the connection rather than to a team: read on connecting
+  and whenever the drawer opens, dropped when the connection goes, and left
+  alone when another team is named. Founding a team re-reads it, since the
+  person who just made one is the likeliest to pick it.
 
 - **Hand an asset to a team, from the pane that is showing it** (#200). The act
   #66 exists for. #148 decision 5 gives content one way onto a team's line — a

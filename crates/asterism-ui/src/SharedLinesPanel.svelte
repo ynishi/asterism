@@ -12,10 +12,11 @@
   // `sharedCatalog` and `activeFilter.activePersona` directly, and the
   // App only mounts it.
   //
-  // The team id is typed in because the member's client has no verb
-  // for "the teams I am in". What a picker would change when that verb
-  // lands, and what it would not, is argued in the catalog's header
-  // rather than restated here.
+  // A team is picked from the ones this account is in, or named in the
+  // field below them. What the picker changed and what it did not is
+  // argued in the catalog's header; what this panel decides is where
+  // the two go — the list first, the field under it, and why the field
+  // is still here at all.
   //
   // What this panel reads from that header is `phase`: there is nobody
   // to ask, there is nobody chosen to ask about, or there is. The three
@@ -128,9 +129,10 @@
 
   // Picking from the list is the same act as submitting the field, and
   // goes the same way — `lookAt` and then whichever tab is open. The
-  // field is written too, so the two never disagree about which team
-  // this window is on and pressing a row leaves the field showing what
-  // was picked rather than what was typed last.
+  // field is written too, so pressing a row leaves it showing what was
+  // picked rather than what somebody typed last. It is still the
+  // component's own state between edits, for the reason `teamField`
+  // gives: a submit is what moves the catalog.
   async function choose(teamId: string) {
     teamField = teamId;
     await sharedCatalog.lookAt(teamId);
@@ -273,8 +275,9 @@
              below used to be the only way to name. Ids rather than
              names because a team has none — the model carries an id
              and a creation time, the same shape the roster tab meets
-             and says so about. The role is the one fact that tells one
-             row from another today. -->
+             and says so about. The role is shown beside each because
+             it is the fact a reader chooses on; the creation time is
+             what the rows are ordered by and is not drawn. -->
         {#if sharedCatalog.teams.loading}
           <p class="drawer-empty">reading your teams…</p>
         {:else if sharedCatalog.teams.error}
@@ -285,10 +288,18 @@
           <ul class="drawer-list teams" role="list">
             {#each sharedCatalog.teams.data as team (team.team_id)}
               <li>
+                <!-- `aria-current` beside the weight, because the
+                     marking is the answer to "which team is this
+                     window on" and weight alone says that to one kind
+                     of reader. The e2e reads the class for the same
+                     fact. -->
                 <button
                   type="button"
                   class="drawer-row"
                   class:active={sharedCatalog.teamId === team.team_id}
+                  aria-current={sharedCatalog.teamId === team.team_id
+                    ? "true"
+                    : undefined}
                   onclick={() => choose(team.team_id)}
                   title="Read the lines this team hosts"
                 >
@@ -326,15 +337,15 @@
           <button type="submit">List its lines</button>
         </form>
 
-        <!-- Founding a team sits beside the field rather than on a tab,
-             because every tab is an answer about the team named above
-             and this is the one act about no team in particular.
-             Beside the field in every phase with a connection, not only
-             in `no-team`: naming a team is a one-way trip on this
-             surface — the field is `required`, so there is no way back
-             to having named none — and an offer that only appeared
-             there would be an offer somebody could take exactly once
-             per window. -->
+        <!-- Founding a team sits under the list and the field rather
+             than on a tab, because every tab is an answer about the
+             team named above and this is the one act about no team in
+             particular. Shown in every phase with a connection, not
+             only in `no-team`: naming a team is still a one-way trip
+             on this surface — picking a row or submitting the field
+             both name one, and neither has an undo — so an offer that
+             only appeared before the first would be an offer somebody
+             could take exactly once per window. -->
         <button type="button" class="make-team" onclick={makeTeam}>
           Start a team of your own
         </button>
@@ -345,7 +356,7 @@
 
         {#if sharedCatalog.phase === "no-team"}
           <p class="drawer-empty">
-            Name a team above to see the lines it hosts.
+            Pick a team above, or name one, to see the lines it hosts.
           </p>
         {:else}
           <nav class="drawer-tabs" aria-label="What to read about this team">
@@ -529,10 +540,12 @@
         {:else if sharedCatalog.lines.data.length === 0}
           <p class="drawer-empty">This team hosts no lines.</p>
         {:else}
-          <!-- Named `lines`, because this drawer now holds two lists
-               that share the styling: the teams to pick from and the
-               lines the picked one hosts. The roster and the ledger
-               were already distinguished this way. -->
+          <!-- Named `lines` so a selector can name this one. Every
+               list in this drawer carries `drawer-list` for the
+               styling and a modifier for the naming — the roster and
+               the ledger already did, and the teams above made the
+               difference matter for the lines too. The class has no
+               CSS of its own; the e2e specs are what read it. -->
           <ul class="drawer-list lines" role="list">
             {#each sharedCatalog.lines.data as line (line.id)}
               <li>

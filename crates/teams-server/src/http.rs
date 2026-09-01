@@ -351,12 +351,14 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
 
     let authed = Router::new()
         .route("/teams/create", post(create_team))
-        // The one team read that names no team, because the question
-        // is about the caller rather than about a team: everything
-        // under `team_scoped` needs an id to gate on and this is what
-        // a caller asks *before* they have one. `teams` is a static
-        // segment, which axum prefers over the `{team_id}` capture —
-        // the same grammar note as `purge` and `heads` below.
+        // A team read that names no team, because the question is
+        // about the caller rather than about a team: everything under
+        // `team_scoped` needs an id to gate on and this is what a
+        // caller asks *before* they have one.
+        //
+        // One segment, so the grammar note the routes below carry does
+        // not apply here — there is no capture at this position for a
+        // static segment to be preferred over.
         .route("/teams", get(my_teams))
         // Deliberately outside `team_gate`: the blob read answers one
         // `404` for every miss instead of the gate's 403/404 split —
@@ -769,13 +771,12 @@ async fn change_role(
 // Handlers — reads.
 // ----------------------------------------------------------------------
 
-/// `GET /teams/{team_id}/roster` — the current membership state.
 /// `GET /teams` — the teams the caller is a member of.
 ///
-/// The roster read turned around, and the only team read outside
-/// [`team_gate`]: it answers before a caller has a team to be gated
-/// on, which is the whole reason it exists — the app's team id is
-/// typed today because nothing answers this.
+/// The roster read turned around, and it sits outside [`team_gate`]
+/// because it answers before a caller has a team to be gated on —
+/// which is the whole reason it exists. Until it did, an app had no
+/// way to offer a choice of team and made somebody type an id.
 ///
 /// **Membership, not reach.** An admin acts inside any team without a
 /// membership row (#83 §1), and this route does not widen for one: an
@@ -802,6 +803,7 @@ async fn my_teams(
     }))
 }
 
+/// `GET /teams/{team_id}/roster` — the current membership state.
 async fn roster(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(access): Extension<TeamAccess>,

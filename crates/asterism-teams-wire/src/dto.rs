@@ -83,9 +83,8 @@ pub struct RosterMemberDto {
 /// The teams the caller is a member of (`GET /teams`).
 ///
 /// The roster read turned around: that one takes a team and answers
-/// with users, this one takes the caller and answers with teams. It is
-/// the only team read that names no team in its path, because the
-/// question is not about one.
+/// with users, this one takes the caller and answers with teams. Its
+/// path names no team because the question is not about one.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct MyTeamsDto {
     /// One row per membership the caller holds, ordered oldest team
@@ -96,20 +95,17 @@ pub struct MyTeamsDto {
 
 /// One team the caller belongs to.
 ///
-/// **No name, because a team has none.** The `team` table is an id and
-/// a creation time; nothing in the model, the ledger's kinds or this
-/// wire carries a label for one. So a picker over these rows shows
-/// ids, the way the roster shows user ids and says why. Naming a team
-/// is a change to the model rather than a field this DTO is missing.
+/// **No name, because a team has none** — `TeamMembership` in the
+/// domain is where that is argued. Nothing on this wire carries a
+/// label for a team either, so a row is an id, a role and a time.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct MyTeamDto {
-    /// The team, and the path segment of every team-scoped route.
+    /// The team, and what its scoped routes are named by.
     pub team_id: String,
     /// What the caller is in it: `"owner"` or `"member"`.
     ///
-    /// The one fact beyond the id that distinguishes one row from
-    /// another today, and it is free — the membership row the query
-    /// reads is where it lives.
+    /// Free, in the sense that costs a read nothing: the membership
+    /// row the query already reads is where it lives.
     pub role: String,
     /// When the team was created, unix epoch milliseconds.
     pub created_at_ms: i64,
