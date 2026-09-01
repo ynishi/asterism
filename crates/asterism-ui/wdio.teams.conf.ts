@@ -83,6 +83,11 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
 
 /** The account this fixture provisions. Its password is generated. */
 const LOGIN = "e2e-member";
+// A second account, so the roster has somebody to let in and take back
+// out (#210). It is provisioned and left off every team: what the
+// spec drives is the invite, and an account already on a roster would
+// have nothing to prove.
+const OTHER_LOGIN = "e2e-other";
 
 /** What the second team's line and its one entry are called. Named
  *  here because the spec asserts on both. */
@@ -438,6 +443,10 @@ async function prepareFixture(): Promise<void> {
   serverCli(["create-user", "--db", db, "--login", LOGIN], {
     ASTERISM_TEAMS_USER_PASSWORD: password,
   });
+  const otherPassword = randomBytes(18).toString("base64url");
+  serverCli(["create-user", "--db", db, "--login", OTHER_LOGIN], {
+    ASTERISM_TEAMS_USER_PASSWORD: otherPassword,
+  });
 
   const child = spawn(
     serverBinary,
@@ -463,6 +472,15 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_LOGIN = LOGIN;
   process.env.E2E_TEAMS_PASSWORD = password;
   process.env.E2E_TEAMS_ID = team.team_id;
+
+  // The invitee's id rather than its login. A membership row names an
+  // account by id, so that is what the invite form asks for, and a
+  // login is not something the roster could show back.
+  const other = await postJson<{ user_id: string }>("/teams/auth/login", {
+    login: OTHER_LOGIN,
+    password: otherPassword,
+  });
+  process.env.E2E_TEAMS_OTHER_ID = other.user_id;
 
   const worked = await seedWorkableTeam(session.token);
   process.env.E2E_TEAMS_WORK_ID = worked.teamId;
