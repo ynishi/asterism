@@ -125,7 +125,7 @@
     {
       "path": "asterism_teams_wire::dto::RosterDto",
       "kind": "struct",
-      "docs": "The team's current membership set\n(`GET /teams/{team_id}/roster`)."
+      "docs": "The team's current membership set, and what the caller may do in\nit (`GET /teams/{team_id}/roster`)."
     },
     {
       "path": "asterism_teams_wire::dto::RosterMemberDto",

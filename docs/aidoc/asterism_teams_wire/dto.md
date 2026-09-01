@@ -20,7 +20,7 @@ its own (#83 §1).
 - `MyTeamDto` — One team the caller belongs to.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `ResolvedContentDto` — The bulk resolve's answer
-- `RosterDto` — The team's current membership set
+- `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.
 - `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.

@@ -252,7 +252,7 @@ other.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
 - `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
-- `team_roster` — Who is in a team, and in what role.
+- `team_roster` — Who is in a team, in what role, and what the reader may do there.
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).

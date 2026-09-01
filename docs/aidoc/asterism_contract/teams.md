@@ -49,7 +49,7 @@ and an actor's display name is a snapshot rather than a lookup.
 - `TeamDeviceTokensDto` — The device tokens this window's account holds, on whatever machines
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
-- `TeamRosterDto` — Who is in a team, and in what role.
+- `TeamRosterDto` — Who is in a team, in what role, and what the reader may do there.
 - `TeamRosterMemberDto` — One membership row.
 - `TeamRosterViewerDto` — The reader's own standing in the team whose roster this is.
 - `TeamSubjectRefDto` — One typed reference an act makes.

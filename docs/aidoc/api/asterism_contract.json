@@ -1270,7 +1270,7 @@
     {
       "path": "asterism_contract::teams::TeamRosterDto",
       "kind": "struct",
-      "docs": "Who is in a team, and in what role."
+      "docs": "Who is in a team, in what role, and what the reader may do there."
     },
     {
       "path": "asterism_contract::teams::TeamRosterMemberDto",
@@ -1280,7 +1280,7 @@
     {
       "path": "asterism_contract::teams::TeamRosterViewerDto",
       "kind": "struct",
-      "docs": "The reader's own standing in the team whose roster this is.\n\nHere because the rows cannot answer it. An instance admin reaches a\nteam by standing outside it, so they hold no row, and a screen\nderiving a role from the rows reads that absence as \"nothing you\nmay do\" — while what they may do is delete the team. The server's\ngate works this out to let the request through and says it here\nrather than leaving each surface to guess."
+      "docs": "The reader's own standing in the team whose roster this is.\n\nThis plane's mirror of the shape the team server answers with. Why\nthe read carries it at all is argued where the team's own side\nwrites it; what a reader here needs is that `role` is absent for a\ncaller who holds no membership row, which an instance admin may be."
     },
     {
       "path": "asterism_contract::teams::TeamSubjectRefDto",

@@ -985,7 +985,7 @@
     {
       "path": "asterism_ui::commands::team_roster",
       "kind": "function",
-      "docs": "Who is in a team, and in what role.\n\nIds rather than names, because that is what a membership row holds\n— see [`TeamRosterMemberDto`]. The mapping is here for the reason\nthe ledger's is: the wire is what a member's client and a team\nserver say to each other, and a screen holds the contract's\nvocabulary alone."
+      "docs": "Who is in a team, in what role, and what the reader may do there.\n\nIds rather than names, because that is what a membership row holds\n— see [`TeamRosterMemberDto`]. The mapping is here for the reason\nthe ledger's is: the wire is what a member's client and a team\nserver say to each other, and a screen holds the contract's\nvocabulary alone."
     },
     {
       "path": "asterism_ui::commands::team_server_session",
