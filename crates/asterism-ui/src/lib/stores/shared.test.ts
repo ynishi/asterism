@@ -1158,6 +1158,32 @@ describe("the roster", () => {
     expect(sharedCatalog.teamId).toBe("");
     expect(sharedCatalog.roster.data).toBeNull();
   });
+
+  it("stops looking at a team the reader took themself out of", async () => {
+    // Removing yourself ends the relationship the panel was drawing.
+    // The re-read every other removal performs would be refused by the
+    // gate this reader no longer passes, and `Resource.load` turns
+    // that into an error message under a panel still pointed at the
+    // team — so this takes the path deleting one takes.
+    sharedCatalog.teamId = "t1";
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "owner" },
+      ],
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.removeMember("u1");
+
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+    expect(sharedCatalog.said).toContain("no longer in");
+  });
 });
 
 describe("the connection this machine remembers", () => {

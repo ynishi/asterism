@@ -816,19 +816,34 @@ class SharedCatalog {
     this.said = `Invited ${userId} as ${role}.`;
   }
 
-  /// Takes a member out of the team.
+  /// Takes a member out of the team, which the reader may do to
+  /// themself.
   ///
   /// The last owner cannot go, and the server says so — what arrives
   /// here is a refusal `mutate` puts on screen, worded by the server
   /// rather than guessed at before asking.
+  ///
+  /// Removing yourself ends this window's relationship with the team,
+  /// so it takes `stopReading`'s path rather than the re-read. The
+  /// re-read would be refused by the gate the reader no longer passes,
+  /// and `Resource.load` turns a refusal into an error message under a
+  /// panel still pointed at the team, still drawing its lines, with
+  /// the picker still offering it.
   async removeMember(userId: string): Promise<void> {
+    const team = this.teamId;
     this.said = null;
     await mutate<void>(
       "remove_team_member",
-      { teamIdRaw: this.teamId, userId },
+      { teamIdRaw: team, userId },
       "remove that member",
     );
-    await this.roster.load({ teamId: this.teamId });
+    if (userId === this.session) {
+      this.stopReading();
+      await this.teams.load({});
+      this.said = `You are no longer in ${team}.`;
+      return;
+    }
+    await this.roster.load({ teamId: team });
     this.said = `Removed ${userId}.`;
   }
 
@@ -858,21 +873,30 @@ class SharedCatalog {
   }
 
   /// Deletes the team, and stops looking at what is no longer there.
-  ///
-  /// Everything read about this team is dropped rather than left to go
-  /// stale: the panel would otherwise keep drawing a roster, a ledger
-  /// and a line list belonging to something the server no longer has.
   async deleteTeam(): Promise<void> {
     const gone = this.teamId;
     this.said = null;
     await mutate<void>("delete_team", { teamIdRaw: gone }, "delete the team");
+    this.stopReading();
+    await this.teams.load({});
+    this.said = `Deleted team ${gone}.`;
+  }
+
+  /// Lets go of everything read about the team now named, and stops
+  /// naming it.
+  ///
+  /// Two acts end a reader's relationship with a team — deleting it,
+  /// and being taken out of it — and what the panel has to forget is
+  /// the same either way: it would otherwise keep drawing a roster, a
+  /// line list and a ledger belonging to something it can no longer
+  /// ask about. Written once because the second caller arrived after
+  /// the first, and having only one of them do it is the defect.
+  stopReading(): void {
     this.teamId = "";
     this.closeLine();
     this.roster.reset();
     this.lines.reset();
     this.forgetLedger();
-    await this.teams.load({});
-    this.said = `Deleted team ${gone}.`;
   }
 
   /// Drops the walk. The ledger belongs to a team and to a connection,
