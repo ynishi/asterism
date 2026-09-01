@@ -1,6 +1,6 @@
 //! End-to-end guard for auth v0 (#83 §5, the #91 slice): login /
-//! logout, session expiry, and the one limiter every auth endpoint
-//! sits behind.
+//! logout, session expiry, and the one limiter every
+//! credential-presenting endpoint sits behind.
 //!
 //! The suite drives the real router through `oneshot` — same
 //! discipline as `asterism-server`'s route suites: a handler reached
@@ -249,7 +249,7 @@ async fn logout_destroys_the_session() {
 }
 
 #[tokio::test]
-async fn one_limiter_covers_every_auth_endpoint() {
+async fn one_limiter_covers_every_credential_presenting_endpoint() {
     // Three attempts per window; in-process requests share one key.
     let h = harness(RateLimiter::new(3, Duration::from_secs(60))).await;
     h.ctx
@@ -283,8 +283,13 @@ async fn one_limiter_covers_every_auth_endpoint() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(body["kind"], "RateLimited");
 
-    // The limiter is one bucket over ALL auth endpoints (#83 §5):
-    // logout is throttled by the same exhausted budget.
+    // One bucket, not one per route (#83 §5). Logout presents a token
+    // of its own and resolves it itself, so it sits in the limited
+    // block beside the login arm and finds the same budget already
+    // spent. The device verbs present a session the gate has resolved
+    // and sit outside it — `http`'s module doc is where that line is
+    // drawn. Nothing asserts which side they landed on; the router is
+    // where it is visible, in one block.
     let (status, _) = call(
         &h.router,
         post_authed("/teams/auth/logout", "irrelevant", serde_json::json!({})),

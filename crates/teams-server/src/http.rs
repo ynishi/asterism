@@ -7,6 +7,10 @@
 //! |---|---|---|
 //! | POST | `/teams/auth/login` | none (rate-limited) |
 //! | POST | `/teams/auth/logout` | bearer token (rate-limited) |
+//! | POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+//! | POST | `/teams/auth/device` | any live session — mints a device token (#204) |
+//! | GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
+//! | DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
 //! | POST | `/teams/create` | any authenticated user; admin-only under closed registration |
 //! | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 //! | GET | `/teams/{team_id}/roster` | member, or an admin |
@@ -47,6 +51,43 @@
 //! wins and the ledger stamp is the member's — the admin variant is
 //! reserved for an admin acting *from outside* the membership set,
 //! which is exactly when §1 demands the stamp say so.
+//!
+//! ## Which of the device-token routes the limiter covers (#204)
+//!
+//! One of the four, and the split is the decision. #83 §5 puts new
+//! auth routes in the limited router, and what that limiter is for is
+//! an unauthenticated caller presenting a *credential*: its budget is
+//! what bounds guessing. `POST /teams/auth/device/login` is exactly
+//! that — a token arrives from nobody in particular and either
+//! resolves or does not — so it sits beside the password arm and
+//! shares its bucket.
+//!
+//! The mint, the listing and the revoke present no credential; they
+//! present a session [`auth_gate`] has already resolved. Putting them
+//! under the same bucket would spend a login's budget on a caller who
+//! is already inside, so a person who minted a token would find
+//! themselves unable to log in again — while protecting a guessing
+//! surface that does not exist, because there is nothing to guess past
+//! a session that already resolved. They sit behind the gate instead.
+//!
+//! ## Minting asks for a live session and nothing more (#204)
+//!
+//! Not the password arm specifically, and this is the other question
+//! #204 leaves open. Any-session is what makes an OIDC adapter (#163)
+//! free: a verified ID token reaches the mint through a session the
+//! same way a password does, and the minting path never learns which
+//! verifier answered — which is the property the whole issue turns on.
+//! Requiring a re-auth would put a password back in front of a flow
+//! whose point is that a password is not always what happened.
+//!
+//! What that costs is written down rather than waved at: a stolen live
+//! session can mint a device token, which outlives the session by
+//! design. The bound on it is that the owner can see every token
+//! (`GET`) and revoke any of it (`DELETE`), and that the tokens the
+//! disk holds expire on a fixed day
+//! ([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
+//! A re-auth requirement can be added later without moving the table
+//! or changing a single row shape.
 //!
 //! ## The blob read is the one deliberate exception to [`team_gate`]
 //!
@@ -89,7 +130,7 @@ use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 // The other plane's refusal type, named for what it is here: the
 // hosted forge's services are `asterism-core`'s and speak its
@@ -120,10 +161,12 @@ use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // depend on (#148 decision 15). Which crate a shape comes from is the
 // answer to "does a client say this", and nothing else changed about
 // any of them.
-use asterism_teams_wire::command::{CreateTeamCommand, LoginCommand};
+use asterism_teams_wire::command::{
+    CreateTeamCommand, DeviceLoginCommand, LoginCommand, MintDeviceTokenCommand,
+};
 use asterism_teams_wire::dto::{
-    LedgerEventDto, LedgerPageDto, MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto,
-    SubjectRefDto, TeamCreatedDto,
+    DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto, LedgerEventDto, LedgerPageDto,
+    MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -308,9 +351,18 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
     let auth = Router::new()
         .route("/teams/auth/login", post(login))
         .route("/teams/auth/logout", post(logout))
-        // One limiter over ALL auth endpoints (#83 §5) — the layer
-        // wraps every route above it, and new auth routes belong in
-        // this block so they inherit it.
+        // The device arm that presents a credential (#204). Its three
+        // siblings present a session instead and live below the gate —
+        // the module doc's "which of the device-token routes the
+        // limiter covers".
+        .route("/teams/auth/device/login", post(device_login))
+        // One limiter over every route above it (#83 §5). What decides
+        // whether a new auth route belongs in this block is whether it
+        // *presents a credential*: the budget is what bounds guessing,
+        // so an arm somebody can guess at goes here. The device
+        // verbs below present a session the gate already resolved and
+        // sit outside — the module doc's "which of the device-token
+        // routes the limiter covers" is the whole argument.
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_rate_limit))
         .with_state(ctx.clone());
 
@@ -360,6 +412,16 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         // not apply here — there is no capture at this position for a
         // static segment to be preferred over.
         .route("/teams", get(my_teams))
+        // Managing the caller's own device tokens (#204). No team to
+        // gate on and no admin sibling: these answer about the account
+        // the session resolved to and nobody else. `auth` is a static
+        // segment, preferred over the `{team_id}` capture — the same
+        // grammar note `heads` carries below.
+        .route(
+            "/teams/auth/device",
+            post(mint_device_token).get(device_tokens),
+        )
+        .route("/teams/auth/device/{id}", delete(revoke_device_token))
         // Deliberately outside `team_gate`: the blob read answers one
         // `404` for every miss instead of the gate's 403/404 split —
         // the module doc's "one deliberate exception".
@@ -558,6 +620,132 @@ async fn logout(
 ) -> Result<StatusCode, ApiError> {
     let token = bearer_token(&headers).ok_or(ApiError::Unauthorized)?;
     ctx.auth.destroy_session(token).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----------------------------------------------------------------------
+// Handlers — device tokens (#204).
+// ----------------------------------------------------------------------
+
+/// `POST /teams/auth/device/login`. A device token in, an **ordinary
+/// session** out — same table, same TTL, same shape on the wire as the
+/// password arm's.
+///
+/// That sameness is the design (#204): device tokens sit in front of
+/// sessions rather than beside them, so nothing downstream of
+/// [`auth_gate`] can tell how a session was obtained, and nothing
+/// downstream needs to. An unknown, revoked and expired token are one
+/// `401`, the way a wrong password and an unknown login are.
+///
+/// Sweeps both tables on the way in, and the two sweeps are here for
+/// different reasons — which is the adapter's rule rather than this
+/// route's. A session table is swept where it fills, and this route
+/// fills it. A device-token table fills too rarely for that to bound
+/// it, so it is swept where one is read and where one is presented
+/// (`PasswordAuth::cleanup_expired_device_tokens`), and this is the
+/// surface where one is presented.
+async fn device_login(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Json(cmd): Json<DeviceLoginCommand>,
+) -> Result<Json<SessionDto>, ApiError> {
+    let now = now_ms();
+    ctx.auth.cleanup_expired(now).await?;
+    ctx.auth.cleanup_expired_device_tokens(now).await?;
+    let account = ctx
+        .auth
+        .resolve_device_token(&cmd.token, now)
+        .await?
+        .ok_or(ApiError::Unauthorized)?;
+    let token = ctx
+        .auth
+        .create_session(account.user_id, now, ctx.session_ttl_ms)
+        .await?;
+    Ok(Json(SessionDto {
+        token,
+        user_id: account.user_id.to_string(),
+        display_name: account.display_name,
+        admin: account.admin,
+        expires_at_ms: now.saturating_add(ctx.session_ttl_ms),
+    }))
+}
+
+/// `POST /teams/auth/device` — mints a device token for the caller's
+/// own account.
+///
+/// The account comes from the session the gate resolved and cannot
+/// come from the body, which is what keeps this from being a way to
+/// issue a credential for somebody else. Why a live session is enough,
+/// and what that costs, is the module doc's.
+///
+/// **The token is in this response and never in another one.** The
+/// listing answers with handles, and the instance holds only a
+/// SHA-256 — so a client that loses the value mints a second token
+/// rather than asking for this one again.
+async fn mint_device_token(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Json(cmd): Json<MintDeviceTokenCommand>,
+) -> Result<Json<DeviceTokenMintedDto>, ApiError> {
+    let minted = ctx
+        .auth
+        .mint_device_token(account.user_id, &cmd.label, now_ms())
+        .await?;
+    Ok(Json(DeviceTokenMintedDto {
+        token: minted.token,
+        id: minted.id.to_string(),
+        expires_at_ms: minted.expires_at_ms,
+    }))
+}
+
+/// `GET /teams/auth/device` — the caller's own device tokens.
+///
+/// Owner-scoped with no admin widening, unlike the team reads §1 lets
+/// an admin through: those answer about a team's shared state, and
+/// this answers about what sits on one person's machines. An admin who
+/// needs a member locked out has the member's account to act on.
+///
+/// Sweeps first, so a row that stopped resolving is not listed as
+/// though it still did.
+async fn device_tokens(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+) -> Result<Json<DeviceTokensDto>, ApiError> {
+    ctx.auth.cleanup_expired_device_tokens(now_ms()).await?;
+    let tokens = ctx.auth.list_device_tokens(account.user_id).await?;
+    Ok(Json(DeviceTokensDto {
+        tokens: tokens
+            .into_iter()
+            .map(|row| DeviceTokenDto {
+                id: row.id.to_string(),
+                label: row.label,
+                created_at_ms: row.created_at_ms,
+                last_used_at_ms: row.last_used_at_ms,
+                expires_at_ms: row.expires_at_ms,
+            })
+            .collect(),
+    }))
+}
+
+/// `DELETE /teams/auth/device/{id}` — revokes one of the caller's own
+/// device tokens.
+///
+/// `204`, and the same `204` for a handle that named nothing, one
+/// already revoked, and one belonging to another account — the
+/// adapter's idempotence, kept on the wire because distinguishing them
+/// would answer "does this id exist" about ids the caller has no
+/// business knowing. Logout answers the same way for the same reason.
+///
+/// The sessions this token minted are not revoked with it: they die at
+/// their own TTL (#204). A session outliving the credential that
+/// produced it is the honest reading of a device token — it authorises
+/// the *making* of sessions, and taking it away stops the next one.
+async fn revoke_device_token(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = parse_uuid(&id, "id")?;
+    ctx.auth.revoke_device_token(account.user_id, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

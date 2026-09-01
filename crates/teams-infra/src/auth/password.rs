@@ -1,7 +1,7 @@
 //! `auth::password` — the v0 instance-local credential adapter
 //! (#83 §5).
 //!
-//! Three decisions carry this module:
+//! The decisions that carry this module:
 //!
 //! - **Hashing is argon2id through RustCrypto's `argon2`** (OWASP's
 //!   current first choice), default parameters, PHC-string storage —
@@ -20,6 +20,15 @@
 //!   [`PasswordAuth::cleanup_expired`] sweeps in bulk (the server runs
 //!   it on every login, so the table cannot accumulate dead rows
 //!   faster than logins happen).
+//! - **A device token is that construction with a longer life and a
+//!   name** (#204). Same bytes, same hash-at-rest rule, same two-sided
+//!   expiry — [`PasswordAuth::mint_device_token`] and its four
+//!   siblings differ from the session verbs in what the row carries
+//!   (a label, a handle, a last-use stamp) rather than in how the
+//!   secret is handled. What it is *for* is the invariant #204 fixes:
+//!   the disk may hold this and no primary credential, whichever
+//!   verifier said yes — so the mint takes a `user_id` and never asks
+//!   how the caller proved they were one.
 //! - **No default credentials exist** ([`reject_default_credential`]):
 //!   the bootstrap admin (#83 §5, the §1
 //!   [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
@@ -48,8 +57,35 @@ use uuid::Uuid;
 
 use crate::sqlite::map::infra_err;
 
-/// Length of the opaque session token in raw bytes (256 bits).
-const SESSION_TOKEN_BYTES: usize = 32;
+/// Length of an opaque token in raw bytes (256 bits) — sessions and
+/// device tokens alike, because they are one construction issued for
+/// two lifetimes (#204).
+const OPAQUE_TOKEN_BYTES: usize = 32;
+
+/// How long a device token lives from the mint: **90 days** (#204).
+///
+/// **Fixed, not slid forward on use**, which is the open question that
+/// issue leaves to whoever implements it. Sliding is kinder to a daily
+/// driver and costs two things this shape will not pay: the list stops
+/// being able to say a date — "expires when it expires, unless you use
+/// it" is not a sentence a person revokes on — and a stolen token's
+/// life becomes a function of how often the thief presents it, so the
+/// one credential the disk is allowed to hold would be the one whose
+/// end nothing bounds. A fixed window ends on a day both the owner and
+/// the instance can name.
+///
+/// A constant here rather than a field on the server's context, which
+/// is where the session lifetime sits (`TeamsCtx::session_ttl_ms`).
+/// Neither is settable from outside the binary today — the server
+/// fills that field from its own `DEFAULT_SESSION_TTL_MS` and only the
+/// route suites pass anything else — so the difference is not one of
+/// configurability but of where the question belongs. A session
+/// lifetime is a deployment's trade between re-logins and exposure,
+/// which is why it is a field a context can carry and a test can vary.
+/// This one is the bound on a credential at rest, and an instance that
+/// could widen it to a year would be answering a question #204
+/// settled.
+pub const DEVICE_TOKEN_TTL_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 
 /// Passwords the instance refuses to ever store — the "no fixed
 /// defaults" rule (#83 §5) enforced at the door, compared
@@ -79,6 +115,67 @@ pub struct AccountRecord {
     /// *account*, never of any membership row — an admin lives outside
     /// the membership table (#83 §1).
     pub admin: bool,
+}
+
+/// What a device-token mint hands back (#204).
+///
+/// **No derived `Debug`** — see the hand-written one below. This is
+/// the only type in this crate that carries a live credential, and it
+/// carries one for exactly one hop: the mint is the single moment the
+/// token's value exists outside the client that will hold it.
+#[derive(Clone)]
+pub struct MintedDeviceToken {
+    /// The token itself — 256 CSPRNG bits, hex. The table holds only
+    /// its SHA-256, so this value cannot be recovered from the
+    /// instance and is never answered with again.
+    pub token: String,
+    /// The row's handle: what a listing names it by and what a revoke
+    /// takes. Not derived from the token, so it may be stored and
+    /// shown wherever the token may not.
+    pub id: Uuid,
+    /// When it stops resolving, epoch ms.
+    pub expires_at_ms: i64,
+}
+
+/// Prints everything about a mint except the value that would let the
+/// reader use it.
+///
+/// The derived one would put a live credential into every panic
+/// message, test failure and log line that ever formats this — which
+/// is how a secret ends up somewhere nobody meant to put it, copied
+/// out by someone who was looking at something else. The token travels
+/// from the mint into one HTTP response and into the caller's keychain,
+/// and nowhere a human reads.
+impl std::fmt::Debug for MintedDeviceToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MintedDeviceToken")
+            .field("token", &"<not shown>")
+            .field("id", &self.id)
+            .field("expires_at_ms", &self.expires_at_ms)
+            .finish()
+    }
+}
+
+/// One device token as its owner sees it — everything the row holds
+/// except the digest (#204).
+///
+/// `Debug` is derived here, and the contrast with
+/// [`MintedDeviceToken`] is the point: nothing on this type
+/// authenticates anybody, which is the property that lets the listing
+/// route exist at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceTokenRecord {
+    /// The revocation handle.
+    pub id: Uuid,
+    /// What the client called this device when it asked.
+    pub label: String,
+    /// When it was minted, epoch ms.
+    pub created_at_ms: i64,
+    /// When it was last presented, epoch ms — `None` for a token
+    /// nobody has used yet.
+    pub last_used_at_ms: Option<i64>,
+    /// When it stops resolving, epoch ms.
+    pub expires_at_ms: i64,
 }
 
 /// The v0 password + session adapter over the teams database.
@@ -194,7 +291,7 @@ impl PasswordAuth {
                 "session ttl {ttl_ms}ms is not positive"
             )));
         }
-        let mut bytes = [0u8; SESSION_TOKEN_BYTES];
+        let mut bytes = [0u8; OPAQUE_TOKEN_BYTES];
         rand::rngs::OsRng
             .try_fill_bytes(&mut bytes)
             .map_err(|e| DomainError::Infra(anyhow::anyhow!("OS CSPRNG failure: {e}")))?;
@@ -300,6 +397,237 @@ impl PasswordAuth {
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM auth_session WHERE expires_at <= ?1",
+                    params![now_ms],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(swept as u64)
+    }
+
+    // ------------------------------------------------------------------
+    // Device tokens (#204) — the same construction, issued to a device.
+    // ------------------------------------------------------------------
+
+    /// Mints a device token for `user_id`: 256 random bits to the
+    /// caller, their SHA-256 to the table, and a handle beside it.
+    ///
+    /// **The mint never learns which verifier said yes**, and that is
+    /// the whole of #204's leverage: it takes an account id, so the
+    /// password flow reaches it as login → session → mint, and an OIDC
+    /// adapter (#163) reaches the same verb the same way without this
+    /// code changing. Whether a *live session* is enough to ask is the
+    /// route's decision, argued there.
+    ///
+    /// A blank label is refused. The label is what a person reads in
+    /// the list before revoking, and a set of unnamed rows is a list
+    /// that cannot be acted on — the same reasoning that makes the
+    /// domain refuse a blank display name, applied to the one field
+    /// this row has for a human.
+    ///
+    /// The lifetime is [`DEVICE_TOKEN_TTL_MS`] and is not a parameter;
+    /// the expiry is absolute, computed here so the row and the caller
+    /// agree on it.
+    pub async fn mint_device_token(
+        &self,
+        user_id: Uuid,
+        label: &str,
+        now_ms: i64,
+    ) -> Result<MintedDeviceToken, DomainError> {
+        let label = label.trim().to_string();
+        if label.is_empty() {
+            return Err(DomainError::Validation(
+                "device token label is blank; a device token is named so its owner can \
+                 tell one from another when revoking"
+                    .into(),
+            ));
+        }
+        let mut bytes = [0u8; OPAQUE_TOKEN_BYTES];
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut bytes)
+            .map_err(|e| DomainError::Infra(anyhow::anyhow!("OS CSPRNG failure: {e}")))?;
+        let token = hex(&bytes);
+        let token_hash = sha256_hex(&token);
+        let id = Uuid::now_v7();
+        let expires_at = now_ms.saturating_add(DEVICE_TOKEN_TTL_MS);
+        let stored_label = label.clone();
+        self.isle
+            .call(move |conn| {
+                let known: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM user_account WHERE user_id = ?1)",
+                    params![user_id],
+                    |row| row.get(0),
+                )?;
+                if !known {
+                    return Ok(Err(DomainError::Validation(format!(
+                        "user {user_id} has no account on this instance"
+                    ))));
+                }
+                conn.execute(
+                    "INSERT INTO device_token
+                     (token_hash, id, user_id, label, created_at, last_used_at, expires_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
+                    params![token_hash, id, user_id, stored_label, now_ms, expires_at],
+                )?;
+                Ok(Ok(()))
+            })
+            .await
+            .map_err(infra_err)??;
+        Ok(MintedDeviceToken {
+            token,
+            id,
+            expires_at_ms: expires_at,
+        })
+    }
+
+    /// Resolves a device token to its account, or `None` for an
+    /// unknown **or expired** one — the same one-armed answer
+    /// [`Self::resolve_session`] gives, for the same reason, and an
+    /// expired row is deleted on the way out just as a session's is.
+    ///
+    /// A successful resolve stamps `last_used_at`. That write is the
+    /// reason this is not a read: the column is what a person looks at
+    /// to decide whether a device is still theirs, and a "last used"
+    /// that only moved when somebody remembered to update it would be
+    /// worse than absent. It is stamped inside the same closure as the
+    /// lookup, so a resolve either answers and records or does
+    /// neither.
+    pub async fn resolve_device_token(
+        &self,
+        token: &str,
+        now_ms: i64,
+    ) -> Result<Option<AccountRecord>, DomainError> {
+        let token_hash = sha256_hex(token);
+        self.isle
+            .call(move |conn| {
+                let row = conn
+                    .query_row(
+                        "SELECT d.expires_at, a.user_id, a.login, a.display_name, a.is_admin
+                         FROM device_token d
+                         JOIN user_account a ON a.user_id = d.user_id
+                         WHERE d.token_hash = ?1",
+                        params![token_hash],
+                        |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                AccountRecord {
+                                    user_id: row.get(1)?,
+                                    login: row.get(2)?,
+                                    display_name: row.get(3)?,
+                                    admin: row.get(4)?,
+                                },
+                            ))
+                        },
+                    )
+                    .optional()?;
+                match row {
+                    None => Ok(None),
+                    Some((expires_at, _)) if expires_at <= now_ms => {
+                        conn.execute(
+                            "DELETE FROM device_token WHERE token_hash = ?1",
+                            params![token_hash],
+                        )?;
+                        Ok(None)
+                    }
+                    Some((_, account)) => {
+                        conn.execute(
+                            "UPDATE device_token SET last_used_at = ?2 WHERE token_hash = ?1",
+                            params![token_hash, now_ms],
+                        )?;
+                        Ok(Some(account))
+                    }
+                }
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// One account's device tokens, oldest mint first, **without the
+    /// digest that authenticates any of them**.
+    ///
+    /// [`DeviceTokenRecord`] is what makes that structural rather than
+    /// a discipline: there is no field for a hash to be put in.
+    ///
+    /// Rows the table holds, which is not quite the same as rows that
+    /// still resolve — an expired token sits here until something
+    /// touches or sweeps it. That is why every row carries its
+    /// `expires_at_ms`, and why the routes run
+    /// [`Self::cleanup_expired_device_tokens`] before they read: the
+    /// sweep is what keeps the two answers together, and the column is
+    /// what lets a reader tell when it has not.
+    pub async fn list_device_tokens(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<DeviceTokenRecord>, DomainError> {
+        self.isle
+            .call(move |conn| {
+                let mut statement = conn.prepare(
+                    "SELECT id, label, created_at, last_used_at, expires_at
+                     FROM device_token WHERE user_id = ?1
+                     ORDER BY created_at, id",
+                )?;
+                let rows = statement
+                    .query_map(params![user_id], |row| {
+                        Ok(DeviceTokenRecord {
+                            id: row.get(0)?,
+                            label: row.get(1)?,
+                            created_at_ms: row.get(2)?,
+                            last_used_at_ms: row.get(3)?,
+                            expires_at_ms: row.get(4)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// Revokes one of `user_id`'s device tokens by its handle.
+    ///
+    /// **Owner-scoped in the statement**, not in a check before it:
+    /// the `user_id` predicate is what makes another account's handle
+    /// match nothing, so there is no arrangement of arguments that
+    /// deletes a row the caller does not own.
+    ///
+    /// Idempotent, like [`Self::destroy_session`]: a handle that never
+    /// existed, one already revoked, and one belonging to somebody
+    /// else are the same `Ok(())`. Distinguishing them would answer
+    /// "does this id exist" for ids the caller has no business knowing
+    /// about, and the caller's goal — this token resolves to nothing
+    /// *for me* — is true in all three cases.
+    pub async fn revoke_device_token(&self, user_id: Uuid, id: Uuid) -> Result<(), DomainError> {
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM device_token WHERE id = ?1 AND user_id = ?2",
+                    params![id, user_id],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(())
+    }
+
+    /// Sweeps every device token whose expiry has passed, returning
+    /// how many rows went — [`Self::cleanup_expired`]'s sibling over
+    /// the other table.
+    ///
+    /// A sibling rather than a second statement inside that one: the
+    /// two sweeps run at different moments, because the tables fill at
+    /// different moments. Sessions accumulate as fast as people log
+    /// in, so the login path is where that table is swept; device
+    /// tokens accumulate as fast as people mint, which is rare, so
+    /// theirs is swept where it is read and where one is presented.
+    /// Folding them together would make each call site pay for a sweep
+    /// it did not need and hide which surface keeps which table
+    /// bounded.
+    pub async fn cleanup_expired_device_tokens(&self, now_ms: i64) -> Result<u64, DomainError> {
+        let swept = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM device_token WHERE expires_at <= ?1",
                     params![now_ms],
                 )
             })
@@ -455,6 +783,12 @@ mod tests {
 
     async fn session_rows(isle: &AsyncIsle) -> i64 {
         isle.call(|conn| conn.query_row("SELECT count(*) FROM auth_session", [], |r| r.get(0)))
+            .await
+            .unwrap()
+    }
+
+    async fn device_rows(isle: &AsyncIsle) -> i64 {
+        isle.call(|conn| conn.query_row("SELECT count(*) FROM device_token", [], |r| r.get(0)))
             .await
             .unwrap()
     }
@@ -650,6 +984,221 @@ mod tests {
                 .await
                 .is_err()
         );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_device_token_resolves_until_revoked_and_records_its_last_use() {
+        let (auth, isle, driver) = auth().await;
+        let user_id = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+
+        let minted = auth
+            .mint_device_token(user_id, "Hoshino's MacBook", T0)
+            .await
+            .unwrap();
+        assert_eq!(minted.expires_at_ms, T0 + DEVICE_TOKEN_TTL_MS);
+
+        // Nothing has presented it yet, and the listing says so
+        // instead of borrowing the mint instant.
+        let listed = auth.list_device_tokens(user_id).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, minted.id);
+        assert_eq!(listed[0].label, "Hoshino's MacBook");
+        assert_eq!(listed[0].last_used_at_ms, None);
+
+        let resolved = auth
+            .resolve_device_token(&minted.token, T0 + 5_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.user_id, user_id);
+        assert_eq!(resolved.display_name, "Hoshino");
+        assert_eq!(
+            auth.list_device_tokens(user_id).await.unwrap()[0].last_used_at_ms,
+            Some(T0 + 5_000),
+            "a resolve stamps the use it was"
+        );
+
+        auth.revoke_device_token(user_id, minted.id).await.unwrap();
+        assert!(
+            auth.resolve_device_token(&minted.token, T0 + 6_000)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(device_rows(&isle).await, 0);
+        // Revoking again is idempotent, exactly as destroying a
+        // session is.
+        auth.revoke_device_token(user_id, minted.id).await.unwrap();
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_device_token_is_only_its_owners_to_revoke() {
+        let (auth, isle, driver) = auth().await;
+        let mine = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let theirs = auth
+            .create_account("someone", "Someone Else", GOOD, false, T0)
+            .await
+            .unwrap();
+        let minted = auth.mint_device_token(mine, "MacBook", T0).await.unwrap();
+
+        // The other account's revoke is not an error and is also not a
+        // deletion: it matched nothing, which is the same answer a
+        // handle that never existed gets.
+        auth.revoke_device_token(theirs, minted.id).await.unwrap();
+        assert_eq!(device_rows(&isle).await, 1);
+        assert!(
+            auth.resolve_device_token(&minted.token, T0 + 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        // And the listing is scoped the same way.
+        assert!(auth.list_device_tokens(theirs).await.unwrap().is_empty());
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_expired_device_token_is_rejected_and_its_row_deleted() {
+        let (auth, isle, driver) = auth().await;
+        let user_id = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let minted = auth
+            .mint_device_token(user_id, "MacBook", T0)
+            .await
+            .unwrap();
+        assert_eq!(device_rows(&isle).await, 1);
+
+        assert!(
+            auth.resolve_device_token(&minted.token, T0 + DEVICE_TOKEN_TTL_MS)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            device_rows(&isle).await,
+            0,
+            "rejection is cleanup for the row that was touched"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_device_sweep_takes_only_what_expired() {
+        let (auth, isle, driver) = auth().await;
+        let user_id = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        // One minted long enough ago to have expired, one minted now.
+        let dead = auth
+            .mint_device_token(user_id, "old laptop", T0 - DEVICE_TOKEN_TTL_MS)
+            .await
+            .unwrap();
+        let live = auth
+            .mint_device_token(user_id, "MacBook", T0)
+            .await
+            .unwrap();
+
+        assert_eq!(auth.cleanup_expired_device_tokens(T0).await.unwrap(), 1);
+        assert_eq!(device_rows(&isle).await, 1);
+        assert!(
+            auth.resolve_device_token(&dead.token, T0 + 1)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            auth.resolve_device_token(&live.token, T0 + 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        // The two sweeps answer for their own tables and nothing else.
+        let session = auth.create_session(user_id, T0, 60_000).await.unwrap();
+        assert_eq!(auth.cleanup_expired_device_tokens(T0 + 1).await.unwrap(), 0);
+        assert!(
+            auth.resolve_session(&session, T0 + 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_device_token_needs_a_name_and_an_account() {
+        let (auth, isle, driver) = auth().await;
+        let user_id = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+
+        for label in ["", "   ", "\n\t"] {
+            let refused = auth.mint_device_token(user_id, label, T0).await;
+            assert!(
+                matches!(refused, Err(DomainError::Validation(_))),
+                "{label:?} must be refused"
+            );
+        }
+        let unknown = auth.mint_device_token(Uuid::now_v7(), "MacBook", T0).await;
+        assert!(matches!(unknown, Err(DomainError::Validation(_))));
+        assert_eq!(device_rows(&isle).await, 0, "nothing landed");
+
+        // The label is stored trimmed, so the list shows what a person
+        // typed rather than what their terminal added.
+        auth.mint_device_token(user_id, "  MacBook  ", T0)
+            .await
+            .unwrap();
+        assert_eq!(
+            auth.list_device_tokens(user_id).await.unwrap()[0].label,
+            "MacBook"
+        );
+
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_table_holds_a_hash_and_never_the_token() {
+        let (auth, isle, driver) = auth().await;
+        let user_id = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let minted = auth
+            .mint_device_token(user_id, "MacBook", T0)
+            .await
+            .unwrap();
+
+        let token = minted.token.clone();
+        let (stored, matching): (String, i64) = isle
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT token_hash, (SELECT count(*) FROM device_token WHERE token_hash = ?1)
+                     FROM device_token",
+                    params![token],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_ne!(stored, minted.token, "the row must not be the credential");
+        assert_eq!(stored, sha256_hex(&minted.token));
+        assert_eq!(matching, 0, "the token's own value keys nothing");
 
         driver.shutdown().await.unwrap();
     }

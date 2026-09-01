@@ -108,8 +108,9 @@ use asterism_contract::query::{
 };
 use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
 use asterism_contract::teams::{
-    MyTeamDto, MyTeamsDto, PromotedAssetDto, TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto,
-    TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
+    MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
+    StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
 };
 use schema_bridge::{SchemaBridge as _, export_types};
 
@@ -376,6 +377,11 @@ fn main() {
         PromotedAssetDto,
         MyTeamsDto,
         MyTeamDto,
+        TeamDeviceTokensDto,
+        TeamDeviceTokenDto,
+        StoredTeamConnectionDto,
+        StoredTeamConnectDto,
+        StoredTeamConnectOutcome,
     )
     .expect("failed to export TS bindings from asterism-contract");
     tauri_build::build()

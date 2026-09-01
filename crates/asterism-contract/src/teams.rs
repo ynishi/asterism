@@ -241,3 +241,120 @@ pub struct PromotedAssetDto {
     /// projection is a forge op and needs a round of its own.
     pub already_promoted: bool,
 }
+
+/// The device tokens this window's account holds, on whatever machines
+/// (#204).
+///
+/// Owner-scoped, which the route decides and the wire's own
+/// `DeviceTokensDto` argues: there is no admin-facing sibling, and
+/// nothing here takes an account to ask about.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamDeviceTokensDto {
+    /// One row per live token, oldest mint first.
+    pub tokens: Vec<TeamDeviceTokenDto>,
+}
+
+/// One device token as its owner sees it.
+///
+/// **Nothing here authenticates anybody** — not the token, not its
+/// hash, not a prefix of either — which is what lets a listing exist
+/// at all. The wire shape this maps from states the same property; it
+/// is repeated because it is the reason a screen may draw these rows
+/// and the reason `id` is safe in a file.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamDeviceTokenDto {
+    /// The handle to revoke by.
+    pub id: String,
+    /// What the client called that device when it asked.
+    pub label: String,
+    /// When it was minted, unix epoch milliseconds.
+    pub created_at_ms: i64,
+    /// When it was last presented, unix epoch milliseconds.
+    ///
+    /// Absent for a token nobody has used yet, which is a different
+    /// fact from "used at the moment it was made" and is why this is
+    /// not seeded from the mint time.
+    pub last_used_at_ms: Option<i64>,
+    /// When it stops resolving, unix epoch milliseconds.
+    pub expires_at_ms: i64,
+}
+
+/// What this machine remembers about a team server, none of which
+/// authenticates anybody (#204).
+///
+/// The connect form pre-fills from this. Where the halves live and why
+/// the token is not among them is on `stored_connection` in the
+/// desktop binary, which owns both stores.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct StoredTeamConnectionDto {
+    /// The server the token was minted by, as it was typed.
+    pub base_url: String,
+    /// The account it was minted for.
+    pub login: String,
+    /// The stored token's revocation handle, so a listing can mark
+    /// which row is the machine reading it.
+    pub token_id: String,
+    /// What this device asked to be called in that listing.
+    pub label: String,
+}
+
+/// What came of trying to connect from what this machine had stored
+/// (#204).
+///
+/// Three outcomes rather than two, and the third is why this is a
+/// shape rather than a `boolean`: a window that was never remembered
+/// and one whose token has been revoked both end at the password form,
+/// but only the second is worth telling somebody about.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct StoredTeamConnectDto {
+    /// Which of the three happened.
+    pub outcome: StoredTeamConnectOutcome,
+    /// Whose account the server named. Present for `connected` and for
+    /// nothing else.
+    pub user: Option<String>,
+}
+
+/// The three ends of a silent reconnect.
+///
+/// **None of them is a failure.** A reconnect nobody asked for is
+/// attempted whenever the panel opens, so a refusal reported as an
+/// error would put a message in front of somebody who did nothing. A
+/// server that is unreachable or shouting is a different matter and
+/// does reach the caller as an error, because that is a fact about the
+/// attempt rather than about the stored credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, SchemaBridge)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredTeamConnectOutcome {
+    /// Connected, on the session shape the password arm also yields.
+    Connected,
+    /// Nothing was tried, because nothing this machine could present
+    /// was in hand.
+    ///
+    /// Three ways in, and they are one answer because the caller's
+    /// next act is the same in all of them — show the password form:
+    /// no metadata at all; metadata whose keychain entry is gone; and
+    /// metadata whose keychain would not answer, which is a locked
+    /// store, a prompt somebody dismissed, or a session with no
+    /// credential store behind it.
+    ///
+    /// **What became of the file differs between them, and is not
+    /// reported here.** An entry that is gone takes the metadata with
+    /// it, since a file describing a connection that cannot be made
+    /// pre-fills a form into a reconnect nothing can complete. A
+    /// keychain that would not answer leaves the file where it was:
+    /// the file is the sole index of the keychain, the entry it names
+    /// is most likely still sitting there, and one dismissed prompt
+    /// must not be what deletes the only record of it. No field here
+    /// tells the two apart, because a caller that needs to know reads
+    /// `stored_team_connection` back afterwards — the same rule the
+    /// panel follows at every other site that changes what is stored —
+    /// rather than being handed a fact by a command that is done with
+    /// it.
+    ///
+    /// What separates this from [`Self::Rejected`] is who said no. Here
+    /// no server was asked; there one was, and refused.
+    Nothing,
+    /// What was stored no longer resolves. Both halves of it are
+    /// forgotten by the time this is answered.
+    Rejected,
+}

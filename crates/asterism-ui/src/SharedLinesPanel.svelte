@@ -64,6 +64,31 @@
   let baseUrl = $state("http://127.0.0.1:8787");
   let login = $state("");
   let password = $state("");
+  // Unticked to begin with, and it stays a choice rather than a
+  // default: ticking it puts a credential on this machine for months,
+  // and that is not something to arrive at by not reading a form.
+  let remember = $state(false);
+
+  // What this machine remembered, put back in the fields (#204).
+  //
+  // An effect rather than an initialiser because the catalog reads it
+  // when the panel opens, which is after this component is built. It
+  // runs when `stored` changes and not when somebody types, so a
+  // half-typed server is never overwritten — and a rejected credential
+  // leaves `stored` in place precisely so the login survives into the
+  // form the person is about to use.
+  $effect(() => {
+    const held = sharedCatalog.stored;
+    if (held === null) return;
+    baseUrl = held.base_url;
+    login = held.login;
+  });
+
+  // Whether the device list is showing. Closed to begin with: it
+  // answers a question about the account rather than about the work,
+  // which is the same reason the ledger's payloads are behind a
+  // toggle.
+  let devicesOpen = $state(false);
 
   // The field is this component's, not the catalog's.
   //
@@ -114,9 +139,24 @@
 
   async function connect(event: Event) {
     event.preventDefault();
-    await sharedCatalog.connect(baseUrl, login, password);
+    await sharedCatalog.connect(baseUrl, login, password, remember);
     password = "";
+    // Back to unticked, like the password. Disconnecting revoked the
+    // token this ticking minted, so a box left ticked would mint
+    // another on the next connect from a choice somebody made about a
+    // connection they have since ended.
+    remember = false;
     if (teamField) await sharedCatalog.lookAt(teamField);
+  }
+
+  // The list reads on demand, like the roster and the ledger: what
+  // this account has stored on its other machines is a question asked
+  // apart from working with what a team holds.
+  async function toDevices() {
+    devicesOpen = !devicesOpen;
+    if (devicesOpen && sharedCatalog.deviceTokens.data.length === 0) {
+      await sharedCatalog.deviceTokens.load({});
+    }
   }
 
   async function look(event: Event) {
@@ -235,13 +275,27 @@
       </header>
 
       <!-- These lines are on a team's server. They are read from it
-           every time this panel opens; nothing here is kept. -->
+           every time this panel opens; none of them is kept. The
+           qualifier is #204's: a device token may be on this machine,
+           in the keychain, and it is not one of these lines. -->
       <p class="drawer-note">
-        Hosted by a team, and read from it. Nothing on this panel is
-        stored on this machine — cloning is how you take a copy.
+        Hosted by a team, and read from it. None of the work shown here
+        is stored on this machine — cloning is how you take a copy.
       </p>
 
       {#if sharedCatalog.phase === "disconnected"}
+        {#if sharedCatalog.storedRejected}
+          <!-- The one outcome of a silent reconnect worth a sentence.
+               Nothing was stored and the stored thing was refused look
+               identical — this form — and only the second is somebody
+               else's doing. -->
+          <p class="drawer-said">
+            This machine's saved sign-in was refused, and has been
+            forgotten. It was either revoked or it expired. Signing in
+            again does not replace it &mdash; tick
+            &ldquo;Remember this device&rdquo; below to save a new one.
+          </p>
+        {/if}
         <form class="drawer-form" onsubmit={connect}>
           <label>
             Server
@@ -260,6 +314,24 @@
               autocomplete="current-password"
             />
           </label>
+          <!-- What ticking this does, said before it is ticked: the
+               server mints a token for this machine and the keychain
+               holds it. The password is not stored under any key, and
+               signing out gives the token back. -->
+          <label class="drawer-check">
+            <input type="checkbox" bind:checked={remember} />
+            Remember this device
+          </label>
+          <p class="drawer-cost">
+            {#if remember}
+              This server will issue a token for this device, kept in
+              the system keychain so the next window signs in without
+              asking. Your password is not stored. Disconnecting
+              revokes it; closing the window keeps it.
+            {:else}
+              You will be asked for this password again next time.
+            {/if}
+          </p>
           <button type="submit">Connect</button>
         </form>
       {:else}
@@ -269,6 +341,67 @@
             Disconnect
           </button>
         </div>
+
+        <!-- The devices this account has signed in from, behind a
+             toggle for the ledger payloads' reason: it answers about
+             the account rather than about a team, so it is not one of
+             the tabs, and it is not what somebody opened this drawer
+             to read. -->
+        <button
+          type="button"
+          class="event-payload-toggle"
+          aria-expanded={devicesOpen}
+          onclick={toDevices}
+        >
+          {devicesOpen ? "▾" : "▸"} devices signed in
+        </button>
+
+        {#if devicesOpen}
+          <p class="drawer-note">
+            Each of these is a machine that can sign in as you without a
+            password. Revoking one takes that back; sessions it already
+            opened run out on their own.
+          </p>
+          {#if sharedCatalog.deviceTokens.loading}
+            <p class="drawer-empty">loading…</p>
+          {:else if sharedCatalog.deviceTokens.error}
+            <p class="drawer-empty drawer-error">
+              Could not read your devices: {sharedCatalog.deviceTokens.error}
+            </p>
+          {:else if sharedCatalog.deviceTokens.data.length === 0}
+            <p class="drawer-empty">
+              No device is remembering this account.
+            </p>
+          {:else}
+            <ul class="drawer-list devices" role="list">
+              {#each sharedCatalog.deviceTokens.data as token (token.id)}
+                <li
+                  class="device"
+                  class:you={sharedCatalog.stored?.token_id === token.id}
+                >
+                  <span class="device-label">
+                    {token.label}{#if sharedCatalog.stored?.token_id === token.id}
+                      &nbsp;· this one{/if}
+                  </span>
+                  <span class="device-when">
+                    minted {fmtDateTime(token.created_at_ms)} ·
+                    {#if token.last_used_at_ms === null}
+                      never used
+                    {:else}
+                      last used {fmtDateTime(token.last_used_at_ms)}
+                    {/if}
+                    · expires {fmtDateTime(token.expires_at_ms)}
+                  </span>
+                  <button
+                    type="button"
+                    onclick={() => sharedCatalog.revokeDevice(token.id)}
+                    title="Stop this device signing in without a password"
+                  >Revoke</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
 
         <!-- The teams this account is in, which is what the field
              below used to be the only way to name. Ids rather than
@@ -894,6 +1027,38 @@
     opacity: 0.6;
     font-size: 0.72rem;
     white-space: nowrap;
+  }
+  /* Two rows rather than the roster's one line: a device's three
+     times are a sentence, and at this drawer's width putting them
+     beside the label leaves neither readable. Placed explicitly
+     because the reading order and the layout differ — the times come
+     after the label in the markup, where somebody hearing this row
+     wants them, and under it on screen. */
+  .devices .device {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 0.15rem 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.45rem 0.1rem;
+    font-size: 0.78rem;
+  }
+  .devices .device.you {
+    font-weight: 600;
+  }
+  .device-label {
+    grid-area: 1 / 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .devices .device button {
+    grid-area: 1 / 2;
+  }
+  .device-when {
+    grid-area: 2 / 1 / 3 / -1;
+    opacity: 0.6;
+    font-size: 0.72rem;
+    font-weight: 400;
   }
   .ledger .event {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);

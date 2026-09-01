@@ -442,3 +442,13 @@ export type MyTeamsDto = { teams: { team_id: string; role: string; created_at_ms
 
 export type MyTeamDto = { team_id: string; role: string; created_at_ms: number; };
 
+export type TeamDeviceTokensDto = { tokens: { id: string; label: string; created_at_ms: number; last_used_at_ms: number | null; expires_at_ms: number; }[]; };
+
+export type TeamDeviceTokenDto = { id: string; label: string; created_at_ms: number; last_used_at_ms: number | null; expires_at_ms: number; };
+
+export type StoredTeamConnectionDto = { base_url: string; login: string; token_id: string; label: string; };
+
+export type StoredTeamConnectDto = { outcome: 'connected' | 'nothing' | 'rejected'; user: string | null; };
+
+export type StoredTeamConnectOutcome = 'connected' | 'nothing' | 'rejected';
+

@@ -30,7 +30,8 @@ pub const DEFAULT_SESSION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 pub const DEFAULT_PURGE_GRACE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Auth rate limit: attempts allowed per key per window (#83 §5 — one
-/// limiter over ALL auth endpoints from v0).
+/// limiter, shared by every route that lets somebody present a
+/// credential).
 pub const AUTH_RATE_LIMIT_MAX: u32 = 10;
 
 /// Auth rate limit window.
@@ -50,7 +51,8 @@ pub struct TeamsCtx {
     pub registration: RegistrationPolicy,
     /// Session lifetime handed to every login.
     pub session_ttl_ms: i64,
-    /// The one limiter every auth endpoint sits behind.
+    /// The one limiter every credential-presenting endpoint sits
+    /// behind — which of them those are is `http`'s module doc.
     pub auth_limiter: RateLimiter,
     /// How long a purge mark must sit before reclaim may remove it
     /// (#95). [`DEFAULT_PURGE_GRACE_MS`] unless the operator says

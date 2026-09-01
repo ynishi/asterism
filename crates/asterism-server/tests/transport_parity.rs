@@ -164,29 +164,65 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "active_profile",
         "desktop chrome: which local data profile this process opened",
     ),
+    (
+        "stored_team_connection",
+        "desktop chrome: what this machine's keychain and profile home \
+         remember, which no server holds",
+    ),
     // Deliberately one-sided, and #153 argues why where the obligation
     // itself is stated: a verb against somebody else's server is not a
     // verb against this one.
     ("clone_shared_entry", "talks to a team, not to this process"),
-    ("create_team", "talks to a team, not to this process"),
+    (
+        "close_shared_pursuit",
+        "talks to a team, not to this process",
+    ),
     (
         "connect_team_server",
         "talks to a team, not to this process",
     ),
+    (
+        "connect_team_server_stored",
+        "talks to a team, not to this process",
+    ),
+    ("create_team", "talks to a team, not to this process"),
     (
         "disconnect_team_server",
         "talks to a team, not to this process",
     ),
     ("list_shared_lines", "talks to a team, not to this process"),
     (
+        "list_team_device_tokens",
+        "talks to a team, not to this process",
+    ),
+    ("my_teams", "talks to a team, not to this process"),
+    (
+        "open_shared_pursuit",
+        "talks to a team, not to this process",
+    ),
+    (
+        "promote_asset_to_team",
+        "talks to a team, not to this process",
+    ),
+    (
         "publish_line_to_team",
+        "talks to a team, not to this process",
+    ),
+    ("push_shared_round", "talks to a team, not to this process"),
+    (
+        "revoke_team_device_token",
         "talks to a team, not to this process",
     ),
     (
         "shared_line_history",
         "talks to a team, not to this process",
     ),
+    (
+        "shared_line_pursuits",
+        "talks to a team, not to this process",
+    ),
     ("shared_line_states", "talks to a team, not to this process"),
+    ("shared_pursuit", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
     ("team_roster", "talks to a team, not to this process"),
     (

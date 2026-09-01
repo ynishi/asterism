@@ -103,8 +103,9 @@ use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
 use asterism_contract::teams::{
-    MyTeamDto, MyTeamsDto, PromotedAssetDto, TeamCreatedDto, TeamLedgerEventDto, TeamLedgerPageDto,
-    TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
+    MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
+    StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -124,7 +125,7 @@ use asterism_core::domain::value::{AssetId, PersonaId, SourceKind};
 use tauri::State;
 
 use crate::error::UiError;
-use crate::state::AppState;
+use crate::state::{AppState, TeamsConnection};
 
 /// Returns the active local data profile for persistent UI chrome.
 #[tauri::command]
@@ -3043,9 +3044,15 @@ fn teams_error(err: asterism_teams_client::TeamsClientError) -> UiError {
     }
 }
 
-/// The team server this window is talking to, or a refusal saying it is
-/// talking to none.
-async fn teams_client(state: &AppState) -> Result<asterism_teams_client::TeamsClient, UiError> {
+/// The team connection this window is holding, or a refusal saying it
+/// is holding none.
+///
+/// The pair travels with the session because some verbs have to decide
+/// whether what this machine remembers is what it is talking to —
+/// [`stored_connection`](crate::stored_connection)'s "which connection
+/// a verb acts on". Most verbs want only the session and take
+/// [`teams_client`].
+async fn teams_connection(state: &AppState) -> Result<TeamsConnection, UiError> {
     state.teams.lock().await.clone().ok_or_else(|| {
         UiError::from(DomainError::Validation(
             "this window is not connected to a team server; connect to one first".into(),
@@ -3053,43 +3060,383 @@ async fn teams_client(state: &AppState) -> Result<asterism_teams_client::TeamsCl
     })
 }
 
+/// The team server this window is talking to, or a refusal saying it is
+/// talking to none.
+async fn teams_client(state: &AppState) -> Result<asterism_teams_client::TeamsClient, UiError> {
+    Ok(teams_connection(state).await?.client)
+}
+
 fn team_id(raw: &str, what: &'static str) -> Result<TeamScopedId, UiError> {
     Ok(TeamScopedId::parse(raw, what)?)
 }
 
+/// Whose account a server just accepted, or a refusal saying it named
+/// nobody.
+///
+/// Both login arms ask this, and neither has anything to do with an
+/// answer that authenticated somebody the client cannot name.
+fn accepted_as(client: &asterism_teams_client::TeamsClient) -> Result<String, UiError> {
+    client.user_id().map(ToString::to_string).ok_or_else(|| {
+        UiError::from(DomainError::Infra(anyhow::anyhow!(
+            "the server accepted the login and named nobody"
+        )))
+    })
+}
+
+/// Whether a refusal was the one-armed `Unauthorized`.
+///
+/// The single fact the stored-credential path turns on: an unknown, a
+/// revoked and an expired device token are all this, which is why the
+/// answer to it is to forget rather than to diagnose.
+fn was_unauthorized(err: &asterism_teams_client::TeamsClientError) -> bool {
+    matches!(
+        err,
+        asterism_teams_client::TeamsClientError::Refused { status: 401, .. }
+    )
+}
+
 /// Logs this window in to a team server and holds the session.
 ///
-/// Nothing is stored. The URL and the session live for as long as the
-/// window does — see `AppState::teams` for why a credential has no home
-/// on disk yet.
+/// `remember` is the mint: with it, the session this login opened is
+/// used once more to ask the server for a device token, which goes in
+/// this machine's keychain so the next window reconnects without a
+/// password. What that stores and where is
+/// [`stored_connection`](crate::stored_connection); the password is
+/// not part of it under any key.
+///
+/// Being remembered is not a condition of connecting. A mint that
+/// fails leaves a window logged in and a box that will have to be
+/// ticked again, which is the honest outcome — refusing the connection
+/// over it would take away the thing that did work.
+///
+/// That is why the session is installed **before** the mint is
+/// attempted rather than after it, and why the mint's refusal does not
+/// leave this function: a locked keychain, a denied prompt and a
+/// server that would not mint all end here as a warning in the diag
+/// log and a connected window. Nothing tells the person, which is a
+/// real cost and the smaller one — the box is unticked next time they
+/// look, and a modal saying a credential was not saved is a modal
+/// about something they can simply do again. Saying so on the return
+/// shape is the alternative, and it puts a field across the wire, the
+/// bindings and the store to carry a fact nothing acts on.
 #[tauri::command]
 pub async fn connect_team_server(
     state: State<'_, AppState>,
     base_url: String,
     login: String,
     password: String,
+    remember: bool,
 ) -> Result<String, UiError> {
-    let mut client = asterism_teams_client::TeamsClient::new(base_url);
+    let mut client = asterism_teams_client::TeamsClient::new(base_url.clone());
     client.login(&login, &password).await.map_err(teams_error)?;
-    let user = client
-        .user_id()
-        .ok_or_else(|| {
-            UiError::from(DomainError::Infra(anyhow::anyhow!(
-                "the server accepted the login and named nobody"
-            )))
-        })?
-        .to_string();
-    *state.teams.lock().await = Some(client);
+    let user = accepted_as(&client)?;
+    *state.teams.lock().await = Some(TeamsConnection {
+        client: client.clone(),
+        base_url: base_url.clone(),
+        login: login.clone(),
+    });
+    if remember && let Err(err) = remember_this_device(&client, &base_url, &login).await {
+        tracing::warn!(
+            error = %err,
+            "the connection stands; this machine was not able to remember it",
+        );
+    }
     Ok(user)
 }
 
-/// Drops the session. The panel goes empty rather than stale.
+/// Mints a device token on a live session and stores the pair.
+///
+/// The order is the invariant's, and what the invariant turns on is
+/// that the file is the sole index of the keychain: the entry a new
+/// pair displaces goes first, the file second, and the entry the file
+/// has just named last. A run that dies anywhere in that cannot leave
+/// a keychain entry nothing names, because the keychain is written
+/// only after the file says what is going into it.
+///
+/// What such a run does leave depends on the pair. Remembering a
+/// **new** pair leaves a file naming a pair whose entry is missing,
+/// which [`connect_team_server_stored`] repairs by dropping the
+/// metadata and showing the password form; the cost is a working
+/// credential thrown away by a crash and a password typed once more.
+/// Remembering **the same pair again** is the exception, because
+/// `retire_replaced` returns early there: the entry survives holding
+/// the previous token while the file's `token_id` names the row just
+/// minted, so nothing is orphaned and the next launch reconnects, but
+/// a later disconnect revokes the row the file names rather than the
+/// one this machine was presenting. What that costs is a row left in
+/// the owner's listing until it expires, which
+/// `stored_connection`'s "what a remember retires, and in what order"
+/// weighs against retiring an entry the write is about to replace.
+///
+/// The token used to reach the keychain first, so that no metadata
+/// could name a token nothing held. That was true of the pair being
+/// written and silent about the pair being displaced, where the file
+/// went on naming the previous connection and the next launch
+/// reconnected to it, leaving the entry just written where nothing
+/// would look again. `stored_connection`'s "what a remember retires,
+/// and in what order" is where the two costs are weighed.
+///
+/// Which pair is being displaced can only be read before the write, so
+/// the old metadata is read at the top and carried across all three
+/// writes.
+/// [`retire_replaced`](crate::stored_connection::retire_replaced)
+/// takes its keychain entry when it is another pair's, and
+/// [`superseded_row`](crate::stored_connection::superseded_row) names
+/// the server row left over when it is this pair's — revoked here on
+/// the live client, which is the server that issued it in exactly that
+/// case.
+///
+/// That revoke is best effort in [`disconnect_team_server`]'s sense: a
+/// remember that stored the credential did the thing that was asked
+/// for, and a stale row must not turn it into a refusal, so a failure
+/// is logged and the row is left to its expiry. A displaced pair
+/// naming a *different* server has a row nothing here can revoke at
+/// all, which `stored_connection` records as the known limit.
+async fn remember_this_device(
+    client: &asterism_teams_client::TeamsClient,
+    base_url: &str,
+    login: &str,
+) -> Result<(), UiError> {
+    let label = crate::stored_connection::device_label();
+    let displaced = crate::stored_connection::read_metadata().await;
+    let minted = client
+        .mint_device_token(&label)
+        .await
+        .map_err(teams_error)?;
+    let superseded = crate::stored_connection::superseded_row(displaced.as_ref(), base_url, login);
+    crate::stored_connection::retire_replaced(displaced.as_ref(), base_url, login).await;
+    crate::stored_connection::write_metadata(&crate::stored_connection::StoredConnection {
+        base_url: base_url.to_string(),
+        login: login.to_string(),
+        token_id: minted.id,
+        label,
+    })
+    .await?;
+    crate::stored_connection::write_token(base_url, login, &minted.token).await?;
+    if let Some(superseded) = superseded
+        && let Err(err) = client.revoke_device_token(superseded).await
+    {
+        tracing::warn!(
+            error = %err,
+            "this pair was remembered again; the row the new token replaced \
+             is left to expire",
+        );
+    }
+    Ok(())
+}
+
+/// What the connect form pre-fills from, or `None` when this machine
+/// remembers no server.
+///
+/// Every field is safe to hand a window, which
+/// [`StoredConnection`](crate::stored_connection::StoredConnection) is
+/// where it is argued: the token has no path into that shape.
+#[tauri::command]
+pub async fn stored_team_connection() -> Result<Option<StoredTeamConnectionDto>, UiError> {
+    Ok(crate::stored_connection::read_metadata()
+        .await
+        .map(|stored| StoredTeamConnectionDto {
+            base_url: stored.base_url,
+            login: stored.login,
+            token_id: stored.token_id,
+            label: stored.label,
+        }))
+}
+
+/// Reconnects from the device token this machine holds, without asking
+/// anybody anything.
+///
+/// The silent half of #204: a restart reaches its team from the
+/// keychain, and the password form is what a rejection falls back to.
+/// What lands in [`AppState::teams`](crate::state::AppState::teams) is
+/// an ordinary session — the same one
+/// [`connect_team_server`] hands over — so nothing downstream knows
+/// which arm was used.
+///
+/// A `401` forgets both halves before answering. Keeping a token the
+/// server has said no to buys a second silent failure on the next
+/// launch and a listing row nobody can match to a machine.
+///
+/// Which of the three ends this reached, and why none of them is an
+/// error, is on [`StoredTeamConnectOutcome`].
+#[tauri::command]
+pub async fn connect_team_server_stored(
+    state: State<'_, AppState>,
+) -> Result<StoredTeamConnectDto, UiError> {
+    let nothing = StoredTeamConnectDto {
+        outcome: StoredTeamConnectOutcome::Nothing,
+        user: None,
+    };
+    let Some(stored) = crate::stored_connection::read_metadata().await else {
+        return Ok(nothing);
+    };
+    let token = match crate::stored_connection::read_token(&stored.base_url, &stored.login).await {
+        crate::stored_connection::StoredToken::Held(token) => token,
+        // The keychain answered, and its answer is that there is no
+        // entry: the file is describing a connection that cannot be
+        // made, and it is the sole index of the keychain, so keeping
+        // it buys a form that pre-fills into nothing.
+        crate::stored_connection::StoredToken::NoEntry => {
+            crate::stored_connection::delete_metadata().await;
+            return Ok(nothing);
+        }
+        // The keychain would not answer — locked, a prompt dismissed,
+        // no store configured. **The file stays.** The entry is very
+        // likely still there, and deleting the only thing that names
+        // it over one denied prompt is how a live credential becomes
+        // one nothing knows how to revoke. This launch shows the
+        // password form; the next one asks the keychain again.
+        crate::stored_connection::StoredToken::Unavailable => {
+            tracing::warn!(
+                "this machine's keychain would not answer for the stored \
+                 connection; it is kept and will be tried again",
+            );
+            return Ok(nothing);
+        }
+    };
+
+    let mut client = asterism_teams_client::TeamsClient::new(stored.base_url.clone());
+    match client.login_with_device_token(&token).await {
+        Ok(_) => {
+            let user = accepted_as(&client)?;
+            *state.teams.lock().await = Some(TeamsConnection {
+                client,
+                base_url: stored.base_url,
+                login: stored.login,
+            });
+            Ok(StoredTeamConnectDto {
+                outcome: StoredTeamConnectOutcome::Connected,
+                user: Some(user),
+            })
+        }
+        Err(err) if was_unauthorized(&err) => {
+            crate::stored_connection::forget(&stored.base_url, &stored.login).await;
+            Ok(StoredTeamConnectDto {
+                outcome: StoredTeamConnectOutcome::Rejected,
+                user: None,
+            })
+        }
+        Err(err) => Err(teams_error(err)),
+    }
+}
+
+/// Drops the session, and drops what this machine was keeping.
+///
+/// **Signing out revokes the device token; closing the window does
+/// not.** The issue leaves this open and this is the answer: pressing
+/// disconnect is somebody saying they are done here, and a stored
+/// credential outliving that would make the button a lie on every
+/// machine but the server's listing. A window closing says nothing of
+/// the kind — nothing in this process runs on the way out, which is
+/// what makes "close the window" the gesture that keeps the
+/// connection.
+///
+/// The revoke is best effort in the same sense the logout already is:
+/// a server that cannot be reached to be told must not be able to hold
+/// somebody in a session, so the local half happens either way. What
+/// that costs is a row left in the owner's listing when the server was
+/// down, revocable from the panel the next time it answers, and the
+/// token behind it is gone from this machine regardless.
+///
+/// **What is revoked and forgotten is the connection being ended, not
+/// whatever the file happens to name.** The two come apart on a path
+/// that is reached rather than theoretical — a remembered server that
+/// was down leaves its metadata in place and its login in the connect
+/// form, which is editable over — and a verb that followed the file
+/// there would send one server's handle to another and wipe the first
+/// one's entry while its row stayed live. So the stored half is
+/// touched only when it names this connection, and otherwise this is a
+/// logout and nothing more:
+/// [`stored_connection`](crate::stored_connection)'s "which connection
+/// a verb acts on" is where that rule is stated for all three verbs
+/// that ask it.
 #[tauri::command]
 pub async fn disconnect_team_server(state: State<'_, AppState>) -> Result<(), UiError> {
-    if let Some(mut client) = state.teams.lock().await.take() {
-        // Best effort: the local session is already gone, and a server
-        // that cannot be reached to be told will expire it.
-        let _ = client.logout().await;
+    // Taken once, before either call to the server. The session is
+    // gone from this window the moment somebody presses the button —
+    // what follows is telling the server about it — and holding the
+    // lock across two network round trips would make every other
+    // command wait on a server that may be the reason this is being
+    // pressed.
+    let Some(connection) = state.teams.lock().await.take() else {
+        return Ok(());
+    };
+    if let Some(stored) = crate::stored_connection::read_metadata().await
+        && stored.names(&connection.base_url, &connection.login)
+    {
+        let _ = connection
+            .client
+            .revoke_device_token(&stored.token_id)
+            .await;
+        crate::stored_connection::forget(&stored.base_url, &stored.login).await;
+    }
+    // Best effort: the local session is already gone, and a server
+    // that cannot be reached to be told will expire it.
+    let mut client = connection.client;
+    let _ = client.logout().await;
+    Ok(())
+}
+
+/// The device tokens this account holds, on whatever machines.
+///
+/// Owner-scoped by the route rather than by anything here, which the
+/// wire's `DeviceTokensDto` states where it is defined. Mapped to the
+/// contract for the reason the roster's and the ledger's are — the
+/// wire is what a member's client and a team server say to each other,
+/// and a screen holds one vocabulary.
+#[tauri::command]
+pub async fn list_team_device_tokens(
+    state: State<'_, AppState>,
+) -> Result<TeamDeviceTokensDto, UiError> {
+    let client = teams_client(&state).await?;
+    let held = client.list_device_tokens().await.map_err(teams_error)?;
+    Ok(TeamDeviceTokensDto {
+        tokens: held
+            .tokens
+            .into_iter()
+            .map(|token| TeamDeviceTokenDto {
+                id: token.id,
+                label: token.label,
+                created_at_ms: token.created_at_ms,
+                last_used_at_ms: token.last_used_at_ms,
+                expires_at_ms: token.expires_at_ms,
+            })
+            .collect(),
+    })
+}
+
+/// Revokes one of this account's device tokens.
+///
+/// Revoking the row this machine is holding forgets it here too, so
+/// the next launch shows the password form rather than presenting a
+/// token the server has already dropped. Revoking another machine's
+/// row leaves this one alone — that is the point of the listing.
+///
+/// The revoke itself needs no identity rule: it goes down the live
+/// client, so the connection it acts on is the connection in hand by
+/// construction. The rule applies to the second half, where the file
+/// is consulted — a handle is unique to the server that issued it, so
+/// the stored pair has to name this connection before a matching
+/// `token_id` means the row just dropped was the one this machine
+/// holds. That is
+/// [`stored_connection`](crate::stored_connection)'s "which connection
+/// a verb acts on", third case.
+#[tauri::command]
+pub async fn revoke_team_device_token(
+    state: State<'_, AppState>,
+    token_id: String,
+) -> Result<(), UiError> {
+    let connection = teams_connection(&state).await?;
+    connection
+        .client
+        .revoke_device_token(&token_id)
+        .await
+        .map_err(teams_error)?;
+    if let Some(stored) = crate::stored_connection::read_metadata().await
+        && stored.names(&connection.base_url, &connection.login)
+        && stored.token_id == token_id
+    {
+        crate::stored_connection::forget(&stored.base_url, &stored.login).await;
     }
     Ok(())
 }
@@ -3102,7 +3449,7 @@ pub async fn team_server_session(state: State<'_, AppState>) -> Result<Option<St
         .lock()
         .await
         .as_ref()
-        .and_then(|client| client.user_id().map(ToString::to_string)))
+        .and_then(|held| held.client.user_id().map(ToString::to_string)))
 }
 
 /// Every line a team hosts, without its history.

@@ -24,6 +24,32 @@ use asterism_server::state::ServerCtx;
 use async_trait::async_trait;
 use tauri::{AppHandle, Emitter};
 
+/// A live team session, and the pair that names it.
+///
+/// The client alone cannot answer "which connection is this" the way
+/// the stored state asks it: `stored_connection` keys an entry by
+/// server **and login**, and a session knows the server it was built
+/// with and the `user_id` the server answered with — not the login as
+/// somebody typed it. So the pair travels beside the session, set once
+/// where the connection is made and read by every verb that has to
+/// decide whether what this machine remembers is what it is holding.
+///
+/// That rule, and what goes wrong without it, is on
+/// [`stored_connection`](crate::stored_connection)'s "which connection
+/// a verb acts on".
+#[derive(Clone)]
+pub struct TeamsConnection {
+    /// The session itself — what every read of a shared line goes
+    /// down.
+    pub client: asterism_teams_client::TeamsClient,
+    /// The server as it was typed, before any trailing slash came off.
+    pub base_url: String,
+    /// The account it was typed for. Not the `user_id`: the keychain
+    /// entry is keyed by what a person enters on the form, and that is
+    /// what has to match.
+    pub login: String,
+}
+
 /// Bundle of services registered as Tauri state.
 ///
 /// Note: no isle handle here. The precomputed session snapshot is
@@ -94,11 +120,23 @@ pub struct AppState {
     ///
     /// Held in a lock because logging in mutates the client, and behind
     /// an `Option` because the desktop starts with no team and may end
-    /// with none. There is no stored URL or token anywhere: the session
-    /// lives for as long as the window does, which is the smallest
-    /// thing that works and the only one that does not put a
-    /// credential somewhere this issue did not design a home for.
-    pub teams: Arc<tokio::sync::Mutex<Option<asterism_teams_client::TeamsClient>>>,
+    /// with none.
+    ///
+    /// **The session here is still the window's and dies with it.**
+    /// What #204 added is not a longer-lived session but a way to open
+    /// another one without a password: the OS keychain may hold a
+    /// device token, and the profile home may hold the server URL and
+    /// login that name it. Neither is a session and neither is a
+    /// password — the invariant, and which store holds which half, is
+    /// on [`stored_connection`](crate::stored_connection).
+    ///
+    /// So a window that reconnects silently arrives here exactly as one
+    /// that was typed into does, and nothing below this field can tell
+    /// which happened. This was written before that existed, when the
+    /// sentence was that nothing was stored anywhere; the reason it
+    /// said so — that a credential had no designed home — is what #204
+    /// answered rather than what it worked around.
+    pub teams: Arc<tokio::sync::Mutex<Option<TeamsConnection>>>,
     /// App-level Threads container — UI writes flow through this
     /// service; the HTTP surface (Claude Code / agents) writes to
     /// the same rows via `ServerCtx::thread_service`, since both

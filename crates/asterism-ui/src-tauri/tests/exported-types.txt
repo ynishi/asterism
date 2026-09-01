@@ -8,8 +8,8 @@
 # `withheld` means the type reaches no TypeScript caller on purpose;
 # NOT_PROJECTED in that test carries the reason for each.
 #
-# derived: 228
-# exported: 221
+# derived: 233
+# exported: 226
 # withheld: 7
 
 exported  AddAssetBatchCommand
@@ -215,11 +215,16 @@ exported  SnapshotDto
 exported  SortOrder
 exported  SortSpec
 exported  SortTarget
+exported  StoredTeamConnectDto
+exported  StoredTeamConnectOutcome
+exported  StoredTeamConnectionDto
 exported  TagCountDto
 exported  TagDto
 exported  TagMatch
 exported  TagSuggestionDto
 exported  TeamCreatedDto
+exported  TeamDeviceTokenDto
+exported  TeamDeviceTokensDto
 exported  TeamLedgerEventDto
 exported  TeamLedgerPageDto
 exported  TeamRosterDto

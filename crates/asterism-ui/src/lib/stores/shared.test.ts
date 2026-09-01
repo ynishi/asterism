@@ -106,6 +106,9 @@ beforeEach(() => {
   sharedCatalog.states.reset();
   sharedCatalog.history.reset();
   sharedCatalog.pursuits.reset();
+  sharedCatalog.stored = null;
+  sharedCatalog.storedRejected = false;
+  sharedCatalog.deviceTokens.reset();
 });
 
 describe("what the panel shows", () => {
@@ -932,11 +935,15 @@ describe("the teams to pick from", () => {
 
   it("reads them on connecting, which is the phase they are for", async () => {
     mutateMock.mockResolvedValueOnce("u1");
+    // What the connection stored, read back before the teams are:
+    // a login that did not ask to be remembered stores nothing, and
+    // this is the read that says which (#204).
+    apiMock.mockResolvedValueOnce(null);
     apiMock.mockResolvedValueOnce({
       teams: [{ team_id: "t1", role: "owner", created_at_ms: 1 }],
     });
 
-    await sharedCatalog.connect("http://x", "who", "secret");
+    await sharedCatalog.connect("http://x", "who", "secret", false);
 
     expect(apiMock).toHaveBeenCalledWith("my_teams");
     expect(sharedCatalog.teams.data).toHaveLength(1);
@@ -1042,5 +1049,171 @@ describe("the roster", () => {
     expect(mutateMock).toHaveBeenCalledWith("create_team", {}, "create a team");
     expect(made).toBe("t9");
     expect(sharedCatalog.said).toContain("t9");
+  });
+});
+
+describe("the connection this machine remembers", () => {
+  // #204. What these pin is the one thing the DOM cannot say: a
+  // reconnect nobody asked for is attempted, and none of the ways it
+  // can end is reported as a failure — because a window whose stored
+  // credential was refused is a window showing the form it would have
+  // shown anyway.
+  //
+  // The credential itself never appears here, and that is the point:
+  // it lives in the OS keychain, the commands are the only thing that
+  // touches it, and every value in these tests is one a file may hold.
+
+  const stored = {
+    base_url: "http://x",
+    login: "who",
+    token_id: "dt1",
+    label: "Asterism on macos",
+  };
+
+  it("tries what it remembers when the panel opens on no session", async () => {
+    apiMock.mockResolvedValueOnce(null); // refreshSession answers nobody
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockResolvedValueOnce({ outcome: "connected", user: "u1" });
+    apiMock.mockResolvedValueOnce({ teams: [] });
+
+    await sharedCatalog.openPanel();
+
+    expect(apiMock).toHaveBeenCalledWith("connect_team_server_stored");
+    expect(sharedCatalog.session).toBe("u1");
+    expect(sharedCatalog.storedRejected).toBe(false);
+  });
+
+  it("does not try one on a window already connected", async () => {
+    // The session a window has is the one it keeps: a second login
+    // would replace it with an identical one for no reason.
+    apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce({ teams: [] });
+
+    await sharedCatalog.openPanel();
+
+    expect(apiMock).not.toHaveBeenCalledWith("connect_team_server_stored");
+  });
+
+  it("says so when what it remembered was refused", async () => {
+    // The one outcome worth a sentence. `stored` survives it, because
+    // the login it carries is what the person is about to type a
+    // password beside.
+    apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockResolvedValueOnce({ outcome: "rejected", user: null });
+
+    await sharedCatalog.openPanel();
+
+    expect(sharedCatalog.session).toBeNull();
+    expect(sharedCatalog.storedRejected).toBe(true);
+    expect(sharedCatalog.stored).toEqual(stored);
+  });
+
+  it("says nothing when there was nothing to try", async () => {
+    apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // nothing stored
+
+    await sharedCatalog.openPanel();
+
+    expect(apiMock).not.toHaveBeenCalledWith("connect_team_server_stored");
+    expect(sharedCatalog.storedRejected).toBe(false);
+    expect(sharedCatalog.stored).toBeNull();
+  });
+
+  it("keeps what it remembers when the attempt kept the file", async () => {
+    // `nothing` is two ends wearing one name: the file was dropped
+    // because its keychain entry was gone, or it was kept because the
+    // keychain would not answer — a locked store, a prompt somebody
+    // dismissed. The command says which by what it left on disk and
+    // nothing else, so this reads it back. Assuming it was dropped is
+    // how one dismissed prompt empties a form of a connection this
+    // machine still has.
+    apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockResolvedValueOnce({ outcome: "nothing", user: null });
+    apiMock.mockResolvedValueOnce(stored); // the file survived
+
+    await sharedCatalog.openPanel();
+
+    expect(sharedCatalog.session).toBeNull();
+    expect(sharedCatalog.storedRejected).toBe(false);
+    expect(sharedCatalog.stored).toEqual(stored);
+  });
+
+  it("lets go of what the attempt dropped", async () => {
+    // The other end of `nothing`: the keychain answered that the entry
+    // is gone, so the command dropped the file it was the sole index
+    // of, and the form has nothing left to pre-fill from.
+    apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockResolvedValueOnce({ outcome: "nothing", user: null });
+    apiMock.mockResolvedValueOnce(null); // the file went with the entry
+
+    await sharedCatalog.openPanel();
+
+    expect(sharedCatalog.session).toBeNull();
+    expect(sharedCatalog.storedRejected).toBe(false);
+    expect(sharedCatalog.stored).toBeNull();
+  });
+
+  it("keeps quiet when the server could not be reached", async () => {
+    // Unreachable is a fact about the attempt rather than about the
+    // credential, so nothing is forgotten and nothing is reported: the
+    // window lands on the form, which is where it started.
+    apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockRejectedValueOnce(new Error("connection refused"));
+
+    await expect(sharedCatalog.openPanel()).resolves.toBeUndefined();
+
+    expect(sharedCatalog.session).toBeNull();
+    expect(sharedCatalog.storedRejected).toBe(false);
+  });
+
+  it("carries the choice to be remembered into the login", async () => {
+    mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce(stored);
+    apiMock.mockResolvedValueOnce({ teams: [] });
+
+    await sharedCatalog.connect("http://x", "who", "secret", true);
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "connect_team_server",
+      { baseUrl: "http://x", login: "who", password: "secret", remember: true },
+      "connect to that team server",
+    );
+    expect(sharedCatalog.stored).toEqual(stored);
+  });
+
+  it("gives up being remembered when the connection is ended", async () => {
+    sharedCatalog.stored = stored;
+    sharedCatalog.storedRejected = true;
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(apiMock).toHaveBeenCalledWith("disconnect_team_server");
+    expect(sharedCatalog.stored).toBeNull();
+    expect(sharedCatalog.storedRejected).toBe(false);
+  });
+
+  it("re-reads both sides after a revoke", async () => {
+    // Revoking may have been this machine's own row, and only the
+    // command knows: the listing is asked again rather than patched,
+    // and so is what this machine still holds.
+    sharedCatalog.stored = stored;
+    mutateMock.mockResolvedValueOnce(undefined);
+    apiMock.mockResolvedValueOnce(null); // nothing stored any more
+    apiMock.mockResolvedValueOnce({ tokens: [] });
+
+    await sharedCatalog.revokeDevice("dt1");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "revoke_team_device_token",
+      { tokenId: "dt1" },
+      "revoke that device",
+    );
+    expect(sharedCatalog.stored).toBeNull();
+    expect(sharedCatalog.deviceTokens.data).toEqual([]);
   });
 });
