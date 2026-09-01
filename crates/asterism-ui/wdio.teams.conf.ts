@@ -26,9 +26,12 @@
 // `POST /teams/create` is behind a session. So the fixture logs in
 // over HTTP before the app is ever driven.
 //
-// Then a second team, with a line holding one entry, for the work
-// spec — `seedWorkableTeam` says why it is a second one and why the
-// app cannot seed it.
+// Then the teams a spec cannot make for itself. One the second
+// account founds and invites the first into, because leaving needs a
+// team the window's account did not found. One with a line holding an
+// entry, for the work spec — `seedWorkableTeam` says why the app
+// cannot seed that one. `prepareFixture` is the order they are made
+// in; a spec reaches each by the environment name given it there.
 //
 // A spec reads the values it needs from `process.env`. That is
 // the channel that works: the worker re-evaluates this module, so
@@ -84,9 +87,10 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
 /** The account this fixture provisions. Its password is generated. */
 const LOGIN = "e2e-member";
 // A second account, so the roster has somebody to let in and take back
-// out (#210). It is provisioned and left off every team: what the
-// spec drives is the invite, and an account already on a roster would
-// have nothing to prove.
+// out (#210). It joins none of the teams a spec invites it to, which
+// is the point — an account already on that roster would have nothing
+// to prove. It founds one of its own, because leaving needs a team the
+// window's account did not found.
 const OTHER_LOGIN = "e2e-other";
 
 /** What the second team's line and its one entry are called. Named

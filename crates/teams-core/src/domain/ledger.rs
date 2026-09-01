@@ -214,8 +214,8 @@ pub const MEMBERSHIP_ADDED: &str = "teams.membership.added/1";
 ///
 /// **One kind for both, and what separates them is inside the entry**:
 /// it reads as a departure when the actor is also the subject, and as
-/// a removal when it is not. Every reader that needs to tell the two
-/// apart reads it here rather than off a second kind.
+/// a removal when it is not. A reader telling the two apart reads it
+/// here rather than off a second kind.
 ///
 /// A second kind was the alternative and costs more than it gives.
 /// The stream is append-only, so a new spelling separates the two only

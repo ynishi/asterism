@@ -331,13 +331,12 @@ pub(crate) struct AuthedAccount(pub(crate) AccountRecord);
 /// team.
 ///
 /// **Two axes, not one value.** A role is a membership row in this
-/// team; being an instance admin is a standing outside every roster.
-/// A caller may hold both — an admin who founded a team holds a row in
-/// it like anybody else — so neither field is derivable from the
-/// other, and the pair is what [`decide`] needs to ask the row first:
-/// an act inside a team is stamped with the membership capacity when
-/// there is one, and the admin capacity is the fallback for a caller
-/// standing outside the roster (#83 §1).
+/// team; being an instance admin is a standing that belongs to no
+/// roster. A caller may hold both — an admin who founded a team holds
+/// a row in it like anybody else — so neither field is derivable from
+/// the other, and [`decide`] needs the pair rather than either alone.
+/// Which capacity a given verb is granted under is that function's
+/// question, under the rule the module doc above states.
 ///
 /// **This is the sentence the rest of the surface leaves to this
 /// site.** A route refusing a caller who holds no row says *that* —

@@ -3658,8 +3658,8 @@ pub async fn leave_team(state: State<'_, AppState>, team_id_raw: String) -> Resu
 }
 
 /// Deletes the team, which an owner may do and so may an instance
-/// admin — the one verb in this group that standing outside the roster
-/// is enough for.
+/// admin: standing outside the roster is enough here, which the client
+/// verb it calls says where the routes are named.
 ///
 /// It takes the team's ledger with it. The confirmation that says so
 /// belongs on the screen offering the act, not here.

@@ -229,10 +229,11 @@
   // own. Deleting is the one their standing does carry, so it asks a
   // second question.
   //
-  // An admin who is also a member of this team is an ordinary member
-  // of it here: they hold a row, `iOwn` reads it, and the controls
-  // follow the role rather than the standing. The two are separate
-  // fields for that reason.
+  // An admin who is also a member holds a row, so `iOwn` reads it like
+  // anybody else's — and `mayDelete` asks the standing besides,
+  // because the server does: a verb the row's role does not permit
+  // falls through to the admin capacity rather than stopping there.
+  // The two are separate fields for that reason.
   const iOwn = $derived(sharedCatalog.myRole === "owner");
   const mayDelete = $derived(iOwn || sharedCatalog.iAmAdmin);
 
@@ -949,8 +950,9 @@
                  by standing alone: an admin holding no row in this
                  team is offered nothing above, because #83 §1 gives
                  them no implicit membership verbs. One who is also a
-                 member of it gets whatever their role gets, here and
-                 above, like anybody else. -->
+                 member gets what their role gets above, and this
+                 besides — the server grants the delete to the standing
+                 whether or not a row is held. -->
             <button type="button" class="delete-team" onclick={askDeleteTeam}>
               Delete this team
             </button>

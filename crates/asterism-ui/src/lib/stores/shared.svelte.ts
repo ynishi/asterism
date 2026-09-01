@@ -330,7 +330,7 @@ const LEDGER_PAGE = 50;
 /// Whether a membership event records somebody going of their own
 /// accord rather than being taken out (#210).
 ///
-/// The one implementation of a rule stated on the kind itself:
+/// This plane's reading of a rule stated on the kind itself:
 /// `teams.membership.removed/1` covers a member leaving and being
 /// removed alike, and its doc is where the reading lives and where the
 /// argument against a second kind is kept. This is that reading in

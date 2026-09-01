@@ -13,21 +13,19 @@
 //
 // # Why it needs a window rather than the store's tests
 //
-// `lib/stores/shared.test.ts` owns what the catalog does with the six
-// verbs — the command each names, that every one re-reads the roster
-// after writing, that leaving and deleting let go of everything read
-// about the team. All of it against mocked `api` and `mutate`, which
-// is the hole this fills: those tests assert that the catalog called
-// `"invite_team_member"` with a shape their own author wrote down
-// twice. Nothing there presses a control, so nothing there answers
-// whether the controls exist, whether an owner is shown them, whether
-// the confirmations stand between a person and the two writes that
-// cannot be undone, or whether the form's id reaches a server that
-// accepts it.
+// `lib/stores/shared.test.ts` owns what the catalog does with these
+// verbs, and its own describe blocks are the list. All of it against
+// mocked `api` and `mutate`, which is the hole this fills: those tests
+// assert that the catalog called `"invite_team_member"` with a shape
+// their own author wrote down twice. Nothing there presses a control,
+// so nothing there answers whether the controls exist, whether an
+// owner is shown them, whether a confirmation stands between a person
+// and a write that cannot be undone, or whether the form's id reaches
+// a server that accepts it.
 //
 // # Which teams it uses, and why each
 //
-// **One it founds itself**, for the four writes that need a roster the
+// **One it founds itself**, for the writes that need a roster the
 // reader owns. Founding is the shortest way to be an owner, and the
 // team goes with the database `onComplete` removes.
 //
@@ -285,8 +283,8 @@ describe("the roster's writes", () => {
       );
     });
 
-    // A team of its own, because four of the five writes below are an
-    // owner's and founding is the shortest way to be one.
+    // A team of its own, because all but the leave below is an owner's
+    // and founding is the shortest way to be one.
     await stage(trail, "found a team to work on", ROUND_TRIP_MS, async () => {
       await clickIn(`${DRAWER} .make-team`);
       await pollUntil(
@@ -306,10 +304,11 @@ describe("the roster's writes", () => {
     });
     await snap("roster-01-founded");
 
-    // The controls are an owner's, and this reader is one. A member
-    // sees the rows and nothing to press, which is the store's test to
-    // make and not a window's — what a window answers is that the
-    // controls are here at all.
+    // The controls are an owner's, and this reader is one. What a
+    // member is shown is not asserted anywhere: the panel has no test
+    // file, and the store's tests cannot answer it, holding no
+    // controls. So this pins that they exist, and nothing pins their
+    // absence.
     await stage(trail, "the owner is offered the writes", DRIVER_MS, async () => {
       const text = (await drawerText()) ?? "";
       for (const control of ["Let somebody in", "Invite", "leave", "Delete this team"]) {
@@ -319,14 +318,15 @@ describe("the roster's writes", () => {
       }
     });
 
-    // Against the rows rather than the drawer's whole text. Every one
-    // of these writes reports itself into `said`, which is inside the
-    // drawer and names the account it acted on — so a probe reading
-    // the drawer passes on the report instead of on the roster, and
-    // whether it is the report or the row it saw is a race. The invite
-    // is the direction where that reads as a pass before the row
-    // exists; the removal below is the direction where it never reads
-    // as one at all.
+    // Against the rows rather than the drawer's whole text. Each write
+    // reports itself into a status line inside the drawer that names
+    // the account it acted on, so a probe reading the drawer can pass
+    // on the report rather than on the roster. It bites hardest on the
+    // removal, where the id the probe waits to lose is the one the
+    // report has just gained: that probe never passes, which is how it
+    // turned up. Here it would take a failed re-read to go wrong, the
+    // store setting the line only after the read returns — a narrower
+    // hazard, and the same fix.
     await stage(trail, "let somebody in", ROUND_TRIP_MS, async () => {
       await fill(`${DRAWER} .drawer-invite input[type="text"]`, otherId);
       await clickIn(`${DRAWER} .drawer-invite button[type="submit"]`);
@@ -470,8 +470,8 @@ describe("the roster's writes", () => {
     });
     await snap("roster-06-left");
 
-    // The drawer closes behind this spec: it is the last of the four,
-    // and an overlay left open is what the others hand each other.
+    // The drawer closes behind this spec, which `SPECS` runs last, and
+    // an overlay left open is what the others hand each other.
     // Through its own control rather than the sidebar row that opened
     // it — the drawer is an overlay with a backdrop over everything,
     // which is what `teams-promote.spec.ts` says where it does the
