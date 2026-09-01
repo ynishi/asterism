@@ -34,10 +34,16 @@ and this project adheres to
   and the case that is not — the last owner, by either verb — is the team's
   state to refuse rather than a row's to guess ahead of.
 
-  **An instance admin sees nothing here**, including the delete their standing
-  does carry. They hold no membership row, so the role the screen derives from
-  the roster is empty, and the roster is all it has to derive from. What would
-  close that is the read answering with the caller's own capacity instead.
+  **The roster read says what the reader may reach**, rather than leaving a
+  screen to find its own row and work it out. That is what an instance admin
+  needs it to do: they hold no membership row at all, so a screen searching the
+  rows reads their absence as nothing they may reach, when what they may reach
+  is deleting the team. The read carries the role the gate resolved and whether
+  the caller is an admin — not a third value of the role, since an admin may
+  also be a member of the team they administer — and the delete asks both. The
+  four member-shaped controls stay off an admin's screen, which is right: §1
+  grants them no implicit invite, remove or role change inside a team not
+  theirs.
 
   **A last-owner refusal still arrives as a sentence.** The server answers 409
   carrying the token that separates it from a malformed request, and the
