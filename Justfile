@@ -1451,6 +1451,23 @@ changed-packages:
         fi
     done
 
+    # The mapping above is a proxy for "which crates could this
+    # break", and a test that reads a file out of another member's
+    # directory is where the proxy is wrong in the direction that
+    # costs: `asterism-server`'s `transport_parity` test parses the
+    # desktop's command module, so a branch editing only that file
+    # selected `asterism-ui` alone, and seven commands landed across
+    # three pull requests with `main`'s full run as the first thing to
+    # say so. Named one file at a time, like the sentinel exemptions
+    # above, and for the same reason: a rule nobody sees reads as
+    # coverage.
+    if printf '%s\n' "$attributable" \
+        | grep -qxF 'crates/asterism-ui/src-tauri/src/commands.rs'; then
+        echo "crates/asterism-ui/src-tauri/src/commands.rs is read by" >&2
+        echo "asterism-server's transport_parity test; selecting it too." >&2
+        packages="$packages asterism-server"
+    fi
+
     if [ -z "${packages// /}" ]; then
         echo "No workspace member changed. Changed paths:" >&2
         printf '%s\n' "$attributable" | sed 's/^/  /' >&2

@@ -24,23 +24,26 @@
 //! — "an import written without one is invisible to a grep, which is
 //! exactly the case that matters".
 //!
-//! # Which direction this covers, and which it does not
+//! # Which direction this covers, and how both come to run it
 //!
 //! It reads a file from each crate, so it cannot sit in "the crate that
 //! owns the file" the way `src-tauri`'s `mutation_surface.rs` does
 //! (#159). `changed-packages` maps a changed path to the member
-//! directory containing it, so a branch touching only `commands.rs`
-//! selects `asterism-ui` and this test does not run on it.
+//! directory containing it, which alone would select `asterism-ui` for
+//! a branch touching only `commands.rs`, and this test would not run
+//! on it.
 //!
-//! Sitting here is the side that matters, and #136 is why: every one of
-//! the sixteen verbs it counted "landed in a change whose scope said
-//! `routes`, and nothing counted the other side afterwards". The drift
-//! that has actually happened is a route arriving without its command,
-//! and that branch touches `http.rs` and selects this crate. The
-//! opposite gap is real and left open on purpose — a command arriving
-//! without its route is caught one merge later, on `main`'s full run,
-//! which is the same trade `changed-packages` documents for every
-//! dependent it does not rebuild.
+//! Sitting here is the side #136 argued for: every one of the sixteen
+//! verbs it counted "landed in a change whose scope said `routes`, and
+//! nothing counted the other side afterwards", and a branch touching
+//! `http.rs` selects this crate. The opposite gap was first left open
+//! as a documented trade — a command arriving without its route caught
+//! one merge later, on `main`'s full run — and it collected: seven
+//! commands landed across three pull requests before that run said so.
+//! So `changed-packages` now names `commands.rs` as a file this test
+//! reads and selects this crate for it too, beside its sentinel
+//! exemptions, which is what holds both directions to the branch that
+//! made them.
 
 use std::collections::BTreeSet;
 use std::fs;
