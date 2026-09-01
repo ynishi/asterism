@@ -107,6 +107,7 @@ other.
 - `delete_series_strategy` — Removes a series rule and, by the schema's cascade, every key
 - `delete_session` — Deletes a Session — only when no `asset` row still references
 - `delete_tag` — Drops a tag channel and every link to it — the command twin of
+- `delete_team` — Deletes the team, which an owner may do and so may an instance
 - `delete_thread` — Deletes a Thread (cascades to messages).
 - `delete_thread_message` — Deletes one Message (misfire correction).
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
@@ -132,9 +133,11 @@ other.
 - `get_session` — Fetches one Session by surrogate id (`None` when absent). Used
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
+- `grant_team_owner` — Makes a member an owner.
 - `groups_of_asset` — Which Groups the asset already sits in — powers the "already
 - `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
+- `invite_team_member` — Invites an account into the team, in the role named.
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
 - `list_asset_comments` — Lists every comment on `asset_id` in chronological order.
@@ -213,6 +216,7 @@ other.
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
+- `remove_team_member` — Removes a member from the team.
 - `rename_dir` — Renames a Dir.
 - `rename_forge_line` — Moves the line's own description. Not a landing: nothing goes on the
 - `rename_forge_thread` — Names the conversation, or takes its name off.
@@ -231,6 +235,7 @@ other.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
 - `revoke_team_device_token` — Revokes one of this account's device tokens.
+- `revoke_team_owner` — Puts an owner back to being a member.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.

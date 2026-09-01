@@ -258,6 +258,11 @@
       "docs": "Drops a tag channel and every link to it — the command twin of\n`POST /asterism/tags/delete`. Unlike [`detach_tag`], this removes\nthe channel itself; there is no trash for tags."
     },
     {
+      "path": "asterism_ui::commands::delete_team",
+      "kind": "function",
+      "docs": "Deletes the team, which an owner may do and so may an instance\nadmin — the one verb in this group that standing outside the roster\nis enough for.\n\nIt takes the team's ledger with it. The confirmation that says so\nbelongs on the screen offering the act, not here."
+    },
+    {
       "path": "asterism_ui::commands::delete_thread",
       "kind": "function",
       "docs": "Deletes a Thread (cascades to messages)."
@@ -383,6 +388,11 @@
       "docs": "Fetches one Thread by id."
     },
     {
+      "path": "asterism_ui::commands::grant_team_owner",
+      "kind": "function",
+      "docs": "Makes a member an owner."
+    },
+    {
       "path": "asterism_ui::commands::groups_of_asset",
       "kind": "function",
       "docs": "Which Groups the asset already sits in — powers the \"already\nadded\" state on the detail-overlay dropdown."
@@ -396,6 +406,11 @@
       "path": "asterism_ui::commands::hydrate_cards",
       "kind": "function",
       "docs": "Batch-hydrates cards by id. Companion to `list_asset_index` —\nthe frontend calls this for the ~40 rows the VList is about\nto paint plus a small prefetch window. Ids that don't exist\nor are hidden from the viewer drop out of the response."
+    },
+    {
+      "path": "asterism_ui::commands::invite_team_member",
+      "kind": "function",
+      "docs": "Invites an account into the team, in the role named.\n\nThe invitee must already hold an account on the instance; an id\nnobody holds is refused as a malformed request rather than\nprovisioning anybody."
     },
     {
       "path": "asterism_ui::commands::jobs_stats",
@@ -788,6 +803,11 @@
       "docs": "Idempotent remove of an asset from a Group."
     },
     {
+      "path": "asterism_ui::commands::remove_team_member",
+      "kind": "function",
+      "docs": "Removes a member from the team.\n\nRemoving the last owner is refused with a `409`, which is a\ndifferent thing from a malformed request and arrives here as the\nsame `UiError` anyway: [`teams_error`] flattens every 4xx into a\nvalidation error and drops the token that separated them. So the\nscreen can say what happened only as far as the server's own\nsentence carries it. That flattening is #211's, not this command's."
+    },
+    {
       "path": "asterism_ui::commands::rename_dir",
       "kind": "function",
       "docs": "Renames a Dir."
@@ -876,6 +896,11 @@
       "path": "asterism_ui::commands::revoke_team_device_token",
       "kind": "function",
       "docs": "Revokes one of this account's device tokens.\n\nRevoking the row this machine is holding forgets it here too, so\nthe next launch shows the password form rather than presenting a\ntoken the server has already dropped. Revoking another machine's\nrow leaves this one alone — that is the point of the listing.\n\nThe revoke itself needs no identity rule: it goes down the live\nclient, so the connection it acts on is the connection in hand by\nconstruction. The rule applies to the second half, where the file\nis consulted — a handle is unique to the server that issued it, so\nthe stored pair has to name this connection before a matching\n`token_id` means the row just dropped was the one this machine\nholds. That is\n[`stored_connection`](crate::stored_connection)'s \"which connection\na verb acts on\", third case."
+    },
+    {
+      "path": "asterism_ui::commands::revoke_team_owner",
+      "kind": "function",
+      "docs": "Puts an owner back to being a member.\n\nThe last owner cannot be demoted, including by themself, and that\nrefusal reaches a screen the way [`remove_team_member`]'s does."
     },
     {
       "path": "asterism_ui::commands::say_in_forge_thread",

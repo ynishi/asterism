@@ -5,7 +5,7 @@
     {
       "path": "asterism_teams_wire::command",
       "kind": "module",
-      "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
+      "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nAn owner's roster writes are here too, and that is not an exception\nto the line above. They moved from `teams-contract` when an owner\ngained a screen to say them from (#210), and an owner saying them\nis a member's client saying them. The dividing line stays *who says\nit*: what an operator or an admin says from outside a team — the\nsubstrate's own upload, the purge, the head registry — stays where\nit was, because no client speaks it.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "asterism_teams_wire::command::CreateTeamCommand",
@@ -23,9 +23,19 @@
       "docs": "Brings content into a team against open work\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=sha256:<hex>`,\nmembers only — #148 decision 5).\n\nIts one field travels in the **query string**: the request body is\nthe content's raw bytes, streamed, so there is no JSON body for it\nto ride in (the OCI registry `PUT ?digest=` shape, #83 §3). What\nthe write leaves behind is what separates this from the substrate's\nown upload: it mints the team asset a round can name, and the work\nit entered against is the path's."
     },
     {
+      "path": "asterism_teams_wire::command::GrantOwnerCommand",
+      "kind": "struct",
+      "docs": "Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner\nonly). The resulting ledger event carries both the old and the new\nrole in its payload."
+    },
+    {
       "path": "asterism_teams_wire::command::HaveContentCommand",
       "kind": "struct",
       "docs": "Asks which digests a team already has\n(`POST /teams/{team_id}/forge/content/have`, members only).\n\n**This exists to avoid re-sending bytes and for nothing else.** It\nanswers inside one team, to that team's members, about digests the\ncaller is holding and could upload anyway — so what it reveals is\nwhat the asker could learn by uploading, minus the upload. That\nbound is the design rather than a caveat on it: the same question\nasked across teams, or by anyone outside one, is the deduplication\nside channel Harnik et al. (2010) describes, and #83 §3 closes it\nby making the link row the visibility boundary. This route is\ninside that boundary.\n\nA POST for a read, for [`ResolveContentCommand`]'s reason."
+    },
+    {
+      "path": "asterism_teams_wire::command::InviteMemberCommand",
+      "kind": "struct",
+      "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
     },
     {
       "path": "asterism_teams_wire::command::LoginCommand",
@@ -38,9 +48,19 @@
       "docs": "Asks for a device token (`POST /teams/auth/device`, #204).\n\nCarries no account: whose token it is comes from the session the\ngate resolved, which is what keeps the mint from being a way to\nissue a credential for somebody else."
     },
     {
+      "path": "asterism_teams_wire::command::RemoveMemberCommand",
+      "kind": "struct",
+      "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
+    },
+    {
       "path": "asterism_teams_wire::command::ResolveContentCommand",
       "kind": "struct",
       "docs": "Asks what a team holds for a list of its own asset ids\n(`POST /teams/{team_id}/forge/content/resolve`, members only).\n\nA body rather than a query string because the list is the request:\na client reconciling what it promoted asks about as many ids as it\nhas, and a URL is not where that belongs."
+    },
+    {
+      "path": "asterism_teams_wire::command::RevokeOwnerCommand",
+      "kind": "struct",
+      "docs": "Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,\nowner only). Revoking the last owner — including yourself — is a\n`409` (#83 §1: the last owner cannot self-demote)."
     },
     {
       "path": "asterism_teams_wire::dto",
