@@ -1008,6 +1008,39 @@ async fn the_roster_writes_go_over_the_client() {
     assert_eq!(deleted.kind, "teams.team.deleted/1");
 }
 
+/// A member takes themself out through the client, and an admin has
+/// nothing there to take out.
+#[tokio::test]
+async fn a_member_leaves_through_the_client() {
+    let h = harness().await;
+    let (_alice_id, alice) = member(&h, "alice").await;
+    let (bob_id, bob) = member(&h, "bob").await;
+    let team =
+        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    alice
+        .invite_member(team, &bob_id.to_string(), "member")
+        .await
+        .expect("invite bob");
+
+    let left = bob.leave_team(team).await.expect("bob leaves");
+    assert_eq!(left.kind, "teams.membership.removed/1");
+    assert_eq!(
+        left.actor_user_id,
+        bob_id.to_string(),
+        "stamped to the one leaving, which is what tells this from a removal"
+    );
+    assert_eq!(
+        alice.roster(team).await.unwrap().members.len(),
+        1,
+        "the roster is alice's again"
+    );
+
+    match alice.leave_team(team).await {
+        Err(TeamsClientError::Refused { status, .. }) => assert_eq!(status, 409),
+        other => panic!("the last owner should not be able to leave: {other:?}"),
+    }
+}
+
 /// The last owner cannot go, and what the client hands back says the
 /// team's state refused it rather than the request being wrong.
 ///

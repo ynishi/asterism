@@ -371,6 +371,7 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         .route("/teams/{team_id}/events", get(events))
         .route("/teams/{team_id}/members/invite", post(invite_member))
         .route("/teams/{team_id}/members/remove", post(remove_member))
+        .route("/teams/{team_id}/members/leave", post(leave_team))
         .route("/teams/{team_id}/owners/grant", post(grant_owner))
         .route("/teams/{team_id}/owners/revoke", post(revoke_owner))
         .route("/teams/{team_id}/blobs", put(upload_blob))
@@ -884,6 +885,43 @@ async fn remove_member(
             access.team_id,
             user_id,
             stamp(&account, capacity)?,
+            now_ms(),
+        )
+        .await?;
+    Ok(Json(event_dto(&event)?))
+}
+
+/// `POST /teams/{team_id}/members/leave` — any member, of themself
+/// (#210).
+///
+/// Not in the authority table, and that is the point of it. Every
+/// other verb here asks whether the caller may act on somebody else's
+/// row; this one asks nothing, because a member acting on their own
+/// membership needs no authority over anyone. What it does need is a
+/// membership: an instance admin passes the gate on their standing
+/// and holds no row, so there is nothing there to leave, and they get
+/// the same `403` the gate gives a stranger.
+///
+/// The last owner cannot go, the same refusal removing them raises,
+/// and the ledger appends the same kind — an entry reads as a
+/// departure rather than a removal when its actor and its subject are
+/// the same account.
+async fn leave_team(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+) -> Result<Json<LedgerEventDto>, ApiError> {
+    if access.role.is_none() {
+        return Err(ApiError::Forbidden(
+            "you hold no membership in this team to leave".to_string(),
+        ));
+    }
+    let event = ctx
+        .repo
+        .leave_team(
+            access.team_id,
+            account.user_id,
+            stamp(&account, Capacity::Member)?,
             now_ms(),
         )
         .await?;

@@ -463,6 +463,7 @@ pub fn run() {
             commands::remove_team_member,
             commands::grant_team_owner,
             commands::revoke_team_owner,
+            commands::leave_team,
             commands::delete_team,
         ])
         .run(tauri::generate_context!())

@@ -65,6 +65,21 @@ use crate::sqlite::map::{
 /// domain refusal (rolls it back explicitly).
 type TxOutcome<T> = Result<Result<T, DomainError>, rusqlite::Error>;
 
+/// Which of the domain's two spellings of the departure rule a write
+/// is making.
+///
+/// Both arms reach one invariant — the last owner cannot go — and the
+/// distinction is the caller's intent rather than a difference in
+/// what is checked. It is here rather than in the domain because the
+/// domain already carries it as two method names.
+#[derive(Clone, Copy)]
+enum Departure {
+    /// Somebody else took them out.
+    Removed,
+    /// They took themself out.
+    Voluntary,
+}
+
 /// SQLite repository for the teams plane — teams, memberships, blob
 /// links, locators, and the append-only ledger, all through the write
 /// rule in the module doc.
@@ -266,17 +281,64 @@ impl SqliteTeamsRepository {
         actor: LedgerActor,
         occurred_at_ms: i64,
     ) -> Result<LedgerEvent, DomainError> {
+        self.depart(team_id, user_id, actor, occurred_at_ms, Departure::Removed)
+            .await
+    }
+
+    /// A member takes themself out (#210).
+    ///
+    /// The same transition and the same last-owner rule, reached
+    /// through [`TeamRoster::check_leave`] because the going is
+    /// voluntary. The domain spells that rule twice so a caller says
+    /// which of the two acts it is making, and the two spellings
+    /// answer identically — a departure is refused on the state of the
+    /// roster rather than on whose hand is on it.
+    ///
+    /// The kind is the same for both, which the constant's own doc
+    /// says: an entry reads as a departure rather than a removal when
+    /// its actor and its subject are the same account.
+    pub async fn leave_team(
+        &self,
+        team_id: Uuid,
+        user_id: Uuid,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+    ) -> Result<LedgerEvent, DomainError> {
+        self.depart(
+            team_id,
+            user_id,
+            actor,
+            occurred_at_ms,
+            Departure::Voluntary,
+        )
+        .await
+    }
+
+    /// The write both departures make, with the domain's two spellings
+    /// of one rule selected by the caller.
+    async fn depart(
+        &self,
+        team_id: Uuid,
+        user_id: Uuid,
+        actor: LedgerActor,
+        occurred_at_ms: i64,
+        how: Departure,
+    ) -> Result<LedgerEvent, DomainError> {
         self.write_tx(move |tx| {
             let roster = match roster_in_tx(tx, team_id)? {
                 Ok(roster) => roster,
                 Err(refused) => return Ok(Err(refused)),
             };
-            if let Err(refused) = roster.check_remove(user_id) {
+            let checked = match how {
+                Departure::Removed => roster.check_remove(user_id),
+                Departure::Voluntary => roster.check_leave(user_id),
+            };
+            if let Err(refused) = checked {
                 return Ok(Err(refused));
             }
             let removed_role = roster
                 .role_of(user_id)
-                .expect("check_remove admitted the user, so the roster holds a role");
+                .expect("the check admitted the user, so the roster holds a role");
             tx.execute(
                 "DELETE FROM membership WHERE team_id = ?1 AND user_id = ?2",
                 params![team_id, user_id],

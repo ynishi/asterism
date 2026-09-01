@@ -452,6 +452,20 @@ impl TeamsClient {
         .await
     }
 
+    /// Takes the signed-in account out of the team
+    /// (`POST /teams/{team_id}/members/leave`).
+    ///
+    /// The one verb in this group asking no authority over anybody: a
+    /// member acting on their own membership needs none. What it does
+    /// ask is that there is a membership to leave — an instance admin
+    /// holds none and is refused — and that the team is not left
+    /// without an owner, which is the same `409` removing the last one
+    /// raises.
+    pub async fn leave_team(&self, team: TeamScopedId) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(&format!("/teams/{team}/members/leave"), "leave_team", &())
+            .await
+    }
+
     /// Deletes the team (`POST /teams/{team_id}/delete`), which an
     /// owner may do and so may an instance admin — the one verb in
     /// this group where standing outside the roster is enough.

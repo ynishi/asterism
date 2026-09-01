@@ -195,6 +195,7 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("grant_team_owner", "talks to a team, not to this process"),
     ("invite_team_member", "talks to a team, not to this process"),
+    ("leave_team", "talks to a team, not to this process"),
     ("list_shared_lines", "talks to a team, not to this process"),
     (
         "list_team_device_tokens",

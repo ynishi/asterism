@@ -3641,6 +3641,22 @@ pub async fn revoke_team_owner(
     Ok(())
 }
 
+/// Takes the signed-in account out of the team.
+///
+/// Reachable by any member, because leaving asks no authority over
+/// anybody. An instance admin holds no membership to leave and is
+/// refused; the last owner is refused too, and that refusal reaches a
+/// screen the way [`remove_team_member`]'s does.
+#[tauri::command]
+pub async fn leave_team(state: State<'_, AppState>, team_id_raw: String) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .leave_team(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
 /// Deletes the team, which an owner may do and so may an instance
 /// admin — the one verb in this group that standing outside the roster
 /// is enough for.

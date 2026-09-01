@@ -1193,6 +1193,33 @@ describe("the roster", () => {
     expect(sharedCatalog.roster.data).toBeNull();
     expect(sharedCatalog.said).toContain("no longer in");
   });
+
+  it("leaves a team and stops looking at it", async () => {
+    // The departure verb, distinct from removing yourself: the server
+    // refuses this one to somebody holding no membership rather than
+    // treating them as a removable row. What the panel does afterwards
+    // is the same either way.
+    sharedCatalog.teamId = "t1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "member", admin: false },
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.leaveTeam();
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "leave_team",
+      { teamIdRaw: "t1" },
+      "leave the team",
+    );
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+    expect(sharedCatalog.said).toContain("left");
+  });
 });
 
 describe("the connection this machine remembers", () => {

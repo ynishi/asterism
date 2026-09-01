@@ -826,19 +826,20 @@ class SharedCatalog {
     this.said = `Invited ${userId} as ${role}.`;
   }
 
-  /// Takes a member out of the team, which the reader may do to
-  /// themself.
+  /// Takes a member out of the team.
   ///
   /// The last owner cannot go, and the server says so — what arrives
   /// here is a refusal `mutate` puts on screen, worded by the server
   /// rather than guessed at before asking.
   ///
-  /// Removing yourself ends this window's relationship with the team,
-  /// so it takes `stopReading`'s path rather than the re-read. The
-  /// re-read would be refused by the gate the reader no longer passes,
-  /// and `Resource.load` turns a refusal into an error message under a
-  /// panel still pointed at the team, still drawing its lines, with
-  /// the picker still offering it.
+  /// The reader's own row offers `leaveTeam` rather than this, since
+  /// #210 gave departing a verb of its own. The server still permits
+  /// an owner to remove themself, so the case is handled here rather
+  /// than assumed away: it ends this window's relationship with the
+  /// team, and takes `stopReading`'s path rather than the re-read the
+  /// gate would now refuse. Without it `Resource.load` turns that
+  /// refusal into an error message under a panel still pointed at the
+  /// team, still drawing its lines, with the picker still offering it.
   async removeMember(userId: string): Promise<void> {
     const team = this.teamId;
     this.said = null;
@@ -880,6 +881,21 @@ class SharedCatalog {
     );
     await this.roster.load({ teamId: this.teamId });
     this.said = `${userId} is a member.`;
+  }
+
+  /// Takes the reader out of the team, and stops looking at it.
+  ///
+  /// Distinct from removing yourself, which the roster also allows an
+  /// owner: this one is the departure verb, and the server refuses it
+  /// to somebody holding no membership rather than treating them as a
+  /// removable row. The last owner cannot go by either.
+  async leaveTeam(): Promise<void> {
+    const team = this.teamId;
+    this.said = null;
+    await mutate<void>("leave_team", { teamIdRaw: team }, "leave the team");
+    this.stopReading();
+    await this.teams.load({});
+    this.said = `You have left ${team}.`;
   }
 
   /// Deletes the team, and stops looking at what is no longer there.

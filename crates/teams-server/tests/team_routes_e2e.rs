@@ -832,3 +832,91 @@ async fn the_roster_says_what_the_reader_may_do() {
 
     h.driver.shutdown().await.unwrap();
 }
+
+/// A member takes themself out, and the two callers who cannot (#210).
+///
+/// Leaving asks no authority over anybody, so it is not in the table
+/// the other membership verbs answer to. What it asks instead is that
+/// there is a membership to leave, which is the admin's refusal, and
+/// that the team is not left without an owner, which is the last
+/// owner's.
+#[tokio::test]
+async fn a_member_leaves_and_the_last_owner_cannot() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (bob_id, bob) = user(&h, "bob", false).await;
+    let (_op_id, op) = user(&h, "op", true).await;
+    let team = create_team(&h, &alice).await;
+    let leave_uri = format!("/teams/{team}/members/leave");
+
+    let (status, body) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": bob_id.to_string(), "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invite bob: {body}");
+
+    // An admin passes the gate on their standing and holds no row, so
+    // there is nothing there to leave.
+    let (status, refused) = call(
+        &h.router,
+        post_authed(&leave_uri, &op, serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an admin leaving: {refused}");
+
+    let (status, left) = call(
+        &h.router,
+        post_authed(&leave_uri, &bob, serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "bob leaves: {left}");
+    assert_eq!(left["kind"], "teams.membership.removed/1");
+    assert_eq!(
+        left["actor_user_id"],
+        bob_id.to_string(),
+        "the act is stamped to the one leaving, which is what tells a \
+         departure from a removal: {left}"
+    );
+
+    let (_, roster) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &alice),
+    )
+    .await;
+    assert_eq!(
+        roster["members"].as_array().expect("members").len(),
+        1,
+        "the roster is alice's again: {roster}"
+    );
+
+    // And the owner is now the last one.
+    let (status, refused) = call(
+        &h.router,
+        post_authed(&leave_uri, &alice, serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "the last owner cannot go, however the going is phrased: {refused}"
+    );
+    assert_eq!(refused["kind"], "Conflict");
+
+    let (_, after) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &alice),
+    )
+    .await;
+    assert_eq!(
+        after["members"].as_array().expect("members").len(),
+        1,
+        "the refusal moved nothing: {after}"
+    );
+
+    h.driver.shutdown().await.unwrap();
+}

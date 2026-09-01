@@ -253,6 +253,18 @@
     await sharedCatalog.removeMember(userId);
   }
 
+  async function askLeave() {
+    const ok = await confirmCatalog.open({
+      title: "Leave this team?",
+      body: "You lose everything it holds. What you did stays in its ledger, and getting back in takes an invitation.",
+      confirmLabel: "Leave",
+      danger: true,
+    });
+    if (!ok) return;
+    await sharedCatalog.leaveTeam();
+    teamField = "";
+  }
+
   async function askDeleteTeam() {
     const ok = await confirmCatalog.open({
       title: "Delete this team?",
@@ -859,15 +871,32 @@
                     {member.role}{#if member.user_id === sharedCatalog.session}
                       &nbsp;· you{/if}
                   </span>
-                  {#if iOwn}
-                    <!-- The reader's own row carries them too: an
-                         owner may step down, and may take themself
-                         out. The second is a removal rather than a
-                         departure — the ledger records it as one, and
-                         `leave` has no route — so the button says what
-                         it does. The case neither may reach is the
-                         last owner, and that is the team's state to
-                         refuse rather than this row's to guess at. -->
+                  {#if member.user_id === sharedCatalog.session}
+                    <!-- The reader's own row, and what it offers is
+                         leaving rather than removing. A member acting
+                         on their own membership asks no authority over
+                         anybody, so the verb is there whether or not
+                         they own the team — an owner also gets the
+                         step down beside it. The last owner is refused
+                         either way, and that is the team's state to
+                         refuse rather than this row's to guess ahead
+                         of. -->
+                    <span class="member-acts">
+                      {#if iOwn}
+                        <button
+                          type="button"
+                          onclick={() =>
+                            sharedCatalog.revokeOwner(member.user_id)}
+                          title="Step down to being a member of this team"
+                        >demote</button>
+                      {/if}
+                      <button
+                        type="button"
+                        onclick={askLeave}
+                        title="Take yourself out of this team"
+                      >leave</button>
+                    </span>
+                  {:else if iOwn}
                     <span class="member-acts">
                       {#if member.role === "owner"}
                         <button
