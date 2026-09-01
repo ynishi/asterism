@@ -3495,7 +3495,7 @@ pub async fn my_teams(state: State<'_, AppState>) -> Result<MyTeamsDto, UiError>
     })
 }
 
-/// Who is in a team, and in what role.
+/// Who is in a team, in what role, and what the reader may do there.
 ///
 /// Ids rather than names, because that is what a membership row holds
 /// — see [`TeamRosterMemberDto`]. The mapping is here for the reason

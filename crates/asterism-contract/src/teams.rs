@@ -145,7 +145,7 @@ pub struct MyTeamDto {
     pub created_at_ms: i64,
 }
 
-/// Who is in a team, and in what role.
+/// Who is in a team, in what role, and what the reader may do there.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamRosterDto {
     /// The team the roster describes.
@@ -158,12 +158,10 @@ pub struct TeamRosterDto {
 
 /// The reader's own standing in the team whose roster this is.
 ///
-/// Here because the rows cannot answer it. An instance admin reaches a
-/// team by standing outside it, so they hold no row, and a screen
-/// deriving a role from the rows reads that absence as "nothing you
-/// may do" — while what they may do is delete the team. The server's
-/// gate works this out to let the request through and says it here
-/// rather than leaving each surface to guess.
+/// This plane's mirror of the shape the team server answers with. Why
+/// the read carries it at all is argued where the team's own side
+/// writes it; what a reader here needs is that `role` is absent for a
+/// caller who holds no membership row, which an instance admin may be.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamRosterViewerDto {
     /// The reader's role, or nothing when they hold no membership row.

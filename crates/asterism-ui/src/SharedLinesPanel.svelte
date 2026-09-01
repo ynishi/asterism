@@ -222,11 +222,17 @@
   // member shown a control it cannot press is being offered a refusal.
   // The server decides regardless — this only decides what to offer.
   //
-  // An instance admin holds no membership row, so `iOwn` is false for
-  // them and the four member-shaped controls stay off their screen —
-  // which is right, because §1 grants an admin no implicit invite,
-  // remove or role change inside a team they do not own. Deleting is
-  // the one their standing does carry, so it asks a second question.
+  // An instance admin who holds no membership row has no role, so
+  // `iOwn` is false and the four member-shaped controls stay off their
+  // screen — which is right, because #83 §1 grants an admin no
+  // implicit invite, remove or role change inside a team they do not
+  // own. Deleting is the one their standing does carry, so it asks a
+  // second question.
+  //
+  // An admin who is also a member of this team is an ordinary member
+  // of it here: they hold a row, `iOwn` reads it, and the controls
+  // follow the role rather than the standing. The two are separate
+  // fields for that reason.
   const iOwn = $derived(sharedCatalog.myRole === "owner");
   const mayDelete = $derived(iOwn || sharedCatalog.iAmAdmin);
 
@@ -251,6 +257,10 @@
     });
     if (!ok) return;
     await sharedCatalog.removeMember(userId);
+    // Removing yourself ends the connection to this team, and the
+    // field above still holds its id — the same tidy leaving and
+    // deleting do, for the same reason.
+    if (userId === sharedCatalog.session) teamField = "";
   }
 
   async function askLeave() {
@@ -933,10 +943,12 @@
                  working it. Founding sits outside the tabs because it
                  is about no team in particular; this is not that.
 
-                 The one control here an instance admin reaches, and
-                 the only place on this tab where their standing shows:
-                 the rows above offer them nothing, because §1 gives an
-                 admin no implicit membership verbs. -->
+                 The one control on this tab an instance admin reaches
+                 by standing alone: an admin holding no row in this
+                 team is offered nothing above, because #83 §1 gives
+                 them no implicit membership verbs. One who is also a
+                 member of it gets whatever their role gets, here and
+                 above, like anybody else. -->
             <button type="button" class="delete-team" onclick={askDeleteTeam}>
               Delete this team
             </button>

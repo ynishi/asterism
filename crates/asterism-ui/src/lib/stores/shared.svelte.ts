@@ -857,11 +857,17 @@ class SharedCatalog {
   /// The reader's own row offers `leaveTeam` rather than this, since
   /// #210 gave departing a verb of its own. The server still permits
   /// an owner to remove themself, so the case is handled here rather
-  /// than assumed away: it ends this window's relationship with the
-  /// team, and takes `stopReading`'s path rather than the re-read the
-  /// gate would now refuse. Without it `Resource.load` turns that
-  /// refusal into an error message under a panel still pointed at the
-  /// team, still drawing its lines, with the picker still offering it.
+  /// than assumed away: it ends this window's membership, and takes
+  /// `stopReading`'s path rather than the re-read.
+  ///
+  /// Not because the re-read would always be refused — an instance
+  /// admin who was also a member still passes the gate afterwards, on
+  /// the standing that is not a row — but because the panel would
+  /// otherwise keep drawing a team this reader is no longer in, which
+  /// is true of both. For the reader who holds nothing else the gate
+  /// does refuse it, and `Resource.load` turns that refusal into an
+  /// error message under a panel still pointed at the team, still
+  /// drawing its lines, with the picker still offering it.
   async removeMember(userId: string): Promise<void> {
     const team = this.teamId;
     this.said = null;

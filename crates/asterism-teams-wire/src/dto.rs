@@ -129,8 +129,8 @@ pub struct TeamCreatedDto {
     pub event: LedgerEventDto,
 }
 
-/// The team's current membership set
-/// (`GET /teams/{team_id}/roster`).
+/// The team's current membership set, and what the caller may do in
+/// it (`GET /teams/{team_id}/roster`).
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct RosterDto {
     /// The team the roster describes.

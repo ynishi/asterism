@@ -359,7 +359,8 @@ impl TeamsClient {
         self.get("/teams", "my_teams").await
     }
 
-    /// The team's current membership set.
+    /// The team's current membership set, and what this session may do
+    /// in it.
     pub async fn roster(&self, team: TeamScopedId) -> Result<RosterDto, TeamsClientError> {
         self.get(&format!("/teams/{team}/roster"), "roster").await
     }
