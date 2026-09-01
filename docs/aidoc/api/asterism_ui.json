@@ -420,7 +420,7 @@
     {
       "path": "asterism_ui::commands::leave_team",
       "kind": "function",
-      "docs": "Takes the signed-in account out of the team.\n\nReachable by any member, because leaving asks no authority over\nanybody. An instance admin holds no membership to leave and is\nrefused; the last owner is refused too, and that refusal reaches a\nscreen the way [`remove_team_member`]'s does."
+      "docs": "Takes the signed-in account out of the team.\n\nReachable by any member, because leaving asks no authority over\nanybody. A caller holding no membership row has nothing to leave\nand is refused; the last owner is refused too, and that refusal\nreaches a screen the way [`remove_team_member`]'s does."
     },
     {
       "path": "asterism_ui::commands::link_group",

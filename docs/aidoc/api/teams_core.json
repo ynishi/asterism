@@ -225,7 +225,7 @@
     {
       "path": "teams_core::domain::ledger::MEMBERSHIP_REMOVED",
       "kind": "constant",
-      "docs": "A member left or was removed."
+      "docs": "A member left or was removed.\n\n**One kind for both, and what separates them is inside the entry**:\nit reads as a departure when the actor is also the subject, and as\na removal when it is not. Every reader that needs to tell the two\napart reads it here rather than off a second kind.\n\nA second kind was the alternative and costs more than it gives.\nThe stream is append-only, so a new spelling separates the two only\nfrom the moment it is added: every departure written before it goes\non reading as a removal, and every reader carries both kinds\nforever to cover a distinction one of them already makes. This one\nanswers the same about a row written before anybody thought to ask."
     },
     {
       "path": "teams_core::domain::ledger::ROLE_CHANGED",
