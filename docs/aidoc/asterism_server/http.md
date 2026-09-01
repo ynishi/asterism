@@ -84,10 +84,11 @@ deliberate. The sixteen-verb debt #136 counted is what that
 reasoning cost while nobody counted; the check is the answer to the
 question #136 left open and pointed at #124.
 
-One direction of that check runs later than the other. The test
-reads a file from each crate and sits in this one, so a branch
-touching only the desktop's commands does not select it — its own
-doc says why that side was chosen.
+Both directions of that check run on the branch that owes them:
+the test reads a file from each crate and sits in this one, and
+`changed-packages` names the desktop's command module so a branch
+touching only that file selects this crate too. The test's own doc
+says why it sits on this side.
 
 ## Functions
 

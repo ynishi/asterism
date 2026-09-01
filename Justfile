@@ -1451,16 +1451,15 @@ changed-packages:
         fi
     done
 
-    # The mapping above is a proxy for "which crates could this
-    # break", and a test that reads a file out of another member's
-    # directory is where the proxy is wrong in the direction that
-    # costs: `asterism-server`'s `transport_parity` test parses the
-    # desktop's command module, so a branch editing only that file
-    # selected `asterism-ui` alone, and seven commands landed across
-    # three pull requests with `main`'s full run as the first thing to
-    # say so. Named one file at a time, like the sentinel exemptions
-    # above, and for the same reason: a rule nobody sees reads as
-    # coverage.
+    # Where that proxy is wrong *across* members, the way `fixtures/`
+    # and `scripts/` are where it is wrong outside them:
+    # `asterism-server`'s `transport_parity` test parses the desktop's
+    # command module, so a branch editing only that file selected
+    # `asterism-ui` alone, and team verbs landed across #199, #201 and
+    # #203 with `main`'s full run as the first thing to say so. Named
+    # one file at a time, and announced, because a package with no
+    # changed path under it would otherwise read as a bug in this
+    # recipe.
     if printf '%s\n' "$attributable" \
         | grep -qxF 'crates/asterism-ui/src-tauri/src/commands.rs'; then
         echo "crates/asterism-ui/src-tauri/src/commands.rs is read by" >&2
@@ -1479,7 +1478,8 @@ changed-packages:
 # Test the packages this branch touched (pre-push's narrow suite).
 #
 # One limit, stated because a narrower gate that reads as a full one is
-# worse than no gate: it names packages a change *edited*, not packages
+# worse than no gate: it names packages a change *edited* — plus the
+# one cross-member file `changed-packages` singles out — not packages
 # that depend on them. Editing `asterism-core` does not test
 # `asterism-server` here, and it is `main`'s own run that catches what
 # that misses — a pull request's run asks this same narrow question.
@@ -1573,7 +1573,7 @@ rust-test-changed:
         echo "That is every member this branch touched; no Rust test to run."
         exit 0
     fi
-    echo "Testing what this branch touched:$(printf ' %s' $run)"
+    echo "Testing what this branch's diff calls for:$(printf ' %s' $run)"
     echo "Dependents of these are not run here — main's run covers them."
     just rust-test-pkg $run
 
@@ -1608,7 +1608,7 @@ rust-clippy-changed:
         echo "No workspace member changed; no Rust lint to run."
         exit 0
     fi
-    echo "Linting what this branch touched:$(printf ' %s' $packages)"
+    echo "Linting what this branch's diff calls for:$(printf ' %s' $packages)"
     status=0
     for pkg in $packages; do
         echo

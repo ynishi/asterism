@@ -38,12 +38,10 @@
 //! nothing counted the other side afterwards", and a branch touching
 //! `http.rs` selects this crate. The opposite gap was first left open
 //! as a documented trade — a command arriving without its route caught
-//! one merge later, on `main`'s full run — and it collected: seven
-//! commands landed across three pull requests before that run said so.
-//! So `changed-packages` now names `commands.rs` as a file this test
-//! reads and selects this crate for it too, beside its sentinel
-//! exemptions, which is what holds both directions to the branch that
-//! made them.
+//! one merge later, on `main`'s full run — and it collected.
+//! `changed-packages` now names `commands.rs` as a file this test
+//! reads and selects this crate for it too; the case for that rule
+//! sits with the rule, in the recipe.
 
 use std::collections::BTreeSet;
 use std::fs;
