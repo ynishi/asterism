@@ -430,6 +430,23 @@ class SharedCatalog {
     "sharedCatalog.roster",
   );
 
+  /// The role the reader holds in the team now named, read off the
+  /// roster they are looking at.
+  ///
+  /// `null` covers two situations this cannot tell apart: the roster
+  /// has not been read, and the reader holds no row in it. The second
+  /// is what an instance admin looks like — they reach a team by
+  /// standing outside it rather than by joining it (#83 §1), so no
+  /// membership set describes them. The server decides every one of
+  /// these verbs regardless of what this says; hiding a control is
+  /// about not offering somebody a refusal, not about enforcement.
+  get myRole(): string | null {
+    if (this.session === null) return null;
+    const rows = this.roster.data?.members;
+    if (!rows) return null;
+    return rows.find((member) => member.user_id === this.session)?.role ?? null;
+  }
+
   /// The work against the open line, open and ended alike.
   ///
   /// Read from the server like everything else here. A pursuit on this
@@ -780,6 +797,82 @@ class SharedCatalog {
     // person who just founded a team is the likeliest to pick it.
     await this.teams.load({});
     return created.team_id;
+  }
+
+  /// Lets an account into the team, in the role named.
+  ///
+  /// Re-reads the roster afterwards rather than adding a row from what
+  /// the write answered, for the reason `pursuits` gives: this is
+  /// somebody else's server, and what it holds now is its answer to
+  /// give rather than one worked out here.
+  async inviteMember(userId: string, role: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "invite_team_member",
+      { teamIdRaw: this.teamId, userId, role },
+      "invite that account",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `Invited ${userId} as ${role}.`;
+  }
+
+  /// Takes a member out of the team.
+  ///
+  /// The last owner cannot go, and the server says so — what arrives
+  /// here is a refusal `mutate` puts on screen, worded by the server
+  /// rather than guessed at before asking.
+  async removeMember(userId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "remove_team_member",
+      { teamIdRaw: this.teamId, userId },
+      "remove that member",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `Removed ${userId}.`;
+  }
+
+  /// Makes a member an owner.
+  async grantOwner(userId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "grant_team_owner",
+      { teamIdRaw: this.teamId, userId },
+      "make that member an owner",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `${userId} is an owner.`;
+  }
+
+  /// Puts an owner back to being a member, which the last owner cannot
+  /// do even to themself.
+  async revokeOwner(userId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "revoke_team_owner",
+      { teamIdRaw: this.teamId, userId },
+      "take back the owner role",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `${userId} is a member.`;
+  }
+
+  /// Deletes the team, and stops looking at what is no longer there.
+  ///
+  /// Everything read about this team is dropped rather than left to go
+  /// stale: the panel would otherwise keep drawing a roster, a ledger
+  /// and a line list belonging to something the server no longer has.
+  async deleteTeam(): Promise<void> {
+    const gone = this.teamId;
+    this.said = null;
+    await mutate<void>("delete_team", { teamIdRaw: gone }, "delete the team");
+    this.teamId = "";
+    this.closeLine();
+    this.roster.reset();
+    this.lines.reset();
+    this.forgetLedger();
+    await this.teams.load({});
+    this.said = `Deleted team ${gone}.`;
   }
 
   /// Drops the walk. The ledger belongs to a team and to a connection,

@@ -1050,6 +1050,114 @@ describe("the roster", () => {
     expect(made).toBe("t9");
     expect(sharedCatalog.said).toContain("t9");
   });
+
+  it("reads the caller's own role off the rows it already has", async () => {
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "member" },
+      ],
+    });
+
+    await sharedCatalog.roster.load({ teamId: "t1" });
+
+    expect(sharedCatalog.myRole).toBe("owner");
+  });
+
+  it("says nothing about a reader the roster has no row for", async () => {
+    // Which is what an instance admin looks like: they reach a team by
+    // standing outside it, so a membership set has nothing to say
+    // about them. An unread roster answers the same `null`, and this
+    // getter cannot tell the two apart.
+    sharedCatalog.session = "an-admin";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+    });
+
+    await sharedCatalog.roster.load({ teamId: "t1" });
+
+    expect(sharedCatalog.myRole).toBeNull();
+  });
+
+  it("re-reads the roster after letting somebody in", async () => {
+    sharedCatalog.teamId = "t1";
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "member" },
+      ],
+    });
+
+    await sharedCatalog.inviteMember("u2", "member");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "invite_team_member",
+      { teamIdRaw: "t1", userId: "u2", role: "member" },
+      "invite that account",
+    );
+    expect(sharedCatalog.roster.data?.members).toHaveLength(2);
+  });
+
+  it("names each of the three member-shaped writes to its own command", async () => {
+    sharedCatalog.teamId = "t1";
+    const rows = {
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+    };
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.removeMember("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "remove_team_member",
+      { teamIdRaw: "t1", userId: "u2" },
+      "remove that member",
+    );
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.grantOwner("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "grant_team_owner",
+      { teamIdRaw: "t1", userId: "u2" },
+      "make that member an owner",
+    );
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.revokeOwner("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "revoke_team_owner",
+      { teamIdRaw: "t1", userId: "u2" },
+      "take back the owner role",
+    );
+  });
+
+  it("stops looking at a team it deleted", async () => {
+    sharedCatalog.teamId = "t1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.deleteTeam();
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "delete_team",
+      { teamIdRaw: "t1" },
+      "delete the team",
+    );
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+  });
 });
 
 describe("the connection this machine remembers", () => {
