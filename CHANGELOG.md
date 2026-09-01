@@ -61,7 +61,11 @@ and this project adheres to
 
   The ledger records it under the kind a removal takes, which is what that
   kind's own doc has said since it was written — an entry reads as a departure
-  rather than a removal when its actor and its subject are the same account.
+  rather than a removal when its actor and its subject are the same account, and
+  the ledger tab now says which of the two it read. A kind of its own was the
+  alternative and costs more than it gives: the stream is append-only, so a
+  second spelling would split one act at the point it was added, leaving every
+  departure before it reading as a removal and every reader needing both.
   `TeamRoster::check_leave` finally has a caller: the domain spelled that rule
   twice so a write could say which of the two acts it is making, and the two
   spellings answer identically, because a departure is refused on the state of
