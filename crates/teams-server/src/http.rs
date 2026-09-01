@@ -138,10 +138,7 @@ use axum::{Extension, Json, Router};
 // in one module would read as one.
 use asterism_core::DomainError as ForgeError;
 use http_body_util::BodyExt as _;
-use teams_contract::command::{
-    GrantOwnerCommand, InviteMemberCommand, RemoveMemberCommand, RevokeOwnerCommand,
-    UploadBlobCommand,
-};
+use teams_contract::command::UploadBlobCommand;
 use teams_contract::dto::{
     BlobUploadedDto, HeadPublishedDto, MarkedBlobLinkDto, MarkedBlobsDto, PurgeReclaimedDto,
 };
@@ -162,7 +159,8 @@ use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // answer to "does a client say this", and nothing else changed about
 // any of them.
 use asterism_teams_wire::command::{
-    CreateTeamCommand, DeviceLoginCommand, LoginCommand, MintDeviceTokenCommand,
+    CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand,
+    MintDeviceTokenCommand, RemoveMemberCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
     DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto, LedgerEventDto, LedgerPageDto,
