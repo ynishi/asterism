@@ -139,6 +139,7 @@ other.
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
 - `invite_team_member` — Invites an account into the team, in the role named.
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
+- `leave_team` — Takes the signed-in account out of the team.
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
 - `list_asset_comments` — Lists every comment on `asset_id` in chronological order.
 - `list_asset_index` — Index-only grid listing for 6-figure result sets. Returns

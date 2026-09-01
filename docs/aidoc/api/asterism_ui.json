@@ -418,6 +418,11 @@
       "docs": "Snapshot of the apalis `Jobs` table used by the UI progress\nbanner. Polled every few seconds by the front-end. Mapped to the\ncontract wire form so the shape reaches `bindings.ts` through\nschema-bridge (the infra type stays off the contract layer)."
     },
     {
+      "path": "asterism_ui::commands::leave_team",
+      "kind": "function",
+      "docs": "Takes the signed-in account out of the team.\n\nReachable by any member, because leaving asks no authority over\nanybody. An instance admin holds no membership to leave and is\nrefused; the last owner is refused too, and that refusal reaches a\nscreen the way [`remove_team_member`]'s does."
+    },
+    {
       "path": "asterism_ui::commands::link_group",
       "kind": "function",
       "docs": "Connects a Group into another Group (cycle- / persona-guarded)."
