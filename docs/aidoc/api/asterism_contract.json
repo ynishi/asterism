@@ -1228,9 +1228,34 @@
       "docs": "What a promotion left behind, as a screen needs to read it.\n\nThe client's own outcome carries more — the relation key whole, and\nthe pursuit as it now reads — and neither crosses. The key's team\nand line are what the caller passed in, so answering with them\nwould be handing back an argument; the pursuit is a `ForgePursuitDto`\nthe work surface re-reads for itself, and returning a second copy\nwould give two screens two answers about one piece of work.\n\nWhat is here is what only the promotion knows."
     },
     {
+      "path": "asterism_contract::teams::StoredTeamConnectDto",
+      "kind": "struct",
+      "docs": "What came of trying to connect from what this machine had stored\n(#204).\n\nThree outcomes rather than two, and the third is why this is a\nshape rather than a `boolean`: a window that was never remembered\nand one whose token has been revoked both end at the password form,\nbut only the second is worth telling somebody about."
+    },
+    {
+      "path": "asterism_contract::teams::StoredTeamConnectOutcome",
+      "kind": "enum",
+      "docs": "The three ends of a silent reconnect.\n\n**None of them is a failure.** A reconnect nobody asked for is\nattempted whenever the panel opens, so a refusal reported as an\nerror would put a message in front of somebody who did nothing. A\nserver that is unreachable or shouting is a different matter and\ndoes reach the caller as an error, because that is a fact about the\nattempt rather than about the stored credential."
+    },
+    {
+      "path": "asterism_contract::teams::StoredTeamConnectionDto",
+      "kind": "struct",
+      "docs": "What this machine remembers about a team server, none of which\nauthenticates anybody (#204).\n\nThe connect form pre-fills from this. Where the halves live and why\nthe token is not among them is on `stored_connection` in the\ndesktop binary, which owns both stores."
+    },
+    {
       "path": "asterism_contract::teams::TeamCreatedDto",
       "kind": "struct",
       "docs": "What founding a team answers with.\n\nThe id alone. The wire's version carries the ledger event the\ncreation appended as well, and a screen has somewhere better to\nread that — the ledger tab, where every act of the team's is. What\na create form needs is the id, because that is what the field above\nthe tabs wants next."
+    },
+    {
+      "path": "asterism_contract::teams::TeamDeviceTokenDto",
+      "kind": "struct",
+      "docs": "One device token as its owner sees it.\n\n**Nothing here authenticates anybody** — not the token, not its\nhash, not a prefix of either — which is what lets a listing exist\nat all. The wire shape this maps from states the same property; it\nis repeated because it is the reason a screen may draw these rows\nand the reason `id` is safe in a file."
+    },
+    {
+      "path": "asterism_contract::teams::TeamDeviceTokensDto",
+      "kind": "struct",
+      "docs": "The device tokens this window's account holds, on whatever machines\n(#204).\n\nOwner-scoped, which the route decides and the wire's own\n`DeviceTokensDto` argues: there is no admin-facing sibling, and\nnothing here takes an account to ask about."
     },
     {
       "path": "asterism_contract::teams::TeamLedgerEventDto",

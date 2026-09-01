@@ -13,6 +13,11 @@
       "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
     },
     {
+      "path": "asterism_teams_wire::command::DeviceLoginCommand",
+      "kind": "struct",
+      "docs": "Presents a device token to `POST /teams/auth/device/login` (#204).\n\nAnswers with the same session the password arm answers with —\ndevice tokens sit in front of sessions rather than replacing them,\nso a client that has logged in this way is holding an ordinary\nsession and everything downstream of the gate is unchanged.\n\n**No derived `Debug`**, for the reason\n[`SessionDto`](crate::dto::SessionDto)'s hand-written one gives:\nthis body carries the one credential a client's disk is allowed to\nhold."
+    },
+    {
       "path": "asterism_teams_wire::command::EnterContentCommand",
       "kind": "struct",
       "docs": "Brings content into a team against open work\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=sha256:<hex>`,\nmembers only — #148 decision 5).\n\nIts one field travels in the **query string**: the request body is\nthe content's raw bytes, streamed, so there is no JSON body for it\nto ride in (the OCI registry `PUT ?digest=` shape, #83 §3). What\nthe write leaves behind is what separates this from the substrate's\nown upload: it mints the team asset a round can name, and the work\nit entered against is the path's."
@@ -28,6 +33,11 @@
       "docs": "Presents a credential to `POST /teams/auth/login`."
     },
     {
+      "path": "asterism_teams_wire::command::MintDeviceTokenCommand",
+      "kind": "struct",
+      "docs": "Asks for a device token (`POST /teams/auth/device`, #204).\n\nCarries no account: whose token it is comes from the session the\ngate resolved, which is what keeps the mint from being a way to\nissue a credential for somebody else."
+    },
+    {
       "path": "asterism_teams_wire::command::ResolveContentCommand",
       "kind": "struct",
       "docs": "Asks what a team holds for a list of its own asset ids\n(`POST /teams/{team_id}/forge/content/resolve`, members only).\n\nA body rather than a query string because the list is the request:\na client reconciling what it promoted asks about as many ids as it\nhas, and a URL is not where that belongs."
@@ -41,6 +51,21 @@
       "path": "asterism_teams_wire::dto::ContentEnteredDto",
       "kind": "struct",
       "docs": "What the team minted for content that entered it\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).\n\nThe asset id is the team's own surrogate and never a local one\n(#148 decision 6): a client keeps the correspondence on its own\nmachine, and reading this as a local `AssetId` is the one thing\nthat boundary forbids."
+    },
+    {
+      "path": "asterism_teams_wire::dto::DeviceTokenDto",
+      "kind": "struct",
+      "docs": "One device token as its owner sees it.\n\n**`Debug` is derived, and that is the property worth checking:**\nnothing on this shape authenticates anybody — not the token, not\nits hash, not a prefix of either — which is what lets the listing\nexist at all."
+    },
+    {
+      "path": "asterism_teams_wire::dto::DeviceTokenMintedDto",
+      "kind": "struct",
+      "docs": "A freshly minted device token (`POST /teams/auth/device`, #204).\n\n**No derived `Debug`**, for the reason [`SessionDto`]'s\nhand-written one gives. The difference worth stating here is how\nlong the value is useful for: a session dies in hours, this is the\ncredential a client puts in an OS keychain and presents after a\nrestart, so a copy of it that leaked into a log is a copy that\nworks for months."
+    },
+    {
+      "path": "asterism_teams_wire::dto::DeviceTokensDto",
+      "kind": "struct",
+      "docs": "The caller's own device tokens (`GET /teams/auth/device`, #204).\n\nOwner-scoped, and there is no admin-facing sibling: what an\ninstance's other accounts have stored on their machines is theirs\nto see and revoke."
     },
     {
       "path": "asterism_teams_wire::dto::HeldAssetDto",
@@ -90,7 +115,7 @@
     {
       "path": "asterism_teams_wire::dto::SessionDto",
       "kind": "struct",
-      "docs": "A freshly minted session (`POST /teams/auth/login`).\n\n**No derived `Debug`** — see the hand-written one below. This is\nthe one shape in this crate carrying a live credential."
+      "docs": "A freshly minted session (`POST /teams/auth/login`, and\n`POST /teams/auth/device/login` — one session shape, whichever arm\nissued it).\n\n**No derived `Debug`** — see the hand-written one below, which is\nwhere this crate's rule about formatting a live credential is\nstated."
     },
     {
       "path": "asterism_teams_wire::dto::SubjectRefDto",

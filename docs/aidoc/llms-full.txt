@@ -609,7 +609,12 @@ and an actor's display name is a snapshot rather than a lookup.
 - `MyTeamDto` — One team the account belongs to.
 - `MyTeamsDto` — The teams this window's account belongs to.
 - `PromotedAssetDto` — What a promotion left behind, as a screen needs to read it.
+- `StoredTeamConnectDto` — What came of trying to connect from what this machine had stored
+- `StoredTeamConnectOutcome` — The three ends of a silent reconnect.
+- `StoredTeamConnectionDto` — What this machine remembers about a team server, none of which
 - `TeamCreatedDto` — What founding a team answers with.
+- `TeamDeviceTokenDto` — One device token as its owner sees it.
+- `TeamDeviceTokensDto` — The device tokens this window's account holds, on whatever machines
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
 - `TeamRosterDto` — Who is in a team, and in what role.
@@ -14200,9 +14205,11 @@ session token → user_id → membership gate).
 ## Types
 
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
+- `DeviceLoginCommand` — Presents a device token to `POST /teams/auth/device/login` (#204).
 - `EnterContentCommand` — Brings content into a team against open work
 - `HaveContentCommand` — Asks which digests a team already has
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
+- `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 
 
@@ -14219,6 +14226,9 @@ its own (#83 §1).
 ## Types
 
 - `ContentEnteredDto` — What the team minted for content that entered it
+- `DeviceTokenDto` — One device token as its owner sees it.
+- `DeviceTokenMintedDto` — A freshly minted device token (`POST /teams/auth/device`, #204).
+- `DeviceTokensDto` — The caller's own device tokens (`GET /teams/auth/device`, #204).
 - `HeldAssetDto` — One asset a team holds, as the bulk resolve answers about it.
 - `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
@@ -14228,7 +14238,7 @@ its own (#83 §1).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set
 - `RosterMemberDto` — One membership row as the roster lists it.
-- `SessionDto` — A freshly minted session (`POST /teams/auth/login`).
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
 
@@ -14316,6 +14326,7 @@ covered those paths either.
 - [`commands`](commands.md): Tauri command handlers — a thin translation layer. They pass DTOs
 - [`error`](error.md): `UiError` — error type crossed by Tauri command handlers.
 - [`state`](state.md): `AppState` — service DI + backend initialisation.
+- [`stored_connection`](stored_connection.md): What this machine remembers about a team server between windows
 
 
 <!-- asterism_ui/commands.md -->
@@ -14406,6 +14417,7 @@ other.
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `close_shared_pursuit` — Ends work on a shared line, landing it or abandoning it.
 - `connect_team_server` — Logs this window in to a team server and holds the session.
+- `connect_team_server_stored` — Reconnects from the device token this machine holds, without asking
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
 - `create_group` — Creates a Group under the given persona.
@@ -14432,7 +14444,7 @@ other.
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
 - `detach_tag_batch` — Detaches one tag from many assets in one call.
 - `discard_forge_line` — Takes the line, its history and every piece of work against it.
-- `disconnect_team_server` — Drops the session. The panel goes empty rather than stale.
+- `disconnect_team_server` — Drops the session, and drops what this machine was keeping.
 - `dispatch_run` — Live-source dispatch (`dispatch_run`): freezes a Group (query
 - `edit_asset_comment` — Rewrites the body of an existing comment (stamps `edited_at`).
 - `edit_chapter_mark` — Retitles a section and, unlike the mark face, may move it: the reason
@@ -14491,6 +14503,7 @@ other.
 - `list_streams` — The stream names [`list_observations`]'s `stream` filter accepts —
 - `list_tag_counts` — Sidebar Tags section — every tag paired with the number of
 - `list_tag_suggestions` — Lists what the bound visual model proposed for one asset (#112),
+- `list_team_device_tokens` — The device tokens this account holds, on whatever machines.
 - `list_thread_messages` — Lists the Messages of a Thread.
 - `list_threads` — Lists Threads under the given anchor, freshest first. Archived
 - `merge_assets` — The manual merge verb: a person's ruling that a set of rows is one
@@ -14549,6 +14562,7 @@ other.
 - `restore_asset` — Returns a trashed asset to the live set.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
+- `revoke_team_device_token` — Revokes one of this account's device tokens.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
@@ -14562,6 +14576,7 @@ other.
 - `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `shared_pursuit` — One piece of work on a shared line, as it stands.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
+- `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_roster` — Who is in a team, and in what role.
 - `team_server_session` — Whether this window is talking to a team server.
@@ -14621,6 +14636,187 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+- `TeamsConnection` — A live team session, and the pair that names it.
+
+
+<!-- asterism_ui/stored_connection.md -->
+# asterism-ui::stored_connection
+
+What this machine remembers about a team server between windows
+(#204).
+
+# The invariant
+
+**The disk never holds a primary credential.** Not the password,
+not anything a verifier issued. The one credential this machine may
+keep is a device token the server minted — expiring, listable and
+revocable — and it lives in the OS keychain, never in a file.
+Everything else worth remembering is not a credential at all, and
+that half lives in the profile home as ordinary JSON.
+
+Two stores, and the split is the rule rather than a convenience:
+anything reaching [`write_metadata`] is by construction something a
+reader of the file may see, and the only value that does not go
+through it is the token, which has no path to a file from anywhere
+in this module.
+
+# Why the pair is keyed by server and login
+
+One stored connection per server URL and login is the shape the
+issue settles on, so [`account_key`] is the whole identity of an
+entry: presenting a token minted for one account to another server
+is not a case this module can reach, because the key that found the
+token names both.
+
+# Which connection a verb acts on
+
+**A verb touches the stored state only when the stored metadata
+names the connection in hand** — same server, same login, compared
+by [`StoredConnection::names`]. The two stores answer different
+questions and only one of them is about the window: the file says
+what this machine was last told to remember, and the session says
+what it is talking to now. They agree on the ordinary path and come
+apart on a real one — a remembered server that was down when the
+panel opened leaves its metadata in place, the connect form is
+editable over the values it pre-filled, and the next thing signed
+in to is somebody else.
+
+Without the rule, a verb reading the file alone acts on the wrong
+connection twice over: it sends one server's revocation handle to
+another, where it is an idempotent `204` that deletes nothing, and
+it drops the first server's entry while the row it names lives out
+its ninety days. Signing out would then revoke nothing and forget
+everything. So the file is a claim to be checked rather than an
+instruction to be followed, and a verb that cannot match it does
+the half it is sure of — end the session — and leaves the rest
+alone.
+
+[`remember_this_device`](crate::commands) and
+[`disconnect_team_server`](crate::commands) are where this is
+applied, and `revoke_team_device_token` is the third: it revokes on
+the live client, which is the connection in hand by construction,
+and consults the file only to decide whether the row it just
+dropped was this machine's own.
+
+# What a remember retires, and in what order
+
+**The file is the sole index of the keychain.** Nothing here
+enumerates entries, and nothing else in the app holds a list of
+them, so an entry the file does not name is reachable from neither
+store — the "credential nothing knows how to revoke" [`forget`]
+exists to prevent, arrived at by a third door. That makes the order
+of a remember's writes part of the invariant rather than a detail
+of one function: the displaced entry goes first, the file second,
+and the entry the file has just named last.
+
+A crash inside that order leaves one of two states, and which one
+turns on whether the pair being written is the pair being
+displaced. A **new pair** lands in the state the next launch
+already repairs — a file naming a pair whose entry is missing,
+which `connect_team_server_stored` answers by dropping the metadata
+and showing the password form.
+
+**The same pair remembered twice is the exception**, because
+[`retire_replaced`] returns early there by design: nothing takes
+the entry away, so a run that dies between the file and the
+keychain leaves the entry holding the *previous* token while the
+file's `token_id` names the row just minted. Nothing is orphaned —
+the entry is the one the file names — and what it leaves is a
+handle that is ahead of the credential behind it. The next launch
+reconnects on the old token and works; a disconnect after it
+revokes the row the file names, which is the new one, and the old
+row — whose token this machine was actually presenting — lives out
+its fixed expiry with its handle written down nowhere. That is a
+row in the owner's listing rather than a credential on this
+machine, it is bounded by an expiry nobody has to act for, and the
+next remember of that pair overwrites both halves. Cheaper than the
+alternative, which is retiring an entry the write is about to
+replace and losing a working credential to the same crash.
+
+An entry nothing names cannot be created at all, because the
+keychain is written only after the file says what is about to go
+into it.
+
+The order used to be the other one: the token reached the keychain
+before anything reached the file, so that no metadata could name a
+token nothing held. That was true of the pair being written and
+silent about the pair being displaced, where the file went on
+naming the previous connection and the next launch reconnected to
+it — leaving the entry just written where nothing would ever look
+again. The two costs are not alike: a missing entry is repaired on
+the next launch by a person typing a password once more, and an
+entry nothing names is repaired by nothing.
+
+# The row behind a displaced pair
+
+Retiring an entry takes away this machine's copy of a credential
+and says nothing to the server that minted it, so the
+`device_token` row stays live under the same [`device_label`] as
+the one that replaced it. Two cases, and what separates them is
+whether the session in hand can reach the row:
+
+- **The same pair remembered again.** The live session is that
+  server's, so the displaced handle — read out of the file before
+  it is overwritten, which is what [`superseded_row`] answers — can
+  be revoked over it. Best effort: a remember that stored the
+  credential did what was asked, and a revoke that failed must not
+  turn it into a refusal. What that costs is the old row left to
+  its expiry, in a listing where it can still be picked out.
+- **A different server remembered.** **Known limitation:** that row
+  cannot be revoked from here. The handle names a row on a server
+  this window is not talking to, and the session in hand belongs to
+  the new one. The row lives out its fixed expiry, listed where it
+  was issued and revocable from any window signed in there. The
+  keychain entry is retired either way, so what is left behind is a
+  row in somebody's listing rather than a credential on this
+  machine.
+
+A crashed remember leaves an unrevoked row of its own, too — the
+mint lands and the writes do not. It ends up where the other two
+do: on the server, in the owner's listing, which is the whole
+reason that listing is a screen.
+
+# Failing quietly on the way in, loudly on the way out
+
+Every read degrades to "nothing is stored" **in what it puts in
+front of a person**. A locked keychain, a denied prompt, a profile
+home somebody moved and a file half a disk wrote all end at the
+password form, because a reader who is told their keychain is
+unavailable can do nothing the form does not already ask of them.
+
+What a read may not degrade is the answer it gives this module. The
+file is the sole index of the keychain, so a caller deciding
+whether to drop the file needs the one distinction the person does
+not: an entry that is gone says the file is stale, and a keychain
+that would not answer says nothing at all. [`read_token`] therefore
+answers a [`StoredToken`] rather than an `Option`. Folding those
+two together is how one denied prompt at launch deletes the index
+of an entry that is still sitting there — the state the section
+above says a remember cannot create, reached by a deletion instead.
+
+A write is the opposite. Somebody ticked a box asking to be
+remembered, and a keychain that refuses has to say so: the
+alternative is an app that silently forgets and asks again next
+week, with no way to tell that from a revoked token.
+
+## Functions
+
+- `account_key` — The keychain account name for one server-and-login pair.
+- `delete_metadata` — Removes the non-secret half. Best effort, for [`delete_token`]'s
+- `delete_token` — Takes the device token out of the keychain.
+- `device_label` — What this device would call itself when asking for a token.
+- `forget` — Drops both halves for one server and login.
+- `read_metadata` — What was stored about the last server this machine was told to
+- `read_token` — The device token stored for this server and login.
+- `retire_replaced` — Takes away the keychain entry of the pair a newly remembered one
+- `superseded_row` — The handle of the `device_token` row a fresh mint for this pair
+- `write_metadata` — Writes the non-secret half, replacing what was there.
+- `write_token` — Puts a device token in the keychain, replacing whatever this
+
+## Types
+
+- `StoredConnection` — What this machine remembers about a team server, none of which
+- `StoredToken` — What the keychain said when asked for one pair's token.
 
 
 <!-- asterism_vision/index.md -->
@@ -15214,8 +15410,8 @@ mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
   plane's again because the dependency rule below forbids sharing
   the module they came from.
 - [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
-  behind `teams-core`'s auth port, opaque sessions with expiry and
-  a cleanup path.
+  behind `teams-core`'s auth port, and below it the opaque stores
+  that port does not reach, each with expiry and a sweep.
 - [`blob`] — the local CAS adapter behind `teams-core`'s blob port:
   `blobs/sha256/<2ch>/<64hex>` plus a staging dir, the
   declared-digest write path, and the startup sweep (#83 §3).
@@ -15278,11 +15474,13 @@ Auth adapters for the teams plane (#83 §5).
 v0 is the instance-local password adapter ([`password`]): argon2id
 hashing behind `teams-core`'s
 [`CredentialVerifier`](teams_core::port::auth::CredentialVerifier)
-port, plus the DB-backed opaque session store — the session lives
-here and not in the domain on purpose (#83 §1: a session is a
-short-lived infra artifact that resolves to a `user_id`, and the
-ledger never sees one). OIDC is a later adapter behind the same
-port; 2FA is deferred by design.
+port, and beneath it the DB-backed opaque stores the port knows
+nothing about. That split is the rule rather than a list — what a
+verifier answers is the domain's question, and what resolves to a
+`user_id` afterwards is a short-lived infra artifact the ledger
+never sees (#83 §1). The module's own doc says which stores those
+are today. OIDC is a later adapter behind the same port; 2FA is
+deferred by design.
 
 
 <!-- teams_infra/auth__password.md -->
@@ -15291,7 +15489,7 @@ port; 2FA is deferred by design.
 `auth::password` — the v0 instance-local credential adapter
 (#83 §5).
 
-Three decisions carry this module:
+The decisions that carry this module:
 
 - **Hashing is argon2id through RustCrypto's `argon2`** (OWASP's
   current first choice), default parameters, PHC-string storage —
@@ -15310,6 +15508,15 @@ Three decisions carry this module:
   [`PasswordAuth::cleanup_expired`] sweeps in bulk (the server runs
   it on every login, so the table cannot accumulate dead rows
   faster than logins happen).
+- **A device token is that construction with a longer life and a
+  name** (#204). Same bytes, same hash-at-rest rule, same two-sided
+  expiry — [`PasswordAuth::mint_device_token`] and its four
+  siblings differ from the session verbs in what the row carries
+  (a label, a handle, a last-use stamp) rather than in how the
+  secret is handled. What it is *for* is the invariant #204 fixes:
+  the disk may hold this and no primary credential, whichever
+  verifier said yes — so the mint takes a `user_id` and never asks
+  how the caller proved they were one.
 - **No default credentials exist** ([`reject_default_credential`]):
   the bootstrap admin (#83 §5, the §1
   [`InstanceAdmin`](teams_core::domain::identity::InstanceAdmin)) is
@@ -15330,7 +15537,13 @@ process-local dummy hash so the two answers cost the same work
 ## Types
 
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
+- `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
+- `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
+
+## Constants
+
+- `DEVICE_TOKEN_TTL_MS` — How long a device token lives from the mint: **90 days** (#204).
 
 
 <!-- teams_infra/backup.md -->
@@ -16030,6 +16243,10 @@ slice).
 |---|---|---|
 | POST | `/teams/auth/login` | none (rate-limited) |
 | POST | `/teams/auth/logout` | bearer token (rate-limited) |
+| POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+| POST | `/teams/auth/device` | any live session — mints a device token (#204) |
+| GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
+| DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
 | POST | `/teams/create` | any authenticated user; admin-only under closed registration |
 | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 | GET | `/teams/{team_id}/roster` | member, or an admin |
@@ -16070,6 +16287,43 @@ established. When both capacities could act, the membership row
 wins and the ledger stamp is the member's — the admin variant is
 reserved for an admin acting *from outside* the membership set,
 which is exactly when §1 demands the stamp say so.
+
+## Which of the device-token routes the limiter covers (#204)
+
+One of the four, and the split is the decision. #83 §5 puts new
+auth routes in the limited router, and what that limiter is for is
+an unauthenticated caller presenting a *credential*: its budget is
+what bounds guessing. `POST /teams/auth/device/login` is exactly
+that — a token arrives from nobody in particular and either
+resolves or does not — so it sits beside the password arm and
+shares its bucket.
+
+The mint, the listing and the revoke present no credential; they
+present a session [`auth_gate`] has already resolved. Putting them
+under the same bucket would spend a login's budget on a caller who
+is already inside, so a person who minted a token would find
+themselves unable to log in again — while protecting a guessing
+surface that does not exist, because there is nothing to guess past
+a session that already resolved. They sit behind the gate instead.
+
+## Minting asks for a live session and nothing more (#204)
+
+Not the password arm specifically, and this is the other question
+#204 leaves open. Any-session is what makes an OIDC adapter (#163)
+free: a verified ID token reaches the mint through a session the
+same way a password does, and the minting path never learns which
+verifier answered — which is the property the whole issue turns on.
+Requiring a re-auth would put a password back in front of a flow
+whose point is that a password is not always what happened.
+
+What that costs is written down rather than waved at: a stolen live
+session can mint a device token, which outlives the session by
+design. The bound on it is that the owner can see every token
+(`GET`) and revoke any of it (`DELETE`), and that the tokens the
+disk holds expire on a fixed day
+([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
+A re-auth requirement can be added later without moving the table
+or changing a single row shape.
 
 ## The blob read is the one deliberate exception to [`team_gate`]
 

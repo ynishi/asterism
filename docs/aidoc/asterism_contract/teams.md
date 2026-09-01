@@ -41,7 +41,12 @@ and an actor's display name is a snapshot rather than a lookup.
 - `MyTeamDto` — One team the account belongs to.
 - `MyTeamsDto` — The teams this window's account belongs to.
 - `PromotedAssetDto` — What a promotion left behind, as a screen needs to read it.
+- `StoredTeamConnectDto` — What came of trying to connect from what this machine had stored
+- `StoredTeamConnectOutcome` — The three ends of a silent reconnect.
+- `StoredTeamConnectionDto` — What this machine remembers about a team server, none of which
 - `TeamCreatedDto` — What founding a team answers with.
+- `TeamDeviceTokenDto` — One device token as its owner sees it.
+- `TeamDeviceTokensDto` — The device tokens this window's account holds, on whatever machines
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
 - `TeamRosterDto` — Who is in a team, and in what role.

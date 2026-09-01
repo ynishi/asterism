@@ -27,8 +27,8 @@ mark/unmark/reclaim), the zero-link sweep ([`gc`]) and the backup
   plane's again because the dependency rule below forbids sharing
   the module they came from.
 - [`auth`] — the #83 §5 auth v0 adapter: argon2id credentials
-  behind `teams-core`'s auth port, opaque sessions with expiry and
-  a cleanup path.
+  behind `teams-core`'s auth port, and below it the opaque stores
+  that port does not reach, each with expiry and a sweep.
 - [`blob`] — the local CAS adapter behind `teams-core`'s blob port:
   `blobs/sha256/<2ch>/<64hex>` plus a staging dir, the
   declared-digest write path, and the startup sweep (#83 §3).

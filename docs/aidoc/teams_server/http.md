@@ -9,6 +9,10 @@ slice).
 |---|---|---|
 | POST | `/teams/auth/login` | none (rate-limited) |
 | POST | `/teams/auth/logout` | bearer token (rate-limited) |
+| POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+| POST | `/teams/auth/device` | any live session — mints a device token (#204) |
+| GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
+| DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
 | POST | `/teams/create` | any authenticated user; admin-only under closed registration |
 | POST | `/teams/{team_id}/delete` | owner, or an admin (admin-stamped) |
 | GET | `/teams/{team_id}/roster` | member, or an admin |
@@ -49,6 +53,43 @@ established. When both capacities could act, the membership row
 wins and the ledger stamp is the member's — the admin variant is
 reserved for an admin acting *from outside* the membership set,
 which is exactly when §1 demands the stamp say so.
+
+## Which of the device-token routes the limiter covers (#204)
+
+One of the four, and the split is the decision. #83 §5 puts new
+auth routes in the limited router, and what that limiter is for is
+an unauthenticated caller presenting a *credential*: its budget is
+what bounds guessing. `POST /teams/auth/device/login` is exactly
+that — a token arrives from nobody in particular and either
+resolves or does not — so it sits beside the password arm and
+shares its bucket.
+
+The mint, the listing and the revoke present no credential; they
+present a session [`auth_gate`] has already resolved. Putting them
+under the same bucket would spend a login's budget on a caller who
+is already inside, so a person who minted a token would find
+themselves unable to log in again — while protecting a guessing
+surface that does not exist, because there is nothing to guess past
+a session that already resolved. They sit behind the gate instead.
+
+## Minting asks for a live session and nothing more (#204)
+
+Not the password arm specifically, and this is the other question
+#204 leaves open. Any-session is what makes an OIDC adapter (#163)
+free: a verified ID token reaches the mint through a session the
+same way a password does, and the minting path never learns which
+verifier answered — which is the property the whole issue turns on.
+Requiring a re-auth would put a password back in front of a flow
+whose point is that a password is not always what happened.
+
+What that costs is written down rather than waved at: a stolen live
+session can mint a device token, which outlives the session by
+design. The bound on it is that the owner can see every token
+(`GET`) and revoke any of it (`DELETE`), and that the tokens the
+disk holds expire on a fixed day
+([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
+A re-auth requirement can be added later without moving the table
+or changing a single row shape.
 
 ## The blob read is the one deliberate exception to [`team_gate`]
 
