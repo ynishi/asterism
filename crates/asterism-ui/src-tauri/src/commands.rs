@@ -2997,8 +2997,10 @@ pub async fn list_forge_threads_about(
 // -----------------------------------------------------------------
 // Lines a team hosts (#148 decisions 10, 11 and 16).
 //
-// Everything below reaches a team's server, which is the difference
-// from the block above. A shared line is served through rather than
+// Everything below is about a team's server, which is the difference
+// from the block above — most of it reaches one; what this machine
+// remembers of one, and a wait for one's browser round trip, are the
+// exceptions, and each says so. A shared line is served through rather than
 // mirrored, so each of these reads is a request and there is no local
 // copy to be out of date with — which is also why they answer the same
 // DTOs the local verbs do. Two sources, one vocabulary, and a panel
