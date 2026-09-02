@@ -8,6 +8,13 @@
 //! | POST | `/teams/auth/login` | none (rate-limited) |
 //! | POST | `/teams/auth/logout` | bearer token (rate-limited) |
 //! | POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+//! | GET | `/teams/auth/providers` | none — what this instance offers besides a password (#163) |
+//! | POST | `/teams/auth/oidc/attempts` | none (rate-limited) — starts a sign-in through the provider (#163) |
+//! | GET | `/teams/auth/oidc/attempts/{id}` | none — the page a browser lands on, HTML |
+//! | POST | `/teams/auth/oidc/attempts/{id}/authorize` | none — the button, `303` to the provider |
+//! | GET | `/teams/auth/oidc/callback` | a code from the provider (rate-limited) — `303` to the app's loopback listener |
+//! | GET | `/teams/auth/oidc/attempts/{id}/done` | none — the page the listener sends the browser on to, HTML |
+//! | POST | `/teams/auth/oidc/attempts/{id}/collect` | the attempt's secret and the grant the browser delivered (rate-limited) — answers with an ordinary session, once |
 //! | POST | `/teams/auth/device` | any live session — mints a device token (#204) |
 //! | GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
 //! | DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
@@ -74,10 +81,10 @@
 //! ## Minting asks for a live session and nothing more (#204)
 //!
 //! Not the password arm specifically, and this is the other question
-//! #204 leaves open. Any-session is what makes an OIDC adapter (#163)
-//! free: a verified ID token reaches the mint through a session the
+//! #204 leaves open. Any-session is what makes the provider path
+//! (#163) free: a sign-in through the provider ends in a session the
 //! same way a password does, and the minting path never learns which
-//! verifier answered — which is the property the whole issue turns on.
+//! way in was taken — which is the property the whole issue turns on.
 //! Requiring a re-auth would put a password back in front of a flow
 //! whose point is that a password is not always what happened.
 //!
@@ -85,10 +92,11 @@
 //! session can mint a device token, which outlives the session by
 //! design. The bound on it is that the owner can see every token
 //! (`GET`) and revoke any of it (`DELETE`), and that the tokens the
-//! disk holds expire on a fixed day
-//! ([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
-//! A re-auth requirement can be added later without moving the table
-//! or changing a single row shape.
+//! disk holds end on a day fixed at the mint and earlier when unused
+//! ([`TeamsCtx::device_token_ttl_ms`] and
+//! [`TeamsCtx::device_token_idle_ms`], #163). A re-auth requirement
+//! can be added later without moving the table or changing a single
+//! row shape.
 //!
 //! ## The blob read is the one deliberate exception to [`team_gate`]
 //!
@@ -152,7 +160,7 @@ use teams_core::domain::identity::{
 use teams_core::domain::ledger::LedgerEvent;
 use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
-use teams_infra::auth::password::AccountRecord;
+use teams_infra::auth::password::{AccountRecord, DeviceTokenResolution};
 use teams_infra::gc::sweep_zero_link_blobs;
 use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // The shapes a member's client also reads, from the leaf both planes
@@ -218,6 +226,17 @@ pub(crate) enum ApiError {
     HeadRegistryEmpty,
     /// The auth limiter refused the attempt.
     RateLimited,
+    /// A sign-in through a provider was asked of an instance that has
+    /// none configured (#163).
+    NoProvider,
+    /// The attempt id names no live attempt — or the secret presented
+    /// is not the one it was started with, which is deliberately the
+    /// same answer (the `oidc` module doc says why).
+    AttemptNotFound,
+    /// A stored credential that has stopped resolving, and why: the
+    /// `401` an app acts on rather than the one it can only show a
+    /// password form for (#163). The token is `reason` on the body.
+    ReauthRequired(&'static str),
 }
 
 impl From<DomainError> for ApiError {
@@ -262,6 +281,17 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, kind, message) = match self {
             Self::Forge(err) => return forge_response(&err),
+            Self::ReauthRequired(reason) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "kind": "Unauthorized",
+                        "message": format!("the stored credential is {reason}; sign in again"),
+                        "reason": reason,
+                    })),
+                )
+                    .into_response();
+            }
             Self::Domain(err) => {
                 let (status, kind) = match &err {
                     DomainError::Validation(_) => (StatusCode::BAD_REQUEST, "Validation"),
@@ -312,6 +342,16 @@ impl IntoResponse for ApiError {
                 StatusCode::TOO_MANY_REQUESTS,
                 "RateLimited",
                 "too many authentication attempts; retry later".to_string(),
+            ),
+            Self::NoProvider => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "this instance signs people in with passwords only".to_string(),
+            ),
+            Self::AttemptNotFound => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "no such sign-in attempt".to_string(),
             ),
         };
         (
@@ -372,6 +412,22 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         // the module doc's "which of the device-token routes the
         // limiter covers".
         .route("/teams/auth/device/login", post(device_login))
+        // The provider path's routes under the limiter (#163): the
+        // provider's callback (presents a code) and the collect
+        // (presents the attempt's secret and grant) belong here by the
+        // rule below; starting an attempt presents nothing and is here
+        // for a different reason — each start holds ten minutes of
+        // memory, and the budget is what bounds how many. The pages a
+        // browser walks between them sit in the public router below.
+        .route(
+            "/teams/auth/oidc/attempts",
+            post(crate::oidc::attempt_start),
+        )
+        .route("/teams/auth/oidc/callback", get(crate::oidc::callback))
+        .route(
+            "/teams/auth/oidc/attempts/{id}/collect",
+            post(crate::oidc::attempt_collect),
+        )
         // One limiter over every route above it (#83 §5). What decides
         // whether a new auth route belongs in this block is whether it
         // *presents a credential*: the budget is what bounds guessing,
@@ -380,6 +436,30 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         // sit outside — the module doc's "which of the device-token
         // routes the limiter covers" is the whole argument.
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_rate_limit))
+        .with_state(ctx.clone());
+
+    // Public and unlimited: what a connect form reads before anybody
+    // has a credential to present (#163), and the pages a browser
+    // walks around a sign-in. The page shows a label and the done page
+    // says what happened; the button does take the page's token, and
+    // it is outside the limiter because the token is 256 random bits
+    // with nothing to guess at — a budget bounds guessing, and there is
+    // none. None of them answers anything a caller could not learn by
+    // starting an attempt of their own.
+    let public = Router::new()
+        .route("/teams/auth/providers", get(crate::oidc::providers))
+        .route(
+            "/teams/auth/oidc/attempts/{id}",
+            get(crate::oidc::attempt_page),
+        )
+        .route(
+            "/teams/auth/oidc/attempts/{id}/authorize",
+            post(crate::oidc::attempt_authorize),
+        )
+        .route(
+            "/teams/auth/oidc/attempts/{id}/done",
+            get(crate::oidc::attempt_done),
+        )
         .with_state(ctx.clone());
 
     let team_scoped = Router::new()
@@ -454,7 +534,7 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_gate))
         .with_state(ctx);
 
-    Router::new().merge(auth).merge(authed)
+    Router::new().merge(auth).merge(public).merge(authed)
 }
 
 // ----------------------------------------------------------------------
@@ -619,13 +699,32 @@ async fn login(
         .auth
         .create_session(user_id, now, ctx.session_ttl_ms)
         .await?;
-    Ok(Json(SessionDto {
+    Ok(Json(session_dto(&ctx, token, &account, now).await?))
+}
+
+/// A session as the wire says it — one function for the three arms
+/// that mint one (password, device token, provider), so that what a
+/// session says about its account cannot differ by how it was got.
+pub(crate) async fn session_dto(
+    ctx: &TeamsCtx,
+    token: String,
+    account: &AccountRecord,
+    now: i64,
+) -> Result<SessionDto, ApiError> {
+    let instance_id = ctx.auth.instance_id().await?;
+    Ok(SessionDto {
         token,
-        user_id: user_id.to_string(),
-        display_name: account.display_name,
+        user_id: account.user_id.to_string(),
+        login: account.login.clone(),
+        display_name: account.display_name.clone(),
         admin: account.admin,
         expires_at_ms: now.saturating_add(ctx.session_ttl_ms),
-    }))
+        // One tenant per instance today, so the tenant is the
+        // instance; the field exists so that stops being true without
+        // a client noticing.
+        tenant_id: instance_id.clone(),
+        instance_id,
+    })
 }
 
 /// `POST /teams/auth/logout`. Destroys the presented session;
@@ -651,39 +750,47 @@ async fn logout(
 /// That sameness is the design (#204): device tokens sit in front of
 /// sessions rather than beside them, so nothing downstream of
 /// [`auth_gate`] can tell how a session was obtained, and nothing
-/// downstream needs to. An unknown, revoked and expired token are one
-/// `401`, the way a wrong password and an unknown login are.
+/// downstream needs to. A token that does not resolve is a `401`
+/// whose body carries the reason the adapter's
+/// [`DeviceTokenResolution`] gave, because the caller is an app
+/// holding a credential it was given, and which end it met is what it
+/// tells the person (#163). Unlike the password arm, there is nothing
+/// to enumerate: a device token is 256 random bits, and "revoked" is
+/// also the answer for one this instance never minted.
 ///
-/// Sweeps both tables on the way in, and the two sweeps are here for
-/// different reasons — which is the adapter's rule rather than this
-/// route's. A session table is swept where it fills, and this route
-/// fills it. A device-token table fills too rarely for that to bound
-/// it, so it is swept where one is read and where one is presented
+/// Sweeps both tables, and the two sweeps are here for different
+/// reasons — which is the adapter's rule rather than this route's. A
+/// session table is swept where it fills, and this route fills it. A
+/// device-token table fills too rarely for that to bound it, so it is
+/// swept where one is read and where one is presented
 /// (`PasswordAuth::cleanup_expired_device_tokens`), and this is the
-/// surface where one is presented.
+/// surface where one is presented. The device sweep runs **after** the
+/// resolve, not before: a sweep first would delete the very row an
+/// expired token names and the resolve would then answer `revoked`
+/// for a token that expired, which is the distinction the reason
+/// exists to draw. The table is bounded either way.
 async fn device_login(
     State(ctx): State<Arc<TeamsCtx>>,
     Json(cmd): Json<DeviceLoginCommand>,
 ) -> Result<Json<SessionDto>, ApiError> {
     let now = now_ms();
     ctx.auth.cleanup_expired(now).await?;
-    ctx.auth.cleanup_expired_device_tokens(now).await?;
-    let account = ctx
+    let resolution = ctx
         .auth
-        .resolve_device_token(&cmd.token, now)
-        .await?
-        .ok_or(ApiError::Unauthorized)?;
+        .resolve_device_token(&cmd.token, now, ctx.device_token_idle_ms)
+        .await?;
+    ctx.auth.cleanup_expired_device_tokens(now).await?;
+    let account = match resolution {
+        DeviceTokenResolution::Resolved(account) => account,
+        DeviceTokenResolution::Expired => return Err(ApiError::ReauthRequired("expired")),
+        DeviceTokenResolution::Idle => return Err(ApiError::ReauthRequired("idle")),
+        DeviceTokenResolution::Unknown => return Err(ApiError::ReauthRequired("revoked")),
+    };
     let token = ctx
         .auth
         .create_session(account.user_id, now, ctx.session_ttl_ms)
         .await?;
-    Ok(Json(SessionDto {
-        token,
-        user_id: account.user_id.to_string(),
-        display_name: account.display_name,
-        admin: account.admin,
-        expires_at_ms: now.saturating_add(ctx.session_ttl_ms),
-    }))
+    Ok(Json(session_dto(&ctx, token, &account, now).await?))
 }
 
 /// `POST /teams/auth/device` — mints a device token for the caller's
@@ -705,7 +812,12 @@ async fn mint_device_token(
 ) -> Result<Json<DeviceTokenMintedDto>, ApiError> {
     let minted = ctx
         .auth
-        .mint_device_token(account.user_id, &cmd.label, now_ms())
+        .mint_device_token(
+            account.user_id,
+            &cmd.label,
+            now_ms(),
+            ctx.device_token_ttl_ms,
+        )
         .await?;
     Ok(Json(DeviceTokenMintedDto {
         token: minted.token,

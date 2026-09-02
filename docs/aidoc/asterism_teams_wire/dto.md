@@ -9,6 +9,7 @@ its own (#83 §1).
 
 ## Types
 
+- `AuthProvidersDto` — What this instance offers besides a password
 - `ContentEnteredDto` — What the team minted for content that entered it
 - `DeviceTokenDto` — One device token as its owner sees it.
 - `DeviceTokenMintedDto` — A freshly minted device token (`POST /teams/auth/device`, #204).
@@ -19,10 +20,12 @@ its own (#83 §1).
 - `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
 - `MyTeamDto` — One team the caller belongs to.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
+- `OidcAttemptDto` — A sign-in attempt through the provider
+- `OidcProviderDto` — One identity provider, as a connect form names it.
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.
-- `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`,
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
 - `ViewerDto` — The caller's standing in the team whose roster this is.

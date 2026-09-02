@@ -10,6 +10,65 @@ and this project adheres to
 
 ### Added
 
+- **Sign in through the team's identity provider — the server half** (#163). An
+  instance may now be configured with one OIDC provider
+  (`serve --oidc-issuer … --oidc-client-id … --public-url …`, the client secret
+  in `$ASTERISM_TEAMS_OIDC_CLIENT_SECRET`), and from then on a member signs in
+  through it instead of a password. The instance is the provider's OAuth client:
+  it runs the authorization-code exchange with PKCE as a confidential client,
+  checks the ID token against the provider's published keys, and resolves the
+  subject to an invited account. The member's app never speaks to the provider
+  and what it ends up holding is the same device token a password login mints
+  (#204) — so the gate, the session table and the keychain are unchanged, and an
+  instance with no provider configured behaves as it did.
+
+  **An account is bound to an address, and the first sign-in pins the subject.**
+  `create-user --oidc-email … --oidc-issuer …` provisions an account that holds
+  no password (a locked hash, the Unix convention), and `link-oidc` binds an
+  existing one. The first sign-in whose token carries that email — verified, or
+  it does not count — pins the provider's `sub` to the row, and after that the
+  subject is what resolves and the email is inert. A provider re-issuing the
+  address to somebody else, and an unverified email claim, are the two
+  account-takeover shapes the issue names, and the binding table's indexes make
+  the refusals structural.
+
+  **The answer comes back through the browser to the app's own machine.** The
+  app listens on a loopback port, starts an attempt with the SHA-256 of a secret
+  it keeps and the port, and opens a page on the instance that names the device
+  asking before sending the person on to the provider. The callback runs the
+  exchange and sends the browser to `127.0.0.1:<port>` with a one-time grant;
+  the app collects the session by presenting the secret and the grant together.
+  The secret is what stops a third party who learns the attempt id; the loopback
+  leg is what stops somebody starting an attempt of their own and getting a
+  person to finish it — the grant lands on a port of the victim's machine where
+  nothing of theirs is listening. There is no poll to fall back to, which is the
+  price: a client that cannot listen on loopback cannot sign in this way. The
+  page that asks stays, cannot be framed, and its button takes a token only the
+  page hands out. The three routes that present something sit under the auth
+  limiter with the password arm.
+
+  **A device token's lifetime is policy, and it ends early when unused.**
+  `serve --device-token-days` sets the ceiling every mint is stamped with (90 by
+  default) and `--device-token-idle-days` how long a token may go unpresented
+  (30; `0` turns the bound off). The window stays fixed at the mint and is never
+  slid forward on use; the idle bound only ever ends a token sooner. A token
+  that stops resolving is still a `401`, and its body now says why — `expired`,
+  `idle` or `revoked` — so the app can tell the person which rather than show
+  one password form for all three. `revoked` is one answer for an owner's revoke
+  and a token this instance never minted; an admin's revoke has no route yet and
+  a forced re-authentication is not built here — both are #213's.
+
+  **A session says what a client needs to key its store by.** `SessionDto`
+  gained `login` (a sign-in through a provider ends in a session for an account
+  whose login nobody typed), `instance_id` (the instance's own stable id, minted
+  once by its schema — a URL is a name that moves, and this is what a stored
+  connection should be keyed by) and `tenant_id` (the instance's, until there
+  are tenants; here from the first so that a host serving several later changes
+  nothing a client stores). All three default on decode.
+
+  The desktop app's button, the command that opens the browser and collects, and
+  the move of the keychain key onto the instance id are the next slice.
+
 - **Invite somebody into a team, and take them out, from the app** (#210). The
   five roster writes had a route, an authority rule, a repository method and
   route-level tests, and stopped there: no client verb, no desktop command, no
@@ -106,8 +165,8 @@ and this project adheres to
   none of which authenticates anybody. The password is stored under no key.
 
   **The mint asks for a live session and nothing more**, which is what leaves a
-  later OIDC adapter (#163) free: a verified ID token reaches it exactly as a
-  password does, and the minting path never learns which verifier answered. What
+  sign-in through a provider (#163) free: it ends in a session exactly as a
+  password does, and the minting path never learns which way in was taken. What
   that costs is that a stolen session can mint one, and the bound on it is the
   owner's — a list in the drawer of every token the account holds, each with its
   device's label, when it was minted and when it was last used, and a revoke

@@ -8,6 +8,11 @@
       "docs": "Command shapes — inputs of the `/teams/*` routes a member's client\ncalls.\n\nAn owner's roster writes are here too, and that is not an exception\nto the line above. They moved from `teams-contract` when an owner\ngained a screen to say them from (#210), and an owner saying them\nis a member's client saying them. What stayed behind stayed for the\nreason the crate doc gives — no client sends it — and not for\nanything about whose act it is: the substrate's own upload is a\nmember's act that no client happens to send.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
+      "path": "asterism_teams_wire::command::CollectOidcAttemptCommand",
+      "kind": "struct",
+      "docs": "Collects a sign-in attempt\n(`POST /teams/auth/oidc/attempts/{id}/collect`, #163).\n\nTwo things, for two questions: the secret says this caller is the\napp that started the attempt, the grant says the browser that\nfinished it was sent to that app's machine. A resolved attempt is\ncollected with both, and a collect missing either is answered as\nthough the attempt did not exist. A refused attempt is answered to\nthe secret alone — there was no grant to deliver, and the app that\nstarted it is owed the refusal.\n\n**No derived `Debug`**: until the collect lands, these two are what\nstand between the attempt id and a session."
+    },
+    {
       "path": "asterism_teams_wire::command::CreateTeamCommand",
       "kind": "struct",
       "docs": "Creates a team (`POST /teams/create`).\n\nWho may call this follows the registration policy (#83 §1): any\nauthenticated user when registration is open, admins only when it\nis closed."
@@ -48,6 +53,11 @@
       "docs": "Asks for a device token (`POST /teams/auth/device`, #204).\n\nCarries no account: whose token it is comes from the session the\ngate resolved, which is what keeps the mint from being a way to\nissue a credential for somebody else."
     },
     {
+      "path": "asterism_teams_wire::command::OidcAttemptCommand",
+      "kind": "struct",
+      "docs": "Starts a sign-in through the provider\n(`POST /teams/auth/oidc/attempts`, #163).\n\nThe app makes a secret it keeps, and sends its SHA-256 here. The\ninstance stores the hash beside the attempt and will hand the\nsession only to a collect that presents the secret — so the attempt\nid, which travels through a browser and a provider's logs, is not by\nitself a way to collect what the person signed in for."
+    },
+    {
       "path": "asterism_teams_wire::command::RemoveMemberCommand",
       "kind": "struct",
       "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
@@ -68,6 +78,11 @@
       "docs": "Response shapes of the `/teams/*` routes a member's client reads.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
     },
     {
+      "path": "asterism_teams_wire::dto::AuthProvidersDto",
+      "kind": "struct",
+      "docs": "What this instance offers besides a password\n(`GET /teams/auth/providers`, #163). Public — it is what a connect\nform reads before anybody has signed in, to know whether to offer\na provider button at all."
+    },
+    {
       "path": "asterism_teams_wire::dto::ContentEnteredDto",
       "kind": "struct",
       "docs": "What the team minted for content that entered it\n(`PUT /teams/{team_id}/forge/pursuits/{id}/content?digest=…`).\n\nThe asset id is the team's own surrogate and never a local one\n(#148 decision 6): a client keeps the correspondence on its own\nmachine, and reading this as a local `AssetId` is the one thing\nthat boundary forbids."
@@ -80,7 +95,7 @@
     {
       "path": "asterism_teams_wire::dto::DeviceTokenMintedDto",
       "kind": "struct",
-      "docs": "A freshly minted device token (`POST /teams/auth/device`, #204).\n\n**No derived `Debug`**, for the reason [`SessionDto`]'s\nhand-written one gives. The difference worth stating here is how\nlong the value is useful for: a session dies in hours, this is the\ncredential a client puts in an OS keychain and presents after a\nrestart, so a copy of it that leaked into a log is a copy that\nworks for months."
+      "docs": "A freshly minted device token (`POST /teams/auth/device`, #204).\n\n**No derived `Debug`**, for the reason [`SessionDto`]'s\nhand-written one gives. The difference worth stating here is how\nlong the value is useful for: a session dies in hours, this is the\ncredential a client puts in an OS keychain and presents after a\nrestart, so a copy of it that leaked into a log is a copy that\nworks for months.\n\nCarries no instance or tenant id: the session that asked for this\ntoken said both, and the session the token is later presented for\nsays them again, so what a client keys its store by is never\nmissing at the moment it writes."
     },
     {
       "path": "asterism_teams_wire::dto::DeviceTokensDto",
@@ -118,6 +133,16 @@
       "docs": "The teams the caller is a member of (`GET /teams`).\n\nThe roster read turned around: that one takes a team and answers\nwith users, this one takes the caller and answers with teams. Its\npath names no team because the question is not about one."
     },
     {
+      "path": "asterism_teams_wire::dto::OidcAttemptDto",
+      "kind": "struct",
+      "docs": "A sign-in attempt through the provider\n(`POST /teams/auth/oidc/attempts`, #163): where to send the browser,\nand how long the attempt is good for.\n\nNothing here is a credential. The attempt id is the `state` the\nprovider echoes and what the start page is keyed by; presenting it\ncollects nothing without the secret the app kept and the grant the\nbrowser brings back.\n\nWhat comes back to the app comes through its loopback listener,\nnot through this crate. The contract that listener is to meet: the\nprovider's callback sends the browser to\n`http://127.0.0.1:<port>/teams/auth/oidc/loopback?attempt=<id>`\nwith either `&grant=<grant>` or `&refused=1`, and the listener is\nto answer with a `303` to `<start_url>/done`, where the instance\nsays what happened. The collect route then answers with an\nordinary [`SessionDto`]: a `401` for an attempt that was refused\n(to the secret alone — there was no grant), a `404` for one nothing\nnames, past its expiry, already collected, not yet finished in the\nbrowser, or whose secret or grant is not its own."
+    },
+    {
+      "path": "asterism_teams_wire::dto::OidcProviderDto",
+      "kind": "struct",
+      "docs": "One identity provider, as a connect form names it."
+    },
+    {
       "path": "asterism_teams_wire::dto::ResolvedContentDto",
       "kind": "struct",
       "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
@@ -135,7 +160,7 @@
     {
       "path": "asterism_teams_wire::dto::SessionDto",
       "kind": "struct",
-      "docs": "A freshly minted session (`POST /teams/auth/login`, and\n`POST /teams/auth/device/login` — one session shape, whichever arm\nissued it).\n\n**No derived `Debug`** — see the hand-written one below, which is\nwhere this crate's rule about formatting a live credential is\nstated."
+      "docs": "A freshly minted session (`POST /teams/auth/login`,\n`POST /teams/auth/device/login`, and the collect of a sign-in\nthrough the provider — one session shape, whichever arm issued\nit).\n\n**No derived `Debug`** — see the hand-written one below, which is\nwhere this crate's rule about formatting a live credential is\nstated."
     },
     {
       "path": "asterism_teams_wire::dto::SubjectRefDto",

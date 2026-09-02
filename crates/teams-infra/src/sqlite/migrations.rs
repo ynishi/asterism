@@ -738,14 +738,12 @@ CREATE INDEX idx_asset_projection_team ON asset_projection(team_id);
 /// like one somebody used — which is the single fact this column
 /// exists for a person to read before deciding whether to revoke.
 ///
-/// **Expiry is enforced the way sessions enforce it**, on touch and by
-/// the bulk sweep that walks `expires_at`. What differs is where the
-/// lifetime comes from: a session's rides on the server's context
-/// (`teams_server::state::TeamsCtx::session_ttl_ms`, which the binary
-/// fills from a default and the route suites shorten), a device
-/// token's is a constant in the adapter (`DEVICE_TOKEN_TTL_MS`) that
-/// nothing varies, and the reasoning for fixing it is stated there
-/// rather than here.
+/// **`expires_at` is absolute, written at the mint**, and enforced the
+/// way a session's is — on touch and by the bulk sweep that walks the
+/// index on it. Where the lifetime comes from is the server's
+/// context's question (`teams_server::state::TeamsCtx`), and the
+/// idle end #163 added beside it is enforced on touch alone, from
+/// `last_used_at`; the sweep reads `expires_at` only.
 ///
 /// The `user_id` key cascades, matching `auth_session`: whatever
 /// removes an account takes its stored credentials with it, and a
@@ -768,6 +766,77 @@ CREATE INDEX        idx_device_token_user    ON device_token(user_id, created_at
 CREATE INDEX        idx_device_token_expires ON device_token(expires_at);
 "#;
 
+/// V11 — the binding between an account and an external identity
+/// (#163): which provider says who this account is, and how the
+/// instance recognises the person the provider vouches for.
+///
+/// One row per account, and an account has at most one. `issuer` is
+/// the provider's issuer URL as the instance is configured with it;
+/// `email` is what an admin wrote when provisioning, lower-cased, and
+/// is how the *first* verified sign-in finds the account; `subject` is
+/// the provider's stable id for the person and is **pinned on that
+/// first sign-in** — `NULL` until then, and authoritative after.
+/// `bound_at` records the pinning. Why the email plays no part once a
+/// subject is pinned is `auth::oidc`'s §Pinning.
+///
+/// Two unique indexes say the two ways a token may find an account:
+/// by `(issuer, subject)` once pinned, by `(issuer, email)` before.
+/// The email index is total, because two rows one address could pin
+/// is a row the first sign-in cannot choose between. The subject index
+/// is partial so that it holds pinned rows only — SQLite already
+/// treats every `NULL` as distinct in a unique index, so the predicate
+/// changes what the index contains, not what it admits.
+///
+/// The `user_id` key cascades like `auth_session`'s and
+/// `device_token`'s: whatever removes an account takes its binding
+/// with it, and a binding that resolves to no account would be a row
+/// that admits nobody.
+///
+/// `user_account` is untouched. Its `password_hash` column stays
+/// `NOT NULL`; an account provisioned for a provider holds the locked
+/// sentinel the adapter documents (`PasswordAuth::create_account_locked`)
+/// rather than a relaxed column, because relaxing a `NOT NULL` in
+/// SQLite is a table rebuild, and a rebuild of the table every
+/// credential row references is not worth a sentinel's saving.
+const V11_OIDC_IDENTITY: &str = r#"
+CREATE TABLE oidc_identity (
+    user_id  BLOB PRIMARY KEY REFERENCES user_account(user_id) ON DELETE CASCADE,
+    issuer   TEXT NOT NULL,
+    email    TEXT NOT NULL,
+    subject  TEXT,
+    bound_at INTEGER
+) STRICT, WITHOUT ROWID;
+
+CREATE UNIQUE INDEX idx_oidc_identity_email   ON oidc_identity(issuer, email);
+CREATE UNIQUE INDEX idx_oidc_identity_subject ON oidc_identity(issuer, subject)
+    WHERE subject IS NOT NULL;
+"#;
+
+/// V12 — the instance's own stable id (#163).
+///
+/// A member's client keys what it stores about a server by something
+/// that names the server, and a URL is a name that moves: a custom
+/// domain, a port, a host renamed. This is the name that does not.
+/// Minted here, once, from SQLite's CSPRNG, so an instance has an id
+/// from the moment its schema exists and no code path can be reached
+/// before it does; a restored backup carries the same id as the
+/// instance it was taken from, which is the answer a client holding a
+/// token for that instance wants.
+///
+/// A key/value shape rather than a one-column table, so that the next
+/// instance-scoped fact — a tenant id, when there are tenants — is a
+/// row rather than a migration.
+const V12_INSTANCE_IDENTITY: &str = r#"
+CREATE TABLE instance_identity (
+    key   TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (key)
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO instance_identity (key, value)
+VALUES ('instance_id', lower(hex(randomblob(16))));
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -781,6 +850,8 @@ const MIGRATIONS: &[&str] = &[
     V8_TEAM_ASSET_CONTENT,
     V9_ASSET_PROJECTION,
     V10_DEVICE_TOKEN,
+    V11_OIDC_IDENTITY,
+    V12_INSTANCE_IDENTITY,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -1147,6 +1218,82 @@ mod tests {
         for forbidden in ["secret", "plaintext", "token TEXT"] {
             assert!(!ddl.contains(forbidden), "{forbidden} in: {ddl}");
         }
+    }
+
+    #[test]
+    fn v11_binds_one_identity_per_account_and_admits_two_ways_of_finding_it() {
+        let conn = migrated();
+        for (id, login) in [("X'01'", "hoshino"), ("X'02'", "kanade")] {
+            conn.execute(
+                &format!(
+                    "INSERT INTO user_account
+                     (user_id, login, display_name, password_hash, is_admin, created_at)
+                     VALUES ({id}, '{login}', '{login}', 'phc', 0, 0)"
+                ),
+                [],
+            )
+            .unwrap();
+        }
+        let bind = |user: &str, email: &str, subject: Option<&str>| {
+            conn.execute(
+                &format!(
+                    "INSERT INTO oidc_identity (user_id, issuer, email, subject, bound_at)
+                     VALUES ({user}, 'https://issuer.example', ?1, ?2, NULL)"
+                ),
+                rusqlite::params![email, subject],
+            )
+        };
+        bind("X'01'", "hoshino@example.com", None).expect("an unpinned binding");
+        // One account, one binding: the key is the account.
+        assert!(bind("X'01'", "other@example.com", None).is_err());
+        // Two accounts cannot claim one address at one issuer — the
+        // first verified sign-in would not know which to pin.
+        assert!(bind("X'02'", "hoshino@example.com", None).is_err());
+        // Two unpinned rows coexist: a unique index never collides on
+        // NULL, with or without the predicate.
+        bind("X'02'", "kanade@example.com", None).expect("a second unpinned binding");
+
+        conn.execute(
+            "UPDATE oidc_identity SET subject = 'sub-1', bound_at = 1 WHERE user_id = X'01'",
+            [],
+        )
+        .unwrap();
+        // A pinned subject is unique at its issuer.
+        assert!(
+            conn.execute(
+                "UPDATE oidc_identity SET subject = 'sub-1', bound_at = 2 WHERE user_id = X'02'",
+                [],
+            )
+            .is_err()
+        );
+
+        // Removing the account removes its binding with it.
+        conn.execute("DELETE FROM user_account WHERE user_id = X'01'", [])
+            .unwrap();
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM oidc_identity", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 1);
+    }
+
+    #[test]
+    fn v12_mints_one_instance_id_and_a_second_migration_run_keeps_it() {
+        let mut conn = migrated();
+        let read = |conn: &Connection| -> String {
+            conn.query_row(
+                "SELECT value FROM instance_identity WHERE key = 'instance_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let id = read(&conn);
+        assert_eq!(id.len(), 32, "{id}");
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "{id}");
+        migrate(&mut conn).unwrap();
+        assert_eq!(read(&conn), id, "re-running the series mints nothing");
+        let other = migrated();
+        assert_ne!(read(&other), id, "two instances, two ids");
     }
 
     #[test]

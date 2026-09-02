@@ -375,6 +375,7 @@
 
 - [teams-infra overview](teams_infra/index.md): # teams-infra — adapters for the teams plane
 - [teams-infra::auth](teams_infra/auth.md): Auth adapters for the teams plane (#83 §5).
+- [teams-infra::auth::oidc](teams_infra/auth__oidc.md): OIDC sign-in (#163): the instance is the provider's OAuth client,
 - [teams-infra::auth::password](teams_infra/auth__password.md): `auth::password` — the v0 instance-local credential adapter
 - [teams-infra::backup](teams_infra/backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
 - [teams-infra::blob](teams_infra/blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
@@ -393,6 +394,7 @@
 
 - [teams-server overview](teams_server/index.md): # teams-server — the hosted Team plane's server library
 - [teams-server::http](teams_server/http.md): HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+- [teams-server::oidc](teams_server/oidc.md): Sign-in through the instance's identity provider (#163): the
 - [teams-server::rate_limit](teams_server/rate_limit.md): The auth rate limiter — hand-rolled, per-key, sliding-window.
 - [teams-server::state](teams_server/state.md): Shared server context — what every handler and gate reads.
 

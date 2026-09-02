@@ -18,6 +18,7 @@ session token → user_id → membership gate).
 
 ## Types
 
+- `CollectOidcAttemptCommand` — Collects a sign-in attempt
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
 - `DeviceLoginCommand` — Presents a device token to `POST /teams/auth/device/login` (#204).
 - `EnterContentCommand` — Brings content into a team against open work
@@ -26,6 +27,7 @@ session token → user_id → membership gate).
 - `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
 - `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
+- `OidcAttemptCommand` — Starts a sign-in through the provider
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,

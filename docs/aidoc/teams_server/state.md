@@ -20,6 +20,8 @@ SQLite file behind one writer.
 
 - `AUTH_RATE_LIMIT_MAX` — Auth rate limit: attempts allowed per key per window (#83 §5 — one
 - `AUTH_RATE_LIMIT_WINDOW` — Auth rate limit window.
+- `DEFAULT_DEVICE_TOKEN_IDLE_MS` — How long a device token may go unpresented before it stops
+- `DEFAULT_DEVICE_TOKEN_TTL_MS` — How long a device token lives from its mint unless the instance
 - `DEFAULT_PURGE_GRACE_MS` — The purge grace window's safe default: **7 days**, the
 - `DEFAULT_SESSION_TTL_MS` — How long a session lives from login (24 hours). Sessions are
 

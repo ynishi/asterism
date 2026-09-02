@@ -6,7 +6,7 @@
 //! workspace has no per-key rate-limiting dependency: `tower`'s own
 //! limit layers are global concurrency/rate caps with no notion of a
 //! client key, and the crates that do keyed limiting (`tower_governor`
-//! and friends) would arrive for exactly one middleware on two routes.
+//! and friends) would arrive for exactly one middleware.
 //! A sliding-window log over a `Mutex<HashMap>` is ~40 lines, has no
 //! background task, and its failure mode (a mutex) is simpler than a
 //! dependency's upgrade treadmill — so the decision, recorded here, is

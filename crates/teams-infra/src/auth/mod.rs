@@ -8,7 +8,15 @@
 //! verifier answers is the domain's question, and what resolves to a
 //! `user_id` afterwards is a short-lived infra artifact the ledger
 //! never sees (#83 §1). The module's own doc says which stores those
-//! are today. OIDC is a later adapter behind the same port; 2FA is
-//! deferred by design.
+//! are today.
+//!
+//! [`oidc`] (#163) is a way in that sits **beside** the port rather
+//! than behind it: the port's one method takes a login and a secret,
+//! and what a provider hands back is neither — a signed statement
+//! about who somebody is, which the instance exchanges for itself as
+//! the provider's OAuth client. What every way in shares is everything
+//! after a `user_id` is known: the same session, the same device
+//! token, the same gate. 2FA is deferred by design.
 
+pub mod oidc;
 pub mod password;

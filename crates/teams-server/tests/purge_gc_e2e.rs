@@ -54,10 +54,13 @@ async fn harness(purge_grace_ms: i64) -> Harness {
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
         auth: PasswordAuth::new(isle.clone()),
+        oidc: None,
         projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle),
         blobs,
         registration: RegistrationPolicy::Open,
         session_ttl_ms: 60_000,
+        device_token_ttl_ms: teams_server::state::DEFAULT_DEVICE_TOKEN_TTL_MS,
+        device_token_idle_ms: None,
         auth_limiter: RateLimiter::new(1_000, Duration::from_secs(60)),
         purge_grace_ms,
         gc_guard: Arc::new(GcGuard::new()),

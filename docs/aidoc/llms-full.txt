@@ -14219,6 +14219,7 @@ session token → user_id → membership gate).
 
 ## Types
 
+- `CollectOidcAttemptCommand` — Collects a sign-in attempt
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
 - `DeviceLoginCommand` — Presents a device token to `POST /teams/auth/device/login` (#204).
 - `EnterContentCommand` — Brings content into a team against open work
@@ -14227,6 +14228,7 @@ session token → user_id → membership gate).
 - `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
 - `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
+- `OidcAttemptCommand` — Starts a sign-in through the provider
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
@@ -14244,6 +14246,7 @@ its own (#83 §1).
 
 ## Types
 
+- `AuthProvidersDto` — What this instance offers besides a password
 - `ContentEnteredDto` — What the team minted for content that entered it
 - `DeviceTokenDto` — One device token as its owner sees it.
 - `DeviceTokenMintedDto` — A freshly minted device token (`POST /teams/auth/device`, #204).
@@ -14254,10 +14257,12 @@ its own (#83 §1).
 - `LedgerPageDto` — One page of a team's stream (`GET /teams/{team_id}/events`).
 - `MyTeamDto` — One team the caller belongs to.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
+- `OidcAttemptDto` — A sign-in attempt through the provider
+- `OidcProviderDto` — One identity provider, as a connect form names it.
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.
-- `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
+- `SessionDto` — A freshly minted session (`POST /teams/auth/login`,
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
 - `ViewerDto` — The caller's standing in the team whose roster this is.
@@ -15377,11 +15382,14 @@ compiled.
 (#83 §1).
 
 Credentials live behind this port so the v0 choice (instance-local
-argon2id password adapter, #83 §5) stays an adapter detail and a
-later OIDC adapter is a new implementation, not a domain change.
-Sessions are deliberately **not** here: a session is a short-lived
-infra artifact that resolves to a `user_id` and the ledger never
-sees one — `teams-infra` owns that table and its expiry.
+argon2id password adapter, #83 §5) stays an adapter detail. It was
+cut expecting an OIDC adapter to be a second implementation; when
+that sign-in arrived (#163) it sat beside the port instead, because
+what a provider hands back is not a login and a secret —
+`teams-infra`'s auth module says where the two paths meet. Sessions
+are deliberately **not** here: a session is a short-lived infra
+artifact that resolves to a `user_id` and the ledger never sees one
+— `teams-infra` owns that table and its expiry.
 
 ## Traits
 
@@ -15478,6 +15486,7 @@ model and the traits are named here and nothing below them is.
 ## Modules
 
 - [`auth`](auth.md): Auth adapters for the teams plane (#83 §5).
+- [`auth::oidc`](auth__oidc.md): OIDC sign-in (#163): the instance is the provider's OAuth client,
 - [`auth::password`](auth__password.md): `auth::password` — the v0 instance-local credential adapter
 - [`backup`](backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
 - [`blob`](blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
@@ -15506,8 +15515,79 @@ nothing about. That split is the rule rather than a list — what a
 verifier answers is the domain's question, and what resolves to a
 `user_id` afterwards is a short-lived infra artifact the ledger
 never sees (#83 §1). The module's own doc says which stores those
-are today. OIDC is a later adapter behind the same port; 2FA is
-deferred by design.
+are today.
+
+[`oidc`] (#163) is a way in that sits **beside** the port rather
+than behind it: the port's one method takes a login and a secret,
+and what a provider hands back is neither — a signed statement
+about who somebody is, which the instance exchanges for itself as
+the provider's OAuth client. What every way in shares is everything
+after a `user_id` is known: the same session, the same device
+token, the same gate. 2FA is deferred by design.
+
+
+<!-- teams_infra/auth__oidc.md -->
+# teams-infra::auth::oidc
+
+OIDC sign-in (#163): the instance is the provider's OAuth client,
+and the invite still says whether.
+
+Two halves, kept apart because they answer different questions.
+[`OidcClient`] talks to the provider: discovery, the authorization
+URL a browser is sent to, the code exchange, and the check of the
+ID token that comes back — signature against the provider's
+published keys, issuer and audience against configuration, expiry
+against the clock, nonce against the attempt. [`OidcIdentities`]
+talks to the database: which account a verified identity resolves
+to, and the pinning that makes that answer stable.
+
+## Why the server is the client
+
+The desktop app never speaks to the provider. It opens a browser at
+this instance, and this instance runs the whole authorization-code
+exchange as a confidential client — client secret here, never on a
+device; one callback URL, registered once by whoever hosts the
+instance. That is the backend-for-frontend shape
+draft-ietf-oauth-v2-1 §2.1 recommends for a native application
+that wishes to use client credentials, and what it buys is stated
+where it is used: a provider outage stops new sign-ins and nothing
+else, the device listing is the instance's, and a hosted deployment
+with several providers changes nothing on a member's machine.
+
+## What a verified token is not
+
+Proof of membership. The provider answers who; the binding row
+answers whether that person holds an account here, and the roster
+answers whether they belong to a team. A token that verifies and
+resolves to nobody is refused with the same one-armed answer a
+wrong password gets, and nothing here provisions an account from a
+claim.
+
+## Pinning
+
+An admin binds an account to an email at the provider. The first
+sign-in whose token carries that email — **verified**, or it does
+not count — pins the token's `sub` to the row, and from then on the
+subject is what resolves and the email is inert. A provider that
+later hands the address to somebody else hands them a different
+subject; an unverified email claim never matches anything. The two
+account-takeover shapes the issue names are closed by those two
+rules, and `sqlite::migrations::V11_OIDC_IDENTITY` is where the
+indexes make them structural.
+
+## Functions
+
+- `normalize_email` — Lower-cased and trimmed: the one form an address is stored and
+- `sha256_hex` — SHA-256 of a string, hex — how an attempt's collector is compared
+
+## Types
+
+- `Exchange` — What a code exchange comes to.
+- `IdentityBinding` — One account's binding, as an admin reads it back.
+- `OidcClient` — The provider-facing half: discovery, the authorization URL, the
+- `OidcConfig` — How the instance reaches its provider — what `teams-server serve`
+- `OidcIdentities` — The database half: the binding rows, and the resolve that pins.
+- `VerifiedIdentity` — Who a provider vouched for, after every check passed.
 
 
 <!-- teams_infra/auth__password.md -->
@@ -15537,8 +15617,8 @@ The decisions that carry this module:
   faster than logins happen).
 - **A device token is that construction with a longer life and a
   name** (#204). Same bytes, same hash-at-rest rule, same two-sided
-  expiry — [`PasswordAuth::mint_device_token`] and its four
-  siblings differ from the session verbs in what the row carries
+  expiry — [`PasswordAuth::mint_device_token`] and its siblings
+  differ from the session verbs in what the row carries
   (a label, a handle, a last-use stamp) rather than in how the
   secret is handled. What it is *for* is the invariant #204 fixes:
   the disk may hold this and no primary credential, whichever
@@ -15552,10 +15632,11 @@ The decisions that carry this module:
   creation time rather than warned about.
 
 The port implementation ([`CredentialVerifier`]) keeps the port's
-one-arm contract: a wrong password and an unknown login are the
-same `Ok(None)`, and the unknown-login path verifies against a
-process-local dummy hash so the two answers cost the same work
-(username-enumeration resistance on the timing side too).
+one-arm contract: a wrong password, an unknown login and an account
+that holds no password ([`LOCKED_PASSWORD`], #163) are the same
+`Ok(None)`, and the two paths that find no hash to check verify
+against a process-local dummy hash so every answer costs the same
+work (username-enumeration resistance on the timing side too).
 
 ## Functions
 
@@ -15565,12 +15646,9 @@ process-local dummy hash so the two answers cost the same work
 
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
 - `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
+- `DeviceTokenResolution` — How a device token stops resolving, and why (#163).
 - `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
-
-## Constants
-
-- `DEVICE_TOKEN_TTL_MS` — How long a device token lives from the mint: **90 days** (#204).
 
 
 <!-- teams_infra/backup.md -->
@@ -16241,6 +16319,10 @@ route tests drive in-process:
   linked, and not public: the module is `pub(crate)` because it
   exports no type, only routes that reach a caller through
   [`http::router`].
+- [`oidc`] — sign-in through the instance's identity provider
+  (#163): the attempts an app starts, the pages a browser walks,
+  and the collect that ends in an ordinary session. Its routes are
+  registered from [`http`].
 - [`rate_limit`] — the one limiter every auth endpoint sits behind
   (#83 §5: from v0, not retrofitted).
 - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
@@ -16254,6 +16336,7 @@ say which issue owns each.
 ## Modules
 
 - [`http`](http.md): HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+- [`oidc`](oidc.md): Sign-in through the instance's identity provider (#163): the
 - [`rate_limit`](rate_limit.md): The auth rate limiter — hand-rolled, per-key, sliding-window.
 - [`state`](state.md): Shared server context — what every handler and gate reads.
 
@@ -16271,6 +16354,13 @@ slice).
 | POST | `/teams/auth/login` | none (rate-limited) |
 | POST | `/teams/auth/logout` | bearer token (rate-limited) |
 | POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+| GET | `/teams/auth/providers` | none — what this instance offers besides a password (#163) |
+| POST | `/teams/auth/oidc/attempts` | none (rate-limited) — starts a sign-in through the provider (#163) |
+| GET | `/teams/auth/oidc/attempts/{id}` | none — the page a browser lands on, HTML |
+| POST | `/teams/auth/oidc/attempts/{id}/authorize` | none — the button, `303` to the provider |
+| GET | `/teams/auth/oidc/callback` | a code from the provider (rate-limited) — `303` to the app's loopback listener |
+| GET | `/teams/auth/oidc/attempts/{id}/done` | none — the page the listener sends the browser on to, HTML |
+| POST | `/teams/auth/oidc/attempts/{id}/collect` | the attempt's secret and the grant the browser delivered (rate-limited) — answers with an ordinary session, once |
 | POST | `/teams/auth/device` | any live session — mints a device token (#204) |
 | GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
 | DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
@@ -16337,10 +16427,10 @@ a session that already resolved. They sit behind the gate instead.
 ## Minting asks for a live session and nothing more (#204)
 
 Not the password arm specifically, and this is the other question
-#204 leaves open. Any-session is what makes an OIDC adapter (#163)
-free: a verified ID token reaches the mint through a session the
+#204 leaves open. Any-session is what makes the provider path
+(#163) free: a sign-in through the provider ends in a session the
 same way a password does, and the minting path never learns which
-verifier answered — which is the property the whole issue turns on.
+way in was taken — which is the property the whole issue turns on.
 Requiring a re-auth would put a password back in front of a flow
 whose point is that a password is not always what happened.
 
@@ -16348,10 +16438,11 @@ What that costs is written down rather than waved at: a stolen live
 session can mint a device token, which outlives the session by
 design. The bound on it is that the owner can see every token
 (`GET`) and revoke any of it (`DELETE`), and that the tokens the
-disk holds expire on a fixed day
-([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
-A re-auth requirement can be added later without moving the table
-or changing a single row shape.
+disk holds end on a day fixed at the mint and earlier when unused
+([`TeamsCtx::device_token_ttl_ms`] and
+[`TeamsCtx::device_token_idle_ms`], #163). A re-auth requirement
+can be added later without moving the table or changing a single
+row shape.
 
 ## The blob read is the one deliberate exception to [`team_gate`]
 
@@ -16391,6 +16482,95 @@ and `forge_response` below.
 - `router` — Builds the router; the caller binds a listener and calls
 
 
+<!-- teams_server/oidc.md -->
+# teams-server::oidc
+
+Sign-in through the instance's identity provider (#163): the
+attempts a desktop app starts, the pages a browser walks, the
+loopback hand-back that ties the answer to the machine the app runs
+on, and the collect that turns a provider's answer into an ordinary
+session.
+
+## The shape
+
+```text
+app ──► listens on http://127.0.0.1:<port>
+app ──► POST /teams/auth/oidc/attempts {collector, label, loopback_port}
+                                       ──► {attempt_id, start_url}
+app ──► opens start_url in the system browser
+  browser ──► GET  …/attempts/{id}            the page: "sign in <label>?"
+  browser ──► POST …/attempts/{id}/authorize  303 to the provider
+  browser ──► provider ──► GET …/callback?code&state
+                                               exchange, verify, resolve
+  browser ◄── 303 http://127.0.0.1:<port>/…?attempt={id}&grant=…
+  browser ──► the app's listener ──► 303 …/attempts/{id}/done  (a page)
+app ──► POST …/attempts/{id}/collect {secret, grant} ──► session, once
+```
+
+The listener's two lines are the contract the app is to meet, not
+something this crate holds; the wire crate's `OidcAttemptDto` is
+where it is stated for the app.
+
+From the session on, nothing is new: the app mints a device token
+on it the way it does after a password (#204), and the gate never
+learns which way in was taken.
+
+## What binds the answer to the app, and to its machine
+
+Two things, for two attackers.
+
+The attempt id travels through a browser's history and a provider's
+logs, so it is not what collects the session. The app keeps a secret
+and starts the attempt with its SHA-256; the collect presents the
+secret, and a collect that presents anything else is answered as
+though the attempt did not exist. That is one answer for six cases
+— a wrong secret, a wrong grant, an id nothing names, an attempt
+past its expiry, one already collected, one the browser has not
+finished — so that none of them can be told apart from outside.
+That closes the case of a third party who *learns* an id.
+
+It closes nothing against somebody who *started* the attempt and
+gets a person to finish it in their browser — the shape device-code
+phishing takes — because the starter holds the secret. What closes
+that case is where the provider's answer goes: not to the app's
+poll, but to the browser, as a redirect to the loopback address the
+attempt was started with, carrying a one-time grant the collect
+also requires. The browser that finished the sign-in is on the
+person's machine, `127.0.0.1` on that machine is the person's
+machine, and an app listening there is the app the person is
+running. An attempt started elsewhere sends its grant to a port on
+the victim's machine where nothing of the attacker's is listening,
+and the grant is never collected. There is no poll to fall back to;
+a client that cannot listen on loopback cannot sign in this way,
+which is the price, stated. RFC 8252 §7.3 is the loopback shape,
+and the AWS CLI's move from device code to loopback is the
+precedent for choosing it over polling for exactly this attack.
+
+The page before the provider is still there and still asks, with
+the label the attempt was started with. It is a courtesy and a
+speed bump, not the defence: the label is text whoever started the
+attempt typed. What the page does have to do is not be skippable —
+its button takes a token only the page hands out, and the page
+refuses to be framed — so that the person does see it.
+
+## In memory, not in the database
+
+Attempts live in a map on the context, swept on every start and
+gone with the process. An attempt is ten minutes of state with no
+meaning after the session it produced, and a restart mid-sign-in
+costs the person a second click, which is the same cost the
+limiter's in-memory buckets accept for the same reason.
+
+## Types
+
+- `Collect` — What a collect comes to, before it is a status code.
+- `OidcSignIn` — The provider half of the context: the client, the bindings, and the
+
+## Constants
+
+- `ATTEMPT_TTL_MS` — How long an attempt may sit between being started and being
+
+
 <!-- teams_server/rate_limit.md -->
 # teams-server::rate_limit
 
@@ -16402,7 +16582,7 @@ The auth rate limiter — hand-rolled, per-key, sliding-window.
 workspace has no per-key rate-limiting dependency: `tower`'s own
 limit layers are global concurrency/rate caps with no notion of a
 client key, and the crates that do keyed limiting (`tower_governor`
-and friends) would arrive for exactly one middleware on two routes.
+and friends) would arrive for exactly one middleware.
 A sliding-window log over a `Mutex<HashMap>` is ~40 lines, has no
 background task, and its failure mode (a mutex) is simpler than a
 dependency's upgrade treadmill — so the decision, recorded here, is
@@ -16445,6 +16625,8 @@ SQLite file behind one writer.
 
 - `AUTH_RATE_LIMIT_MAX` — Auth rate limit: attempts allowed per key per window (#83 §5 — one
 - `AUTH_RATE_LIMIT_WINDOW` — Auth rate limit window.
+- `DEFAULT_DEVICE_TOKEN_IDLE_MS` — How long a device token may go unpresented before it stops
+- `DEFAULT_DEVICE_TOKEN_TTL_MS` — How long a device token lives from its mint unless the instance
 - `DEFAULT_PURGE_GRACE_MS` — The purge grace window's safe default: **7 days**, the
 - `DEFAULT_SESSION_TTL_MS` — How long a session lives from login (24 hours). Sessions are
 

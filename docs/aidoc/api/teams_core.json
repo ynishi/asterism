@@ -335,7 +335,7 @@
     {
       "path": "teams_core::port::auth",
       "kind": "module",
-      "docs": "`port::auth` — credential verification behind a provider swap\n(#83 §1).\n\nCredentials live behind this port so the v0 choice (instance-local\nargon2id password adapter, #83 §5) stays an adapter detail and a\nlater OIDC adapter is a new implementation, not a domain change.\nSessions are deliberately **not** here: a session is a short-lived\ninfra artifact that resolves to a `user_id` and the ledger never\nsees one — `teams-infra` owns that table and its expiry."
+      "docs": "`port::auth` — credential verification behind a provider swap\n(#83 §1).\n\nCredentials live behind this port so the v0 choice (instance-local\nargon2id password adapter, #83 §5) stays an adapter detail. It was\ncut expecting an OIDC adapter to be a second implementation; when\nthat sign-in arrived (#163) it sat beside the port instead, because\nwhat a provider hands back is not a login and a secret —\n`teams-infra`'s auth module says where the two paths meet. Sessions\nare deliberately **not** here: a session is a short-lived infra\nartifact that resolves to a `user_id` and the ledger never sees one\n— `teams-infra` owns that table and its expiry."
     },
     {
       "path": "teams_core::port::auth::CredentialVerifier",
