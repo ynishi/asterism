@@ -10,6 +10,30 @@ and this project adheres to
 
 ### Added
 
+- **Sign in through the team's identity provider — the app's half** (#163). The
+  connect drawer asks the server it is pointed at whether it offers a provider,
+  and shows a "Sign in with …" button when it does. Pressing it opens the system
+  browser at the server's page; the person signs in there; the browser comes
+  back to a port the app is listening on at `127.0.0.1` with a one-time grant,
+  and the app collects the session with the grant and a secret it kept. No login
+  and no password cross the drawer for this path — the session says which
+  account it was — and from the session on it is the password path: the same
+  connection, the same device token when "Remember this device" is ticked, the
+  same keychain. A refusal, a tab closed without finishing, and a server that
+  offers no provider each say so in the drawer.
+
+  **What the keychain entry is keyed by moved from the server's URL to the
+  instance's id.** A URL is a name that moves — a custom domain, a port, a host
+  renamed — and an entry keyed by one went silently unfindable the day it did.
+  The session now carries the instance's stable id (the server half of #163),
+  and an entry is keyed by that and the login. An entry written before the id
+  existed is moved across the first time a reconnect learns the id; until then
+  it is compared the way it was written, so nothing already stored is lost.
+
+  `tauri-plugin-opener` enters the app for the one thing it does — handing a URL
+  to the default browser from a bundled app — and the loopback listener is the
+  `axum` the app already runs.
+
 - **Sign in through the team's identity provider — the server half** (#163). An
   instance may now be configured with one OIDC provider
   (`serve --oidc-issuer … --oidc-client-id … --public-url …`, the client secret
@@ -65,9 +89,6 @@ and this project adheres to
   connection should be keyed by) and `tenant_id` (the instance's, until there
   are tenants; here from the first so that a host serving several later changes
   nothing a client stores). All three default on decode.
-
-  The desktop app's button, the command that opens the browser and collects, and
-  the move of the keychain key onto the instance id are the next slice.
 
 - **Invite somebody into a team, and take them out, from the app** (#210). The
   five roster writes had a route, an authority rule, a repository method and
