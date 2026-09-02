@@ -131,9 +131,20 @@ pub struct OidcAttemptDto {
     /// which shows the device label and asks before sending the person
     /// on to the provider.
     pub start_url: String,
-    /// When the attempt stops being collectable, epoch ms — how long
-    /// the listener should wait.
+    /// When the attempt stops being collectable, epoch ms on the
+    /// instance's clock. What a client derives a wait from when it
+    /// meets an instance too old to say `ttl_ms`, which says why that
+    /// is not the way.
     pub expires_at_ms: i64,
+    /// How long the attempt is collectable from now, ms: what the
+    /// listener waits from, up to a ceiling of its own. A duration
+    /// rather than the instant above because a client subtracting its
+    /// own clock from the instance's gets the difference between two
+    /// clocks, and a clock fast by more than the attempt's life ended
+    /// the wait before the browser could come back. `0` from an
+    /// instance older than the field, which stated only the instant.
+    #[serde(default)]
+    pub ttl_ms: i64,
 }
 
 /// A freshly minted device token (`POST /teams/auth/device`, #204).

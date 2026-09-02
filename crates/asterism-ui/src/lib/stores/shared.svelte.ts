@@ -290,6 +290,7 @@
 // moved `shared lines` beside the forge in the sidebar and named
 // revisiting that as this umbrella's, and revisiting a placement is a
 // different act from choosing one.
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { clashingNames, projectWork } from "../forge-projection";
 import type { ForgeProjectedEntry } from "../forge-projection";
@@ -315,6 +316,15 @@ import type {
   TeamProviderDto,
   TeamRosterDto,
 } from "../../bindings";
+
+/// What the backend says when a sign-in through the provider has a
+/// page to go to — the event `connect_team_server_provider` emits
+/// before it waits. Hand-typed on purpose: the generated bindings are
+/// a projection of `asterism-contract`, and this shape lives in the
+/// app crate beside the command that emits it. Its name and this
+/// shape have to match `PROVIDER_SIGN_IN_EVENT` and
+/// `ProviderSignInStarted` in `src-tauri/src/commands.rs`.
+type ProviderSignInStarted = { attempt_id: string; start_url: string };
 
 /// What the two reads need to name a line on a server.
 type TeamArgs = { teamId: string };
@@ -380,7 +390,9 @@ class SharedCatalog {
   /// Why the stored token was refused, when it was: `expired`, `idle`
   /// or `revoked` as the server said it (#163), or null from a server
   /// too old to say. What the drawer tells the person, since what the
-  /// app did — forget the token — is the same for all three.
+  /// app did — forget the token — is the same for all three. Cleared
+  /// wherever `storedRejected` is: by every connection that lands, and
+  /// by a disconnect.
   storedRejectedReason = $state<string | null>(null);
 
   /// The device tokens this account holds, on whatever machines.
@@ -671,7 +683,12 @@ class SharedCatalog {
   /// one is swallowed here for the same reason. A window whose silent
   /// attempt failed is a window showing the connect form, which is
   /// where it would have been anyway.
+  ///
+  /// Not while a sign-in through the provider waits (#163), for the
+  /// reason `providerBusy` gives; opening the panel again with a wait
+  /// running is the way here.
   async resume(): Promise<void> {
+    if (this.providerBusy) return;
     await this.readStored();
     if (this.stored === null) return;
     let attempt: StoredTeamConnectDto;
@@ -742,6 +759,25 @@ class SharedCatalog {
     this.providerFor = url;
   }
 
+  /// Whether a sign-in through the provider is under way, from the
+  /// press to the command's answer. While it is, the wait owns the
+  /// connection: `connect` and `resume` do nothing, so no session is
+  /// opened under it for its answer to write over, and the form is
+  /// off. True before the attempt has an id — the round trip that
+  /// starts it is the window in which a second press would start a
+  /// second wait, which the backend refuses and this keeps from being
+  /// asked; `providerAttempt` is what the drawer shows once the id is
+  /// known. Outlives the drawer, which is the point: closing it is not
+  /// ending the wait.
+  providerBusy = $state(false);
+
+  /// The sign-in through the provider that is waiting for the browser
+  /// — which attempt, and where the browser was sent — or null when
+  /// none is. Set by the backend's event, which is also what makes the
+  /// attempt cancellable: a cancel names the id. Why the drawer shows
+  /// the page is said where it is shown.
+  providerAttempt = $state<{ id: string; startUrl: string } | null>(null);
+
   /// Signs in through the server's identity provider, in the system
   /// browser, and optionally asks to be remembered (#163).
   ///
@@ -749,16 +785,71 @@ class SharedCatalog {
   /// person proves who they are, and the session that comes back says
   /// which account it was. The rest is `connect` — the same
   /// connection, the same mint when `remember` is ticked.
-  async connectWithProvider(baseUrl: string, remember: boolean): Promise<void> {
+  ///
+  /// The command tells the window which attempt and where it sent the
+  /// browser, as an event, before it waits; the listener is registered
+  /// before the command is called so the event cannot be missed, and
+  /// removed however the command ends. One at a time: a call while
+  /// one is under way does nothing, on the ground `providerBusy`
+  /// gives. A `null` answer is a cancel from this drawer — no session
+  /// and nothing to report. Answers whether a session was opened, so
+  /// the drawer knows whether to untick the box.
+  async connectWithProvider(
+    baseUrl: string,
+    remember: boolean,
+  ): Promise<boolean> {
+    if (this.providerBusy) return false;
+    this.providerBusy = true;
     this.said = null;
-    this.session = await mutate<string>(
-      "connect_team_server_provider",
-      { baseUrl, remember },
-      "sign in through the team server's provider",
-    );
+    this.providerAttempt = null;
+    let session: string | null = null;
+    try {
+      const unlisten = await listen<ProviderSignInStarted>(
+        "team-provider-sign-in",
+        (event) => {
+          this.providerAttempt = {
+            id: event.payload.attempt_id,
+            startUrl: event.payload.start_url,
+          };
+        },
+      );
+      try {
+        session = await mutate<string | null>(
+          "connect_team_server_provider",
+          { baseUrl, remember },
+          "sign in through the team server's provider",
+        );
+      } finally {
+        unlisten();
+      }
+    } finally {
+      this.providerAttempt = null;
+      this.providerBusy = false;
+    }
+    if (session === null) return false;
+    this.session = session;
     this.storedRejected = false;
+    this.storedRejectedReason = null;
     await this.readStored();
     await this.teams.load({});
+    return true;
+  }
+
+  /// Ends the sign-in through the provider that is waiting, by the
+  /// attempt's id (#163). The command answers `null` to
+  /// `connectWithProvider`, which is where the drawer's state goes
+  /// back — up to the collect; a press that lands after the session
+  /// has been collected is too late, and the person is signed in,
+  /// which the command's doc is where that boundary is stated.
+  /// Nothing to cancel is nothing to do.
+  async cancelProviderSignIn(): Promise<void> {
+    const attempt = this.providerAttempt;
+    if (attempt === null) return;
+    await mutate<null>(
+      "cancel_provider_sign_in",
+      { attemptId: attempt.id },
+      "cancel the sign-in through the team server's provider",
+    );
   }
 
   /// Logs in with a password, and optionally asks to be remembered.
@@ -767,12 +858,17 @@ class SharedCatalog {
   /// to ask for a device token, which lands in this machine's
   /// keychain. What it stores and why the password is not part of it
   /// is on the command.
+  ///
+  /// Refused while a sign-in through the provider waits, for the
+  /// reason `providerBusy` gives; the form is off then, and this is
+  /// the guard behind the form.
   async connect(
     baseUrl: string,
     login: string,
     password: string,
     remember: boolean,
   ): Promise<void> {
+    if (this.providerBusy) return;
     this.said = null;
     this.session = await mutate<string>(
       "connect_team_server",
@@ -780,6 +876,7 @@ class SharedCatalog {
       "connect to that team server",
     );
     this.storedRejected = false;
+    this.storedRejectedReason = null;
     // What the mint wrote, read back rather than assumed: a connection
     // made without ticking the box leaves whatever was stored before
     // exactly as it was, and this is the one read that says which.
@@ -859,6 +956,7 @@ class SharedCatalog {
     this.session = null;
     this.stored = null;
     this.storedRejected = false;
+    this.storedRejectedReason = null;
     this.deviceTokens.reset();
     this.selected = null;
     // Not a cache being invalidated — a served-through view losing the

@@ -107,7 +107,14 @@ tracing = { workspace = true }
 #
 # A feature is opt-in at the command line, so the default `cargo build`
 # — including `just dogfood-build`, which produces the app that holds
-# real data — never pulls it in. `just ui-e2e` passes `--features wdio`.
+# real data — never pulls it in. The recipes that drive the app from a
+# WebDriver pass `--features wdio`; the Justfile is the list.
+#
+# The feature is read outside the WebDriver surface too — a sign-in
+# through a team's identity provider does not open the system browser
+# under it, because the suite is the browser. A read of it outside
+# that surface says why at its `cfg`, which is where to look for the
+# effects.
 [features]
 wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 # The ONNX encoder path (#112). The app process is the one that runs

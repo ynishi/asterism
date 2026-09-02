@@ -35,15 +35,23 @@ import type {
   PromotedAssetDto,
   TeamLedgerEventDto,
 } from "../../bindings";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { mutate } from "../mutate";
 import { isDeparture, sharedCatalog } from "./shared.svelte";
 
 vi.mock("../api", () => ({ api: vi.fn() }));
 vi.mock("../mutate", () => ({ mutate: vi.fn() }));
+// The provider sign-in listens for the backend's event before it calls
+// the command; there is no backend here, so the listener is a no-op
+// that hands back an unlisten.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async () => () => {}),
+}));
 
 const apiMock = vi.mocked(api);
 const mutateMock = vi.mocked(mutate);
+const listenMock = vi.mocked(listen);
 
 function line(id: string, name: string): ForgeLineDto {
   return {
@@ -112,6 +120,8 @@ beforeEach(() => {
   sharedCatalog.deviceTokens.reset();
   sharedCatalog.provider = null;
   sharedCatalog.providerFor = null;
+  sharedCatalog.providerBusy = false;
+  sharedCatalog.providerAttempt = null;
 });
 
 // The silent reconnect's refusal carries the server's reason (#163),
@@ -156,8 +166,9 @@ describe("why a stored sign-in was refused", () => {
 
 // Signing in through the server's identity provider (#163). What the
 // store owes the form: the button is offered only on the server's own
-// say-so, and the sign-in itself carries no login and no password —
-// the browser is where those happen.
+// say-so, the sign-in itself carries no login and no password — the
+// browser is where those happen — and one wait at a time owns the
+// connection until it ends or is cancelled.
 describe("signing in through the provider", () => {
   it("offers a button only when the server says it has a provider", async () => {
     apiMock.mockResolvedValueOnce({ name: "Example IdP" });
@@ -199,6 +210,115 @@ describe("signing in through the provider", () => {
     );
     expect(sharedCatalog.session).toBe("u1");
     expect(sharedCatalog.storedRejected).toBe(false);
+  });
+
+  // One wait at a time: the form is off from the press, and a press
+  // that lands anyway — before the event that names the attempt —
+  // starts nothing beside the one under way.
+  it("starts no second sign-in while one is under way", async () => {
+    let finish: (value: string | null) => void = () => {};
+    mutateMock.mockReturnValueOnce(
+      new Promise<string | null>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const first = sharedCatalog.connectWithProvider(
+      "http://127.0.0.1:8787",
+      false,
+    );
+    await Promise.resolve();
+    expect(sharedCatalog.providerBusy).toBe(true);
+    await expect(
+      sharedCatalog.connectWithProvider("http://127.0.0.1:8787", false),
+    ).resolves.toBe(false);
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+
+    apiMock.mockResolvedValueOnce(null); // stored_team_connection
+    apiMock.mockResolvedValueOnce({ teams: [] }); // my teams
+    finish("u1");
+    await expect(first).resolves.toBe(true);
+    expect(sharedCatalog.providerBusy).toBe(false);
+  });
+
+  // The cancel names the attempt the backend's event named, and a
+  // wait that ends on it opens no session and reports nothing.
+  it("cancels the attempt the event named, and that is not an error", async () => {
+    let started: (event: {
+      payload: { attempt_id: string; start_url: string };
+    }) => void = () => {};
+    listenMock.mockImplementationOnce(async (_name, handler) => {
+      started = handler as typeof started;
+      return () => {};
+    });
+    let finish: (value: string | null) => void = () => {};
+    mutateMock.mockReturnValueOnce(
+      new Promise<string | null>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const waiting = sharedCatalog.connectWithProvider(
+      "http://127.0.0.1:8787",
+      true,
+    );
+    await Promise.resolve();
+    started({
+      payload: {
+        attempt_id: "a1",
+        start_url: "http://127.0.0.1:8787/teams/auth/oidc/attempts/a1",
+      },
+    });
+    expect(sharedCatalog.providerAttempt).toEqual({
+      id: "a1",
+      startUrl: "http://127.0.0.1:8787/teams/auth/oidc/attempts/a1",
+    });
+
+    mutateMock.mockResolvedValueOnce(null);
+    await sharedCatalog.cancelProviderSignIn();
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "cancel_provider_sign_in",
+      { attemptId: "a1" },
+      expect.any(String),
+    );
+
+    finish(null);
+    await expect(waiting).resolves.toBe(false);
+    expect(sharedCatalog.session).toBeNull();
+    expect(sharedCatalog.said).toBeNull();
+    expect(sharedCatalog.providerAttempt).toBeNull();
+    expect(sharedCatalog.providerBusy).toBe(false);
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it("has nothing to cancel when nothing is waiting", async () => {
+    await sharedCatalog.cancelProviderSignIn();
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  // The wait owns the connection: nothing else opens a session under
+  // it — not the form, not the silent reconnect a reopened drawer
+  // would run — so what the wait answers is never written over
+  // something opened meanwhile.
+  it("opens no other session while a sign-in through the provider waits", async () => {
+    let finish: (value: string | null) => void = () => {};
+    mutateMock.mockReturnValueOnce(
+      new Promise<string | null>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const waiting = sharedCatalog.connectWithProvider(
+      "http://127.0.0.1:8787",
+      false,
+    );
+    await Promise.resolve();
+
+    await sharedCatalog.connect("http://127.0.0.1:8787", "alice", "pw", false);
+    await sharedCatalog.resume();
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+    expect(apiMock).not.toHaveBeenCalled();
+    expect(sharedCatalog.session).toBeNull();
+
+    finish(null);
+    await waiting;
   });
 });
 
@@ -243,7 +363,9 @@ describe("what the panel shows", () => {
     await sharedCatalog.openPanel();
 
     expect(sharedCatalog.open).toBe(true);
-    expect(apiMock).toHaveBeenCalledWith("list_shared_lines", { teamIdRaw: "t1" });
+    expect(apiMock).toHaveBeenCalledWith("list_shared_lines", {
+      teamIdRaw: "t1",
+    });
   });
 
   it("does not ask a server it is not connected to", async () => {
@@ -252,7 +374,10 @@ describe("what the panel shows", () => {
     await sharedCatalog.openPanel();
 
     expect(sharedCatalog.session).toBeNull();
-    expect(apiMock).not.toHaveBeenCalledWith("list_shared_lines", expect.anything());
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "list_shared_lines",
+      expect.anything(),
+    );
   });
 
   it("counts a line's change points out of its history", async () => {
@@ -263,8 +388,26 @@ describe("what the panel shows", () => {
       genesis_id: "g1",
       genesis_at_ms: 1,
       changes: [
-        { id: "c1", parent_id: "g1", from_pursuit_id: "p1", by_node_id: "n1", at_ms: 2, actor_kind: "user", actor_id: "a1", table: [] },
-        { id: "c2", parent_id: "c1", from_pursuit_id: "p2", by_node_id: "n2", at_ms: 3, actor_kind: "user", actor_id: "a1", table: [] },
+        {
+          id: "c1",
+          parent_id: "g1",
+          from_pursuit_id: "p1",
+          by_node_id: "n1",
+          at_ms: 2,
+          actor_kind: "user",
+          actor_id: "a1",
+          table: [],
+        },
+        {
+          id: "c2",
+          parent_id: "c1",
+          from_pursuit_id: "p2",
+          by_node_id: "n2",
+          at_ms: 3,
+          actor_kind: "user",
+          actor_id: "a1",
+          table: [],
+        },
       ],
     });
 
@@ -381,7 +524,12 @@ describe("the two writes", () => {
     mutateMock.mockResolvedValueOnce(line("l9", "the whole story"));
     apiMock.mockResolvedValueOnce([]);
 
-    await sharedCatalog.publish("local-1", "the whole story", "mainline-first", true);
+    await sharedCatalog.publish(
+      "local-1",
+      "the whole story",
+      "mainline-first",
+      true,
+    );
 
     expect(mutateMock).toHaveBeenCalledWith(
       "publish_line_to_team",
@@ -401,7 +549,12 @@ describe("the two writes", () => {
     mutateMock.mockResolvedValueOnce(line("l9", "as it stands"));
     apiMock.mockResolvedValueOnce([]);
 
-    await sharedCatalog.publish("local-1", "as it stands", "mainline-first", false);
+    await sharedCatalog.publish(
+      "local-1",
+      "as it stands",
+      "mainline-first",
+      false,
+    );
 
     expect(sharedCatalog.said).not.toContain("re-enacted");
     expect(sharedCatalog.said).toContain("as it stands");
@@ -413,7 +566,9 @@ describe("the two writes", () => {
 
     await sharedCatalog.publish("local-1", "seeded", "mainline-first", false);
 
-    expect(apiMock).toHaveBeenCalledWith("list_shared_lines", { teamIdRaw: "t1" });
+    expect(apiMock).toHaveBeenCalledWith("list_shared_lines", {
+      teamIdRaw: "t1",
+    });
     expect(sharedCatalog.lines.data.map((l) => l.id)).toEqual(["l9"]);
   });
 });
@@ -898,7 +1053,10 @@ describe("walking the ledger", () => {
   });
 
   it("appends the next page rather than replacing what it has", async () => {
-    apiMock.mockResolvedValueOnce({ events: [event(1), event(2)], next_after: 2 });
+    apiMock.mockResolvedValueOnce({
+      events: [event(1), event(2)],
+      next_after: 2,
+    });
     await sharedCatalog.readLedgerPage();
     apiMock.mockResolvedValueOnce({ events: [event(3)], next_after: null });
 
@@ -917,7 +1075,10 @@ describe("walking the ledger", () => {
     // taken*, not that the walk is over — so asking again has to ask
     // about what comes after the last event, not about the beginning.
     // Passing nothing would append a second copy of the whole ledger.
-    apiMock.mockResolvedValueOnce({ events: [event(1), event(2)], next_after: null });
+    apiMock.mockResolvedValueOnce({
+      events: [event(1), event(2)],
+      next_after: null,
+    });
     await sharedCatalog.readLedgerPage();
     apiMock.mockResolvedValueOnce({ events: [], next_after: null });
 

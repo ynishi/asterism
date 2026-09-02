@@ -115,7 +115,9 @@ pub fn run() {
     // server. The backend calls it and nothing in the webview does,
     // which is why the capability file grants the webview none of the
     // plugin's commands: a capability is what the webview may reach
-    // over IPC, and the Rust call is not that.
+    // over IPC, and the Rust call is not that. Under the `wdio`
+    // feature the call is compiled out and the plugin stays registered
+    // — the suite is the browser, and the reason sits at the call.
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
 
     // WebDriver surface for `just ui-e2e`, behind the `wdio` feature.
@@ -448,6 +450,7 @@ pub fn run() {
             // and comes back on loopback.
             commands::team_auth_provider,
             commands::connect_team_server_provider,
+            commands::cancel_provider_sign_in,
             // The one credential this machine may keep, and what it
             // costs to keep it (#204). `stored_connection` owns both
             // stores; this block is the verbs a window reaches them

@@ -3188,29 +3188,106 @@ pub async fn team_auth_provider(base_url: String) -> Result<Option<TeamProviderD
     }))
 }
 
+/// The event the window hears when a sign-in through the provider has
+/// a page to go to (#163). Its payload is [`ProviderSignInStarted`].
+pub const PROVIDER_SIGN_IN_EVENT: &str = "team-provider-sign-in";
+
+/// The sign-in through the provider that is waiting, as the drawer
+/// hears of it: which attempt, and where the browser is being sent —
+/// told before it is sent there. The id is what a cancel names; the
+/// page is what the drawer shows.
+#[derive(Clone, serde::Serialize)]
+pub struct ProviderSignInStarted {
+    /// The attempt the server started — what
+    /// [`cancel_provider_sign_in`] takes.
+    pub attempt_id: String,
+    /// The page on the team server the browser is handed.
+    pub start_url: String,
+}
+
+/// The longest this side waits for the browser, whatever the server
+/// says the attempt is good for: a quarter of an hour. The server's
+/// number is a fact about that server; this is the app's patience,
+/// and a cancel is the way out before it. Both arms of the wait stop
+/// here.
+const PROVIDER_WAIT_MAX_MS: i64 = 15 * 60 * 1000;
+
+/// Holds `AppState::provider_sign_in` for the length of one sign-in
+/// and empties it on the way out — the return, an error, or the
+/// command's future being dropped — so the slot never outlives the
+/// wait it stands for.
+struct ProviderSignInSlot(
+    std::sync::Arc<std::sync::Mutex<Option<crate::state::ProviderSignInInFlight>>>,
+);
+
+impl Drop for ProviderSignInSlot {
+    fn drop(&mut self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+}
+
 /// Signs this window in through the team server's identity provider
-/// (#163), and holds the session.
+/// (#163), and holds the session. `None` when the wait was ended from
+/// the drawer by [`cancel_provider_sign_in`]: nothing was signed in
+/// and nothing went wrong, so there is nothing to say.
 ///
 /// The app's end of the shape `provider_sign_in` describes: a listener
 /// on loopback, an attempt started with a secret's hash and the port,
-/// the system browser opened at the server's page, and the session
-/// collected once the browser has come back with the grant. The person
+/// the window told which attempt and where the browser is being sent
+/// ([`PROVIDER_SIGN_IN_EVENT`]), the system browser opened at the
+/// server's page — except under the `wdio` feature, where the suite is
+/// the browser — and the session collected once the browser has come
+/// back with the grant. The person
 /// never types a login here — the session says it — and from the
 /// session on this is [`connect_team_server`]: the same connection,
 /// the same mint when `remember` is ticked, the same keychain.
 ///
-/// Waits about as long as the attempt is good for, and the listener
-/// goes with the wait. A browser tab closed without finishing is a
-/// wait that ends with a refusal saying so; a provider that refused is
-/// a refusal saying that; both leave the window where it was.
+/// One at a time: a second call while one is waiting is refused, on
+/// the ground [`crate::state::ProviderSignInInFlight`] gives. Waits
+/// as long as the attempt is good for and no longer than
+/// `PROVIDER_WAIT_MAX_MS` — or, against a server too old to say how
+/// long, about that, on the terms the arms below give — and the
+/// listener goes with the wait. A browser tab closed without
+/// finishing is a wait that ends with a refusal saying so; a cancel
+/// from the drawer is a wait that ends with `None`, honoured up to the
+/// collect — a cancel that lands after the session has been collected
+/// is too late, and the person is signed in; a provider that refused
+/// is a refusal saying that. All of them leave the window where it
+/// was.
 #[tauri::command]
 pub async fn connect_team_server_provider(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     base_url: String,
     remember: bool,
-) -> Result<String, UiError> {
+) -> Result<Option<String>, UiError> {
+    use tauri::Emitter as _;
+    // The import follows the one call that uses it, which is compiled
+    // out under `wdio` — the reason is at that call.
+    #[cfg(not(feature = "wdio"))]
     use tauri_plugin_opener::OpenerExt as _;
+
+    // The slot first, before anything is started: the window between
+    // the check and the take is what would let two waits run.
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let slot = {
+        let mut in_flight = state
+            .provider_sign_in
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if in_flight.is_some() {
+            return Err(UiError::from(DomainError::Validation(
+                "a sign-in through the provider is already waiting for the browser; finish \
+                 it or cancel it first"
+                    .into(),
+            )));
+        }
+        *in_flight = Some(crate::state::ProviderSignInInFlight {
+            attempt_id: String::new(),
+            cancel: Some(cancel_tx),
+        });
+        ProviderSignInSlot(state.provider_sign_in.clone())
+    };
 
     let mut client = asterism_teams_client::TeamsClient::new(base_url.clone());
     let provider = client
@@ -3245,6 +3322,28 @@ pub async fn connect_team_server_provider(
         .map_err(teams_error)?;
     let done_url = format!("{}/done", attempt.start_url);
     let waiting = listener.serve(attempt.attempt_id.clone(), done_url);
+    // The slot learns which attempt it stands for, so a cancel can
+    // name it.
+    if let Some(in_flight) = slot.0.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        in_flight.attempt_id = attempt.attempt_id.clone();
+    }
+    // The window is told which attempt and where the browser is being
+    // sent, before it is sent there — what the drawer does with it is
+    // the panel's to say — and the e2e suite has the page to walk.
+    if let Err(err) = app.emit(
+        PROVIDER_SIGN_IN_EVENT,
+        ProviderSignInStarted {
+            attempt_id: attempt.attempt_id.clone(),
+            start_url: attempt.start_url.clone(),
+        },
+    ) {
+        tracing::warn!(error = %err, "the window was not told where the sign-in went");
+    }
+    // Under the e2e build the browser is not opened: the suite is the
+    // browser, walking the page over HTTP from the URL the event
+    // carried, and a real one opening on the runner would be a window
+    // nothing drives. Everything else on this path is what ships.
+    #[cfg(not(feature = "wdio"))]
     app.opener()
         .open_url(&attempt.start_url, None::<&str>)
         .map_err(|err| {
@@ -3252,30 +3351,42 @@ pub async fn connect_team_server_provider(
                 "could not open the browser for the sign-in: {err}"
             )))
         })?;
-    // How long to wait is the attempt's own life, which the server
-    // states as an instant on its clock. Read on this machine's clock
-    // that can come out as nothing at all when the two disagree, so
-    // the wait is held to at least a minute and at most a quarter of
-    // an hour: a person who finishes inside a minute on a fast clock
-    // is still collected, and a server that has already expired the
-    // attempt answers the collect with the refusal that says so.
-    let remaining = attempt
-        .expires_at_ms
-        .saturating_sub(chrono::Utc::now().timestamp_millis())
-        .clamp(60_000, 15 * 60_000) as u64;
-    let outcome = tokio::time::timeout(std::time::Duration::from_millis(remaining), waiting)
-        .await
-        .map_err(|_| {
-            UiError::from(DomainError::Validation(format!(
-                "the sign-in through {} was not finished in time; try again",
-                provider.name
-            )))
-        })?
-        .map_err(|_| {
-            UiError::from(DomainError::Infra(anyhow::anyhow!(
-                "the loopback listener went away before the browser came back"
-            )))
-        })?;
+    // How long to wait is the attempt's own life, as the server states
+    // it: `ttl_ms`, or for a server too old to say it the instant, on
+    // the terms `OidcAttemptDto`'s doc gives. What is this side's: the
+    // instant arm is held to at least a minute, so a clock fast by
+    // more than the attempt's life cannot make the wait nothing, and
+    // both arms stop at `PROVIDER_WAIT_MAX_MS`.
+    let remaining = if attempt.ttl_ms > 0 {
+        attempt.ttl_ms.min(PROVIDER_WAIT_MAX_MS) as u64
+    } else {
+        attempt
+            .expires_at_ms
+            .saturating_sub(chrono::Utc::now().timestamp_millis())
+            .clamp(60_000, PROVIDER_WAIT_MAX_MS) as u64
+    };
+    // Three ways out of the wait: the browser comes back, the time
+    // runs out, or the drawer cancels. Dropping `waiting` on the
+    // cancel arm is what takes the listener down — `provider_sign_in`
+    // says why a drop is enough — and the server's attempt is left to
+    // expire, which is fine: the secret it would need is dropped here
+    // with everything else.
+    let timed = tokio::time::timeout(std::time::Duration::from_millis(remaining), waiting);
+    let outcome = tokio::select! {
+        timed = timed => timed
+            .map_err(|_| {
+                UiError::from(DomainError::Validation(format!(
+                    "the sign-in through {} was not finished in time; try again",
+                    provider.name
+                )))
+            })?
+            .map_err(|_| {
+                UiError::from(DomainError::Infra(anyhow::anyhow!(
+                    "the loopback listener went away before the browser came back"
+                )))
+            })?,
+        Ok(()) = &mut cancel_rx => return Ok(None),
+    };
     let grant = match outcome {
         crate::provider_sign_in::Outcome::Granted(grant) => grant,
         // One refusal on the wire for three causes — the provider sent
@@ -3292,6 +3403,14 @@ pub async fn connect_team_server_provider(
             ))));
         }
     };
+    // The last look at the cancel before the session exists: a press
+    // that landed while the browser was coming back would otherwise
+    // sign the person in who asked not to be. After the collect there
+    // is a session to be honest about, and the doc says a cancel then
+    // is too late.
+    if cancel_rx.try_recv().is_ok() {
+        return Ok(None);
+    }
     client
         .collect_oidc_attempt(&attempt.attempt_id, secret.value(), &grant)
         .await
@@ -3312,7 +3431,42 @@ pub async fn connect_team_server_provider(
             "the connection stands; this machine was not able to remember it",
         );
     }
-    Ok(user)
+    Ok(Some(user))
+}
+
+/// Ends the sign-in through the provider that is waiting for the
+/// browser (#163), by the attempt's id, so a cancel meant for one
+/// attempt cannot end another. [`connect_team_server_provider`] then
+/// answers `None`. No attempt by that id waiting — it finished, it
+/// timed out, or the id is not one the app announced, the empty id a
+/// wait carries before the server has answered included — is nothing
+/// to do rather than an error: the drawer that asked has nothing to
+/// show either way.
+#[tauri::command]
+pub async fn cancel_provider_sign_in(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<(), UiError> {
+    if attempt_id.is_empty() {
+        return Ok(());
+    }
+    let cancel = {
+        let mut in_flight = state
+            .provider_sign_in
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match in_flight.as_mut() {
+            Some(found) if found.attempt_id == attempt_id => found.cancel.take(),
+            _ => None,
+        }
+    };
+    if let Some(cancel) = cancel {
+        // A receiver already gone is a wait that ended on its own
+        // between the drawer's press and this; the same "nothing to
+        // do".
+        let _ = cancel.send(());
+    }
+    Ok(())
 }
 
 /// Mints a device token on a live session and stores the pair, in the

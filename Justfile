@@ -1860,9 +1860,10 @@ ui-e2e: ffmpeg-sidecar
     npx wdio run wdio.conf.ts
 
 # The suite `ui-e2e` cannot hold. Every read on the team plane is a
-# request to a second binary, and this is the recipe that builds it;
-# `wdio.teams.conf.ts` is what starts it, seeds a database nothing has
-# touched, and stops it — including when the run fails.
+# request to a second binary, and the sign-in spec walks through a
+# third; this is the recipe that builds them, and `wdio.teams.conf.ts`
+# is what starts them, seeds a database nothing has touched, and stops
+# them — including when the run fails.
 #
 # A run of its own rather than more specs under `ui-e2e`, and the
 # argument for that is in `wdio.teams.conf.ts` beside the spec glob
@@ -1883,8 +1884,11 @@ ui-e2e-teams: ffmpeg-sidecar
     #!/usr/bin/env bash
     set -euo pipefail
     # The second binary. Debug, because the config looks for it under
-    # `target/debug/` beside the app the next command builds.
-    cargo build -p teams-server
+    # `target/debug/` beside the app the next command builds. The third
+    # is the stand-in identity provider the sign-in spec walks through
+    # (#163) — an example of the same crate, under `target/debug/examples/`.
+    # Both named: `--example` alone builds only the example.
+    cargo build -p teams-server --bin teams-server --example fake_oidc_provider
     cd "{{ ui_dir }}"
     # Same build shape as `ui-e2e` — see its comment for why `tauri
     # build` rather than `cargo build`.
