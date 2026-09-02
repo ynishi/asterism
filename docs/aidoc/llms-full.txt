@@ -13476,9 +13476,10 @@ process's own controls, byte-serving routes the app reaches through
 Tauri's asset protocol instead, diagnostics a socket client reads,
 and a single-key read the desktop already answers with a wider one.
 A command may stand without a route on the same first ground, when
-it stages a desktop fact a socket client does not have, when it is a
-batch second form over a single-item route, or when it talks to a
-team rather than to this process.
+it stages or ends something of the desktop's a socket client does
+not have — a fact it keeps, a wait it holds — when it is a batch
+second form over a single-item route, or when it talks to a team
+rather than to this process.
 
 Which names are on each side, and the reason each one is there,
 lives in `tests/transport_parity.rs`, which fails when either list
@@ -13490,17 +13491,22 @@ stale three times: twice while #136's debt was being paid, and once
 when #169 added a verb to both surfaces and left the total behind.
 
 The team verbs are where the obligation above is deliberately
-one-sided, and #153 added them. They are not verbs against this
-server — they are a member's client talking to somebody else's,
-carrying that server's session — so a route here would be this
-process proxying a connection it does not hold and cannot
-authenticate. The obligation is about a person not losing a verb
-by being on the other surface, and a socket client that wants a team
-has the same client library the desktop has. Nothing forbids the
-edge — `asterism-teams-client` is an `asterism-*` crate and #83 §4
-permits it here exactly as it permits it in `asterism-ui` — so if a
-headless deployment ever needs to publish a line, this is a
-decision to revisit rather than a wall.
+one-sided, on the ground #153 stated. They are not verbs against
+this server — they are a member's client talking to somebody
+else's, carrying that server's session, or asking it what it offers
+before there is a session to carry (#163) — so a route here would
+be this process proxying a connection it does not hold and cannot
+authenticate, or a discovery read against a server it is not. The
+obligation is about a person not losing a verb by being on the
+other surface, and a socket client that wants a team has the same
+client library the desktop has for every request the desktop makes
+— what it does not have is the desktop's loopback listener, which
+is why a sign-in through a provider is the desktop's alone and the
+changelog says so. Nothing forbids the edge —
+`asterism-teams-client` is an `asterism-*` crate and #83 §4 permits
+it here exactly as it permits it in `asterism-ui` — so if a headless
+deployment ever needs to publish a line, this is a decision to
+revisit rather than a wall.
 
 Two differences in *shape* are by design. Attribution: these
 handlers build a context from command fields with
