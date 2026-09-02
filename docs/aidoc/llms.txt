@@ -343,6 +343,7 @@
 - [asterism-ui overview](asterism_ui/index.md): # asterism-ui — Asterism desktop UI (Tauri v2 backend)
 - [asterism-ui::commands](asterism_ui/commands.md): Tauri command handlers — a thin translation layer. They pass DTOs
 - [asterism-ui::error](asterism_ui/error.md): `UiError` — error type crossed by Tauri command handlers.
+- [asterism-ui::provider_sign_in](asterism_ui/provider_sign_in.md): The desktop's half of a sign-in through the team's identity
 - [asterism-ui::state](asterism_ui/state.md): `AppState` — service DI + backend initialisation.
 - [asterism-ui::stored_connection](asterism_ui/stored_connection.md): What this machine remembers about a team server between windows
 

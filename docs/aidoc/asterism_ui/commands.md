@@ -85,6 +85,7 @@ other.
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `close_shared_pursuit` — Ends work on a shared line, landing it or abandoning it.
 - `connect_team_server` — Logs this window in to a team server and holds the session.
+- `connect_team_server_provider` — Signs this window in through the team server's identity provider
 - `connect_team_server_stored` — Reconnects from the device token this machine holds, without asking
 - `create_dir` — Creates a Dir under the given persona.
 - `create_dispatch` — Kicks off one exporter run against a Selection. The apalis
@@ -251,6 +252,7 @@ other.
 - `shared_pursuit` — One piece of work on a shared line, as it stands.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
 - `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
+- `team_auth_provider` — What a team server offers besides a password (#163), or `None`.
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_roster` — Who is in a team, in what role, and what the reader may do there.
 - `team_server_session` — Whether this window is talking to a team server.
