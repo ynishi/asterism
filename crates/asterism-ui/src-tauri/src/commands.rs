@@ -105,8 +105,8 @@ use asterism_contract::query::{
 use asterism_contract::teams::{
     MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
     StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
-    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamRosterViewerDto,
-    TeamSubjectRefDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamProviderDto, TeamRosterDto, TeamRosterMemberDto,
+    TeamRosterViewerDto, TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3084,16 +3084,38 @@ fn accepted_as(client: &asterism_teams_client::TeamsClient) -> Result<String, Ui
     })
 }
 
-/// Whether a refusal was the one-armed `Unauthorized`.
+/// Whether a refusal was a `401`.
 ///
-/// The single fact the stored-credential path turns on: an unknown, a
-/// revoked and an expired device token are all this, which is why the
-/// answer to it is to forget rather than to diagnose.
+/// The single fact the stored-credential path turns on: what this
+/// machine does is the same for every reason the body carries — forget
+/// the token — because a credential the server has said no to is not
+/// one to present again. Which reason it was travels separately, on
+/// `StoredTeamConnectDto::reason`, for the drawer to tell the person.
 fn was_unauthorized(err: &asterism_teams_client::TeamsClientError) -> bool {
     matches!(
         err,
         asterism_teams_client::TeamsClientError::Refused { status: 401, .. }
     )
+}
+
+/// The instance id a session said, or `None` from a server too old to
+/// say one — which is what lets `stored_connection`'s comparison fall
+/// back to the URL for it.
+fn known_instance(id: &str) -> Option<&str> {
+    (!id.is_empty()).then_some(id)
+}
+
+/// Who a session says it is for and on which instance, once a client
+/// holds one.
+fn session_identity(
+    client: &asterism_teams_client::TeamsClient,
+) -> Result<(String, String), UiError> {
+    let session = client.session().ok_or_else(|| {
+        UiError::from(DomainError::Infra(anyhow::anyhow!(
+            "the server accepted the sign-in and handed back no session"
+        )))
+    })?;
+    Ok((session.login.clone(), session.instance_id.clone()))
 }
 
 /// Logs this window in to a team server and holds the session.
@@ -3131,12 +3153,16 @@ pub async fn connect_team_server(
     let mut client = asterism_teams_client::TeamsClient::new(base_url.clone());
     client.login(&login, &password).await.map_err(teams_error)?;
     let user = accepted_as(&client)?;
+    let (_, instance_id) = session_identity(&client)?;
     *state.teams.lock().await = Some(TeamsConnection {
         client: client.clone(),
         base_url: base_url.clone(),
         login: login.clone(),
+        instance_id: instance_id.clone(),
     });
-    if remember && let Err(err) = remember_this_device(&client, &base_url, &login).await {
+    if remember
+        && let Err(err) = remember_this_device(&client, &base_url, &login, &instance_id).await
+    {
         tracing::warn!(
             error = %err,
             "the connection stands; this machine was not able to remember it",
@@ -3145,75 +3171,195 @@ pub async fn connect_team_server(
     Ok(user)
 }
 
-/// Mints a device token on a live session and stores the pair.
+/// What a team server offers besides a password (#163), or `None`.
 ///
-/// The order is the invariant's, and what the invariant turns on is
-/// that the file is the sole index of the keychain: the entry a new
-/// pair displaces goes first, the file second, and the entry the file
-/// has just named last. A run that dies anywhere in that cannot leave
-/// a keychain entry nothing names, because the keychain is written
-/// only after the file says what is going into it.
+/// Asked of a server nobody is signed in to, which is the point: the
+/// connect form reads it to know whether to show the provider's button
+/// beside the password fields. A server that cannot be reached is an
+/// error here rather than `None`, because this command answers a fact
+/// and "no answer" is not "no provider"; the drawer's store folds the
+/// two into "no button", and says why there.
+#[tauri::command]
+pub async fn team_auth_provider(base_url: String) -> Result<Option<TeamProviderDto>, UiError> {
+    let client = asterism_teams_client::TeamsClient::new(base_url);
+    let providers = client.auth_providers().await.map_err(teams_error)?;
+    Ok(providers.oidc.map(|provider| TeamProviderDto {
+        name: provider.name,
+    }))
+}
+
+/// Signs this window in through the team server's identity provider
+/// (#163), and holds the session.
 ///
-/// What such a run does leave depends on the pair. Remembering a
-/// **new** pair leaves a file naming a pair whose entry is missing,
-/// which [`connect_team_server_stored`] repairs by dropping the
-/// metadata and showing the password form; the cost is a working
-/// credential thrown away by a crash and a password typed once more.
-/// Remembering **the same pair again** is the exception, because
-/// `retire_replaced` returns early there: the entry survives holding
-/// the previous token while the file's `token_id` names the row just
-/// minted, so nothing is orphaned and the next launch reconnects, but
-/// a later disconnect revokes the row the file names rather than the
-/// one this machine was presenting. What that costs is a row left in
-/// the owner's listing until it expires, which
-/// `stored_connection`'s "what a remember retires, and in what order"
-/// weighs against retiring an entry the write is about to replace.
+/// The app's end of the shape `provider_sign_in` describes: a listener
+/// on loopback, an attempt started with a secret's hash and the port,
+/// the system browser opened at the server's page, and the session
+/// collected once the browser has come back with the grant. The person
+/// never types a login here — the session says it — and from the
+/// session on this is [`connect_team_server`]: the same connection,
+/// the same mint when `remember` is ticked, the same keychain.
 ///
-/// The token used to reach the keychain first, so that no metadata
-/// could name a token nothing held. That was true of the pair being
-/// written and silent about the pair being displaced, where the file
-/// went on naming the previous connection and the next launch
-/// reconnected to it, leaving the entry just written where nothing
-/// would look again. `stored_connection`'s "what a remember retires,
-/// and in what order" is where the two costs are weighed.
+/// Waits about as long as the attempt is good for, and the listener
+/// goes with the wait. A browser tab closed without finishing is a
+/// wait that ends with a refusal saying so; a provider that refused is
+/// a refusal saying that; both leave the window where it was.
+#[tauri::command]
+pub async fn connect_team_server_provider(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    base_url: String,
+    remember: bool,
+) -> Result<String, UiError> {
+    use tauri_plugin_opener::OpenerExt as _;
+
+    let mut client = asterism_teams_client::TeamsClient::new(base_url.clone());
+    let provider = client
+        .auth_providers()
+        .await
+        .map_err(teams_error)?
+        .oidc
+        .ok_or_else(|| {
+            UiError::from(DomainError::Validation(
+                "this team server signs people in with passwords only".into(),
+            ))
+        })?;
+    let listener = crate::provider_sign_in::Listener::bind()
+        .await
+        .map_err(|err| {
+            UiError::from(DomainError::Infra(anyhow::anyhow!(
+                "could not listen on loopback for the browser to come back: {err}"
+            )))
+        })?;
+    let secret = crate::provider_sign_in::Secret::new().map_err(|err| {
+        UiError::from(DomainError::Infra(anyhow::anyhow!(
+            "could not make a secret for the sign-in: {err}"
+        )))
+    })?;
+    let attempt = client
+        .start_oidc_attempt(
+            &secret.collector(),
+            &crate::stored_connection::device_label(),
+            listener.port(),
+        )
+        .await
+        .map_err(teams_error)?;
+    let done_url = format!("{}/done", attempt.start_url);
+    let waiting = listener.serve(attempt.attempt_id.clone(), done_url);
+    app.opener()
+        .open_url(&attempt.start_url, None::<&str>)
+        .map_err(|err| {
+            UiError::from(DomainError::Infra(anyhow::anyhow!(
+                "could not open the browser for the sign-in: {err}"
+            )))
+        })?;
+    // How long to wait is the attempt's own life, which the server
+    // states as an instant on its clock. Read on this machine's clock
+    // that can come out as nothing at all when the two disagree, so
+    // the wait is held to at least a minute and at most a quarter of
+    // an hour: a person who finishes inside a minute on a fast clock
+    // is still collected, and a server that has already expired the
+    // attempt answers the collect with the refusal that says so.
+    let remaining = attempt
+        .expires_at_ms
+        .saturating_sub(chrono::Utc::now().timestamp_millis())
+        .clamp(60_000, 15 * 60_000) as u64;
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(remaining), waiting)
+        .await
+        .map_err(|_| {
+            UiError::from(DomainError::Validation(format!(
+                "the sign-in through {} was not finished in time; try again",
+                provider.name
+            )))
+        })?
+        .map_err(|_| {
+            UiError::from(DomainError::Infra(anyhow::anyhow!(
+                "the loopback listener went away before the browser came back"
+            )))
+        })?;
+    let grant = match outcome {
+        crate::provider_sign_in::Outcome::Granted(grant) => grant,
+        // One refusal on the wire for three causes — the provider sent
+        // no code, the token did not verify, the person is nobody this
+        // instance knows — and the app cannot tell them apart, which
+        // is the server's one-armed answer doing its job. The sentence
+        // names the cause a person can act on and hedges the rest.
+        crate::provider_sign_in::Outcome::Refused => {
+            return Err(UiError::from(DomainError::Validation(format!(
+                "the team server did not accept the sign-in through {}; if you expected to \
+                 be let in, ask whoever runs it to check that your address is bound to your \
+                 account",
+                provider.name
+            ))));
+        }
+    };
+    client
+        .collect_oidc_attempt(&attempt.attempt_id, secret.value(), &grant)
+        .await
+        .map_err(teams_error)?;
+    let user = accepted_as(&client)?;
+    let (login, instance_id) = session_identity(&client)?;
+    *state.teams.lock().await = Some(TeamsConnection {
+        client: client.clone(),
+        base_url: base_url.clone(),
+        login: login.clone(),
+        instance_id: instance_id.clone(),
+    });
+    if remember
+        && let Err(err) = remember_this_device(&client, &base_url, &login, &instance_id).await
+    {
+        tracing::warn!(
+            error = %err,
+            "the connection stands; this machine was not able to remember it",
+        );
+    }
+    Ok(user)
+}
+
+/// Mints a device token on a live session and stores the pair, in the
+/// order `stored_connection`'s "what a remember retires, and in what
+/// order" fixes: the displaced entry first, the file second, the entry
+/// the file has just named last. What a crash at each step leaves, and
+/// why the order was once the other one, are argued there and not
+/// here.
 ///
-/// Which pair is being displaced can only be read before the write, so
-/// the old metadata is read at the top and carried across all three
-/// writes.
+/// What is this site's: which pair is being displaced can only be read
+/// before the write, so the old metadata is read at the top and
+/// carried across all three writes.
 /// [`retire_replaced`](crate::stored_connection::retire_replaced)
-/// takes its keychain entry when it is another pair's, and
-/// [`superseded_row`](crate::stored_connection::superseded_row) names
-/// the server row left over when it is this pair's — revoked here on
-/// the live client, which is the server that issued it in exactly that
-/// case.
-///
-/// That revoke is best effort in [`disconnect_team_server`]'s sense: a
-/// remember that stored the credential did the thing that was asked
-/// for, and a stale row must not turn it into a refusal, so a failure
-/// is logged and the row is left to its expiry. A displaced pair
-/// naming a *different* server has a row nothing here can revoke at
-/// all, which `stored_connection` records as the known limit.
+/// takes the old keychain entry when the write goes under another key,
+/// and [`superseded_row`](crate::stored_connection::superseded_row)
+/// names the server row left over when the pair is this connection's
+/// — revoked here on the live client, which is the server that issued
+/// it in exactly that case. That revoke is best effort in
+/// [`disconnect_team_server`]'s sense: a remember that stored the
+/// credential did the thing that was asked for, and a stale row must
+/// not turn it into a refusal, so a failure is logged and the row is
+/// left to its expiry.
 async fn remember_this_device(
     client: &asterism_teams_client::TeamsClient,
     base_url: &str,
     login: &str,
+    instance_id: &str,
 ) -> Result<(), UiError> {
     let label = crate::stored_connection::device_label();
+    let instance = known_instance(instance_id);
     let displaced = crate::stored_connection::read_metadata().await;
     let minted = client
         .mint_device_token(&label)
         .await
         .map_err(teams_error)?;
-    let superseded = crate::stored_connection::superseded_row(displaced.as_ref(), base_url, login);
-    crate::stored_connection::retire_replaced(displaced.as_ref(), base_url, login).await;
-    crate::stored_connection::write_metadata(&crate::stored_connection::StoredConnection {
+    let superseded =
+        crate::stored_connection::superseded_row(displaced.as_ref(), base_url, login, instance);
+    crate::stored_connection::retire_replaced(displaced.as_ref(), base_url, login, instance).await;
+    let stored = crate::stored_connection::StoredConnection {
         base_url: base_url.to_string(),
         login: login.to_string(),
         token_id: minted.id,
         label,
-    })
-    .await?;
-    crate::stored_connection::write_token(base_url, login, &minted.token).await?;
+        instance_id: instance.map(str::to_string),
+    };
+    crate::stored_connection::write_metadata(&stored).await?;
+    crate::stored_connection::write_token(&stored.key(), &minted.token).await?;
     if let Some(superseded) = superseded
         && let Err(err) = client.revoke_device_token(superseded).await
     {
@@ -3267,11 +3413,12 @@ pub async fn connect_team_server_stored(
     let nothing = StoredTeamConnectDto {
         outcome: StoredTeamConnectOutcome::Nothing,
         user: None,
+        reason: None,
     };
     let Some(stored) = crate::stored_connection::read_metadata().await else {
         return Ok(nothing);
     };
-    let token = match crate::stored_connection::read_token(&stored.base_url, &stored.login).await {
+    let token = match crate::stored_connection::read_token(&stored.key()).await {
         crate::stored_connection::StoredToken::Held(token) => token,
         // The keychain answered, and its answer is that there is no
         // entry: the file is describing a connection that cannot be
@@ -3300,21 +3447,38 @@ pub async fn connect_team_server_stored(
     match client.login_with_device_token(&token).await {
         Ok(_) => {
             let user = accepted_as(&client)?;
+            let (_, instance_id) = session_identity(&client)?;
+            // An entry from before the instance id existed is moved
+            // onto the key it is named by from now on, the first time
+            // a session says the id (#163). `stored_connection`'s
+            // `rekey` is where the order of the three writes is
+            // argued.
+            let stored = match (&stored.instance_id, known_instance(&instance_id)) {
+                (None, Some(id)) => crate::stored_connection::rekey(&stored, id, &token).await,
+                _ => stored,
+            };
             *state.teams.lock().await = Some(TeamsConnection {
                 client,
                 base_url: stored.base_url,
                 login: stored.login,
+                instance_id,
             });
             Ok(StoredTeamConnectDto {
                 outcome: StoredTeamConnectOutcome::Connected,
                 user: Some(user),
+                reason: None,
             })
         }
         Err(err) if was_unauthorized(&err) => {
-            crate::stored_connection::forget(&stored.base_url, &stored.login).await;
+            crate::stored_connection::forget(&stored).await;
+            let reason = match &err {
+                asterism_teams_client::TeamsClientError::Refused { reason, .. } => reason.clone(),
+                _ => None,
+            };
             Ok(StoredTeamConnectDto {
                 outcome: StoredTeamConnectOutcome::Rejected,
                 user: None,
+                reason,
             })
         }
         Err(err) => Err(teams_error(err)),
@@ -3363,13 +3527,17 @@ pub async fn disconnect_team_server(state: State<'_, AppState>) -> Result<(), Ui
         return Ok(());
     };
     if let Some(stored) = crate::stored_connection::read_metadata().await
-        && stored.names(&connection.base_url, &connection.login)
+        && stored.names(
+            &connection.base_url,
+            &connection.login,
+            known_instance(&connection.instance_id),
+        )
     {
         let _ = connection
             .client
             .revoke_device_token(&stored.token_id)
             .await;
-        crate::stored_connection::forget(&stored.base_url, &stored.login).await;
+        crate::stored_connection::forget(&stored).await;
     }
     // Best effort: the local session is already gone, and a server
     // that cannot be reached to be told will expire it.
@@ -3434,10 +3602,14 @@ pub async fn revoke_team_device_token(
         .await
         .map_err(teams_error)?;
     if let Some(stored) = crate::stored_connection::read_metadata().await
-        && stored.names(&connection.base_url, &connection.login)
+        && stored.names(
+            &connection.base_url,
+            &connection.login,
+            known_instance(&connection.instance_id),
+        )
         && stored.token_id == token_id
     {
-        crate::stored_connection::forget(&stored.base_url, &stored.login).await;
+        crate::stored_connection::forget(&stored).await;
     }
     Ok(())
 }

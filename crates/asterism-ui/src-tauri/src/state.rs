@@ -44,10 +44,17 @@ pub struct TeamsConnection {
     pub client: asterism_teams_client::TeamsClient,
     /// The server as it was typed, before any trailing slash came off.
     pub base_url: String,
-    /// The account it was typed for. Not the `user_id`: the keychain
-    /// entry is keyed by what a person enters on the form, and that is
-    /// what has to match.
+    /// The account it was typed for — or, for a sign-in through the
+    /// provider, the login the session said (#163). Not the `user_id`:
+    /// the keychain entry is keyed by the login, and that is what has
+    /// to match.
     pub login: String,
+    /// The instance's stable id, as the session said it (#163) — or
+    /// empty, from a server too old to say one, which every reader
+    /// turns into `None` before comparing. Why the keychain entry is
+    /// keyed by it is `stored_connection`'s "what an entry is keyed
+    /// by".
+    pub instance_id: String,
 }
 
 /// Bundle of services registered as Tauri state.

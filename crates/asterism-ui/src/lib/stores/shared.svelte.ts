@@ -240,7 +240,7 @@
 // one thing, a device token the server minted — expiring, listable,
 // revocable — and that shape is the same whichever verifier said yes,
 // which is what made the question answerable before #163's provider
-// path exists rather than after it.
+// path existed rather than after it.
 //
 // So both alternatives #167 weighed are used, for different halves.
 // The OS keychain holds the token. The profile directory holds the
@@ -312,6 +312,7 @@ import type {
   TeamDeviceTokensDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
+  TeamProviderDto,
   TeamRosterDto,
 } from "../../bindings";
 
@@ -375,6 +376,12 @@ class SharedCatalog {
   /// of them is worth a sentence. Cleared by a connection, since what
   /// it describes is over.
   storedRejected = $state(false);
+
+  /// Why the stored token was refused, when it was: `expired`, `idle`
+  /// or `revoked` as the server said it (#163), or null from a server
+  /// too old to say. What the drawer tells the person, since what the
+  /// app did — forget the token — is the same for all three.
+  storedRejectedReason = $state<string | null>(null);
 
   /// The device tokens this account holds, on whatever machines.
   ///
@@ -641,10 +648,10 @@ class SharedCatalog {
 
   /// Re-reads what this machine remembers.
   ///
-  /// Read back rather than inferred at each of the three sites that
-  /// change it — a connection that minted, a revoke that may have
-  /// been this machine's own row, and the silent attempt — because
-  /// only the command knows which of them left anything behind.
+  /// Read back rather than inferred at each site that changes it — a
+  /// connection that minted, a revoke that may have been this
+  /// machine's own row, the silent attempt — because only the command
+  /// knows which of them left anything behind.
   ///
   /// `?? null` because absent and null are the same fact here and
   /// only one of them is a value the rest of this file tests for.
@@ -676,12 +683,18 @@ class SharedCatalog {
     if (attempt?.outcome === "connected") {
       this.session = attempt.user;
       this.storedRejected = false;
+      this.storedRejectedReason = null;
       return;
     }
     // `rejected` forgot both halves before answering, and `stored` is
     // kept anyway: the login it carries is what the person is about to
-    // type a password beside.
+    // type a password beside. The reason travels with it (#163) —
+    // which of expired, idle or revoked — for the sentence the drawer
+    // shows, and for nothing the store does.
     this.storedRejected = attempt?.outcome === "rejected";
+    this.storedRejectedReason = this.storedRejected
+      ? (attempt.reason ?? null)
+      : null;
     if (this.storedRejected) return;
     // `nothing` is the one that has to be read back rather than
     // inferred. It covers a file that was dropped — its entry was
@@ -691,6 +704,61 @@ class SharedCatalog {
     // would make one dismissed keychain prompt empty the form of a
     // connection this machine still remembers.
     await this.readStored();
+  }
+
+  /// The identity provider the server last asked about offers, or
+  /// null — and which server the answer is for, so a form does not
+  /// show one server's button beside another server's URL.
+  ///
+  /// Read rather than guessed: whether a server signs people in
+  /// through a provider is the server's fact (#163), and the form
+  /// asks it as the URL settles.
+  provider = $state<TeamProviderDto | null>(null);
+  providerFor = $state<string | null>(null);
+
+  /// Asks a server what it offers besides a password.
+  ///
+  /// A server that does not answer is a server with no button, not a
+  /// refusal to report: the form is still usable with a password, and
+  /// the same URL typed into the password path will say what is wrong
+  /// with it.
+  async probeProvider(baseUrl: string): Promise<void> {
+    const url = baseUrl.trim();
+    if (url === "") {
+      this.provider = null;
+      this.providerFor = null;
+      return;
+    }
+    let provider: TeamProviderDto | null = null;
+    try {
+      provider =
+        (await api<TeamProviderDto | null>("team_auth_provider", {
+          baseUrl: url,
+        })) ?? null;
+    } catch {
+      provider = null;
+    }
+    this.provider = provider;
+    this.providerFor = url;
+  }
+
+  /// Signs in through the server's identity provider, in the system
+  /// browser, and optionally asks to be remembered (#163).
+  ///
+  /// No login and no password cross here: the browser is where the
+  /// person proves who they are, and the session that comes back says
+  /// which account it was. The rest is `connect` — the same
+  /// connection, the same mint when `remember` is ticked.
+  async connectWithProvider(baseUrl: string, remember: boolean): Promise<void> {
+    this.said = null;
+    this.session = await mutate<string>(
+      "connect_team_server_provider",
+      { baseUrl, remember },
+      "sign in through the team server's provider",
+    );
+    this.storedRejected = false;
+    await this.readStored();
+    await this.teams.load({});
   }
 
   /// Logs in with a password, and optionally asks to be remembered.

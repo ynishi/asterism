@@ -296,6 +296,17 @@ pub struct TeamDeviceTokenDto {
     pub expires_at_ms: i64,
 }
 
+/// The identity provider a team server signs people in through, as
+/// its connect form names it (#163) — or nothing, for a server that
+/// verifies passwords only. Read before anybody is signed in, so the
+/// form knows whether to offer the button.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamProviderDto {
+    /// What to call it on the button — whatever the person hosting
+    /// the server wrote.
+    pub name: String,
+}
+
 /// What this machine remembers about a team server, none of which
 /// authenticates anybody (#204).
 ///
@@ -329,6 +340,13 @@ pub struct StoredTeamConnectDto {
     /// Whose account the server named. Present for `connected` and for
     /// nothing else.
     pub user: Option<String>,
+    /// Why the server refused the stored token, for `rejected` and for
+    /// nothing else: `expired`, `idle` or `revoked`, as the server's
+    /// `401` said it (#163), or `None` from a server too old to say.
+    /// What the drawer does is the same for all three — the token is
+    /// forgotten — and which it was is what the drawer tells the
+    /// person.
+    pub reason: Option<String>,
 }
 
 /// The three ends of a silent reconnect.

@@ -16,19 +16,34 @@
 //! through it is the token, which has no path to a file from anywhere
 //! in this module.
 //!
-//! # Why the pair is keyed by server and login
+//! # What an entry is keyed by
 //!
-//! One stored connection per server URL and login is the shape the
-//! issue settles on, so [`account_key`] is the whole identity of an
-//! entry: presenting a token minted for one account to another server
-//! is not a case this module can reach, because the key that found the
-//! token names both.
+//! One stored connection per instance and login. The keychain entry
+//! is keyed by the instance's stable id and the login ([`entry_key`]),
+//! not by the server's URL: a URL is a name that moves — a custom
+//! domain, a port, a host renamed — and an entry keyed by one goes
+//! silently unfindable the day it does, which is every device on that
+//! server asking for a password again for a reason nobody can see. The
+//! instance id is minted once by the server's schema and comes back on
+//! every session (#163), so it is what the entry is named for. The
+//! login is still half the key because two accounts on one instance
+//! are two entries.
+//!
+//! Entries written before the id existed are keyed by URL and login
+//! ([`account_key`]), and [`StoredConnection::instance_id`] is `None`
+//! for them. The first successful reconnect from such an entry learns
+//! the id from the session and moves the entry across ([`rekey`]); a
+//! verb asked about such an entry compares the way it was written.
+//! Presenting a token minted for one account to another server is not
+//! a case this module can reach either way, because the key that found
+//! the token names the account.
 //!
 //! # Which connection a verb acts on
 //!
 //! **A verb touches the stored state only when the stored metadata
-//! names the connection in hand** — same server, same login, compared
-//! by [`StoredConnection::names`]. The two stores answer different
+//! names the connection in hand** — same instance and login, or same
+//! server and login for an entry from before the id, compared by
+//! [`StoredConnection::names`]. The two stores answer different
 //! questions and only one of them is about the window: the file says
 //! what this machine was last told to remember, and the session says
 //! what it is talking to now. They agree on the ordinary path and come
@@ -91,7 +106,9 @@
 //!
 //! An entry nothing names cannot be created at all, because the
 //! keychain is written only after the file says what is about to go
-//! into it.
+//! into it — with one bounded exception, [`rekey`]'s, which moves an
+//! entry between keys and says what a crash mid-move leaves and why
+//! it is not a credential nothing can revoke.
 //!
 //! The order used to be the other one: the token reached the keychain
 //! before anything reached the file, so that no metadata could name a
@@ -189,28 +206,58 @@ pub struct StoredConnection {
     pub token_id: String,
     /// What this device asked to be called in the owner's listing.
     pub label: String,
+    /// The instance's stable id, as the session that minted the token
+    /// said it (#163) — what the keychain entry is keyed by. `None` for
+    /// an entry written before the id existed, which is keyed by
+    /// [`account_key`] until [`rekey`] moves it; defaulted on read so
+    /// such a file still parses.
+    #[serde(default)]
+    pub instance_id: Option<String>,
 }
 
 impl StoredConnection {
-    /// Whether what was stored names this server and login — the
-    /// module header's "which connection a verb acts on", as the one
-    /// question every verb asks before touching either store.
+    /// Whether what was stored names this connection — the module
+    /// header's "which connection a verb acts on", as the one question
+    /// every verb asks before touching either store.
     ///
-    /// Compared through [`account_key`] rather than field by field, so
-    /// the two ways of typing one server answer the same here as they
-    /// do in the keychain. A comparison that disagreed with the key
-    /// would be the worse defect of the two: a verb would decide the
-    /// pair matched and then reach an entry it does not name.
-    pub fn names(&self, base_url: &str, login: &str) -> bool {
-        account_key(&self.base_url, &self.login) == account_key(base_url, login)
+    /// Compared the way the entry was written: by instance id and
+    /// login when the file carries an id and the session says one, by
+    /// [`account_key`] otherwise, so the two ways of typing one server
+    /// answer the same here as they do in the keychain. A comparison
+    /// that disagreed with the key would be the worse defect of the
+    /// two: a verb would decide the pair matched and then reach an
+    /// entry it does not name.
+    pub fn names(&self, base_url: &str, login: &str, instance_id: Option<&str>) -> bool {
+        match (self.instance_id.as_deref(), instance_id) {
+            (Some(mine), Some(theirs)) => mine == theirs && self.login == login,
+            _ => account_key(&self.base_url, &self.login) == account_key(base_url, login),
+        }
+    }
+
+    /// The keychain account name this entry is under.
+    pub fn key(&self) -> String {
+        entry_key(self.instance_id.as_deref(), &self.base_url, &self.login)
     }
 }
 
-/// The keychain account name for one server-and-login pair.
+/// The keychain account name for one connection: by instance id and
+/// login when the id is known, by server and login before that.
 ///
-/// Written to be read: macOS shows this string in Keychain Access, so
-/// a person auditing what an app has stored sees which account on
-/// which server rather than a hash.
+/// Written to be read as far as it can be: macOS shows this string in
+/// Keychain Access, and the login half is what a person auditing what
+/// an app has stored recognises. The instance half is the id the
+/// server minted, opaque by design; the file beside it says which
+/// server that is.
+pub fn entry_key(instance_id: Option<&str>, base_url: &str, login: &str) -> String {
+    match instance_id {
+        Some(id) => format!("{login} @ instance {id}"),
+        None => account_key(base_url, login),
+    }
+}
+
+/// The keychain account name entries were keyed by before the instance
+/// id existed, and the comparison [`StoredConnection::names`] falls
+/// back to whenever either side has no id.
 ///
 /// Trailing slashes come off so that a server typed with one and a
 /// server typed without reach the same entry. Nothing else is
@@ -255,7 +302,8 @@ pub enum StoredToken {
     Unavailable,
 }
 
-/// The device token stored for this server and login.
+/// The device token stored under `key` — a [`StoredConnection::key`],
+/// or an [`entry_key`] built for the pair in hand.
 ///
 /// The keychain call runs on a blocking thread because it is one: the
 /// first read of an entry can put a prompt in front of the person and
@@ -263,8 +311,8 @@ pub enum StoredToken {
 /// that. A thread that does not come back at all is [`StoredToken::Unavailable`]
 /// for the same reason a locked keychain is — it is a fact about this
 /// read rather than about the entry.
-pub async fn read_token(base_url: &str, login: &str) -> StoredToken {
-    let account = account_key(base_url, login);
+pub async fn read_token(key: &str) -> StoredToken {
+    let account = key.to_string();
     match tokio::task::spawn_blocking(move || {
         keyring::Entry::new(SERVICE, &account)?.get_password()
     })
@@ -296,14 +344,14 @@ fn keychain_answer(answered: Result<String, keyring::Error>) -> StoredToken {
     }
 }
 
-/// Puts a device token in the keychain, replacing whatever this
-/// server and login had there.
+/// Puts a device token in the keychain under `key`, replacing whatever
+/// was there.
 ///
 /// Refusals reach the caller, for the reason the module header gives:
 /// this is somebody's request to be remembered, and one that did not
 /// happen has to be visible.
-pub async fn write_token(base_url: &str, login: &str, token: &str) -> Result<(), UiError> {
-    let account = account_key(base_url, login);
+pub async fn write_token(key: &str, token: &str) -> Result<(), UiError> {
+    let account = key.to_string();
     let token = token.to_string();
     tokio::task::spawn_blocking(move || {
         keyring::Entry::new(SERVICE, &account)?.set_password(&token)
@@ -321,13 +369,13 @@ pub async fn write_token(base_url: &str, login: &str, token: &str) -> Result<(),
     })
 }
 
-/// Takes the device token out of the keychain.
+/// Takes the device token under `key` out of the keychain.
 ///
 /// Says nothing about whether there was one. Forgetting is reached
 /// from a logout and from a token the server rejected, and neither has
 /// anything to do differently on learning the entry was already gone.
-pub async fn delete_token(base_url: &str, login: &str) {
-    let account = account_key(base_url, login);
+pub async fn delete_token(key: &str) {
+    let account = key.to_string();
     let _ = tokio::task::spawn_blocking(move || {
         keyring::Entry::new(SERVICE, &account).map(|entry| entry.delete_credential())
     })
@@ -358,7 +406,8 @@ pub async fn read_metadata() -> Option<StoredConnection> {
 /// is this file rewritten, and the entry the previous one held has
 /// been taken away by [`retire_replaced`] before this lands — the file
 /// indexes the keychain, so it never names one pair while another's
-/// entry sits outside it.
+/// entry sits outside it. [`rekey`] is the one caller that writes this
+/// with the old entry still in place, for the interval it argues.
 pub async fn write_metadata(stored: &StoredConnection) -> Result<(), UiError> {
     let path = metadata_path()?;
     let body = serde_json::to_vec_pretty(stored).map_err(|err| {
@@ -399,21 +448,38 @@ pub async fn write_metadata(stored: &StoredConnection) -> Result<(), UiError> {
 /// [`superseded_row`] is the other half of a displacement, and what it
 /// answers cannot be recovered once the file is rewritten.
 ///
-/// Returns having done nothing when the displaced pair is the pair
-/// being written. That entry is not orphaned by the write, it is
-/// overwritten by it, and deleting it here would take away the entry
-/// the file is about to name. The server row that displacement leaves
-/// behind is [`superseded_row`]'s.
+/// Returns having done nothing when the displaced entry is the entry
+/// about to be written — decided by [`is_displaced`], which compares
+/// keys rather than asking [`StoredConnection::names`]. The two
+/// questions differ by exactly one case: a file from before the
+/// instance id, remembered again by a session that says one, *names*
+/// the connection (so the row it holds is the one to revoke) and yet
+/// sits under a key the write will not touch. Asking `names` here left
+/// that entry behind with nothing naming it; asking the key retires
+/// it. The server row that displacement leaves behind is
+/// [`superseded_row`]'s.
 ///
 /// Best effort, for [`delete_token`]'s reason.
-pub async fn retire_replaced(previous: Option<&StoredConnection>, base_url: &str, login: &str) {
+pub async fn retire_replaced(
+    previous: Option<&StoredConnection>,
+    base_url: &str,
+    login: &str,
+    instance_id: Option<&str>,
+) {
     let Some(previous) = previous else {
         return;
     };
-    if previous.names(base_url, login) {
+    if !is_displaced(previous, &entry_key(instance_id, base_url, login)) {
         return;
     }
-    delete_token(&previous.base_url, &previous.login).await;
+    delete_token(&previous.key()).await;
+}
+
+/// Whether writing under `new_key` leaves `previous`'s entry behind —
+/// the question [`retire_replaced`] asks, kept apart from it because
+/// it is the half that can be tested without a keychain.
+pub fn is_displaced(previous: &StoredConnection, new_key: &str) -> bool {
+    previous.key() != new_key
 }
 
 /// The handle of the `device_token` row a fresh mint for this pair
@@ -437,9 +503,10 @@ pub fn superseded_row<'a>(
     previous: Option<&'a StoredConnection>,
     base_url: &str,
     login: &str,
+    instance_id: Option<&str>,
 ) -> Option<&'a str> {
     previous
-        .filter(|previous| previous.names(base_url, login))
+        .filter(|previous| previous.names(base_url, login, instance_id))
         .map(|previous| previous.token_id.as_str())
 }
 
@@ -451,15 +518,58 @@ pub async fn delete_metadata() {
     }
 }
 
-/// Drops both halves for one server and login.
+/// Drops both halves of one stored connection.
 ///
 /// The pair is what a stored connection is, so the two are forgotten
 /// together — a keychain entry outliving its metadata is a credential
 /// nothing knows how to revoke, and metadata outliving its entry is a
 /// form that pre-fills into a reconnect that cannot work.
-pub async fn forget(base_url: &str, login: &str) {
-    delete_token(base_url, login).await;
+pub async fn forget(stored: &StoredConnection) {
+    delete_token(&stored.key()).await;
     delete_metadata().await;
+}
+
+/// Moves an entry written before the instance id existed onto the key
+/// it is named by from now on (#163), once a reconnect has learnt the
+/// id from the session.
+///
+/// Three writes: the file first, now naming the new key; the new
+/// keychain entry second, holding the same token; the old entry last,
+/// taken away. That is the file-before-keychain half of the module
+/// header's order, which is the half that matters here — the other
+/// half retires a displaced entry first, and this entry is not
+/// displaced, it is being moved. A run that dies after the first write
+/// leaves a file naming an entry that is not there yet, which the next
+/// launch repairs by dropping the file and asking for a password — and
+/// an old entry nothing on this machine names, holding a token whose
+/// row is still on the server. That is the "row behind a displaced
+/// pair" of the module header: listed where it was issued, revocable
+/// from any window signed in there, and ended by its fixed expiry
+/// without anybody acting. A run that dies after the second write
+/// leaves the old entry as a second copy of a live credential, bounded
+/// the same way, and gone the next time this pair is remembered.
+///
+/// Returns what the file now says. The keychain writes are best effort
+/// past the file: a keychain that refuses the new entry has left the
+/// old one in place and the file naming a key that is empty, which the
+/// next launch repairs as above.
+pub async fn rekey(stored: &StoredConnection, instance_id: &str, token: &str) -> StoredConnection {
+    let moved = StoredConnection {
+        instance_id: Some(instance_id.to_string()),
+        ..stored.clone()
+    };
+    if write_metadata(&moved).await.is_err() {
+        return stored.clone();
+    }
+    if write_token(&moved.key(), token).await.is_err() {
+        tracing::warn!(
+            "the keychain would not take the entry under its new key; the old entry stays \
+             until the next remember",
+        );
+        return moved;
+    }
+    delete_token(&stored.key()).await;
+    moved
 }
 
 #[cfg(test)]
@@ -504,10 +614,64 @@ mod tests {
             login: "alice".into(),
             token_id: "dt_01234".into(),
             label: "Asterism on macos".into(),
+            instance_id: Some("0123abcd".into()),
         };
         let json = serde_json::to_string(&stored).expect("a struct of strings");
         let back: StoredConnection = serde_json::from_str(&json).expect("what was just written");
         assert_eq!(stored, back);
+    }
+
+    /// A file written before the instance id existed still parses, and
+    /// says so by carrying none — which is what keeps it on the key it
+    /// was written under until a reconnect moves it.
+    #[test]
+    fn a_file_from_before_the_instance_id_still_reads_and_keeps_its_key() {
+        let old = r#"{"base_url":"http://127.0.0.1:8787","login":"alice","token_id":"dt_01234","label":"Asterism on macos"}"#;
+        let stored: StoredConnection = serde_json::from_str(old).expect("the old shape");
+        assert_eq!(stored.instance_id, None);
+        assert_eq!(stored.key(), account_key("http://127.0.0.1:8787", "alice"));
+        let moved = StoredConnection {
+            instance_id: Some("0123abcd".into()),
+            ..stored.clone()
+        };
+        assert_eq!(moved.key(), "alice @ instance 0123abcd");
+        assert_ne!(moved.key(), stored.key());
+    }
+
+    /// The one case where "names the connection" and "is the entry
+    /// being written" come apart: a file from before the id, remembered
+    /// again by a session that says one. The old entry is retired,
+    /// because the write goes under a key it is not under; a file that
+    /// already carries the id is not, because the write overwrites it.
+    #[test]
+    fn re_remembering_a_pre_id_entry_under_an_id_retires_it() {
+        let old = StoredConnection {
+            base_url: "http://127.0.0.1:8787".into(),
+            login: "alice".into(),
+            token_id: "dt_01234".into(),
+            label: "Asterism on macos".into(),
+            instance_id: None,
+        };
+        let with_id = entry_key(Some("0123abcd"), "http://127.0.0.1:8787", "alice");
+        assert!(old.names("http://127.0.0.1:8787", "alice", Some("0123abcd")));
+        assert!(is_displaced(&old, &with_id));
+        assert!(!is_displaced(
+            &old,
+            &entry_key(None, "http://127.0.0.1:8787/", "alice")
+        ));
+        let moved = StoredConnection {
+            instance_id: Some("0123abcd".into()),
+            ..old
+        };
+        assert!(!is_displaced(&moved, &with_id));
+        assert!(is_displaced(
+            &moved,
+            &entry_key(Some("ffffffff"), "", "alice")
+        ));
+        assert!(is_displaced(
+            &moved,
+            &entry_key(Some("0123abcd"), "", "bob")
+        ));
     }
 
     /// The invariant this module exists for, asked of the bytes rather
@@ -526,6 +690,7 @@ mod tests {
             login: "alice".into(),
             token_id: "dt_01234".into(),
             label: "Asterism on macos".into(),
+            instance_id: Some("0123abcd".into()),
         };
         let json = serde_json::to_value(&stored).expect("a struct of strings");
         let keys: Vec<&str> = json
@@ -534,7 +699,10 @@ mod tests {
             .keys()
             .map(String::as_str)
             .collect();
-        assert_eq!(keys, ["base_url", "login", "token_id", "label"]);
+        assert_eq!(
+            keys,
+            ["base_url", "login", "token_id", "label", "instance_id"]
+        );
         for forbidden in ["token", "password", "secret"] {
             assert!(
                 !keys.contains(&forbidden),
@@ -557,17 +725,43 @@ mod tests {
             login: "alice".into(),
             token_id: "dt_01234".into(),
             label: "Asterism on macos".into(),
+            instance_id: None,
         };
-        assert!(stored.names("http://127.0.0.1:8787", "alice"));
+        assert!(stored.names("http://127.0.0.1:8787", "alice", None));
         assert!(
-            stored.names("http://127.0.0.1:8787/", "alice"),
+            stored.names("http://127.0.0.1:8787/", "alice", None),
             "the trailing slash the keychain key folds has to fold here too, \
              or a verb decides a pair matches and then reaches an entry it \
              does not name",
         );
-        assert!(!stored.names("http://example.test", "alice"));
-        assert!(!stored.names("http://127.0.0.1:8787", "bob"));
-        assert!(!stored.names("http://127.0.0.1:8787", "Alice"));
+        assert!(!stored.names("http://example.test", "alice", None));
+        assert!(!stored.names("http://127.0.0.1:8787", "bob", None));
+        assert!(!stored.names("http://127.0.0.1:8787", "Alice", None));
+        // A file without an id is compared the way it was written,
+        // whatever the session says.
+        assert!(stored.names("http://127.0.0.1:8787", "alice", Some("0123abcd")));
+    }
+
+    /// Once the file carries an id, the id and the login are the
+    /// comparison and the URL is not: the server moving is the case the
+    /// id exists for.
+    #[test]
+    fn a_stored_pair_with_an_instance_id_names_by_the_id() {
+        let stored = StoredConnection {
+            base_url: "http://127.0.0.1:8787".into(),
+            login: "alice".into(),
+            token_id: "dt_01234".into(),
+            label: "Asterism on macos".into(),
+            instance_id: Some("0123abcd".into()),
+        };
+        assert!(stored.names("https://teams.example", "alice", Some("0123abcd")));
+        assert!(!stored.names("http://127.0.0.1:8787", "alice", Some("ffffffff")));
+        assert!(!stored.names("http://127.0.0.1:8787", "bob", Some("0123abcd")));
+        // A session from a server too old to say its id falls back to
+        // the URL comparison, so a stored id does not lock such a
+        // server out.
+        assert!(stored.names("http://127.0.0.1:8787", "alice", None));
+        assert!(!stored.names("http://example.test", "alice", None));
     }
 
     /// Which server row a remember supersedes, which is the half of a
@@ -586,28 +780,29 @@ mod tests {
             login: "alice".into(),
             token_id: "dt_01234".into(),
             label: "Asterism on macos".into(),
+            instance_id: None,
         };
         assert_eq!(
-            superseded_row(Some(&stored), "http://127.0.0.1:8787", "alice"),
+            superseded_row(Some(&stored), "http://127.0.0.1:8787", "alice", None),
             Some("dt_01234"),
         );
         assert_eq!(
-            superseded_row(Some(&stored), "http://127.0.0.1:8787/", "alice"),
+            superseded_row(Some(&stored), "http://127.0.0.1:8787/", "alice", None),
             Some("dt_01234"),
             "the trailing slash folds here as it does in the key, or one \
              way of typing a server re-mints without retiring the row the \
              other way left",
         );
         assert_eq!(
-            superseded_row(Some(&stored), "http://example.test", "alice"),
+            superseded_row(Some(&stored), "http://example.test", "alice", None),
             None,
         );
         assert_eq!(
-            superseded_row(Some(&stored), "http://127.0.0.1:8787", "bob"),
+            superseded_row(Some(&stored), "http://127.0.0.1:8787", "bob", None),
             None,
         );
         assert_eq!(
-            superseded_row(None, "http://127.0.0.1:8787", "alice"),
+            superseded_row(None, "http://127.0.0.1:8787", "alice", None),
             None,
             "a first remember displaces nothing",
         );

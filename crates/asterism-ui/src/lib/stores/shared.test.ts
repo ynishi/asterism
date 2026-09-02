@@ -108,7 +108,98 @@ beforeEach(() => {
   sharedCatalog.pursuits.reset();
   sharedCatalog.stored = null;
   sharedCatalog.storedRejected = false;
+  sharedCatalog.storedRejectedReason = null;
   sharedCatalog.deviceTokens.reset();
+  sharedCatalog.provider = null;
+  sharedCatalog.providerFor = null;
+});
+
+// The silent reconnect's refusal carries the server's reason (#163),
+// and the store keeps it beside the flag for the drawer's sentence —
+// and drops it the moment a connection lands.
+describe("why a stored sign-in was refused", () => {
+  it("keeps the reason the server gave beside the refusal", async () => {
+    apiMock.mockResolvedValueOnce({
+      base_url: "http://127.0.0.1:8787",
+      login: "alice",
+      token_id: "dt_1",
+      label: "Asterism on macos",
+    });
+    apiMock.mockResolvedValueOnce({
+      outcome: "rejected",
+      user: null,
+      reason: "idle",
+    });
+    await sharedCatalog.resume();
+    expect(sharedCatalog.storedRejected).toBe(true);
+    expect(sharedCatalog.storedRejectedReason).toBe("idle");
+  });
+
+  it("has no reason once a reconnect lands", async () => {
+    sharedCatalog.storedRejectedReason = "revoked";
+    apiMock.mockResolvedValueOnce({
+      base_url: "http://127.0.0.1:8787",
+      login: "alice",
+      token_id: "dt_1",
+      label: "Asterism on macos",
+    });
+    apiMock.mockResolvedValueOnce({
+      outcome: "connected",
+      user: "u1",
+      reason: null,
+    });
+    await sharedCatalog.resume();
+    expect(sharedCatalog.session).toBe("u1");
+    expect(sharedCatalog.storedRejectedReason).toBeNull();
+  });
+});
+
+// Signing in through the server's identity provider (#163). What the
+// store owes the form: the button is offered only on the server's own
+// say-so, and the sign-in itself carries no login and no password —
+// the browser is where those happen.
+describe("signing in through the provider", () => {
+  it("offers a button only when the server says it has a provider", async () => {
+    apiMock.mockResolvedValueOnce({ name: "Example IdP" });
+    await sharedCatalog.probeProvider("http://127.0.0.1:8787/");
+    expect(apiMock).toHaveBeenCalledWith("team_auth_provider", {
+      baseUrl: "http://127.0.0.1:8787/",
+    });
+    expect(sharedCatalog.provider).toEqual({ name: "Example IdP" });
+    expect(sharedCatalog.providerFor).toBe("http://127.0.0.1:8787/");
+
+    apiMock.mockResolvedValueOnce(null);
+    await sharedCatalog.probeProvider("http://127.0.0.1:9989");
+    expect(sharedCatalog.provider).toBeNull();
+    expect(sharedCatalog.providerFor).toBe("http://127.0.0.1:9989");
+  });
+
+  it("treats a server that does not answer as one with no button", async () => {
+    apiMock.mockRejectedValueOnce(new Error("connection refused"));
+    await sharedCatalog.probeProvider("http://nowhere.test");
+    expect(sharedCatalog.provider).toBeNull();
+    expect(sharedCatalog.providerFor).toBe("http://nowhere.test");
+  });
+
+  it("asks nothing about a blank server", async () => {
+    await sharedCatalog.probeProvider("   ");
+    expect(apiMock).not.toHaveBeenCalled();
+    expect(sharedCatalog.providerFor).toBeNull();
+  });
+
+  it("signs in with the server and the remember box and nothing typed", async () => {
+    mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce(null); // stored_team_connection
+    apiMock.mockResolvedValueOnce({ teams: [] }); // my teams
+    await sharedCatalog.connectWithProvider("http://127.0.0.1:8787", true);
+    expect(mutateMock).toHaveBeenCalledWith(
+      "connect_team_server_provider",
+      { baseUrl: "http://127.0.0.1:8787", remember: true },
+      expect.any(String),
+    );
+    expect(sharedCatalog.session).toBe("u1");
+    expect(sharedCatalog.storedRejected).toBe(false);
+  });
 });
 
 describe("what the panel shows", () => {
