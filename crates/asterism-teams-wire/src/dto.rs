@@ -8,9 +8,10 @@
 use schema_bridge::SchemaBridge;
 use serde::{Deserialize, Serialize};
 
-/// A freshly minted session (`POST /teams/auth/login`, and
-/// `POST /teams/auth/device/login` — one session shape, whichever arm
-/// issued it).
+/// A freshly minted session (`POST /teams/auth/login`,
+/// `POST /teams/auth/device/login`, and the collect of a sign-in
+/// through the provider — one session shape, whichever arm issued
+/// it).
 ///
 /// **No derived `Debug`** — see the hand-written one below, which is
 /// where this crate's rule about formatting a live credential is
@@ -24,6 +25,15 @@ pub struct SessionDto {
     pub token: String,
     /// The account the session resolves to.
     pub user_id: String,
+    /// The login name the account was created under — the one field
+    /// here a person did not necessarily type: a sign-in through a
+    /// provider (#163) ends in a session for an account whose login the
+    /// provider never heard of, so the session says it. Defaulted on
+    /// decode, so a client reads a server from before the field as one
+    /// that answered with a blank login rather than as one that
+    /// answered nothing.
+    #[serde(default)]
+    pub login: String,
     /// The display name the ledger would stamp for this account.
     pub display_name: String,
     /// Whether this account is an instance admin (#83 §1) — acting
@@ -32,6 +42,20 @@ pub struct SessionDto {
     pub admin: bool,
     /// When the session stops resolving, epoch ms.
     pub expires_at_ms: i64,
+    /// The instance's stable id (#163) — what a client is to key what
+    /// it stores about this server by, because the URL it connected to
+    /// is a name that moves and this is not. Opaque; the same for
+    /// every session the instance ever mints. Defaulted on decode for
+    /// the reason `login` is.
+    #[serde(default)]
+    pub instance_id: String,
+    /// The tenant this session belongs to, as an opaque id (#163).
+    /// One instance hosts one tenant today, and the value is the
+    /// instance's; it is here from the first so that a host serving
+    /// several tenants later changes nothing a client stores or
+    /// compares. Defaulted on decode for the reason `login` is.
+    #[serde(default)]
+    pub tenant_id: String,
 }
 
 /// Prints everything about a session except the value that would let
@@ -48,11 +72,68 @@ impl std::fmt::Debug for SessionDto {
         f.debug_struct("SessionDto")
             .field("token", &"<not shown>")
             .field("user_id", &self.user_id)
+            .field("login", &self.login)
             .field("display_name", &self.display_name)
             .field("admin", &self.admin)
             .field("expires_at_ms", &self.expires_at_ms)
+            .field("instance_id", &self.instance_id)
+            .field("tenant_id", &self.tenant_id)
             .finish()
     }
+}
+
+/// What this instance offers besides a password
+/// (`GET /teams/auth/providers`, #163). Public — it is what a connect
+/// form reads before anybody has signed in, to know whether to offer
+/// a provider button at all.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AuthProvidersDto {
+    /// The identity provider this instance signs people in through,
+    /// or `None` for an instance that verifies passwords and nothing
+    /// else.
+    pub oidc: Option<OidcProviderDto>,
+}
+
+/// One identity provider, as a connect form names it.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OidcProviderDto {
+    /// What to call it on the button — whatever the person hosting
+    /// wrote when configuring the instance.
+    pub name: String,
+}
+
+/// A sign-in attempt through the provider
+/// (`POST /teams/auth/oidc/attempts`, #163): where to send the browser,
+/// and how long the attempt is good for.
+///
+/// Nothing here is a credential. The attempt id is the `state` the
+/// provider echoes and what the start page is keyed by; presenting it
+/// collects nothing without the secret the app kept and the grant the
+/// browser brings back.
+///
+/// What comes back to the app comes through its loopback listener,
+/// not through this crate. The contract that listener is to meet: the
+/// provider's callback sends the browser to
+/// `http://127.0.0.1:<port>/teams/auth/oidc/loopback?attempt=<id>`
+/// with either `&grant=<grant>` or `&refused=1`, and the listener is
+/// to answer with a `303` to `<start_url>/done`, where the instance
+/// says what happened. The collect route then answers with an
+/// ordinary [`SessionDto`]: a `401` for an attempt that was refused
+/// (to the secret alone — there was no grant), a `404` for one nothing
+/// names, past its expiry, already collected, not yet finished in the
+/// browser, or whose secret or grant is not its own.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OidcAttemptDto {
+    /// The attempt's id, which the collect route takes and the loopback
+    /// redirect names.
+    pub attempt_id: String,
+    /// The page to open in the system browser: this instance's own,
+    /// which shows the device label and asks before sending the person
+    /// on to the provider.
+    pub start_url: String,
+    /// When the attempt stops being collectable, epoch ms — how long
+    /// the listener should wait.
+    pub expires_at_ms: i64,
 }
 
 /// A freshly minted device token (`POST /teams/auth/device`, #204).
@@ -63,6 +144,11 @@ impl std::fmt::Debug for SessionDto {
 /// credential a client puts in an OS keychain and presents after a
 /// restart, so a copy of it that leaked into a log is a copy that
 /// works for months.
+///
+/// Carries no instance or tenant id: the session that asked for this
+/// token said both, and the session the token is later presented for
+/// says them again, so what a client keys its store by is never
+/// missing at the moment it writes.
 #[derive(Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct DeviceTokenMintedDto {
     /// The token. **This response is the only time it exists outside

@@ -41,13 +41,14 @@ use asterism_contract::forge::{
 use asterism_core::domain::team_link::TeamScopedId;
 use asterism_core::error::DomainError;
 use asterism_teams_wire::command::{
-    CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand, HaveContentCommand,
-    InviteMemberCommand, LoginCommand, MintDeviceTokenCommand, RemoveMemberCommand,
-    ResolveContentCommand, RevokeOwnerCommand,
+    CollectOidcAttemptCommand, CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand,
+    HaveContentCommand, InviteMemberCommand, LoginCommand, MintDeviceTokenCommand,
+    OidcAttemptCommand, RemoveMemberCommand, ResolveContentCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
-    ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto, LedgerEventDto,
-    LedgerPageDto, MyTeamsDto, ResolvedContentDto, RosterDto, SessionDto, TeamCreatedDto,
+    AuthProvidersDto, ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto,
+    LedgerEventDto, LedgerPageDto, MyTeamsDto, OidcAttemptDto, ResolvedContentDto, RosterDto,
+    SessionDto, TeamCreatedDto,
 };
 use asterism_teams_wire::projection::{
     EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
@@ -226,9 +227,11 @@ impl TeamsClient {
     /// ordinary session — the same shape [`Self::login`] returns — so
     /// nothing below this method knows which arm was used.
     ///
-    /// An unknown, revoked and expired token are the same `401`. That
-    /// is the client's cue to fall back to the password form, and the
-    /// one thing it must not do on that path is keep the stored token:
+    /// A token that does not resolve is a `401` whose `reason` says
+    /// which of `expired`, `idle` or `revoked` it was (#163) — the
+    /// [`TeamsClientError::Refused`] carries it. Any of them is the
+    /// client's cue to fall back to the password form, and the one
+    /// thing it must not do on that path is keep the stored token:
     /// deciding when a stored credential is discarded belongs to
     /// whoever owns the keychain entry, so this method changes nothing
     /// on disk in either direction.
@@ -242,6 +245,92 @@ impl TeamsClient {
             .post(&url)
             .json(&DeviceLoginCommand {
                 token: token.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        let session: SessionDto = read_json("POST", &url, response).await?;
+        self.session = Some(session.clone());
+        Ok(session)
+    }
+
+    /// What this server offers besides a password (#163). No session
+    /// needed — it is what a connect form asks before anybody is in.
+    pub async fn auth_providers(&self) -> Result<AuthProvidersDto, TeamsClientError> {
+        let url = self.url("/teams/auth/providers");
+        let response =
+            self.http
+                .get(&url)
+                .send()
+                .await
+                .map_err(|source| TeamsClientError::Transport {
+                    url: url.clone(),
+                    source,
+                })?;
+        read_json("GET", &url, response).await
+    }
+
+    /// Starts a sign-in through the server's identity provider (#163).
+    ///
+    /// `collector` is the SHA-256, in hex, of a secret the caller made
+    /// and keeps; `label` is what the person will see on the page in
+    /// their browser before going on to the provider; `loopback_port`
+    /// is where the caller is listening at `127.0.0.1`, because the
+    /// provider's answer comes back through the browser to that port
+    /// rather than to a poll. What comes back here is where to send the
+    /// browser and how long to keep listening; what comes back to the
+    /// listener, and what to do with it, is on
+    /// [`OidcAttemptDto`].
+    pub async fn start_oidc_attempt(
+        &self,
+        collector: &str,
+        label: &str,
+        loopback_port: u16,
+    ) -> Result<OidcAttemptDto, TeamsClientError> {
+        let url = self.url("/teams/auth/oidc/attempts");
+        let response = self
+            .http
+            .post(&url)
+            .json(&OidcAttemptCommand {
+                collector: collector.to_string(),
+                label: label.to_string(),
+                loopback_port,
+            })
+            .send()
+            .await
+            .map_err(|source| TeamsClientError::Transport {
+                url: url.clone(),
+                source,
+            })?;
+        read_json("POST", &url, response).await
+    }
+
+    /// Collects a sign-in attempt (#163): the session, which this
+    /// client then keeps for every call after.
+    ///
+    /// `secret` is what `collector` was the hash of; `grant` is what
+    /// the browser delivered to the caller's loopback listener, or
+    /// empty when it delivered `refused=1` instead. A `401` is the
+    /// provider's answer resolving to nobody here, answered to the
+    /// secret alone; a `404` is an attempt nothing names, past its
+    /// expiry, or a secret or grant that is not its own, deliberately
+    /// one answer. Collected once: a second call is the `404`.
+    pub async fn collect_oidc_attempt(
+        &mut self,
+        attempt_id: &str,
+        secret: &str,
+        grant: &str,
+    ) -> Result<SessionDto, TeamsClientError> {
+        let url = self.url(&format!("/teams/auth/oidc/attempts/{attempt_id}/collect"));
+        let response = self
+            .http
+            .post(&url)
+            .json(&CollectOidcAttemptCommand {
+                secret: secret.to_string(),
+                grant: grant.to_string(),
             })
             .send()
             .await

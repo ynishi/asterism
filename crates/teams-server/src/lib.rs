@@ -13,6 +13,10 @@
 //!   linked, and not public: the module is `pub(crate)` because it
 //!   exports no type, only routes that reach a caller through
 //!   [`http::router`].
+//! - [`oidc`] — sign-in through the instance's identity provider
+//!   (#163): the attempts an app starts, the pages a browser walks,
+//!   and the collect that ends in an ordinary session. Its routes are
+//!   registered from [`http`].
 //! - [`rate_limit`] — the one limiter every auth endpoint sits behind
 //!   (#83 §5: from v0, not retrofitted).
 //! - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
@@ -27,5 +31,6 @@
 
 pub(crate) mod forge;
 pub mod http;
+pub mod oidc;
 pub mod rate_limit;
 pub mod state;

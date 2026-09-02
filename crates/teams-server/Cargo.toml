@@ -102,3 +102,13 @@ sha2 = { workspace = true }
 tempfile = "3"
 # The backup restore e2e unpacks the archive the way an operator would.
 tar = { workspace = true }
+# The sign-in e2e (#163) stands up an identity provider of its own:
+# a P-256 key made per run, published as a JWK the way a provider
+# publishes one, and ID tokens signed with it. The three lines are what
+# a provider is made of, and none of them reaches the binary.
+jsonwebtoken = { workspace = true }
+p256         = { workspace = true }
+rand         = { workspace = true }
+# ...and the provider checks the PKCE challenge and the client's basic
+# auth the way a real one does, which is two base64 alphabets.
+base64       = { workspace = true }

@@ -47,6 +47,15 @@ sha2 = { workspace = true }
 rand = { workspace = true }
 # `teams-core::port::auth::CredentialVerifier` is an async trait.
 async-trait = { workspace = true }
+# OIDC sign-in (#163): the instance is the provider's OAuth client, so
+# this crate is where discovery, the code exchange and the ID-token
+# check live. The workspace manifest says why the signature check is a
+# crate and the rest is `reqwest`.
+jsonwebtoken = { workspace = true }
+reqwest      = { workspace = true }
+serde        = { workspace = true }
+# The PKCE challenge is the base64url form of a SHA-256, RFC 7636 §4.2.
+base64       = { workspace = true }
 # The blob adapter's write path (#83 §3): async fs for the staging
 # file, the fsyncs and the rename. Promoted from dev-dependency when
 # the adapter landed (#93) — until then only the tests were async.

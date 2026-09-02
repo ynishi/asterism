@@ -16,12 +16,33 @@ use teams_infra::gc::GcGuard;
 use teams_infra::sqlite::SqliteTeamsRepository;
 use teams_infra::sqlite::projection::SqliteProjectionStore;
 
+use crate::oidc::OidcSignIn;
 use crate::rate_limit::RateLimiter;
 
 /// How long a session lives from login (24 hours). Sessions are
 /// short-lived by design (#83 §1); a client that outlives this logs in
 /// again.
 pub const DEFAULT_SESSION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// How long a device token lives from its mint unless the instance
+/// says otherwise: **90 days** (#204, made policy by #163).
+///
+/// Policy rather than a constant, because a lifetime is a deployment's
+/// trade between re-logins and exposure — the same reason a session's
+/// is a field here — and because a fixed number is the one answer a
+/// security questionnaire refuses: the expected shape is a ceiling an
+/// operator sets, which is what `teams-server serve --device-token-days`
+/// is. What stays fixed is that each token's window is fixed *at its
+/// mint*, never slid forward on use; the adapter's mint says why.
+pub const DEFAULT_DEVICE_TOKEN_TTL_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
+/// How long a device token may go unpresented before it stops
+/// resolving, unless the instance says otherwise: **30 days**. A
+/// laptop in a drawer holds a credential nobody is using, and this is
+/// what bounds it; NIST SP 800-63B is where an inactivity timeout
+/// comes from as an expectation. `--device-token-idle-days 0` turns
+/// it off.
+pub const DEFAULT_DEVICE_TOKEN_IDLE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// The purge grace window's safe default: **7 days**, the
 /// delayed-deletion period GitLab ships for the same trash→purge shape
@@ -43,6 +64,10 @@ pub struct TeamsCtx {
     pub repo: SqliteTeamsRepository,
     /// Credentials and sessions — auth v0 (#83 §5).
     pub auth: PasswordAuth,
+    /// The identity provider this instance signs people in through
+    /// (#163), or `None` for an instance that verifies passwords and
+    /// nothing else.
+    pub oidc: Option<Arc<OidcSignIn>>,
     /// The instance's CAS — bytes only; visibility is the link rows'
     /// question, answered through [`Self::repo`] (#83 §3, #93).
     pub blobs: LocalFileStorageAdapter,
@@ -51,6 +76,14 @@ pub struct TeamsCtx {
     pub registration: RegistrationPolicy,
     /// Session lifetime handed to every login.
     pub session_ttl_ms: i64,
+    /// Device-token lifetime handed to every mint
+    /// ([`DEFAULT_DEVICE_TOKEN_TTL_MS`] unless the operator says
+    /// otherwise).
+    pub device_token_ttl_ms: i64,
+    /// How long a device token may go unpresented, or `None` for no
+    /// bound ([`DEFAULT_DEVICE_TOKEN_IDLE_MS`] unless the operator says
+    /// otherwise).
+    pub device_token_idle_ms: Option<i64>,
     /// The one limiter every credential-presenting endpoint sits
     /// behind — which of them those are is `http`'s module doc.
     pub auth_limiter: RateLimiter,

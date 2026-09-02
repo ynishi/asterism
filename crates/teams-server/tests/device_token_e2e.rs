@@ -24,10 +24,12 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use rusqlite_isle::{AsyncIsle, AsyncIsleDriver};
 use teams_core::domain::identity::RegistrationPolicy;
-use teams_infra::auth::password::{DEVICE_TOKEN_TTL_MS, PasswordAuth};
+use teams_infra::auth::password::PasswordAuth;
 use teams_infra::sqlite::SqliteTeamsRepository;
 use teams_server::rate_limit::RateLimiter;
-use teams_server::state::{TeamsCtx, now_ms};
+use teams_server::state::{
+    DEFAULT_DEVICE_TOKEN_IDLE_MS, DEFAULT_DEVICE_TOKEN_TTL_MS, TeamsCtx, now_ms,
+};
 use tower::ServiceExt;
 
 const GOOD: &str = "correct horse battery staple";
@@ -52,10 +54,13 @@ async fn harness() -> Harness {
     let ctx = Arc::new(TeamsCtx {
         repo: SqliteTeamsRepository::new(isle.clone()),
         auth: PasswordAuth::new(isle.clone()),
+        oidc: None,
         projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle.clone()),
         blobs,
         registration: RegistrationPolicy::Open,
         session_ttl_ms: 60_000,
+        device_token_ttl_ms: DEFAULT_DEVICE_TOKEN_TTL_MS,
+        device_token_idle_ms: Some(DEFAULT_DEVICE_TOKEN_IDLE_MS),
         // Generous: nothing here is about the limiter, and the arm
         // that shares its bucket is covered by `auth_session_e2e`.
         auth_limiter: RateLimiter::new(1_000, Duration::from_secs(60)),
@@ -339,7 +344,8 @@ async fn an_expired_token_is_unauthorized_and_its_row_is_gone() {
         .mint_device_token(
             user_id,
             "old laptop",
-            now_ms() - DEVICE_TOKEN_TTL_MS - 1_000,
+            now_ms() - h.ctx.device_token_ttl_ms - 1_000,
+            h.ctx.device_token_ttl_ms,
         )
         .await
         .expect("mint a stale token");
@@ -355,11 +361,12 @@ async fn an_expired_token_is_unauthorized_and_its_row_is_gone() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "expired must read as 401");
     assert_eq!(body["kind"], "Unauthorized");
-    // Gone, and the route reaches that two ways at once: it sweeps
-    // before it resolves, and a resolve that met the row would have
-    // deleted it on touch. Which one got there first is not a fact
-    // this surface owes anybody — that the row cannot outlive its
-    // expiry is (the adapter's tests pin the touch path on its own).
+    // The resolve meets the row before the sweep takes it, so the
+    // reason is the token's own end and not "revoked" (#163).
+    assert_eq!(body["reason"], "expired", "{body}");
+    // Gone: the resolve deleted it on touch, and the sweep after it
+    // would have taken it anyway. That the row cannot outlive its
+    // expiry is the fact this surface owes.
     assert_eq!(device_rows(&h.isle).await, 0);
 
     h.driver.shutdown().await.unwrap();

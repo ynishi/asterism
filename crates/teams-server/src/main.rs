@@ -28,6 +28,18 @@
 //! registration surface ships; invited members must already hold an
 //! account.
 //!
+//! ## The identity provider (#163)
+//!
+//! An instance may sign its members in through one OIDC provider
+//! instead of a password: `serve --oidc-issuer … --oidc-client-id …
+//! --public-url …` with the client secret in
+//! `$ASTERISM_TEAMS_OIDC_CLIENT_SECRET` — an environment variable for
+//! the reason the passwords are. `create-user --oidc-email` and
+//! `link-oidc` say which account an address at the provider signs in
+//! as. Why the instance rather than the app is the provider's client
+//! is `teams_infra::auth::oidc`'s. Without the arguments the instance
+//! is what it was.
+//!
 //! ## Binding
 //!
 //! Loopback by default, like the sibling binary. Unlike the local app,
@@ -43,13 +55,23 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use teams_core::domain::identity::RegistrationPolicy;
+use teams_infra::auth::oidc::{OidcClient, OidcConfig, OidcIdentities};
 use teams_infra::auth::password::PasswordAuth;
 use teams_infra::sqlite::SqliteTeamsRepository;
 use teams_server::http;
+use teams_server::oidc::OidcSignIn;
 use teams_server::rate_limit::RateLimiter;
 use teams_server::state::{
-    AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW, DEFAULT_SESSION_TTL_MS, TeamsCtx, now_ms,
+    AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW, DEFAULT_DEVICE_TOKEN_IDLE_MS,
+    DEFAULT_DEVICE_TOKEN_TTL_MS, DEFAULT_SESSION_TTL_MS, TeamsCtx, now_ms,
 };
+
+/// A millisecond span as whole days, for the two device-token
+/// arguments: the context's constants are the numbers, and the
+/// arguments are how an operator spells them.
+const fn days(ms: i64) -> u32 {
+    (ms / (24 * 60 * 60 * 1000)) as u32
+}
 
 /// Default HTTP port. Its own number, near the local app's profile
 /// ports (8989 / 18989 / 28989) but colliding with none of them — the
@@ -60,6 +82,10 @@ const DEFAULT_PORT: u16 = 9989;
 const ADMIN_PASSWORD_ENV: &str = "ASTERISM_TEAMS_ADMIN_PASSWORD";
 /// Where `create-user` reads its password from.
 const USER_PASSWORD_ENV: &str = "ASTERISM_TEAMS_USER_PASSWORD";
+/// Where `serve` reads the provider's client secret from (#163) — an
+/// environment variable for the reason the passwords are: it stays out
+/// of shell history and process listings.
+const OIDC_CLIENT_SECRET_ENV: &str = "ASTERISM_TEAMS_OIDC_CLIENT_SECRET";
 
 /// Asterism teams server (hosted Team plane, #83).
 #[derive(Parser)]
@@ -99,6 +125,39 @@ enum Command {
         /// #83 §1 names for the trash→purge shape.
         #[arg(long, default_value_t = 7 * 24 * 60 * 60)]
         purge_grace_seconds: u32,
+        /// How many days a device token lives from its mint (#204,
+        /// #163). A ceiling, fixed per token at the mint; the context's
+        /// default is the number and says why it is a setting.
+        #[arg(long, default_value_t = days(DEFAULT_DEVICE_TOKEN_TTL_MS))]
+        device_token_days: u32,
+        /// How many days a device token may go unpresented before it
+        /// stops resolving. `0` turns the bound off.
+        #[arg(long, default_value_t = days(DEFAULT_DEVICE_TOKEN_IDLE_MS))]
+        device_token_idle_days: u32,
+        /// The identity provider's issuer URL (#163) — the `iss` its
+        /// ID tokens carry, and where `/.well-known/openid-configuration`
+        /// is found. Given together with `--oidc-client-id` and
+        /// `--public-url`, and with the client secret in
+        /// `$ASTERISM_TEAMS_OIDC_CLIENT_SECRET`, it makes this instance
+        /// the provider's OAuth client; absent, the instance signs
+        /// people in with passwords only.
+        #[arg(long, requires_all = ["oidc_client_id", "public_url"])]
+        oidc_issuer: Option<String>,
+        /// The client id the provider registered this instance under.
+        #[arg(long, requires = "oidc_issuer")]
+        oidc_client_id: Option<String>,
+        /// What the app calls the provider on its button — "Google",
+        /// "Okta". Default: the issuer's host.
+        #[arg(long, requires = "oidc_issuer")]
+        oidc_name: Option<String>,
+        /// The origin members' browsers reach this instance at,
+        /// `https://teams.example.com` — what the provider is told to
+        /// send the browser back to, and what a sign-in page's URL is
+        /// built on. Register `<public-url>/teams/auth/oidc/callback`
+        /// as the redirect URI at the provider. Nothing reads it
+        /// without a provider, so alone it is refused.
+        #[arg(long, requires = "oidc_issuer")]
+        public_url: Option<String>,
     },
     /// Creates the database (if missing) and applies every pending
     /// migration. Idempotent — safe to re-run.
@@ -131,6 +190,8 @@ enum Command {
     },
     /// Provisions an ordinary user account. Password from
     /// `$ASTERISM_TEAMS_USER_PASSWORD`; same refusals as the admin's.
+    /// With `--oidc-email`, no password: the account signs in through
+    /// the provider and holds none (#163).
     CreateUser {
         /// SQLite database path.
         #[arg(long)]
@@ -141,6 +202,36 @@ enum Command {
         /// Display name for ledger stamps (default: the login).
         #[arg(long)]
         display_name: Option<String>,
+        /// The address the person signs in with at the provider. The
+        /// first sign-in whose verified email matches pins the
+        /// provider's subject to the account; no password is read or
+        /// stored.
+        #[arg(long, requires = "oidc_issuer")]
+        oidc_email: Option<String>,
+        /// The provider the address belongs to — the same issuer URL
+        /// `serve --oidc-issuer` is given. Meaningless without
+        /// `--oidc-email`, and refused alone rather than silently
+        /// making a password account.
+        #[arg(long, requires = "oidc_email")]
+        oidc_issuer: Option<String>,
+    },
+    /// Binds an existing account to its address at the identity
+    /// provider (#163). Rebinding unpins: the next verified sign-in
+    /// with the new address pins afresh.
+    LinkOidc {
+        /// SQLite database path.
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// The account's login name.
+        #[arg(long)]
+        login: String,
+        /// The address the person signs in with at the provider.
+        #[arg(long)]
+        email: String,
+        /// The provider the address belongs to — the same issuer URL
+        /// `serve --oidc-issuer` is given.
+        #[arg(long)]
+        oidc_issuer: String,
     },
     /// Runs the zero-link sweep on demand (#95): deletes blob bytes no
     /// team links anymore. Links marked for purge still count as links
@@ -266,6 +357,129 @@ async fn create_account(
     Ok(())
 }
 
+/// Provisions an account that signs in through the provider and holds
+/// no password (#163): the locked row, and the binding beside it.
+async fn create_provider_account(
+    db: Option<PathBuf>,
+    login: &str,
+    display_name: Option<String>,
+    issuer: &str,
+    email: &str,
+) -> anyhow::Result<()> {
+    let db_path = resolve_db_path(db)?;
+    let (isle, driver) = teams_infra::sqlite::open_and_migrate(&db_path).await?;
+    let auth = PasswordAuth::new(isle.clone());
+    let identities = OidcIdentities::new(isle);
+    let display_name = display_name.unwrap_or_else(|| login.to_string());
+    // Two writes, not one transaction: the account is created, then
+    // bound. A binding refused after the account landed — an address
+    // another account holds, say — leaves an account nobody can sign
+    // in as, and the message says what completes it.
+    let outcome = async {
+        let user_id = auth
+            .create_account_locked(login, &display_name, false, now_ms())
+            .await?;
+        identities
+            .bind_email(user_id, issuer, email)
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "{err}; the account {login:?} exists and holds no password — \
+                     `link-oidc --login {login} --email <address> --oidc-issuer {issuer}` \
+                     completes it"
+                )
+            })?;
+        Ok::<_, anyhow::Error>(user_id)
+    }
+    .await;
+    driver.shutdown().await.ok();
+    let user_id = outcome?;
+    println!(
+        "teams-server: user {login:?} created (user_id {user_id}), signs in as {email:?} at {issuer}"
+    );
+    Ok(())
+}
+
+/// Binds an existing account to its provider address (#163).
+async fn link_provider_account(
+    db: Option<PathBuf>,
+    login: &str,
+    issuer: &str,
+    email: &str,
+) -> anyhow::Result<()> {
+    let db_path = existing_db_path(db)?;
+    let (isle, driver) = teams_infra::sqlite::open_and_migrate(&db_path).await?;
+    let auth = PasswordAuth::new(isle.clone());
+    let identities = OidcIdentities::new(isle);
+    let outcome = async {
+        let account = auth
+            .account_by_login(login)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("no account is registered as {login:?}"))?;
+        identities
+            .bind_email(account.user_id, issuer, email)
+            .await?;
+        Ok::<_, anyhow::Error>(account.user_id)
+    }
+    .await;
+    driver.shutdown().await.ok();
+    let user_id = outcome?;
+    println!("teams-server: user {login:?} (user_id {user_id}) signs in as {email:?} at {issuer}");
+    Ok(())
+}
+
+/// The provider half of the context, from the `serve` arguments — or
+/// `None` when no issuer was given, in which case nothing about the
+/// instance changes.
+fn provider_from_args(
+    identities: OidcIdentities,
+    issuer: Option<String>,
+    client_id: Option<String>,
+    name: Option<String>,
+    public_url: Option<String>,
+) -> anyhow::Result<Option<Arc<OidcSignIn>>> {
+    let Some(issuer) = issuer else {
+        return Ok(None);
+    };
+    // clap's `requires_all` has already refused the other two missing;
+    // the unwraps below are that refusal restated as types.
+    let client_id = client_id.expect("clap requires --oidc-client-id with --oidc-issuer");
+    let public_url = public_url.expect("clap requires --public-url with --oidc-issuer");
+    let public_url = public_url.trim_end_matches('/').to_string();
+    let client_secret = std::env::var(OIDC_CLIENT_SECRET_ENV).map_err(|_| {
+        anyhow::anyhow!(
+            "set ${OIDC_CLIENT_SECRET_ENV} to the client secret the provider issued; \
+             this instance has no default credentials (#83 §5)"
+        )
+    })?;
+    // The issuer's host, for a button nobody named: everything after
+    // the scheme and before the first slash, which is a host and a
+    // port at most — an issuer URL carries no credentials or query.
+    let display_name = name.unwrap_or_else(|| {
+        let after_scheme = issuer
+            .split_once("://")
+            .map_or(issuer.as_str(), |(_, rest)| rest);
+        after_scheme
+            .split('/')
+            .next()
+            .filter(|host| !host.is_empty())
+            .unwrap_or(issuer.as_str())
+            .to_string()
+    });
+    let client = OidcClient::new(OidcConfig {
+        issuer,
+        client_id,
+        client_secret,
+        redirect_url: format!("{public_url}/teams/auth/oidc/callback"),
+        display_name,
+    });
+    Ok(Some(Arc::new(OidcSignIn::new(
+        client,
+        identities,
+        &public_url,
+    ))))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
@@ -276,9 +490,22 @@ async fn main() -> anyhow::Result<()> {
             bind,
             closed_registration,
             purge_grace_seconds,
+            device_token_days,
+            device_token_idle_days,
+            oidc_issuer,
+            oidc_client_id,
+            oidc_name,
+            public_url,
         } => {
             let db_path = resolve_db_path(db)?;
             let (isle, _driver) = teams_infra::sqlite::open_and_migrate(&db_path).await?;
+            let oidc = provider_from_args(
+                OidcIdentities::new(isle.clone()),
+                oidc_issuer,
+                oidc_client_id,
+                oidc_name,
+                public_url,
+            )?;
             let blob_root = match blobs {
                 Some(path) => path,
                 None => teams_infra::paths::default_blob_root()?,
@@ -294,12 +521,16 @@ async fn main() -> anyhow::Result<()> {
             let ctx = Arc::new(TeamsCtx {
                 repo: SqliteTeamsRepository::new(isle.clone()),
                 auth: PasswordAuth::new(isle.clone()),
+                oidc,
                 projections: teams_infra::sqlite::projection::SqliteProjectionStore::new(isle),
                 blobs,
                 registration,
                 session_ttl_ms: DEFAULT_SESSION_TTL_MS,
                 auth_limiter: RateLimiter::new(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW),
                 purge_grace_ms: i64::from(purge_grace_seconds) * 1000,
+                device_token_ttl_ms: i64::from(device_token_days) * 24 * 60 * 60 * 1000,
+                device_token_idle_ms: (device_token_idle_days > 0)
+                    .then(|| i64::from(device_token_idle_days) * 24 * 60 * 60 * 1000),
                 gc_guard: Arc::new(teams_infra::gc::GcGuard::new()),
             });
             let addr = SocketAddr::from((bind, port.unwrap_or(DEFAULT_PORT)));
@@ -341,7 +572,20 @@ async fn main() -> anyhow::Result<()> {
             db,
             login,
             display_name,
-        } => create_account(db, &login, display_name, USER_PASSWORD_ENV, false).await,
+            oidc_email,
+            oidc_issuer,
+        } => match (oidc_email, oidc_issuer) {
+            (Some(email), Some(issuer)) => {
+                create_provider_account(db, &login, display_name, &issuer, &email).await
+            }
+            _ => create_account(db, &login, display_name, USER_PASSWORD_ENV, false).await,
+        },
+        Command::LinkOidc {
+            db,
+            login,
+            email,
+            oidc_issuer,
+        } => link_provider_account(db, &login, &oidc_issuer, &email).await,
         Command::Gc { db, blobs } => {
             let db_path = existing_db_path(db)?;
             // No migration on a maintenance verb: the schema must

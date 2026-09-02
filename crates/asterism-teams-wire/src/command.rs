@@ -40,8 +40,13 @@ pub struct LoginCommand {
 /// hold.
 #[derive(Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct DeviceLoginCommand {
-    /// The device token, as the mint answered with it. An unknown,
-    /// revoked and expired token are the same `401`.
+    /// The device token, as the mint answered with it. A token that
+    /// does not resolve is a `401` whose body carries a `reason` —
+    /// `expired`, `idle` or `revoked` — so the app can say which to
+    /// the person rather than showing one password form for all three
+    /// (#163). `revoked` also covers a token this instance never
+    /// minted, because a handle nobody holds and one somebody took
+    /// back are both nothing to present.
     pub token: String,
 }
 
@@ -49,6 +54,59 @@ impl std::fmt::Debug for DeviceLoginCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeviceLoginCommand")
             .field("token", &"<not shown>")
+            .finish()
+    }
+}
+
+/// Starts a sign-in through the provider
+/// (`POST /teams/auth/oidc/attempts`, #163).
+///
+/// The app makes a secret it keeps, and sends its SHA-256 here. The
+/// instance stores the hash beside the attempt and will hand the
+/// session only to a collect that presents the secret — so the attempt
+/// id, which travels through a browser and a provider's logs, is not by
+/// itself a way to collect what the person signed in for.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct OidcAttemptCommand {
+    /// SHA-256 of the app's secret, hex. Not the secret.
+    pub collector: String,
+    /// What the start page shows the person before they go on to the
+    /// provider — "Yutaka's MacBook". Blank is refused.
+    pub label: String,
+    /// The port the app is listening on at `127.0.0.1`. The provider's
+    /// answer reaches the app through the browser, as a redirect to
+    /// this port carrying a one-time grant — which is what ties the
+    /// sign-in to the machine the app runs on, and why there is no
+    /// poll to fall back to. `0` is refused.
+    pub loopback_port: u16,
+}
+
+/// Collects a sign-in attempt
+/// (`POST /teams/auth/oidc/attempts/{id}/collect`, #163).
+///
+/// Two things, for two questions: the secret says this caller is the
+/// app that started the attempt, the grant says the browser that
+/// finished it was sent to that app's machine. A resolved attempt is
+/// collected with both, and a collect missing either is answered as
+/// though the attempt did not exist. A refused attempt is answered to
+/// the secret alone — there was no grant to deliver, and the app that
+/// started it is owed the refusal.
+///
+/// **No derived `Debug`**: until the collect lands, these two are what
+/// stand between the attempt id and a session.
+#[derive(Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct CollectOidcAttemptCommand {
+    /// The secret whose hash started the attempt.
+    pub secret: String,
+    /// The grant the browser delivered to the app's loopback listener.
+    pub grant: String,
+}
+
+impl std::fmt::Debug for CollectOidcAttemptCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CollectOidcAttemptCommand")
+            .field("secret", &"<not shown>")
+            .field("grant", &"<not shown>")
             .finish()
     }
 }
