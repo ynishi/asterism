@@ -24,8 +24,8 @@ The decisions that carry this module:
   faster than logins happen).
 - **A device token is that construction with a longer life and a
   name** (#204). Same bytes, same hash-at-rest rule, same two-sided
-  expiry — [`PasswordAuth::mint_device_token`] and its four
-  siblings differ from the session verbs in what the row carries
+  expiry — [`PasswordAuth::mint_device_token`] and its siblings
+  differ from the session verbs in what the row carries
   (a label, a handle, a last-use stamp) rather than in how the
   secret is handled. What it is *for* is the invariant #204 fixes:
   the disk may hold this and no primary credential, whichever
@@ -39,10 +39,11 @@ The decisions that carry this module:
   creation time rather than warned about.
 
 The port implementation ([`CredentialVerifier`]) keeps the port's
-one-arm contract: a wrong password and an unknown login are the
-same `Ok(None)`, and the unknown-login path verifies against a
-process-local dummy hash so the two answers cost the same work
-(username-enumeration resistance on the timing side too).
+one-arm contract: a wrong password, an unknown login and an account
+that holds no password ([`LOCKED_PASSWORD`], #163) are the same
+`Ok(None)`, and the two paths that find no hash to check verify
+against a process-local dummy hash so every answer costs the same
+work (username-enumeration resistance on the timing side too).
 
 ## Functions
 
@@ -52,10 +53,7 @@ process-local dummy hash so the two answers cost the same work
 
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
 - `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
+- `DeviceTokenResolution` — How a device token stops resolving, and why (#163).
 - `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
-
-## Constants
-
-- `DEVICE_TOKEN_TTL_MS` — How long a device token lives from the mint: **90 days** (#204).
 

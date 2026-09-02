@@ -15,6 +15,10 @@ route tests drive in-process:
   linked, and not public: the module is `pub(crate)` because it
   exports no type, only routes that reach a caller through
   [`http::router`].
+- [`oidc`] — sign-in through the instance's identity provider
+  (#163): the attempts an app starts, the pages a browser walks,
+  and the collect that ends in an ordinary session. Its routes are
+  registered from [`http`].
 - [`rate_limit`] — the one limiter every auth endpoint sits behind
   (#83 §5: from v0, not retrofitted).
 - [`state`] — the shared [`TeamsCtx`](state::TeamsCtx) the handlers
@@ -28,6 +32,7 @@ say which issue owns each.
 ## Modules
 
 - [`http`](http.md): HTTP transport — the axum `/teams/*` router (#83 §5, the #91
+- [`oidc`](oidc.md): Sign-in through the instance's identity provider (#163): the
 - [`rate_limit`](rate_limit.md): The auth rate limiter — hand-rolled, per-key, sliding-window.
 - [`state`](state.md): Shared server context — what every handler and gate reads.
 

@@ -10,6 +10,13 @@ slice).
 | POST | `/teams/auth/login` | none (rate-limited) |
 | POST | `/teams/auth/logout` | bearer token (rate-limited) |
 | POST | `/teams/auth/device/login` | a device token (rate-limited) — answers with an ordinary session |
+| GET | `/teams/auth/providers` | none — what this instance offers besides a password (#163) |
+| POST | `/teams/auth/oidc/attempts` | none (rate-limited) — starts a sign-in through the provider (#163) |
+| GET | `/teams/auth/oidc/attempts/{id}` | none — the page a browser lands on, HTML |
+| POST | `/teams/auth/oidc/attempts/{id}/authorize` | none — the button, `303` to the provider |
+| GET | `/teams/auth/oidc/callback` | a code from the provider (rate-limited) — `303` to the app's loopback listener |
+| GET | `/teams/auth/oidc/attempts/{id}/done` | none — the page the listener sends the browser on to, HTML |
+| POST | `/teams/auth/oidc/attempts/{id}/collect` | the attempt's secret and the grant the browser delivered (rate-limited) — answers with an ordinary session, once |
 | POST | `/teams/auth/device` | any live session — mints a device token (#204) |
 | GET | `/teams/auth/device` | any live session — the caller's own tokens, never their values |
 | DELETE | `/teams/auth/device/{id}` | any live session — owner-scoped, `204` |
@@ -76,10 +83,10 @@ a session that already resolved. They sit behind the gate instead.
 ## Minting asks for a live session and nothing more (#204)
 
 Not the password arm specifically, and this is the other question
-#204 leaves open. Any-session is what makes an OIDC adapter (#163)
-free: a verified ID token reaches the mint through a session the
+#204 leaves open. Any-session is what makes the provider path
+(#163) free: a sign-in through the provider ends in a session the
 same way a password does, and the minting path never learns which
-verifier answered — which is the property the whole issue turns on.
+way in was taken — which is the property the whole issue turns on.
 Requiring a re-auth would put a password back in front of a flow
 whose point is that a password is not always what happened.
 
@@ -87,10 +94,11 @@ What that costs is written down rather than waved at: a stolen live
 session can mint a device token, which outlives the session by
 design. The bound on it is that the owner can see every token
 (`GET`) and revoke any of it (`DELETE`), and that the tokens the
-disk holds expire on a fixed day
-([`DEVICE_TOKEN_TTL_MS`](teams_infra::auth::password::DEVICE_TOKEN_TTL_MS)).
-A re-auth requirement can be added later without moving the table
-or changing a single row shape.
+disk holds end on a day fixed at the mint and earlier when unused
+([`TeamsCtx::device_token_ttl_ms`] and
+[`TeamsCtx::device_token_idle_ms`], #163). A re-auth requirement
+can be added later without moving the table or changing a single
+row shape.
 
 ## The blob read is the one deliberate exception to [`team_gate`]
 

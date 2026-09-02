@@ -68,6 +68,7 @@ model and the traits are named here and nothing below them is.
 ## Modules
 
 - [`auth`](auth.md): Auth adapters for the teams plane (#83 §5).
+- [`auth::oidc`](auth__oidc.md): OIDC sign-in (#163): the instance is the provider's OAuth client,
 - [`auth::password`](auth__password.md): `auth::password` — the v0 instance-local credential adapter
 - [`backup`](backup.md): `backup` — the all-in-one instance backup (#83 §4, the #95 slice):
 - [`blob`](blob.md): `blob` — [`LocalFileStorageAdapter`], the v0 backing of the
