@@ -14440,6 +14440,7 @@ other.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `cancel_provider_sign_in` — Ends the sign-in through the provider that is waiting for the
 - `clone_shared_entry` — Takes a copy of one entry of a shared line (#148 decision 10).
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `close_shared_pursuit` — Ends work on a shared line, landing it or abandoning it.
@@ -14627,6 +14628,14 @@ other.
 - `update_series_strategy` — Partially updates a series rule (each omitted field is left
 - `visual_model_status` — Which visual model this process bound, if any (#112).
 
+## Types
+
+- `ProviderSignInStarted` — The sign-in through the provider that is waiting, as the drawer
+
+## Constants
+
+- `PROVIDER_SIGN_IN_EVENT` — The event the window hears when a sign-in through the provider has
+
 
 <!-- asterism_ui/error.md -->
 # asterism-ui::error
@@ -14709,6 +14718,7 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+- `ProviderSignInInFlight` — A sign-in through the team's identity provider that is waiting for
 - `TeamsConnection` — A live team session, and the pair that names it.
 
 
@@ -16685,8 +16695,8 @@ SQLite file behind one writer.
 
 ## Constants
 
-- `AUTH_RATE_LIMIT_MAX` — Auth rate limit: attempts allowed per key per window (#83 §5 — one
 - `AUTH_RATE_LIMIT_WINDOW` — Auth rate limit window.
+- `DEFAULT_AUTH_RATE_LIMIT` — Auth rate limit: hits allowed per key per window on the routes the
 - `DEFAULT_DEVICE_TOKEN_IDLE_MS` — How long a device token may go unpresented before it stops
 - `DEFAULT_DEVICE_TOKEN_TTL_MS` — How long a device token lives from its mint unless the instance
 - `DEFAULT_PURGE_GRACE_MS` — The purge grace window's safe default: **7 days**, the

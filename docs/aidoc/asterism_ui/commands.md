@@ -81,6 +81,7 @@ other.
 - `attach_tag` — Attaches a tag to an asset by name (creates the tag row on first
 - `attach_tag_batch` — Attaches one tag to many assets in one call (grid multi-select).
 - `batch_group_membership` — Bulk attach / detach of asset↔group pairs. Returns
+- `cancel_provider_sign_in` — Ends the sign-in through the provider that is waiting for the
 - `clone_shared_entry` — Takes a copy of one entry of a shared line (#148 decision 10).
 - `close_forge_pursuit` — Ends the work, and puts what it says on the line if it says
 - `close_shared_pursuit` — Ends work on a shared line, landing it or abandoning it.
@@ -267,4 +268,12 @@ other.
 - `update_query_group_query` — "Update query": validates + persists a replacement rule (rejecting
 - `update_series_strategy` — Partially updates a series rule (each omitted field is left
 - `visual_model_status` — Which visual model this process bound, if any (#112).
+
+## Types
+
+- `ProviderSignInStarted` — The sign-in through the provider that is waiting, as the drawer
+
+## Constants
+
+- `PROVIDER_SIGN_IN_EVENT` — The event the window hears when a sign-in through the provider has
 
