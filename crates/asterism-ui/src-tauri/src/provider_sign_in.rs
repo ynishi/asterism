@@ -281,11 +281,20 @@ mod tests {
             abandoned.is_err(),
             "nothing came back, so the wait timed out"
         );
-        // The acceptor's abort lands on the runtime asynchronously;
-        // give it a moment, then the port has to be bindable again.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        let rebound = tokio::net::TcpListener::bind(("127.0.0.1", port)).await;
-        assert!(rebound.is_ok(), "the port was still held: {rebound:?}");
+        // The acceptor's abort lands on the runtime asynchronously, so
+        // the port is bindable again soon rather than at once; what
+        // the test pins is that it is bindable at all, within a bound
+        // no scheduler should miss.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                Ok(_) => break,
+                Err(_) if tokio::time::Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(err) => panic!("the port was still held: {err}"),
+            }
+        }
     }
 
     #[tokio::test]
