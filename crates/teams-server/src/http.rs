@@ -19,6 +19,7 @@
 //! | — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 //! | POST | `/teams/{team_id}/members/invite` | owner |
 //! | POST | `/teams/{team_id}/members/remove` | owner |
+//! | POST | `/teams/{team_id}/members/leave` | any caller holding a row, of themself |
 //! | POST | `/teams/{team_id}/owners/grant` | owner |
 //! | POST | `/teams/{team_id}/owners/revoke` | owner |
 //! | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |
@@ -138,10 +139,7 @@ use axum::{Extension, Json, Router};
 // in one module would read as one.
 use asterism_core::DomainError as ForgeError;
 use http_body_util::BodyExt as _;
-use teams_contract::command::{
-    GrantOwnerCommand, InviteMemberCommand, RemoveMemberCommand, RevokeOwnerCommand,
-    UploadBlobCommand,
-};
+use teams_contract::command::UploadBlobCommand;
 use teams_contract::dto::{
     BlobUploadedDto, HeadPublishedDto, MarkedBlobLinkDto, MarkedBlobsDto, PurgeReclaimedDto,
 };
@@ -162,11 +160,13 @@ use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // answer to "does a client say this", and nothing else changed about
 // any of them.
 use asterism_teams_wire::command::{
-    CreateTeamCommand, DeviceLoginCommand, LoginCommand, MintDeviceTokenCommand,
+    CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand,
+    MintDeviceTokenCommand, RemoveMemberCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
     DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto, LedgerEventDto, LedgerPageDto,
     MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
+    ViewerDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -328,12 +328,28 @@ impl IntoResponse for ApiError {
 pub(crate) struct AuthedAccount(pub(crate) AccountRecord);
 
 /// What [`team_gate`] established about the caller in the `{team_id}`
-/// team: their current role (from state), and whether the admin
-/// capacity is available as a fallback.
+/// team.
+///
+/// **Two axes, not one value.** A role is a membership row in this
+/// team; being an instance admin is a standing that belongs to no
+/// roster. A caller may hold both — an admin who founded a team holds
+/// a row in it like anybody else — so neither field is derivable from
+/// the other, and [`decide`] needs the pair rather than either alone.
+/// Which capacity a given verb is granted under is that function's
+/// question, under the rule the module doc above states.
+///
+/// **This is the sentence the rest of the surface leaves to this
+/// site.** A route refusing a caller who holds no row says *that* —
+/// the absence of a row — rather than naming an instance admin, who is
+/// only the commonest caller in that state and not the condition
+/// anything tests.
 #[derive(Clone)]
 pub(crate) struct TeamAccess {
+    /// The team the gate resolved from the path.
     pub(crate) team_id: Uuid,
+    /// The caller's role in it, or nothing when they hold no row.
     pub(crate) role: Option<Role>,
+    /// Whether the caller is an instance admin. Independent of `role`.
     pub(crate) admin: bool,
 }
 
@@ -372,6 +388,7 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         .route("/teams/{team_id}/events", get(events))
         .route("/teams/{team_id}/members/invite", post(invite_member))
         .route("/teams/{team_id}/members/remove", post(remove_member))
+        .route("/teams/{team_id}/members/leave", post(leave_team))
         .route("/teams/{team_id}/owners/grant", post(grant_owner))
         .route("/teams/{team_id}/owners/revoke", post(revoke_owner))
         .route("/teams/{team_id}/blobs", put(upload_blob))
@@ -891,6 +908,42 @@ async fn remove_member(
     Ok(Json(event_dto(&event)?))
 }
 
+/// `POST /teams/{team_id}/members/leave` — any member, of themself
+/// (#210).
+///
+/// Not in the authority table, and that is the point of it. The verbs
+/// that act on somebody else's row ask whether the caller may; this
+/// one asks nothing, because a member acting on their own membership
+/// needs no authority over anyone. What it does need is a row to act
+/// on, so a caller holding none is refused — see [`TeamAccess`] for
+/// why that is the condition rather than any statement about who the
+/// caller is.
+///
+/// The last owner cannot go, the same refusal removing them raises,
+/// and the ledger appends [`MEMBERSHIP_REMOVED`], whose doc says how
+/// an entry reads as a departure rather than a removal.
+async fn leave_team(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Extension(access): Extension<TeamAccess>,
+) -> Result<Json<LedgerEventDto>, ApiError> {
+    if access.role.is_none() {
+        return Err(ApiError::Forbidden(
+            "you hold no membership in this team to leave".to_string(),
+        ));
+    }
+    let event = ctx
+        .repo
+        .leave_team(
+            access.team_id,
+            account.user_id,
+            stamp(&account, Capacity::Member)?,
+            now_ms(),
+        )
+        .await?;
+    Ok(Json(event_dto(&event)?))
+}
+
 /// `POST /teams/{team_id}/owners/grant` — owner only. The event
 /// payload carries old + new (#83 §1).
 async fn grant_owner(
@@ -991,7 +1044,8 @@ async fn my_teams(
     }))
 }
 
-/// `GET /teams/{team_id}/roster` — the current membership state.
+/// `GET /teams/{team_id}/roster` — the current membership state, and
+/// what the caller may do in it.
 async fn roster(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(access): Extension<TeamAccess>,
@@ -1007,6 +1061,13 @@ async fn roster(
                 role: row.role.as_str().to_string(),
             })
             .collect(),
+        // Said rather than left to be derived. The gate worked this
+        // out to let the request through, and a caller with no row —
+        // an admin — cannot be found in the rows at all.
+        viewer: ViewerDto {
+            role: access.role.map(|role| role.as_str().to_string()),
+            admin: access.admin,
+        },
     }))
 }
 

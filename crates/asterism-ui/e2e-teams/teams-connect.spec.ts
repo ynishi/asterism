@@ -41,8 +41,9 @@
 // creates and `onComplete` removes. What does survive a run is the
 // app's own profile directory — opening a home creates it and stamps
 // its marker before any store is touched — and the retained
-// screenshots. Neither holds anything this spec put there: connecting
-// is the only write it performs, and that one lives in the window.
+// screenshots. Neither holds anything this spec put there: what it
+// writes is a connection and a team, and both live where the run's own
+// database and the window do.
 import { browser } from "@wdio/globals";
 import fs from "node:fs";
 import path from "node:path";

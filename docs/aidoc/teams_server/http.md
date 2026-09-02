@@ -21,6 +21,7 @@ slice).
 | — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
+| POST | `/teams/{team_id}/members/leave` | any caller holding a row, of themself |
 | POST | `/teams/{team_id}/owners/grant` | owner |
 | POST | `/teams/{team_id}/owners/revoke` | owner |
 | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |

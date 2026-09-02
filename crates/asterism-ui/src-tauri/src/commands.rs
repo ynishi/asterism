@@ -105,7 +105,8 @@ use asterism_contract::query::{
 use asterism_contract::teams::{
     MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
     StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
-    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamRosterViewerDto,
+    TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3494,7 +3495,7 @@ pub async fn my_teams(state: State<'_, AppState>) -> Result<MyTeamsDto, UiError>
     })
 }
 
-/// Who is in a team, and in what role.
+/// Who is in a team, in what role, and what the reader may do there.
 ///
 /// Ids rather than names, because that is what a membership row holds
 /// — see [`TeamRosterMemberDto`]. The mapping is here for the reason
@@ -3521,6 +3522,10 @@ pub async fn team_roster(
                 role: member.role,
             })
             .collect(),
+        viewer: TeamRosterViewerDto {
+            role: roster.viewer.role,
+            admin: roster.viewer.admin,
+        },
     })
 }
 
@@ -3548,6 +3553,124 @@ pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, U
     Ok(TeamCreatedDto {
         team_id: created.team_id,
     })
+}
+
+// The roster writes (#210). None of them answers with anything, and
+// that is the same decision `create_team` made for the half of its
+// response it drops: what the server hands back is the ledger event
+// the write appended, and a screen reads the team's acts in the ledger
+// tab rather than out of a write. What a caller wants after one of
+// these is the roster, which it asks for.
+//
+// No contract type is added by any of them, so the boundary these
+// commands sit on carries nothing new across.
+
+/// Invites an account into the team, in the role named.
+///
+/// The invitee must already hold an account on the instance; an id
+/// nobody holds is refused as a malformed request rather than
+/// provisioning anybody.
+#[tauri::command]
+pub async fn invite_team_member(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    user_id: String,
+    role: String,
+) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .invite_member(team_id(&team_id_raw, "team id")?, &user_id, &role)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Removes a member from the team.
+///
+/// Removing the last owner is refused with a `409`, which is a
+/// different thing from a malformed request and arrives here as the
+/// same `UiError` anyway: [`teams_error`] answers a `404` on its own
+/// and turns every other 4xx into a validation error, dropping the
+/// token that told a conflict from a bad field. So the screen can say
+/// what happened only as far as the server's own sentence carries it.
+/// That flattening is #211's, not this command's.
+#[tauri::command]
+pub async fn remove_team_member(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    user_id: String,
+) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .remove_member(team_id(&team_id_raw, "team id")?, &user_id)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Makes a member an owner.
+#[tauri::command]
+pub async fn grant_team_owner(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    user_id: String,
+) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .grant_owner(team_id(&team_id_raw, "team id")?, &user_id)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Puts an owner back to being a member.
+///
+/// The last owner cannot be demoted, including by themself, and that
+/// refusal reaches a screen the way [`remove_team_member`]'s does.
+#[tauri::command]
+pub async fn revoke_team_owner(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    user_id: String,
+) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .revoke_owner(team_id(&team_id_raw, "team id")?, &user_id)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Takes the signed-in account out of the team.
+///
+/// Reachable by any member, because leaving asks no authority over
+/// anybody. A caller holding no membership row has nothing to leave
+/// and is refused; the last owner is refused too, and that refusal
+/// reaches a screen the way [`remove_team_member`]'s does.
+#[tauri::command]
+pub async fn leave_team(state: State<'_, AppState>, team_id_raw: String) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .leave_team(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Deletes the team, which an owner may do and so may an instance
+/// admin: standing outside the roster is enough here, which the client
+/// verb it calls says where the routes are named.
+///
+/// It takes the team's ledger with it. The confirmation that says so
+/// belongs on the screen offering the act, not here.
+#[tauri::command]
+pub async fn delete_team(state: State<'_, AppState>, team_id_raw: String) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .delete_team(team_id(&team_id_raw, "team id")?)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
 }
 
 /// One page of a team's ledger, seq ascending (#148 decision 18).

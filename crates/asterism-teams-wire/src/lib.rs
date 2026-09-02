@@ -10,8 +10,9 @@
 //! ## What lives here, and what does not
 //!
 //! Here: the shapes that are **teams-shaped** — a session, a team and
-//! its roster, a page of the ledger, the three content verbs hosting
-//! adds, and the projection envelope (#148 decisions 12 to 14).
+//! its roster, the roster's own writes (#210), a page of the ledger,
+//! the three content verbs hosting adds, and the projection envelope
+//! (#148 decisions 12 to 14).
 //!
 //! Not here, and each for a stated reason:
 //!
@@ -21,10 +22,13 @@
 //!   type, which is the failure this crate is meant to prevent rather
 //!   than a shape it should take.
 //! - **The substrate's own surfaces.** The blob upload, the purge
-//!   two-step and the head registry stay in `teams-contract`: they are
-//!   an operator's and an admin's vocabulary, and a member's client
-//!   does not speak them. The dividing line is *who says it*, not what
-//!   it is about.
+//!   two-step and the head registry stay in `teams-contract`, because
+//!   no client sends them. Which is not the same as saying whose acts
+//!   they are: the upload is a **member's** act, and its route refuses
+//!   an admin's implicit one — content reaches a team through the
+//!   promotion path instead, so no client has occasion to send it. The
+//!   dividing line is *who says it*, not what it is about and not
+//!   whose act it is.
 //! - **Validation.** Same as `teams-contract`: role words, ids and
 //!   digests are parsed by whichever plane receives them. This crate
 //!   defines shapes.

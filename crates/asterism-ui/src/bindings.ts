@@ -430,9 +430,11 @@ export type TeamLedgerEventDto = { seq: number; event_id: string; team_id: strin
 
 export type TeamSubjectRefDto = { ref_type: string; value: string; };
 
-export type TeamRosterDto = { team_id: string; members: { user_id: string; role: string; }[]; };
+export type TeamRosterDto = { team_id: string; members: { user_id: string; role: string; }[]; viewer: { role: string | null; admin: boolean; }; };
 
 export type TeamRosterMemberDto = { user_id: string; role: string; };
+
+export type TeamRosterViewerDto = { role: string | null; admin: boolean; };
 
 export type TeamCreatedDto = { team_id: string; };
 

@@ -617,8 +617,9 @@ and an actor's display name is a snapshot rather than a lookup.
 - `TeamDeviceTokensDto` — The device tokens this window's account holds, on whatever machines
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
-- `TeamRosterDto` — Who is in a team, and in what role.
+- `TeamRosterDto` — Who is in a team, in what role, and what the reader may do there.
 - `TeamRosterMemberDto` — One membership row.
+- `TeamRosterViewerDto` — The reader's own standing in the team whose roster this is.
 - `TeamSubjectRefDto` — One typed reference an act makes.
 
 
@@ -14154,8 +14155,9 @@ second choice for exactly this case is a leaf, and this is it.
 ## What lives here, and what does not
 
 Here: the shapes that are **teams-shaped** — a session, a team and
-its roster, a page of the ledger, the three content verbs hosting
-adds, and the projection envelope (#148 decisions 12 to 14).
+its roster, the roster's own writes (#210), a page of the ledger,
+the three content verbs hosting adds, and the projection envelope
+(#148 decisions 12 to 14).
 
 Not here, and each for a stated reason:
 
@@ -14165,10 +14167,13 @@ Not here, and each for a stated reason:
   type, which is the failure this crate is meant to prevent rather
   than a shape it should take.
 - **The substrate's own surfaces.** The blob upload, the purge
-  two-step and the head registry stay in `teams-contract`: they are
-  an operator's and an admin's vocabulary, and a member's client
-  does not speak them. The dividing line is *who says it*, not what
-  it is about.
+  two-step and the head registry stay in `teams-contract`, because
+  no client sends them. Which is not the same as saying whose acts
+  they are: the upload is a **member's** act, and its route refuses
+  an admin's implicit one — content reaches a team through the
+  promotion path instead, so no client has occasion to send it. The
+  dividing line is *who says it*, not what it is about and not
+  whose act it is.
 - **Validation.** Same as `teams-contract`: role words, ids and
   digests are parsed by whichever plane receives them. This crate
   defines shapes.
@@ -14199,6 +14204,14 @@ type that re-spelled its fields would not be a move:
 Command shapes — inputs of the `/teams/*` routes a member's client
 calls.
 
+An owner's roster writes are here too, and that is not an exception
+to the line above. They moved from `teams-contract` when an owner
+gained a screen to say them from (#210), and an owner saying them
+is a member's client saying them. What stayed behind stayed for the
+reason the crate doc gives — no client sends it — and not for
+anything about whose act it is: the substrate's own upload is a
+member's act that no client happens to send.
+
 The session token is **not** a field on any of these: it travels in
 the `Authorization: Bearer` header, resolved by the server's gate
 middleware before a handler sees the body (#83 §5 — every route:
@@ -14209,10 +14222,14 @@ session token → user_id → membership gate).
 - `CreateTeamCommand` — Creates a team (`POST /teams/create`).
 - `DeviceLoginCommand` — Presents a device token to `POST /teams/auth/device/login` (#204).
 - `EnterContentCommand` — Brings content into a team against open work
+- `GrantOwnerCommand` — Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
 - `HaveContentCommand` — Asks which digests a team already has
+- `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
 - `LoginCommand` — Presents a credential to `POST /teams/auth/login`.
 - `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
+- `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
+- `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 
 
 <!-- asterism_teams_wire/dto.md -->
@@ -14238,11 +14255,12 @@ its own (#83 §1).
 - `MyTeamDto` — One team the caller belongs to.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `ResolvedContentDto` — The bulk resolve's answer
-- `RosterDto` — The team's current membership set
+- `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.
 - `SessionDto` — A freshly minted session (`POST /teams/auth/login`, and
 - `SubjectRefDto` — One typed reference an event makes.
 - `TeamCreatedDto` — The result of `POST /teams/create`.
+- `ViewerDto` — The caller's standing in the team whose roster this is.
 
 
 <!-- asterism_teams_wire/projection.md -->
@@ -14441,6 +14459,7 @@ other.
 - `delete_series_strategy` — Removes a series rule and, by the schema's cascade, every key
 - `delete_session` — Deletes a Session — only when no `asset` row still references
 - `delete_tag` — Drops a tag channel and every link to it — the command twin of
+- `delete_team` — Deletes the team, which an owner may do and so may an instance
 - `delete_thread` — Deletes a Thread (cascades to messages).
 - `delete_thread_message` — Deletes one Message (misfire correction).
 - `detach_tag` — Removes a tag from an asset. Idempotent — a missing link is a
@@ -14466,10 +14485,13 @@ other.
 - `get_session` — Fetches one Session by surrogate id (`None` when absent). Used
 - `get_snapshot` — Snapshot view metadata (`snapshot_get`): the freeze's id,
 - `get_thread` — Fetches one Thread by id.
+- `grant_team_owner` — Makes a member an owner.
 - `groups_of_asset` — Which Groups the asset already sits in — powers the "already
 - `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
+- `invite_team_member` — Invites an account into the team, in the role named.
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
+- `leave_team` — Takes the signed-in account out of the team.
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
 - `list_asset_comments` — Lists every comment on `asset_id` in chronological order.
 - `list_asset_index` — Index-only grid listing for 6-figure result sets. Returns
@@ -14547,6 +14569,7 @@ other.
 - `reject_tag_suggestion` — Rejects one tag suggestion (#112); this model never proposes the
 - `remeasure_dims` — Re-reads artefacts and rewrites `width_px` / `height_px` — the
 - `remove_asset_from_group` — Idempotent remove of an asset from a Group.
+- `remove_team_member` — Removes a member from the team.
 - `rename_dir` — Renames a Dir.
 - `rename_forge_line` — Moves the line's own description. Not a landing: nothing goes on the
 - `rename_forge_thread` — Names the conversation, or takes its name off.
@@ -14565,6 +14588,7 @@ other.
 - `restore_group` — Returns a trashed Group to the sidebar.
 - `restore_persona` — Returns a trashed persona and the assets that went with it.
 - `revoke_team_device_token` — Revokes one of this account's device tokens.
+- `revoke_team_owner` — Puts an owner back to being a member.
 - `say_in_forge_thread` — Says something.
 - `search_asset_ids` — The same retrieval as `search_assets`, reduced to the rank order.
 - `search_assets` — Full-text / fuzzy search.
@@ -14580,7 +14604,7 @@ other.
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
 - `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
-- `team_roster` — Who is in a team, and in what role.
+- `team_roster` — Who is in a team, in what role, and what the reader may do there.
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
@@ -14881,10 +14905,10 @@ than served.
 
 # teams-contract — wire contract for the teams plane
 
-What is left here after #148 decision 15: the `/teams/*` shapes a
-member's client does not speak. The roster verbs, which are an
-owner's; the substrate's own blob upload and its purge two-step;
-the instance head registry. Everything a client says or reads moved
+What is left here after #148 decision 15, and after #210 took the
+roster verbs the same way: the `/teams/*` shapes no client sends.
+The substrate's own blob upload and its purge two-step; the
+instance head registry. Everything a client says or reads moved
 to `asterism-teams-wire`, the MIT/Apache leaf both planes may link — this
 crate cannot be that leaf, for the two reasons #148 gives: its
 licence is AGPL-3.0-or-later (#162), which the local plane may not
@@ -14920,21 +14944,26 @@ Validation is not here: role words go through
 
 ## Modules
 
-- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes an
+- [`command`](command.md): Command DTOs — inputs of the state-changing `/teams/*` routes no
 - [`dto`](dto.md): Response DTOs of the `/teams/*` surfaces a member's client does not
 
 
 <!-- teams_contract/command.md -->
 # teams-contract::command
 
-Command DTOs — inputs of the state-changing `/teams/*` routes an
-owner, an admin or an operator's tooling calls.
+Command DTOs — inputs of the state-changing `/teams/*` routes no
+client sends.
 
-What a **member's client** sends moved to `asterism-teams-wire` when the
-leaf landed (#148 decision 15): login, team creation and the three
-content verbs live there now, because the client may not link this
-crate. What stayed is what is not a member's vocabulary — the
-roster verbs, which are an owner's, and the substrate's own upload.
+What a **member's client** sends is in `asterism-teams-wire`, which
+the client may link and this crate it may not (#148 decision 15):
+login, team creation, the three content verbs, and — since #210
+gave an owner a screen to say them from — the roster writes.
+
+What stays is the substrate's own upload, and the line it is on is
+who sends it rather than whose act it is: uploading into a team's
+store is a member's act, and the route refuses an admin's implicit
+one. No client sends it because content reaches a team through the
+promotion path instead.
 
 The session token is **not** a field on any of these: it travels in
 the `Authorization: Bearer` header, resolved by the server's gate
@@ -14943,10 +14972,6 @@ session token → user_id → membership gate).
 
 ## Types
 
-- `GrantOwnerCommand` — Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
-- `InviteMemberCommand` — Invites a user into the team (`POST /teams/{team_id}/members/invite`,
-- `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
-- `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 - `UploadBlobCommand` — Uploads a blob into the team's store
 
 
@@ -16257,6 +16282,7 @@ slice).
 | — | `/teams/{team_id}/forge/*` | member for every write but one; see the `forge` module |
 | POST | `/teams/{team_id}/members/invite` | owner |
 | POST | `/teams/{team_id}/members/remove` | owner |
+| POST | `/teams/{team_id}/members/leave` | any caller holding a row, of themself |
 | POST | `/teams/{team_id}/owners/grant` | owner |
 | POST | `/teams/{team_id}/owners/revoke` | owner |
 | PUT | `/teams/{team_id}/blobs?digest=…` | member (a roster row; an admin has no implicit upload) |

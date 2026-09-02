@@ -1,6 +1,14 @@
 //! Command shapes — inputs of the `/teams/*` routes a member's client
 //! calls.
 //!
+//! An owner's roster writes are here too, and that is not an exception
+//! to the line above. They moved from `teams-contract` when an owner
+//! gained a screen to say them from (#210), and an owner saying them
+//! is a member's client saying them. What stayed behind stayed for the
+//! reason the crate doc gives — no client sends it — and not for
+//! anything about whose act it is: the substrate's own upload is a
+//! member's act that no client happens to send.
+//!
 //! The session token is **not** a field on any of these: it travels in
 //! the `Authorization: Bearer` header, resolved by the server's gate
 //! middleware before a handler sees the body (#83 §5 — every route:
@@ -74,6 +82,44 @@ pub struct CreateTeamCommand {
     /// anyone else's. A regular user founds their own team: they omit
     /// this (or name themselves; naming anyone else is refused).
     pub owner_user_id: Option<String>,
+}
+
+/// Invites a user into the team (`POST /teams/{team_id}/members/invite`,
+/// owner only).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct InviteMemberCommand {
+    /// The invitee — must hold an account on this instance.
+    pub user_id: String,
+    /// The role the invitee joins with: `"owner"` or `"member"`
+    /// (validated by the domain's parser; anything else is a `400`).
+    pub role: String,
+}
+
+/// Removes a member (`POST /teams/{team_id}/members/remove`, owner
+/// only). Removing the last owner is refused with a `409` and changes
+/// nothing (#83 §1).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RemoveMemberCommand {
+    /// The member to remove.
+    pub user_id: String,
+}
+
+/// Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
+/// only). The resulting ledger event carries both the old and the new
+/// role in its payload.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct GrantOwnerCommand {
+    /// The member whose role becomes `owner`.
+    pub user_id: String,
+}
+
+/// Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
+/// owner only). Revoking the last owner — including yourself — is a
+/// `409` (#83 §1: the last owner cannot self-demote).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RevokeOwnerCommand {
+    /// The owner whose role becomes `member`.
+    pub user_id: String,
 }
 
 /// Brings content into a team against open work

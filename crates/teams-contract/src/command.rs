@@ -1,11 +1,16 @@
-//! Command DTOs — inputs of the state-changing `/teams/*` routes an
-//! owner, an admin or an operator's tooling calls.
+//! Command DTOs — inputs of the state-changing `/teams/*` routes no
+//! client sends.
 //!
-//! What a **member's client** sends moved to `asterism-teams-wire` when the
-//! leaf landed (#148 decision 15): login, team creation and the three
-//! content verbs live there now, because the client may not link this
-//! crate. What stayed is what is not a member's vocabulary — the
-//! roster verbs, which are an owner's, and the substrate's own upload.
+//! What a **member's client** sends is in `asterism-teams-wire`, which
+//! the client may link and this crate it may not (#148 decision 15):
+//! login, team creation, the three content verbs, and — since #210
+//! gave an owner a screen to say them from — the roster writes.
+//!
+//! What stays is the substrate's own upload, and the line it is on is
+//! who sends it rather than whose act it is: uploading into a team's
+//! store is a member's act, and the route refuses an admin's implicit
+//! one. No client sends it because content reaches a team through the
+//! promotion path instead.
 //!
 //! The session token is **not** a field on any of these: it travels in
 //! the `Authorization: Bearer` header, resolved by the server's gate
@@ -14,44 +19,6 @@
 
 use schema_bridge::SchemaBridge;
 use serde::{Deserialize, Serialize};
-
-/// Invites a user into the team (`POST /teams/{team_id}/members/invite`,
-/// owner only).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct InviteMemberCommand {
-    /// The invitee — must hold an account on this instance.
-    pub user_id: String,
-    /// The role the invitee joins with: `"owner"` or `"member"`
-    /// (validated by the domain's parser; anything else is a `400`).
-    pub role: String,
-}
-
-/// Removes a member (`POST /teams/{team_id}/members/remove`, owner
-/// only). Removing the last owner is refused with a `409` and changes
-/// nothing (#83 §1).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct RemoveMemberCommand {
-    /// The member to remove.
-    pub user_id: String,
-}
-
-/// Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner
-/// only). The resulting ledger event carries both the old and the new
-/// role in its payload.
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct GrantOwnerCommand {
-    /// The member whose role becomes `owner`.
-    pub user_id: String,
-}
-
-/// Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
-/// owner only). Revoking the last owner — including yourself — is a
-/// `409` (#83 §1: the last owner cannot self-demote).
-#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
-pub struct RevokeOwnerCommand {
-    /// The owner whose role becomes `member`.
-    pub user_id: String,
-}
 
 /// Uploads a blob into the team's store
 /// (`PUT /teams/{team_id}/blobs?digest=sha256:<hex>`, members only).

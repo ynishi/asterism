@@ -56,7 +56,8 @@
   // Publishing goes with the list for the same reason. It seeds
   // another line, which is a thing to do from where the lines are.
   import SharedLineWork from "./SharedLineWork.svelte";
-  import { sharedCatalog } from "./lib/stores/shared.svelte";
+  import { confirmCatalog } from "./lib/stores/confirm.svelte";
+  import { isDeparture, sharedCatalog } from "./lib/stores/shared.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { fmtDateTime } from "./lib/formatters";
   import type { ForgeChangeRowDto } from "./bindings";
@@ -214,6 +215,79 @@
     teamField = teamId;
     await sharedCatalog.lookAt(teamId);
     await refreshOpenTab();
+  }
+
+  // The roster writes (#210). Whether to draw them at all is one
+  // question asked once: an owner's verbs are not a member's, and a
+  // member shown a control it cannot press is being offered a refusal.
+  // The server decides regardless — this only decides what to offer.
+  //
+  // An instance admin who holds no membership row has no role, so
+  // `iOwn` is false and the four member-shaped controls stay off their
+  // screen — which is right, because #83 §1 grants an admin no
+  // implicit invite, remove or role change inside a team they do not
+  // own. Deleting is the one their standing does carry, so it asks a
+  // second question.
+  //
+  // An admin who is also a member holds a row, so `iOwn` reads it like
+  // anybody else's — and `mayDelete` asks the standing besides,
+  // because the server does: a verb the row's role does not permit
+  // falls through to the admin capacity rather than stopping there.
+  // The two are separate fields for that reason.
+  const iOwn = $derived(sharedCatalog.myRole === "owner");
+  const mayDelete = $derived(iOwn || sharedCatalog.iAmAdmin);
+
+  let inviteId = $state("");
+  let inviteRole = $state("member");
+
+  async function invite(event: Event) {
+    event.preventDefault();
+    await sharedCatalog.inviteMember(inviteId.trim(), inviteRole);
+    inviteId = "";
+  }
+
+  // Removing somebody and deleting a team both ask first, and the two
+  // other row verbs do not: a role change is undone by the button
+  // beside it, and these two are not undone by anything.
+  async function askRemove(userId: string) {
+    const ok = await confirmCatalog.open({
+      title: "Remove this member?",
+      body: `${userId} loses everything this team holds. What they did stays in the ledger, under the name it read at the time.`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    await sharedCatalog.removeMember(userId);
+    // The reader's own row offers `leave` instead of this, so the
+    // branch is unreachable from the roster as it stands. It is here
+    // because the store handles the same case for the same reason —
+    // the server permits an owner to remove themself, and a path
+    // nobody draws today is still a path.
+    if (userId === sharedCatalog.session) teamField = "";
+  }
+
+  async function askLeave() {
+    const ok = await confirmCatalog.open({
+      title: "Leave this team?",
+      body: "You lose everything it holds. What you did stays in its ledger, and getting back in takes an invitation.",
+      confirmLabel: "Leave",
+      danger: true,
+    });
+    if (!ok) return;
+    await sharedCatalog.leaveTeam();
+    teamField = "";
+  }
+
+  async function askDeleteTeam() {
+    const ok = await confirmCatalog.open({
+      title: "Delete this team?",
+      body: "Its lines, everything it holds, and its whole ledger go with it. This cannot be undone.",
+      confirmLabel: "Delete Forever",
+      danger: true,
+    });
+    if (!ok) return;
+    await sharedCatalog.deleteTeam();
+    teamField = "";
   }
 
 
@@ -756,6 +830,34 @@
             keeps the name it read when it happened.
           </p>
 
+          {#if iOwn}
+            <!-- Above the rows because it adds one, and the rows are
+                 what it adds to. An id rather than a name to invite
+                 by, and not for the reason the note above gives: that
+                 one is about rows that already exist. An invitee has
+                 none, and a team has no directory to search for
+                 somebody who is not in it yet. -->
+            <form class="drawer-form drawer-invite" onsubmit={invite}>
+              <label>
+                Let somebody in
+                <input
+                  type="text"
+                  bind:value={inviteId}
+                  placeholder="account id"
+                  required
+                />
+              </label>
+              <label>
+                As
+                <select bind:value={inviteRole}>
+                  <option value="member">member</option>
+                  <option value="owner">owner</option>
+                </select>
+              </label>
+              <button type="submit">Invite</button>
+            </form>
+          {/if}
+
           {#if sharedCatalog.roster.loading}
             <p class="drawer-empty">loading…</p>
           {:else if sharedCatalog.roster.error}
@@ -782,9 +884,78 @@
                     {member.role}{#if member.user_id === sharedCatalog.session}
                       &nbsp;· you{/if}
                   </span>
+                  {#if member.user_id === sharedCatalog.session}
+                    <!-- The reader's own row, and what it offers is
+                         leaving rather than removing. A member acting
+                         on their own membership asks no authority over
+                         anybody, so the verb is there whether or not
+                         they own the team — an owner also gets the
+                         step down beside it. The last owner is refused
+                         either way, and that is the team's state to
+                         refuse rather than this row's to guess ahead
+                         of. -->
+                    <span class="member-acts">
+                      {#if iOwn}
+                        <button
+                          type="button"
+                          onclick={() =>
+                            sharedCatalog.revokeOwner(member.user_id)}
+                          title="Step down to being a member of this team"
+                        >demote</button>
+                      {/if}
+                      <button
+                        type="button"
+                        onclick={askLeave}
+                        title="Take yourself out of this team"
+                      >leave</button>
+                    </span>
+                  {:else if iOwn}
+                    <span class="member-acts">
+                      {#if member.role === "owner"}
+                        <button
+                          type="button"
+                          onclick={() =>
+                            sharedCatalog.revokeOwner(member.user_id)}
+                          title="Put this owner back to being a member"
+                        >demote</button>
+                      {:else}
+                        <button
+                          type="button"
+                          onclick={() =>
+                            sharedCatalog.grantOwner(member.user_id)}
+                          title="Make this member an owner"
+                        >promote</button>
+                      {/if}
+                      <button
+                        type="button"
+                        onclick={() => askRemove(member.user_id)}
+                        title="Remove this member from the team"
+                      >remove</button>
+                    </span>
+                  {/if}
                 </li>
               {/each}
             </ul>
+          {/if}
+
+          {#if mayDelete}
+            <!-- Under the roster rather than on a tab of its own. Every
+                 tab is an answer about the team named above, and this
+                 is an act about that same team — the one somebody is
+                 looking at when they are administering it rather than
+                 working it. Founding sits outside the tabs because it
+                 is about no team in particular; this is not that.
+
+                 The one control on this tab an instance admin reaches
+                 by standing alone: an admin holding no row in this
+                 team is offered nothing above, because #83 §1 gives
+                 them no implicit membership verbs. One who is also a
+                 member gets what their role gets above, and this
+                 besides — the server grants the delete to the standing
+                 whether or not a row is held. -->
+            <button type="button" class="delete-team" onclick={askDeleteTeam}>
+              Delete this team
+            </button>
           {/if}
         {/if}
 
@@ -816,6 +987,17 @@
                 <li class="event">
                   <div class="event-head">
                     <span class="event-kind">{event.kind}</span>
+                    <!-- The kind covers leaving and being removed
+                         alike, and neither of the two fields that
+                         separate them is drawn on this row — the actor
+                         shows as a name, and the subjects not at all —
+                         so a reader could not tell without being told.
+                         The kind itself stays verbatim beside the
+                         note: a screen rewriting one would be
+                         answering for a stream it does not own. -->
+                    {#if isDeparture(event)}
+                      <span class="event-note">left of their own accord</span>
+                    {/if}
                     <span class="event-when"
                       >{fmtDateTime(event.occurred_at_ms)}</span
                     >
@@ -1017,7 +1199,13 @@
   .roster .member.you {
     font-weight: 600;
   }
+  /* Takes the slack so the role and the acts stay at the right edge.
+     Without it a row with three children spreads them evenly and the
+     role drifts into the middle, which reads as a column that is not
+     one. */
   .member-id {
+    flex: 1;
+    min-width: 0;
     font-family: ui-monospace, monospace;
     font-size: 0.72rem;
     overflow: hidden;
@@ -1027,6 +1215,27 @@
     opacity: 0.6;
     font-size: 0.72rem;
     white-space: nowrap;
+  }
+  .member-acts {
+    display: flex;
+    gap: 0.3rem;
+    white-space: nowrap;
+  }
+  .member-acts button {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.68rem;
+    opacity: 0.75;
+  }
+  .member-acts button:hover {
+    opacity: 1;
+  }
+  .delete-team {
+    margin-top: 0.9rem;
+    font-size: 0.72rem;
+    opacity: 0.7;
+  }
+  .delete-team:hover {
+    opacity: 1;
   }
   /* Two rows rather than the roster's one line: a device's three
      times are a sentence, and at this drawer's width putting them
@@ -1069,6 +1278,12 @@
     display: flex;
     justify-content: space-between;
     gap: 0.5rem;
+  }
+  .event-note {
+    opacity: 0.6;
+    font-size: 0.68rem;
+    font-style: italic;
+    white-space: nowrap;
   }
   .event-kind {
     font-family: ui-monospace, monospace;

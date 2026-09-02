@@ -1,9 +1,9 @@
 //! # teams-contract — wire contract for the teams plane
 //!
-//! What is left here after #148 decision 15: the `/teams/*` shapes a
-//! member's client does not speak. The roster verbs, which are an
-//! owner's; the substrate's own blob upload and its purge two-step;
-//! the instance head registry. Everything a client says or reads moved
+//! What is left here after #148 decision 15, and after #210 took the
+//! roster verbs the same way: the `/teams/*` shapes no client sends.
+//! The substrate's own blob upload and its purge two-step; the
+//! instance head registry. Everything a client says or reads moved
 //! to `asterism-teams-wire`, the MIT/Apache leaf both planes may link — this
 //! crate cannot be that leaf, for the two reasons #148 gives: its
 //! licence is AGPL-3.0-or-later (#162), which the local plane may not

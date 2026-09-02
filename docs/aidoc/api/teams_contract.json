@@ -5,27 +5,7 @@
     {
       "path": "teams_contract::command",
       "kind": "module",
-      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes an\nowner, an admin or an operator's tooling calls.\n\nWhat a **member's client** sends moved to `asterism-teams-wire` when the\nleaf landed (#148 decision 15): login, team creation and the three\ncontent verbs live there now, because the client may not link this\ncrate. What stayed is what is not a member's vocabulary — the\nroster verbs, which are an owner's, and the substrate's own upload.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
-    },
-    {
-      "path": "teams_contract::command::GrantOwnerCommand",
-      "kind": "struct",
-      "docs": "Grants the owner role (`POST /teams/{team_id}/owners/grant`, owner\nonly). The resulting ledger event carries both the old and the new\nrole in its payload."
-    },
-    {
-      "path": "teams_contract::command::InviteMemberCommand",
-      "kind": "struct",
-      "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
-    },
-    {
-      "path": "teams_contract::command::RemoveMemberCommand",
-      "kind": "struct",
-      "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
-    },
-    {
-      "path": "teams_contract::command::RevokeOwnerCommand",
-      "kind": "struct",
-      "docs": "Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,\nowner only). Revoking the last owner — including yourself — is a\n`409` (#83 §1: the last owner cannot self-demote)."
+      "docs": "Command DTOs — inputs of the state-changing `/teams/*` routes no\nclient sends.\n\nWhat a **member's client** sends is in `asterism-teams-wire`, which\nthe client may link and this crate it may not (#148 decision 15):\nlogin, team creation, the three content verbs, and — since #210\ngave an owner a screen to say them from — the roster writes.\n\nWhat stays is the substrate's own upload, and the line it is on is\nwho sends it rather than whose act it is: uploading into a team's\nstore is a member's act, and the route refuses an admin's implicit\none. No client sends it because content reaches a team through the\npromotion path instead.\n\nThe session token is **not** a field on any of these: it travels in\nthe `Authorization: Bearer` header, resolved by the server's gate\nmiddleware before a handler sees the body (#83 §5 — every route:\nsession token → user_id → membership gate)."
     },
     {
       "path": "teams_contract::command::UploadBlobCommand",

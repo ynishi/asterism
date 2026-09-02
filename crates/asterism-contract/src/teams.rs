@@ -145,13 +145,30 @@ pub struct MyTeamDto {
     pub created_at_ms: i64,
 }
 
-/// Who is in a team, and in what role.
+/// Who is in a team, in what role, and what the reader may do there.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamRosterDto {
     /// The team the roster describes.
     pub team_id: String,
     /// One row per member.
     pub members: Vec<TeamRosterMemberDto>,
+    /// What the reader may do here (#210).
+    pub viewer: TeamRosterViewerDto,
+}
+
+/// The reader's own standing in the team whose roster this is.
+///
+/// This plane's mirror of the shape the team server answers with. Why
+/// the read carries it at all is argued where the team's own side
+/// writes it; what a reader here needs is that `role` is absent for a
+/// caller who holds no membership row, which an instance admin may be.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamRosterViewerDto {
+    /// The reader's role, or nothing when they hold no membership row.
+    pub role: Option<String>,
+    /// Whether the reader is an instance admin. Independent of `role`:
+    /// an admin may also be a member of the team they administer.
+    pub admin: bool,
 }
 
 /// One membership row.

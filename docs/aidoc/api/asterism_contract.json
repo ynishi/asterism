@@ -1270,12 +1270,17 @@
     {
       "path": "asterism_contract::teams::TeamRosterDto",
       "kind": "struct",
-      "docs": "Who is in a team, and in what role."
+      "docs": "Who is in a team, in what role, and what the reader may do there."
     },
     {
       "path": "asterism_contract::teams::TeamRosterMemberDto",
       "kind": "struct",
       "docs": "One membership row.\n\n**No display name.** A membership is a row about an account rather\nthan about a person, and the name a ledger event carries is a\nsnapshot the *act* took — there is nothing equivalent to read here.\nA surface listing these shows ids, and saying why is cheaper than\nleaving a reader to wonder how one screen has names and the other\ndoes not."
+    },
+    {
+      "path": "asterism_contract::teams::TeamRosterViewerDto",
+      "kind": "struct",
+      "docs": "The reader's own standing in the team whose roster this is.\n\nThis plane's mirror of the shape the team server answers with. Why\nthe read carries it at all is argued where the team's own side\nwrites it; what a reader here needs is that `role` is absent for a\ncaller who holds no membership row, which an instance admin may be."
     },
     {
       "path": "asterism_contract::teams::TeamSubjectRefDto",

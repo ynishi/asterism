@@ -10,6 +10,75 @@ and this project adheres to
 
 ### Added
 
+- **Invite somebody into a team, and take them out, from the app** (#210). The
+  five roster writes had a route, an authority rule, a repository method and
+  route-level tests, and stopped there: no client verb, no desktop command, no
+  control. They reach the screen now — an invite form above the roster's rows,
+  promote or demote and remove on each row, and deleting the team under them.
+
+  **The command shapes moved to the leaf**, where the member's client can reach
+  them. They sat in `teams-contract`, which a client may never link, and copying
+  them across would have been the second home for one type that
+  `asterism-teams-wire` exists to prevent. The server already read the leaf, so
+  nothing gained a dependency and no handler changed. What the move settles is
+  the line the leaf draws, and it is who sends a shape rather than whose act it
+  is: an owner inviting from the app is a member's client sending it, while the
+  substrate's upload stays behind because no client sends it at all. The four
+  shapes changed licence by moving, AGPL-3.0-or-later to MIT OR Apache-2.0,
+  which is what the leaf is for and what #148 decision 15 did with the shapes
+  that went before them.
+
+  **Only an owner is shown the four that act on a roster.** A member sees the
+  rows and nothing to press, because a control somebody cannot use is a refusal
+  offered in advance. The reader's own row carries the controls too: stepping
+  down is theirs to do, and the case that is not — the last owner, by either
+  verb — is the team's state to refuse rather than a row's to guess ahead of.
+
+  **The roster read says what the reader may reach**, rather than leaving a
+  screen to find its own row and work it out. That is what an instance admin
+  needs it to do: one who holds no membership row is not in the rows at all, so
+  a screen searching them reads that absence as nothing they may reach, when
+  what they may reach is deleting the team. The read carries the role the gate
+  resolved and whether the caller is an admin — not a third value of the role,
+  since an admin may also be a member of the team they administer — and the
+  delete asks both. On this tab an admin standing outside a team is offered the
+  delete and nothing beside it, which is right: §1 grants them no implicit
+  invite, remove or role change inside a team not theirs. One who is also a
+  member gets what their role gives above and the delete besides, since the
+  server grants that verb to the standing whether or not a row is held.
+
+  **A last-owner refusal still arrives as a sentence.** The server answers 409
+  carrying the token that separates it from a malformed request, and the
+  desktop's error conversion answers a 404 on its own and turns every other 4xx
+  into one shape on the way to a screen. #211 is that conversion.
+
+  **Leaving is its own verb, and it asks no authority over anybody.** The writes
+  that act on somebody else's row ask whether the caller may; this one asks
+  nothing, because a member acting on their own membership needs no standing
+  over anyone. So it sits outside the authority table, and what it asks instead
+  is a row to act on — a caller holding none is refused, which is the condition
+  rather than any statement about who they are. The reader's own row offers it
+  whether or not they own the team, with the step down beside it when they do.
+
+  The ledger records it under the kind a removal takes, and that kind's own doc
+  is now where the reading that separates the two lives: an entry is a departure
+  when its actor is also its subject. The ledger tab says which of the two it
+  read. A second kind was the alternative and costs more than it gives, which
+  the same doc argues where the choice would be reopened — the stream is
+  append-only, so a new spelling separates them only from the moment it is
+  added. `TeamRoster::check_leave` finally has a caller: the domain spelled that
+  rule twice so a write could say which of the two acts it is making, and the
+  two spellings answer identically, because a departure is refused on the state
+  of the roster rather than on whose hand is on it. The last owner cannot go by
+  either, and the panel lets go of the team afterwards the way deleting one
+  makes it let go.
+
+  `join` is not part of this either, and the model says why: an invitation
+  writes a membership row directly, so there is nothing to accept, and a verb by
+  which somebody asks to enter would be a request, an approval, and a ledger
+  kind for both. #171's bullet read "invite and join under `RegistrationPolicy`"
+  and that policy gates who may found a team rather than who may enter one.
+
 - **The cross-member reader list, held to the tree** (#208). `changed-packages`
   reads `scripts/cross-member-readers.txt` — which tests read files under
   another member's directory — and selects the reading crate for a branch that

@@ -133,10 +133,11 @@ async fn member(h: &Harness, login: &str) -> (Uuid, TeamsClient) {
 
 /// Puts a second account on the roster.
 ///
-/// Straight at the repository rather than over the invite route: the
-/// route is `teams-contract`'s vocabulary, which a member's client
-/// deliberately does not speak, and this suite is about what the
-/// client does rather than about how a roster is filled.
+/// Straight at the repository rather than over the invite route. The
+/// client speaks that route since #210, so this is a fixture's
+/// shortcut rather than the only way in: the suites that call this are
+/// about what a member does once a roster holds them, not about how it
+/// came to.
 async fn join(h: &Harness, team: Uuid, owner: Uuid, joining: Uuid) {
     let owner = h
         .ctx
@@ -943,5 +944,133 @@ async fn a_push_without_projections_captures_nothing() {
             .unwrap()
             .is_none(),
         "an entry nobody described has no projection"
+    );
+}
+
+// ----------------------------------------------------------------------
+// The roster writes, over the client (#210).
+// ----------------------------------------------------------------------
+
+/// An owner fills a roster and empties it again through the client,
+/// and the ledger says what each act was.
+///
+/// One test rather than five, because the five are one sequence: there
+/// is nobody to grant a role to until somebody was invited, and nobody
+/// to remove until they hold one. Split apart, each would spend its
+/// body re-inviting, which tests the fixture rather than the verb.
+#[tokio::test]
+async fn the_roster_writes_go_over_the_client() {
+    let h = harness().await;
+    let (_alice_id, alice) = member(&h, "alice").await;
+    let (bob_id, _bob) = member(&h, "bob").await;
+    let team =
+        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+
+    let added = alice
+        .invite_member(team, &bob_id.to_string(), "member")
+        .await
+        .expect("invite bob");
+    assert_eq!(added.kind, "teams.membership.added/1");
+    assert_eq!(
+        added.actor_kind, "member",
+        "an owner acts in their membership, not as the instance"
+    );
+    assert_eq!(
+        alice.roster(team).await.unwrap().members.len(),
+        2,
+        "alice founded it and bob was let in"
+    );
+
+    let granted = alice
+        .grant_owner(team, &bob_id.to_string())
+        .await
+        .expect("grant bob the owner role");
+    assert_eq!(granted.kind, "teams.membership.role_changed/1");
+
+    let revoked = alice
+        .revoke_owner(team, &bob_id.to_string())
+        .await
+        .expect("revoke it again, alice being an owner still");
+    assert_eq!(revoked.kind, "teams.membership.role_changed/1");
+
+    let removed = alice
+        .remove_member(team, &bob_id.to_string())
+        .await
+        .expect("remove bob");
+    assert_eq!(removed.kind, "teams.membership.removed/1");
+    assert_eq!(
+        alice.roster(team).await.unwrap().members.len(),
+        1,
+        "the roster is alice's again"
+    );
+
+    let deleted = alice.delete_team(team).await.expect("delete the team");
+    assert_eq!(deleted.kind, "teams.team.deleted/1");
+}
+
+/// A member takes themself out through the client, and the last owner
+/// cannot.
+#[tokio::test]
+async fn a_member_leaves_through_the_client() {
+    let h = harness().await;
+    let (_alice_id, alice) = member(&h, "alice").await;
+    let (bob_id, bob) = member(&h, "bob").await;
+    let team =
+        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    alice
+        .invite_member(team, &bob_id.to_string(), "member")
+        .await
+        .expect("invite bob");
+
+    let left = bob.leave_team(team).await.expect("bob leaves");
+    assert_eq!(left.kind, "teams.membership.removed/1");
+    assert_eq!(
+        left.actor_user_id,
+        bob_id.to_string(),
+        "stamped to the one leaving, which is what tells this from a removal"
+    );
+    assert_eq!(
+        alice.roster(team).await.unwrap().members.len(),
+        1,
+        "the roster is alice's again"
+    );
+
+    match alice.leave_team(team).await {
+        Err(TeamsClientError::Refused { status, .. }) => assert_eq!(status, 409),
+        other => panic!("the last owner should not be able to leave: {other:?}"),
+    }
+}
+
+/// The last owner cannot go, and what the client hands back says the
+/// team's state refused it rather than the request being wrong.
+///
+/// A 409 rather than a 400 is the point of the assertion: the request
+/// named a real member and spelled every field, and the team is what
+/// says no. The client keeps the status; what happens to it on the way
+/// to a screen is #211's.
+#[tokio::test]
+async fn the_last_owner_refusal_reaches_the_client_as_a_conflict() {
+    let h = harness().await;
+    let (alice_id, alice) = member(&h, "alice").await;
+    let team =
+        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+
+    match alice.remove_member(team, &alice_id.to_string()).await {
+        Err(TeamsClientError::Refused { status, kind, .. }) => {
+            assert_eq!(status, 409);
+            assert_eq!(kind, "Conflict");
+        }
+        other => panic!("removing the last owner should be refused: {other:?}"),
+    }
+
+    match alice.revoke_owner(team, &alice_id.to_string()).await {
+        Err(TeamsClientError::Refused { status, .. }) => assert_eq!(status, 409),
+        other => panic!("demoting the last owner should be refused: {other:?}"),
+    }
+
+    assert_eq!(
+        alice.roster(team).await.unwrap().members.len(),
+        1,
+        "neither refusal moved the roster"
     );
 }

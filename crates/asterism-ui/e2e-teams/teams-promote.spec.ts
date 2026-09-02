@@ -31,9 +31,10 @@
 //
 // # What it meets, and what it leaves
 //
-// It runs last, so it meets a window the other two have used. What
-// mattered was not the session — each spec disconnects — but the
-// shared-lines drawer, which `teams-work.spec.ts` leaves open: its
+// It meets a window its predecessors in `SPECS` have used. What
+// mattered was not the session — a spec that connects disconnects —
+// but the shared-lines drawer, which `teams-work.spec.ts` leaves open:
+// its
 // backdrop covers everything, and a spec that types into the sidebar
 // under it waits for a driver that retries rather than refuses. So
 // this one closes the drawer before it touches anything, and

@@ -26,9 +26,12 @@
 // `POST /teams/create` is behind a session. So the fixture logs in
 // over HTTP before the app is ever driven.
 //
-// Then a second team, with a line holding one entry, for the work
-// spec — `seedWorkableTeam` says why it is a second one and why the
-// app cannot seed it.
+// Then the teams a spec cannot make for itself. One the second
+// account founds and invites the first into, because leaving needs a
+// team the window's account did not found. One with a line holding an
+// entry, for the work spec — `seedWorkableTeam` says why the app
+// cannot seed that one. `prepareFixture` is the order they are made
+// in; a spec reaches each by the environment name given it there.
 //
 // A spec reads the values it needs from `process.env`. That is
 // the channel that works: the worker re-evaluates this module, so
@@ -83,6 +86,12 @@ const BASE_URL = `http://${SERVER_HOST}:${SERVER_PORT}`;
 
 /** The account this fixture provisions. Its password is generated. */
 const LOGIN = "e2e-member";
+// A second account, so the roster has somebody to let in and take back
+// out (#210). It joins none of the teams a spec invites it to, which
+// is the point — an account already on that roster would have nothing
+// to prove. It founds one of its own, because leaving needs a team the
+// window's account did not found.
+const OTHER_LOGIN = "e2e-other";
 
 /** What the second team's line and its one entry are called. Named
  *  here because the spec asserts on both. */
@@ -95,6 +104,7 @@ const SPECS = [
   "./e2e-teams/teams-connect.spec.ts",
   "./e2e-teams/teams-work.spec.ts",
   "./e2e-teams/teams-promote.spec.ts",
+  "./e2e-teams/teams-roster.spec.ts",
 ];
 
 /** Everything the server owns, removed and remade on every run. */
@@ -438,6 +448,10 @@ async function prepareFixture(): Promise<void> {
   serverCli(["create-user", "--db", db, "--login", LOGIN], {
     ASTERISM_TEAMS_USER_PASSWORD: password,
   });
+  const otherPassword = randomBytes(18).toString("base64url");
+  serverCli(["create-user", "--db", db, "--login", OTHER_LOGIN], {
+    ASTERISM_TEAMS_USER_PASSWORD: otherPassword,
+  });
 
   const child = spawn(
     serverBinary,
@@ -449,10 +463,10 @@ async function prepareFixture(): Promise<void> {
   server = child;
   await waitForServer(child, 30_000);
 
-  const session = await postJson<{ token: string }>("/teams/auth/login", {
-    login: LOGIN,
-    password,
-  });
+  const session = await postJson<{ token: string; user_id: string }>(
+    "/teams/auth/login",
+    { login: LOGIN, password },
+  );
   const team = await postJson<{ team_id: string }>(
     "/teams/create",
     { owner_user_id: null },
@@ -463,6 +477,31 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_LOGIN = LOGIN;
   process.env.E2E_TEAMS_PASSWORD = password;
   process.env.E2E_TEAMS_ID = team.team_id;
+
+  // The invitee's id rather than its login. A membership row names an
+  // account by id, so that is what the invite form asks for, and a
+  // login is not something the roster could show back.
+  const other = await postJson<{ token: string; user_id: string }>(
+    "/teams/auth/login",
+    { login: OTHER_LOGIN, password: otherPassword },
+  );
+  process.env.E2E_TEAMS_OTHER_ID = other.user_id;
+
+  // A team the window's account is a member of rather than the owner
+  // of. The roster spec needs one to leave from, and founding a team
+  // makes you its owner — the last of which cannot go, by either verb.
+  // So the second account founds this one and invites the first.
+  const theirs = await postJson<{ team_id: string }>(
+    "/teams/create",
+    { owner_user_id: null },
+    other.token,
+  );
+  await postJson(
+    `/teams/${theirs.team_id}/members/invite`,
+    { user_id: session.user_id, role: "member" },
+    other.token,
+  );
+  process.env.E2E_TEAMS_LEAVE_ID = theirs.team_id;
 
   const worked = await seedWorkableTeam(session.token);
   process.env.E2E_TEAMS_WORK_ID = worked.teamId;

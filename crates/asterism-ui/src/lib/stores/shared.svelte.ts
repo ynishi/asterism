@@ -152,14 +152,15 @@
 // # Where #171's surfaces attach
 //
 // **The roster** — who is in the team — is the second tab, over the
-// member's client's `roster`. It is a read and nothing more, and that
-// is the routes' doing rather than a scope somebody chose: #171's body
-// asks for four verbs beside it, and they answer to four different
-// rules at four different depths. Only the read and team creation are
-// wired end to end. **Joining has no verb at all**, so a tab offering
-// one would be offering something with nothing behind it, and
-// `RegistrationPolicy` — which #171 hangs all four on — is consulted
-// by exactly one of them.
+// member's client's `roster`. It reads and it writes: #210 brought the
+// five roster writes up from the routes they had stopped at, so
+// inviting, removing and the two role changes sit on the tab beside
+// the read, and deleting the team sits under them. **Joining has no
+// verb at all**, so a tab offering one would be offering something
+// with nothing behind it, and `RegistrationPolicy` — which #171 hung
+// it on — gates who may found a team rather than who may enter one.
+// Leaving has no verb either: an owner may take themself out, which
+// the ledger records as a removal.
 //
 // Founding a team is the write that came with this tab and does not
 // sit on it. Every tab is an answer about the team named above them,
@@ -326,6 +327,22 @@ type LineArgs = { teamId: string; lineId: string };
 /// still looking at the tab.
 const LEDGER_PAGE = 50;
 
+/// Whether a membership event records somebody going of their own
+/// accord rather than being taken out (#210).
+///
+/// This plane's reading of a rule stated on the kind itself:
+/// `teams.membership.removed/1` covers a member leaving and being
+/// removed alike, and its doc is where the reading lives and where the
+/// argument against a second kind is kept. This is that reading in
+/// TypeScript, over the two fields the entry already carries.
+export function isDeparture(event: TeamLedgerEventDto): boolean {
+  if (event.kind !== "teams.membership.removed/1") return false;
+  return event.subjects.some(
+    (subject) =>
+      subject.ref_type === "user" && subject.value === event.actor_user_id,
+  );
+}
+
 class SharedCatalog {
   /// Whether the panel is showing. The panel reads this itself; the
   /// App only mounts it.
@@ -418,7 +435,7 @@ class SharedCatalog {
     "sharedCatalog.teams",
   );
 
-  /// Who is in the team now named.
+  /// Who is in the team now named, and what the reader may do there.
   ///
   /// A `Resource` rather than a walk, because a roster is one answer:
   /// the whole membership set comes back at once, and the read has no
@@ -429,6 +446,32 @@ class SharedCatalog {
     null,
     "sharedCatalog.roster",
   );
+
+  /// The role the reader holds in the team now named, as the roster
+  /// read said it.
+  ///
+  /// Said rather than derived from the rows, and the difference is an
+  /// instance admin: they reach a team by standing outside it rather
+  /// than by joining it (#83 §1), so no membership set describes them,
+  /// and a getter searching the rows would read their absence as
+  /// "nothing you may do" while what they may do is delete the team.
+  /// `null` here means the reader holds no membership row, or the
+  /// roster has not been read yet — for what an admin may still do,
+  /// ask `iAmAdmin`.
+  ///
+  /// The server decides every one of these verbs regardless of what
+  /// this says. Hiding a control is about not offering somebody a
+  /// refusal, not about enforcement.
+  get myRole(): string | null {
+    return this.roster.data?.viewer.role ?? null;
+  }
+
+  /// Whether the reader is an instance admin, as the roster read said
+  /// it. Independent of `myRole`: an admin may also be a member of the
+  /// team they are administering.
+  get iAmAdmin(): boolean {
+    return this.roster.data?.viewer.admin ?? false;
+  }
 
   /// The work against the open line, open and ended alike.
   ///
@@ -780,6 +823,128 @@ class SharedCatalog {
     // person who just founded a team is the likeliest to pick it.
     await this.teams.load({});
     return created.team_id;
+  }
+
+  /// Lets an account into the team, in the role named.
+  ///
+  /// Re-reads the roster afterwards rather than adding a row from what
+  /// the write answered, for the reason `pursuits` gives: this is
+  /// somebody else's server, and what it holds now is its answer to
+  /// give rather than one worked out here.
+  async inviteMember(userId: string, role: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "invite_team_member",
+      { teamIdRaw: this.teamId, userId, role },
+      "invite that account",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `Invited ${userId} as ${role}.`;
+  }
+
+  /// Takes a member out of the team.
+  ///
+  /// The last owner cannot go, and the server says so — what arrives
+  /// here is a refusal `mutate` puts on screen, worded by the server
+  /// rather than guessed at before asking.
+  ///
+  /// The reader's own row offers `leaveTeam` rather than this, since
+  /// #210 gave departing a verb of its own. The server still permits
+  /// an owner to remove themself, so the case is handled here rather
+  /// than assumed away: it ends this window's membership, and takes
+  /// `stopReading`'s path rather than the re-read.
+  ///
+  /// Not because the re-read would always be refused — an instance
+  /// admin who was also a member still passes the gate afterwards, on
+  /// the standing that is not a row — but because the panel would
+  /// otherwise keep drawing a team this reader is no longer in, which
+  /// is true of both. For the reader who holds nothing else the gate
+  /// does refuse it, and `Resource.load` turns that refusal into an
+  /// error message under a panel still pointed at the team, still
+  /// drawing its lines, with the picker still offering it.
+  async removeMember(userId: string): Promise<void> {
+    const team = this.teamId;
+    this.said = null;
+    await mutate<void>(
+      "remove_team_member",
+      { teamIdRaw: team, userId },
+      "remove that member",
+    );
+    if (userId === this.session) {
+      this.stopReading();
+      await this.teams.load({});
+      this.said = `You are no longer in ${team}.`;
+      return;
+    }
+    await this.roster.load({ teamId: team });
+    this.said = `Removed ${userId}.`;
+  }
+
+  /// Makes a member an owner.
+  async grantOwner(userId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "grant_team_owner",
+      { teamIdRaw: this.teamId, userId },
+      "make that member an owner",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `${userId} is an owner.`;
+  }
+
+  /// Puts an owner back to being a member, which the last owner cannot
+  /// do even to themself.
+  async revokeOwner(userId: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "revoke_team_owner",
+      { teamIdRaw: this.teamId, userId },
+      "take back the owner role",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `${userId} is a member.`;
+  }
+
+  /// Takes the reader out of the team, and stops looking at it.
+  ///
+  /// Distinct from removing yourself, which the roster also allows an
+  /// owner: this one is the departure verb, and the server refuses it
+  /// to somebody holding no membership rather than treating them as a
+  /// removable row. The last owner cannot go by either.
+  async leaveTeam(): Promise<void> {
+    const team = this.teamId;
+    this.said = null;
+    await mutate<void>("leave_team", { teamIdRaw: team }, "leave the team");
+    this.stopReading();
+    await this.teams.load({});
+    this.said = `You have left ${team}.`;
+  }
+
+  /// Deletes the team, and stops looking at what is no longer there.
+  async deleteTeam(): Promise<void> {
+    const gone = this.teamId;
+    this.said = null;
+    await mutate<void>("delete_team", { teamIdRaw: gone }, "delete the team");
+    this.stopReading();
+    await this.teams.load({});
+    this.said = `Deleted team ${gone}.`;
+  }
+
+  /// Lets go of everything read about the team now named, and stops
+  /// naming it.
+  ///
+  /// Whatever ends a reader's relationship with a team, what the panel
+  /// has to forget is the same: it would otherwise keep drawing a
+  /// roster, a line list and a ledger belonging to something it can no
+  /// longer ask about. Written once because each new way of ending it
+  /// arrives after the last, and a caller that skips the forgetting is
+  /// the defect this exists to make impossible.
+  stopReading(): void {
+    this.teamId = "";
+    this.closeLine();
+    this.roster.reset();
+    this.lines.reset();
+    this.forgetLedger();
   }
 
   /// Drops the walk. The ledger belongs to a team and to a connection,

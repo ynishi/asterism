@@ -110,7 +110,8 @@ use asterism_contract::sort::{SortOrder, SortSpec, SortTarget};
 use asterism_contract::teams::{
     MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
     StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
-    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamSubjectRefDto,
+    TeamLedgerEventDto, TeamLedgerPageDto, TeamRosterDto, TeamRosterMemberDto, TeamRosterViewerDto,
+    TeamSubjectRefDto,
 };
 use schema_bridge::{SchemaBridge as _, export_types};
 
@@ -373,6 +374,7 @@ fn main() {
         TeamSubjectRefDto,
         TeamRosterDto,
         TeamRosterMemberDto,
+        TeamRosterViewerDto,
         TeamCreatedDto,
         PromotedAssetDto,
         MyTeamsDto,

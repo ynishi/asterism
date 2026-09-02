@@ -37,7 +37,7 @@ import type {
 } from "../../bindings";
 import { api } from "../api";
 import { mutate } from "../mutate";
-import { sharedCatalog } from "./shared.svelte";
+import { isDeparture, sharedCatalog } from "./shared.svelte";
 
 vi.mock("../api", () => ({ api: vi.fn() }));
 vi.mock("../mutate", () => ({ mutate: vi.fn() }));
@@ -1002,6 +1002,7 @@ describe("the roster", () => {
         { user_id: "u1", role: "owner" },
         { user_id: "u2", role: "member" },
       ],
+      viewer: { role: "owner", admin: false },
     });
 
     await sharedCatalog.roster.load({ teamId: "t1" });
@@ -1019,6 +1020,7 @@ describe("the roster", () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     apiMock.mockResolvedValueOnce([]); // lines for the new team
@@ -1032,6 +1034,7 @@ describe("the roster", () => {
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     apiMock.mockResolvedValueOnce(undefined);
@@ -1049,6 +1052,173 @@ describe("the roster", () => {
     expect(mutateMock).toHaveBeenCalledWith("create_team", {}, "create a team");
     expect(made).toBe("t9");
     expect(sharedCatalog.said).toContain("t9");
+  });
+
+  it("takes the reader's own standing from what the read said", async () => {
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "member" },
+      ],
+      viewer: { role: "owner", admin: false },
+    });
+
+    await sharedCatalog.roster.load({ teamId: "t1" });
+
+    expect(sharedCatalog.myRole).toBe("owner");
+    expect(sharedCatalog.iAmAdmin).toBe(false);
+  });
+
+  it("says an admin holds no role and is an admin anyway", async () => {
+    // The case the rows cannot answer. An instance admin reaches a
+    // team by standing outside it, so no membership row describes
+    // them; derived from the rows this would read as "nothing you may
+    // do", and what they may do is delete the team.
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: null, admin: true },
+    });
+
+    await sharedCatalog.roster.load({ teamId: "t1" });
+
+    expect(sharedCatalog.myRole).toBeNull();
+    expect(sharedCatalog.iAmAdmin).toBe(true);
+  });
+
+  it("re-reads the roster after letting somebody in", async () => {
+    sharedCatalog.teamId = "t1";
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "member" },
+      ],
+      viewer: { role: "owner", admin: false },
+    });
+
+    await sharedCatalog.inviteMember("u2", "member");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "invite_team_member",
+      { teamIdRaw: "t1", userId: "u2", role: "member" },
+      "invite that account",
+    );
+    expect(sharedCatalog.roster.data?.members).toHaveLength(2);
+  });
+
+  it("names each of the three member-shaped writes to its own command", async () => {
+    sharedCatalog.teamId = "t1";
+    const rows = {
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
+    };
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.removeMember("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "remove_team_member",
+      { teamIdRaw: "t1", userId: "u2" },
+      "remove that member",
+    );
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.grantOwner("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "grant_team_owner",
+      { teamIdRaw: "t1", userId: "u2" },
+      "make that member an owner",
+    );
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.revokeOwner("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "revoke_team_owner",
+      { teamIdRaw: "t1", userId: "u2" },
+      "take back the owner role",
+    );
+  });
+
+  it("stops looking at a team it deleted", async () => {
+    sharedCatalog.teamId = "t1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "owner", admin: false },
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.deleteTeam();
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "delete_team",
+      { teamIdRaw: "t1" },
+      "delete the team",
+    );
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+  });
+
+  it("stops looking at a team the reader took themself out of", async () => {
+    // Removing yourself ends the relationship the panel was drawing.
+    // The re-read every other removal performs would be refused by the
+    // gate this reader no longer passes, and `Resource.load` turns
+    // that into an error message under a panel still pointed at the
+    // team — so this takes the path deleting one takes.
+    sharedCatalog.teamId = "t1";
+    sharedCatalog.session = "u1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        { user_id: "u1", role: "owner" },
+        { user_id: "u2", role: "owner" },
+      ],
+      viewer: { role: "owner", admin: false },
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.removeMember("u1");
+
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+    expect(sharedCatalog.said).toContain("no longer in");
+  });
+
+  it("leaves a team and stops looking at it", async () => {
+    // The departure verb, distinct from removing yourself: the server
+    // refuses this one to somebody holding no membership rather than
+    // treating them as a removable row. What the panel does afterwards
+    // is the same either way.
+    sharedCatalog.teamId = "t1";
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [{ user_id: "u1", role: "owner" }],
+      viewer: { role: "member", admin: false },
+    });
+    await sharedCatalog.roster.load({ teamId: "t1" });
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+
+    await sharedCatalog.leaveTeam();
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "leave_team",
+      { teamIdRaw: "t1" },
+      "leave the team",
+    );
+    expect(sharedCatalog.teamId).toBe("");
+    expect(sharedCatalog.roster.data).toBeNull();
+    expect(sharedCatalog.said).toContain("left");
   });
 });
 
@@ -1215,5 +1385,51 @@ describe("the connection this machine remembers", () => {
     );
     expect(sharedCatalog.stored).toBeNull();
     expect(sharedCatalog.deviceTokens.data).toEqual([]);
+  });
+});
+
+describe("telling a departure from a removal", () => {
+  // One kind carries both, which is what its own doc says, so the
+  // reading is off the actor and the subject rather than off a second
+  // kind that would split the act at the point it was added.
+  const act = {
+    seq: 1,
+    event_id: "e1",
+    team_id: "t1",
+    actor_kind: "member",
+    actor_user_id: "u1",
+    actor_display_name: "u1",
+    occurred_at_ms: 0,
+    payload_json: "{}",
+  };
+
+  it("reads one when the actor is the subject", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.removed/1",
+        subjects: [{ ref_type: "user", value: "u1" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("reads a removal when somebody else was taken out", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.removed/1",
+        subjects: [{ ref_type: "user", value: "u2" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("reads nothing into a kind that is neither", () => {
+    expect(
+      isDeparture({
+        ...act,
+        kind: "teams.membership.added/1",
+        subjects: [{ ref_type: "user", value: "u1" }],
+      }),
+    ).toBe(false);
   });
 });
