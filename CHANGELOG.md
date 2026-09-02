@@ -55,9 +55,8 @@ and this project adheres to
   that stops resolving is still a `401`, and its body now says why — `expired`,
   `idle` or `revoked` — so the app can tell the person which rather than show
   one password form for all three. `revoked` is one answer for an owner's revoke
-  and a token this instance never minted; an admin's revoke has no route yet (it
-  is a managed-hosting addition) and will be the same answer when it does, and a
-  forced re-authentication is not built here.
+  and a token this instance never minted; an admin's revoke has no route yet and
+  a forced re-authentication is not built here — both are #213's.
 
   **A session says what a client needs to key its store by.** `SessionDto`
   gained `login` (a sign-in through a provider ends in a session for an account
