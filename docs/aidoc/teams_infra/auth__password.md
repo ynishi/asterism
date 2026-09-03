@@ -39,9 +39,12 @@ The decisions that carry this module:
   creation time rather than warned about.
 
 The port implementation ([`CredentialVerifier`]) keeps the port's
-one-arm contract: a wrong password, an unknown login and an account
-that holds no password ([`LOCKED_PASSWORD`], #163) are the same
-`Ok(None)`, and the two paths that find no hash to check verify
+one-arm contract: a wrong password, an unknown login, an account
+that holds no password ([`LOCKED_PASSWORD`], #163) and an account
+an admin has locked (`locked_at`, #213 — a different thing from
+holding no password, which V13's doc separates) are the same
+`Ok(None)`, and the paths that check no hash — none to check, or
+one they decline — verify
 against a process-local dummy hash so every answer costs the same
 work (username-enumeration resistance on the timing side too).
 
@@ -51,9 +54,11 @@ work (username-enumeration resistance on the timing side too).
 
 ## Types
 
+- `AccountEvent` — One row of the instance's record of acts on accounts (#213): who
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
 - `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
-- `DeviceTokenResolution` — How a device token stops resolving, and why (#163).
+- `DeviceTokenResolution` — How a device token stops resolving, and why (#163, #213).
+- `LockOutcome` — What [`PasswordAuth::lock_account`] did (#213).
 - `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
 

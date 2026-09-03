@@ -75,7 +75,17 @@
     {
       "path": "asterism_teams_wire::dto",
       "kind": "module",
-      "docs": "Response shapes of the `/teams/*` routes a member's client reads.\n\nMutation routes answer with the [`LedgerEventDto`] their write\nappended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1)."
+      "docs": "Response shapes of the `/teams/*` routes a member's client reads —\nand, since #213, of the admin's routes under `/teams/admin`, which\nlive here because a shape's crate is the answer to \"does a client\nsay this\" for whichever client comes to say it.\n\nA team's mutation routes answer with the [`LedgerEventDto`] their\nwrite appended — the same-tx rule (#83 §2) means the event *is* the\nreceipt, and a role change carrying old+new in its payload reads on\nits own (#83 §1). The admin's account verbs answer `204` and land\nin the instance's own record instead ([`AccountEventDto`]), for the\nreason its migration gives."
+    },
+    {
+      "path": "asterism_teams_wire::dto::AccountEventDto",
+      "kind": "struct",
+      "docs": "One act on an account, from the instance's record (#213): who did\nwhat to whom, and when. Why the record is its own table and not\nthe ledger is the migration's to say (`teams-infra`'s V13); the\nactor is stamped the way a ledger actor is, by id and by the name\nthey had at the time."
+    },
+    {
+      "path": "asterism_teams_wire::dto::AccountEventsDto",
+      "kind": "struct",
+      "docs": "The instance's record of acts on accounts (#213), whole\n(`GET /teams/admin/events`) or for one account\n(`GET /teams/admin/accounts/{user_id}/events`), oldest first. An\naccount's page includes the acts on every account, which reached\nit too."
     },
     {
       "path": "asterism_teams_wire::dto::AuthProvidersDto",
@@ -100,7 +110,7 @@
     {
       "path": "asterism_teams_wire::dto::DeviceTokensDto",
       "kind": "struct",
-      "docs": "The caller's own device tokens (`GET /teams/auth/device`, #204).\n\nOwner-scoped, and there is no admin-facing sibling: what an\ninstance's other accounts have stored on their machines is theirs\nto see and revoke."
+      "docs": "The caller's own device tokens (`GET /teams/auth/device`, #204) —\nor, on the admin's route (`GET /teams/admin/accounts/{user_id}/devices`,\n#213), another account's, in the same shape and with the same\nabsence: no value, no digest, on either."
     },
     {
       "path": "asterism_teams_wire::dto::HeldAssetDto",

@@ -39,6 +39,13 @@ slice).
 | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or an admin — the marked set, same authority as the mark |
 | PUT | `/teams/heads/registry` | admins only — instance scope (#132), no team gate |
 | GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
+| GET | `/teams/admin/accounts/{user_id}/devices` | admins only — another account's devices, never their values (#213) |
+| DELETE | `/teams/admin/accounts/{user_id}/devices` | admins only — takes back every live device token the account holds (the ones its listing shows), `204`; the next presentation of any of them inside its window is `401 revoked_by_instance`; sessions already held run to their TTL |
+| POST | `/teams/admin/accounts/{user_id}/lock` | admins only — the account resolves no credential until unlocked, `204`; its rows and stamps stay; `400` for the caller's own account and for the last unlocked admin |
+| DELETE | `/teams/admin/accounts/{user_id}/lock` | admins only — lifts the lock, `204` |
+| GET | `/teams/admin/accounts/{user_id}/events` | admins only — what was done to that account and by whom, and whether it is locked |
+| DELETE | `/teams/admin/devices` | admins only — takes back every live device token on the instance, `204`; sessions run to their TTL |
+| GET | `/teams/admin/events` | admins only — the instance's whole record of acts on accounts |
 
 ## The gate (#83 §5: every route, no exceptions)
 
@@ -47,8 +54,9 @@ Two middleware layers, in request order:
 1. [`auth_gate`] — `Authorization: Bearer` token →
    [`PasswordAuth::resolve_session`] → [`AccountRecord`], inserted
    as an extension. Missing, malformed, unknown and **expired**
-   tokens are all the same `401` (an expired row is deleted on
-   touch).
+   tokens, and a live token whose account an admin has locked
+   (#213), are all the same `401` (an expired row is deleted on
+   touch; a locked account's row is kept).
 2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
    segment → team existence (`404`) → the caller's current role in
    *this* team, read from state, never from the ledger (#83 §1).
@@ -64,7 +72,7 @@ which is exactly when §1 demands the stamp say so.
 
 ## Which of the device-token routes the limiter covers (#204)
 
-One of the four, and the split is the decision. #83 §5 puts new
+The login arm alone, and the split is the decision. #83 §5 puts new
 auth routes in the limited router, and what that limiter is for is
 an unauthenticated caller presenting a *credential*: its budget is
 what bounds guessing. `POST /teams/auth/device/login` is exactly
@@ -72,8 +80,8 @@ that — a token arrives from nobody in particular and either
 resolves or does not — so it sits beside the password arm and
 shares its bucket.
 
-The mint, the listing and the revoke present no credential; they
-present a session [`auth_gate`] has already resolved. Putting them
+Every other device-token route presents no credential; each
+presents a session [`auth_gate`] has already resolved. Putting them
 under the same bucket would spend a login's budget on a caller who
 is already inside, so a person who minted a token would find
 themselves unable to log in again — while protecting a guessing

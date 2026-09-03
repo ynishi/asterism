@@ -170,7 +170,7 @@
     {
       "path": "asterism_ui::commands::connect_team_server_stored",
       "kind": "function",
-      "docs": "Reconnects from the device token this machine holds, without asking\nanybody anything.\n\nThe silent half of #204: a restart reaches its team from the\nkeychain, and the password form is what a rejection falls back to.\nWhat lands in [`AppState::teams`](crate::state::AppState::teams) is\nan ordinary session — the same one\n[`connect_team_server`] hands over — so nothing downstream knows\nwhich arm was used.\n\nA `401` forgets both halves before answering. Keeping a token the\nserver has said no to buys a second silent failure on the next\nlaunch and a listing row nobody can match to a machine.\n\nWhich of the three ends this reached, and why none of them is an\nerror, is on [`StoredTeamConnectOutcome`]."
+      "docs": "Reconnects from the device token this machine holds, without asking\nanybody anything.\n\nThe silent half of #204: a restart reaches its team from the\nkeychain, and the password form is what a rejection falls back to.\nWhat lands in [`AppState::teams`](crate::state::AppState::teams) is\nan ordinary session — the same one\n[`connect_team_server`] hands over — so nothing downstream knows\nwhich arm was used.\n\nA `401` forgets both halves before answering, whatever its reason\n— [`was_unauthorized`]'s doc says why the reason does not get a\nvote. Keeping a token the server has said no to buys a second\nsilent failure on the next launch and a listing row nobody can\nmatch to a machine.\n\nWhich of the three ends this reached, and why none of them is an\nerror, is on [`StoredTeamConnectOutcome`]."
     },
     {
       "path": "asterism_ui::commands::create_dir",
@@ -620,7 +620,7 @@
     {
       "path": "asterism_ui::commands::list_team_device_tokens",
       "kind": "function",
-      "docs": "The device tokens this account holds, on whatever machines.\n\nOwner-scoped by the route rather than by anything here, which the\nwire's `DeviceTokensDto` states where it is defined. Mapped to the\ncontract for the reason the roster's and the ledger's are — the\nwire is what a member's client and a team server say to each other,\nand a screen holds one vocabulary."
+      "docs": "The device tokens this account holds, on whatever machines.\n\nOwner-scoped by the route rather than by anything here: the\ncaller's own, which is the route this asks (`GET /teams/auth/device`)\nand not the admin's. Mapped to the\ncontract for the reason the roster's and the ledger's are — the\nwire is what a member's client and a team server say to each other,\nand a screen holds one vocabulary."
     },
     {
       "path": "asterism_ui::commands::list_thread_messages",

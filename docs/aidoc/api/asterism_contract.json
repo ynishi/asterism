@@ -1255,7 +1255,7 @@
     {
       "path": "asterism_contract::teams::TeamDeviceTokensDto",
       "kind": "struct",
-      "docs": "The device tokens this window's account holds, on whatever machines\n(#204).\n\nOwner-scoped, which the route decides and the wire's own\n`DeviceTokensDto` argues: there is no admin-facing sibling, and\nnothing here takes an account to ask about."
+      "docs": "The device tokens this window's account holds, on whatever machines\n(#204).\n\nOwner-scoped, which the route decides: nothing here takes an\naccount to ask about, and this window asks about its own."
     },
     {
       "path": "asterism_contract::teams::TeamLedgerEventDto",
