@@ -1,9 +1,14 @@
-//! Response shapes of the `/teams/*` routes a member's client reads.
+//! Response shapes of the `/teams/*` routes a member's client reads —
+//! and, since #213, of the admin's routes under `/teams/admin`, which
+//! live here because a shape's crate is the answer to "does a client
+//! say this" for whichever client comes to say it.
 //!
-//! Mutation routes answer with the [`LedgerEventDto`] their write
-//! appended — the same-tx rule (#83 §2) means the event *is* the
+//! A team's mutation routes answer with the [`LedgerEventDto`] their
+//! write appended — the same-tx rule (#83 §2) means the event *is* the
 //! receipt, and a role change carrying old+new in its payload reads on
-//! its own (#83 §1).
+//! its own (#83 §1). The admin's account verbs answer `204` and land
+//! in the instance's own record instead ([`AccountEventDto`]), for the
+//! reason its migration gives.
 
 use schema_bridge::SchemaBridge;
 use serde::{Deserialize, Serialize};
@@ -184,15 +189,52 @@ impl std::fmt::Debug for DeviceTokenMintedDto {
     }
 }
 
-/// The caller's own device tokens (`GET /teams/auth/device`, #204).
-///
-/// Owner-scoped, and there is no admin-facing sibling: what an
-/// instance's other accounts have stored on their machines is theirs
-/// to see and revoke.
+/// The caller's own device tokens (`GET /teams/auth/device`, #204) —
+/// or, on the admin's route (`GET /teams/admin/accounts/{user_id}/devices`,
+/// #213), another account's, in the same shape and with the same
+/// absence: no value, no digest, on either.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct DeviceTokensDto {
     /// One row per live token, oldest mint first.
     pub tokens: Vec<DeviceTokenDto>,
+}
+
+/// One act on an account, from the instance's record (#213): who did
+/// what to whom, and when. Why the record is its own table and not
+/// the ledger is the migration's to say (`teams-infra`'s V13); the
+/// actor is stamped the way a ledger actor is, by id and by the name
+/// they had at the time.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AccountEventDto {
+    /// The row's place in the record; ascending is the order the acts
+    /// happened in.
+    pub seq: i64,
+    /// When, epoch ms.
+    pub occurred_at_ms: i64,
+    /// The admin who acted.
+    pub actor_user_id: String,
+    /// The name they had at the time.
+    pub actor_name: String,
+    /// The account acted on, or absent for an act on every account
+    /// at once.
+    pub subject_user_id: Option<String>,
+    /// What was done: `locked`, `unlocked`, or `devices_revoked`.
+    pub kind: String,
+}
+
+/// The instance's record of acts on accounts (#213), whole
+/// (`GET /teams/admin/events`) or for one account
+/// (`GET /teams/admin/accounts/{user_id}/events`), oldest first. An
+/// account's page includes the acts on every account, which reached
+/// it too.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct AccountEventsDto {
+    /// When the account was locked, epoch ms, for one account's page
+    /// while it is; absent otherwise, and always absent on the whole
+    /// record's page.
+    pub locked_at_ms: Option<i64>,
+    /// The acts.
+    pub events: Vec<AccountEventDto>,
 }
 
 /// One device token as its owner sees it.

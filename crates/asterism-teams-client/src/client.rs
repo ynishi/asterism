@@ -227,14 +227,16 @@ impl TeamsClient {
     /// ordinary session — the same shape [`Self::login`] returns — so
     /// nothing below this method knows which arm was used.
     ///
-    /// A token that does not resolve is a `401` whose `reason` says
-    /// which of `expired`, `idle` or `revoked` it was (#163) — the
-    /// [`TeamsClientError::Refused`] carries it. Any of them is the
-    /// client's cue to fall back to the password form, and the one
-    /// thing it must not do on that path is keep the stored token:
-    /// deciding when a stored credential is discarded belongs to
-    /// whoever owns the keychain entry, so this method changes nothing
-    /// on disk in either direction.
+    /// A token that does not resolve is a `401` whose `reason` names
+    /// which end it met — the values are on the wire's
+    /// `DeviceLoginCommand` — and the [`TeamsClientError::Refused`]
+    /// carries it. Any of them is the client's cue to fall back to the
+    /// password form. Whether the
+    /// stored token is kept is not this method's to decide: deciding
+    /// when a stored credential is discarded belongs to whoever owns
+    /// the keychain entry, and what the owner does with each reason is
+    /// the owner's, so this method changes nothing on disk in either
+    /// direction.
     pub async fn login_with_device_token(
         &mut self,
         token: &str,

@@ -85,7 +85,9 @@ use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use serde::Deserialize;
 use teams_core::DomainError;
-use teams_infra::auth::oidc::{Exchange, OidcClient, OidcIdentities, sha256_hex};
+use teams_infra::auth::oidc::{
+    Exchange, IdentityResolution, OidcClient, OidcIdentities, sha256_hex,
+};
 use teams_infra::auth::password::AccountRecord;
 
 use crate::http::{ApiError, session_dto};
@@ -127,7 +129,9 @@ enum Phase {
     /// Collected: the session is the app's, and this is only here so
     /// the page the browser lands on afterwards can say it went well.
     Collected,
-    /// The provider's answer resolved to nobody, or did not verify.
+    /// The provider's answer resolved to nobody, did not verify, or
+    /// resolved to an account this instance has locked (#213); the
+    /// reason is for the log.
     Refused(&'static str),
 }
 
@@ -326,11 +330,20 @@ impl OidcSignIn {
                 Exchange::Refused(reason) => Phase::Refused(reason),
                 Exchange::Verified(identity) => {
                     match self.identities.resolve(&identity, now).await? {
-                        Some(account) => Phase::Resolved {
+                        IdentityResolution::Resolved(account) => Phase::Resolved {
                             account,
                             grant: OidcClient::random_token()?,
                         },
-                        None => {
+                        // The provider vouched; the instance has
+                        // locked the account (#213). Told apart here
+                        // for the instance's log — the browser and
+                        // the app get the one-armed refusal every
+                        // refused attempt gets, which the adapter's
+                        // `Exchange::Refused` doc says is the rule.
+                        IdentityResolution::Locked => {
+                            Phase::Refused("this account is locked on this instance")
+                        }
+                        IdentityResolution::Unknown => {
                             Phase::Refused("the provider vouched for nobody this instance knows")
                         }
                     }

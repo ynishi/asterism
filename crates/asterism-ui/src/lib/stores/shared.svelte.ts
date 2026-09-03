@@ -388,11 +388,13 @@ class SharedCatalog {
   storedRejected = $state(false);
 
   /// Why the stored token was refused, when it was: `expired`, `idle`
-  /// or `revoked` as the server said it (#163), or null from a server
-  /// too old to say. What the drawer tells the person, since what the
-  /// app did — forget the token — is the same for all three. Cleared
-  /// wherever `storedRejected` is: by every connection that lands, and
-  /// by a disconnect.
+  /// or `revoked` as the server said it (#163), `revoked_by_instance`
+  /// or `locked` when an admin did it (#213), or null from a server
+  /// too old to say. What the drawer tells the person, and nothing
+  /// the store acts on: what the app did with the token is the same
+  /// for every reason, on the terms `connect_team_server_stored`
+  /// gives. Cleared wherever `storedRejected` is: by every connection
+  /// that lands, and by a disconnect.
   storedRejectedReason = $state<string | null>(null);
 
   /// The device tokens this account holds, on whatever machines.
@@ -705,9 +707,9 @@ class SharedCatalog {
     }
     // `rejected` forgot both halves before answering, and `stored` is
     // kept anyway: the login it carries is what the person is about to
-    // type a password beside. The reason travels with it (#163) —
-    // which of expired, idle or revoked — for the sentence the drawer
-    // shows, and for nothing the store does.
+    // type a password beside. The reason travels with it (#163, #213)
+    // — one of the values `storedRejectedReason` names, or null — for
+    // the sentence the drawer shows, and for nothing the store does.
     this.storedRejected = attempt?.outcome === "rejected";
     this.storedRejectedReason = this.storedRejected
       ? (attempt.reason ?? null)

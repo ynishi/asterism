@@ -739,11 +739,14 @@ CREATE INDEX idx_asset_projection_team ON asset_projection(team_id);
 /// exists for a person to read before deciding whether to revoke.
 ///
 /// **`expires_at` is absolute, written at the mint**, and enforced the
-/// way a session's is — on touch and by the bulk sweep that walks the
-/// index on it. Where the lifetime comes from is the server's
-/// context's question (`teams_server::state::TeamsCtx`), and the
-/// idle end #163 added beside it is enforced on touch alone, from
-/// `last_used_at`; the sweep reads `expires_at` only.
+/// way a session's is — on touch and by the bulk sweep. Where the
+/// lifetime comes from is the server's context's question
+/// (`teams_server::state::TeamsCtx`). The idle end #163 added beside
+/// it was enforced on touch alone until #213 made one predicate of a
+/// token's ends (`auth::password`'s `ended_sql`), which the sweep
+/// applies too — reading `last_used_at` and `revoked_at` as well as
+/// `expires_at`, so the sweep no longer walks the index on
+/// `expires_at` alone; `ended_sql`'s doc weighs that.
 ///
 /// The `user_id` key cascades, matching `auth_session`: whatever
 /// removes an account takes its stored credentials with it, and a
@@ -837,6 +840,69 @@ INSERT INTO instance_identity (key, value)
 VALUES ('instance_id', lower(hex(randomblob(16))));
 "#;
 
+/// V13 — what an admin may do to somebody else's sign-in (#213), as
+/// three facts the schema had no column for.
+///
+/// **`user_account.locked_at`**: an account that keeps its rows and
+/// resolves no credential, on the terms `auth::password`'s
+/// `lock_account` defines. `NULL` is the
+/// ordinary state; a timestamp is the lock and says when. Distinct
+/// from deleting the account because the ledger stamps it, and a
+/// stamp has to keep resolving to a name; distinct from
+/// `LOCKED_PASSWORD` (V11) because that says "no password", which a
+/// provider still signs past.
+///
+/// **`device_token.revoked_at`**: a token an admin took back, kept as
+/// a row rather than deleted, so that the next time it is presented
+/// the answer can say *the instance signed you out* — which end that
+/// is among the others is `auth::password::DeviceTokenResolution`'s
+/// to say. An owner's own revoke still deletes (#204's reasoning
+/// stands: a person taking back their own handle needs no news of
+/// it); the tombstone is for the case where the person holding the
+/// device did not do it. Read once and deleted, or gone with the
+/// window the mint wrote — never with the idle bound, which is a fact
+/// about a token and not about a tombstone (`auth::password`'s
+/// `ended_sql` is where that is decided).
+///
+/// **`account_event`**: where an act on an account is recorded. The
+/// ledger is per team (#83 §2) and an account belongs to no team, so
+/// an admin locking one or signing one out everywhere has no team's
+/// ledger to land in — this is the instance's, one row per act, the
+/// actor stamped by id and by the name they had at the time exactly
+/// as a ledger actor is. `subject_user_id` is `NULL` for an act on
+/// every account at once. Append-only by the ledger's rule and the
+/// ledger's means: no `updated_at`, no soft delete, and the two
+/// triggers that abort an `UPDATE` or a `DELETE`. The index serves the
+/// per-account read; the whole record is read in `seq` order off the
+/// key.
+const V13_ADMIN_ACCOUNT_VERBS: &str = r#"
+ALTER TABLE user_account ADD COLUMN locked_at INTEGER;
+ALTER TABLE device_token ADD COLUMN revoked_at INTEGER;
+
+CREATE TABLE account_event (
+    seq             INTEGER PRIMARY KEY,
+    occurred_at     INTEGER NOT NULL,
+    actor_user_id   BLOB    NOT NULL,
+    actor_name      TEXT    NOT NULL,
+    subject_user_id BLOB,
+    kind            TEXT    NOT NULL
+) STRICT;
+
+CREATE INDEX idx_account_event_subject ON account_event(subject_user_id, seq);
+
+CREATE TRIGGER account_event_no_update
+BEFORE UPDATE ON account_event
+BEGIN
+    SELECT RAISE(ABORT, 'account_event is append-only');
+END;
+
+CREATE TRIGGER account_event_no_delete
+BEFORE DELETE ON account_event
+BEGIN
+    SELECT RAISE(ABORT, 'account_event is append-only');
+END;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -852,6 +918,7 @@ const MIGRATIONS: &[&str] = &[
     V10_DEVICE_TOKEN,
     V11_OIDC_IDENTITY,
     V12_INSTANCE_IDENTITY,
+    V13_ADMIN_ACCOUNT_VERBS,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).
@@ -1294,6 +1361,75 @@ mod tests {
         assert_eq!(read(&conn), id, "re-running the series mints nothing");
         let other = migrated();
         assert_ne!(read(&other), id, "two instances, two ids");
+    }
+
+    #[test]
+    fn v13_adds_a_lock_a_tombstone_and_an_instance_record_that_is_append_only() {
+        let conn = migrated();
+        conn.execute(
+            "INSERT INTO user_account
+             (user_id, login, display_name, password_hash, is_admin, created_at)
+             VALUES (X'01', 'hoshino', 'Hoshino', 'phc', 0, 0)",
+            [],
+        )
+        .unwrap();
+        // The lock is a timestamp on the account, absent by default.
+        let locked: Option<i64> = conn
+            .query_row(
+                "SELECT locked_at FROM user_account WHERE user_id = X'01'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(locked, None);
+        // A token an admin took back keeps its row, marked.
+        conn.execute(
+            "INSERT INTO device_token
+             (token_hash, id, user_id, label, created_at, last_used_at, expires_at, revoked_at)
+             VALUES ('h', X'10', X'01', 'MacBook', 0, NULL, 10, 5)",
+            [],
+        )
+        .unwrap();
+        // The instance's record: an act on one account, and one on all.
+        conn.execute(
+            "INSERT INTO account_event
+             (occurred_at, actor_user_id, actor_name, subject_user_id, kind)
+             VALUES (1, X'02', 'Admin', X'01', 'locked'), (2, X'02', 'Admin', NULL, 'devices_revoked')",
+            [],
+        )
+        .unwrap();
+        let kinds: Vec<String> = conn
+            .prepare("SELECT kind FROM account_event ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(kinds, ["locked", "devices_revoked"]);
+        // Append-only the way the ledger is: a rewrite and a removal
+        // both abort.
+        assert!(
+            conn.execute(
+                "UPDATE account_event SET kind = 'unlocked' WHERE seq = 1",
+                []
+            )
+            .is_err()
+        );
+        assert!(conn.execute("DELETE FROM account_event", []).is_err());
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM account_event", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 2);
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'account_event'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for forbidden in ["updated_at", "deleted", "trashed"] {
+            assert!(!ddl.contains(forbidden), "{forbidden} in: {ddl}");
+        }
     }
 
     #[test]

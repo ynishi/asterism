@@ -711,6 +711,54 @@ async fn a_bound_address_signs_in_by_email_once_and_by_subject_after() {
     h.driver.shutdown().await.unwrap();
 }
 
+/// The lock reaches the provider arm too (#213): the provider vouches,
+/// the instance refuses, and nothing is pinned by a sign-in it
+/// refused — so the first sign-in after the lock lifts pins as the
+/// first would have.
+#[tokio::test]
+async fn a_locked_account_is_refused_through_the_provider_and_pinned_once_unlocked() {
+    let h = harness(true).await;
+    bound_account(&h, "hoshino", "hoshino@example.com").await;
+    let provider = h.provider.as_ref().unwrap();
+    let identities = OidcIdentities::new(h.isle.clone());
+    let hoshino = h
+        .ctx
+        .auth
+        .account_by_login("hoshino")
+        .await
+        .unwrap()
+        .unwrap()
+        .user_id;
+    h.ctx.auth.lock_account(hoshino, now_ms()).await.unwrap();
+
+    provider.next_person("sub-hoshino", "hoshino@example.com", true);
+    let w = walk_the_browser(&h, "s1", "MacBook").await;
+    assert_eq!(w.status, StatusCode::UNAUTHORIZED, "{}", w.page);
+    let (status, _) = collect(&h, &w.id, "s1", "").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        identities.binding(hoshino).await.unwrap().unwrap().subject,
+        None,
+        "a refused sign-in pins nothing"
+    );
+
+    h.ctx.auth.unlock_account(hoshino).await.unwrap();
+    provider.next_person("sub-hoshino", "hoshino@example.com", true);
+    let w = walk_the_browser(&h, "s2", "MacBook").await;
+    assert_eq!(w.status, StatusCode::OK, "{}", w.page);
+    assert_eq!(
+        identities.binding(hoshino).await.unwrap().unwrap().subject,
+        Some("sub-hoshino".into())
+    );
+
+    // And a pinned account, locked, is refused by the subject arm too.
+    h.ctx.auth.lock_account(hoshino, now_ms()).await.unwrap();
+    provider.next_person("sub-hoshino", "hoshino@example.com", true);
+    let w = walk_the_browser(&h, "s3", "MacBook").await;
+    assert_eq!(w.status, StatusCode::UNAUTHORIZED, "{}", w.page);
+    h.driver.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn an_unverified_email_and_an_unknown_person_are_the_same_refusal() {
     let h = harness(true).await;

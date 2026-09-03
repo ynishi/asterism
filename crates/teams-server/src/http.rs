@@ -37,6 +37,13 @@
 //! | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or an admin — the marked set, same authority as the mark |
 //! | PUT | `/teams/heads/registry` | admins only — instance scope (#132), no team gate |
 //! | GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
+//! | GET | `/teams/admin/accounts/{user_id}/devices` | admins only — another account's devices, never their values (#213) |
+//! | DELETE | `/teams/admin/accounts/{user_id}/devices` | admins only — takes back every live device token the account holds (the ones its listing shows), `204`; the next presentation of any of them inside its window is `401 revoked_by_instance`; sessions already held run to their TTL |
+//! | POST | `/teams/admin/accounts/{user_id}/lock` | admins only — the account resolves no credential until unlocked, `204`; its rows and stamps stay; `400` for the caller's own account and for the last unlocked admin |
+//! | DELETE | `/teams/admin/accounts/{user_id}/lock` | admins only — lifts the lock, `204` |
+//! | GET | `/teams/admin/accounts/{user_id}/events` | admins only — what was done to that account and by whom, and whether it is locked |
+//! | DELETE | `/teams/admin/devices` | admins only — takes back every live device token on the instance, `204`; sessions run to their TTL |
+//! | GET | `/teams/admin/events` | admins only — the instance's whole record of acts on accounts |
 //!
 //! ## The gate (#83 §5: every route, no exceptions)
 //!
@@ -45,8 +52,9 @@
 //! 1. [`auth_gate`] — `Authorization: Bearer` token →
 //!    [`PasswordAuth::resolve_session`] → [`AccountRecord`], inserted
 //!    as an extension. Missing, malformed, unknown and **expired**
-//!    tokens are all the same `401` (an expired row is deleted on
-//!    touch).
+//!    tokens, and a live token whose account an admin has locked
+//!    (#213), are all the same `401` (an expired row is deleted on
+//!    touch; a locked account's row is kept).
 //! 2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
 //!    segment → team existence (`404`) → the caller's current role in
 //!    *this* team, read from state, never from the ledger (#83 §1).
@@ -62,7 +70,7 @@
 //!
 //! ## Which of the device-token routes the limiter covers (#204)
 //!
-//! One of the four, and the split is the decision. #83 §5 puts new
+//! The login arm alone, and the split is the decision. #83 §5 puts new
 //! auth routes in the limited router, and what that limiter is for is
 //! an unauthenticated caller presenting a *credential*: its budget is
 //! what bounds guessing. `POST /teams/auth/device/login` is exactly
@@ -70,8 +78,8 @@
 //! resolves or does not — so it sits beside the password arm and
 //! shares its bucket.
 //!
-//! The mint, the listing and the revoke present no credential; they
-//! present a session [`auth_gate`] has already resolved. Putting them
+//! Every other device-token route presents no credential; each
+//! presents a session [`auth_gate`] has already resolved. Putting them
 //! under the same bucket would spend a login's budget on a caller who
 //! is already inside, so a person who minted a token would find
 //! themselves unable to log in again — while protecting a guessing
@@ -160,7 +168,7 @@ use teams_core::domain::identity::{
 use teams_core::domain::ledger::LedgerEvent;
 use teams_core::domain::store::{DeclaredDigest, TeamBlobLink, parse_digest};
 use teams_core::port::auth::CredentialVerifier;
-use teams_infra::auth::password::{AccountRecord, DeviceTokenResolution};
+use teams_infra::auth::password::{AccountRecord, DeviceTokenResolution, LockOutcome};
 use teams_infra::gc::sweep_zero_link_blobs;
 use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // The shapes a member's client also reads, from the leaf both planes
@@ -172,9 +180,9 @@ use asterism_teams_wire::command::{
     MintDeviceTokenCommand, RemoveMemberCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
-    DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto, LedgerEventDto, LedgerPageDto,
-    MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto,
-    ViewerDto,
+    AccountEventDto, AccountEventsDto, DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto,
+    LedgerEventDto, LedgerPageDto, MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto,
+    SubjectRefDto, TeamCreatedDto, ViewerDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -197,13 +205,18 @@ pub(crate) enum ApiError {
     /// refusal depending on which prefix it asked would not be talking
     /// to a mirror.
     Forge(ForgeError),
-    /// No token, a malformed header, an unknown token, or an expired
-    /// one — deliberately indistinguishable.
+    /// No token, a malformed header, an unknown token, an expired one,
+    /// or a live one whose account an admin has locked (#213) —
+    /// deliberately indistinguishable.
     Unauthorized,
     /// Authenticated, but this verb is not yours here.
     Forbidden(String),
     /// The `{team_id}` names no team on this instance.
     TeamNotFound,
+    /// The `{user_id}` an admin named has no account on this instance
+    /// (#213). Sayable, because the routes that answer it are an
+    /// admin's, and which accounts exist is an admin's to know.
+    AccountNotFound,
     /// Nothing has been said about this entry (#148 decision 12) — an
     /// ordinary absence rather than a fault.
     ///
@@ -233,9 +246,12 @@ pub(crate) enum ApiError {
     /// is not the one it was started with, which is deliberately the
     /// same answer (the `oidc` module doc says why).
     AttemptNotFound,
-    /// A stored credential that has stopped resolving, and why: the
-    /// `401` an app acts on rather than the one it can only show a
-    /// password form for (#163). The token is `reason` on the body.
+    /// A device token refused, and why: the `401` an app acts on
+    /// rather than the one it can only show a password form for (#163,
+    /// #213). The token is `reason` on the body, and the message is
+    /// worded per reason, because "sign in again" is the right advice
+    /// for a credential that ended and the wrong one for an account
+    /// that is locked.
     ReauthRequired(&'static str),
 }
 
@@ -282,11 +298,20 @@ impl IntoResponse for ApiError {
         let (status, kind, message) = match self {
             Self::Forge(err) => return forge_response(&err),
             Self::ReauthRequired(reason) => {
+                let message = match reason {
+                    "locked" => {
+                        "the account is locked on this instance; ask whoever runs it".to_string()
+                    }
+                    "revoked_by_instance" => {
+                        "this device was signed out by the instance; sign in again".to_string()
+                    }
+                    _ => format!("the stored credential is {reason}; sign in again"),
+                };
                 return (
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({
                         "kind": "Unauthorized",
-                        "message": format!("the stored credential is {reason}; sign in again"),
+                        "message": message,
                         "reason": reason,
                     })),
                 )
@@ -322,6 +347,11 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "NotFound",
                 "no such team on this instance".to_string(),
+            ),
+            Self::AccountNotFound => (
+                StatusCode::NOT_FOUND,
+                "NotFound",
+                "no such account on this instance".to_string(),
             ),
             Self::BlobNotFound => (
                 StatusCode::NOT_FOUND,
@@ -407,7 +437,7 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
     let auth = Router::new()
         .route("/teams/auth/login", post(login))
         .route("/teams/auth/logout", post(logout))
-        // The device arm that presents a credential (#204). Its three
+        // The device arm that presents a credential (#204). Its
         // siblings present a session instead and live below the gate —
         // the module doc's "which of the device-token routes the
         // limiter covers".
@@ -510,8 +540,9 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
         // static segment to be preferred over.
         .route("/teams", get(my_teams))
         // Managing the caller's own device tokens (#204). No team to
-        // gate on and no admin sibling: these answer about the account
-        // the session resolved to and nobody else. `auth` is a static
+        // gate on: these answer about the account the session resolved
+        // to and nobody else; the admin's reach over another account's
+        // is under `/teams/admin` below (#213). `auth` is a static
         // segment, preferred over the `{team_id}` capture — the same
         // grammar note `heads` carries below.
         .route(
@@ -530,6 +561,28 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
             "/teams/heads/registry",
             get(head_registry).put(publish_head_registry),
         )
+        // An admin's reach over somebody else's sign-in (#213): the
+        // account verbs the instance admin had no route for. Instance
+        // scope, admin-only inside each handler, no team gate — the
+        // same shape as the head registry. `admin` is a static
+        // segment, preferred over the `{team_id}` capture.
+        .route(
+            "/teams/admin/accounts/{user_id}/devices",
+            get(admin_device_tokens).delete(admin_revoke_device_tokens),
+        )
+        .route(
+            "/teams/admin/accounts/{user_id}/lock",
+            post(admin_lock_account).delete(admin_unlock_account),
+        )
+        .route(
+            "/teams/admin/accounts/{user_id}/events",
+            get(admin_account_events),
+        )
+        .route(
+            "/teams/admin/devices",
+            delete(admin_revoke_every_device_token),
+        )
+        .route("/teams/admin/events", get(admin_events))
         .merge(team_scoped)
         .layer(middleware::from_fn_with_state(ctx.clone(), auth_gate))
         .with_state(ctx);
@@ -779,11 +832,22 @@ async fn device_login(
         .auth
         .resolve_device_token(&cmd.token, now, ctx.device_token_idle_ms)
         .await?;
-    ctx.auth.cleanup_expired_device_tokens(now).await?;
+    ctx.auth
+        .cleanup_expired_device_tokens(now, ctx.device_token_idle_ms)
+        .await?;
     let account = match resolution {
         DeviceTokenResolution::Resolved(account) => account,
         DeviceTokenResolution::Expired => return Err(ApiError::ReauthRequired("expired")),
         DeviceTokenResolution::Idle => return Err(ApiError::ReauthRequired("idle")),
+        // The two #213 ends: the instance took the token back, or
+        // locked the account. Named apart from `revoked` because the
+        // person holding the device did neither, and what they can do
+        // about it differs — sign in again, or ask whoever runs the
+        // instance.
+        DeviceTokenResolution::RevokedByInstance => {
+            return Err(ApiError::ReauthRequired("revoked_by_instance"));
+        }
+        DeviceTokenResolution::Locked => return Err(ApiError::ReauthRequired("locked")),
         DeviceTokenResolution::Unknown => return Err(ApiError::ReauthRequired("revoked")),
     };
     let token = ctx
@@ -828,30 +892,31 @@ async fn mint_device_token(
 
 /// `GET /teams/auth/device` — the caller's own device tokens.
 ///
-/// Owner-scoped with no admin widening, unlike the team reads §1 lets
-/// an admin through: those answer about a team's shared state, and
-/// this answers about what sits on one person's machines. An admin who
-/// needs a member locked out has the member's account to act on.
+/// Owner-scoped: this route answers about the caller and nobody else.
+/// It once argued that no admin widening existed because a person's
+/// machines are their own; #213 widened it, on a route of the admin's
+/// (`GET /teams/admin/accounts/{user_id}/devices`) rather than here,
+/// so that the owner's route still takes no account to ask about and
+/// the admin's act is the admin's, recorded as such.
 ///
-/// Sweeps first, so a row that stopped resolving is not listed as
-/// though it still did.
+/// Sweeps first to keep the table bounded where it is read; what is
+/// listed is decided by the listing's own predicate, the one the
+/// sweep and the instance's revoke share, so a row that stopped
+/// resolving is not shown whether or not the sweep has reached it.
 async fn device_tokens(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
 ) -> Result<Json<DeviceTokensDto>, ApiError> {
-    ctx.auth.cleanup_expired_device_tokens(now_ms()).await?;
-    let tokens = ctx.auth.list_device_tokens(account.user_id).await?;
+    let now = now_ms();
+    ctx.auth
+        .cleanup_expired_device_tokens(now, ctx.device_token_idle_ms)
+        .await?;
+    let tokens = ctx
+        .auth
+        .list_device_tokens(account.user_id, now, ctx.device_token_idle_ms)
+        .await?;
     Ok(Json(DeviceTokensDto {
-        tokens: tokens
-            .into_iter()
-            .map(|row| DeviceTokenDto {
-                id: row.id.to_string(),
-                label: row.label,
-                created_at_ms: row.created_at_ms,
-                last_used_at_ms: row.last_used_at_ms,
-                expires_at_ms: row.expires_at_ms,
-            })
-            .collect(),
+        tokens: tokens.into_iter().map(device_token_dto).collect(),
     }))
 }
 
@@ -864,10 +929,8 @@ async fn device_tokens(
 /// would answer "does this id exist" about ids the caller has no
 /// business knowing. Logout answers the same way for the same reason.
 ///
-/// The sessions this token minted are not revoked with it: they die at
-/// their own TTL (#204). A session outliving the credential that
-/// produced it is the honest reading of a device token — it authorises
-/// the *making* of sessions, and taking it away stops the next one.
+/// The sessions this token minted are not revoked with it, for the
+/// reason `PasswordAuth::revoke_device_token` gives.
 async fn revoke_device_token(
     State(ctx): State<Arc<TeamsCtx>>,
     Extension(AuthedAccount(account)): Extension<AuthedAccount>,
@@ -876,6 +939,241 @@ async fn revoke_device_token(
     let id = parse_uuid(&id, "id")?;
     ctx.auth.revoke_device_token(account.user_id, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ----------------------------------------------------------------------
+// Handlers — an admin's reach over accounts (#213).
+// ----------------------------------------------------------------------
+//
+// The capacity is the one #83 §1 gives an admin — a flag on the
+// account, outside every roster — reaching an *account* through it
+// rather than a team. Each is admin-only in the handler, as the head
+// registry is, and each act on an account is written to the
+// instance's record (`account_event`, V13) with the admin stamped the
+// way a ledger actor is, for the reason the migration gives.
+
+/// Call this before `subject_account`, not after: the order is what
+/// keeps a non-admin from learning which accounts exist.
+fn require_admin(account: &AccountRecord, act: &str) -> Result<(), ApiError> {
+    if account.admin {
+        return Ok(());
+    }
+    Err(ApiError::Forbidden(format!(
+        "{act} is an instance admin's act (#213)"
+    )))
+}
+
+/// The account a `{user_id}` names, or [`ApiError::AccountNotFound`]
+/// for one this instance has no row for.
+async fn subject_account(ctx: &TeamsCtx, raw: &str) -> Result<AccountRecord, ApiError> {
+    let user_id = parse_uuid(raw, "user_id")?;
+    ctx.auth
+        .account(user_id)
+        .await?
+        .ok_or(ApiError::AccountNotFound)
+}
+
+/// One device token as a listing shows it: the same row, and the same
+/// absence, whichever route asked.
+fn device_token_dto(row: teams_infra::auth::password::DeviceTokenRecord) -> DeviceTokenDto {
+    DeviceTokenDto {
+        id: row.id.to_string(),
+        label: row.label,
+        created_at_ms: row.created_at_ms,
+        last_used_at_ms: row.last_used_at_ms,
+        expires_at_ms: row.expires_at_ms,
+    }
+}
+
+fn account_event_dto(event: teams_infra::auth::password::AccountEvent) -> AccountEventDto {
+    AccountEventDto {
+        seq: event.seq,
+        occurred_at_ms: event.occurred_at_ms,
+        actor_user_id: event.actor_user_id.to_string(),
+        actor_name: event.actor_name,
+        subject_user_id: event.subject_user_id.map(|id| id.to_string()),
+        kind: event.kind,
+    }
+}
+
+/// `GET /teams/admin/accounts/{user_id}/devices` — admins only: the
+/// devices another account has stored a token on, in the shape the
+/// owner's own listing uses and with the same absence — no value, no
+/// digest — and the same sweep first, for the reason the owner's read
+/// gives. What this shows is decided by the same predicate the
+/// admin's revoke uses, so it is what that revoke would take back, and
+/// nothing else.
+async fn admin_device_tokens(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(user_id): Path<String>,
+) -> Result<Json<DeviceTokensDto>, ApiError> {
+    require_admin(&account, "reading another account's devices")?;
+    let subject = subject_account(&ctx, &user_id).await?;
+    let now = now_ms();
+    ctx.auth
+        .cleanup_expired_device_tokens(now, ctx.device_token_idle_ms)
+        .await?;
+    let tokens = ctx
+        .auth
+        .list_device_tokens(subject.user_id, now, ctx.device_token_idle_ms)
+        .await?
+        .into_iter()
+        .map(device_token_dto)
+        .collect();
+    Ok(Json(DeviceTokensDto { tokens }))
+}
+
+/// `DELETE /teams/admin/accounts/{user_id}/devices` — admins only:
+/// takes back every live device token the account holds — the ones
+/// its listing shows — so no device of theirs signs in silently
+/// again. Each becomes a tombstone and answers `revoked_by_instance`
+/// once, on `DeviceTokenResolution`'s terms. Recorded as
+/// `devices_revoked` on the account. Sessions are left as
+/// `PasswordAuth::revoke_device_token` leaves them, for the reason
+/// given there; the lock is the verb that stops them resolving, which
+/// is why offboarding is this and then the lock.
+async fn admin_revoke_device_tokens(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&account, "taking another account's devices back")?;
+    let subject = subject_account(&ctx, &user_id).await?;
+    let now = now_ms();
+    ctx.auth
+        .revoke_device_tokens_of(subject.user_id, now, ctx.device_token_idle_ms)
+        .await?;
+    ctx.auth
+        .record_account_event(&account, Some(subject.user_id), "devices_revoked", now)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /teams/admin/devices` — admins only: takes back every live
+/// device token on the instance, the admin's own included, which is
+/// the honest reading of "every". Sessions are left as the per-account
+/// verb leaves them. Recorded once, on no account.
+async fn admin_revoke_every_device_token(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&account, "taking every device back")?;
+    let now = now_ms();
+    ctx.auth
+        .revoke_every_device_token(now, ctx.device_token_idle_ms)
+        .await?;
+    ctx.auth
+        .record_account_event(&account, None, "devices_revoked", now)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /teams/admin/accounts/{user_id}/lock` — admins only: the
+/// account keeps its rows and resolves no credential from now, on the
+/// terms `PasswordAuth::lock_account` defines. Its ledger stamps keep
+/// resolving, which is the difference from deleting it. An admin
+/// cannot lock themself, and the last admin who can authenticate is
+/// locked by nobody — the adapter decides that inside its own
+/// statement, so two admins locking each other in the same instant
+/// cannot leave the instance with none; the way back from a lock
+/// applied out of band is `bootstrap-admin`, whose doc says why.
+/// Recorded as `locked`; locking an account already locked records
+/// nothing and answers the same, which the adapter decides in its
+/// statement rather than this handler in a read before it.
+async fn admin_lock_account(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&account, "locking an account")?;
+    let subject = subject_account(&ctx, &user_id).await?;
+    if subject.user_id == account.user_id {
+        return Err(ApiError::Domain(DomainError::Validation(
+            "an admin cannot lock their own account; another admin can".to_string(),
+        )));
+    }
+    let now = now_ms();
+    match ctx.auth.lock_account(subject.user_id, now).await? {
+        LockOutcome::Locked => {
+            ctx.auth
+                .record_account_event(&account, Some(subject.user_id), "locked", now)
+                .await?;
+        }
+        LockOutcome::Unchanged => {}
+        LockOutcome::LastAdmin => {
+            return Err(ApiError::Domain(DomainError::Validation(
+                "this is the last unlocked admin; an instance with none has no way back to \
+                 its own admin verbs, so provision or unlock another admin first"
+                    .to_string(),
+            )));
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /teams/admin/accounts/{user_id}/lock` — admins only: lifts
+/// the lock. The lock refused and took nothing away, and it stopped
+/// no clock either, so what the server still holds for the account —
+/// device tokens and sessions inside whatever life each has left, its
+/// provider binding — resolves again; what the admin's revoke took
+/// back before the lock stays taken. Whether a device presents the
+/// token again is the client's business — the desktop's rule is on
+/// its `was_unauthorized` — and the row is here either way. Recorded
+/// as `unlocked`; an account not locked records nothing, decided as
+/// the lock is.
+async fn admin_unlock_account(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require_admin(&account, "unlocking an account")?;
+    let subject = subject_account(&ctx, &user_id).await?;
+    let now = now_ms();
+    if ctx.auth.unlock_account(subject.user_id).await? {
+        ctx.auth
+            .record_account_event(&account, Some(subject.user_id), "unlocked", now)
+            .await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /teams/admin/accounts/{user_id}/events` — admins only: what
+/// was done to this account and by whom, oldest first, including the
+/// acts on every account that reached it too.
+async fn admin_account_events(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+    Path(user_id): Path<String>,
+) -> Result<Json<AccountEventsDto>, ApiError> {
+    require_admin(&account, "reading an account's record")?;
+    let subject = subject_account(&ctx, &user_id).await?;
+    // One call, for the reason `account_page` gives.
+    let (locked_at_ms, events) = ctx.auth.account_page(subject.user_id).await?;
+    Ok(Json(AccountEventsDto {
+        locked_at_ms,
+        events: events.into_iter().map(account_event_dto).collect(),
+    }))
+}
+
+/// `GET /teams/admin/events` — admins only: the instance's whole
+/// record of acts on accounts, oldest first.
+async fn admin_events(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(AuthedAccount(account)): Extension<AuthedAccount>,
+) -> Result<Json<AccountEventsDto>, ApiError> {
+    require_admin(&account, "reading the instance's record")?;
+    let events = ctx
+        .auth
+        .account_events()
+        .await?
+        .into_iter()
+        .map(account_event_dto)
+        .collect();
+    Ok(Json(AccountEventsDto {
+        locked_at_ms: None,
+        events,
+    }))
 }
 
 // ----------------------------------------------------------------------
