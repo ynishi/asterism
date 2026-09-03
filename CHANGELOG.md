@@ -1082,6 +1082,36 @@ and this project adheres to
 
 ### Changed
 
+- **Handing an asset to a team is set up on the asset** (#219). The detail
+  pane's "Hand to a team" picks its own target — the team, one of its lines, and
+  the work against that line — where before it only read what the shared-lines
+  drawer had open, and refused with a sentence sending the person there. The
+  pickers hold nothing of their own — each writes the shared catalog and reads
+  it back, so there is still one place naming the three ids and the drawer
+  follows: after a promotion it is on that team, that line, that work. A window
+  that remembers its server resumes the session silently when the pane asks, so
+  the drawer need never open; with no session at all, the drawer is still where
+  a connection is made.
+
+  Work is opened on its own press, "Open work for this", rather than as a step
+  of the promotion — an entry point the client's `Promotion` was asked to carry
+  for a caller with none and refused: a pursuit is the record that a person
+  chose to start work, and one opened automatically for a promotion the team
+  then refuses would be a record of a decision nobody made, an orphan no verb
+  takes back without recording a second one. The caller opens work first, or the
+  promotion is refused before anything is sent.
+
+  What holds under it. Naming a team drops the last team's lines, and showing a
+  line drops the last line's states, chain and work, before the next are read
+  rather than when they answer, so nothing on screen offers one line's work
+  against another while a read is in flight; the catalog refuses that pairing
+  besides. And a read that has not answered is not an empty answer: `Resource`
+  now says whether any load has landed since its last reset, every claim the
+  pane draws from a read waits on that read — before it answers the pane shows
+  the id it is on and nothing about it — and the pane offers to open work only
+  once the line's work has been read. The pane asks again whenever the session,
+  the team on or the line on changes, not only when the asset does.
+
 - **The shared-lines drawer gives the line its room** (#217). It is the forge
   drawer's width now, `min(52rem, 96vw)`, and draws the same two columns: a rail
   on the left with who is signed in, the teams this account is in, and — once a
