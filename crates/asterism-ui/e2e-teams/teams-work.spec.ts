@@ -22,8 +22,8 @@
 //
 // # What it walks
 //
-// The line's frame in place of the list, its three tabs, and then the
-// work: open a pursuit, rename the seeded entry, close as satisfied,
+// The line's frame beside the list it was picked from, its three tabs,
+// and then the work: open a pursuit, rename the seeded entry, close as satisfied,
 // and read the new name back off the contents tab. The rename is the
 // operation under test because it is the one this plane can perform
 // end to end — adding content is the promotion, which #198 leaves to
@@ -275,8 +275,17 @@ describe("work against a team's line", () => {
     });
 
     await stage(trail, "name the seeded team", ROUND_TRIP_MS, async () => {
-      await fill(`${DRAWER} form input[type="text"]`, teamId);
-      await clickIn(`${DRAWER} form button[type="submit"]`);
+      // By id, which sits behind a disclosure in the rail (#217): the
+      // account was made for this run and is not a member of the
+      // seeded team, so the list holds nothing to press.
+      // Press the toggle only when the form is not already showing: the
+      // panel outlives one spec, and a press against an open form
+      // closes it.
+      if (!(await $(`${DRAWER} .by-id`).isExisting())) {
+        await clickIn(`${DRAWER} .by-id-toggle`);
+      }
+      await fill(`${DRAWER} .by-id input[type="text"]`, teamId);
+      await clickIn(`${DRAWER} .by-id button[type="submit"]`);
       // Which tab is showing is inherited rather than chosen: the panel
       // is mounted for the window's lifetime, so it is still on
       // whichever tab the last spec left it on — `members`, as it
@@ -292,9 +301,10 @@ describe("work against a team's line", () => {
     });
     await snap("10-work-team-read");
 
-    // Selecting a line replaces the list rather than expanding inside
-    // it, so the way back is what says the frame is open — and the
-    // publish form, which belongs to the list, has to be gone with it.
+    // Selecting a line opens its frame in the body beside the list, so
+    // the way back is what says the frame is open — and the publish
+    // form, which the body holds when no line is, has to be gone with
+    // it.
     await stage(trail, "open the line", ROUND_TRIP_MS, async () => {
       // `.lines` rather than `.drawer-list`: the drawer holds two
       // lists that share the styling since #202 put the teams to pick

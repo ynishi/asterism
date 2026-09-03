@@ -12,11 +12,11 @@
   // `sharedCatalog` and `activeFilter.activePersona` directly, and the
   // App only mounts it.
   //
-  // A team is picked from the ones this account is in, or named in the
-  // field below them. What the picker changed and what it did not is
-  // argued in the catalog's header; what this panel decides is where
-  // the two go — the list first, the field under it, and why the field
-  // is still here at all.
+  // A team is picked from the ones this account is in, or named by id.
+  // What the picker changed and what it did not is argued in the
+  // catalog's header; what this panel decides is where the two go, and
+  // why the id field is still here at all — both under "Two columns"
+  // below and beside the control.
   //
   // What this panel reads from that header is `phase`: there is nobody
   // to ask, there is nobody chosen to ask about, or there is. The three
@@ -29,38 +29,64 @@
   // subject.
   //
   // What this component adds is where everything else goes. The
-  // connection and the team sit *above* the tabs, because they are
-  // what the tabs are answers about. Publishing sits *inside* the
-  // lines tab, because it seeds a line and a line is what that tab is
-  // for. Founding a team sits beside the field, argued where the
-  // control is.
+  // connection and the team are what the tabs are answers about, so
+  // they are picked from before the tabs are read. Publishing sits
+  // *inside* the lines tab, because it seeds a line and a line is what
+  // that tab is for. Founding a team sits with the teams, argued where
+  // the control is.
   //
-  // # A line replaces the list rather than opening beside it
+  // # Two columns, the forge's width (#217)
   //
-  // A list beside a line's own frame is `ForgePanel`'s arrangement,
-  // and `ForgePanel` says in its own header that it is wider than this
-  // drawer for exactly that reason. This one is `min(30rem, 92vw)`, so
-  // the two columns would be two narrow ones. Pressing a line puts its
-  // frame where the list was, and the frame's header carries the way
-  // back. The catalog leaves the choice here rather than making it,
-  // and says so where it draws the frame.
+  // The same shape `ForgePanel` draws, at the same `min(52rem, 96vw)`:
+  // a rail on the left and the thing being read on the right. This
+  // drawer was one column at 30rem, and a line replaced the list when
+  // it opened — which was the trade that width forced, and what it
+  // cost was the line. Everything a person had to pass (the note, the
+  // session, the devices, the teams, the typed id, the founding
+  // button, the team's tabs, the line's header, the line's tabs) stayed
+  // on screen above the line's body, and with a pursuit open the body
+  // began in the bottom tenth.
   //
-  // The cost is that the list is not visible while a line is open, so
-  // moving between two lines is two presses rather than one. That is
-  // the trade the width forces, and it is the same one the entries
-  // list used to make in miniature — before this, a selected line
-  // expanded *inside* its row, which is a third arrangement and the
-  // one that scales worst: the tabs would have opened inside a list
-  // item.
+  // The rail holds what is picked from: who is signed in, the teams,
+  // and — once a team is on — its lines. The body holds what is read
+  // about the pick: the team's three tabs, and inside `lines` either
+  // the open line's frame or the publish form. Typing a team id, which
+  // the instance admin still needs (their list is empty while their
+  // reach is not), sits behind a disclosure in the rail rather than as
+  // a form beside a list that already holds the same rows.
   //
-  // Publishing goes with the list for the same reason. It seeds
-  // another line, which is a thing to do from where the lines are.
+  // Not a component shared with `ForgePanel`, and not the same store
+  // (#148 decision 16, #170 §1): two sources, two panels. What they
+  // share is the shape — and, where the shape is code rather than CSS,
+  // the code: `axes()` reads a change row the same way for both and
+  // lives in `lib/forge-projection.ts`. The shell, the tab strip and
+  // the fold's rows stay as each file's own markup, because a component
+  // for a flex row of two columns or a row of three buttons would carry
+  // less than its props do; #217 asked for those as components, and
+  // this is the departure.
+  //
+  // Two more of #217's asks are not built as written, on purpose. The
+  // signed-in row keeps Disconnect beside it and the devices behind
+  // their own disclosure rather than both behind a menu: a menu hides
+  // the one verb that ends the connection and the list that says which
+  // machines can open one, and a row plus a disclosure is the same
+  // height. And the publish form is not at the rail's foot: it belongs
+  // to the lines tab (below), and a form at the rail's foot would stand
+  // under the roster and the ledger too, offering to seed a line from
+  // tabs that are not about lines.
+  //
+  // Publishing stays with the lines tab. It seeds another line, which
+  // is a thing to do from where the lines are read — and the local line
+  // it seeds from is picked from the forge's own list rather than typed
+  // as an id, since this machine knows every one of them.
+  import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { isDeparture, sharedCatalog } from "./lib/stores/shared.svelte";
+  import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { activeFilter } from "./lib/stores/filter.svelte";
   import { fmtDateTime } from "./lib/formatters";
-  import type { ForgeChangeRowDto } from "./bindings";
+  import { axes } from "./lib/forge-projection";
 
   let baseUrl = $state("http://127.0.0.1:8787");
   let login = $state("");
@@ -110,6 +136,29 @@
   // which is the same reason the ledger's payloads are behind a
   // toggle.
   let devicesOpen = $state(false);
+
+  // Whether the typed-id form is showing (#217). Closed to begin with:
+  // the list above it holds every team this account is in, and the
+  // reader who needs the field — the instance admin, whose list is
+  // empty while their reach is not — opens it once.
+  let byIdOpen = $state(false);
+
+  // The local lines the publish form picks from. Read once, the first
+  // time a team is on, because that is when the form can be shown;
+  // `forgeCatalog` reads the same list when its own drawer opens, and
+  // one more read here costs one call over this machine's store.
+  //
+  // Once, by a flag rather than by looking at what the list holds: a
+  // successful read writes a fresh array to `data` even when it is
+  // empty, and an effect that read `data` to decide would be re-run by
+  // its own answer.
+  let localLinesAsked = false;
+  $effect(() => {
+    if (sharedCatalog.phase !== "ready" || localLinesAsked) return;
+    localLinesAsked = true;
+    if (untrack(() => forgeCatalog.lines.data.length) > 0) return;
+    void forgeCatalog.lines.load();
+  });
 
   // The field is this component's, not the catalog's.
   //
@@ -197,6 +246,10 @@
     // Everything naming a team has to let go of is `lookAt`'s, written
     // once there rather than at each caller.
     await sharedCatalog.lookAt(teamField);
+    // Folded away once it has done its one job: the team it named is
+    // the one being read now, and a form standing open under the list
+    // is what #217 took out of the main path.
+    byIdOpen = false;
     await refreshOpenTab();
   }
 
@@ -331,18 +384,6 @@
     await sharedCatalog.show(lineId);
   }
 
-  /// What a change row moved, phrased from the axes rather than as a
-  /// verb — the reading `ForgePanel` gives its own chain, and for its
-  /// reason: the model stores which axes a row states, and "renamed"
-  /// is a reading of that rather than a kind of row.
-  function axes(row: ForgeChangeRowDto): string {
-    const moved: string[] = [];
-    if (row.existence !== null) moved.push(`existence → ${row.existence}`);
-    if (row.content_asset_id !== null) moved.push("content");
-    if (row.name !== null) moved.push("name");
-    return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
-  }
-
   async function publish(event: Event) {
     event.preventDefault();
     await sharedCatalog.publish(publishLineId, publishName, STRATEGY, reenact);
@@ -383,10 +424,12 @@
       <!-- These lines are on a team's server. They are read from it
            every time this panel opens; none of them is kept. The
            qualifier is #204's: a device token may be on this machine,
-           in the keychain, and it is not one of these lines. -->
-      <p class="drawer-note">
-        Hosted by a team, and read from it. None of the work shown here
-        is stored on this machine — cloning is how you take a copy.
+           in the keychain, and it is not one of these lines. One line
+           under the title rather than a paragraph above everything:
+           it is the drawer's standing, not a step on the way in. -->
+      <p class="drawer-sub">
+        Hosted by a team and read from it — none of the work shown here
+        is stored on this machine; cloning is how you take a copy.
       </p>
 
       {#if sharedCatalog.providerAttempt !== null}
@@ -523,8 +566,15 @@
           {/if}
         </form>
       {:else}
+        <section class="team-plane" aria-label="The team and its lines">
+        <!-- The rail: what is picked from. Its order is the order a
+             person meets things — who they are here, which teams they
+             are in, and which lines the team on has. -->
+        <div class="rail">
         <div class="drawer-session">
-          <span>Signed in as {sharedCatalog.session}</span>
+          <span title={sharedCatalog.session ?? undefined}>
+            Signed in as {sharedCatalog.session}
+          </span>
           <button type="button" onclick={() => sharedCatalog.disconnect()}>
             Disconnect
           </button>
@@ -599,6 +649,7 @@
              not carry it. The role is shown beside each because
              it is the fact a reader chooses on; the creation time is
              what the rows are ordered by and is not drawn. -->
+        <h4 class="rail-head">Teams</h4>
         {#if sharedCatalog.teams.loading}
           <p class="drawer-empty">reading your teams…</p>
         {:else if sharedCatalog.teams.error}
@@ -622,7 +673,7 @@
                     ? "true"
                     : undefined}
                   onclick={() => choose(team.team_id)}
-                  title="Read the lines this team hosts"
+                  title={team.team_id}
                 >
                   <span class="row-title mono">{team.team_id}</span>
                   <span class="row-standing">{team.role}</span>
@@ -640,44 +691,96 @@
           </p>
         {/if}
 
-        <!-- Kept, and demoted. It names a team the list above does not
-             hold, and the reader that has is the instance admin: they
-             act inside teams without a membership row, so their list
-             is empty while their reach is not. Without this the plane
-             would have no entrance for them at all. -->
-        <form class="drawer-form" onsubmit={look}>
-          <label>
-            Or name a team directly
-            <input
-              type="text"
-              bind:value={teamField}
-              placeholder="team id"
-              required
-            />
-          </label>
-          <button type="submit">List its lines</button>
-        </form>
-
-        <!-- Founding a team sits under the list and the field rather
-             than on a tab, because every tab is an answer about the
-             team named above and this is the one act about no team in
-             particular. Shown in every phase with a connection, not
-             only in `no-team`: naming a team is still a one-way trip
-             on this surface — picking a row or submitting the field
-             both name one, and neither has an undo — so an offer that
-             only appeared before the first would be an offer somebody
-             could take exactly once per window. -->
+        <!-- Founding a team sits at the foot of the list rather than on
+             a tab, because every tab is an answer about the team named
+             and this is the one act about no team in particular. Shown
+             in every phase with a connection, not only in `no-team`:
+             naming a team is still a one-way trip on this surface —
+             picking a row or submitting the field both name one, and
+             neither has an undo — so an offer that only appeared before
+             the first would be an offer somebody could take exactly
+             once per window. -->
         <button type="button" class="make-team" onclick={makeTeam}>
           Start a team of your own
         </button>
 
+        <!-- Kept, and folded away. It names a team the list above does
+             not hold, and the reader that has is the instance admin:
+             they act inside teams without a membership row, so their
+             list is empty while their reach is not. Without this the
+             plane would have no entrance for them at all — and with it
+             open beside the list, everybody else read two ways to do
+             one thing (#217). -->
+        <button
+          type="button"
+          class="disclose by-id-toggle"
+          aria-expanded={byIdOpen}
+          onclick={() => (byIdOpen = !byIdOpen)}
+        >
+          {byIdOpen ? "▾" : "▸"} open a team by id
+        </button>
+        {#if byIdOpen}
+          <form class="drawer-form by-id" onsubmit={look}>
+            <label>
+              Team id
+              <input
+                type="text"
+                bind:value={teamField}
+                placeholder="team id"
+                required
+              />
+            </label>
+            <button type="submit">List its lines</button>
+          </form>
+        {/if}
+
+        {#if sharedCatalog.phase === "ready"}
+          <!-- The team's lines, in the rail because they are what the
+               body reads about next. Named `lines` so a selector can
+               name this one; the class has no CSS of its own beyond
+               the marking, and the e2e specs read it. -->
+          <h4 class="rail-head">Lines</h4>
+          {#if sharedCatalog.lines.loading}
+            <p class="drawer-empty">loading…</p>
+          {:else if sharedCatalog.lines.error}
+            <p class="drawer-empty drawer-error">
+              Could not read the team's lines: {sharedCatalog.lines.error}
+            </p>
+          {:else if sharedCatalog.lines.data.length === 0}
+            <p class="drawer-empty">This team hosts no lines.</p>
+          {:else}
+            <ul class="drawer-list lines" role="list">
+              {#each sharedCatalog.lines.data as line (line.id)}
+                <li>
+                  <button
+                    type="button"
+                    class="drawer-row"
+                    class:active={current !== null && current.id === line.id}
+                    aria-current={current !== null && current.id === line.id
+                      ? "true"
+                      : undefined}
+                    onclick={() => openLine(line.id)}
+                    title="Open this line"
+                  >
+                    <span class="row-title">{line.name}</span>
+                    <span class="row-standing">{line.standing}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
+        </div>
+
+        <!-- The body: what is read about the pick. -->
+        <div class="body">
         {#if sharedCatalog.said}
           <p class="drawer-said">{sharedCatalog.said}</p>
         {/if}
 
         {#if sharedCatalog.phase === "no-team"}
           <p class="drawer-empty">
-            Pick a team above, or name one, to see the lines it hosts.
+            Pick a team, or open one by id, to see the lines it hosts.
           </p>
         {:else}
           <nav class="drawer-tabs" aria-label="What to read about this team">
@@ -700,12 +803,12 @@
         {/if}
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
-          <!-- The lines list is what this chain renders, and this arm
+          <!-- The line's frame is what this chain renders, and this arm
                is what keeps it off the other tabs. The publish form
                below carries its own condition. -->
         {:else if current !== null}
-          <!-- A line, in place of the list rather than beside it,
-               argued in this component's header.
+          <!-- A line, beside the list it was picked from, argued in
+               this component's header.
 
                The three tabs are the forge's three answers about one
                line, which decision 19 makes the same three here — a
@@ -715,10 +818,11 @@
                member's client carries no thread verbs, which the
                catalog's header records. -->
           <header class="line-head">
-            <!-- Back to the list. What letting go of a line ends is
-                 the catalog's, written once there: the work open under
-                 it goes too, because a piece of work belongs to the
-                 line it is against. -->
+            <!-- Lets go of the line; the list beside it never left.
+                 What letting go of a line ends is the catalog's,
+                 written once there: the work open under it goes too,
+                 because a piece of work belongs to the line it is
+                 against. -->
             <button
               type="button"
               class="back"
@@ -852,60 +956,51 @@
               genesis · {fmtDateTime(sharedCatalog.history.data.genesis_at_ms)}
             </p>
           {/if}
-        {:else if sharedCatalog.lines.loading}
-          <p class="drawer-empty">loading…</p>
-        {:else if sharedCatalog.lines.error}
-          <p class="drawer-empty drawer-error">
-            Could not read the team's lines: {sharedCatalog.lines.error}
+        {:else if sharedCatalog.lines.data.length > 0}
+          <!-- The list is in the rail; this is the body with nothing
+               picked from it yet. -->
+          <p class="drawer-empty">
+            Pick a line on the left to read what is on it, the work
+            against it, and its history.
           </p>
-        {:else if sharedCatalog.lines.data.length === 0}
-          <p class="drawer-empty">This team hosts no lines.</p>
-        {:else}
-          <!-- Named `lines` so a selector can name this one. Every
-               list in this drawer carries `drawer-list` for the
-               styling and a modifier for the naming — the roster and
-               the ledger already did, and the teams above made the
-               difference matter for the lines too. The class has no
-               CSS of its own; the e2e specs are what read it. -->
-          <ul class="drawer-list lines" role="list">
-            {#each sharedCatalog.lines.data as line (line.id)}
-              <li>
-                <button
-                  type="button"
-                  class="drawer-row"
-                  onclick={() => openLine(line.id)}
-                  title="Open this line"
-                >
-                  <span class="row-title">{line.name}</span>
-                  <span class="row-standing">{line.standing}</span>
-                </button>
-              </li>
-            {/each}
-          </ul>
         {/if}
 
         <!-- Publishing. The re-enactment is chosen here or never:
              a line seeded with its current state cannot be given its
              history afterwards.
 
-             Behind `ready` for the same reason the list above is: it
-             seeds a line on the team in the field, and with no team
-             named it would be offering to publish to nobody. It goes
-             with the list when a line is open, because it is one of
-             the things the list is for: seeding another line is a
-             thing to do from where the lines are, and this drawer
-             shows one place at a time. -->
+             Behind `ready` for the same reason the lines list is: it
+             seeds a line on the team that is on, and with no team
+             named it would be offering to publish to nobody. It gives
+             way when a line is open, because the body holds one thing
+             at a time — the line's frame, or this — and seeding
+             another line is a thing to do from the tab the lines are
+             read on. -->
         {#if sharedCatalog.phase === "ready" && tab === "lines" && current === null}
           <form class="drawer-form drawer-publish" onsubmit={publish}>
             <h4>Publish a line of mine</h4>
+            <!-- Picked from this machine's lines rather than typed as
+                 an id (#217): the forge knows every one of them. The
+                 typed field stays for the case the list is empty or
+                 unread, because a line that exists and is not listed
+                 should still be publishable. -->
             <label>
               Local line
-              <input
-                type="text"
-                bind:value={publishLineId}
-                placeholder="line id"
-                required
-              />
+              {#if forgeCatalog.lines.data.length > 0}
+                <select bind:value={publishLineId} required>
+                  <option value="" disabled>choose…</option>
+                  {#each forgeCatalog.lines.data as line (line.id)}
+                    <option value={line.id}>{line.name} · {line.standing}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input
+                  type="text"
+                  bind:value={publishLineId}
+                  placeholder="line id"
+                  required
+                />
+              {/if}
             </label>
             <label>
               Call it
@@ -1176,6 +1271,8 @@
             {/if}
           </div>
         {/if}
+        </div>
+        </section>
       {/if}
     </div>
   </div>
@@ -1195,7 +1292,9 @@
     top: 0;
     right: 0;
     height: 100%;
-    width: min(30rem, 92vw);
+    /* The forge's width, for the forge's reason: two columns, and the
+       lists stay in view while a line is read (#217). */
+    width: min(52rem, 96vw);
     overflow-y: auto;
     background: var(--panel-bg, #1b1b1e);
     color: var(--panel-fg, #e8e8ea);
@@ -1225,6 +1324,52 @@
     font-size: 0.78rem;
     opacity: 0.72;
     line-height: 1.45;
+  }
+  .drawer-sub {
+    font-size: 0.74rem;
+    opacity: 0.6;
+    margin: 0.1rem 0 0.9rem;
+  }
+  .team-plane {
+    display: flex;
+    gap: 1.2rem;
+    align-items: flex-start;
+  }
+  .rail {
+    flex: 0 0 15rem;
+    min-width: 0;
+  }
+  .body {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .rail-head {
+    margin: 1rem 0 0.2rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+  .rail .drawer-form {
+    margin: 0.4rem 0 0.6rem;
+  }
+  .disclose {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.74rem;
+    opacity: 0.6;
+    padding: 0.4rem 0 0.1rem;
+    text-align: left;
+  }
+  .disclose:hover {
+    opacity: 1;
+  }
+  .lines .drawer-row.active {
+    font-weight: 600;
+  }
+  .body > .drawer-tabs {
+    margin-top: 0;
   }
   .drawer-said {
     font-size: 0.8rem;
@@ -1265,6 +1410,14 @@
     font-size: 0.78rem;
     opacity: 0.85;
   }
+  /* One row in the rail. The id is long and the rail is not, so the
+     whole of it is on the title. */
+  .drawer-session span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .drawer-empty {
     font-size: 0.8rem;
     opacity: 0.7;
@@ -1298,8 +1451,9 @@
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
-    font-size: 0.78rem;
-    padding: 0.35rem 0.6rem;
+    font-size: 0.74rem;
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.55rem;
   }
   .roster .member {
     display: flex;
@@ -1461,11 +1615,16 @@
   .teams .drawer-row.active {
     font-weight: 600;
   }
+  /* One line, cut at the right edge: a team id drawn in a 15rem rail
+     would otherwise break at its hyphens. The whole id is the row's
+     title. */
   .mono {
     font-family: ui-monospace, monospace;
     font-size: 0.72rem;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .line-head {
     display: flex;

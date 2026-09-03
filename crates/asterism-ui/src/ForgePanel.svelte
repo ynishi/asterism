@@ -11,10 +11,11 @@
   // — the arrangement `SharedLinesPanel` has, and the list of reads is
   // the same shape, so a reader who knows one knows this.
   //
-  // A drawer, and wider than that one. The forge answers several
-  // questions about a line at once, and the list of lines has to stay
-  // in view while any of them is read or selecting becomes a round
-  // trip. A single-column drawer has no room for both.
+  // A drawer, two columns wide. The forge answers several questions
+  // about a line at once, and the list of lines has to stay in view
+  // while any of them is read or selecting becomes a round trip. A
+  // single-column drawer has no room for both — which is why the
+  // team's drawer took this width and this shape too (#217).
   //
   // Tabs rather than panels. Contents, work and history are answers
   // about one line from one place, and a person moving between them is
@@ -50,7 +51,8 @@
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
-  import type { ForgeChangeRowDto, ForgeLineDto } from "./bindings";
+  import type { ForgeLineDto } from "./bindings";
+  import { axes } from "./lib/forge-projection";
 
   let tab = $state<"contents" | "work" | "history">("contents");
   let showOffTheLine = $state(false);
@@ -196,28 +198,6 @@
     return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
 
-  // What a row moved, phrased from the axes it states.
-  //
-  // The model stores three optional axes rather than a verb, and the
-  // familiar verbs are readings of particular combinations — `Row`'s
-  // own doc names four of them. This says what moved rather than
-  // guessing at which verb a person meant: a row touching name alone
-  // is a rename, one touching existence alone is a revival, and one
-  // touching two is neither of those words.
-  function axes(row: ForgeChangeRowDto): string {
-    const moved: string[] = [];
-    // The axis, and what it moved to. The other two say only that they
-    // moved: an asset id and a name are the values themselves, and a
-    // reader wanting them has the row beside this. Existence is the one
-    // whose value is a word — `present` / `absent` — so naming the axis
-    // without it would drop the half that says which way it went.
-    if (row.existence !== null) moved.push(`existence → ${row.existence}`);
-    if (row.content_asset_id !== null) moved.push("content");
-    if (row.name !== null) moved.push("name");
-    // `Row::new` refuses a row that states no axis, so this is
-    // unreachable — said rather than left as an empty cell.
-    return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
-  }
 </script>
 
 <!-- One tile, two lists. What is on the line and what it let go are
@@ -659,8 +639,9 @@
     top: 0;
     right: 0;
     height: 100%;
-    /* Wider than the team's 30rem: two columns, and the list of lines
-       stays in view while a line is read. */
+    /* Two columns, and the list of lines stays in view while a line is
+       read. The team's drawer draws the same width for the same reason
+       (#217). */
     width: min(52rem, 96vw);
     overflow-y: auto;
     background: var(--panel-bg, #1b1b1e);

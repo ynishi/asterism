@@ -293,7 +293,7 @@ describe("the team plane", () => {
             "kinds of empty are merged again (#190)",
         );
       }
-      if (!text.includes("Pick a team above")) {
+      if (!text.includes("Pick a team")) {
         throw new Error(`the drawer did not ask for a team; it read: ${text}`);
       }
       if (text.includes("Publish a line of mine")) {

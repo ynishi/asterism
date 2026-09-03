@@ -464,8 +464,12 @@ describe("the roster's writes", () => {
       "name the team it was invited to",
       ROUND_TRIP_MS,
       async () => {
-        await fill(`${DRAWER} form input[type="text"]`, leaveTeamId);
-        await clickIn(`${DRAWER} form button[type="submit"]`);
+        // By id, behind its disclosure in the rail (#217).
+        if (!(await $(`${DRAWER} .by-id`).isExisting())) {
+          await clickIn(`${DRAWER} .by-id-toggle`);
+        }
+        await fill(`${DRAWER} .by-id input[type="text"]`, leaveTeamId);
+        await clickIn(`${DRAWER} .by-id button[type="submit"]`);
         await clickTab("members");
         await pollUntil(
           async () => ((await drawerText()) ?? "").includes("· you"),
