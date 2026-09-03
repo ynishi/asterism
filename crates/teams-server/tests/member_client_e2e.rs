@@ -951,6 +951,191 @@ async fn a_push_without_projections_captures_nothing() {
 }
 
 // ----------------------------------------------------------------------
+// What a piece of work collides with, and how far behind it is (#211).
+// ----------------------------------------------------------------------
+
+/// The scenario `asterism-server`'s own
+/// `two_pieces_of_work_collide_and_the_rule_settles_it_over_http` walks
+/// for the local plane, over the member's client: two pieces of work
+/// cut from the same line, both replacing one entry, one lands and the
+/// other reads back what it now collides with and how far behind it
+/// is. Mirrored path for path (decision 19), so the shape is the same
+/// answer.
+#[tokio::test]
+async fn a_shared_pursuit_reads_what_it_collides_with_and_how_far_behind_it_is() {
+    let h = harness().await;
+    let (_alice, client) = member(&h, "alice").await;
+    let team =
+        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let line = TeamScopedId::parse(
+        &client
+            .open_line(team, "over the client", MAINLINE)
+            .await
+            .unwrap()
+            .id,
+        "line id",
+    )
+    .unwrap();
+
+    /// Opens a pursuit, enters one content and pushes one round naming
+    /// it — `add` with a name for the first entry onto a line, `replace`
+    /// with none for what disputes an entry already there, on the same
+    /// vocabulary `forge_pursuits_routes_e2e.rs`'s own `add`/`replace`
+    /// use — a `replace` beside an `add` is the shape that collides on
+    /// `content` alone rather than on both axes.
+    async fn enter_one(
+        client: &TeamsClient,
+        team: TeamScopedId,
+        line: TeamScopedId,
+        title: &str,
+        bytes: &[u8],
+        op: asterism_contract::forge::ForgeOpDto,
+    ) -> TeamScopedId {
+        let pursuit = TeamScopedId::parse(
+            &client
+                .open_pursuit(team, line, Some(title), None)
+                .await
+                .unwrap()
+                .id,
+            "pursuit id",
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("m.bin");
+        std::fs::write(&path, bytes).unwrap();
+        let digest = {
+            use asterism_contract::digest::ContentHasher;
+            let mut hasher = ContentHasher::new();
+            hasher.update(bytes);
+            hasher.finish()
+        };
+        let entered = client
+            .enter_content(team, pursuit, &digest, &path)
+            .await
+            .unwrap();
+        client
+            .push_round(
+                team,
+                pursuit,
+                vec![asterism_contract::forge::ForgeOpDto {
+                    content_asset_id: Some(entered.asset_id),
+                    ..op
+                }],
+                None,
+                Vec::new(),
+            )
+            .await
+            .unwrap();
+        pursuit
+    }
+
+    use asterism_contract::forge::ForgeOpDto;
+    let entry = TeamScopedId::new();
+
+    // Something has to be on the line before two pieces of work can
+    // disagree about it.
+    let first = enter_one(
+        &client,
+        team,
+        line,
+        "put it there",
+        b"the first",
+        ForgeOpDto {
+            entry_id: entry.to_string(),
+            kind: "add".to_string(),
+            content_asset_id: None,
+            name: Some("cut-01".to_string()),
+        },
+    )
+    .await;
+    client
+        .close_pursuit(team, first, "satisfied", None)
+        .await
+        .unwrap();
+
+    // Two pieces of work, both replacing what is now on the line —
+    // content alone, so the axis they collide on is unambiguous.
+    let mine = enter_one(
+        &client,
+        team,
+        line,
+        "mine",
+        b"my version",
+        ForgeOpDto {
+            entry_id: entry.to_string(),
+            kind: "replace".to_string(),
+            content_asset_id: None,
+            name: None,
+        },
+    )
+    .await;
+    let theirs = enter_one(
+        &client,
+        team,
+        line,
+        "theirs",
+        b"their version",
+        ForgeOpDto {
+            entry_id: entry.to_string(),
+            kind: "replace".to_string(),
+            content_asset_id: None,
+            name: None,
+        },
+    )
+    .await;
+
+    // Nothing collides yet: the line has not moved under either.
+    assert!(
+        client
+            .pursuit_collisions(team, mine)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(client.pursuit_behind(team, mine).await.unwrap().is_empty());
+
+    // Theirs lands.
+    client
+        .close_pursuit(team, theirs, "satisfied", None)
+        .await
+        .unwrap();
+
+    let behind = client.pursuit_behind(team, mine).await.unwrap();
+    assert_eq!(
+        behind.len(),
+        1,
+        "one landing this work has not seen: {behind:?}"
+    );
+
+    let collisions = client.pursuit_collisions(team, mine).await.unwrap();
+    assert_eq!(collisions.len(), 1, "{collisions:#?}");
+    assert_eq!(collisions[0].entry_id, entry.to_string());
+    assert_eq!(collisions[0].axis, "content");
+
+    // Closing now is refused, and as a conflict a screen can act on —
+    // the same read the local plane gets for the same situation
+    // (`asterism-server`'s own test walks the same shape and refuses
+    // here too, before the collision is resolved). What matters for
+    // this issue is that the reason crosses at all: `teams_error` in
+    // `asterism-ui` now keeps it rather than dropping it under `..`.
+    let refused = client
+        .close_pursuit(team, mine, "satisfied", None)
+        .await
+        .expect_err("the collision is still there to be resolved");
+    match refused {
+        TeamsClientError::Refused { status, reason, .. } => {
+            assert_eq!(status, 409);
+            let token = reason.as_deref().expect("a conflict carries a reason");
+            assert!(
+                asterism_core::error::ConflictKind::from_token(token).is_some(),
+                "not one of the four tokens both planes agree on: {token}"
+            );
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+// ----------------------------------------------------------------------
 // The roster writes, over the client (#210).
 // ----------------------------------------------------------------------
 

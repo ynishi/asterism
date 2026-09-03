@@ -178,6 +178,30 @@ impl ConflictKind {
             Self::Clashes => "clashes",
         }
     }
+
+    /// The kind a token names, or nothing.
+    ///
+    /// [`Self::as_str`]'s inverse, for a caller that read the token off
+    /// a wire rather than from this type directly — a team's client
+    /// reads a refusal's `reason` as a plain string (#211) and has
+    /// nothing else to check it against. Kept beside `as_str` so the
+    /// four tokens are spelled in one place and the two directions
+    /// cannot drift apart.
+    ///
+    /// Named `from_token` rather than `from_str`: the latter reads as
+    /// `std::str::FromStr`, whose `Result<Self, Self::Err>` would need
+    /// an error type this has no use for — every unrecognized token
+    /// answers the same way a recognized one's absence would, with
+    /// nothing.
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "raced" => Some(Self::Raced),
+            "blocked" => Some(Self::Blocked),
+            "settled" => Some(Self::Settled),
+            "clashes" => Some(Self::Clashes),
+            _ => None,
+        }
+    }
 }
 
 impl DomainError {
@@ -258,6 +282,23 @@ impl DomainError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `from_token` undoes `as_str`, for every token. A token that is
+    /// not one of the four answers nothing, honestly, rather than
+    /// being guessed at.
+    #[test]
+    fn from_token_is_as_str_backwards() {
+        for kind in [
+            ConflictKind::Raced,
+            ConflictKind::Blocked,
+            ConflictKind::Settled,
+            ConflictKind::Clashes,
+        ] {
+            assert_eq!(ConflictKind::from_token(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ConflictKind::from_token("unheard-of"), None);
+        assert_eq!(ConflictKind::from_token(""), None);
+    }
 
     /// Every refusal that carries retry advice, and every one that
     /// does not.

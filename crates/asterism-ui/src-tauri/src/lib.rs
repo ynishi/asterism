@@ -465,6 +465,8 @@ pub fn run() {
             commands::shared_line_history,
             commands::shared_line_pursuits,
             commands::shared_pursuit,
+            commands::shared_pursuit_collisions,
+            commands::shared_pursuit_behind,
             commands::open_shared_pursuit,
             commands::push_shared_round,
             commands::close_shared_pursuit,

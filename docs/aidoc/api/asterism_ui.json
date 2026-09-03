@@ -988,6 +988,16 @@
       "docs": "One piece of work on a shared line, as it stands."
     },
     {
+      "path": "asterism_ui::commands::shared_pursuit_behind",
+      "kind": "function",
+      "docs": "The landings a piece of shared work has not seen, oldest first\n(#211, mirroring [`get_forge_pursuit_behind`])."
+    },
+    {
+      "path": "asterism_ui::commands::shared_pursuit_collisions",
+      "kind": "function",
+      "docs": "What a piece of shared work still asks for that the line has moved\nsince (#211, mirroring [`get_forge_pursuit_collisions`]).\n\nNo mapping, for the reason [`shared_line_pursuits`] gives: decision\n19 mirrors the forge path for path, so a shared collision is the\ncontract's own `ForgeCollisionDto`."
+    },
+    {
       "path": "asterism_ui::commands::snapshot_members",
       "kind": "function",
       "docs": "Snapshot view members (`snapshot_members`): renderable cards\nin frozen `position` order (later-deleted assets are absent)."
