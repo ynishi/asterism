@@ -492,8 +492,12 @@ describe("promoting an asset to a team", () => {
           ROUND_TRIP_MS,
         );
       }
-      await fill(`${DRAWER} form input[type="text"]`, teamId);
-      await clickIn(`${DRAWER} form button[type="submit"]`);
+      // By id, behind its disclosure in the rail (#217).
+      if (!(await $(`${DRAWER} .by-id`).isExisting())) {
+        await clickIn(`${DRAWER} .by-id-toggle`);
+      }
+      await fill(`${DRAWER} .by-id input[type="text"]`, teamId);
+      await clickIn(`${DRAWER} .by-id button[type="submit"]`);
       await clickLabelled(TEAM_TABS, "lines");
       await pollUntil(
         async () => ((await textOf(DRAWER)) ?? "").includes(lineName),

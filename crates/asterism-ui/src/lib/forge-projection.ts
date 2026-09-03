@@ -15,7 +15,38 @@
 // fold would be the drift the separation is not asking for: every rule
 // below is one the model gets right and a screen has to predict, and
 // two predictions of one rule diverge on the case nobody tested.
-import type { ForgeEntryStateDto, ForgeRoundDto } from "../bindings";
+import type {
+  ForgeChangeRowDto,
+  ForgeEntryStateDto,
+  ForgeRoundDto,
+} from "../bindings";
+
+/// What a change row moved, phrased from the axes it states.
+///
+/// The model stores three optional axes rather than a verb, and the
+/// familiar verbs are readings of particular combinations — `Row`'s
+/// own doc names four of them. This says what moved rather than
+/// guessing at which verb a person meant: a row touching name alone is
+/// a rename, one touching existence alone is a revival, and one
+/// touching two is neither of those words.
+///
+/// Here rather than in either panel for the reason the fold below is:
+/// both planes draw a change chain, the rows are the same DTO, and two
+/// readings of one row would diverge on the case nobody tested (#217).
+export function axes(row: ForgeChangeRowDto): string {
+  const moved: string[] = [];
+  // The axis, and what it moved to. The other two say only that they
+  // moved: an asset id and a name are the values themselves, and a
+  // reader wanting them has the row beside this. Existence is the one
+  // whose value is a word — `present` / `absent` — so naming the axis
+  // without it would drop the half that says which way it went.
+  if (row.existence !== null) moved.push(`existence → ${row.existence}`);
+  if (row.content_asset_id !== null) moved.push("content");
+  if (row.name !== null) moved.push("name");
+  // `Row::new` refuses a row that states no axis, so this is
+  // unreachable — said rather than left as an empty cell.
+  return moved.length > 0 ? moved.join(" · ") : "(states nothing)";
+}
 
 /// One entry as a satisfied close would leave it.
 export interface ForgeProjectedEntry {

@@ -80,9 +80,11 @@
 // not, and whether they should is a question for whichever child wants
 // one rather than something this frame has already answered.
 //
-// The frame, with a line open:
+// The frame, with a line open — the part of the drawer that reads
+// about the pick; who is signed in, the teams and the lines are picked
+// from beside it, and the panel draws where:
 //
-//   ┌─ team ── ▾ studio ───────────────── signed in as ytk ─────────┐
+//   ┌───────────────────────────────────────────────────────────────┐
 //   │ lines │ members │ ledger                                      │
 //   │ ───────────────────────────────────────────────────────────── │
 //   │ ← the team's lines   ROOT   open                              │
@@ -92,10 +94,10 @@
 //   │ key visual                                          [ Clone ] │
 //   └───────────────────────────────────────────────────────────────┘
 //
-// The list is not beside it: whether the two share the width or take
-// turns is the panel's to decide, and its header decides it — this
-// drawer is narrow, so a line takes the place of the list and the
-// header carries the way back.
+// Whether the list sits beside it or the two take turns is the panel's
+// to decide, and its header decides it. The header's "← the team's
+// lines" lets go of the line, which is the catalog's `closeLine`
+// either way.
 //
 // Which of the three leads is a choice rather than a consequence.
 // Lines lead because a team is joined in order to work with what it
