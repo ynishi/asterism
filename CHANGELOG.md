@@ -1082,6 +1082,19 @@ and this project adheres to
 
 ### Changed
 
+- **The shared-lines drawer gives the line its room** (#217). It is the forge
+  drawer's width now, `min(52rem, 96vw)`, and draws the same two columns: a rail
+  on the left with who is signed in, the teams this account is in, and — once a
+  team is on — its lines; the body on the right with the team's three tabs, and
+  inside `lines` either the open line's frame or the publish form. Before this
+  the drawer was one column at 30rem, and everything a person had to pass stayed
+  on screen above the line, so with a pursuit open the work began in the bottom
+  tenth. The typed team id, which the instance admin still needs, sits behind
+  "open a team by id" in the rail and folds away once it has named one; the
+  publish form picks the local line from this machine's own list, read through
+  the forge's store, and asks for an id only when that list is empty. Two panels
+  and two stores still (#148 decision 16) — what they share is the shape.
+
 - **A `CLAUDE*.md` is ignored wherever it sits, and so is a nested `.claude/`.**
   The ignore list named the root `CLAUDE.md`, which is not where the risk lives.
   Claude Code reads a `CLAUDE.md` or a `CLAUDE.local.md` from the directory it
