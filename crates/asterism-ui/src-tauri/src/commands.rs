@@ -4431,7 +4431,8 @@ impl asterism_teams_client::clone::Imports for LocalLibrary<'_> {
 ///
 /// The act #66 exists for, and the one entry point content has (#148
 /// decision 5): the pursuit is named because a team never holds an
-/// asset that is not attached to work.
+/// asset that is not attached to work — and it is the caller's to have
+/// opened, for the reason `Promotion::pursuit_id` gives.
 ///
 /// **What travels is decision 4's and is decided below this command**,
 /// in `PromotedMark::gather`, which is the only thing that can say

@@ -117,9 +117,11 @@
 //
 // `phase` is where they are told apart, and it is the frame's own
 // state rather than a per-resource one. Each resource already knows
-// whether it is loading and whether it failed; what none of them can
-// know is whether there is a server behind it at all, because that is
-// a fact about the connection rather than about any read. A screen
+// whether it is loading, whether it failed, and — since #219 — whether
+// any load has answered since its last reset, which is the first kind
+// of empty told apart at the read itself; what none of them can know
+// is whether there is a server behind it at all, because that is a
+// fact about the connection rather than about any read. A screen
 // deriving it from `lines.data.length` would be reading the answer to
 // a question nobody asked.
 //
@@ -196,11 +198,15 @@
 // is not showing it. The asset detail pane is where it belongs, which
 // is #171's own answer.
 //
-// What the model adds is that it cannot be started from there either
-// without work already open: decision 5 gives content exactly one
-// entry point, a verb scoped to an open pursuit, so that the team
-// never holds an Asset that is not attached to work. Which pursuit,
-// and what the detail pane does when there is none, is that surface's
+// What the model adds is that it lands on open work: decision 5 gives
+// content exactly one entry point, a verb scoped to an open pursuit,
+// so that the team never holds an Asset that is not attached to work.
+// The pane does not open one on a caller's behalf (#219) — a pursuit
+// is the record that a person chose to start work, and `Promotion`'s
+// own doc, on the client, says why opening one as a step of a
+// promotion the team might still refuse is not that. So opening work
+// for an entry is its own press on the pane, before the promotion.
+// Which pursuit, and what the detail pane offers, is that surface's
 // to decide and belongs in its header. What belongs here is that the
 // open pursuit is a read over the member's client, and like the
 // roster's and the ledger's it arrives with the child that needs it.
@@ -585,6 +591,13 @@ class SharedCatalog {
   closeLine(): void {
     this.selected = null;
     this.clearWork();
+    // And what was read for it, on the rule `show` states: the line
+    // is the subject of these three, and a subject let go of takes
+    // its reads with it rather than leaving them answered for a line
+    // nothing is on.
+    this.states.reset();
+    this.history.reset();
+    this.pursuits.reset();
   }
 
   /// What is on the line, and only what is on it. An entry the line
@@ -609,9 +622,9 @@ class SharedCatalog {
   ///
   /// The frame reads this rather than reading a resource, because the
   /// two kinds of empty a served-through view has are not a resource's
-  /// to tell apart — a `Resource` knows whether it is loading and
-  /// whether it failed, and neither answers whether there is a server
-  /// behind it. See the header.
+  /// to tell apart — a `Resource` knows whether it is loading, whether
+  /// it failed and whether it has answered, and none of those answers
+  /// whether there is a server behind it. See the header.
   ///
   /// `no-team` is where a window begins: the field starts empty, so a
   /// window that has just connected is in it until somebody names a
@@ -656,6 +669,35 @@ class SharedCatalog {
 
   closePanel(): void {
     this.open = false;
+  }
+
+  /// What the asset pane needs before it can offer a target (#219): a
+  /// session — the one this window has, or the one this machine
+  /// remembers, tried silently as opening the drawer would, short of
+  /// the one difference below — and the teams, the lines of the team
+  /// that is on, and the work against the line that is on.
+  ///
+  /// The lists are read every time, on the rule the drawer opens under
+  /// (decision 16): a served-through view that showed what it last had
+  /// would be a mirror, and an empty list is an answer rather than an
+  /// absence of one. What is not repeated is the silent sign-in: a
+  /// window that has a session keeps it, and one whose stored sign-in
+  /// was refused is not made to hear the refusal again per asset —
+  /// `storedRejected` is the field that already holds that.
+  async readyForPromotion(): Promise<void> {
+    if (this.session === null) await this.refreshSession();
+    if (this.session === null && !this.storedRejected) await this.resume();
+    if (this.session === null) return;
+    await this.teams.load({});
+    if (this.phase !== "ready") return;
+    const teamId = this.teamId;
+    const lineId = this.selected;
+    await Promise.all([
+      this.lines.load({ teamId }),
+      lineId === null
+        ? Promise.resolve(true)
+        : this.pursuits.load({ teamId, lineId }),
+    ]);
   }
 
   async refreshSession(): Promise<void> {
@@ -1183,6 +1225,14 @@ class SharedCatalog {
     this.history.reset();
     this.roster.reset();
     this.pursuits.reset();
+    // The list of lines too, and before the read rather than when it
+    // answers: naming a team changes what the list is about, and a
+    // list kept from the team before would answer — and read as
+    // answered — for a team it was never asked about (#219). The rule
+    // is the same for every read under a subject: whoever changes the
+    // subject resets what was read for the last one, so `answered`
+    // means "answered for what is on now" everywhere it is read.
+    this.lines.reset();
     await this.lines.load({ teamId });
   }
 
@@ -1191,6 +1241,17 @@ class SharedCatalog {
     // A piece of work belongs to the line it is against, so opening
     // another line ends whatever was open under the last one.
     this.working = null;
+    // And what was read about the last one goes before the next is
+    // read, not when it answers. `Resource.load` keeps the previous
+    // answer until the new one lands, which is right for a list being
+    // refreshed and wrong for a list whose subject changed: between
+    // the two, `selected` named one line while the states, the chain
+    // and the work under it were another's — and a picker built from
+    // that list offered another line's work against this one (#219).
+    // `lookAt` clears the same way for the same reason, one level up.
+    this.states.reset();
+    this.history.reset();
+    this.pursuits.reset();
     await Promise.all([
       this.states.load({ teamId: this.teamId, lineId }),
       this.history.load({ teamId: this.teamId, lineId }),
@@ -1296,8 +1357,9 @@ class SharedCatalog {
   /// whether the work is still open, so a promotion onto ended work
   /// sends the whole file and is told afterwards. This refuses here,
   /// where nothing has been read off disk yet.
-  /// Two refusals rather than one, because "not in the list" and
-  /// "ended" are different facts. The first is what a failed re-read
+  /// Separate refusals rather than one, because "not in the list",
+  /// "against another line" and "ended" are different facts. The
+  /// first is what a failed re-read
   /// leaves — `Resource` puts its data back to the initial and the
   /// reason on `.error` — and not what one in flight leaves, which
   /// keeps the previous list until it resolves.
@@ -1306,7 +1368,7 @@ class SharedCatalog {
   /// nobody.** They throw before `mutate` is called, and `mutate` is
   /// the only thing that puts a refusal in front of a person. That is
   /// the arrangement rather than a gap: a screen offers this verb only
-  /// when it has a line, work, and work that has not ended, so a guard
+  /// when it has a line and open work that has not ended, so a guard
   /// firing means a caller skipped what the screen checks. The message
   /// is for whoever is reading the stack, and the tests assert which
   /// of them fired.
@@ -1315,6 +1377,15 @@ class SharedCatalog {
     const work = this.work;
     if (work === null) {
       throw new Error("the work being read is not in this line's list");
+    }
+    // The list is reset when the line changes, so this cannot fire
+    // from the catalog's own reads. It is the invariant said in one
+    // more place than the reset, for the caller that sets `working`
+    // by hand: content against work on one line, recorded at home
+    // against another, is a link row naming a line the entry never
+    // reached.
+    if (work.line_id !== this.selected) {
+      throw new Error("that work is against another line");
     }
     if (work.close !== null) {
       throw new Error("that work has ended, so nothing can enter against it");
@@ -1326,11 +1397,15 @@ class SharedCatalog {
   /// work.
   ///
   /// The verb the detail pane reaches for, and it is here rather than
-  /// there because the three ids it needs are this catalog's: the
-  /// team, the line, and the pursuit content may enter against (#148
-  /// decision 5). A pane holding its own copies of those would be a
-  /// second answer to a question this frame already answers, and the
-  /// place they could disagree.
+  /// there because the ids it needs are this catalog's: the team, the
+  /// line, and the pursuit content may enter against (#148 decision
+  /// 5). A pane holding its own copies of those would be a second
+  /// answer to a question this frame already answers, and the place
+  /// they could disagree. The work has to be open already —
+  /// `Promotion::pursuit_id` on the client says why this does not
+  /// open one for a caller with none: a pursuit is a decision to start
+  /// work, and one opened as a step of a promotion the team then
+  /// refuses is a record of a decision nobody made.
   ///
   /// What comes back is what only the promotion knows. The work is
   /// re-read here rather than taken from what the write answered, on

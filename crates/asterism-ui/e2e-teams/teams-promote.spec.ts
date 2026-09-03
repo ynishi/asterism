@@ -42,7 +42,7 @@
 //
 // # What it walks
 //
-// Open work on the team's line, then leave the drawer for the grid:
+// Name the team in the drawer, then leave it for the grid:
 // promoting is an act about an asset, and the pane showing that asset
 // is where the verb sits (#171). What it checks at the end is that the
 // round reached the work — read back through the drawer, not from what
@@ -225,25 +225,6 @@ async function clickLabelled(container: string, label: string): Promise<void> {
     label,
   );
   if (!hit) throw new Error(`nothing in ${container} reads "${label}"`);
-}
-
-/** Presses the first control inside `container` carrying `text`. */
-async function clickCarrying(container: string, text: string): Promise<void> {
-  const hit = await browser.execute(
-    (sel: string, want: string) => {
-      const scope = document.querySelector(sel);
-      if (scope === null) return false;
-      const button = Array.from(scope.querySelectorAll("button")).find(
-        (candidate) => (candidate.textContent ?? "").includes(want),
-      );
-      if (button === undefined) return false;
-      (button as HTMLElement).click();
-      return true;
-    },
-    container,
-    text,
-  );
-  if (!hit) throw new Error(`nothing in ${container} carries "${text}"`);
 }
 
 /** Types into a field the way a person does — see the sibling specs. */
@@ -506,33 +487,9 @@ describe("promoting an asset to a team", () => {
       );
     });
 
-    // Work first, because content enters against open work and nothing
-    // else — #148 decision 5, and the reason the pane refuses when
-    // there is none.
-    await stage(trail, "open work on the line", ROUND_TRIP_MS, async () => {
-      // `.lines` rather than `.drawer-list`: two lists share that
-      // class since #202, and the looser selector finds the teams.
-      await clickCarrying(`${DRAWER} .drawer-list.lines`, lineName);
-      await pollUntil(
-        async () => ((await textOf(DRAWER)) ?? "").includes("the team's lines"),
-        "opening a line did not show its frame",
-        ROUND_TRIP_MS,
-      );
-      await clickLabelled(LINE_TABS, "work");
-      await fill(`${DRAWER} .new-work input[type="text"]`, "take this one");
-      await clickLabelled(`${DRAWER} .new-work`, "Open");
-      await pollUntil(
-        async () =>
-          ((await textOf(DRAWER)) ?? "").includes("The line, as this would leave it"),
-        "opening work did not land on the work itself",
-        ROUND_TRIP_MS,
-      );
-    });
-    await snap("21-work-open");
-
-    // Out of the drawer and onto the asset. The drawer holds the three
-    // ids while it is closed, which is what lets the pane promote to
-    // work opened here.
+    // No work is opened here (#219): the pane picks the line and opens
+    // the work itself. The drawer's part is the connection and the
+    // team, which it holds while it is closed.
     await stage(trail, "open the asset's pane", DRIVER_MS, async () => {
       await clickIn(`${DRAWER} .drawer-close`);
       await clickIn(`.grid-wrapper .card[data-asset-id="${assetId}"]`);
@@ -545,6 +502,58 @@ describe("promoting an asset to a team", () => {
     await scrollTo(PROMOTE);
     await snap("22-pane-open");
 
+    // The target is picked on the pane (#219): the team is the one the
+    // drawer named, the line is picked here, and the work is opened
+    // for this entry on its own press — not folded into Promote,
+    // because a pursuit opened as a step of a promotion the team then
+    // refuses would be a record nobody made.
+    await stage(trail, "pick the line on the pane", ROUND_TRIP_MS, async () => {
+      await pollUntil(
+        async () =>
+          browser.execute(
+            (sel: string, want: string) =>
+              Array.from(
+                document.querySelectorAll<HTMLOptionElement>(`${sel} .pick-line option`),
+              ).some((option) => (option.textContent ?? "").includes(want)),
+            PROMOTE,
+            lineName,
+          ),
+        "the pane never offered the team's lines",
+        ROUND_TRIP_MS,
+      );
+      const picked = await browser.execute(
+        (sel: string, want: string) => {
+          const select = document.querySelector<HTMLSelectElement>(`${sel} .pick-line`);
+          if (select === null) return false;
+          const option = Array.from(select.options).find((one) =>
+            (one.textContent ?? "").includes(want),
+          );
+          if (option === undefined) return false;
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        },
+        PROMOTE,
+        lineName,
+      );
+      if (!picked) throw new Error(`no line option reads "${lineName}"`);
+      await pollUntil(
+        async () => (await proseOf(PROMOTE)).includes("Open work for this"),
+        "picking a line did not offer to open work for this entry",
+        ROUND_TRIP_MS,
+      );
+    });
+
+    await stage(trail, "open work for this entry", ROUND_TRIP_MS, async () => {
+      await fill(`${PROMOTE} .call-it input[type="text"]`, NAMED);
+      await clickLabelled(`${PROMOTE} .open-work`, "Open work for this");
+      await pollUntil(
+        async () => (await proseOf(PROMOTE)).includes("Onto"),
+        "opening work did not land on it",
+        ROUND_TRIP_MS,
+      );
+    });
+
     await stage(trail, "it says what travels before it goes", DRIVER_MS, async () => {
       const text = await proseOf(PROMOTE);
       // Decision 4, on the screen rather than only in the client.
@@ -554,10 +563,11 @@ describe("promoting an asset to a team", () => {
       if (!text.includes("What stays")) {
         throw new Error(`the pane did not say what stays home: ${text}`);
       }
-      // And which work it would go onto, which is the thing a person
-      // has to be able to check before pressing.
-      if (!text.includes("take this one")) {
-        throw new Error(`the pane did not name the open work: ${text}`);
+      // And where it would go, which is the thing a person has to be
+      // able to check before pressing: onto the work just opened,
+      // titled with what was typed, against the line just picked.
+      if (!text.includes(NAMED)) {
+        throw new Error(`the pane did not name the work it opened: ${text}`);
       }
       if (!text.includes(lineName)) {
         throw new Error(`the pane did not name the line: ${text}`);
@@ -565,8 +575,7 @@ describe("promoting an asset to a team", () => {
     });
 
     await stage(trail, "hand it over", ROUND_TRIP_MS, async () => {
-      await fill(`${PROMOTE} input[type="text"]`, NAMED);
-      await clickLabelled(PROMOTE, "Promote");
+      await clickLabelled(`${PROMOTE} .do-promote`, "Promote");
       // A refusal from the team is shown by `mutate` as a toast and by
       // nothing else — the surface's own catch adds nothing to it — so
       // the wait is for either answer. Without this, a refused
@@ -610,6 +619,14 @@ describe("promoting an asset to a team", () => {
     await stage(trail, "the round is on the work", ROUND_TRIP_MS, async () => {
       await clickIn(".detail-panel .detail-close");
       await clickIn(SHARED_ROW);
+      // The drawer follows the pane (#219): it is on the line and the
+      // work the promotion opened, so the work tab shows that work.
+      await pollUntil(
+        async () => ((await textOf(DRAWER)) ?? "").includes("the team's lines"),
+        "the drawer did not follow the pane onto the line",
+        ROUND_TRIP_MS,
+      );
+      await clickLabelled(LINE_TABS, "work");
       await pollUntil(
         async () => {
           const text = (await textOf(DRAWER)) ?? "";

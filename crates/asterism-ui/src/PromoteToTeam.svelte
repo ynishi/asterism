@@ -19,20 +19,60 @@
   // five acts that cannot be pressed twice, and nothing on the way
   // would have said so.
   //
-  // # Which pursuit, and what this shows when there is none
+  // # The target is picked here, and written through (#219)
   //
-  // Whichever the shared-lines drawer has open. The three ids a
-  // promotion needs — team, line, pursuit — are `sharedCatalog`'s
-  // already, and it holds them whether or not the drawer is showing, so
-  // a person opens work once and promotes from as many assets as they
-  // like. This surface reads them and never sets them; a picker here
-  // would be a second place naming the same three, and then two places
-  // could disagree about which team an asset was going to.
+  // The three ids a promotion needs — team, line, pursuit — are
+  // `sharedCatalog`'s, and this surface used to only read them: a
+  // person set them up in the drawer, closed it, found the asset, and
+  // pressed — and the pane's own answer when the drawer was not set up
+  // was a sentence sending the person there. The destination is picked
+  // here now, on the asset.
   //
-  // With no work open there is nothing to promote *to*, and this says
-  // so rather than offering a disabled button — a control that cannot
-  // act is worse than a sentence that says where to go. The drawer is
-  // one press away, and the button below opens it.
+  // What did not change is that there is one place naming the three.
+  // The pickers below do not hold a team, a line or a pursuit of their
+  // own — each writes the catalog (`lookAt`, `show`, `selectPursuit`,
+  // `clearWork`) and reads it back, so the drawer follows: opened
+  // after a promotion, it is already on that team, that line, that
+  // work. A picker holding copies was the second place that could
+  // disagree about where an asset was going, and this is not that.
+  //
+  // The target moves while this pane is mounted, and what the pickers
+  // draw between a pick and the read that answers it is the catalog's
+  // to say: `show` drops the last line's states, chain and work before
+  // it reads the next, so no row here ever offers one line's work
+  // against another, and `requireOpenWork` refuses the pairing if a
+  // caller ever assembles it by hand. What the catalog says about a
+  // read itself is its `answered` — an empty list before the read
+  // lands is nobody having asked, not "none" — and every claim this
+  // surface draws from a resource waits on that resource's: the rows,
+  // the two empties, whether the team on is off the list, and the
+  // Promote press, which waits on the Work row's.
+  //
+  // # Work is opened, not assumed
+  //
+  // A promotion needs open work, and this pane does not open one for
+  // it. `Promotion::pursuit_id` on the client says why: a pursuit is
+  // the record that a person chose to start work, and one opened as a
+  // step of a promotion the team then refuses is a record of a
+  // decision nobody made — an orphan a refused Tx would leave, with no
+  // verb that takes it back without recording a second decision.
+  //
+  // So opening work for this entry is its own act, pressed on its
+  // own: "Open work for this" calls the same `openPursuit` the
+  // shared-lines drawer's own form does, titled with what the entry is
+  // being called, and only once it has landed does Promote appear.
+  // Choosing an existing piece of open work skips that press. Either
+  // way the decision to have work open is the person's, made before
+  // the promotion is, which is what makes a refused promotion cost
+  // nothing beyond itself.
+  //
+  // With no session the drawer is still where a connection is made,
+  // and the button opens it. #219 asked for the connect form in place;
+  // that form carries the provider hand-off and the stored-sign-in
+  // sentences, and a second copy here would be a copy to drift. What
+  // this surface does instead is try the silent resume the drawer
+  // would (#204), so a window that remembers its server offers a
+  // target without the drawer ever opening.
   //
   // # What travels is said before it goes
   //
@@ -71,24 +111,128 @@
   // so that renaming the asset in the pane above does not overwrite a
   // half-typed name here. That is why the seed is read untracked: this
   // effect is about which asset is showing.
+  //
   $effect(() => {
     void assetId;
     promoted = null;
     named = untrack(() => defaultName);
   });
 
+  // What a target needs — a session, silently resumed if there is one
+  // to resume, the teams, the lines and the work — is asked for when
+  // the asset changes and whenever the target's preconditions do: the
+  // session, the team on, the line on. Not on the asset alone: a
+  // disconnect drops every read and keeps the team, and a pane that
+  // asked only per asset would sit on "this team hosts no lines" for
+  // a team it never re-read. The call is untracked because what it
+  // reads it also writes; the three preconditions are read tracked so
+  // that changing one runs it.
+  $effect(() => {
+    void assetId;
+    void sharedCatalog.session;
+    void sharedCatalog.teamId;
+    void sharedCatalog.selected;
+    void untrack(() => sharedCatalog.readyForPromotion());
+  });
+
+  // The outcome is about the target it was sent to. The target moves
+  // without the pane moving now, so a change of team, line or work
+  // takes the last outcome down with it rather than leaving its ids
+  // under a target they never went to. A promotion itself touches
+  // none of the three — the work has to be open already (#219) — so
+  // this effect does not fire across a promote, and the outcome it
+  // reports stays up.
+  $effect(() => {
+    void sharedCatalog.teamId;
+    void sharedCatalog.selected;
+    void sharedCatalog.working;
+    promoted = null;
+  });
+
+  const teams = $derived(sharedCatalog.teams.data);
+  // The team the catalog is on may be one the list does not hold: the
+  // instance admin reaches a team by id without a membership row.
+  // Offered as itself rather than dropped, so the pane never shows a
+  // team other than the one the catalog is on. A claim about the list,
+  // so it waits on the list: until the teams have answered, the team
+  // on is neither in the list nor off it, and the row says only which
+  // team it is.
+  const teamOffList = $derived(
+    sharedCatalog.teams.answered &&
+      sharedCatalog.teamId !== "" &&
+      !teams.some((team) => team.team_id === sharedCatalog.teamId),
+  );
+  // On a team while the teams list has not answered — a window the
+  // catalog itself makes, since a disconnect keeps the team and drops
+  // the reads made for it.
+  const teamUnread = $derived(
+    !sharedCatalog.teams.answered && sharedCatalog.teamId !== "",
+  );
   const line = $derived(
     sharedCatalog.lines.data.find((one) => one.id === sharedCatalog.selected) ??
       null,
   );
   const work = $derived(sharedCatalog.work);
-  // Ended work is read like any other — the drawer lists it and shows
-  // what was asked for — so a pursuit being selected does not mean
-  // anything may enter against it. Kept apart here because the cost of
-  // getting it wrong is not a refusal: the content verb streams the
-  // whole body into the team's blob store and only then asks whether
-  // the work has closed.
   const ended = $derived(work !== null && work.close !== null);
+  // What the work picker shows: the open pursuit the catalog is on, or
+  // nothing when it is on none — or on one that has ended, which this
+  // surface does not offer and so reads as none. Empty means "not
+  // chosen yet", not "let the write open one" — there is no such
+  // choice here (#219).
+  const workChoice = $derived(work !== null && !ended ? work.id : "");
+  // No team on, or no line on it, and a read that failed says so
+  // rather than reading as an empty answer — the catalog's header
+  // refuses that merge, and the drawer draws the error first too.
+  // And a read that has not answered is not an empty answer either:
+  // every claim here drawn from a resource waits on its `answered`,
+  // so "no teams" and "no lines" are only ever said of a list that
+  // was asked for.
+  const noTeams = $derived(
+    sharedCatalog.teams.answered && !sharedCatalog.teams.error &&
+      teams.length === 0 && !teamOffList,
+  );
+  const noLines = $derived(
+    sharedCatalog.phase === "ready" && sharedCatalog.lines.answered &&
+      !sharedCatalog.lines.error && sharedCatalog.lines.data.length === 0,
+  );
+
+  async function pickTeam(event: Event) {
+    const teamId = (event.currentTarget as HTMLSelectElement).value;
+    if (teamId === "" || teamId === sharedCatalog.teamId) return;
+    await sharedCatalog.lookAt(teamId);
+  }
+
+  async function pickLine(event: Event) {
+    const lineId = (event.currentTarget as HTMLSelectElement).value;
+    if (lineId === "" || lineId === sharedCatalog.selected) return;
+    await sharedCatalog.show(lineId);
+  }
+
+  function pickWork(event: Event) {
+    const pursuitId = (event.currentTarget as HTMLSelectElement).value;
+    if (pursuitId === "") sharedCatalog.clearWork();
+    else sharedCatalog.selectPursuit(pursuitId);
+  }
+
+  let opening = $state(false);
+
+  // Opens work for this entry, on its own press: the decision to have
+  // work open belongs to the person, made before the promotion is, and
+  // this is the same `openPursuit` the shared-lines drawer's own form
+  // calls. Titled with what the entry is being called, since that is
+  // what the work exists to carry — editable up there, not asked twice
+  // here.
+  async function openWorkForThis(event: Event) {
+    event.preventDefault();
+    opening = true;
+    try {
+      await sharedCatalog.openPursuit(named.trim(), "");
+    } catch {
+      // Said by `mutate`, the same as the drawer's own form.
+    } finally {
+      opening = false;
+    }
+  }
 
   async function promote(event: Event) {
     event.preventDefault();
@@ -120,103 +264,205 @@
     <button type="button" onclick={() => sharedCatalog.openPanel()}>
       open shared lines
     </button>
-  {:else if work === null || line === null}
-    <p class="quiet">
-      A promotion goes onto open work, so there has to be some: open a line
-      in the shared-lines drawer and open a pursuit against it. What is
-      promoted lands on that work, and reaches the line when it closes
-      satisfied.
-    </p>
-    <button type="button" onclick={() => sharedCatalog.openPanel()}>
-      open shared lines
-    </button>
-  {:else if ended}
-    <!-- Its own sentence rather than the one above, because the reader
-         is not in the same place: something *is* selected, and what is
-         wrong with it is that it has ended. -->
-    <p class="quiet">
-      The work showing in the shared-lines drawer has ended, and nothing
-      enters against work that has. Open another pursuit against
-      <strong>{line.name}</strong> to hand this over.
-    </p>
-    <button type="button" onclick={() => sharedCatalog.openPanel()}>
-      open shared lines
-    </button>
   {:else}
-    <p class="quiet target">
-      Onto <strong>{work.title ?? "(untitled work)"}</strong>, against
-      <strong>{line.name}</strong>.
-    </p>
-
-    <!-- Before the control, because it is a thing to know before
-         pressing rather than after. -->
-    <p class="quiet travels">
-      What goes: the file itself, and the marks you wrote on it. What
-      stays: thumbnails, anything indexed from the file, and marks the
-      import or a machine made — the team can make those again.
-    </p>
-
-    <form onsubmit={promote}>
+    <!-- The target, top down: which team, which of its lines, which
+         work against that line. Each row is the catalog's answer, and
+         changing one writes the catalog — which is why the rows below
+         it re-read rather than being cleared here. -->
+    <div class="target">
       <label>
+        Team
+        {#if !sharedCatalog.teams.answered && !teamUnread}
+          <span class="quiet">reading your teams…</span>
+        {:else if sharedCatalog.teams.error && teams.length === 0}
+          <span class="quiet">
+            Could not read your teams: {sharedCatalog.teams.error}
+          </span>
+        {:else if noTeams}
+          <span class="quiet">
+            You are not a member of any team on this server. Founding
+            one, or opening one by id, starts from the shared-lines
+            drawer.
+          </span>
+        {:else}
+          <select class="pick-team" value={sharedCatalog.teamId} onchange={pickTeam}>
+            <option value="" disabled>choose…</option>
+            {#each teams as team (team.team_id)}
+              <option value={team.team_id}>{team.team_id} · {team.role}</option>
+            {/each}
+            {#if teamOffList}
+              <option value={sharedCatalog.teamId}
+                >{sharedCatalog.teamId} · opened by id</option
+              >
+            {:else if teamUnread}
+              <!-- The team on, by id alone: how it was reached — a
+                   membership row, or by id without one — is the
+                   list's to say, and the list has not answered. -->
+              <option value={sharedCatalog.teamId}>{sharedCatalog.teamId}</option>
+            {/if}
+          </select>
+        {/if}
+      </label>
+
+      {#if sharedCatalog.phase === "ready"}
+        <label>
+          Line
+          {#if !sharedCatalog.lines.answered}
+            <span class="quiet">reading the team's lines…</span>
+          {:else if sharedCatalog.lines.error}
+            <span class="quiet">
+              Could not read the team's lines: {sharedCatalog.lines.error}
+            </span>
+          {:else if noLines}
+            <span class="quiet">
+              This team hosts no lines. Publishing one starts from the
+              shared-lines drawer.
+            </span>
+          {:else}
+            <select
+              class="pick-line"
+              value={sharedCatalog.selected ?? ""}
+              onchange={pickLine}
+            >
+              <option value="" disabled>choose…</option>
+              {#each sharedCatalog.lines.data as one (one.id)}
+                <option value={one.id}>{one.name} · {one.standing}</option>
+              {/each}
+            </select>
+          {/if}
+        </label>
+      {/if}
+
+      {#if line !== null}
+        <label>
+          Work
+          <!-- Nothing offered until the line's work has been read: an
+               empty list before the read answers is not "no open
+               work", it is nobody having asked yet, which the
+               catalog's `answered` keeps apart from the answer
+               (#219). Only existing work is a choice here — opening
+               one is its own act, below. -->
+          {#if !sharedCatalog.pursuits.answered}
+            <span class="quiet">reading the work against this line…</span>
+          {:else if sharedCatalog.pursuits.error}
+            <span class="quiet">
+              Could not read the work against this line:
+              {sharedCatalog.pursuits.error}
+            </span>
+          {:else if sharedCatalog.openWork.length === 0}
+            <span class="quiet">Nothing open against this line yet.</span>
+          {:else}
+            <select class="pick-work" value={workChoice} onchange={pickWork}>
+              <option value="" disabled>choose…</option>
+              {#each sharedCatalog.openWork as item (item.id)}
+                <option value={item.id}>{item.title ?? "(untitled work)"}</option>
+              {/each}
+            </select>
+          {/if}
+        </label>
+      {/if}
+    </div>
+
+    {#if noTeams || noLines}
+      <button type="button" onclick={() => sharedCatalog.openPanel()}>
+        open shared lines
+      </button>
+    {:else if line !== null && sharedCatalog.pursuits.answered && !sharedCatalog.pursuits.error}
+      <label class="call-it">
         Call it, on the line
         <input type="text" bind:value={named} required />
       </label>
-      <button type="submit" disabled={sending || named.trim() === ""}>
-        {sending ? "Handing over…" : "Promote"}
-      </button>
-    </form>
+
+      {#if workChoice === ""}
+        <!-- No work chosen: the decision to have one open is the
+             person's, pressed on its own rather than folded into
+             Promote (#219) — see the header for why. -->
+        <p class="quiet travels">
+          A promotion goes onto open work. Pick a piece above, or open
+          one for this entry.
+        </p>
+        <form class="open-work" onsubmit={openWorkForThis}>
+          <button type="submit" disabled={opening || named.trim() === ""}>
+            {opening ? "Opening…" : "Open work for this"}
+          </button>
+        </form>
+      {:else}
+        <p class="quiet where">
+          Onto <strong>{work?.title ?? "(untitled work)"}</strong>, against
+          <strong>{line.name}</strong>.
+        </p>
+
+        <!-- Before the control, because it is a thing to know before
+             pressing rather than after. -->
+        <p class="quiet travels">
+          What goes: the file itself, and the marks you wrote on it. What
+          stays: thumbnails, anything indexed from the file, and marks the
+          import or a machine made — the team can make those again.
+        </p>
+
+        <form class="do-promote" onsubmit={promote}>
+          <button type="submit" disabled={sending || named.trim() === ""}>
+            {sending ? "Handing over…" : "Promote"}
+          </button>
+        </form>
+      {/if}
+    {/if}
 
     {#if promoted !== null}
       <!-- What only the promotion knows. `sharedCatalog.said` carries
            the sentence; this carries the three facts a person may want
-           to check afterwards. -->
-      <dl class="outcome">
-        {#if promoted.already_promoted}
+           to check afterwards. Outside the form's own branch: the
+           promotion's last act is a re-read of the work, and a re-read
+           that failed must not take the answer down with it — the
+           entry was pushed whether or not the list could be read
+           back. -->
+        <dl class="outcome">
+          {#if promoted.already_promoted}
+            <div>
+              <dt>Sent</dt>
+              <dd>
+                Nothing. This machine had already promoted it onto this line —
+                which says what this machine did rather than what the team
+                holds.
+              </dd>
+            </div>
+            <!-- Labelled for what it is on this path. The client hashes
+                 before it reads the relation, so this is the file as it
+                 is now — not what the team took, which was hashed
+                 whenever the first promotion happened. -->
+            <div>
+              <dt>This file, now</dt>
+              <dd class="mono">{promoted.digest}</dd>
+            </div>
+          {:else}
+            <div>
+              <dt>Entry</dt>
+              <dd class="mono">{promoted.entry_id}</dd>
+            </div>
+            <div>
+              <dt>The team's copy</dt>
+              <dd class="mono">{promoted.team_asset_id ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Digest</dt>
+              <dd class="mono">{promoted.digest}</dd>
+            </div>
+          {/if}
           <div>
-            <dt>Sent</dt>
+            <dt>Already there</dt>
             <dd>
-              Nothing. This machine had already promoted it onto this line —
-              which says what this machine did rather than what the team
-              holds.
+              <!-- Three states, and the third is not "no". Nobody asked on
+                   a repeat, because nothing was going to be sent. -->
+              {#if promoted.bytes_already_held === null}
+                not asked
+              {:else if promoted.bytes_already_held}
+                the team already held these bytes
+              {:else}
+                the team did not have these bytes
+              {/if}
             </dd>
           </div>
-          <!-- Labelled for what it is on this path. The client hashes
-               before it reads the relation, so this is the file as it
-               is now — not what the team took, which was hashed
-               whenever the first promotion happened. -->
-          <div>
-            <dt>This file, now</dt>
-            <dd class="mono">{promoted.digest}</dd>
-          </div>
-        {:else}
-          <div>
-            <dt>Entry</dt>
-            <dd class="mono">{promoted.entry_id}</dd>
-          </div>
-          <div>
-            <dt>The team's copy</dt>
-            <dd class="mono">{promoted.team_asset_id ?? "—"}</dd>
-          </div>
-          <div>
-            <dt>Digest</dt>
-            <dd class="mono">{promoted.digest}</dd>
-          </div>
-        {/if}
-        <div>
-          <dt>Already there</dt>
-          <dd>
-            <!-- Three states, and the third is not "no". Nobody asked on
-                 a repeat, because nothing was going to be sent. -->
-            {#if promoted.bytes_already_held === null}
-              not asked
-            {:else if promoted.bytes_already_held}
-              the team already held these bytes
-            {:else}
-              the team did not have these bytes
-            {/if}
-          </dd>
-        </div>
-      </dl>
+        </dl>
     {/if}
   {/if}
 </section>
@@ -238,7 +484,18 @@
     line-height: 1.45;
     margin: 0.3rem 0;
   }
-  .target strong {
+  .target {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.4rem 0;
+  }
+  .target select {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.78rem;
+  }
+  .where strong {
     opacity: 1;
     font-weight: 600;
   }
