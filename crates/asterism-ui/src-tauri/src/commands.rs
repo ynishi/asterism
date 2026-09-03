@@ -3091,8 +3091,13 @@ fn accepted_as(client: &asterism_teams_client::TeamsClient) -> Result<String, Ui
 /// The single fact the stored-credential path turns on: what this
 /// machine does is the same for every reason the body carries — forget
 /// the token — because a credential the server has said no to is not
-/// one to present again. Which reason it was travels separately, on
-/// `StoredTeamConnectDto::reason`, for the drawer to tell the person.
+/// one to present again. That holds for `locked` too (#213), and on
+/// purpose: the reason says why the person was refused and nothing
+/// about whether the token still exists on the server, and a rule
+/// that kept a credential on one word off the wire would be deciding
+/// the second question from an answer to the first. Which reason it
+/// was travels separately, on `StoredTeamConnectDto::reason`, for the
+/// drawer to tell the person.
 fn was_unauthorized(err: &asterism_teams_client::TeamsClientError) -> bool {
     matches!(
         err,
@@ -3556,9 +3561,11 @@ pub async fn stored_team_connection() -> Result<Option<StoredTeamConnectionDto>,
 /// [`connect_team_server`] hands over — so nothing downstream knows
 /// which arm was used.
 ///
-/// A `401` forgets both halves before answering. Keeping a token the
-/// server has said no to buys a second silent failure on the next
-/// launch and a listing row nobody can match to a machine.
+/// A `401` forgets both halves before answering, whatever its reason
+/// — [`was_unauthorized`]'s doc says why the reason does not get a
+/// vote. Keeping a token the server has said no to buys a second
+/// silent failure on the next launch and a listing row nobody can
+/// match to a machine.
 ///
 /// Which of the three ends this reached, and why none of them is an
 /// error, is on [`StoredTeamConnectOutcome`].
@@ -3626,11 +3633,11 @@ pub async fn connect_team_server_stored(
             })
         }
         Err(err) if was_unauthorized(&err) => {
-            crate::stored_connection::forget(&stored).await;
             let reason = match &err {
                 asterism_teams_client::TeamsClientError::Refused { reason, .. } => reason.clone(),
                 _ => None,
             };
+            crate::stored_connection::forget(&stored).await;
             Ok(StoredTeamConnectDto {
                 outcome: StoredTeamConnectOutcome::Rejected,
                 user: None,
@@ -3704,8 +3711,9 @@ pub async fn disconnect_team_server(state: State<'_, AppState>) -> Result<(), Ui
 
 /// The device tokens this account holds, on whatever machines.
 ///
-/// Owner-scoped by the route rather than by anything here, which the
-/// wire's `DeviceTokensDto` states where it is defined. Mapped to the
+/// Owner-scoped by the route rather than by anything here: the
+/// caller's own, which is the route this asks (`GET /teams/auth/device`)
+/// and not the admin's. Mapped to the
 /// contract for the reason the roster's and the ledger's are — the
 /// wire is what a member's client and a team server say to each other,
 /// and a screen holds one vocabulary.

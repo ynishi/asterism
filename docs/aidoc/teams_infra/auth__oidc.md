@@ -31,7 +31,9 @@ Proof of membership. The provider answers who; the binding row
 answers whether that person holds an account here, and the roster
 answers whether they belong to a team. A token that verifies and
 resolves to nobody is refused with the same one-armed answer a
-wrong password gets, and nothing here provisions an account from a
+wrong password gets; one that resolves to an account an admin has
+locked (#213) is refused too, and told apart from nobody for the
+instance's own log. Nothing here provisions an account from a
 claim.
 
 ## Pinning
@@ -55,6 +57,7 @@ indexes make them structural.
 
 - `Exchange` — What a code exchange comes to.
 - `IdentityBinding` — One account's binding, as an admin reads it back.
+- `IdentityResolution` — What a verified identity resolved to (#163, #213).
 - `OidcClient` — The provider-facing half: discovery, the authorization URL, the
 - `OidcConfig` — How the instance reaches its provider — what `teams-server serve`
 - `OidcIdentities` — The database half: the binding rows, and the resolve that pins.

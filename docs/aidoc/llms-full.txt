@@ -14201,7 +14201,7 @@ type that re-spelled its fields would not be a move:
 ## Modules
 
 - [`command`](command.md): Command shapes — inputs of the `/teams/*` routes a member's client
-- [`dto`](dto.md): Response shapes of the `/teams/*` routes a member's client reads.
+- [`dto`](dto.md): Response shapes of the `/teams/*` routes a member's client reads —
 - [`projection`](projection.md): The captured projection — descriptive metadata a promoter said at
 
 
@@ -14244,20 +14244,27 @@ session token → user_id → membership gate).
 <!-- asterism_teams_wire/dto.md -->
 # asterism-teams-wire::dto
 
-Response shapes of the `/teams/*` routes a member's client reads.
+Response shapes of the `/teams/*` routes a member's client reads —
+and, since #213, of the admin's routes under `/teams/admin`, which
+live here because a shape's crate is the answer to "does a client
+say this" for whichever client comes to say it.
 
-Mutation routes answer with the [`LedgerEventDto`] their write
-appended — the same-tx rule (#83 §2) means the event *is* the
+A team's mutation routes answer with the [`LedgerEventDto`] their
+write appended — the same-tx rule (#83 §2) means the event *is* the
 receipt, and a role change carrying old+new in its payload reads on
-its own (#83 §1).
+its own (#83 §1). The admin's account verbs answer `204` and land
+in the instance's own record instead ([`AccountEventDto`]), for the
+reason its migration gives.
 
 ## Types
 
+- `AccountEventDto` — One act on an account, from the instance's record (#213): who did
+- `AccountEventsDto` — The instance's record of acts on accounts (#213), whole
 - `AuthProvidersDto` — What this instance offers besides a password
 - `ContentEnteredDto` — What the team minted for content that entered it
 - `DeviceTokenDto` — One device token as its owner sees it.
 - `DeviceTokenMintedDto` — A freshly minted device token (`POST /teams/auth/device`, #204).
-- `DeviceTokensDto` — The caller's own device tokens (`GET /teams/auth/device`, #204).
+- `DeviceTokensDto` — The caller's own device tokens (`GET /teams/auth/device`, #204) —
 - `HeldAssetDto` — One asset a team holds, as the bulk resolve answers about it.
 - `HeldContentDto` — The have-check's answer
 - `LedgerEventDto` — One entry of a team's append-only stream
@@ -15638,7 +15645,9 @@ Proof of membership. The provider answers who; the binding row
 answers whether that person holds an account here, and the roster
 answers whether they belong to a team. A token that verifies and
 resolves to nobody is refused with the same one-armed answer a
-wrong password gets, and nothing here provisions an account from a
+wrong password gets; one that resolves to an account an admin has
+locked (#213) is refused too, and told apart from nobody for the
+instance's own log. Nothing here provisions an account from a
 claim.
 
 ## Pinning
@@ -15662,6 +15671,7 @@ indexes make them structural.
 
 - `Exchange` — What a code exchange comes to.
 - `IdentityBinding` — One account's binding, as an admin reads it back.
+- `IdentityResolution` — What a verified identity resolved to (#163, #213).
 - `OidcClient` — The provider-facing half: discovery, the authorization URL, the
 - `OidcConfig` — How the instance reaches its provider — what `teams-server serve`
 - `OidcIdentities` — The database half: the binding rows, and the resolve that pins.
@@ -15710,9 +15720,12 @@ The decisions that carry this module:
   creation time rather than warned about.
 
 The port implementation ([`CredentialVerifier`]) keeps the port's
-one-arm contract: a wrong password, an unknown login and an account
-that holds no password ([`LOCKED_PASSWORD`], #163) are the same
-`Ok(None)`, and the two paths that find no hash to check verify
+one-arm contract: a wrong password, an unknown login, an account
+that holds no password ([`LOCKED_PASSWORD`], #163) and an account
+an admin has locked (`locked_at`, #213 — a different thing from
+holding no password, which V13's doc separates) are the same
+`Ok(None)`, and the paths that check no hash — none to check, or
+one they decline — verify
 against a process-local dummy hash so every answer costs the same
 work (username-enumeration resistance on the timing side too).
 
@@ -15722,9 +15735,11 @@ work (username-enumeration resistance on the timing side too).
 
 ## Types
 
+- `AccountEvent` — One row of the instance's record of acts on accounts (#213): who
 - `AccountRecord` — One credential-store row, as the server's gate consumes it: who the
 - `DeviceTokenRecord` — One device token as its owner sees it — everything the row holds
-- `DeviceTokenResolution` — How a device token stops resolving, and why (#163).
+- `DeviceTokenResolution` — How a device token stops resolving, and why (#163, #213).
+- `LockOutcome` — What [`PasswordAuth::lock_account`] did (#213).
 - `MintedDeviceToken` — What a device-token mint hands back (#204).
 - `PasswordAuth` — The v0 password + session adapter over the teams database.
 
@@ -16461,6 +16476,13 @@ slice).
 | GET | `/teams/{team_id}/blobs/purge/marked` | owner, or an admin — the marked set, same authority as the mark |
 | PUT | `/teams/heads/registry` | admins only — instance scope (#132), no team gate |
 | GET | `/teams/heads/registry` | any authenticated account — the live head artifact's bytes, verbatim |
+| GET | `/teams/admin/accounts/{user_id}/devices` | admins only — another account's devices, never their values (#213) |
+| DELETE | `/teams/admin/accounts/{user_id}/devices` | admins only — takes back every live device token the account holds (the ones its listing shows), `204`; the next presentation of any of them inside its window is `401 revoked_by_instance`; sessions already held run to their TTL |
+| POST | `/teams/admin/accounts/{user_id}/lock` | admins only — the account resolves no credential until unlocked, `204`; its rows and stamps stay; `400` for the caller's own account and for the last unlocked admin |
+| DELETE | `/teams/admin/accounts/{user_id}/lock` | admins only — lifts the lock, `204` |
+| GET | `/teams/admin/accounts/{user_id}/events` | admins only — what was done to that account and by whom, and whether it is locked |
+| DELETE | `/teams/admin/devices` | admins only — takes back every live device token on the instance, `204`; sessions run to their TTL |
+| GET | `/teams/admin/events` | admins only — the instance's whole record of acts on accounts |
 
 ## The gate (#83 §5: every route, no exceptions)
 
@@ -16469,8 +16491,9 @@ Two middleware layers, in request order:
 1. [`auth_gate`] — `Authorization: Bearer` token →
    [`PasswordAuth::resolve_session`] → [`AccountRecord`], inserted
    as an extension. Missing, malformed, unknown and **expired**
-   tokens are all the same `401` (an expired row is deleted on
-   touch).
+   tokens, and a live token whose account an admin has locked
+   (#213), are all the same `401` (an expired row is deleted on
+   touch; a locked account's row is kept).
 2. [`team_gate`] (team-scoped routes only) — the `{team_id}` path
    segment → team existence (`404`) → the caller's current role in
    *this* team, read from state, never from the ledger (#83 §1).
@@ -16486,7 +16509,7 @@ which is exactly when §1 demands the stamp say so.
 
 ## Which of the device-token routes the limiter covers (#204)
 
-One of the four, and the split is the decision. #83 §5 puts new
+The login arm alone, and the split is the decision. #83 §5 puts new
 auth routes in the limited router, and what that limiter is for is
 an unauthenticated caller presenting a *credential*: its budget is
 what bounds guessing. `POST /teams/auth/device/login` is exactly
@@ -16494,8 +16517,8 @@ that — a token arrives from nobody in particular and either
 resolves or does not — so it sits beside the password arm and
 shares its bucket.
 
-The mint, the listing and the revoke present no credential; they
-present a session [`auth_gate`] has already resolved. Putting them
+Every other device-token route presents no credential; each
+presents a session [`auth_gate`] has already resolved. Putting them
 under the same bucket would spend a login's budget on a caller who
 is already inside, so a person who minted a token would find
 themselves unable to log in again — while protecting a guessing

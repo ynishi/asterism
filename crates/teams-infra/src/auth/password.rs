@@ -37,9 +37,12 @@
 //!   creation time rather than warned about.
 //!
 //! The port implementation ([`CredentialVerifier`]) keeps the port's
-//! one-arm contract: a wrong password, an unknown login and an account
-//! that holds no password ([`LOCKED_PASSWORD`], #163) are the same
-//! `Ok(None)`, and the two paths that find no hash to check verify
+//! one-arm contract: a wrong password, an unknown login, an account
+//! that holds no password ([`LOCKED_PASSWORD`], #163) and an account
+//! an admin has locked (`locked_at`, #213 — a different thing from
+//! holding no password, which V13's doc separates) are the same
+//! `Ok(None)`, and the paths that check no hash — none to check, or
+//! one they decline — verify
 //! against a process-local dummy hash so every answer costs the same
 //! work (username-enumeration resistance on the timing side too).
 
@@ -63,9 +66,9 @@ use crate::sqlite::map::infra_err;
 /// two lifetimes (#204).
 const OPAQUE_TOKEN_BYTES: usize = 32;
 
-/// How a device token stops resolving, and why (#163).
+/// How a device token stops resolving, and why (#163, #213).
 ///
-/// Three ends and one absence, told apart on the wire so that an app
+/// Each end told apart on the wire so that an app
 /// can say to a person which of them happened — a token the owner
 /// revoked from another machine and one that sat unused for a month
 /// are different news, and an app that shows one password form for
@@ -80,9 +83,21 @@ pub enum DeviceTokenResolution {
     /// The token went unpresented for longer than the instance
     /// allows. The row is gone.
     Idle,
-    /// No row holds this token's digest — never minted here, or
-    /// revoked. The two are one answer, because a handle nobody holds
-    /// and a handle somebody took back are both nothing to present.
+    /// An admin took the token back (#213): the instance signed this
+    /// device out, and the person holding it did not do it. The row
+    /// was kept to say so — through any idle bound, until presented or
+    /// until the window the mint wrote closes, on [`ended_sql`]'s
+    /// terms — and is gone now that it has.
+    RevokedByInstance,
+    /// The account is locked (#213): the token is what it was, and
+    /// resolves nothing until the lock is lifted. The row stays.
+    Locked,
+    /// No row holds this token's digest — never minted here, revoked
+    /// by its owner, or a tombstone that has already said what it was
+    /// kept to say or was swept before it could. They are one answer,
+    /// because a handle nobody holds and a handle its owner took back
+    /// are both nothing to present, the owner needs no news of their
+    /// own act, and the news a tombstone carries is given once.
     Unknown,
 }
 
@@ -92,9 +107,49 @@ impl DeviceTokenResolution {
     fn account(self) -> Option<AccountRecord> {
         match self {
             Self::Resolved(account) => Some(account),
-            Self::Expired | Self::Idle | Self::Unknown => None,
+            Self::Expired | Self::Idle | Self::RevokedByInstance | Self::Locked | Self::Unknown => {
+                None
+            }
         }
     }
+}
+
+/// What [`PasswordAuth::lock_account`] did (#213).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockOutcome {
+    /// This call locked the account.
+    Locked,
+    /// Nothing changed: the account was already locked, or there is
+    /// no such account — a caller that has to tell those apart asks
+    /// [`PasswordAuth::account`] first.
+    Unchanged,
+    /// Refused: the account is the last unlocked admin, and locking it
+    /// would leave the instance with none — counted as unlocked
+    /// admins, which is what the statement can count; an admin
+    /// provisioned without a password would be counted too.
+    LastAdmin,
+}
+
+/// One row of the instance's record of acts on accounts (#213): who
+/// did what to whom, and when. `subject_user_id` is `None` for an act
+/// on every account at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountEvent {
+    /// The row's place in the record; ascending is the order the acts
+    /// happened in.
+    pub seq: i64,
+    /// When, epoch ms.
+    pub occurred_at_ms: i64,
+    /// The admin who acted.
+    pub actor_user_id: Uuid,
+    /// The name they had at the time, as a ledger stamp keeps it.
+    pub actor_name: String,
+    /// The account acted on, or `None` for the whole instance.
+    pub subject_user_id: Option<Uuid>,
+    /// What was done: one of the closed set the wire's
+    /// `AccountEventDto::kind` lists, written by the routes in
+    /// `teams-server` that are its definition.
+    pub kind: String,
 }
 
 /// Passwords the instance refuses to ever store — the "no fixed
@@ -122,6 +177,38 @@ const MIN_PASSWORD_CHARS: usize = 8;
 /// distinguishable from an unknown login on the password arm, by
 /// timing or by answer.
 const LOCKED_PASSWORD: &str = "!";
+
+/// The one predicate for a `device_token` row that may go: the window
+/// the mint wrote has closed, or — while the row is still a token
+/// somebody might present, not a tombstone — it has gone unused past
+/// the idle bound, when the instance has one. Shared by the sweep, the
+/// listing and the instance's revokes (#213), so that "live" means one
+/// thing wherever it is asked: what the sweep would remove, the
+/// listing does not show and the revoke does not stamp.
+///
+/// A tombstone (`revoked_at` set) is exempt from the idle arm on
+/// purpose. Its job is to outlive the credential's clocks until it has
+/// been presented once and said who ended the token; idleness is a
+/// fact about a token nobody is using, and a tombstone is not a token.
+/// It goes when presented, or with the window — which is what bounds
+/// the table. `now` and `idle` are the positional parameter indexes
+/// the caller binds the instant and the optional bound at.
+/// [`PasswordAuth::resolve_device_token`] spells these ends out in
+/// Rust, plus the tombstone's own, because it has to say which one a
+/// token met.
+///
+/// The price of one predicate: the sweep no longer walks
+/// `idx_device_token_expires` alone — the idle arm reads
+/// `last_used_at` and `revoked_at`, so it scans. The table is bounded
+/// by the same sweep, and small; one definition of "live" is worth
+/// more than the index walk was.
+fn ended_sql(now: usize, idle: usize) -> String {
+    format!(
+        "(expires_at <= ?{now} \
+          OR (revoked_at IS NULL AND ?{idle} IS NOT NULL \
+              AND coalesce(last_used_at, created_at) + ?{idle} <= ?{now}))"
+    )
+}
 
 /// One credential-store row, as the server's gate consumes it: who the
 /// session resolves to, and whether that account holds the env/CLI
@@ -423,9 +510,13 @@ impl PasswordAuth {
     }
 
     /// Resolves an opaque token to its account, or `None` for an
-    /// unknown **or expired** token. An expired row is deleted on the
-    /// way out — rejection *is* cleanup for the row that was touched;
-    /// [`Self::cleanup_expired`] handles the ones nothing touches.
+    /// unknown **or expired** token, or one whose account is locked
+    /// (#213). An expired row is deleted on the way out — rejection
+    /// *is* cleanup for the row that was touched;
+    /// [`Self::cleanup_expired`] handles the ones nothing touches. A
+    /// locked account's row is kept: the lock is the account's state
+    /// and not the session's, and lifting it gives the session back
+    /// for whatever life it has left.
     pub async fn resolve_session(
         &self,
         token: &str,
@@ -436,7 +527,8 @@ impl PasswordAuth {
             .call(move |conn| {
                 let row = conn
                     .query_row(
-                        "SELECT s.expires_at, a.user_id, a.login, a.display_name, a.is_admin
+                        "SELECT s.expires_at, a.locked_at,
+                                a.user_id, a.login, a.display_name, a.is_admin
                          FROM auth_session s
                          JOIN user_account a ON a.user_id = s.user_id
                          WHERE s.token_hash = ?1",
@@ -444,11 +536,12 @@ impl PasswordAuth {
                         |row| {
                             Ok((
                                 row.get::<_, i64>(0)?,
+                                row.get::<_, Option<i64>>(1)?,
                                 AccountRecord {
-                                    user_id: row.get(1)?,
-                                    login: row.get(2)?,
-                                    display_name: row.get(3)?,
-                                    admin: row.get(4)?,
+                                    user_id: row.get(2)?,
+                                    login: row.get(3)?,
+                                    display_name: row.get(4)?,
+                                    admin: row.get(5)?,
                                 },
                             ))
                         },
@@ -456,14 +549,15 @@ impl PasswordAuth {
                     .optional()?;
                 match row {
                     None => Ok(None),
-                    Some((expires_at, _)) if expires_at <= now_ms => {
+                    Some((expires_at, _, _)) if expires_at <= now_ms => {
                         conn.execute(
                             "DELETE FROM auth_session WHERE token_hash = ?1",
                             params![token_hash],
                         )?;
                         Ok(None)
                     }
-                    Some((_, account)) => Ok(Some(account)),
+                    Some((_, Some(_), _)) => Ok(None),
+                    Some((_, None, account)) => Ok(Some(account)),
                 }
             })
             .await
@@ -532,7 +626,7 @@ impl PasswordAuth {
     /// would leave the list unable to say a date, and make a stolen
     /// token's life a function of how often the thief presents it. An
     /// idle timeout is the opposite thing — it ends a token early and
-    /// never extends one — and it is [`Self::resolve_device_token`]'s.
+    /// never extends one — and is applied wherever [`ended_sql`] is.
     pub async fn mint_device_token(
         &self,
         user_id: Uuid,
@@ -587,9 +681,14 @@ impl PasswordAuth {
     }
 
     /// Resolves a device token to its account, or says which of the
-    /// three ways it stopped resolving ([`DeviceTokenResolution`]). An
-    /// expired or idle row is deleted on the way out, just as an
-    /// expired session's is.
+    /// ways it stopped resolving ([`DeviceTokenResolution`]). The
+    /// token's own ends come first and delete the row on the way out
+    /// — an expired or idle one just as an expired session's is, and a
+    /// tombstone an admin left once it has said what it was kept to
+    /// say; the account's lock is read only of a token that would
+    /// otherwise resolve, and that row is kept, because the lock is
+    /// the account's and lifting it gives the token back to whatever
+    /// life it has left.
     ///
     /// `idle_ms` is the instance's idle timeout, if it has one: a token
     /// last presented (or, never presented, minted) longer ago than
@@ -615,7 +714,8 @@ impl PasswordAuth {
             .call(move |conn| {
                 let row = conn
                     .query_row(
-                        "SELECT d.expires_at, d.created_at, d.last_used_at,
+                        "SELECT d.expires_at, d.created_at, d.last_used_at, d.revoked_at,
+                                a.locked_at,
                                 a.user_id, a.login, a.display_name, a.is_admin
                          FROM device_token d
                          JOIN user_account a ON a.user_id = d.user_id
@@ -626,20 +726,31 @@ impl PasswordAuth {
                                 row.get::<_, i64>(0)?,
                                 row.get::<_, i64>(1)?,
                                 row.get::<_, Option<i64>>(2)?,
+                                row.get::<_, Option<i64>>(3)?,
+                                row.get::<_, Option<i64>>(4)?,
                                 AccountRecord {
-                                    user_id: row.get(3)?,
-                                    login: row.get(4)?,
-                                    display_name: row.get(5)?,
-                                    admin: row.get(6)?,
+                                    user_id: row.get(5)?,
+                                    login: row.get(6)?,
+                                    display_name: row.get(7)?,
+                                    admin: row.get(8)?,
                                 },
                             ))
                         },
                     )
                     .optional()?;
-                let Some((expires_at, created_at, last_used_at, account)) = row else {
+                let Some((expires_at, created_at, last_used_at, revoked_at, locked_at, account)) =
+                    row
+                else {
                     return Ok(DeviceTokenResolution::Unknown);
                 };
-                let ended = if expires_at <= now_ms {
+                // The ends first, the lock after — do not hoist the
+                // lock above this chain: "sign everybody out, then
+                // lock" is the order #213 names, and a lock read first
+                // would answer `Locked` for a token that had already
+                // ended.
+                let ended = if revoked_at.is_some() {
+                    Some(DeviceTokenResolution::RevokedByInstance)
+                } else if expires_at <= now_ms {
                     Some(DeviceTokenResolution::Expired)
                 } else if idle_ms.is_some_and(|idle| {
                     last_used_at.unwrap_or(created_at).saturating_add(idle) <= now_ms
@@ -648,6 +759,9 @@ impl PasswordAuth {
                 } else {
                     None
                 };
+                if ended.is_none() && locked_at.is_some() {
+                    return Ok(DeviceTokenResolution::Locked);
+                }
                 if let Some(ended) = ended {
                     conn.execute(
                         "DELETE FROM device_token WHERE token_hash = ?1",
@@ -688,26 +802,34 @@ impl PasswordAuth {
     /// [`DeviceTokenRecord`] is what makes that structural rather than
     /// a discipline: there is no field for a hash to be put in.
     ///
-    /// Rows the table holds, which is not quite the same as rows that
-    /// still resolve — an expired token sits here until something
-    /// touches or sweeps it. That is why every row carries its
-    /// `expires_at_ms`, and why the routes run
-    /// [`Self::cleanup_expired_device_tokens`] before they read: the
-    /// sweep is what keeps the two answers together, and the column is
-    /// what lets a reader tell when it has not.
+    /// Rows that are live on [`ended_sql`]'s terms and that nobody has
+    /// taken back — a row that has ended but not yet been swept is
+    /// not shown, and neither is a tombstone an admin left (#213), so
+    /// what this shows is every token still inside its own life —
+    /// which is what the instance's revoke would take back, and, for
+    /// an account that is not locked, what still resolves. Every row
+    /// carries its `expires_at_ms`
+    /// so a reader can see the end coming; the routes run
+    /// [`Self::cleanup_expired_device_tokens`] before they read to
+    /// keep the table bounded, not to keep this honest — the predicate
+    /// does that.
     pub async fn list_device_tokens(
         &self,
         user_id: Uuid,
+        now_ms: i64,
+        idle_ms: Option<i64>,
     ) -> Result<Vec<DeviceTokenRecord>, DomainError> {
         self.isle
             .call(move |conn| {
-                let mut statement = conn.prepare(
+                let mut statement = conn.prepare(&format!(
                     "SELECT id, label, created_at, last_used_at, expires_at
-                     FROM device_token WHERE user_id = ?1
+                     FROM device_token
+                     WHERE user_id = ?1 AND revoked_at IS NULL AND NOT {}
                      ORDER BY created_at, id",
-                )?;
+                    ended_sql(2, 3)
+                ))?;
                 let rows = statement
-                    .query_map(params![user_id], |row| {
+                    .query_map(params![user_id, now_ms, idle_ms], |row| {
                         Ok(DeviceTokenRecord {
                             id: row.get(0)?,
                             label: row.get(1)?,
@@ -731,16 +853,29 @@ impl PasswordAuth {
     /// deletes a row the caller does not own.
     ///
     /// Idempotent, like [`Self::destroy_session`]: a handle that never
-    /// existed, one already revoked, and one belonging to somebody
-    /// else are the same `Ok(())`. Distinguishing them would answer
-    /// "does this id exist" for ids the caller has no business knowing
-    /// about, and the caller's goal — this token resolves to nothing
-    /// *for me* — is true in all three cases.
+    /// existed, one already revoked, one belonging to somebody else,
+    /// and one an admin has already taken back (#213) are the same
+    /// `Ok(())`. Distinguishing them would answer "does this id exist"
+    /// for ids the caller has no business knowing about, and the
+    /// caller's goal — this token resolves to nothing *for me* — is
+    /// true in every case.
+    ///
+    /// The sessions this token minted are not revoked with it: they
+    /// die at their own TTL (#204). A session outliving the credential
+    /// that produced it is the honest reading of a device token — it
+    /// authorises the *making* of sessions, and taking it away stops
+    /// the next one. The instance's revokes (#213) leave sessions the
+    /// same way, and the lock is the verb that stops one resolving.
     pub async fn revoke_device_token(&self, user_id: Uuid, id: Uuid) -> Result<(), DomainError> {
         self.isle
             .call(move |conn| {
+                // A tombstone an admin left (#213) is not the owner's
+                // to delete: it holds news for the device, and a
+                // handle from a listing taken before the admin acted
+                // must not silence it.
                 conn.execute(
-                    "DELETE FROM device_token WHERE id = ?1 AND user_id = ?2",
+                    "DELETE FROM device_token
+                     WHERE id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
                     params![id, user_id],
                 )
             })
@@ -749,9 +884,246 @@ impl PasswordAuth {
         Ok(())
     }
 
-    /// Sweeps every device token whose expiry has passed, returning
-    /// how many rows went — [`Self::cleanup_expired`]'s sibling over
-    /// the other table.
+    /// Takes back every live device token of `user_id` as the instance
+    /// (#213), leaving each row as a tombstone so the next
+    /// presentation is answered [`DeviceTokenResolution::RevokedByInstance`]
+    /// rather than the `Unknown` an owner's own revoke earns. Returns
+    /// how many were live.
+    ///
+    /// Live, in the statement, on [`ended_sql`]'s terms: a row that
+    /// has already ended is left for the sweep rather than stamped —
+    /// the tombstone's whole content is that somebody else ended the
+    /// token, and a token that had ended on its own is not that.
+    /// Sessions are left as [`Self::revoke_device_token`] leaves them,
+    /// for the reason given there.
+    pub async fn revoke_device_tokens_of(
+        &self,
+        user_id: Uuid,
+        now_ms: i64,
+        idle_ms: Option<i64>,
+    ) -> Result<u64, DomainError> {
+        let revoked = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    &format!(
+                        "UPDATE device_token SET revoked_at = ?2
+                         WHERE user_id = ?1 AND revoked_at IS NULL AND NOT {}",
+                        ended_sql(2, 3)
+                    ),
+                    params![user_id, now_ms, idle_ms],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(revoked as u64)
+    }
+
+    /// [`Self::revoke_device_tokens_of`] over every account at once,
+    /// on the same terms. Returns how many were live.
+    pub async fn revoke_every_device_token(
+        &self,
+        now_ms: i64,
+        idle_ms: Option<i64>,
+    ) -> Result<u64, DomainError> {
+        let revoked = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    &format!(
+                        "UPDATE device_token SET revoked_at = ?1
+                         WHERE revoked_at IS NULL AND NOT {}",
+                        ended_sql(1, 2)
+                    ),
+                    params![now_ms, idle_ms],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(revoked as u64)
+    }
+
+    /// Locks `user_id` (#213): from now every credential of the
+    /// account resolves nothing — the password arm, the device arm,
+    /// a provider sign-in, and the sessions it already holds — while
+    /// its rows stay, so its ledger stamps keep resolving to a name.
+    /// This is the definition of the lock: the lock is the account's
+    /// state, so every arm that resolves a credential reads it before
+    /// answering.
+    ///
+    /// Answers what this call did ([`LockOutcome`]). Decided in one
+    /// statement on one connection, so a caller recording the act
+    /// records it once however many times it is asked — and so that
+    /// the last unlocked admin is locked by nobody: two admins each
+    /// locking the other, both sessions resolved before either write
+    /// lands, would otherwise leave an instance with no admin who can
+    /// authenticate, and `bootstrap-admin` as the only way back. The
+    /// refusal is the statement's own subquery, which the isle's one
+    /// thread serialises against every other write.
+    pub async fn lock_account(
+        &self,
+        user_id: Uuid,
+        now_ms: i64,
+    ) -> Result<LockOutcome, DomainError> {
+        self.isle
+            .call(move |conn| {
+                let changed = conn.execute(
+                    "UPDATE user_account SET locked_at = ?2
+                     WHERE user_id = ?1 AND locked_at IS NULL
+                       AND (is_admin = 0
+                            OR (SELECT count(*) FROM user_account
+                                WHERE is_admin = 1 AND locked_at IS NULL) > 1)",
+                    params![user_id, now_ms],
+                )?;
+                if changed == 1 {
+                    return Ok(LockOutcome::Locked);
+                }
+                let unlocked_admin: Option<bool> = conn
+                    .query_row(
+                        "SELECT is_admin = 1 AND locked_at IS NULL
+                         FROM user_account WHERE user_id = ?1",
+                        params![user_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                Ok(match unlocked_admin {
+                    Some(true) => LockOutcome::LastAdmin,
+                    _ => LockOutcome::Unchanged,
+                })
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// Lifts a lock (#213). Answers whether this call is what lifted
+    /// it, on [`Self::lock_account`]'s terms.
+    pub async fn unlock_account(&self, user_id: Uuid) -> Result<bool, DomainError> {
+        let changed = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE user_account SET locked_at = NULL
+                     WHERE user_id = ?1 AND locked_at IS NOT NULL",
+                    params![user_id],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        Ok(changed == 1)
+    }
+
+    /// When `user_id` was locked, or `None` for an account that is not
+    /// (or does not exist). For assertions; the server reads it
+    /// through [`Self::account_page`], in one call with the rows.
+    #[cfg(test)]
+    pub async fn locked_at(&self, user_id: Uuid) -> Result<Option<i64>, DomainError> {
+        self.isle
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT locked_at FROM user_account WHERE user_id = ?1",
+                    params![user_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .optional()
+                .map(Option::flatten)
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// Appends one act to the instance's record of acts on accounts
+    /// (#213), and hands back its place in it.
+    pub async fn record_account_event(
+        &self,
+        actor: &AccountRecord,
+        subject_user_id: Option<Uuid>,
+        kind: &str,
+        now_ms: i64,
+    ) -> Result<i64, DomainError> {
+        let actor_user_id = actor.user_id;
+        let actor_name = actor.display_name.clone();
+        let kind = kind.to_string();
+        self.isle
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO account_event
+                     (occurred_at, actor_user_id, actor_name, subject_user_id, kind)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![now_ms, actor_user_id, actor_name, subject_user_id, kind],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// The instance's whole record of acts on accounts, oldest first
+    /// — a walk of the key. One account's page is
+    /// [`Self::account_page`].
+    pub async fn account_events(&self) -> Result<Vec<AccountEvent>, DomainError> {
+        self.isle
+            .call(move |conn| {
+                conn.prepare(
+                    "SELECT seq, occurred_at, actor_user_id, actor_name,
+                            subject_user_id, kind
+                     FROM account_event ORDER BY seq",
+                )?
+                .query_map([], account_event_from_row)?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// One account's page of the instance record (#213): when it was
+    /// locked, if it is, together with its rows and the rows of the
+    /// acts on every account, which touched it too — oldest first.
+    ///
+    /// One call for the lock and the rows, so a lock landing between
+    /// two reads cannot answer a page whose lock and whose `locked`
+    /// row disagree. The rows are two probes of the subject index
+    /// (the account's, and the subject-less), each already in `seq`
+    /// order, merged; a single `subject_user_id = ?1 OR subject_user_id
+    /// IS NULL` predicate probes the same index twice and then sorts
+    /// the union in a temporary B-tree, which the `UNION ALL` does not
+    /// need.
+    pub async fn account_page(
+        &self,
+        subject_user_id: Uuid,
+    ) -> Result<(Option<i64>, Vec<AccountEvent>), DomainError> {
+        self.isle
+            .call(move |conn| {
+                let locked_at = conn
+                    .query_row(
+                        "SELECT locked_at FROM user_account WHERE user_id = ?1",
+                        params![subject_user_id],
+                        |row| row.get::<_, Option<i64>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+                let events = conn
+                    .prepare(
+                        "SELECT seq, occurred_at, actor_user_id, actor_name,
+                                subject_user_id, kind
+                         FROM account_event WHERE subject_user_id = ?1
+                         UNION ALL
+                         SELECT seq, occurred_at, actor_user_id, actor_name,
+                                subject_user_id, kind
+                         FROM account_event WHERE subject_user_id IS NULL
+                         ORDER BY seq",
+                    )?
+                    .query_map(params![subject_user_id], account_event_from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((locked_at, events))
+            })
+            .await
+            .map_err(infra_err)
+    }
+
+    /// Sweeps every device token that may go on [`ended_sql`]'s terms
+    /// — its window closed, or, for a token and not a tombstone, idle
+    /// past the bound — returning how many rows went;
+    /// [`Self::cleanup_expired`]'s sibling over the other table.
     ///
     /// A sibling rather than a second statement inside that one: the
     /// two sweeps run at different moments, because the tables fill at
@@ -762,13 +1134,23 @@ impl PasswordAuth {
     /// Folding them together would make each call site pay for a sweep
     /// it did not need and hide which surface keeps which table
     /// bounded.
-    pub async fn cleanup_expired_device_tokens(&self, now_ms: i64) -> Result<u64, DomainError> {
+    ///
+    /// Takes an idle token too when the instance has a bound, and a
+    /// tombstone only with its window (#213): [`ended_sql`] is the one
+    /// predicate, so a token this leaves is one the listing shows and
+    /// the instance's revoke stamps, and a tombstone this leaves is
+    /// one that has news to give.
+    pub async fn cleanup_expired_device_tokens(
+        &self,
+        now_ms: i64,
+        idle_ms: Option<i64>,
+    ) -> Result<u64, DomainError> {
         let swept = self
             .isle
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM device_token WHERE expires_at <= ?1",
-                    params![now_ms],
+                    &format!("DELETE FROM device_token WHERE {}", ended_sql(1, 2)),
+                    params![now_ms, idle_ms],
                 )
             })
             .await
@@ -784,23 +1166,25 @@ impl CredentialVerifier for PasswordAuth {
         let secret = secret.to_string();
         self.isle
             .call(move |conn| {
-                let row: Option<(Uuid, String)> = conn
+                let row: Option<(Uuid, String, Option<i64>)> = conn
                     .query_row(
-                        "SELECT user_id, password_hash FROM user_account WHERE login = ?1",
+                        "SELECT user_id, password_hash, locked_at
+                         FROM user_account WHERE login = ?1",
                         params![login],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                     )
                     .optional()?;
                 Ok(match row {
-                    // A locked account (#163) takes the unknown-login
-                    // arm: the same work, the same answer, so the
-                    // password arm cannot say which accounts sign in
-                    // elsewhere.
-                    Some((_, phc)) if phc == LOCKED_PASSWORD => {
+                    // An account with no password (#163) and an
+                    // account an admin locked (#213) both take the
+                    // unknown-login arm: the same work, the same
+                    // answer, so the password arm cannot say which
+                    // accounts sign in elsewhere or which are locked.
+                    Some((_, phc, locked_at)) if phc == LOCKED_PASSWORD || locked_at.is_some() => {
                         let _ = verify_password(&secret, dummy_hash());
                         Ok(None)
                     }
-                    Some((user_id, phc)) => {
+                    Some((user_id, phc, _)) => {
                         verify_password(&secret, &phc).map(|ok| ok.then_some(user_id))
                     }
                     None => {
@@ -887,6 +1271,21 @@ fn dummy_hash() -> &'static str {
     DUMMY.get_or_init(|| {
         hash_password("dummy-credential-for-timing-equalisation")
             .expect("hashing a constant with default parameters cannot fail")
+    })
+}
+
+/// Maps a `seq, occurred_at, actor_user_id, actor_name,
+/// subject_user_id, kind` row into an [`AccountEvent`] — the one place
+/// the row-to-field mapping is spelled; the selects that produce the
+/// row spell the same order.
+fn account_event_from_row(row: &rusqlite::Row<'_>) -> Result<AccountEvent, rusqlite::Error> {
+    Ok(AccountEvent {
+        seq: row.get(0)?,
+        occurred_at_ms: row.get(1)?,
+        actor_user_id: row.get(2)?,
+        actor_name: row.get(3)?,
+        subject_user_id: row.get(4)?,
+        kind: row.get(5)?,
     })
 }
 
@@ -1156,7 +1555,10 @@ mod tests {
 
         // Nothing has presented it yet, and the listing says so
         // instead of borrowing the mint instant.
-        let listed = auth.list_device_tokens(user_id).await.unwrap();
+        let listed = auth
+            .list_device_tokens(user_id, T0 + 5_000, None)
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, minted.id);
         assert_eq!(listed[0].label, "Hoshino's MacBook");
@@ -1171,7 +1573,10 @@ mod tests {
         assert_eq!(resolved.user_id, user_id);
         assert_eq!(resolved.display_name, "Hoshino");
         assert_eq!(
-            auth.list_device_tokens(user_id).await.unwrap()[0].last_used_at_ms,
+            auth.list_device_tokens(user_id, T0 + 5_000, None)
+                .await
+                .unwrap()[0]
+                .last_used_at_ms,
             Some(T0 + 5_000),
             "a resolve stamps the use it was"
         );
@@ -1192,7 +1597,413 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_device_token_is_only_its_owners_to_revoke() {
+    async fn a_token_the_instance_took_back_says_so_once_and_is_then_unknown() {
+        let (auth, isle, driver) = auth().await;
+        let hoshino = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let kanade = auth
+            .create_account("kanade", "Kanade", GOOD, false, T0)
+            .await
+            .unwrap();
+        let laptop = auth
+            .mint_device_token(hoshino, "laptop", T0, TTL)
+            .await
+            .unwrap();
+        let phone = auth
+            .mint_device_token(hoshino, "phone", T0, TTL)
+            .await
+            .unwrap();
+        let theirs = auth
+            .mint_device_token(kanade, "theirs", T0, TTL)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            auth.revoke_device_tokens_of(hoshino, T0 + 1, None)
+                .await
+                .unwrap(),
+            2
+        );
+        // The tombstones are not listed as live tokens…
+        assert!(
+            auth.list_device_tokens(hoshino, T0 + 2, None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // …but they are rows, until presented.
+        assert_eq!(device_rows(&isle).await, 3);
+        for token in [&laptop.token, &phone.token] {
+            assert_eq!(
+                auth.resolve_device_token(token, T0 + 2, None)
+                    .await
+                    .unwrap(),
+                DeviceTokenResolution::RevokedByInstance
+            );
+            assert_eq!(
+                auth.resolve_device_token(token, T0 + 3, None)
+                    .await
+                    .unwrap(),
+                DeviceTokenResolution::Unknown,
+                "the news is given once"
+            );
+        }
+        // Somebody else's token is untouched.
+        assert!(
+            auth.resolve_device_token(&theirs.token, T0 + 4, None)
+                .await
+                .unwrap()
+                .account()
+                .is_some()
+        );
+        // Everybody, then.
+        assert_eq!(
+            auth.revoke_every_device_token(T0 + 5, None).await.unwrap(),
+            1
+        );
+        assert_eq!(
+            auth.resolve_device_token(&theirs.token, T0 + 6, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::RevokedByInstance
+        );
+        // A tombstone nothing presents goes with the expired.
+        let ghost = auth
+            .mint_device_token(kanade, "ghost", T0, TTL)
+            .await
+            .unwrap();
+        auth.revoke_device_tokens_of(kanade, T0 + 7, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0 + TTL + 1, None)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            auth.resolve_device_token(&ghost.token, T0 + TTL + 2, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Unknown
+        );
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_lock_never_masks_the_end_a_token_met() {
+        let (auth, isle, driver) = auth().await;
+        let hoshino = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let taken = auth
+            .mint_device_token(hoshino, "taken back", T0, TTL)
+            .await
+            .unwrap();
+        // A token that had already expired, and one that had gone
+        // idle, when the instance took everything back: neither is
+        // stamped, because neither was ended by the instance.
+        let stale = auth
+            .mint_device_token(hoshino, "stale", T0, 1_000)
+            .await
+            .unwrap();
+        let idle = auth
+            .mint_device_token(hoshino, "idle", T0, TTL)
+            .await
+            .unwrap();
+        // `taken` is in use — presented once, which is what keeps it
+        // inside the idle bound at the revoke.
+        assert!(
+            auth.resolve_device_token(&taken.token, T0 + 1_000, None)
+                .await
+                .unwrap()
+                .account()
+                .is_some()
+        );
+        // #213's own order: sign everybody out, then lock — with a
+        // token minted between the two that would otherwise resolve.
+        assert_eq!(
+            auth.revoke_device_tokens_of(hoshino, T0 + 2_000, Some(1_500))
+                .await
+                .unwrap(),
+            1,
+            "only the live token was taken back"
+        );
+        let live = auth
+            .mint_device_token(hoshino, "live", T0 + 2_001, TTL)
+            .await
+            .unwrap();
+        auth.lock_account(hoshino, T0 + 2_002).await.unwrap();
+
+        // A token that no longer exists says how it ended, lock or no
+        // lock, and its row goes; only the token that would otherwise
+        // resolve is answered with the lock, and stays.
+        assert_eq!(
+            auth.resolve_device_token(&taken.token, T0 + 2_003, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::RevokedByInstance
+        );
+        assert_eq!(
+            auth.resolve_device_token(&stale.token, T0 + 2_004, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Expired
+        );
+        assert_eq!(
+            auth.resolve_device_token(&idle.token, T0 + 2_005, Some(1_500))
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Idle
+        );
+        assert_eq!(
+            auth.resolve_device_token(&live.token, T0 + 2_006, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Locked
+        );
+        assert_eq!(device_rows(&isle).await, 1);
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_tombstone_outlives_the_idle_bound_and_goes_with_the_window() {
+        let (auth, isle, driver) = auth().await;
+        let hoshino = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        // Used once, long ago: one tick inside a 30-unit idle bound at
+        // the revoke, and far past it by the time anything sweeps.
+        let old = auth
+            .mint_device_token(hoshino, "old phone", T0, 1_000)
+            .await
+            .unwrap();
+        assert!(
+            auth.resolve_device_token(&old.token, T0 + 10, None)
+                .await
+                .unwrap()
+                .account()
+                .is_some()
+        );
+        assert_eq!(
+            auth.revoke_device_tokens_of(hoshino, T0 + 39, Some(30))
+                .await
+                .unwrap(),
+            1
+        );
+        // A plain token idle past the bound goes with the same sweep
+        // that leaves the tombstone: it is a token, and idleness is
+        // its end.
+        let _forgotten = auth
+            .mint_device_token(hoshino, "forgotten tablet", T0 + 100, 1_000)
+            .await
+            .unwrap();
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0 + 500, Some(30))
+                .await
+                .unwrap(),
+            1,
+            "the idle token went; the tombstone did not"
+        );
+        assert_eq!(device_rows(&isle).await, 1);
+        // Presented, it says what it was kept to say — not `Idle`, not
+        // `Unknown`.
+        assert_eq!(
+            auth.resolve_device_token(&old.token, T0 + 600, Some(30))
+                .await
+                .unwrap(),
+            DeviceTokenResolution::RevokedByInstance
+        );
+        assert_eq!(device_rows(&isle).await, 0);
+        // And one nothing presents goes with its window.
+        let ghost = auth
+            .mint_device_token(hoshino, "ghost", T0, 1_000)
+            .await
+            .unwrap();
+        auth.revoke_device_tokens_of(hoshino, T0 + 1, Some(30))
+            .await
+            .unwrap();
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0 + 999, Some(30))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0 + 1_000, Some(30))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            auth.resolve_device_token(&ghost.token, T0 + 1_001, Some(30))
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Unknown
+        );
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_locked_account_resolves_no_credential_and_gets_them_back_unlocked() {
+        let (auth, _isle, driver) = auth().await;
+        let hoshino = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let session = auth.create_session(hoshino, T0, 60_000).await.unwrap();
+        let device = auth
+            .mint_device_token(hoshino, "laptop", T0, TTL)
+            .await
+            .unwrap();
+        assert_eq!(auth.locked_at(hoshino).await.unwrap(), None);
+
+        assert_eq!(
+            auth.lock_account(hoshino, T0 + 1).await.unwrap(),
+            LockOutcome::Locked
+        );
+        assert_eq!(auth.locked_at(hoshino).await.unwrap(), Some(T0 + 1));
+        // Locking again is not what locked it, and keeps the first
+        // instant.
+        assert_eq!(
+            auth.lock_account(hoshino, T0 + 2).await.unwrap(),
+            LockOutcome::Unchanged
+        );
+        assert_eq!(auth.locked_at(hoshino).await.unwrap(), Some(T0 + 1));
+        // An account that does not exist is the same answer.
+        assert_eq!(
+            auth.lock_account(Uuid::now_v7(), T0 + 2).await.unwrap(),
+            LockOutcome::Unchanged
+        );
+
+        // The password arm, the device arm, the session it held.
+        let verifier: &dyn CredentialVerifier = &auth;
+        assert_eq!(verifier.verify("hoshino", GOOD).await.unwrap(), None);
+        assert_eq!(
+            auth.resolve_device_token(&device.token, T0 + 3, None)
+                .await
+                .unwrap(),
+            DeviceTokenResolution::Locked
+        );
+        assert_eq!(auth.resolve_session(&session, T0 + 3).await.unwrap(), None);
+        // The rows stay: the account is still an account with a name.
+        assert_eq!(
+            auth.account(hoshino).await.unwrap().unwrap().display_name,
+            "Hoshino"
+        );
+
+        assert!(auth.unlock_account(hoshino).await.unwrap());
+        assert_eq!(auth.locked_at(hoshino).await.unwrap(), None);
+        assert_eq!(
+            verifier.verify("hoshino", GOOD).await.unwrap(),
+            Some(hoshino)
+        );
+        assert!(
+            auth.resolve_device_token(&device.token, T0 + 4, None)
+                .await
+                .unwrap()
+                .account()
+                .is_some()
+        );
+        assert!(
+            auth.resolve_session(&session, T0 + 4)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_last_admin_who_can_authenticate_is_locked_by_nobody() {
+        let (auth, _isle, driver) = auth().await;
+        let first = auth
+            .create_account("first", "First", GOOD, true, T0)
+            .await
+            .unwrap();
+        let second = auth
+            .create_account("second", "Second", GOOD, true, T0)
+            .await
+            .unwrap();
+        let member = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        // Two admins can authenticate: locking one is allowed.
+        assert_eq!(
+            auth.lock_account(second, T0 + 1).await.unwrap(),
+            LockOutcome::Locked
+        );
+        // Now one can: locking it is refused, whoever asks, and the
+        // refusal says why rather than "nothing changed".
+        assert_eq!(
+            auth.lock_account(first, T0 + 2).await.unwrap(),
+            LockOutcome::LastAdmin
+        );
+        assert_eq!(auth.locked_at(first).await.unwrap(), None);
+        // A member is never the last admin.
+        assert_eq!(
+            auth.lock_account(member, T0 + 3).await.unwrap(),
+            LockOutcome::Locked
+        );
+        // Lift the second's lock and the first may be locked again.
+        assert!(auth.unlock_account(second).await.unwrap());
+        assert_eq!(
+            auth.lock_account(first, T0 + 4).await.unwrap(),
+            LockOutcome::Locked
+        );
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_instance_record_keeps_every_act_and_answers_per_account() {
+        let (auth, _isle, driver) = auth().await;
+        let operator = auth
+            .create_account("operator", "Operator", GOOD, true, T0)
+            .await
+            .unwrap();
+        let hoshino = auth
+            .create_account("hoshino", "Hoshino", GOOD, false, T0)
+            .await
+            .unwrap();
+        let kanade = auth
+            .create_account("kanade", "Kanade", GOOD, false, T0)
+            .await
+            .unwrap();
+        let actor = auth.account(operator).await.unwrap().unwrap();
+        auth.record_account_event(&actor, Some(hoshino), "locked", T0 + 1)
+            .await
+            .unwrap();
+        auth.record_account_event(&actor, None, "devices_revoked", T0 + 2)
+            .await
+            .unwrap();
+        auth.record_account_event(&actor, Some(kanade), "locked", T0 + 3)
+            .await
+            .unwrap();
+
+        let all = auth.account_events().await.unwrap();
+        assert_eq!(
+            all.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+            ["locked", "devices_revoked", "locked"]
+        );
+        assert_eq!(all[0].actor_name, "Operator");
+        assert_eq!(all[1].subject_user_id, None);
+        // One account's page: its own acts and the acts on everybody.
+        let (lock, hers) = auth.account_page(hoshino).await.unwrap();
+        assert_eq!(lock, None, "the page carries the lock, and there is none");
+        assert_eq!(
+            hers.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            [all[0].seq, all[1].seq]
+        );
+        driver.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_owners_revoke_reaches_only_their_own_handle() {
         let (auth, isle, driver) = auth().await;
         let mine = auth
             .create_account("hoshino", "Hoshino", GOOD, false, T0)
@@ -1220,7 +2031,12 @@ mod tests {
                 .is_some()
         );
         // And the listing is scoped the same way.
-        assert!(auth.list_device_tokens(theirs).await.unwrap().is_empty());
+        assert!(
+            auth.list_device_tokens(theirs, T0, None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         driver.shutdown().await.unwrap();
     }
@@ -1335,7 +2151,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(auth.cleanup_expired_device_tokens(T0).await.unwrap(), 1);
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0, None).await.unwrap(),
+            1
+        );
         assert_eq!(device_rows(&isle).await, 1);
         assert_eq!(
             auth.resolve_device_token(&dead.token, T0 + 1, None)
@@ -1352,7 +2171,12 @@ mod tests {
         );
         // The two sweeps answer for their own tables and nothing else.
         let session = auth.create_session(user_id, T0, 60_000).await.unwrap();
-        assert_eq!(auth.cleanup_expired_device_tokens(T0 + 1).await.unwrap(), 0);
+        assert_eq!(
+            auth.cleanup_expired_device_tokens(T0 + 1, None)
+                .await
+                .unwrap(),
+            0
+        );
         assert!(
             auth.resolve_session(&session, T0 + 1)
                 .await
@@ -1390,7 +2214,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            auth.list_device_tokens(user_id).await.unwrap()[0].label,
+            auth.list_device_tokens(user_id, T0 + 5_000, None)
+                .await
+                .unwrap()[0]
+                .label,
             "MacBook"
         );
 

@@ -262,9 +262,8 @@ pub struct PromotedAssetDto {
 /// The device tokens this window's account holds, on whatever machines
 /// (#204).
 ///
-/// Owner-scoped, which the route decides and the wire's own
-/// `DeviceTokensDto` argues: there is no admin-facing sibling, and
-/// nothing here takes an account to ask about.
+/// Owner-scoped, which the route decides: nothing here takes an
+/// account to ask about, and this window asks about its own.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamDeviceTokensDto {
     /// One row per live token, oldest mint first.
@@ -342,10 +341,11 @@ pub struct StoredTeamConnectDto {
     pub user: Option<String>,
     /// Why the server refused the stored token, for `rejected` and for
     /// nothing else: `expired`, `idle` or `revoked`, as the server's
-    /// `401` said it (#163), or `None` from a server too old to say.
-    /// What the drawer does is the same for all three — the token is
-    /// forgotten — and which it was is what the drawer tells the
-    /// person.
+    /// `401` said it (#163), `revoked_by_instance` or `locked` when an
+    /// admin did it (#213), or `None` from a server too old to say.
+    /// What the app does is the same for all of them — the token is
+    /// forgotten, on the terms `connect_team_server_stored` gives —
+    /// and which it was is what the drawer tells the person.
     pub reason: Option<String>,
 }
 
@@ -389,7 +389,8 @@ pub enum StoredTeamConnectOutcome {
     /// What separates this from [`Self::Rejected`] is who said no. Here
     /// no server was asked; there one was, and refused.
     Nothing,
-    /// What was stored no longer resolves. Both halves of it are
-    /// forgotten by the time this is answered.
+    /// What was stored did not resolve. Both halves of it are
+    /// forgotten by the time this is answered, whatever `reason`
+    /// says.
     Rejected,
 }

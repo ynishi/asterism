@@ -29,7 +29,9 @@
 //! answers whether that person holds an account here, and the roster
 //! answers whether they belong to a team. A token that verifies and
 //! resolves to nobody is refused with the same one-armed answer a
-//! wrong password gets, and nothing here provisions an account from a
+//! wrong password gets; one that resolves to an account an admin has
+//! locked (#213) is refused too, and told apart from nobody for the
+//! instance's own log. Nothing here provisions an account from a
 //! claim.
 //!
 //! ## Pinning
@@ -567,8 +569,11 @@ impl OidcIdentities {
             .map_err(infra_err)
     }
 
-    /// The account a verified identity resolves to, or `None` — the
-    /// one-armed answer, for the reason the password arm gives one.
+    /// The account a verified identity resolves to, or why it resolves
+    /// to none: nobody this instance knows — the one-armed answer, for
+    /// the reason the password arm gives one — or an account an admin
+    /// has locked (#213), told apart so the instance can refuse it as
+    /// such and pin nothing on the way.
     ///
     /// By subject first: a pinned row answers regardless of what the
     /// token says about email. Then, for a token whose email the
@@ -580,7 +585,7 @@ impl OidcIdentities {
         &self,
         identity: &VerifiedIdentity,
         now_ms: i64,
-    ) -> Result<Option<AccountRecord>, DomainError> {
+    ) -> Result<IdentityResolution, DomainError> {
         let issuer = identity.issuer.clone();
         let subject = identity.subject.clone();
         let email = identity
@@ -591,53 +596,95 @@ impl OidcIdentities {
             .call(move |conn| {
                 let by_subject = conn
                     .query_row(
-                        "SELECT a.user_id, a.login, a.display_name, a.is_admin
+                        "SELECT a.user_id, a.login, a.display_name, a.is_admin, a.locked_at
                          FROM oidc_identity i JOIN user_account a ON a.user_id = i.user_id
                          WHERE i.issuer = ?1 AND i.subject = ?2",
                         params![issuer, subject],
-                        account_from_row,
+                        account_and_lock_from_row,
                     )
                     .optional()?;
-                if by_subject.is_some() {
-                    return Ok(by_subject);
+                if let Some((account, locked_at)) = by_subject {
+                    return Ok(resolution(account, locked_at));
                 }
                 let Some(email) = email else {
-                    return Ok(None);
+                    return Ok(IdentityResolution::Unknown);
                 };
                 let unpinned = conn
                     .query_row(
-                        "SELECT a.user_id, a.login, a.display_name, a.is_admin
+                        "SELECT a.user_id, a.login, a.display_name, a.is_admin, a.locked_at
                          FROM oidc_identity i JOIN user_account a ON a.user_id = i.user_id
                          WHERE i.issuer = ?1 AND i.email = ?2 AND i.subject IS NULL",
                         params![issuer, email],
-                        account_from_row,
+                        account_and_lock_from_row,
                     )
                     .optional()?;
-                let Some(account) = unpinned else {
-                    return Ok(None);
+                let Some((account, locked_at)) = unpinned else {
+                    return Ok(IdentityResolution::Unknown);
                 };
+                // A locked account is not pinned by a sign-in it
+                // refuses: the lock is lifted first, and the next
+                // verified sign-in pins as it would have.
+                if locked_at.is_some() {
+                    return Ok(IdentityResolution::Locked);
+                }
                 conn.execute(
                     "UPDATE oidc_identity SET subject = ?2, bound_at = ?3 WHERE user_id = ?1",
                     params![account.user_id, subject, now_ms],
                 )?;
-                Ok(Some(account))
+                Ok(IdentityResolution::Resolved(account))
             })
             .await
             .map_err(infra_err)
     }
 }
 
-/// A `user_id, login, display_name, is_admin` row — the column order
-/// `password::account_from_row` spells, repeated here because that one
-/// is private to its module and this one reads the same four columns
-/// through a join.
-fn account_from_row(row: &rusqlite::Row<'_>) -> Result<AccountRecord, rusqlite::Error> {
-    Ok(AccountRecord {
-        user_id: row.get(0)?,
-        login: row.get(1)?,
-        display_name: row.get(2)?,
-        admin: row.get(3)?,
-    })
+/// What a verified identity resolved to (#163, #213).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityResolution {
+    /// The account the binding names.
+    Resolved(AccountRecord),
+    /// The binding names an account an admin has locked (#213): the
+    /// provider vouched, and the instance refuses anyway.
+    Locked,
+    /// No binding names this person.
+    Unknown,
+}
+
+#[cfg(test)]
+impl IdentityResolution {
+    /// The account, for an assertion that does not need the reason.
+    fn account(self) -> Option<AccountRecord> {
+        match self {
+            Self::Resolved(account) => Some(account),
+            Self::Locked | Self::Unknown => None,
+        }
+    }
+}
+
+fn resolution(account: AccountRecord, locked_at: Option<i64>) -> IdentityResolution {
+    if locked_at.is_some() {
+        IdentityResolution::Locked
+    } else {
+        IdentityResolution::Resolved(account)
+    }
+}
+
+/// A `user_id, login, display_name, is_admin, locked_at` row — the
+/// column order `password::account_from_row` spells plus the lock,
+/// repeated here because that one is private to its module and this
+/// one reads the same columns through a join.
+fn account_and_lock_from_row(
+    row: &rusqlite::Row<'_>,
+) -> Result<(AccountRecord, Option<i64>), rusqlite::Error> {
+    Ok((
+        AccountRecord {
+            user_id: row.get(0)?,
+            login: row.get(1)?,
+            display_name: row.get(2)?,
+            admin: row.get(3)?,
+        },
+        row.get(4)?,
+    ))
 }
 
 /// Lower-cased and trimmed: the one form an address is stored and
@@ -729,6 +776,7 @@ mod tests {
                 .resolve(&identity("sub-1", "hoshino@example.com", false), T0)
                 .await
                 .unwrap()
+                .account()
                 .is_none()
         );
         // A verified one pins.
@@ -736,6 +784,7 @@ mod tests {
             .resolve(&identity("sub-1", "hoshino@example.com", true), T0 + 1)
             .await
             .unwrap()
+            .account()
             .expect("pinned by email");
         assert_eq!(found.user_id, hoshino);
         assert_eq!(
@@ -747,6 +796,7 @@ mod tests {
             .resolve(&identity("sub-1", "moved@example.com", true), T0 + 2)
             .await
             .unwrap()
+            .account()
             .expect("resolved by subject");
         assert_eq!(again.user_id, hoshino);
         // ...and the address, re-issued to somebody else, matches nothing.
@@ -755,6 +805,7 @@ mod tests {
                 .resolve(&identity("sub-2", "hoshino@example.com", true), T0 + 3)
                 .await
                 .unwrap()
+                .account()
                 .is_none()
         );
         driver.shutdown().await.unwrap();
@@ -779,6 +830,7 @@ mod tests {
             .resolve(&identity("sub-1", "hoshino@example.com", true), T0)
             .await
             .unwrap()
+            .account()
             .expect("pinned");
         assert!(matches!(
             identities

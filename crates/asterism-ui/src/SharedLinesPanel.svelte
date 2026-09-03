@@ -419,10 +419,11 @@
           <!-- The one outcome of a silent reconnect worth a sentence.
                Nothing was stored and the stored thing was refused look
                identical — this form — and only the second is somebody
-               else's doing. Which of the three ends it met is the
-               server's word (#163), and is what makes the sentence
-               something to act on: a token that sat unused is not one
-               somebody took back. -->
+               else's doing. Which end it met is the server's word
+               (#163, #213), and is what makes the sentence something
+               to act on: a token that sat unused is not one somebody
+               took back, and one the server's admin took back is not
+               one the person did. -->
           <p class="drawer-said">
             This machine's saved sign-in was refused, and has been
             forgotten.
@@ -432,6 +433,11 @@
               It went unused for longer than the server allows.
             {:else if sharedCatalog.storedRejectedReason === "revoked"}
               It was revoked.
+            {:else if sharedCatalog.storedRejectedReason === "revoked_by_instance"}
+              Whoever runs the server signed this device out.
+            {:else if sharedCatalog.storedRejectedReason === "locked"}
+              The account is locked on that server; ask whoever runs
+              it, and sign in again once the lock is lifted.
             {:else}
               It was either revoked or it expired.
             {/if}

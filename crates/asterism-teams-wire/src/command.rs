@@ -42,11 +42,10 @@ pub struct LoginCommand {
 pub struct DeviceLoginCommand {
     /// The device token, as the mint answered with it. A token that
     /// does not resolve is a `401` whose body carries a `reason` —
-    /// `expired`, `idle` or `revoked` — so the app can say which to
-    /// the person rather than showing one password form for all three
-    /// (#163). `revoked` also covers a token this instance never
-    /// minted, because a handle nobody holds and one somebody took
-    /// back are both nothing to present.
+    /// `expired`, `idle` or `revoked` (#163), `revoked_by_instance` or
+    /// `locked` (#213) — and a message worded for it. Which end each
+    /// names, and why they are told apart, is
+    /// `teams-infra`'s `DeviceTokenResolution`.
     pub token: String,
 }
 

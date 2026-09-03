@@ -51,6 +51,6 @@ type that re-spelled its fields would not be a move:
 ## Modules
 
 - [`command`](command.md): Command shapes — inputs of the `/teams/*` routes a member's client
-- [`dto`](dto.md): Response shapes of the `/teams/*` routes a member's client reads.
+- [`dto`](dto.md): Response shapes of the `/teams/*` routes a member's client reads —
 - [`projection`](projection.md): The captured projection — descriptive metadata a promoter said at
 

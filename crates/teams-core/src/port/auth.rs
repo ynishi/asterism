@@ -21,9 +21,12 @@ use crate::error::DomainError;
 pub trait CredentialVerifier: Send + Sync {
     /// Checks `secret` for the account identified by `login`.
     ///
-    /// `Ok(Some(user_id))` on success, `Ok(None)` on a wrong or
-    /// unknown credential — one arm for both, so the port cannot leak
-    /// which half failed (username enumeration); `Err` only when the
+    /// `Ok(Some(user_id))` on success, `Ok(None)` on everything else a
+    /// caller must not be able to tell apart — a wrong credential, an
+    /// unknown login, an account that holds no password, an account
+    /// the instance has locked — one arm for all of them, so the port
+    /// cannot leak which it was (username enumeration, and now which
+    /// accounts sign in elsewhere or are locked); `Err` only when the
     /// provider itself failed to answer.
     async fn verify(&self, login: &str, secret: &str) -> Result<Option<Uuid>, DomainError>;
 }
