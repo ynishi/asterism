@@ -14005,7 +14005,9 @@ Handing an Asset over (#148 decisions 3, 4, 5, 7 and 8).
 3. **Enter the content against open work.** The team mints a
    `TeamAsset` for it, one per promotion (decision 7), so two
    members bringing identical bytes get one each and "who brought
-   what" survives the second contributor.
+   what" survives the second contributor. The work is the caller's
+   to have opened: none is opened here, for the reason
+   [`Promotion::pursuit_id`] gives.
 4. **Push a round that names it**, with the entry id this client
    minted (decision 8) and the projection riding along (decision
    12). The content is there before the round names it, which is

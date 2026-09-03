@@ -13,7 +13,9 @@
 //! 3. **Enter the content against open work.** The team mints a
 //!    `TeamAsset` for it, one per promotion (decision 7), so two
 //!    members bringing identical bytes get one each and "who brought
-//!    what" survives the second contributor.
+//!    what" survives the second contributor. The work is the caller's
+//!    to have opened: none is opened here, for the reason
+//!    [`Promotion::pursuit_id`] gives.
 //! 4. **Push a round that names it**, with the entry id this client
 //!    minted (decision 8) and the projection riding along (decision
 //!    12). The content is there before the round names it, which is
@@ -89,6 +91,16 @@ pub struct Promotion<'a> {
     /// The line the entry lands on.
     pub line_id: TeamScopedId,
     /// The open work the content enters against (#148 decision 5).
+    ///
+    /// Always somebody's: a pursuit is the record that a person chose
+    /// to start work, and this function does not open one on a
+    /// caller's behalf. It was asked to (#219) and refused, because a
+    /// pursuit opened as a step of a promotion the team then refuses
+    /// is a record of a decision nobody made — the orphan of a
+    /// transaction that did not complete — and the forge has no verb
+    /// that takes such a record back without recording a second
+    /// decision. Opening work for an entry from the asset's pane is an
+    /// act of its own there, pressed by the person.
     pub pursuit_id: TeamScopedId,
     /// The Asset and the marks a person wrote on it.
     pub subject: LocalSubject<'a>,

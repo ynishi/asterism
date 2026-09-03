@@ -119,6 +119,38 @@ describe("Resource", () => {
     expect(r.error).toBeNull();
   });
 
+  it("says whether any load has answered, apart from what it answered", async () => {
+    // An initial value and an empty answer read the same on `data`;
+    // `answered` is what tells them apart (#219). Set by success and
+    // by failure alike, cleared by reset, and never by a response
+    // that was dropped as stale.
+    const r = new Resource(async (tag: string) => {
+      if (tag === "fail") throw new Error("no");
+      return [] as string[];
+    }, [] as string[], "test");
+    expect(r.answered).toBe(false);
+
+    await r.load("ok");
+    expect(r.data).toEqual([]);
+    expect(r.answered).toBe(true);
+
+    r.reset();
+    expect(r.answered).toBe(false);
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await r.load("fail");
+    expect(r.answered).toBe(true);
+
+    r.reset();
+    const slow = deferred<string[]>();
+    const s = new Resource(() => slow.promise, [] as string[], "test");
+    const p = s.load(undefined);
+    s.reset();
+    slow.resolve(["late"]);
+    await p;
+    expect(s.answered).toBe(false);
+  });
+
   it("exposes staleness to the fetcher via the isStale callback", async () => {
     const observed: boolean[] = [];
     const gate = deferred<void>();

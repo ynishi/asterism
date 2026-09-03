@@ -573,6 +573,44 @@ describe("the two writes", () => {
   });
 });
 
+describe("what the asset pane asks for before offering a target", () => {
+  // #219: the pane picks the target itself, so it needs what the
+  // drawer reads on opening — without the drawer. Read every time on
+  // decision 16's rule; the silent sign-in alone is not repeated.
+
+  it("reads the teams, the lines and the work of what is on", async () => {
+    sharedCatalog.session = "u1";
+    sharedCatalog.selected = "l1";
+    apiMock.mockResolvedValueOnce({ teams: [] }); // my_teams
+    apiMock.mockResolvedValueOnce([line("l1", "shared")]); // lines
+    apiMock.mockResolvedValueOnce([pursuit("p1")]); // pursuits
+
+    await sharedCatalog.readyForPromotion();
+
+    expect(apiMock).toHaveBeenCalledWith("my_teams");
+    expect(apiMock).toHaveBeenCalledWith("list_shared_lines", {
+      teamIdRaw: "t1",
+    });
+    expect(apiMock).toHaveBeenCalledWith("shared_line_pursuits", {
+      teamIdRaw: "t1",
+      lineId: "l1",
+    });
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "connect_team_server_stored",
+    );
+  });
+
+  it("tries the stored sign-in once, and not again after a refusal", async () => {
+    sharedCatalog.storedRejected = true;
+    apiMock.mockResolvedValueOnce(null); // team_server_session
+
+    await sharedCatalog.readyForPromotion();
+
+    expect(apiMock).not.toHaveBeenCalledWith("connect_team_server_stored");
+    expect(apiMock).not.toHaveBeenCalledWith("my_teams");
+  });
+});
+
 describe("promoting an asset onto the open work", () => {
   // The act #66 exists for, and the one entry point content has (#148
   // decision 5). What these pin is that the verb names the three ids
@@ -648,14 +686,105 @@ describe("promoting an asset onto the open work", () => {
     );
   });
 
-  it("refuses when no work is open", async () => {
-    // Decision 5 again: content enters against open work, so there is
-    // nothing to promote to.
+  it("refuses to promote when no work is open", async () => {
+    // Decision 5: content enters against open work, and #219 settled
+    // that opening one is not this verb's to do on a caller's behalf
+    // — a pursuit opened as a step of a promotion the team then
+    // refuses would be a record of a decision nobody made. So there is
+    // nothing to promote onto here, and no request goes out.
     apiMock.mockResolvedValue([]);
     await sharedCatalog.show("l1");
 
     await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
       /no work is open/,
+    );
+    expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("drops the last team's lines the moment another team is named", async () => {
+    // One level up from the line: naming a team changes what the
+    // lines list is about, and a list kept from the team before would
+    // read as answered for a team it was never asked about.
+    apiMock.mockResolvedValueOnce([line("lA", "one")]);
+    await sharedCatalog.lookAt("t1");
+    expect(sharedCatalog.lines.answered).toBe(true);
+
+    let answer: (value: ForgeLineDto[]) => void = () => {};
+    apiMock.mockReturnValueOnce(
+      new Promise<ForgeLineDto[]>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const naming = sharedCatalog.lookAt("t2");
+
+    expect(sharedCatalog.teamId).toBe("t2");
+    expect(sharedCatalog.lines.data).toEqual([]);
+    expect(sharedCatalog.lines.answered).toBe(false);
+
+    answer([line("lB", "two")]);
+    await naming;
+    expect(sharedCatalog.lines.data.map((l) => l.id)).toEqual(["lB"]);
+    expect(sharedCatalog.lines.answered).toBe(true);
+  });
+
+  it("drops the last line's work the moment another line is shown", async () => {
+    // `Resource.load` keeps the previous answer until the next lands.
+    // For a list whose subject changed that is a window in which a
+    // picker offers one line's work against another, so `show` resets
+    // before it reads rather than after the read answers.
+    await withOpenWork();
+    expect(sharedCatalog.pursuits.data.map((p) => p.id)).toEqual(["p1"]);
+
+    let answer: (value: ForgePursuitDto[]) => void = () => {};
+    apiMock.mockResolvedValueOnce([]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockReturnValueOnce(
+      new Promise<ForgePursuitDto[]>((resolve) => {
+        answer = resolve;
+      }),
+    ); // pursuits, still in flight
+    const showing = sharedCatalog.show("l2");
+
+    expect(sharedCatalog.selected).toBe("l2");
+    expect(sharedCatalog.pursuits.data).toEqual([]);
+    expect(sharedCatalog.working).toBeNull();
+    // And the empty list is not an answer: nobody has asked yet, and
+    // a screen that would offer to open work on an empty list has
+    // this to wait on.
+    expect(sharedCatalog.pursuits.answered).toBe(false);
+
+    answer([{ ...pursuit("p2"), line_id: "l2" }]);
+    await showing;
+    expect(sharedCatalog.pursuits.data.map((p) => p.id)).toEqual(["p2"]);
+    expect(sharedCatalog.pursuits.answered).toBe(true);
+  });
+
+  it("lets go of the line's reads with the line", async () => {
+    // A subject let go of takes its reads with it: after `closeLine`
+    // nothing is on, and nothing may read as answered for a line
+    // nothing is on.
+    await withOpenWork();
+    expect(sharedCatalog.pursuits.answered).toBe(true);
+
+    sharedCatalog.closeLine();
+
+    expect(sharedCatalog.selected).toBeNull();
+    expect(sharedCatalog.working).toBeNull();
+    expect(sharedCatalog.pursuits.data).toEqual([]);
+    expect(sharedCatalog.pursuits.answered).toBe(false);
+    expect(sharedCatalog.states.answered).toBe(false);
+    expect(sharedCatalog.history.answered).toBe(false);
+  });
+
+  it("refuses work that is against another line", async () => {
+    // The reset above is what keeps this from happening through the
+    // catalog's own reads; the guard is the same rule for a caller
+    // that sets `working` by hand.
+    await withOpenWork();
+    sharedCatalog.selected = "l2";
+
+    await expect(sharedCatalog.promote("asset-1", "cut-01")).rejects.toThrow(
+      /against another line/,
     );
     expect(mutateMock).not.toHaveBeenCalled();
   });
