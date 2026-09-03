@@ -306,6 +306,7 @@ import { mutate } from "../mutate";
 import { Resource } from "./_resource.svelte";
 import type {
   AssetDto,
+  ForgeCollisionDto,
   ForgeEntryStateDto,
   ForgeLineDto,
   ForgeLineHistoryDto,
@@ -337,6 +338,8 @@ type ProviderSignInStarted = { attempt_id: string; start_url: string };
 /// What the two reads need to name a line on a server.
 type TeamArgs = { teamId: string };
 type LineArgs = { teamId: string; lineId: string };
+/// What `collisions` and `behind` need to name a piece of work.
+type PursuitArgs = { teamId: string; pursuitId: string };
 
 /// How many events one press of the ledger's foot control brings back.
 ///
@@ -519,6 +522,34 @@ class SharedCatalog {
     "sharedCatalog.pursuits",
   );
 
+  /// What the open work asks for that the line has already moved
+  /// (#211, mirroring `forgeCatalog.collisions`).
+  ///
+  /// A separate `Resource` from the work rather than a field folded
+  /// into it, on `forge.svelte.ts`'s own reasoning: the answer is
+  /// about the pair and moves when either side does.
+  collisions = new Resource<PursuitArgs, ForgeCollisionDto[]>(
+    async (args) =>
+      api<ForgeCollisionDto[]>("shared_pursuit_collisions", {
+        teamIdRaw: args.teamId,
+        pursuitId: args.pursuitId,
+      }),
+    [] as ForgeCollisionDto[],
+    "sharedCatalog.collisions",
+  );
+
+  /// The landings the open work has not seen, oldest first (#211,
+  /// mirroring `forgeCatalog.behind`).
+  behind = new Resource<PursuitArgs, string[]>(
+    async (args) =>
+      api<string[]>("shared_pursuit_behind", {
+        teamIdRaw: args.teamId,
+        pursuitId: args.pursuitId,
+      }),
+    [] as string[],
+    "sharedCatalog.behind",
+  );
+
   /// The piece of work being read, if one is open.
   ///
   /// A second selection under the line, and it narrows rather than
@@ -567,19 +598,28 @@ class SharedCatalog {
     return clashingNames(this.projection);
   }
 
-  /// Reads one of the line's pursuits.
+  /// Shows one of the line's pursuits, and what stands between it and
+  /// the line.
   ///
-  /// Nothing is fetched: the list carries whole pursuits, so opening
-  /// one is choosing which of them the surface is about.
-  selectPursuit(pursuitId: string): void {
+  /// The work itself is not fetched: the list already carries it, so
+  /// opening one is choosing which of them the surface is about. The
+  /// two answers about it are (#211): what it collides with, and how
+  /// far behind the line it is.
+  async selectPursuit(pursuitId: string): Promise<void> {
     this.working = pursuitId;
     this.said = null;
+    await Promise.all([
+      this.collisions.load({ teamId: this.teamId, pursuitId }),
+      this.behind.load({ teamId: this.teamId, pursuitId }),
+    ]);
   }
 
   /// Lets go of the work being read, keeping the line.
   clearWork(): void {
     this.working = null;
     this.said = null;
+    this.collisions.reset();
+    this.behind.reset();
   }
 
   /// Lets go of the line, and of the work under it.
@@ -1252,6 +1292,10 @@ class SharedCatalog {
     this.states.reset();
     this.history.reset();
     this.pursuits.reset();
+    // No work is showing under a line that has just been named, so
+    // whatever these last answered about is gone with it.
+    this.collisions.reset();
+    this.behind.reset();
     await Promise.all([
       this.states.load({ teamId: this.teamId, lineId }),
       this.history.load({ teamId: this.teamId, lineId }),
@@ -1262,7 +1306,11 @@ class SharedCatalog {
   /// Opens work against the line now showing.
   ///
   /// Decision 10 is why nothing is copied first: working on a shared
-  /// line needs no clone.
+  /// line needs no clone. Nothing is read back about what it collides
+  /// with or how far behind it is, on `forge.svelte.ts`'s own
+  /// reasoning: a pursuit cut from where the line is now is level with
+  /// it by construction, so both answers are empty and reset says the
+  /// same thing without the two calls.
   async openPursuit(title: string, note: string): Promise<ForgePursuitDto> {
     const lineId = this.requireLine();
     this.said = null;
@@ -1278,6 +1326,8 @@ class SharedCatalog {
     );
     await this.pursuits.load({ teamId: this.teamId, lineId });
     this.working = pursuit.id;
+    this.collisions.reset();
+    this.behind.reset();
     return pursuit;
   }
 
@@ -1286,7 +1336,11 @@ class SharedCatalog {
   /// Nothing reaches the line here. A round is a request, and the only
   /// moment anything lands is a satisfied close — which is what lets
   /// two members work one line without contending, and why the
-  /// contents are not re-read after this.
+  /// contents are not re-read after this. What a round asks for is
+  /// half of what a collision is made of, so writing one can make or
+  /// clear one (#211) — `behind` is not re-read, on `forge.svelte.ts`'s
+  /// own reasoning: nothing this side writes moves how many landings
+  /// the line has gained.
   async pushRound(ops: ForgeOpDto[], note: string): Promise<void> {
     const pursuitId = this.requireWork();
     this.said = null;
@@ -1295,7 +1349,10 @@ class SharedCatalog {
       { teamIdRaw: this.teamId, pursuitId, ops, note: note || null },
       "push that round",
     );
-    await this.reloadWork();
+    await Promise.all([
+      this.reloadWork(),
+      this.collisions.load({ teamId: this.teamId, pursuitId }),
+    ]);
   }
 
   /// Ends the open work, landing it or abandoning it.
@@ -1316,6 +1373,8 @@ class SharedCatalog {
         ? "Closed as satisfied — what the work asked for is on the line."
         : "Abandoned. The line did not move.";
     this.working = null;
+    this.collisions.reset();
+    this.behind.reset();
     await Promise.all([
       this.states.load({ teamId: this.teamId, lineId }),
       this.history.load({ teamId: this.teamId, lineId }),

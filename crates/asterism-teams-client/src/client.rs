@@ -34,9 +34,9 @@
 use std::path::Path;
 
 use asterism_contract::forge::{
-    CloseForgePursuitCommand, ForgeDiscardedDto, ForgeEntryStateDto, ForgeLineActCommand,
-    ForgeLineDto, ForgeLineHistoryDto, ForgeOpDto, ForgePursuitDto, OpenForgeLineCommand,
-    OpenForgePursuitCommand, PushForgeRoundCommand,
+    CloseForgePursuitCommand, ForgeCollisionDto, ForgeDiscardedDto, ForgeEntryStateDto,
+    ForgeLineActCommand, ForgeLineDto, ForgeLineHistoryDto, ForgeOpDto, ForgePursuitDto,
+    OpenForgeLineCommand, OpenForgePursuitCommand, PushForgeRoundCommand,
 };
 use asterism_core::domain::team_link::TeamScopedId;
 use asterism_core::error::DomainError;
@@ -786,6 +786,42 @@ impl TeamsClient {
         self.get(
             &format!("/teams/{team}/forge/pursuits/{pursuit}"),
             "pursuit",
+        )
+        .await
+    }
+
+    /// What this work still asks for that the line has moved since
+    /// (#211, mirroring the local plane's `PursuitService::collisions`).
+    ///
+    /// Derived from both logs on every call, so it cannot go stale.
+    /// What a screen shows before offering a close.
+    pub async fn pursuit_collisions(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+    ) -> Result<Vec<ForgeCollisionDto>, TeamsClientError> {
+        self.get(
+            &format!("/teams/{team}/forge/pursuits/{pursuit}/collisions"),
+            "pursuit_collisions",
+        )
+        .await
+    }
+
+    /// The landings this work has not seen, oldest first (#211, mirroring
+    /// the local plane's `PursuitService::behind`).
+    ///
+    /// How far behind rather than what collides: a landing here may
+    /// touch nothing this work asks for. A screen reads both — this one
+    /// to say the line has moved, [`Self::pursuit_collisions`] to say
+    /// whether it matters.
+    pub async fn pursuit_behind(
+        &self,
+        team: TeamScopedId,
+        pursuit: TeamScopedId,
+    ) -> Result<Vec<String>, TeamsClientError> {
+        self.get(
+            &format!("/teams/{team}/forge/pursuits/{pursuit}/behind"),
+            "pursuit_behind",
         )
         .await
     }

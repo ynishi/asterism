@@ -240,6 +240,14 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("shared_line_states", "talks to a team, not to this process"),
     ("shared_pursuit", "talks to a team, not to this process"),
+    (
+        "shared_pursuit_behind",
+        "talks to a team, not to this process",
+    ),
+    (
+        "shared_pursuit_collisions",
+        "talks to a team, not to this process",
+    ),
     ("team_auth_provider", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
     ("team_roster", "talks to a team, not to this process"),

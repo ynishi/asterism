@@ -251,6 +251,8 @@ other.
 - `shared_line_pursuits` — The work against a shared line, open and ended alike.
 - `shared_line_states` — What is on a shared line, folded from its chain by the server.
 - `shared_pursuit` — One piece of work on a shared line, as it stands.
+- `shared_pursuit_behind` — The landings a piece of shared work has not seen, oldest first
+- `shared_pursuit_collisions` — What a piece of shared work still asks for that the line has moved
 - `snapshot_members` — Snapshot view members (`snapshot_members`): renderable cards
 - `stored_team_connection` — What the connect form pre-fills from, or `None` when this machine
 - `team_auth_provider` — What a team server offers besides a password (#163), or `None`.

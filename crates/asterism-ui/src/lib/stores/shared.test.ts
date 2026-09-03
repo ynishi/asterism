@@ -640,7 +640,9 @@ describe("promoting an asset onto the open work", () => {
     apiMock.mockResolvedValueOnce(null); // history
     apiMock.mockResolvedValueOnce([pursuit("p1")]); // pursuits
     await sharedCatalog.show("l1");
-    sharedCatalog.selectPursuit("p1");
+    apiMock.mockResolvedValueOnce([]); // collisions
+    apiMock.mockResolvedValueOnce([]); // behind
+    await sharedCatalog.selectPursuit("p1");
   }
 
   it("names the team, the line and the work the catalog has open", async () => {
@@ -752,11 +754,90 @@ describe("promoting an asset onto the open work", () => {
     // a screen that would offer to open work on an empty list has
     // this to wait on.
     expect(sharedCatalog.pursuits.answered).toBe(false);
+    // Nothing is on under the new line, so what the last line's work
+    // collided with and how far behind it was goes with it.
+    expect(sharedCatalog.collisions.answered).toBe(false);
+    expect(sharedCatalog.behind.answered).toBe(false);
 
     answer([{ ...pursuit("p2"), line_id: "l2" }]);
     await showing;
     expect(sharedCatalog.pursuits.data.map((p) => p.id)).toEqual(["p2"]);
     expect(sharedCatalog.pursuits.answered).toBe(true);
+  });
+
+  it("reads what the open work collides with and how far behind it is (#211)", async () => {
+    // The two answers `ForgeWork` shows for the local plane, read the
+    // same way for a shared line: opening a piece of work is choosing
+    // which of the line's pursuits the surface is about, and the two
+    // answers about it come with the choice.
+    apiMock.mockResolvedValueOnce([]); // states
+    apiMock.mockResolvedValueOnce(null); // history
+    apiMock.mockResolvedValueOnce([pursuit("p1")]); // pursuits
+    await sharedCatalog.show("l1");
+
+    apiMock.mockResolvedValueOnce([
+      { entry_id: "e1", axis: "content", moved_in_id: "c1" },
+    ]);
+    apiMock.mockResolvedValueOnce(["c1"]);
+    await sharedCatalog.selectPursuit("p1");
+
+    expect(apiMock).toHaveBeenCalledWith("shared_pursuit_collisions", {
+      teamIdRaw: "t1",
+      pursuitId: "p1",
+    });
+    expect(apiMock).toHaveBeenCalledWith("shared_pursuit_behind", {
+      teamIdRaw: "t1",
+      pursuitId: "p1",
+    });
+    expect(sharedCatalog.collisions.data).toEqual([
+      { entry_id: "e1", axis: "content", moved_in_id: "c1" },
+    ]);
+    expect(sharedCatalog.behind.data).toEqual(["c1"]);
+  });
+
+  it("drops the last work's two answers wherever it lets go of the work", async () => {
+    // `openPursuit` and `closePursuit` do not re-read either — on
+    // `forge.svelte.ts`'s own reasoning, restated where each write is —
+    // so both are reset rather than left to answer for work that is
+    // not on any more.
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.show("l1");
+    apiMock.mockResolvedValueOnce([
+      { entry_id: "e1", axis: "content", moved_in_id: "c1" },
+    ]);
+    apiMock.mockResolvedValueOnce(["c1"]);
+    await sharedCatalog.selectPursuit("p1");
+    expect(sharedCatalog.collisions.data.length).toBe(1);
+    expect(sharedCatalog.behind.data.length).toBe(1);
+
+    sharedCatalog.clearWork();
+    expect(sharedCatalog.collisions.answered).toBe(false);
+    expect(sharedCatalog.behind.answered).toBe(false);
+
+    // Opened level with the line by construction (#211, on
+    // `openPursuit`'s own reasoning): a freshly cut pursuit collides
+    // with nothing and is behind nothing.
+    apiMock.mockResolvedValueOnce([
+      { entry_id: "e1", axis: "content", moved_in_id: "c1" },
+    ]);
+    apiMock.mockResolvedValueOnce(["c1"]);
+    await sharedCatalog.selectPursuit("p1");
+    mutateMock.mockResolvedValueOnce(pursuit("p2"));
+    apiMock.mockResolvedValueOnce([pursuit("p1"), pursuit("p2")]);
+    await sharedCatalog.openPursuit("another", "");
+    expect(sharedCatalog.collisions.answered).toBe(false);
+    expect(sharedCatalog.behind.answered).toBe(false);
+
+    apiMock.mockResolvedValueOnce([
+      { entry_id: "e1", axis: "content", moved_in_id: "c1" },
+    ]);
+    apiMock.mockResolvedValueOnce(["c1"]);
+    await sharedCatalog.selectPursuit("p2");
+    mutateMock.mockResolvedValueOnce(pursuit("p2"));
+    apiMock.mockResolvedValue([]);
+    await sharedCatalog.closePursuit("abandoned", "");
+    expect(sharedCatalog.collisions.answered).toBe(false);
+    expect(sharedCatalog.behind.answered).toBe(false);
   });
 
   it("lets go of the line's reads with the line", async () => {
@@ -765,6 +846,8 @@ describe("promoting an asset onto the open work", () => {
     // nothing is on.
     await withOpenWork();
     expect(sharedCatalog.pursuits.answered).toBe(true);
+    expect(sharedCatalog.collisions.answered).toBe(true);
+    expect(sharedCatalog.behind.answered).toBe(true);
 
     sharedCatalog.closeLine();
 
@@ -774,6 +857,8 @@ describe("promoting an asset onto the open work", () => {
     expect(sharedCatalog.pursuits.answered).toBe(false);
     expect(sharedCatalog.states.answered).toBe(false);
     expect(sharedCatalog.history.answered).toBe(false);
+    expect(sharedCatalog.collisions.answered).toBe(false);
+    expect(sharedCatalog.behind.answered).toBe(false);
   });
 
   it("refuses work that is against another line", async () => {
@@ -840,7 +925,9 @@ describe("promoting an asset onto the open work", () => {
       }),
     ]);
     await sharedCatalog.show("l1");
-    sharedCatalog.selectPursuit("p1");
+    apiMock.mockResolvedValueOnce([]); // collisions
+    apiMock.mockResolvedValueOnce([]); // behind
+    await sharedCatalog.selectPursuit("p1");
 
     // Which refusal, not merely that one happened: the guard has two,
     // and the other one ("not in this line's list") would pass a bare
@@ -935,7 +1022,8 @@ describe("working a shared line", () => {
     apiMock.mockResolvedValueOnce([pursuit("p1")]);
     await sharedCatalog.openPursuit("", "");
     apiMock.mockReset();
-    apiMock.mockResolvedValueOnce([pursuit("p1")]);
+    apiMock.mockResolvedValueOnce([pursuit("p1")]); // pursuits
+    apiMock.mockResolvedValueOnce([]); // collisions
 
     const op: ForgeOpDto = {
       entry_id: "e1",
@@ -961,6 +1049,16 @@ describe("working a shared line", () => {
       teamIdRaw: "t1",
       lineId: "l1",
     });
+    // What a round asks for is half of what a collision is made of, so
+    // writing one can make or clear one (#211).
+    expect(apiMock).toHaveBeenCalledWith("shared_pursuit_collisions", {
+      teamIdRaw: "t1",
+      pursuitId: "p1",
+    });
+    expect(apiMock).not.toHaveBeenCalledWith(
+      "shared_pursuit_behind",
+      expect.anything(),
+    );
   });
 
   it("refuses to push a round when no work is open", async () => {
@@ -1104,7 +1202,9 @@ describe("working a shared line", () => {
       ]),
     ]);
     await sharedCatalog.show("l1");
-    sharedCatalog.selectPursuit("p1");
+    apiMock.mockResolvedValueOnce([]); // collisions
+    apiMock.mockResolvedValueOnce([]); // behind
+    await sharedCatalog.selectPursuit("p1");
 
     expect(sharedCatalog.states.data[0].name).toBe("cut-01");
     expect(sharedCatalog.projection).toEqual([

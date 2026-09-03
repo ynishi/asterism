@@ -31,21 +31,29 @@
   // an entry becomes means choosing from the team's own content, and
   // this plane has no read of that to choose from.
   //
-  // **The two answers above the rows are not read.** `ForgeWork` shows
-  // how many landings have arrived since the work was cut and what it
-  // collides with; the team server mirrors both routes and the desktop
-  // has no command for either. So a close can be refused here by
-  // something this surface never showed. That is a gap and is written
-  // down as one — what closes it is two more commands, not a decision.
+  // **The two answers above the rows, read the way `ForgeWork` reads
+  // them (#211).** How many landings have arrived since the work was
+  // cut, and what it collides with — the team server mirrored both
+  // routes from the day the forge was hosted, and until this issue the
+  // desktop carried no verb for either, so a close could be refused
+  // here by something this surface never showed. `sharedCatalog`'s
+  // `collisions` and `behind` are the same two `Resource`s
+  // `forgeCatalog` keeps, over the same two commands mirrored path for
+  // path (decision 19); this component draws them the same way,
+  // without the one action `ForgeWork` offers under them — this plane
+  // carries no verb that lets a line's rule settle a collision, so the
+  // list is read-only here.
   //
-  // **A refusal reaches this surface as its message and nothing
-  // more.** `ForgeWork` reads a `reason` off the error and says what
-  // to do about it. The wire carries one here too — the forge's
-  // conflicts answer with `blocked` / `raced` / `settled` / `clashes`
-  // and `TeamsClientError::Refused` holds it — but `teams_error` in
-  // `commands.rs` keeps the message and drops the token on the way
-  // across, so what arrives is a sentence. Advice invented from that
-  // sentence would be guessing at which refusal it was.
+  // **A refusal's reason is read the way `ForgeWork` reads it.** The
+  // forge's conflicts answer with `blocked` / `raced` / `settled` /
+  // `clashes`, `TeamsClientError::Refused` holds the token on the way
+  // off the wire, and `teams_error` in `commands.rs` now keeps it
+  // rather than dropping it under `..` — a shared refusal crosses as
+  // the same `UiError::Conflict { message, reason }` a local one does,
+  // and `whatToDo` below reads it the way `ForgeWork`'s does. `blocked`
+  // reads differently on this plane: there is no rule to ask to settle
+  // a collision from here, only the list above to look at, and no
+  // archive/reopen verb on a shared line at all.
   //
   // **No pictures, and no conversations.** An entry names content the
   // team holds, which this machine has no copy of — the contents tab
@@ -74,15 +82,22 @@
   let closeNote = $state("");
   let closing = $state(false);
 
-  // Every write here is awaited inside a `catch` that does nothing,
-  // and the nothing is the point: `mutate` has already put the refusal
-  // on screen, and this plane has no second half to add to it — the
-  // header says why there is no action behind a reason here. What the
-  // catch buys is that a refusal is not also an unhandled rejection,
-  // which `mutate` re-throws for callers that roll something back.
-  // These have nothing to roll back: every write here reaches the
-  // catalog before it touches anything on screen, so a refused one
-  // leaves the surface exactly as it was.
+  // What the last close left to say that the toast does not — the
+  // action behind a reason. `ForgeWork`'s own field, by the same name
+  // and for the same one write: every other one here still catches
+  // into nothing, because `mutate` has already put the refusal on
+  // screen and none of them refuse for a reason this surface can act
+  // on.
+  let said = $state<string | null>(null);
+
+  // Every write but the close is awaited inside a `catch` that does
+  // nothing, and the nothing is the point: `mutate` has already put
+  // the refusal on screen, and this plane has no second half to add to
+  // it for these. What the catch buys is that a refusal is not also an
+  // unhandled rejection, which `mutate` re-throws for callers that roll
+  // something back. These have nothing to roll back: every write here
+  // reaches the catalog before it touches anything on screen, so a
+  // refused one leaves the surface exactly as it was.
   async function open(event: Event) {
     event.preventDefault();
     opening = true;
@@ -148,14 +163,36 @@
     });
   }
 
+  // The action behind a reason, read the way `ForgeWork`'s `whatToDo`
+  // reads it — same four tokens, `blocked`'s message the one that
+  // differs, for the reason the header gives.
+  function whatToDo(error: unknown): string | null {
+    const reason = (error as { reason?: string })?.reason;
+    switch (reason) {
+      case "blocked":
+        return "Something has to change first — look at what this collides with, above. If the list above is empty, the line itself has been archived, which nothing on this screen can undo.";
+      case "raced":
+        return "A landing arrived while this was being written. Closing again will usually take.";
+      case "settled":
+        return "This work has already ended.";
+      case "clashes":
+        return "The line would end up with two entries under one name. Rename one of them below and close again.";
+      default:
+        return null;
+    }
+  }
+
   async function end(outcome: "satisfied" | "abandoned") {
     closing = true;
+    said = null;
     try {
       await sharedCatalog.closePursuit(outcome, closeNote.trim());
       closeNote = "";
-    } catch {
-      // Said by `mutate`. The note is kept, because a close that was
-      // refused is one somebody will press again.
+    } catch (error) {
+      // `mutate` has already put the refusal on screen; this adds the
+      // half it does not read. The note is kept, because a close that
+      // was refused is one somebody will press again.
+      said = whatToDo(error);
     } finally {
       closing = false;
     }
@@ -279,6 +316,38 @@
     <p class="quiet note">{work.note}</p>
   {/if}
 
+  {#if !ended}
+    <!-- Both answers are about work that can still move, on
+         `ForgeWork`'s own reasoning: ended work collides with nothing
+         anybody can act on, and a satisfied close leaves it behind its
+         own landing — a true number about a question nobody is asking
+         any more (#211). -->
+    {#if sharedCatalog.behind.data.length > 0}
+      <p class="quiet">
+        {sharedCatalog.behind.data.length}
+        {sharedCatalog.behind.data.length === 1 ? "landing" : "landings"} on the
+        line since this was cut.
+      </p>
+    {/if}
+
+    {#if sharedCatalog.collisions.data.length > 0}
+      <div class="collisions">
+        <h4>Collides with the line</h4>
+        <ul>
+          {#each sharedCatalog.collisions.data as hit (hit.entry_id + hit.axis)}
+            <li>
+              <span>
+                {projected.find((row) => row.entryId === hit.entry_id)?.name ??
+                  hit.entry_id}
+              </span>
+              <span class="quiet">{hit.axis}</span>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  {/if}
+
   <!-- Only for work that can still move. The sentence is about a close
        that has not happened, and ended work has none coming — an
        abandoned pursuit can leave two entries under one name, with
@@ -287,6 +356,13 @@
     <p class="quiet warn">
       Two entries would be named {clashing.join(", ")}. A line holds one live
       entry per name, so closing this will be refused until one is renamed.
+    </p>
+  {/if}
+
+  {#if said !== null}
+    <p class="said">
+      {said}
+      <button type="button" onclick={() => (said = null)}>dismiss</button>
     </p>
   {/if}
 
@@ -413,6 +489,33 @@
   .warn {
     border-left: 2px solid rgba(220, 170, 90, 0.7);
     padding-left: 0.5rem;
+  }
+  .collisions {
+    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    padding-left: 0.5rem;
+    margin: 0.5rem 0;
+  }
+  .collisions li {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+  }
+  .said {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    padding-left: 0.5rem;
+  }
+  .said button {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 0;
+    text-decoration: underline;
   }
   .work-list button {
     background: none;

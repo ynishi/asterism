@@ -3032,6 +3032,7 @@ pub async fn list_forge_threads_about(
 /// that. Everything else the client can fail at is this machine's
 /// business and reads as one.
 fn teams_error(err: asterism_teams_client::TeamsClientError) -> UiError {
+    use asterism_core::error::ConflictKind;
     use asterism_teams_client::TeamsClientError as E;
     match err {
         E::Local(domain) => UiError::from(domain),
@@ -3040,9 +3041,27 @@ fn teams_error(err: asterism_teams_client::TeamsClientError) -> UiError {
             message,
             ..
         } => UiError::from(DomainError::not_found("on the team server", message)),
+        // The reason a shared refusal carries is held on the wire and
+        // dropped here otherwise (#211): `ForgeWork` on the local plane
+        // reads it to decide what a screen offers, and a shared close
+        // refused for the same cause deserves the same offer. Only a
+        // token this instance recognizes becomes a `Conflict` — one it
+        // does not (a future kind this build predates) falls through to
+        // the plain refusal below, honestly, rather than guessing.
         E::Refused {
-            status, message, ..
-        } if (400..500).contains(&status) => UiError::from(DomainError::Validation(message)),
+            status,
+            message,
+            reason,
+            ..
+        } if (400..500).contains(&status) => {
+            match reason.as_deref().and_then(ConflictKind::from_token) {
+                Some(kind) => UiError::Conflict {
+                    message,
+                    reason: kind.as_str(),
+                },
+                None => UiError::from(DomainError::Validation(message)),
+            }
+        }
         other => UiError::from(DomainError::Infra(anyhow::anyhow!("{other}"))),
     }
 }
@@ -4109,6 +4128,46 @@ pub async fn shared_pursuit(
         .map_err(teams_error)
 }
 
+/// What a piece of shared work still asks for that the line has moved
+/// since (#211, mirroring [`get_forge_pursuit_collisions`]).
+///
+/// No mapping, for the reason [`shared_line_pursuits`] gives: decision
+/// 19 mirrors the forge path for path, so a shared collision is the
+/// contract's own `ForgeCollisionDto`.
+#[tauri::command]
+pub async fn shared_pursuit_collisions(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    pursuit_id: String,
+) -> Result<Vec<ForgeCollisionDto>, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .pursuit_collisions(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&pursuit_id, "pursuit id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
+/// The landings a piece of shared work has not seen, oldest first
+/// (#211, mirroring [`get_forge_pursuit_behind`]).
+#[tauri::command]
+pub async fn shared_pursuit_behind(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    pursuit_id: String,
+) -> Result<Vec<String>, UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .pursuit_behind(
+            team_id(&team_id_raw, "team id")?,
+            team_id(&pursuit_id, "pursuit id")?,
+        )
+        .await
+        .map_err(teams_error)
+}
+
 /// Opens work against a shared line.
 ///
 /// Decision 10 is why nothing is copied first: working on a shared
@@ -4536,5 +4595,67 @@ impl asterism_teams_client::publish::Holdings for LocalHoldings<'_> {
             user_marks: asterism_teams_client::PromotedMark::gather(&layers, &marks),
             asset,
         })
+    }
+}
+
+#[cfg(test)]
+mod teams_error_tests {
+    use asterism_teams_client::TeamsClientError;
+
+    use super::{UiError, teams_error};
+
+    fn refused(status: u16, message: &str, reason: Option<&str>) -> TeamsClientError {
+        TeamsClientError::Refused {
+            method: "POST",
+            url: "/teams/t/forge/pursuits/p/close".to_string(),
+            status,
+            kind: "Conflict".to_string(),
+            message: message.to_string(),
+            reason: reason.map(str::to_string),
+        }
+    }
+
+    /// A refusal whose reason names a kind this build knows becomes a
+    /// `Conflict` a screen can act on, the way a local refusal already
+    /// does (#211) — one row per token so a kind gaining a different
+    /// spelling here is caught the way `only_a_conflict_carries_a_reason`
+    /// in `asterism-core` catches it there.
+    #[test]
+    fn a_recognized_reason_crosses_as_a_conflict() {
+        for token in ["raced", "blocked", "settled", "clashes"] {
+            let mapped = teams_error(refused(409, "the line moved", Some(token)));
+            match mapped {
+                UiError::Conflict { message, reason } => {
+                    assert_eq!(message, "the line moved");
+                    assert_eq!(reason, token);
+                }
+                other => panic!("{token}: expected Conflict, got {other:?}"),
+            }
+        }
+    }
+
+    /// No reason at all is the ordinary 4xx path, unchanged by this
+    /// issue: a validation refusal with nothing a screen can branch on.
+    #[test]
+    fn no_reason_stays_a_validation_refusal() {
+        let mapped = teams_error(refused(400, "not a real pursuit id", None));
+        assert!(matches!(mapped, UiError::Validation { .. }), "{mapped:?}");
+    }
+
+    /// A token this build does not recognize — a kind a newer server
+    /// added — falls through honestly rather than being guessed at.
+    #[test]
+    fn an_unrecognized_reason_falls_through_to_validation() {
+        let mapped = teams_error(refused(409, "a future kind", Some("unheard-of")));
+        assert!(matches!(mapped, UiError::Validation { .. }), "{mapped:?}");
+    }
+
+    /// 404 keeps its own arm, ahead of the conflict match — a shared
+    /// refusal for a pursuit that does not exist reads as not-found
+    /// rather than as an unreadable conflict.
+    #[test]
+    fn not_found_is_unaffected() {
+        let mapped = teams_error(refused(404, "no such pursuit", None));
+        assert!(matches!(mapped, UiError::NotFound { .. }), "{mapped:?}");
     }
 }
