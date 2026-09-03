@@ -10,6 +10,40 @@ and this project adheres to
 
 ### Added
 
+- **An admin's reach over somebody else's sign-in** (#213). An instance admin
+  can now take back every live device token an account holds
+  (`DELETE /teams/admin/accounts/{user_id}/devices`, after `GET …/devices` to
+  see what is there — the two answer on one definition of live), take back every
+  live device token on the instance (`DELETE /teams/admin/devices`), and lock an
+  account (`POST /teams/admin/accounts/{user_id}/lock`, `DELETE` to lift it).
+  Taking tokens back stops the next silent sign-in and nothing else: the
+  sessions an account already holds run to their own TTL, a day by default, and
+  the lock is the verb that stops them resolving — offboarding is both, in that
+  order. A locked account keeps its rows and resolves no credential — not a
+  password, not a device token, not a provider sign-in, not a session it already
+  holds — while its ledger stamps keep resolving, which is the difference from
+  deleting it. Each act is written to the instance's own record
+  (`GET /teams/admin/events`, and per account `GET …/{user_id}/events`, which
+  also says whether the account is locked), because an account belongs to no
+  team and no team's ledger can hold what was done to it. An admin remains the
+  capacity #83 §1 made them — a flag on the account, checked in each handler.
+
+  **The device that was signed out is told that the instance did it.** A token
+  an admin took back is kept as a tombstone rather than deleted, so its next
+  presentation inside the window the mint wrote is a `401` whose reason is
+  `revoked_by_instance` — once, after which it is `revoked` like any token
+  nobody holds; the tombstone outlives the idle bound, which is a fact about a
+  token and not about a tombstone — and a token whose account is locked meets
+  `locked`. The drawer says both in its own words, and forgets the stored token
+  on both as it does on every refusal: the reason says why the person was
+  refused, not whether the token still exists, and the app does not keep a
+  credential on one word off the wire. A token the server kept through a lock is
+  presented no more; the person signs in again once the lock lifts. An owner's
+  own revoke is unchanged: it deletes, and the owner needs no news of their own
+  act. An admin cannot lock their own account, and the last unlocked admin is
+  locked by nobody — decided in the adapter's own statement, so two admins
+  locking each other at once cannot leave an instance with none.
+
 - **Sign in through the team's identity provider — the app's half** (#163). The
   connect drawer asks the server it is pointed at whether it offers a provider,
   and shows a "Sign in with …" button when it does. Pressing it opens the system
@@ -111,10 +145,11 @@ and this project adheres to
   (30; `0` turns the bound off). The window stays fixed at the mint and is never
   slid forward on use; the idle bound only ever ends a token sooner. A token
   that stops resolving is still a `401`, and its body now says why — `expired`,
-  `idle` or `revoked` — so the app can tell the person which rather than show
-  one password form for all three. `revoked` is one answer for an owner's revoke
-  and a token this instance never minted; an admin's revoke has no route yet and
-  a forced re-authentication is not built here — both are #213's.
+  `idle` or `revoked`, and since #213 `revoked_by_instance` or `locked` — so the
+  app can tell the person which rather than show one password form for all of
+  them. `revoked` is one answer for an owner's revoke, a token this instance
+  never minted, and a tombstone that has already given its news; the admin's
+  revoke, and the account lock, are #213's entry above.
 
   **A session says what a client needs to key its store by.** `SessionDto`
   gained `login` (a sign-in through a provider ends in a session for an account
@@ -222,8 +257,8 @@ and this project adheres to
   **The mint asks for a live session and nothing more**, which is what leaves a
   sign-in through a provider (#163) free: it ends in a session exactly as a
   password does, and the minting path never learns which way in was taken. What
-  that costs is that a stolen session can mint one, and the bound on it is the
-  owner's — a list in the drawer of every token the account holds, each with its
+  that costs is that a stolen session can mint one, and the owner has the bound
+  on it — a list in the drawer of every token the account holds, each with its
   device's label, when it was minted and when it was last used, and a revoke
   beside it. The values are never in that list; the instance does not have them
   to give.
