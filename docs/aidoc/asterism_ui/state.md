@@ -16,5 +16,6 @@ progress emitter.
 ## Types
 
 - `AppState` — Bundle of services registered as Tauri state.
+- `ProviderSignInInFlight` — A sign-in through the team's identity provider that is waiting for
 - `TeamsConnection` — A live team session, and the pair that names it.
 

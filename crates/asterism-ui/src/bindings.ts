@@ -450,7 +450,9 @@ export type TeamDeviceTokenDto = { id: string; label: string; created_at_ms: num
 
 export type StoredTeamConnectionDto = { base_url: string; login: string; token_id: string; label: string; };
 
-export type StoredTeamConnectDto = { outcome: 'connected' | 'nothing' | 'rejected'; user: string | null; };
+export type StoredTeamConnectDto = { outcome: 'connected' | 'nothing' | 'rejected'; user: string | null; reason: string | null; };
 
 export type StoredTeamConnectOutcome = 'connected' | 'nothing' | 'rejected';
+
+export type TeamProviderDto = { name: string; };
 

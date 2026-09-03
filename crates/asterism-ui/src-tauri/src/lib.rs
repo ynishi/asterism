@@ -43,6 +43,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod provider_sign_in;
 pub mod state;
 pub mod stored_connection;
 
@@ -109,7 +110,15 @@ pub fn run() {
     asterism_infra::observe::install();
     let opts = parse_cli();
 
-    let builder = tauri::Builder::default();
+    // The opener is how a sign-in through a team's identity provider
+    // (#163) hands the person's default browser the page on the team
+    // server. The backend calls it and nothing in the webview does,
+    // which is why the capability file grants the webview none of the
+    // plugin's commands: a capability is what the webview may reach
+    // over IPC, and the Rust call is not that. Under the `wdio`
+    // feature the call is compiled out and the plugin stays registered
+    // — the suite is the browser, and the reason sits at the call.
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
 
     // WebDriver surface for `just ui-e2e`, behind the `wdio` feature.
     // The feature is what keeps this out of a shipped app: a default
@@ -436,10 +445,17 @@ pub fn run() {
             commands::connect_team_server,
             commands::disconnect_team_server,
             commands::team_server_session,
+            // The other way in (#163): what the server offers besides
+            // a password, and the sign-in that goes through the browser
+            // and comes back on loopback.
+            commands::team_auth_provider,
+            commands::connect_team_server_provider,
+            commands::cancel_provider_sign_in,
             // The one credential this machine may keep, and what it
             // costs to keep it (#204). `stored_connection` owns both
-            // stores; these are the four verbs a window reaches them
-            // through.
+            // stores; this block is the verbs a window reaches them
+            // through by name, and the two connects above reach them
+            // through the mint.
             commands::stored_team_connection,
             commands::connect_team_server_stored,
             commands::list_team_device_tokens,

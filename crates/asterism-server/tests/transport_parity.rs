@@ -171,6 +171,11 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
         "desktop chrome: what this machine's keychain and profile home \
          remember, which no server holds",
     ),
+    (
+        "cancel_provider_sign_in",
+        "desktop chrome: ends a wait this process holds for the browser, \
+         which a socket client never has",
+    ),
     // Deliberately one-sided, and #153 argues why where the obligation
     // itself is stated: a verb against somebody else's server is not a
     // verb against this one.
@@ -181,6 +186,10 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     (
         "connect_team_server",
+        "talks to a team, not to this process",
+    ),
+    (
+        "connect_team_server_provider",
         "talks to a team, not to this process",
     ),
     (
@@ -231,6 +240,7 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("shared_line_states", "talks to a team, not to this process"),
     ("shared_pursuit", "talks to a team, not to this process"),
+    ("team_auth_provider", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
     ("team_roster", "talks to a team, not to this process"),
     (

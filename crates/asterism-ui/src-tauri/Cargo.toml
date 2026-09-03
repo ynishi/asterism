@@ -24,6 +24,10 @@ asterism-contract = { path = "../../asterism-contract" }
 schema-bridge  = { workspace = true }
 
 [dev-dependencies]
+# The loopback listener's test is a browser: it follows the server's
+# redirect to the port and reads the `303` it is answered with, which
+# takes an HTTP client that does not follow redirects on its own.
+reqwest = { workspace = true }
 # `export_parity` reads the contract's sources and this crate's build
 # script, and pairs what one derives against what the other exports. Both
 # halves are syntax — a `SchemaBridge` inside a doc comment is a type that
@@ -67,6 +71,14 @@ tauri            = { workspace = true, features = ["protocol-asset"] }
 # takes a token as an argument and states that where it stores it is
 # the caller's business, and this is the caller.
 keyring          = { workspace = true }
+# A sign-in through the team's identity provider (#163) opens the
+# system browser at the server, keeps a secret the server sees only as
+# its SHA-256, and listens on loopback for the browser to come back;
+# the plugin opens the browser, the two crates below make the secret,
+# and `axum` (already here for the local serve) is the listener.
+tauri-plugin-opener = { workspace = true }
+sha2             = { workspace = true }
+rand             = { workspace = true }
 # `tauri-plugin-log` removed: it only installed in debug builds, so a
 # bundled app produced no diagnostics at all. `asterism_infra::diag`
 # installs one subscriber for every build and also persists to
@@ -95,7 +107,14 @@ tracing = { workspace = true }
 #
 # A feature is opt-in at the command line, so the default `cargo build`
 # — including `just dogfood-build`, which produces the app that holds
-# real data — never pulls it in. `just ui-e2e` passes `--features wdio`.
+# real data — never pulls it in. The recipes that drive the app from a
+# WebDriver pass `--features wdio`; the Justfile is the list.
+#
+# The feature is read outside the WebDriver surface too — a sign-in
+# through a team's identity provider does not open the system browser
+# under it, because the suite is the browser. A read of it outside
+# that surface says why at its `cfg`, which is where to look for the
+# effects.
 [features]
 wdio = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 # The ONNX encoder path (#112). The app process is the one that runs

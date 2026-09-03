@@ -85,6 +85,26 @@
     login = held.login;
   });
 
+  // Whether the server typed here signs people in through a provider
+  // (#163), asked as the URL settles rather than on every keystroke —
+  // a half-typed server is not one to ask, and the answer is a fact
+  // about the server rather than about what was typed.
+  $effect(() => {
+    const url = baseUrl;
+    // Only while the form is showing: a connected window has no
+    // button to decide about, and no reason to knock on a server.
+    if (sharedCatalog.phase !== "disconnected") return;
+    const timer = setTimeout(() => void sharedCatalog.probeProvider(url), 400);
+    return () => clearTimeout(timer);
+  });
+
+  // The provider button is only shown for the server the answer was
+  // about: a URL edited after the probe answered is a server nobody
+  // has asked yet.
+  const provider = $derived(
+    sharedCatalog.providerFor === baseUrl.trim() ? sharedCatalog.provider : null,
+  );
+
   // Whether the device list is showing. Closed to begin with: it
   // answers a question about the account rather than about the work,
   // which is the same reason the ledger's payloads are behind a
@@ -146,6 +166,18 @@
     // token this ticking minted, so a box left ticked would mint
     // another on the next connect from a choice somebody made about a
     // connection they have since ended.
+    remember = false;
+    if (teamField) await sharedCatalog.lookAt(teamField);
+  }
+
+  // The other way in (#163): the browser is where the person signs
+  // in, and nothing typed here goes with them but the server. The
+  // box means the same thing it means above, and is unticked after
+  // for the same reason — when a session was opened; a cancel opened
+  // none and minted nothing, so the box stays as it was.
+  async function connectWithProvider() {
+    const opened = await sharedCatalog.connectWithProvider(baseUrl, remember);
+    if (!opened) return;
     remember = false;
     if (teamField) await sharedCatalog.lookAt(teamField);
   }
@@ -357,27 +389,80 @@
         is stored on this machine — cloning is how you take a copy.
       </p>
 
+      {#if sharedCatalog.providerAttempt !== null}
+        <!-- A sign-in through the provider waiting for the browser
+             (#163), above the phase switch on purpose: the wait owns
+             the connection while it runs — the store opens no session
+             under it — and it outlives this drawer being closed and
+             opened again, so its way out has to be wherever the drawer
+             is and not only inside the form. The URL is shown rather
+             than only opened: a browser that did not open, or opened
+             as somebody else, leaves the person with the page to reach
+             by hand. The cancel is the way out before the wait's own
+             end — a tab closed without finishing is otherwise a wait. -->
+        <p class="drawer-note" data-testid="provider-waiting">
+          Finish signing in in your browser. If it did not open, go to
+          <code data-testid="provider-start-url"
+            >{sharedCatalog.providerAttempt.startUrl}</code
+          >.
+          <button
+            type="button"
+            onclick={() => sharedCatalog.cancelProviderSignIn()}
+          >
+            Cancel
+          </button>
+        </p>
+      {/if}
+
       {#if sharedCatalog.phase === "disconnected"}
         {#if sharedCatalog.storedRejected}
           <!-- The one outcome of a silent reconnect worth a sentence.
                Nothing was stored and the stored thing was refused look
                identical — this form — and only the second is somebody
-               else's doing. -->
+               else's doing. Which of the three ends it met is the
+               server's word (#163), and is what makes the sentence
+               something to act on: a token that sat unused is not one
+               somebody took back. -->
           <p class="drawer-said">
             This machine's saved sign-in was refused, and has been
-            forgotten. It was either revoked or it expired. Signing in
-            again does not replace it &mdash; tick
+            forgotten.
+            {#if sharedCatalog.storedRejectedReason === "expired"}
+              It reached the end of its life.
+            {:else if sharedCatalog.storedRejectedReason === "idle"}
+              It went unused for longer than the server allows.
+            {:else if sharedCatalog.storedRejectedReason === "revoked"}
+              It was revoked.
+            {:else}
+              It was either revoked or it expired.
+            {/if}
+            Signing in again does not replace it &mdash; tick
             &ldquo;Remember this device&rdquo; below to save a new one.
           </p>
         {/if}
+        <!-- Every control is off while a sign-in through the provider
+             waits for the browser (#163): a password sign-in landing
+             under it would be written over when the wait ended — the
+             store refuses one too — and the wait has a cancel of its
+             own above. -->
         <form class="drawer-form" onsubmit={connect}>
           <label>
             Server
-            <input type="url" bind:value={baseUrl} required />
+            <input
+              type="url"
+              bind:value={baseUrl}
+              required
+              disabled={sharedCatalog.providerBusy}
+            />
           </label>
           <label>
             Login
-            <input type="text" bind:value={login} required autocomplete="username" />
+            <input
+              type="text"
+              bind:value={login}
+              required
+              autocomplete="username"
+              disabled={sharedCatalog.providerBusy}
+            />
           </label>
           <label>
             Password
@@ -386,6 +471,7 @@
               bind:value={password}
               required
               autocomplete="current-password"
+              disabled={sharedCatalog.providerBusy}
             />
           </label>
           <!-- What ticking this does, said before it is ticked: the
@@ -393,7 +479,11 @@
                holds it. The password is not stored under any key, and
                signing out gives the token back. -->
           <label class="drawer-check">
-            <input type="checkbox" bind:checked={remember} />
+            <input
+              type="checkbox"
+              bind:checked={remember}
+              disabled={sharedCatalog.providerBusy}
+            />
             Remember this device
           </label>
           <p class="drawer-cost">
@@ -406,7 +496,25 @@
               You will be asked for this password again next time.
             {/if}
           </p>
-          <button type="submit">Connect</button>
+          <button type="submit" disabled={sharedCatalog.providerBusy}>Connect</button>
+          {#if provider !== null}
+            <!-- Shown only when the server said it offers one (#163).
+                 A button rather than a second form: the login and the
+                 password above are not part of this, and the browser
+                 is where the person proves who they are. The "remember"
+                 box above applies here too, and says so. -->
+            <p class="drawer-note">
+              Or sign in in your browser through <strong>{provider.name}</strong>.
+              The device is remembered the same way if the box above is ticked.
+            </p>
+            <button
+              type="button"
+              onclick={connectWithProvider}
+              disabled={sharedCatalog.providerBusy}
+            >
+              Sign in with {provider.name}
+            </button>
+          {/if}
         </form>
       {:else}
         <div class="drawer-session">

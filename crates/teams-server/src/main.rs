@@ -62,7 +62,7 @@ use teams_server::http;
 use teams_server::oidc::OidcSignIn;
 use teams_server::rate_limit::RateLimiter;
 use teams_server::state::{
-    AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW, DEFAULT_DEVICE_TOKEN_IDLE_MS,
+    AUTH_RATE_LIMIT_WINDOW, DEFAULT_AUTH_RATE_LIMIT, DEFAULT_DEVICE_TOKEN_IDLE_MS,
     DEFAULT_DEVICE_TOKEN_TTL_MS, DEFAULT_SESSION_TTL_MS, TeamsCtx, now_ms,
 };
 
@@ -134,6 +134,15 @@ enum Command {
         /// stops resolving. `0` turns the bound off.
         #[arg(long, default_value_t = days(DEFAULT_DEVICE_TOKEN_IDLE_MS))]
         device_token_idle_days: u32,
+        /// How many hits a minute one client address may make on the
+        /// auth routes the limiter covers (#83 §5) — which those are,
+        /// and why the one that presents no credential (starting a
+        /// provider attempt) is among them, is the router's comment in
+        /// `http`. Why the default is what it is, and who raises it, is
+        /// on the constant. `0` refuses every hit; it does not turn the
+        /// limiter off.
+        #[arg(long, default_value_t = DEFAULT_AUTH_RATE_LIMIT)]
+        auth_rate_limit: u32,
         /// The identity provider's issuer URL (#163) — the `iss` its
         /// ID tokens carry, and where `/.well-known/openid-configuration`
         /// is found. Given together with `--oidc-client-id` and
@@ -492,6 +501,7 @@ async fn main() -> anyhow::Result<()> {
             purge_grace_seconds,
             device_token_days,
             device_token_idle_days,
+            auth_rate_limit,
             oidc_issuer,
             oidc_client_id,
             oidc_name,
@@ -526,7 +536,7 @@ async fn main() -> anyhow::Result<()> {
                 blobs,
                 registration,
                 session_ttl_ms: DEFAULT_SESSION_TTL_MS,
-                auth_limiter: RateLimiter::new(AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW),
+                auth_limiter: RateLimiter::new(auth_rate_limit, AUTH_RATE_LIMIT_WINDOW),
                 purge_grace_ms: i64::from(purge_grace_seconds) * 1000,
                 device_token_ttl_ms: i64::from(device_token_days) * 24 * 60 * 60 * 1000,
                 device_token_idle_ms: (device_token_idle_days > 0)

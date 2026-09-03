@@ -44,10 +44,45 @@ pub struct TeamsConnection {
     pub client: asterism_teams_client::TeamsClient,
     /// The server as it was typed, before any trailing slash came off.
     pub base_url: String,
-    /// The account it was typed for. Not the `user_id`: the keychain
-    /// entry is keyed by what a person enters on the form, and that is
-    /// what has to match.
+    /// The account it was typed for — or, for a sign-in through the
+    /// provider, the login the session said (#163). Not the `user_id`:
+    /// the keychain entry is keyed by the login, and that is what has
+    /// to match.
     pub login: String,
+    /// The instance's stable id, as the session said it (#163) — or
+    /// empty, from a server too old to say one, which every reader
+    /// turns into `None` before comparing. Why the keychain entry is
+    /// keyed by it is `stored_connection`'s "what an entry is keyed
+    /// by".
+    pub instance_id: String,
+}
+
+/// A sign-in through the team's identity provider that is waiting for
+/// the browser to come back (#163): which attempt it is, and the way
+/// to end it before the browser does.
+///
+/// One at a time, by construction: the slot that holds this is taken
+/// before the attempt is started and given back however the wait
+/// ends, so a second press while one is waiting is refused rather than
+/// started beside it — two waits would share one window, one event
+/// stream and one drawer, and whichever finished second would write
+/// over the first. The id is empty between the slot being taken and
+/// the server answering with one; `cancel_provider_sign_in` does not
+/// take an empty id, so that window cannot be ended, and nothing is
+/// lost by that, since the drawer has nothing to cancel until the
+/// event that carries the id lands.
+///
+/// It outlives the drawer: closing the drawer is not ending the wait.
+/// What the store excludes while the wait runs is the store's rule,
+/// defined on its `providerBusy`.
+pub struct ProviderSignInInFlight {
+    /// The attempt the server started, once it has.
+    pub attempt_id: String,
+    /// Fires the wait's cancel arm; taken and sent by
+    /// `cancel_provider_sign_in`. The entry stays in the slot after
+    /// that, until the wait it belongs to has returned and cleared it,
+    /// so the slot is never cleared by a wait other than its own.
+    pub cancel: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Bundle of services registered as Tauri state.
@@ -137,6 +172,10 @@ pub struct AppState {
     /// said so — that a credential had no designed home — is what #204
     /// answered rather than what it worked around.
     pub teams: Arc<tokio::sync::Mutex<Option<TeamsConnection>>>,
+    /// The one sign-in through the provider that may be waiting for
+    /// the browser (#163), or none. A `std` mutex: it is never held
+    /// across an await.
+    pub provider_sign_in: Arc<std::sync::Mutex<Option<ProviderSignInInFlight>>>,
     /// App-level Threads container — UI writes flow through this
     /// service; the HTTP surface (Claude Code / agents) writes to
     /// the same rows via `ServerCtx::thread_service`, since both
@@ -240,6 +279,7 @@ pub async fn init(app: AppHandle) -> anyhow::Result<(AppState, Arc<ServerCtx>)> 
         assets: core.assets,
         asset_links: core.asset_links,
         teams: Arc::new(tokio::sync::Mutex::new(None)),
+        provider_sign_in: Arc::new(std::sync::Mutex::new(None)),
         thread_service: core.thread_service,
         line_service: core.line_service,
         pursuit_service: core.pursuit_service,

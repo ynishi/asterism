@@ -18,19 +18,34 @@ reader of the file may see, and the only value that does not go
 through it is the token, which has no path to a file from anywhere
 in this module.
 
-# Why the pair is keyed by server and login
+# What an entry is keyed by
 
-One stored connection per server URL and login is the shape the
-issue settles on, so [`account_key`] is the whole identity of an
-entry: presenting a token minted for one account to another server
-is not a case this module can reach, because the key that found the
-token names both.
+One stored connection per instance and login. The keychain entry
+is keyed by the instance's stable id and the login ([`entry_key`]),
+not by the server's URL: a URL is a name that moves — a custom
+domain, a port, a host renamed — and an entry keyed by one goes
+silently unfindable the day it does, which is every device on that
+server asking for a password again for a reason nobody can see. The
+instance id is minted once by the server's schema and comes back on
+every session (#163), so it is what the entry is named for. The
+login is still half the key because two accounts on one instance
+are two entries.
+
+Entries written before the id existed are keyed by URL and login
+([`account_key`]), and [`StoredConnection::instance_id`] is `None`
+for them. The first successful reconnect from such an entry learns
+the id from the session and moves the entry across ([`rekey`]); a
+verb asked about such an entry compares the way it was written.
+Presenting a token minted for one account to another server is not
+a case this module can reach either way, because the key that found
+the token names the account.
 
 # Which connection a verb acts on
 
 **A verb touches the stored state only when the stored metadata
-names the connection in hand** — same server, same login, compared
-by [`StoredConnection::names`]. The two stores answer different
+names the connection in hand** — same instance and login, or same
+server and login for an entry from before the id, compared by
+[`StoredConnection::names`]. The two stores answer different
 questions and only one of them is about the window: the file says
 what this machine was last told to remember, and the session says
 what it is talking to now. They agree on the ordinary path and come
@@ -93,7 +108,9 @@ replace and losing a working credential to the same crash.
 
 An entry nothing names cannot be created at all, because the
 keychain is written only after the file says what is about to go
-into it.
+into it — with one bounded exception, [`rekey`]'s, which moves an
+entry between keys and says what a crash mid-move leaves and why
+it is not a credential nothing can revoke.
 
 The order used to be the other one: the token reached the keychain
 before anything reached the file, so that no metadata could name a
@@ -159,17 +176,20 @@ week, with no way to tell that from a revoked token.
 
 ## Functions
 
-- `account_key` — The keychain account name for one server-and-login pair.
+- `account_key` — The keychain account name entries were keyed by before the instance
 - `delete_metadata` — Removes the non-secret half. Best effort, for [`delete_token`]'s
-- `delete_token` — Takes the device token out of the keychain.
+- `delete_token` — Takes the device token under `key` out of the keychain.
 - `device_label` — What this device would call itself when asking for a token.
-- `forget` — Drops both halves for one server and login.
+- `entry_key` — The keychain account name for one connection: by instance id and
+- `forget` — Drops both halves of one stored connection.
+- `is_displaced` — Whether writing under `new_key` leaves `previous`'s entry behind —
 - `read_metadata` — What was stored about the last server this machine was told to
-- `read_token` — The device token stored for this server and login.
+- `read_token` — The device token stored under `key` — a [`StoredConnection::key`],
+- `rekey` — Moves an entry written before the instance id existed onto the key
 - `retire_replaced` — Takes away the keychain entry of the pair a newly remembered one
 - `superseded_row` — The handle of the `device_token` row a fresh mint for this pair
 - `write_metadata` — Writes the non-secret half, replacing what was there.
-- `write_token` — Puts a device token in the keychain, replacing whatever this
+- `write_token` — Puts a device token in the keychain under `key`, replacing whatever
 
 ## Types
 

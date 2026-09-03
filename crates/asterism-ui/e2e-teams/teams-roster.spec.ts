@@ -270,18 +270,23 @@ describe("the roster's writes", () => {
 
     // Connect, unless the window already is. A session outlives a spec,
     // so this asks what it found rather than assuming it found nothing.
-    await stage(trail, "connect to the team server", ROUND_TRIP_MS, async () => {
-      if (((await drawerText()) ?? "").includes("Signed in as")) return;
-      await fill(`${DRAWER} form input[type="url"]`, baseUrl);
-      await fill(`${DRAWER} form input[type="text"]`, login);
-      await fill(`${DRAWER} form input[type="password"]`, password);
-      await clickIn(`${DRAWER} form button[type="submit"]`);
-      await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("Signed in as"),
-        "the drawer never reported a session",
-        ROUND_TRIP_MS,
-      );
-    });
+    await stage(
+      trail,
+      "connect to the team server",
+      ROUND_TRIP_MS,
+      async () => {
+        if (((await drawerText()) ?? "").includes("Signed in as")) return;
+        await fill(`${DRAWER} form input[type="url"]`, baseUrl);
+        await fill(`${DRAWER} form input[type="text"]`, login);
+        await fill(`${DRAWER} form input[type="password"]`, password);
+        await clickIn(`${DRAWER} form button[type="submit"]`);
+        await pollUntil(
+          async () => ((await drawerText()) ?? "").includes("Signed in as"),
+          "the drawer never reported a session",
+          ROUND_TRIP_MS,
+        );
+      },
+    );
 
     // A team of its own, because all but the leave below is an owner's
     // and founding is the shortest way to be one.
@@ -309,14 +314,24 @@ describe("the roster's writes", () => {
     // file, and the store's tests cannot answer it, holding no
     // controls. So this pins that they exist, and nothing pins their
     // absence.
-    await stage(trail, "the owner is offered the writes", DRIVER_MS, async () => {
-      const text = (await drawerText()) ?? "";
-      for (const control of ["Let somebody in", "Invite", "leave", "Delete this team"]) {
-        if (!text.includes(control)) {
-          throw new Error(`the roster tab offered no ${control}: ${text}`);
+    await stage(
+      trail,
+      "the owner is offered the writes",
+      DRIVER_MS,
+      async () => {
+        const text = (await drawerText()) ?? "";
+        for (const control of [
+          "Let somebody in",
+          "Invite",
+          "leave",
+          "Delete this team",
+        ]) {
+          if (!text.includes(control)) {
+            throw new Error(`the roster tab offered no ${control}: ${text}`);
+          }
         }
-      }
-    });
+      },
+    );
 
     // Against the rows rather than the drawer's whole text. Each write
     // reports itself into a status line inside the drawer that names
@@ -344,7 +359,8 @@ describe("the roster's writes", () => {
     await stage(trail, "make them an owner", ROUND_TRIP_MS, async () => {
       await clickOnRow(ROSTER_ROW, otherId, "promote");
       await pollUntil(
-        async () => ((await rowText(ROSTER_ROW, otherId)) ?? "").includes("owner"),
+        async () =>
+          ((await rowText(ROSTER_ROW, otherId)) ?? "").includes("owner"),
         "the promoted member never read back as an owner",
         ROUND_TRIP_MS,
       );
@@ -395,54 +411,69 @@ describe("the roster's writes", () => {
     // which is the one to delete. Its roster holds one row — the
     // reader's own, the invited account having been removed — so the
     // control on that row is `leave` rather than `remove`.
-    await stage(trail, "the reader's own row offers leaving", DRIVER_MS, async () => {
-      await clickTab("members");
-      await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("· you"),
-        "the roster never showed the reader's own row",
-        ROUND_TRIP_MS,
-      );
-      const text = (await drawerText()) ?? "";
-      if (!text.includes("leave")) {
-        throw new Error(`the reader's own row offered no leave: ${text}`);
-      }
-    });
+    await stage(
+      trail,
+      "the reader's own row offers leaving",
+      DRIVER_MS,
+      async () => {
+        await clickTab("members");
+        await pollUntil(
+          async () => ((await drawerText()) ?? "").includes("· you"),
+          "the roster never showed the reader's own row",
+          ROUND_TRIP_MS,
+        );
+        const text = (await drawerText()) ?? "";
+        if (!text.includes("leave")) {
+          throw new Error(`the reader's own row offered no leave: ${text}`);
+        }
+      },
+    );
 
     // Delete first, while this team is the one named. It takes the
     // ledger with it, so it asks — the same confirmation removing a
     // member asks, and the same reason for pressing rather than
     // falling into the answer.
-    await stage(trail, "delete the team it founded", ROUND_TRIP_MS, async () => {
-      await clickIn(`${DRAWER} .delete-team`);
-      await pollUntil(
-        async () =>
-          browser.execute(
-            () => document.querySelector(".confirm-panel") !== null,
-          ),
-        "deleting a team asked nothing",
-        DRIVER_MS,
-      );
-      await clickCarrying(".confirm-panel", "Delete");
-      await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("Deleted team"),
-        "the deletion never reported back",
-        ROUND_TRIP_MS,
-      );
-    });
+    await stage(
+      trail,
+      "delete the team it founded",
+      ROUND_TRIP_MS,
+      async () => {
+        await clickIn(`${DRAWER} .delete-team`);
+        await pollUntil(
+          async () =>
+            browser.execute(
+              () => document.querySelector(".confirm-panel") !== null,
+            ),
+          "deleting a team asked nothing",
+          DRIVER_MS,
+        );
+        await clickCarrying(".confirm-panel", "Delete");
+        await pollUntil(
+          async () => ((await drawerText()) ?? "").includes("Deleted team"),
+          "the deletion never reported back",
+          ROUND_TRIP_MS,
+        );
+      },
+    );
     await snap("roster-05-deleted");
 
     // And the team it did not found, which is the one it can leave:
     // the last owner cannot go, and founding makes you the only one.
-    await stage(trail, "name the team it was invited to", ROUND_TRIP_MS, async () => {
-      await fill(`${DRAWER} form input[type="text"]`, leaveTeamId);
-      await clickIn(`${DRAWER} form button[type="submit"]`);
-      await clickTab("members");
-      await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("· you"),
-        "the invited team's roster never showed the reader",
-        ROUND_TRIP_MS,
-      );
-    });
+    await stage(
+      trail,
+      "name the team it was invited to",
+      ROUND_TRIP_MS,
+      async () => {
+        await fill(`${DRAWER} form input[type="text"]`, leaveTeamId);
+        await clickIn(`${DRAWER} form button[type="submit"]`);
+        await clickTab("members");
+        await pollUntil(
+          async () => ((await drawerText()) ?? "").includes("· you"),
+          "the invited team's roster never showed the reader",
+          ROUND_TRIP_MS,
+        );
+      },
+    );
 
     // A member rather than an owner here, so the row offers leaving
     // and nothing else — no step down, because there is nothing to
@@ -470,8 +501,8 @@ describe("the roster's writes", () => {
     });
     await snap("roster-06-left");
 
-    // The drawer closes behind this spec, which `SPECS` runs last, and
-    // an overlay left open is what the others hand each other.
+    // The drawer closes behind this spec, because an overlay left open
+    // is what the others hand each other.
     // Through its own control rather than the sidebar row that opened
     // it — the drawer is an overlay with a backdrop over everything,
     // which is what `teams-promote.spec.ts` says where it does the

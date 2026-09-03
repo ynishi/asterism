@@ -106,6 +106,12 @@ tauri = "2"
 # would be restating the crate's own default and would go stale the day
 # it grows a fourth.
 keyring = "4"
+# Opening the system browser for a sign-in through the team's identity
+# provider (#163). Tauri's own plugin rather than a bare `open` crate,
+# because it is the one that knows each platform's way of handing a URL
+# to the default browser from inside a bundled app, and it is what the
+# capability file can name.
+tauri-plugin-opener = "2"
 
 # --- asterism-server: HTTP API ---
 axum = "0.8"

@@ -50,10 +50,14 @@ pub const DEFAULT_DEVICE_TOKEN_IDLE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// `teams-server serve --purge-grace-seconds`; tests run a tiny one.
 pub const DEFAULT_PURGE_GRACE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
-/// Auth rate limit: attempts allowed per key per window (#83 §5 — one
-/// limiter, shared by every route that lets somebody present a
-/// credential).
-pub const AUTH_RATE_LIMIT_MAX: u32 = 10;
+/// Auth rate limit: hits allowed per key per window on the routes the
+/// one limiter covers (#83 §5) — which those are, and why one of them
+/// presents no credential, is the router's comment in `http`. The
+/// default of `teams-server serve --auth-rate-limit`, sized for one
+/// person guessing; an instance whose clients share an address —
+/// behind a NAT, or a test harness driving one instance from one
+/// machine — sets its own.
+pub const DEFAULT_AUTH_RATE_LIMIT: u32 = 10;
 
 /// Auth rate limit window.
 pub const AUTH_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);

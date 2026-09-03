@@ -45,6 +45,7 @@ covered those paths either.
 
 - [`commands`](commands.md): Tauri command handlers — a thin translation layer. They pass DTOs
 - [`error`](error.md): `UiError` — error type crossed by Tauri command handlers.
+- [`provider_sign_in`](provider_sign_in.md): The desktop's half of a sign-in through the team's identity
 - [`state`](state.md): `AppState` — service DI + backend initialisation.
 - [`stored_connection`](stored_connection.md): What this machine remembers about a team server between windows
 

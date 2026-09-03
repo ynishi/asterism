@@ -501,6 +501,13 @@ async fn walk_the_browser(h: &Harness, secret: &str, label: &str) -> Walked {
     let id = attempt["attempt_id"].as_str().unwrap().to_string();
     let start_url = attempt["start_url"].as_str().unwrap().to_string();
     assert!(start_url.starts_with(PUBLIC_URL), "{start_url}");
+    // The life the app waits, as a duration and not only as an instant
+    // on this clock (the wire crate's `OidcAttemptDto` says why).
+    assert_eq!(
+        attempt["ttl_ms"].as_i64(),
+        Some(teams_server::oidc::ATTEMPT_TTL_MS),
+        "the attempt does not state its life as a duration: {attempt}"
+    );
 
     // The page names the device and asks — escaped, which is why the
     // labels in this suite carry an apostrophe — and refuses to be

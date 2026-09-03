@@ -1,9 +1,10 @@
 // WebdriverIO config for the team plane's e2e suite (`just ui-e2e-teams`).
 //
 // A sibling of `wdio.conf.ts` and `wdio.bench.conf.ts` rather than a
-// variant of either. What makes it one is that this run needs a second
-// process: every read on the team plane is a request to a
-// `teams-server`, and a sibling config starts the app and nothing else.
+// variant of either. What makes it one is that this run needs more
+// than the app: every read on the team plane is a request to a
+// `teams-server`, the sign-in spec needs an identity provider beside
+// it, and a sibling config starts the app and nothing else.
 //
 // # Why the specs do not join the e2e suite's run
 //
@@ -21,10 +22,12 @@
 //
 // # What `onPrepare` puts up, and how a spec reaches it
 //
-// A database of its own, an account, and a team, in that order,
-// because `teams-server` has no verb that makes a team and
-// `POST /teams/create` is behind a session. So the fixture logs in
-// over HTTP before the app is ever driven.
+// A database of its own, the accounts — two with passwords, and for
+// the sign-in spec a third that holds none, with an identity provider
+// process to vouch for it, started before the server — and a team, in
+// that order, because `teams-server` has no verb that makes a team
+// and `POST /teams/create` is behind a session. So the fixture logs
+// in over HTTP before the app is ever driven.
 //
 // Then the teams a spec cannot make for itself. One the second
 // account founds and invites the first into, because leaving needs a
@@ -56,16 +59,17 @@
 //
 // 19897 for the app: not the e2e suite's 19899, not the bench's 19898,
 // not a profile default. 19989 for the server, beside its own default
-// of 9989 and out of reach of an instance somebody is running.
+// of 9989 and out of reach of an instance somebody is running. 19990
+// for the stand-in identity provider, next to the server's.
 //
-// A server that cannot bind stops the run here rather than letting
+// A child that cannot bind stops the run here rather than letting
 // every spec fail at the connect form. That failure mode is not
 // hypothetical — the app spent two configs' worth of comments claiming
 // a port it was not using, and in a window a failed bind is a warning
 // the app survives, so no spec ever reported it.
 //
-// Which is why readiness is the server's own line rather than the port
-// answering: see `waitForServer`.
+// Which is why readiness is each child's own line rather than the port
+// answering: see `waitForMark`.
 
 import type { TauriCapabilities } from "@wdio/tauri-service";
 import { SevereServiceError } from "webdriverio";
@@ -105,17 +109,60 @@ const SPECS = [
   "./e2e-teams/teams-work.spec.ts",
   "./e2e-teams/teams-promote.spec.ts",
   "./e2e-teams/teams-roster.spec.ts",
+  // After the roster spec: it signs in as a third account, and the
+  // window it meets is signed in as the first, which it has to end
+  // before the form it needs shows — see its header.
+  "./e2e-teams/teams-provider.spec.ts",
 ];
+
+/**
+ * How many hits a minute the server lets one address make on the
+ * auth routes its limiter covers. Its default is sized for one
+ * person guessing (#83 §5); this suite is one address making every
+ * spec's sign-ins, sign-outs and the provider round trip. The number
+ * is what the run needs with room, not a claim about the limiter —
+ * the server's own tests hold that.
+ */
+const AUTH_RATE_LIMIT = "100";
 
 /** Everything the server owns, removed and remade on every run. */
 const serverHome = path.join(repoRoot, "workspace/runtime/e2e-teams-server");
 /** The app's profile home, kept apart from the e2e suite's own. */
 const appHome = path.join(repoRoot, "workspace/runtime/e2e-teams");
 
-const screensRoot = path.join(repoRoot, "workspace/test-logs/e2e-teams-screens");
+const screensRoot = path.join(
+  repoRoot,
+  "workspace/test-logs/e2e-teams-screens",
+);
 
 const appBinary = path.join(repoRoot, "target/debug/asterism-ui");
 const serverBinary = path.join(repoRoot, "target/debug/teams-server");
+/** The stand-in identity provider (#163), an example of the server's
+ *  crate — `just ui-e2e-teams` builds it beside the binary. */
+const providerBinary = path.join(
+  repoRoot,
+  "target/debug/examples/fake_oidc_provider",
+);
+
+// The third process: the identity provider the sign-in spec walks
+// through. Its port sits beside the server's; the client id and secret
+// are what the server is started with and what the provider checks at
+// the exchange — the secret generated per run for the password's
+// reason, the id a constant, since an id is a name and not a
+// credential. The account it vouches for holds no password and is
+// bound to the address below by `create-user --oidc-email`.
+const PROVIDER_PORT = "19990";
+const PROVIDER_URL = `http://${SERVER_HOST}:${PROVIDER_PORT}`;
+const PROVIDER_NAME = "Example IdP";
+const OIDC_CLIENT_ID = "asterism-e2e";
+const SSO_LOGIN = "e2e-sso";
+const SSO_EMAIL = "e2e-sso@example.test";
+
+/** The running provider, ended beside the server. */
+let provider: ChildProcess | null = null;
+
+/** What the provider prints once it is bound and serving. */
+const PROVIDER_MARK = "fake-oidc-provider: http://";
 
 /** Same window and same reasoning as the two sibling configs. */
 const WINDOW_LABEL = "main";
@@ -123,8 +170,9 @@ const WINDOW_LABEL = "main";
 /** The running server, so `onComplete` and the exit hook can end it. */
 let server: ChildProcess | null = null;
 
-/** Runs one `teams-server` subcommand to completion, or throws saying which. */
-function serverCli(args: string[], env: NodeJS.ProcessEnv = {}): void {
+/** Runs one `teams-server` subcommand to completion and hands back
+ *  its stdout, or throws saying which. */
+function serverCli(args: string[], env: NodeJS.ProcessEnv = {}): string {
   const done = spawnSync(serverBinary, args, {
     env: { ...process.env, ...env },
     encoding: "utf8",
@@ -141,16 +189,34 @@ function serverCli(args: string[], env: NodeJS.ProcessEnv = {}): void {
         `${(done.stderr || done.stdout || "").trim()}`,
     );
   }
+  return done.stdout;
+}
+
+/** The id `create-user` reports, off the line it prints. */
+function createdUserId(said: string): string {
+  const match = /\(user_id ([^)]+)\)/.exec(said);
+  if (match === null) {
+    throw new Error(
+      `create-user did not report a user_id; it said: ${said.trim()}`,
+    );
+  }
+  return match[1];
 }
 
 /** What `teams-server serve` prints once it is bound and serving. */
 const SERVING_MARK = "teams-server: http://";
 
+/** Resolves when the team server says it is serving — `waitForMark`
+ *  for its line. */
+function waitForServer(child: ChildProcess, deadlineMs: number): Promise<void> {
+  return waitForMark(child, SERVING_MARK, "teams-server", deadlineMs);
+}
+
 /**
- * Resolves when the server says it is serving, or throws saying what
- * stopped it.
+ * Resolves when the child prints the line that says it is serving, or
+ * throws saying what stopped it.
  *
- * It waits for the server's own line rather than for the port to
+ * It waits for the child's own line rather than for the port to
  * accept a connection, and the difference is the whole point of the
  * check. A TCP probe answers "somebody is listening", which is exactly
  * what is true when the port is already taken — so the version of this
@@ -159,7 +225,12 @@ const SERVING_MARK = "teams-server: http://";
  * shape nobody would trace back to the port. Reading the line means a
  * bind failure is what it is: the child exits, and this rejects.
  */
-function waitForServer(child: ChildProcess, deadlineMs: number): Promise<void> {
+function waitForMark(
+  child: ChildProcess,
+  mark: string,
+  name: string,
+  deadlineMs: number,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (error?: Error) => {
@@ -173,30 +244,31 @@ function waitForServer(child: ChildProcess, deadlineMs: number): Promise<void> {
       () =>
         settle(
           new Error(
-            `teams-server did not report itself serving within ${deadlineMs} ms.`,
+            `${name} did not report itself serving within ${deadlineMs} ms.`,
           ),
         ),
       deadlineMs,
     );
     // The last thing it said, so the rejection can name the cause
     // rather than guess at it. A taken port is the likely reason to
-    // exit early and not the only one — a migration the binary refuses
-    // and a blob root it cannot open leave through the same door, and
-    // the server has already said which on this stream.
+    // exit early and not the only one — for the team server, a
+    // migration the binary refuses and a blob root it cannot open
+    // leave through the same door — and the child has already said
+    // which on this stream.
     let lastSaid = "";
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       // The stream is piped so this can read it; forwarding keeps the
-      // server's own log where an `inherit` would have put it.
+      // child's own log where an `inherit` would have put it.
       process.stderr.write(text);
       lastSaid = text.trim() || lastSaid;
-      if (text.includes(SERVING_MARK)) settle();
+      if (text.includes(mark)) settle();
     });
     child.once("exit", (code) =>
       settle(
         new Error(
-          `teams-server exited ${code} before it began serving on ` +
-            `${SERVER_HOST}:${SERVER_PORT}: ${lastSaid || "(it said nothing)"}`,
+          `${name} exited ${code} before it began serving: ` +
+            `${lastSaid || "(it said nothing)"}`,
         ),
       ),
     );
@@ -245,12 +317,19 @@ async function postJson<T>(
   return (await response.json()) as T;
 }
 
-/** Ends the server if it is still up. Safe to call more than once. */
+/** Ends the server and the provider if they are still up. Safe to call
+ *  more than once. */
 function stopServer(): void {
-  if (server === null) return;
-  const child = server;
-  server = null;
-  child.kill("SIGTERM");
+  if (server !== null) {
+    const child = server;
+    server = null;
+    child.kill("SIGTERM");
+  }
+  if (provider !== null) {
+    const child = provider;
+    provider = null;
+    child.kill("SIGTERM");
+  }
 }
 
 // Two hooks, because neither covers the other's case — and the belief
@@ -284,16 +363,18 @@ export const config: WebdriverIO.Config & {
   // which tab it is on. Each spec puts back what it can and states at
   // its head what it met.
   //
-  // The session every spec can undo, and each does: they disconnect at
-  // the end. The team id has no undo on this surface — picking a team
-  // and submitting the field both name one, and neither has a reverse,
-  // so there is no gesture that returns a window to having named none.
-  // `no-team` is
-  // therefore reachable only by the spec that meets the window first,
-  // and `teams-connect.spec.ts` is the one that asserts about it.
+  // The session every spec can undo, by disconnecting at the end; one
+  // that leaves it leaves it for the next spec's header to state. The
+  // team id is not undone by
+  // naming another — picking a team and submitting the field both name
+  // one — so a spec that needs a window that has never named a team
+  // goes first, which is `teams-connect.spec.ts`. Leaving or deleting
+  // the team named is what clears it, and a spec that meets the window
+  // after one of those meets `no-team` again.
   //
-  // A spec added here goes in this list. One that needs `no-team` goes
-  // first, or gets a window of its own — and `assertEverySpecIsListed`
+  // A spec added here goes in this list. One that needs a window that
+  // has never named a team goes first, or gets a window of its own —
+  // and `assertEverySpecIsListed`
   // in `onPrepare` is what says so, because a list is the one shape
   // where forgetting to add a file is a spec that silently never runs.
   specs: SPECS,
@@ -326,7 +407,7 @@ export const config: WebdriverIO.Config & {
   framework: "mocha",
   reporters: ["spec"],
   // The app opens a real window and a real SQLite core, and this suite
-  // also waits on a second process it did not start until `onPrepare`.
+  // also waits on processes it did not start until `onPrepare`.
   mochaOpts: { ui: "bdd", timeout: 300_000 },
 
   // Identical to the two sibling configs and for the identical reason:
@@ -357,8 +438,9 @@ export const config: WebdriverIO.Config & {
   // against a port held by another `teams-server`]. `SevereServiceError`
   // is the one the launcher rethrows, which rejects the awaited call
   // before any worker spawns, so no spec runs at all. `onComplete`
-  // still runs from the launcher's `finally`, so the server is stopped
-  // and the database removed on this path exactly as on the other.
+  // still runs from the launcher's `finally`, so the children are
+  // stopped and the database removed on this path exactly as on the
+  // other.
   onPrepare: async () => {
     try {
       await prepareFixture();
@@ -452,16 +534,77 @@ async function prepareFixture(): Promise<void> {
   serverCli(["create-user", "--db", db, "--login", OTHER_LOGIN], {
     ASTERISM_TEAMS_USER_PASSWORD: otherPassword,
   });
+  // The account that signs in through the provider (#163): no
+  // password, bound to the address the provider will vouch for. Its
+  // id is what the drawer shows once signed in, so the spec gets it.
+  const ssoId = createdUserId(
+    serverCli([
+      "create-user",
+      "--db",
+      db,
+      "--login",
+      SSO_LOGIN,
+      "--oidc-email",
+      SSO_EMAIL,
+      "--oidc-issuer",
+      PROVIDER_URL,
+    ]),
+  );
+
+  // The provider first — though the server reaches it only at the
+  // first sign-in, a provider that cannot bind should stop the run
+  // here, for the reason the server's own bind does.
+  const clientSecret = randomBytes(24).toString("base64url");
+  const idp = spawn(
+    providerBinary,
+    [
+      "--port",
+      PROVIDER_PORT,
+      "--client-id",
+      OIDC_CLIENT_ID,
+      "--client-secret",
+      clientSecret,
+      "--email",
+      SSO_EMAIL,
+    ],
+    { stdio: ["ignore", "inherit", "pipe"] },
+  );
+  provider = idp;
+  await waitForMark(idp, PROVIDER_MARK, "fake-oidc-provider", 30_000);
 
   const child = spawn(
     serverBinary,
-    ["serve", "--db", db, "--blobs", blobs, "--port", SERVER_PORT],
+    [
+      "serve",
+      "--db",
+      db,
+      "--blobs",
+      blobs,
+      "--port",
+      SERVER_PORT,
+      "--auth-rate-limit",
+      AUTH_RATE_LIMIT,
+      "--oidc-issuer",
+      PROVIDER_URL,
+      "--oidc-client-id",
+      OIDC_CLIENT_ID,
+      "--oidc-name",
+      PROVIDER_NAME,
+      "--public-url",
+      BASE_URL,
+    ],
     // stderr piped so the readiness line can be read; the handler
     // forwards it, so nothing is lost by not inheriting.
-    { stdio: ["ignore", "inherit", "pipe"] },
+    {
+      stdio: ["ignore", "inherit", "pipe"],
+      env: { ...process.env, ASTERISM_TEAMS_OIDC_CLIENT_SECRET: clientSecret },
+    },
   );
   server = child;
   await waitForServer(child, 30_000);
+
+  process.env.E2E_TEAMS_PROVIDER_NAME = PROVIDER_NAME;
+  process.env.E2E_TEAMS_SSO_ID = ssoId;
 
   const session = await postJson<{ token: string; user_id: string }>(
     "/teams/auth/login",
@@ -511,8 +654,8 @@ async function prepareFixture(): Promise<void> {
   // The app's own loopback HTTP surface, which is how the promotion
   // spec seeds the one asset it hands over. Passed by environment like
   // everything else here, and it is the app's port rather than the
-  // team server's: the two processes this suite runs both serve HTTP,
-  // and a spec reaching the wrong one gets a 404 that says nothing.
+  // team server's: every process this suite runs serves HTTP, and a
+  // spec reaching the wrong one gets a 404 that says nothing.
   process.env.E2E_TEAMS_APP_URL = `http://${SERVER_HOST}:${APP_PORT}`;
 }
 

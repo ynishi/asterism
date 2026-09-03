@@ -10,6 +10,53 @@ and this project adheres to
 
 ### Added
 
+- **Sign in through the team's identity provider — the app's half** (#163). The
+  connect drawer asks the server it is pointed at whether it offers a provider,
+  and shows a "Sign in with …" button when it does. Pressing it opens the system
+  browser at the server's page; the person signs in there; the browser comes
+  back to a port the app is listening on at `127.0.0.1` with a one-time grant,
+  and the app collects the session with the grant and a secret it kept. No login
+  and no password cross the drawer for this path — the session says which
+  account it was — and from the session on it is the password path: the same
+  connection, the same device token when "Remember this device" is ticked, the
+  same keychain. A refusal, and a tab closed without finishing, are reported the
+  way any refused action is — in the toast — and a server that offers no
+  provider is a drawer with no button.
+
+  **What the keychain entry is keyed by moved from the server's URL to the
+  instance's id.** A URL is a name that moves — a custom domain, a port, a host
+  renamed — and an entry keyed by one went silently unfindable the day it did.
+  The session now carries the instance's stable id (the server half of #163),
+  and an entry is keyed by that and the login. An entry written before the id
+  existed is moved across the first time a reconnect learns the id; until then
+  it is compared the way it was written, so nothing already stored is lost.
+
+  `tauri-plugin-opener` enters the app for the one thing it does — handing a URL
+  to the default browser from a bundled app — and the loopback listener is the
+  `axum` the app already runs.
+
+  While the app waits, the drawer shows the page it sent the browser to, so a
+  browser that never came forward is a page you can open by hand, and a Cancel
+  beside it, so a tab closed without finishing is not a wait you sit out. One
+  sign-in waits at a time, and while it does it owns the connection: the rest of
+  the form is off, a second press starts nothing, closing the drawer does not
+  end it — opening the drawer again shows the wait and its Cancel — and no other
+  session opens under it, not even the remembered one a reopened drawer would
+  otherwise resume, so what the wait answers is never written over something
+  opened meanwhile. Built with the `wdio` feature the app opens no browser at
+  all, which is what lets `just ui-e2e-teams` drive the round trip across the
+  app, a team server, and a stand-in provider (`teams-server`'s
+  `fake_oidc_provider` example) — reading the URL off the drawer, walking the
+  page, the consent and the callback over HTTP, and arriving at the app's
+  loopback port as the browser would.
+
+  How long the app waits for the browser is the attempt's life as the server
+  states it — as a duration now (`ttl_ms` on the attempt), so the wait is the
+  server's number and not a subtraction across two clocks — and never longer
+  than a quarter of an hour, which is the app's own ceiling. Against a server
+  from before the field, which states only the instant, the wait is that instant
+  read on this machine's clock, held to at least a minute.
+
 - **Sign in through the team's identity provider — the server half** (#163). An
   instance may now be configured with one OIDC provider
   (`serve --oidc-issuer … --oidc-client-id … --public-url …`, the client secret
@@ -44,8 +91,19 @@ and this project adheres to
   nothing of theirs is listening. There is no poll to fall back to, which is the
   price: a client that cannot listen on loopback cannot sign in this way. The
   page that asks stays, cannot be framed, and its button takes a token only the
-  page hands out. The three routes that present something sit under the auth
-  limiter with the password arm.
+  page hands out. The callback and the collect present something and sit under
+  the auth limiter with the password arm; the start sits there too, for holding
+  memory rather than for presenting anything. The attempt states its life as a
+  duration (`ttl_ms`) beside the instant, so a client waits on the server's
+  clock and not on the difference between two.
+
+  **The auth limiter's ceiling is a setting.** `serve --auth-rate-limit <n>`
+  sets how many hits a minute one client address may make on the auth routes the
+  limiter covers — the routes that present a credential, and the start of a
+  provider attempt, which presents nothing but holds memory for ten minutes. The
+  default stays ten (#83 §5), sized for one person guessing; an instance behind
+  a shared address, or a test harness driving one instance from one machine,
+  raises it.
 
   **A device token's lifetime is policy, and it ends early when unused.**
   `serve --device-token-days` sets the ceiling every mint is stamped with (90 by
@@ -65,9 +123,6 @@ and this project adheres to
   connection should be keyed by) and `tenant_id` (the instance's, until there
   are tenants; here from the first so that a host serving several later changes
   nothing a client stores). All three default on decode.
-
-  The desktop app's button, the command that opens the browser and collects, and
-  the move of the keychain key onto the instance id are the next slice.
 
 - **Invite somebody into a team, and take them out, from the app** (#210). The
   five roster writes had a route, an authority rule, a repository method and

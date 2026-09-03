@@ -1268,6 +1268,11 @@
       "docs": "One page of a team's ledger, oldest first."
     },
     {
+      "path": "asterism_contract::teams::TeamProviderDto",
+      "kind": "struct",
+      "docs": "The identity provider a team server signs people in through, as\nits connect form names it (#163) — or nothing, for a server that\nverifies passwords only. Read before anybody is signed in, so the\nform knows whether to offer the button."
+    },
+    {
       "path": "asterism_contract::teams::TeamRosterDto",
       "kind": "struct",
       "docs": "Who is in a team, in what role, and what the reader may do there."

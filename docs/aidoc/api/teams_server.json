@@ -48,14 +48,14 @@
       "docs": "Shared server context — what every handler and gate reads.\n\nAssembled once (by `main.rs` over the profile database, by the\nroute tests over an in-memory one) and passed as axum state. Both\nhalves — repository and credential store — wrap clones of the same\n`AsyncIsle`, so state, ledger, credentials and sessions live in one\nSQLite file behind one writer."
     },
     {
-      "path": "teams_server::state::AUTH_RATE_LIMIT_MAX",
-      "kind": "constant",
-      "docs": "Auth rate limit: attempts allowed per key per window (#83 §5 — one\nlimiter, shared by every route that lets somebody present a\ncredential)."
-    },
-    {
       "path": "teams_server::state::AUTH_RATE_LIMIT_WINDOW",
       "kind": "constant",
       "docs": "Auth rate limit window."
+    },
+    {
+      "path": "teams_server::state::DEFAULT_AUTH_RATE_LIMIT",
+      "kind": "constant",
+      "docs": "Auth rate limit: hits allowed per key per window on the routes the\none limiter covers (#83 §5) — which those are, and why one of them\npresents no credential, is the router's comment in `http`. The\ndefault of `teams-server serve --auth-rate-limit`, sized for one\nperson guessing; an instance whose clients share an address —\nbehind a NAT, or a test harness driving one instance from one\nmachine — sets its own."
     },
     {
       "path": "teams_server::state::DEFAULT_DEVICE_TOKEN_IDLE_MS",

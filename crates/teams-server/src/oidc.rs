@@ -258,6 +258,7 @@ impl OidcSignIn {
             start_url: format!("{}/teams/auth/oidc/attempts/{id}", self.public_url),
             attempt_id: id,
             expires_at_ms,
+            ttl_ms: ATTEMPT_TTL_MS,
         })
     }
 
