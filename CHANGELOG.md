@@ -1082,6 +1082,31 @@ and this project adheres to
 
 ### Changed
 
+- **A shared line's work reads what it collides with and how far it is behind,
+  and a refusal names why** (#211). `SharedLineWork` showed neither: a close
+  could be refused by a landing it never displayed, and `pushRound` by a
+  collision the screen gave no way to see. `sharedCatalog` gained the same two
+  `Resource`s `forgeCatalog` already keeps — `collisions` and `behind` — over
+  `pursuit_collisions` and `pursuit_behind`, the team server's own two routes,
+  mirrored client-side and reset at the same write boundaries `openPursuit`,
+  `pushRound`, `closePursuit`, `show` and `clearWork` already reset the rest of
+  the work at. The component draws them the way `ForgeWork` does, without the
+  one action this plane has no verb for: nothing here settles a collision, so
+  the list is read-only.
+
+  **A refusal's reason crosses the wire now instead of stopping at it.**
+  `teams_error` in `commands.rs` matched every 4xx but 404 to one plain
+  `Validation` message, the `..` swallowing whatever token the server sent along
+  with it — the conversion #210's changelog entry named as still owing. It now
+  reads `TeamsClientError::Refused`'s `reason` through
+  `ConflictKind::from_token`, `as_str`'s inverse, and keeps a recognized token
+  as `UiError::Conflict`'s own `reason`, the same shape a local refusal already
+  carries. `SharedLineWork`'s `whatToDo` reads it the way `ForgeWork`'s does,
+  three of the four messages identical; `blocked` differs, because this plane
+  has no rule to settle a collision from and no archive or reopen verb at all —
+  the message points at the list above, and says that an empty list means the
+  line itself was archived, which nothing here can undo.
+
 - **Handing an asset to a team is set up on the asset** (#219). The detail
   pane's "Hand to a team" picks its own target — the team, one of its lines, and
   the work against that line — where before it only read what the shared-lines
