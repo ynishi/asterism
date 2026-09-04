@@ -378,10 +378,10 @@
   // Removing somebody and deleting a team both ask first, and the two
   // other row verbs do not: a role change is undone by the button
   // beside it, and these two are not undone by anything.
-  async function askRemove(userId: string) {
+  async function askRemove(userId: string, login: string) {
     const ok = await confirmCatalog.open({
       title: "Remove this member?",
-      body: `${userId} loses everything this team holds. What they did stays in the ledger, under the name it read at the time.`,
+      body: `${login} loses everything this team holds. What they did stays in the ledger, under the name it read at the time.`,
       confirmLabel: "Remove",
       danger: true,
     });
@@ -1264,7 +1264,7 @@
                       {/if}
                       <button
                         type="button"
-                        onclick={() => askRemove(member.user_id)}
+                        onclick={() => askRemove(member.user_id, member.login)}
                         title="Remove this member from the team"
                       >remove</button>
                     </span>
