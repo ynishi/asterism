@@ -126,6 +126,7 @@ function mount() {
       onSaveLabels: vi.fn(async () => {}),
       onSetAsWallpaper: vi.fn(async () => {}),
       onRefreshCounts: vi.fn(),
+      onRevealInGrid: vi.fn(),
     },
   });
 }

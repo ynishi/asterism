@@ -2,11 +2,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { mutate } from "./lib/mutate";
   import { summariseBulk } from "./lib/bulk-status";
-  import { untrack } from "svelte";
+  import { untrack, tick } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { VList } from "virtua/svelte";
+  import { VList, type VListHandle } from "virtua/svelte";
   import ActiveFilters from "./ActiveFilters.svelte";
   import CardActionIcons from "./CardActionIcons.svelte";
   import ConstellationBurst from "./ConstellationBurst.svelte";
@@ -845,6 +845,62 @@
   function closeDetail() {
     openAssetId = null;
     interaction.remove("detail");
+  }
+
+  /// "Show me this where I keep it" (#189) — DetailPane's ask,
+  /// answered here because the grid, the forge drawer and the persona
+  /// filter are all App's.
+  ///
+  /// Closes the pane first, and steps the forge drawer aside if it is
+  /// the one that opened this: a pane opened from a line entry comes
+  /// up *over* the drawer (#182), so closing only the pane would leave
+  /// the drawer's own backdrop — `z-index: 60` under the pane's `100`
+  /// — covering the grid this is meant to reveal. `stepAside()` is the
+  /// existing "gets out of the way without ending anything" gesture
+  /// (#182's waiting bar is the way back); `closePanel()` is not used
+  /// here, since ending the line and the work is not this action's to
+  /// decide.
+  ///
+  /// Switches `activePersona` when the asset belongs to a different
+  /// one and "all" is not already showing it — `null` lists every
+  /// persona, so it is never a persona a card can belong to "instead
+  /// of". `gridSelection.restore` is the precedent for going where a
+  /// thing lives rather than filtering around it, and this says so on
+  /// the status line with the same `personaName()` a drop or a paste
+  /// already reaches for (#189's "the person has to be able to see
+  /// what changed"). `loadAssets()` is called directly rather than
+  /// left to the filter-change effect's debounce: that effect still
+  /// fires, reads the same `fetchKey()`, and finds this call already
+  /// served it.
+  ///
+  /// If the asset is still off the page after the switch, something
+  /// other than persona is keeping it off — a search, a modality, a
+  /// group, the 🎲 draw's own listing, the trash side, the retrieval
+  /// shortlist's cap — and this says so rather than guessing which of
+  /// those to clear or turn off.
+  async function revealInGrid(assetId: string, personaId: string): Promise<void> {
+    closeDetail();
+    if (forgeCatalog.open) forgeCatalog.stepAside();
+    const switched =
+      activeFilter.activePersona !== null && activeFilter.activePersona !== personaId;
+    if (switched) {
+      activeFilter.activePersona = personaId;
+      await loadAssets();
+    }
+    await tick();
+    const index = filteredRows.findIndex(
+      (row) =>
+        row.kind === "cards" &&
+        row.items.some((it) => it.kind === "message" && it.card.id === assetId),
+    );
+    if (index === -1) {
+      status = switched
+        ? `switched to ${personaName(personaId)} — nothing on the page holds this asset`
+        : "nothing on the page holds this asset";
+      return;
+    }
+    gridVListRef?.scrollToIndex(index, { align: "center" });
+    if (switched) status = `switched to ${personaName(personaId)}`;
   }
   async function navigateDetail(delta: number) {
     detailPaneRef?.navigate?.(delta);
@@ -4266,6 +4322,10 @@
   const CARD_MIN_PX = 180;
   const GRID_GAP_PX = 10; // 0.6rem @ 16px root, close enough for width math.
   let gridWrapperEl = $state<HTMLDivElement | null>(null);
+  // The VList instance, reached for exactly one thing: scrolling to a
+  // row from outside the grid's own scroll gestures (#189's
+  // `revealInGrid`).
+  let gridVListRef = $state<VListHandle | null>(null);
   let gridWrapperWidth = $state(0);
   let gridCols = $derived(
     Math.max(
@@ -5965,7 +6025,12 @@
         onmousedown={onGridMouseDown}
         role="presentation"
       >
-        <VList data={filteredRows} getKey={(row, _i) => row.key} style="height: 100%;">
+        <VList
+          bind:this={gridVListRef}
+          data={filteredRows}
+          getKey={(row, _i) => row.key}
+          style="height: 100%;"
+        >
           {#snippet children(row, _rowIndex)}
             {#if row.kind === "header"}
               <div
@@ -6295,6 +6360,7 @@
     onSaveLabels={saveLabels}
     onSetAsWallpaper={setAsWallpaper}
     onRefreshCounts={() => { void loadSidebarCounts(); void loadTagCounts(); }}
+    onRevealInGrid={revealInGrid}
   />
 </div>
 
