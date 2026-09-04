@@ -1199,6 +1199,16 @@ and this project adheres to
   the forge's store, and asks for an id only when that list is empty. Two panels
   and two stores still (#148 decision 16) — what they share is the shape.
 
+- **The team picker on "Hand to a team" and the remove-member confirm now name
+  who they mean** (#229). #218 named every screen on the team plane, but two
+  were built or read from elsewhere and its sweep did not reach them: the
+  promote picker (#219) still listed `team_id · role`, and the remove-member
+  confirm (predating #218) still read the raw account id in a dialog whose
+  roster row above it already resolved a login. Both now fall back to the id
+  only where no name is on hand — the picker's `<option>` keeps the id on its
+  `title`, the way a team row already does (#218) — and neither reads further
+  than the object it already had.
+
 - **A `CLAUDE*.md` is ignored wherever it sits, and so is a nested `.claude/`.**
   The ignore list named the root `CLAUDE.md`, which is not where the risk lives.
   Claude Code reads a `CLAUDE.md` or a `CLAUDE.local.md` from the directory it

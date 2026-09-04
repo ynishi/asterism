@@ -288,7 +288,7 @@
           <select class="pick-team" value={sharedCatalog.teamId} onchange={pickTeam}>
             <option value="" disabled>choose…</option>
             {#each teams as team (team.team_id)}
-              <option value={team.team_id}>{team.team_id} · {team.role}</option>
+              <option value={team.team_id} title={team.team_id}>{team.name ?? team.team_id} · {team.role}</option>
             {/each}
             {#if teamOffList}
               <option value={sharedCatalog.teamId}
