@@ -45,8 +45,10 @@ no error to notice. Copies collide with nothing.
 The copy itself is
 [`cargo shared-target`](https://crates.io/crates/cargo-shared-target)
 (`cargo install cargo-shared-target`), which shares storage where the filesystem
-clones and copies where it cannot — APFS on macOS, btrfs, bcachefs or
-reflink-formatted XFS on Linux clone; ext4 copies. It runs in the background
+allows it and copies where it cannot — APFS on macOS, btrfs, bcachefs or
+reflink-formatted XFS on Linux clone whole files; ext4 and everything else still
+shares the large artifacts under `deps/` by hard link, the way the shell this
+replaced did, and copies the rest. It runs in the background
 (`workspace/target-staging.log` says when it lands), staged under `workspace/`,
 which is gitignored, so an unfinished seeding never makes the tree dirty and
 never blocks the `-changed` gates. A build started before it lands gets a cold

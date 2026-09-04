@@ -562,31 +562,42 @@ check-changed: check-shared rust-clippy-changed rust-test-changed
 #
 # The copy itself is `cargo shared-target` (crates.io: cargo-shared-target,
 # `cargo install cargo-shared-target`), not shell in this recipe. This
-# used to be about 150 lines of it — a filesystem clone probe, a
-# hardlink fallback for where cloning is unavailable, a name-based
-# `incremental/` prune, a byte-size split of `deps/` — one Justfile's
-# worth of reimplementation of a job that is the same on every checkout
-# that runs it. #226 is the writeup, and the crate's own docs carry the
-# mechanics: which filesystems clone, why `incremental/` is matched by
-# where it sits in `target/` rather than by name (a build script's own
-# `OUT_DIR` is free to hold a directory of that name), why it takes a
-# share of Cargo's build lock while reading, and why dep-info is never
-# shared regardless of size. `--min-shared-size` is left at the crate's
-# default, which is the same 1 MiB the old shell used for the same
-# split.
+# used to be 83 lines of shell in the recipe body, with 77 more of
+# comment explaining it — a filesystem clone probe, a hardlink fallback
+# for where cloning is unavailable, a name-based `incremental/` prune, a
+# byte-size split of `deps/` — one Justfile's worth of reimplementation
+# of a job that is the same on every checkout that runs it. #226 is the
+# writeup, and the crate's own docs carry the mechanics: which
+# filesystems clone, why `incremental/` is matched by where it sits in
+# `target/` rather than by name (a build script's own `OUT_DIR` is free
+# to hold a directory of that name), why it takes a share of Cargo's
+# build lock while reading, and why dep-info is never shared regardless
+# of size. `--min-shared-size` is left at the crate's default, which is
+# the same 1 MiB the old shell used for the same split.
 #
 # Staged under `workspace/`, which `.gitignore` covers, because a
 # staged tree at the worktree's root would be untracked — and the
 # `-changed` gates refuse a tree with anything untracked in it, which
-# would make an unfinished copy block the branch's own gates. Backgrounded
-# with `&` for the same reason the old shell backgrounded its slow half:
-# the command runs in the foreground, but nothing reads `target/` until
+# would make an unfinished copy block the branch's own gates.
+# Backgrounded with `&` unconditionally: nothing reads `target/` until
 # something compiles, so the copy runs through the reading-the-issue
-# part of the work rather than in front of the prompt.
+# part of the work rather than in front of the prompt. The old shell
+# only backgrounded its slow hardlink half and ran the APFS clone in
+# the foreground because that one was seconds; here it is one call
+# either way, so there is nothing to gain by telling the fast case from
+# the slow one before making it.
 #
-# Absent, this recipe still hands back a worktree — cold, on the same
-# terms as every other NOTE below it already used when a clone was not
-# available. A cold worktree's first gate is slower, not broken, and
+# A build running in this checkout while the seeding reads its
+# `target/` is a case the old shell did not detect — a torn snapshot
+# that surfaced later as an artifact sitting behind a fingerprint that
+# said fresh. The crate takes a share of Cargo's own build lock while
+# reading instead, so this now fails rather than tears: the seeding
+# exits into `workspace/target-staging.log` and the worktree stays
+# cold. Cut worktrees between builds, still.
+#
+# Absent, this recipe still hands back a worktree — cold, the same as
+# when there is no `target/` in this checkout to copy at all (the other
+# NOTE below). A cold worktree's first gate is slower, not broken, and
 # that degrade is what keeps `allow-agent` true on a machine nobody has
 # run `cargo install cargo-shared-target` on yet.
 #

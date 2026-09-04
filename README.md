@@ -159,14 +159,16 @@ issue, branch, commit and pull request conventions, and the section on
 covers what a clone gives an agent — `AGENTS.md` at the root — and the two
 plugins that are not installed by cloning.
 
-`just check` is the gate. Beyond a stable Rust toolchain and Node for the UI,
-three things are installed per machine rather than per checkout:
+`just check` is the gate and `worktree-new` is where an agent starts. Beyond a
+stable Rust toolchain and Node for the UI, four things are installed per machine
+rather than per checkout:
 
 | Needed by                                                                                                               | Install                                                                                                                   | Without it                                                                                                   |
 | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `aidoc-guard` (inside `just check`)                                                                                     | `cargo install cargo-aidoc` (0.2.2 or newer), then `rustup toolchain install "$(cargo aidoc --print-required-toolchain)"` | the step prints `WARNING: docs/aidoc/ NOT CHECKED` and the gate continues                                    |
 | `prose-shape`, recommended — see [CONTRIBUTING.md](CONTRIBUTING.md#working-with-coding-agents--the-recommended-pattern) | in Claude Code: `/plugin marketplace add ynishi/asterism`, then `/plugin install prose-shape@asterism`                    | nothing catches a pull request body hard-wrapped into a renderer that folds paragraphs itself                |
 | `review`, recommended — same section                                                                                    | same marketplace: `/plugin install review@asterism`                                                                       | none of the three pre-commit reviews is on the machine, and the answer is to say the change was not reviewed |
+| `worktree-new`'s copy of `target/` into a new worktree                                                                  | `cargo install cargo-shared-target`                                                                                       | the recipe prints a NOTE and the worktree starts cold                                                        |
 
 The toolchain is a dated nightly rather than the channel, and the tool names it
 rather than this file: rustdoc's JSON carries a `format_version`, every nightly
