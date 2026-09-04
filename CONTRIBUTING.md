@@ -40,38 +40,19 @@ crate even across checkouts
 ([cargo#12516](https://github.com/rust-lang/cargo/issues/12516)), which every
 crate here satisfies against every other worktree — so two worktrees pointed at
 one directory can report a gate green against the other branch's binaries, with
-no error to notice. Copies collide with nothing. The copy is made only where it
-is copy-on-write: APFS on macOS, where it costs about three seconds and no disk,
-and on Linux btrfs, bcachefs or XFS made with `reflink=1`, where it is the same
-operation with no timing taken yet. Not ext4, which is what most distributions
-leave on `/`. The recipe asks the filesystem before copying rather than judging
-by the result, because neither `cp` answers usefully afterwards: BSD's `-c` does
-not fail where clonefile is unavailable — it falls back to a real byte copy "to
-ensure the copy still succeeds" (`man cp`), which would cost more than the build
-it is meant to save — and GNU's `--reflink=always` does fail, but once per file,
-which over a full `target/` is tens of thousands of lines.
+no error to notice. Copies collide with nothing.
 
-Where Linux has no clone the recipe hardlinks instead. Measured on ext4 against
-a 111 GB target directory, that is seconds and about 10 GB where a byte copy of
-the same tree is 6.3 minutes and 111 GB — and two of those copies do not fit
-beside a checkout that already holds one. A hardlink shares the inode, so only
-the part of the tree that cargo replaces rather than overwrites is shared: the
-artifacts of a megabyte and up under `deps/`, which cargo names by a hash of
-their inputs and swaps by unlinking its own copy first. Everything else is
-copied, because everything else has a writer that opens the file that is already
-there — dep-info, fingerprints, an `OUT_DIR` a re-run build script does not get
-cleared, rustdoc's JSON, the lock file two checkouts would otherwise queue on.
-`incremental/` is dropped because cargo regenerates it.
-
-That copy is the slow half, so it runs in the background and the recipe returns
-in about two seconds: the branch is cut and its sources are there, and nothing
-reads `target/` until something compiles. It is staged under `workspace/`, which
-is gitignored, so an unfinished copy never makes the tree dirty and never blocks
-the `-changed` gates, and cargo cannot see a half-made tree either way.
-`workspace/target-staging.log` says when it lands, and a build started before
-then gets a cold `target/` of its own, which the staging leaves alone. Off Linux
-and without a clone the recipe skips the copy and says so, and the worktree
-starts cold, which is where it would have started regardless.
+The copy itself is
+[`cargo shared-target`](https://crates.io/crates/cargo-shared-target)
+(`cargo install cargo-shared-target`), which shares storage where the filesystem
+clones and copies where it cannot — APFS on macOS, btrfs, bcachefs or
+reflink-formatted XFS on Linux clone; ext4 copies. It runs in the background
+(`workspace/target-staging.log` says when it lands), staged under `workspace/`,
+which is gitignored, so an unfinished seeding never makes the tree dirty and
+never blocks the `-changed` gates. A build started before it lands gets a cold
+`target/` of its own, which the seeding leaves alone. Without the crate
+installed the recipe says so and the worktree starts cold, which is where it
+would have started regardless.
 
 Run it from the main checkout — a worktree cannot cut another one, and the
 recipe stops rather than nest one. Remove the worktree once the branch is
