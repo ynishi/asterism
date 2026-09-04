@@ -2789,45 +2789,23 @@ and this project adheres to
   whenever the sources are older than that directory's last build. Copies
   collide with nothing, and they do not queue behind cargo's build lock either.
 
-  The copy is made only where it is a copy-on-write clone. On APFS that is 2.9
-  GB in under three seconds, no disk consumed until one side writes, and mtimes
-  preserved, which is what keeps cargo's fingerprints meaningful; on Linux it is
-  `cp --reflink=always` on btrfs, bcachefs or XFS made with `reflink=1` — the
-  same operation, with no timing taken for it yet. ext4 clones nothing and is
-  what most distributions leave on `/`, so Linux gets the hardlink path below
-  more often than the clone. The filesystem is asked before the copy rather than
-  judged by the outcome, because neither `cp` answers usefully afterwards:
-  `cp -c` does not fail where clonefile is unavailable — it falls back to a real
-  byte copy, which would cost more than the build it was meant to save — and GNU
-  `cp --reflink=always` does fail, but once per file, and a full `target/` here
-  held 74,802 of them. Asking is one clone of one 8 KiB file inside the new
-  worktree, removed again before the recipe returns, or named in a NOTE where it
-  could not be.
+  The copy is now made by
+  [`cargo shared-target`](https://crates.io/crates/cargo-shared-target) (#226;
+  `cargo install cargo-shared-target`), which replaced the shell that used to do
+  this: a clone probe, a hardlink fallback where cloning is unavailable, a
+  name-based `incremental/` prune, a byte-size split of `deps/`. It shares
+  storage where the filesystem allows it — clones whole files on APFS, btrfs,
+  bcachefs or reflink-formatted XFS — and elsewhere still shares the large
+  artifacts under `deps/` by hard link and copies the rest, the same split the
+  shell drew; `--min-shared-size` is left at the crate's 1 MiB default, which is
+  what the shell used too.
 
-  Where Linux has no clone it hardlinks, which is the one way left to hand over
-  a target directory without copying it: seconds and about 10 GB against the 6.3
-  minutes and 111 GB the byte copy of the same tree costs at the 301 MiB/s this
-  machine writes — and two of those copies do not fit beside a checkout that
-  already holds one. A hardlink shares the inode, so a write through one path is
-  a write to the other, and only one part of the tree is safe on those terms:
-  the artifacts of a megabyte and up under `deps/` (2,307 files, 85.56 GiB),
-  which cargo names by a hash of their inputs and swaps by unlinking its own
-  copy first. The remaining 33,368 files of 10.44 GiB are copied, because each
-  has a writer that opens the file already there — rustc truncating dep-info,
-  cargo rewriting its fingerprints and `.rustc_info.json`, a re-run build script
-  writing into an `OUT_DIR` nothing cleared, rustdoc overwriting its JSON, and
-  `.cargo-lock`, which is the inode two checkouts would queue on. `incremental/`
-  is dropped rather than either, since cargo regenerates it and it is 18 GB of
-  the 111. A worktree cut this way builds 4 to 16 crates where a cold one builds
-  the 753-crate graph.
-
-  The copy is the slow half — 45 seconds with the tree in page cache, six
-  minutes reading it cold — so it runs in the background and the recipe returns
-  in about two seconds. Nothing reads `target/` until something compiles, and
-  the staging happens under `workspace/`, where being gitignored keeps an
-  unfinished copy from making the tree dirty and blocking the branch's own
-  `-changed` gates. `workspace/target-staging.log` says when it lands; a build
-  that starts first gets a cold `target/` of its own and keeps it.
+  It runs in the background and stages under `workspace/`, where being
+  gitignored keeps an unfinished seeding from making the tree dirty and blocking
+  the branch's own `-changed` gates; `workspace/target-staging.log` says when it
+  lands, and a build that starts first gets a cold `target/` of its own and
+  keeps it. Without the crate installed the recipe prints a NOTE and the
+  worktree starts cold, which is where it would have started regardless.
 
 - **`just commit-msg-check` — the commit-message rules are checked rather than
   remembered** (#67). CONTRIBUTING asks for a body wrapped at 72 columns and for
