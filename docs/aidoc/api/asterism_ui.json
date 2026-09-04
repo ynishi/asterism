@@ -215,7 +215,7 @@
     {
       "path": "asterism_ui::commands::create_team",
       "kind": "function",
-      "docs": "Founds a team on the connected server, owned by the signed-in\naccount.\n\nAnswers with the id alone. The wire also returns the ledger event\nthe creation appended, and a screen reads that where every other\nact of the team's is read rather than out of a write's response."
+      "docs": "Founds a team on the connected server, owned by the signed-in\naccount.\n\nAnswers with the id and the name it was just given. The wire also\nreturns the ledger event the creation appended, and a screen reads\nthat where every other act of the team's is read rather than out\nof a write's response."
     },
     {
       "path": "asterism_ui::commands::create_thread",
@@ -431,6 +431,11 @@
       "path": "asterism_ui::commands::invite_team_member",
       "kind": "function",
       "docs": "Invites an account into the team, in the role named.\n\nThe invitee must already hold an account on the instance; an id\nnobody holds is refused as a malformed request rather than\nprovisioning anybody."
+    },
+    {
+      "path": "asterism_ui::commands::invite_team_member_by_login",
+      "kind": "function",
+      "docs": "Invites an account into the team by login rather than by id\n(#218) — the form \"Let somebody in\" reaches for first, the id form\nstaying reachable through [`invite_team_member`] for when the\nlogin is not known."
     },
     {
       "path": "asterism_ui::commands::jobs_stats",
@@ -863,6 +868,11 @@
       "docs": "Renames a tag channel in place — the command twin of\n`POST /asterism/tags/rename`. Rejected when the name belongs to\nanother tag: rename never merges (that is [`merge_tags`])."
     },
     {
+      "path": "asterism_ui::commands::rename_team",
+      "kind": "function",
+      "docs": "Renames a team — an owner's verb (#218)."
+    },
+    {
       "path": "asterism_ui::commands::reopen_forge_line",
       "kind": "function",
       "docs": "Takes it back out."
@@ -1021,6 +1031,11 @@
       "path": "asterism_ui::commands::team_roster",
       "kind": "function",
       "docs": "Who is in a team, in what role, and what the reader may do there.\n\nIds rather than names, because that is what a membership row holds\n— see [`TeamRosterMemberDto`]. The mapping is here for the reason\nthe ledger's is: the wire is what a member's client and a team\nserver say to each other, and a screen holds the contract's\nvocabulary alone."
+    },
+    {
+      "path": "asterism_ui::commands::team_server_identity",
+      "kind": "function",
+      "docs": "The signed-in account's login and display name, or nothing while\nthis window is talking to no team (#218) — \"Signed in as\" reads\nthis rather than the bare id [`team_server_session`] answers with."
     },
     {
       "path": "asterism_ui::commands::team_server_session",

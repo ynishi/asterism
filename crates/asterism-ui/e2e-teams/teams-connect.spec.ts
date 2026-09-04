@@ -61,7 +61,7 @@ function fixture(): {
   baseUrl: string;
   login: string;
   password: string;
-  teamId: string;
+  teamName: string;
 } {
   const read = (name: string): string => {
     const value = process.env[name];
@@ -77,7 +77,7 @@ function fixture(): {
     baseUrl: read("E2E_TEAMS_BASE_URL"),
     login: read("E2E_TEAMS_LOGIN"),
     password: read("E2E_TEAMS_PASSWORD"),
-    teamId: read("E2E_TEAMS_ID"),
+    teamName: read("E2E_TEAMS_NAME"),
   };
 }
 
@@ -234,7 +234,7 @@ async function snap(name: string): Promise<void> {
 describe("the team plane", () => {
   it("connects, names a team, and reads what it hosts", async () => {
     const trail: string[] = [];
-    const { baseUrl, login, password, teamId } = fixture();
+    const { baseUrl, login, password, teamName } = fixture();
 
     await stage(trail, "the app paints its sidebar", COLD_MS, () =>
       pollUntil(
@@ -314,11 +314,11 @@ describe("the team plane", () => {
     // been on still do it that way.
     await stage(trail, "pick the team and read its lines", ROUND_TRIP_MS, async () => {
       await pollUntil(
-        async () => ((await drawerText()) ?? "").includes(teamId),
+        async () => ((await drawerText()) ?? "").includes(teamName),
         "the account's own teams were never listed",
         ROUND_TRIP_MS,
       );
-      await clickCarrying(`${DRAWER} .teams`, teamId);
+      await clickCarrying(`${DRAWER} .teams`, teamName);
       await pollUntil(
         async () =>
           ((await drawerText()) ?? "").includes("This team hosts no lines."),
@@ -351,10 +351,11 @@ describe("the team plane", () => {
       if (!text.includes("· you")) {
         throw new Error(`the roster did not mark the reader's own row: ${text}`);
       }
-      // Why ids and not names, said where a reader would compare this
-      // tab with the ledger and wonder.
-      if (!text.includes("carries no name")) {
-        throw new Error("the roster did not say why it shows ids");
+      // Login and display name are read live (#218), not stamped —
+      // said where a reader would compare this tab with the ledger
+      // and wonder why the two differ.
+      if (!text.includes("current login and display")) {
+        throw new Error("the roster did not say why its names can move");
       }
       if (text.includes("Publish a line of mine")) {
         throw new Error("the publish form followed the reader onto the roster");
@@ -421,19 +422,20 @@ describe("the team plane", () => {
     // unread state under a tab the reader never left.
     await stage(trail, "found a team and land on it", ROUND_TRIP_MS, async () => {
       await clickTab("members");
-      await clickIn(`${DRAWER} .make-team`);
+      await fill(`${DRAWER} .make-team input[type="text"]`, "Newly Founded");
+      await clickIn(`${DRAWER} .make-team button[type="submit"]`);
       // Which team this window is on is the marked row in the picker,
-      // not whether an id appears in the drawer: since #202 the drawer
-      // lists every team the account is in, so the old id is on screen
-      // whether or not it is the one being read.
+      // not whether a name appears in the drawer: since #202 the
+      // drawer lists every team the account is in, so the old team's
+      // name is on screen whether or not it is the one being read.
       //
       // Polled rather than checked once, and the two conditions are
-      // one wait rather than two: `createTeam` says "Created team"
-      // before it re-reads the list, and `makeTeam` names the new team
-      // only after that returns — so the sentence arrives while the
-      // marked row is still the previous team's, and a check that ran
-      // there would fail saying the reader was left behind when they
-      // were about to be moved.
+      // one wait rather than two: `createTeam` says "Created Newly
+      // Founded" before it re-reads the list, and `makeTeam` names the
+      // new team only after that returns — so the sentence arrives
+      // while the marked row is still the previous team's, and a
+      // check that ran there would fail saying the reader was left
+      // behind when they were about to be moved.
       const markedTeam = async (): Promise<string | null> =>
         browser.execute((sel: string) => {
           const row = document.querySelector(sel);
@@ -441,11 +443,11 @@ describe("the team plane", () => {
         }, `${DRAWER} .teams .drawer-row.active`);
       await pollUntil(
         async () => {
-          if (!((await drawerText()) ?? "").includes("Created team ")) {
+          if (!((await drawerText()) ?? "").includes("Created Newly Founded")) {
             return false;
           }
           const on = await markedTeam();
-          return on !== null && !on.includes(teamId);
+          return on !== null && !on.includes(teamName);
         },
         "founding a team did not land the reader on the team it made",
         ROUND_TRIP_MS,

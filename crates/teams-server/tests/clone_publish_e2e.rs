@@ -454,7 +454,7 @@ async fn a_clone_mints_its_own_id_writes_no_relation_row_and_says_where_it_came_
 
     let team = TeamScopedId::parse(
         &alice_client
-            .create_team(None)
+            .create_team("a team", None)
             .await
             .expect("found a team")
             .team_id,
@@ -586,7 +586,11 @@ async fn cloning_the_same_entry_twice_is_answered_from_what_is_already_here() {
     let (bob, bob_client) = member(&h, "bob").await;
 
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -751,7 +755,11 @@ async fn a_line_published_as_it_stands_is_a_genesis_and_one_change_point() {
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -817,7 +825,11 @@ async fn a_re_enacted_line_replays_the_chain_restamps_the_acts_and_leaves_the_wo
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -965,7 +977,11 @@ async fn what_a_publication_seeded_is_what_a_clone_takes_back() {
     let (alice, alice_client) = member(&h, "alice").await;
     let (bob, bob_client) = member(&h, "bob").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -1034,7 +1050,11 @@ async fn an_entry_the_line_took_off_is_not_something_to_copy() {
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -1134,7 +1154,11 @@ async fn a_line_that_cannot_be_seeded_is_refused_before_the_team_has_one() {
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -1278,7 +1302,11 @@ async fn a_revival_and_a_replace_with_a_rename_re_enact() {
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -1412,7 +1440,11 @@ async fn cloning_an_entry_the_line_never_had_is_refused() {
     let h = harness().await;
     let (_alice, alice_client) = member(&h, "alice").await;
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();

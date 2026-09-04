@@ -151,7 +151,11 @@ async fn login_issues_a_session_and_a_wrong_password_does_not() {
     assert_eq!(body["admin"], false);
     let (status, _) = call(
         &h.router,
-        post_authed("/teams/create", &token, serde_json::json!({})),
+        post_authed(
+            "/teams/create",
+            &token,
+            serde_json::json!({"name": "a team"}),
+        ),
     )
     .await;
     assert_eq!(

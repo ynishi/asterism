@@ -430,19 +430,21 @@ export type TeamLedgerEventDto = { seq: number; event_id: string; team_id: strin
 
 export type TeamSubjectRefDto = { ref_type: string; value: string; };
 
-export type TeamRosterDto = { team_id: string; members: { user_id: string; role: string; }[]; viewer: { role: string | null; admin: boolean; }; };
+export type TeamRosterDto = { team_id: string; members: { user_id: string; login: string; display_name: string; role: string; }[]; viewer: { role: string | null; admin: boolean; }; };
 
-export type TeamRosterMemberDto = { user_id: string; role: string; };
+export type TeamRosterMemberDto = { user_id: string; login: string; display_name: string; role: string; };
 
 export type TeamRosterViewerDto = { role: string | null; admin: boolean; };
 
-export type TeamCreatedDto = { team_id: string; };
+export type TeamCreatedDto = { team_id: string; name: string; };
+
+export type RenamedTeamDto = { team_id: string; name: string; };
 
 export type PromotedAssetDto = { entry_id: string; team_asset_id: string | null; digest: string; bytes_already_held: boolean | null; already_promoted: boolean; };
 
-export type MyTeamsDto = { teams: { team_id: string; role: string; created_at_ms: number; }[]; };
+export type MyTeamsDto = { teams: { team_id: string; name: string | null; role: string; created_at_ms: number; }[]; };
 
-export type MyTeamDto = { team_id: string; role: string; created_at_ms: number; };
+export type MyTeamDto = { team_id: string; name: string | null; role: string; created_at_ms: number; };
 
 export type TeamDeviceTokensDto = { tokens: { id: string; label: string; created_at_ms: number; last_used_at_ms: number | null; expires_at_ms: number; }[]; };
 
@@ -455,4 +457,6 @@ export type StoredTeamConnectDto = { outcome: 'connected' | 'nothing' | 'rejecte
 export type StoredTeamConnectOutcome = 'connected' | 'nothing' | 'rejected';
 
 export type TeamProviderDto = { name: string; };
+
+export type TeamIdentityDto = { login: string; display_name: string; };
 

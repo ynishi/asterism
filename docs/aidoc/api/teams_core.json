@@ -63,6 +63,11 @@
       "docs": "A member's role within one team.\n\nStored as TEXT and validated here in app code rather than as a\ndatabase enum (#83 §1): SQLite-friendly, and a later tier is a new\nword plus a new match arm, not a schema migration. Exactly two\nvalues ship in v0, and [`Role::parse`] is the only way TEXT becomes\na `Role` — an unknown word is refused at the boundary instead of\ndefaulting to either side of the authority table."
     },
     {
+      "path": "teams_core::domain::identity::Team",
+      "kind": "struct",
+      "docs": "A team, named (#218).\n\nThe `User` pattern, one method shorter: `team_id` immutable,\n`name` set once at construction. Unlike a user's, a rename never\nstarts from one of these in memory — the write path validates the\nnew name fresh, through [`Self::new`], and persists it without\never loading the row it is replacing — so there is no `rename`\nmethod here the way [`User::rename`] answers for a user's, and no\n`Team::stamp` either: nothing stamps a team's name the way\n[`ActorStamp`] stamps a user's — a rename changes what every\nscreen shows a team as, on every past ledger entry too, which is\nright: the ledger's stamps are about who acted, never about which\nteam the row belongs to."
+    },
+    {
       "path": "teams_core::domain::identity::TeamAuthority",
       "kind": "enum",
       "docs": "Who is asking, reduced to what the authority table cares about:\nthe actor's current role in *this* team, or the fact that the\nactor is an instance admin."
@@ -70,7 +75,7 @@
     {
       "path": "teams_core::domain::identity::TeamMembership",
       "kind": "struct",
-      "docs": "One team a given user belongs to, read from that user's side.\n\n[`Membership`] with the user dropped and the team's creation time\nadded, which is what the two directions of the same table are for:\na roster is asked about a team and answers with users, this is\nasked about a user and answers with teams. This one drops the\nsubject it was asked about; [`TeamRoster`] keeps its `team_id`,\nbecause that is what its rows are validated against.\n\n**The team is an id and a time, because that is all a team is.**\nNothing in this model names one — not the `team` row, not an event\nkind — so a surface listing these shows ids. That is a different\nshortage from the roster's: a user *has* a display name and the\nledger stamps it, and the roster shows ids only because a\nmembership row does not carry one. Giving a team a name is a change\nto this model rather than a field this struct forgot."
+      "docs": "One team a given user belongs to, read from that user's side.\n\n[`Membership`] with the user dropped and the team's creation time\nadded, which is what the two directions of the same table are for:\na roster is asked about a team and answers with users, this is\nasked about a user and answers with teams. This one drops the\nsubject it was asked about; [`TeamRoster`] keeps its `team_id`,\nbecause that is what its rows are validated against.\n\n**A team may have a name now (#218).** Every team founded since\ncarries one — [`Team::new`] refuses a blank one — so `None` here\nmeans a team from before the migration that added the column,\nrather than a founding that skipped it. A surface listing these\nfalls back to the id for that one case, the way every surface\nlisting a team did before this field existed."
     },
     {
       "path": "teams_core::domain::identity::TeamRoster",

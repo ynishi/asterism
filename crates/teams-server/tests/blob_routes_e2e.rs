@@ -188,7 +188,11 @@ async fn provision(h: &Harness, login: &str, admin: bool) -> (Uuid, String) {
 async fn create_team(h: &Harness, token: &str) -> String {
     let (status, body) = call(
         &h.router,
-        post_authed("/teams/create", token, serde_json::json!({})),
+        post_authed(
+            "/teams/create",
+            token,
+            serde_json::json!({"name": "a team"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "create team: {body}");

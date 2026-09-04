@@ -213,7 +213,11 @@ async fn a_minted_token_logs_in_and_the_session_it_makes_is_an_ordinary_one() {
     // this point nothing can tell how the caller logged in.
     let (status, _) = call(
         &h.router,
-        post_authed("/teams/create", &from_device, serde_json::json!({})),
+        post_authed(
+            "/teams/create",
+            &from_device,
+            serde_json::json!({"name": "a team"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -485,7 +489,11 @@ async fn an_instance_where_nobody_mints_holds_no_device_token() {
 
     let (status, _) = call(
         &h.router,
-        post_authed("/teams/create", &session, serde_json::json!({})),
+        post_authed(
+            "/teams/create",
+            &session,
+            serde_json::json!({"name": "a team"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

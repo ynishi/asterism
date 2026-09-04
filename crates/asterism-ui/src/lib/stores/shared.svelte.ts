@@ -315,11 +315,13 @@ import type {
   MyTeamDto,
   MyTeamsDto,
   PromotedAssetDto,
+  RenamedTeamDto,
   StoredTeamConnectDto,
   StoredTeamConnectionDto,
   TeamCreatedDto,
   TeamDeviceTokenDto,
   TeamDeviceTokensDto,
+  TeamIdentityDto,
   TeamLedgerEventDto,
   TeamLedgerPageDto,
   TeamProviderDto,
@@ -372,6 +374,12 @@ class SharedCatalog {
   /// The user id the server answered with, or `null` when this window
   /// is talking to no team.
   session = $state<string | null>(null);
+  /// The signed-in account's login and display name, or `null`
+  /// (#218) — "Signed in as" reads this rather than `session`, which
+  /// stays the bare id every own-row equality check compares against.
+  /// Read alongside `session` at every place that sets it, the same
+  /// "read back rather than assumed" rule `stored` already follows.
+  identity = $state<TeamIdentityDto | null>(null);
   /// Which team is being looked at — picked from `teams` or typed,
   /// which the header and the panel argue between them. Kept across a
   /// disconnect on purpose; see `phase`.
@@ -742,6 +750,18 @@ class SharedCatalog {
 
   async refreshSession(): Promise<void> {
     this.session = await api<string | null>("team_server_session");
+    await this.refreshIdentity();
+  }
+
+  /// Reads the signed-in account's login and display name back from
+  /// the connection (#218), the same "read back" reason `readStored`
+  /// gives: this window's own state does not know what a mint left
+  /// behind, only the command does. Called at every place that sets
+  /// `session` outside `refreshSession`, and clears `identity` on the
+  /// same `null` `session` does.
+  async refreshIdentity(): Promise<void> {
+    this.identity =
+      (await api<TeamIdentityDto | null>("team_server_identity")) ?? null;
   }
 
   /// Re-reads what this machine remembers.
@@ -785,6 +805,7 @@ class SharedCatalog {
     }
     if (attempt?.outcome === "connected") {
       this.session = attempt.user;
+      await this.refreshIdentity();
       this.storedRejected = false;
       this.storedRejectedReason = null;
       return;
@@ -914,6 +935,7 @@ class SharedCatalog {
     }
     if (session === null) return false;
     this.session = session;
+    await this.refreshIdentity();
     this.storedRejected = false;
     this.storedRejectedReason = null;
     await this.readStored();
@@ -961,6 +983,7 @@ class SharedCatalog {
       { baseUrl, login, password, remember },
       "connect to that team server",
     );
+    await this.refreshIdentity();
     this.storedRejected = false;
     this.storedRejectedReason = null;
     // What the mint wrote, read back rather than assumed: a connection
@@ -1040,6 +1063,7 @@ class SharedCatalog {
   async disconnect(): Promise<void> {
     await api("disconnect_team_server");
     this.session = null;
+    this.identity = null;
     this.stored = null;
     this.storedRejected = false;
     this.storedRejectedReason = null;
@@ -1057,24 +1081,37 @@ class SharedCatalog {
     this.forgetLedger();
   }
 
-  /// Founds a team owned by the signed-in account.
+  /// Founds a team owned by the signed-in account, named (#218) —
+  /// asked for at founding rather than left to read as an id.
   ///
   /// Answers with the id so a caller can name what it made. The one
   /// write here that is about no team in particular, which is why the
   /// control for it does not sit on a tab — every tab is an answer
   /// about the team named above them.
-  async createTeam(): Promise<string> {
+  async createTeam(name: string): Promise<string> {
     this.said = null;
     const created = await mutate<TeamCreatedDto>(
       "create_team",
-      {},
+      { name },
       "create a team",
     );
-    this.said = `Created team ${created.team_id}.`;
+    this.said = `Created ${created.name}.`;
     // The list is one shorter than the truth until this lands, and the
     // person who just founded a team is the likeliest to pick it.
     await this.teams.load({});
     return created.team_id;
+  }
+
+  /// Renames the team on — an owner's verb (#218).
+  async renameTeam(name: string): Promise<void> {
+    this.said = null;
+    const renamed = await mutate<RenamedTeamDto>(
+      "rename_team",
+      { teamIdRaw: this.teamId, name },
+      "rename this team",
+    );
+    await this.teams.load({});
+    this.said = `Renamed to ${renamed.name}.`;
   }
 
   /// Lets an account into the team, in the role named.
@@ -1092,6 +1129,21 @@ class SharedCatalog {
     );
     await this.roster.load({ teamId: this.teamId });
     this.said = `Invited ${userId} as ${role}.`;
+  }
+
+  /// Lets an account into the team by login rather than by id (#218)
+  /// — the form "Let somebody in" reaches for first, the id form
+  /// staying reachable through [`inviteMember`] for when the login is
+  /// not known.
+  async inviteMemberByLogin(login: string, role: string): Promise<void> {
+    this.said = null;
+    await mutate<void>(
+      "invite_team_member_by_login",
+      { teamIdRaw: this.teamId, login, role },
+      "invite that account",
+    );
+    await this.roster.load({ teamId: this.teamId });
+    this.said = `Invited ${login} as ${role}.`;
   }
 
   /// Takes a member out of the team.

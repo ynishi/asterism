@@ -122,7 +122,7 @@ impl Team {
             display_name: display_name.into(),
         });
         repo.create_team(
-            id,
+            teams_core::domain::identity::Team::new(id, "a team").expect("a team name"),
             Membership {
                 user_id: owner,
                 team_id: id,

@@ -52,7 +52,7 @@ function fixture(): {
   baseUrl: string;
   login: string;
   password: string;
-  otherId: string;
+  otherLogin: string;
   leaveTeamId: string;
 } {
   const read = (name: string): string => {
@@ -69,7 +69,7 @@ function fixture(): {
     baseUrl: read("E2E_TEAMS_BASE_URL"),
     login: read("E2E_TEAMS_LOGIN"),
     password: read("E2E_TEAMS_PASSWORD"),
-    otherId: read("E2E_TEAMS_OTHER_ID"),
+    otherLogin: read("E2E_TEAMS_OTHER_LOGIN"),
     leaveTeamId: read("E2E_TEAMS_LEAVE_ID"),
   };
 }
@@ -265,7 +265,7 @@ const ROSTER_ROW = `${DRAWER} .roster li`;
 describe("the roster's writes", () => {
   it("lets somebody in, moves their role, and takes them out", async () => {
     const trail: string[] = [];
-    const { baseUrl, login, password, otherId } = fixture();
+    const { baseUrl, login, password, otherLogin } = fixture();
 
     await stage(trail, "the app paints its sidebar", COLD_MS, () =>
       pollUntil(
@@ -311,10 +311,11 @@ describe("the roster's writes", () => {
     // A team of its own, because all but the leave below is an owner's
     // and founding is the shortest way to be one.
     await stage(trail, "found a team to work on", ROUND_TRIP_MS, async () => {
-      await clickIn(`${DRAWER} .make-team`);
+      await fill(`${DRAWER} .make-team input[type="text"]`, "Constellation");
+      await clickIn(`${DRAWER} .make-team button[type="submit"]`);
       await pollUntil(
-        async () => ((await drawerText()) ?? "").includes("Created team"),
-        "founding a team never reported an id",
+        async () => ((await drawerText()) ?? "").includes("Created Constellation"),
+        "founding a team never reported its name",
         ROUND_TRIP_MS,
       );
     });
@@ -362,11 +363,13 @@ describe("the roster's writes", () => {
     // turned up. Here it would take a failed re-read to go wrong, the
     // store setting the line only after the read returns — a narrower
     // hazard, and the same fix.
+    // By login (#218) — the form the drawer offers first, resolved on
+    // the server rather than typed as an id.
     await stage(trail, "let somebody in", ROUND_TRIP_MS, async () => {
-      await fill(`${DRAWER} .drawer-invite input[type="text"]`, otherId);
+      await fill(`${DRAWER} .drawer-invite input[type="text"]`, otherLogin);
       await clickIn(`${DRAWER} .drawer-invite button[type="submit"]`);
       await pollUntil(
-        async () => (await rowText(ROSTER_ROW, otherId)) !== null,
+        async () => (await rowText(ROSTER_ROW, otherLogin)) !== null,
         "the invited account never reached the roster",
         ROUND_TRIP_MS,
       );
@@ -377,20 +380,20 @@ describe("the roster's writes", () => {
     // offering `make owner` again after `make member` is the assertion
     // that the write landed and the re-read saw it.
     await stage(trail, "make them an owner", ROUND_TRIP_MS, async () => {
-      await clickOnRow(ROSTER_ROW, otherId, "make owner");
+      await clickOnRow(ROSTER_ROW, otherLogin, "make owner");
       await pollUntil(
         async () =>
-          ((await roleOfRow(ROSTER_ROW, otherId)) ?? "").includes("owner"),
+          ((await roleOfRow(ROSTER_ROW, otherLogin)) ?? "").includes("owner"),
         "the promoted member never read back as an owner",
         ROUND_TRIP_MS,
       );
     });
 
     await stage(trail, "put them back to a member", ROUND_TRIP_MS, async () => {
-      await clickOnRow(ROSTER_ROW, otherId, "make member");
+      await clickOnRow(ROSTER_ROW, otherLogin, "make member");
       await pollUntil(
         async () => {
-          const role = (await roleOfRow(ROSTER_ROW, otherId)) ?? "";
+          const role = (await roleOfRow(ROSTER_ROW, otherLogin)) ?? "";
           return role.includes("member") && !role.includes("owner");
         },
         "the demoted owner never read back as a member",
@@ -404,7 +407,7 @@ describe("the roster's writes", () => {
     // did not make that move would pass against a screen that never
     // removed anybody.
     await stage(trail, "take them out again", ROUND_TRIP_MS, async () => {
-      await clickOnRow(ROSTER_ROW, otherId, "remove");
+      await clickOnRow(ROSTER_ROW, otherLogin, "remove");
       await pollUntil(
         async () =>
           browser.execute(
@@ -415,7 +418,7 @@ describe("the roster's writes", () => {
       );
       await clickCarrying(".confirm-panel", "Remove");
       await pollUntil(
-        async () => (await rowText(ROSTER_ROW, otherId)) === null,
+        async () => (await rowText(ROSTER_ROW, otherLogin)) === null,
         "the removed account stayed on the roster",
         ROUND_TRIP_MS,
       );

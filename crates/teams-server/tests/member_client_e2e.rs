@@ -345,7 +345,7 @@ async fn a_promotion_lands_and_a_second_member_reads_it() {
     let (bob, bob_client) = member(&h, "bob").await;
 
     let team_id = alice_client
-        .create_team(None)
+        .create_team("a team", None)
         .await
         .expect("found a team")
         .team_id;
@@ -484,7 +484,11 @@ async fn a_projection_does_not_cross_to_another_team() {
 
     // Alice's team, with a promotion on it.
     let alices = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -543,7 +547,11 @@ async fn a_projection_does_not_cross_to_another_team() {
     // knows Alice's line and entry ids — which is the premise, not a
     // stretch: they ride on the wire and appear in a ledger.
     let mallorys = TeamScopedId::parse(
-        &mallory_client.create_team(None).await.unwrap().team_id,
+        &mallory_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -580,7 +588,11 @@ async fn identical_content_promoted_twice_mints_two_team_assets() {
     let (bob, bob_client) = member(&h, "bob").await;
 
     let team = TeamScopedId::parse(
-        &alice_client.create_team(None).await.unwrap().team_id,
+        &alice_client
+            .create_team("a team", None)
+            .await
+            .unwrap()
+            .team_id,
         "team id",
     )
     .unwrap();
@@ -664,8 +676,11 @@ async fn identical_content_promoted_twice_mints_two_team_assets() {
 async fn promoting_the_same_asset_onto_the_same_line_twice_is_a_repeat() {
     let h = harness().await;
     let (_alice, client) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &client.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     let line = TeamScopedId::parse(
         &client
             .open_line(team, "one line", MAINLINE)
@@ -722,8 +737,11 @@ async fn promoting_the_same_asset_onto_the_same_line_twice_is_a_repeat() {
 async fn a_discarded_line_leaves_rows_that_verify_finds_and_reap_removes() {
     let h = harness().await;
     let (_alice, client) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &client.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     let line = TeamScopedId::parse(
         &client.open_line(team, "doomed", MAINLINE).await.unwrap().id,
         "line id",
@@ -801,8 +819,11 @@ async fn a_projection_for_an_entry_the_round_does_not_touch_is_refused() {
 
     let h = harness().await;
     let (_alice, client) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &client.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     let line = TeamScopedId::parse(
         &client
             .open_line(team, "one line", MAINLINE)
@@ -887,8 +908,11 @@ async fn a_push_without_projections_captures_nothing() {
 
     let h = harness().await;
     let (_alice, client) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &client.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     let line = TeamScopedId::parse(
         &client
             .open_line(team, "one line", MAINLINE)
@@ -965,8 +989,11 @@ async fn a_push_without_projections_captures_nothing() {
 async fn a_shared_pursuit_reads_what_it_collides_with_and_how_far_behind_it_is() {
     let h = harness().await;
     let (_alice, client) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&client.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &client.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     let line = TeamScopedId::parse(
         &client
             .open_line(team, "over the client", MAINLINE)
@@ -1151,8 +1178,11 @@ async fn the_roster_writes_go_over_the_client() {
     let h = harness().await;
     let (_alice_id, alice) = member(&h, "alice").await;
     let (bob_id, _bob) = member(&h, "bob").await;
-    let team =
-        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &alice.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
 
     let added = alice
         .invite_member(team, &bob_id.to_string(), "member")
@@ -1203,8 +1233,11 @@ async fn a_member_leaves_through_the_client() {
     let h = harness().await;
     let (_alice_id, alice) = member(&h, "alice").await;
     let (bob_id, bob) = member(&h, "bob").await;
-    let team =
-        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &alice.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
     alice
         .invite_member(team, &bob_id.to_string(), "member")
         .await
@@ -1240,8 +1273,11 @@ async fn a_member_leaves_through_the_client() {
 async fn the_last_owner_refusal_reaches_the_client_as_a_conflict() {
     let h = harness().await;
     let (alice_id, alice) = member(&h, "alice").await;
-    let team =
-        TeamScopedId::parse(&alice.create_team(None).await.unwrap().team_id, "team id").unwrap();
+    let team = TeamScopedId::parse(
+        &alice.create_team("a team", None).await.unwrap().team_id,
+        "team id",
+    )
+    .unwrap();
 
     match alice.remove_member(team, &alice_id.to_string()).await {
         Err(TeamsClientError::Refused { status, kind, .. }) => {

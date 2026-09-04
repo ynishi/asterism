@@ -152,7 +152,7 @@ async fn a_backup_restores_to_a_working_instance_and_the_archive_is_db_first() {
             .uri("/teams/create")
             .header("content-type", "application/json")
             .header("authorization", format!("Bearer {alice}"))
-            .body(Body::from("{}"))
+            .body(Body::from(r#"{"name":"a team"}"#))
             .unwrap(),
     )
     .await;

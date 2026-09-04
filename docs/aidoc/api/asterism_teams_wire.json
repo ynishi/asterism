@@ -40,7 +40,7 @@
     {
       "path": "asterism_teams_wire::command::InviteMemberCommand",
       "kind": "struct",
-      "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only)."
+      "docs": "Invites a user into the team (`POST /teams/{team_id}/members/invite`,\nowner only).\n\n**Exactly one of `user_id` / `login` (#218).** A login is resolved\nto an account on the server, the same way it always was implicit\nin `user_id` being an account's id; the id form stays reachable for\nwhen the login is not known, or is ambiguous to type by hand. Both\nset, or neither, is a `400` — the command names one invitee, not a\nchoice between two."
     },
     {
       "path": "asterism_teams_wire::command::LoginCommand",
@@ -61,6 +61,11 @@
       "path": "asterism_teams_wire::command::RemoveMemberCommand",
       "kind": "struct",
       "docs": "Removes a member (`POST /teams/{team_id}/members/remove`, owner\nonly). Removing the last owner is refused with a `409` and changes\nnothing (#83 §1)."
+    },
+    {
+      "path": "asterism_teams_wire::command::RenameTeamCommand",
+      "kind": "struct",
+      "docs": "Renames a team (`POST /teams/{team_id}/rename`, #218) — an\nowner-only verb, per the authority table."
     },
     {
       "path": "asterism_teams_wire::command::ResolveContentCommand",
@@ -135,7 +140,7 @@
     {
       "path": "asterism_teams_wire::dto::MyTeamDto",
       "kind": "struct",
-      "docs": "One team the caller belongs to.\n\n**No name, because a team has none** — `TeamMembership` in the\ndomain is where that is argued. Nothing on this wire carries a\nlabel for a team either, so a row is an id, a role and a time."
+      "docs": "One team the caller belongs to.\n\n**`name` is `None` only for a team from before #218** —\n`TeamMembership` in the domain, which this projects, is where that\nreading is argued. Every team founded since carries one."
     },
     {
       "path": "asterism_teams_wire::dto::MyTeamsDto",
@@ -153,6 +158,11 @@
       "docs": "One identity provider, as a connect form names it."
     },
     {
+      "path": "asterism_teams_wire::dto::RenamedTeamDto",
+      "kind": "struct",
+      "docs": "The result of `POST /teams/{team_id}/rename` (#218)."
+    },
+    {
       "path": "asterism_teams_wire::dto::ResolvedContentDto",
       "kind": "struct",
       "docs": "The bulk resolve's answer\n(`POST /teams/{team_id}/forge/content/resolve`)."
@@ -165,7 +175,7 @@
     {
       "path": "asterism_teams_wire::dto::RosterMemberDto",
       "kind": "struct",
-      "docs": "One membership row as the roster lists it."
+      "docs": "One membership row as the roster lists it.\n\n`login` and `display_name` are read live from the account at roster\ntime (#218), not stamped — the distinction the roster's own\nsentence draws against the ledger: this says what a name *is now*,\nthe ledger's stamp says what it *read then*. A rename between two\nroster reads changes this field on the next one and nothing it\ncarried on the last."
     },
     {
       "path": "asterism_teams_wire::dto::SessionDto",

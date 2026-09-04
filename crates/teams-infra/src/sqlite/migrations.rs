@@ -903,6 +903,14 @@ BEGIN
 END;
 "#;
 
+/// V13 → V14 (#218): a team has a name. Nullable, because a team
+/// founded before this migration has none — `Team::new` refuses a
+/// blank name for every founding from here on, so `NULL` reads as
+/// "predates the column" rather than "was founded nameless".
+const V14_TEAM_NAME: &str = r#"
+ALTER TABLE team ADD COLUMN name TEXT;
+"#;
+
 /// Migrations in application order. **Append only** — never rewrite an
 /// existing batch.
 const MIGRATIONS: &[&str] = &[
@@ -919,6 +927,7 @@ const MIGRATIONS: &[&str] = &[
     V11_OIDC_IDENTITY,
     V12_INSTANCE_IDENTITY,
     V13_ADMIN_ACCOUNT_VERBS,
+    V14_TEAM_NAME,
 ];
 
 /// Latest schema version (`MIGRATIONS.len()`).

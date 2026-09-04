@@ -1215,7 +1215,7 @@
     {
       "path": "asterism_contract::teams::MyTeamDto",
       "kind": "struct",
-      "docs": "One team the account belongs to.\n\n**No name, because a team has none**, which the team plane's own\n`TeamMembership` argues: naming one is a change to that model\nrather than a field this shape is missing. What follows here is\nthat a screen over these rows shows ids."
+      "docs": "One team the account belongs to.\n\n**`name` is `None` only for a team from before #218** — the team\nplane's own `TeamMembership`, which this projects, is where that\nreading is argued. Every team founded since carries one; a screen\nover these rows falls back to the id for the one case it does not."
     },
     {
       "path": "asterism_contract::teams::MyTeamsDto",
@@ -1226,6 +1226,11 @@
       "path": "asterism_contract::teams::PromotedAssetDto",
       "kind": "struct",
       "docs": "What a promotion left behind, as a screen needs to read it.\n\nThe client's own outcome carries more — the relation key whole, and\nthe pursuit as it now reads — and neither crosses. The key's team\nand line are what the caller passed in, so answering with them\nwould be handing back an argument; the pursuit is a `ForgePursuitDto`\nthe work surface re-reads for itself, and returning a second copy\nwould give two screens two answers about one piece of work.\n\nWhat is here is what only the promotion knows."
+    },
+    {
+      "path": "asterism_contract::teams::RenamedTeamDto",
+      "kind": "struct",
+      "docs": "What renaming a team answers with (#218)."
     },
     {
       "path": "asterism_contract::teams::StoredTeamConnectDto",
@@ -1245,7 +1250,7 @@
     {
       "path": "asterism_contract::teams::TeamCreatedDto",
       "kind": "struct",
-      "docs": "What founding a team answers with.\n\nThe id alone. The wire's version carries the ledger event the\ncreation appended as well, and a screen has somewhere better to\nread that — the ledger tab, where every act of the team's is. What\na create form needs is the id, because that is what the field above\nthe tabs wants next."
+      "docs": "What founding a team answers with.\n\nThe wire's version also carries the ledger event the creation\nappended, and a screen has somewhere better to read that — the\nledger tab, where every act of the team's is. What a create form\nneeds is the id and the name it was just given, because that is\nwhat the field above the tabs wants next."
     },
     {
       "path": "asterism_contract::teams::TeamDeviceTokenDto",
@@ -1256,6 +1261,11 @@
       "path": "asterism_contract::teams::TeamDeviceTokensDto",
       "kind": "struct",
       "docs": "The device tokens this window's account holds, on whatever machines\n(#204).\n\nOwner-scoped, which the route decides: nothing here takes an\naccount to ask about, and this window asks about its own."
+    },
+    {
+      "path": "asterism_contract::teams::TeamIdentityDto",
+      "kind": "struct",
+      "docs": "The signed-in account's identity, as \"Signed in as\" reads it\n(#218) — the login and display name the session already carries,\nwhich `sharedCatalog.session` (a bare user id, kept for the\nequality checks a row's own-ness is decided by) does not."
     },
     {
       "path": "asterism_contract::teams::TeamLedgerEventDto",
@@ -1280,7 +1290,7 @@
     {
       "path": "asterism_contract::teams::TeamRosterMemberDto",
       "kind": "struct",
-      "docs": "One membership row.\n\n**No display name.** A membership is a row about an account rather\nthan about a person, and the name a ledger event carries is a\nsnapshot the *act* took — there is nothing equivalent to read here.\nA surface listing these shows ids, and saying why is cheaper than\nleaving a reader to wonder how one screen has names and the other\ndoes not."
+      "docs": "One membership row.\n\n**`login` and `display_name` are read live (#218)**, not stamped —\na membership is a row about an account, read fresh each time the\nroster is, and the name a ledger event carries is a different\nthing: a snapshot the *act* took, at write time, which a rename\nafterwards does not touch. This row is the roster's own answer to\n\"who is this account now\"; the ledger tab is where \"who was it\nthen\" is read instead."
     },
     {
       "path": "asterism_contract::teams::TeamRosterViewerDto",

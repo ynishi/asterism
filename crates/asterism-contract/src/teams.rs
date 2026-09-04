@@ -128,14 +128,16 @@ pub struct MyTeamsDto {
 
 /// One team the account belongs to.
 ///
-/// **No name, because a team has none**, which the team plane's own
-/// `TeamMembership` argues: naming one is a change to that model
-/// rather than a field this shape is missing. What follows here is
-/// that a screen over these rows shows ids.
+/// **`name` is `None` only for a team from before #218** — the team
+/// plane's own `TeamMembership`, which this projects, is where that
+/// reading is argued. Every team founded since carries one; a screen
+/// over these rows falls back to the id for the one case it does not.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct MyTeamDto {
     /// The team, and what every team-scoped read is named by.
     pub team_id: String,
+    /// The team's name, or `None` for a team from before #218.
+    pub name: Option<String>,
     /// What this account is in it: `"owner"` or `"member"`.
     pub role: String,
     /// When the team was created, unix epoch milliseconds.
@@ -173,16 +175,21 @@ pub struct TeamRosterViewerDto {
 
 /// One membership row.
 ///
-/// **No display name.** A membership is a row about an account rather
-/// than about a person, and the name a ledger event carries is a
-/// snapshot the *act* took — there is nothing equivalent to read here.
-/// A surface listing these shows ids, and saying why is cheaper than
-/// leaving a reader to wonder how one screen has names and the other
-/// does not.
+/// **`login` and `display_name` are read live (#218)**, not stamped —
+/// a membership is a row about an account, read fresh each time the
+/// roster is, and the name a ledger event carries is a different
+/// thing: a snapshot the *act* took, at write time, which a rename
+/// afterwards does not touch. This row is the roster's own answer to
+/// "who is this account now"; the ledger tab is where "who was it
+/// then" is read instead.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamRosterMemberDto {
     /// The member.
     pub user_id: String,
+    /// The account's current login.
+    pub login: String,
+    /// The account's current display name.
+    pub display_name: String,
     /// `"owner"` or `"member"`.
     ///
     /// The authority table's distinction, and what decides which
@@ -193,15 +200,26 @@ pub struct TeamRosterMemberDto {
 
 /// What founding a team answers with.
 ///
-/// The id alone. The wire's version carries the ledger event the
-/// creation appended as well, and a screen has somewhere better to
-/// read that — the ledger tab, where every act of the team's is. What
-/// a create form needs is the id, because that is what the field above
-/// the tabs wants next.
+/// The wire's version also carries the ledger event the creation
+/// appended, and a screen has somewhere better to read that — the
+/// ledger tab, where every act of the team's is. What a create form
+/// needs is the id and the name it was just given, because that is
+/// what the field above the tabs wants next.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct TeamCreatedDto {
     /// The new team's id — the path segment of every team-scoped read.
     pub team_id: String,
+    /// The name it was founded with (#218).
+    pub name: String,
+}
+
+/// What renaming a team answers with (#218).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RenamedTeamDto {
+    /// The team that was renamed.
+    pub team_id: String,
+    /// Its name now.
+    pub name: String,
 }
 
 /// What a promotion left behind, as a screen needs to read it.
@@ -304,6 +322,18 @@ pub struct TeamProviderDto {
     /// What to call it on the button — whatever the person hosting
     /// the server wrote.
     pub name: String,
+}
+
+/// The signed-in account's identity, as "Signed in as" reads it
+/// (#218) — the login and display name the session already carries,
+/// which `sharedCatalog.session` (a bare user id, kept for the
+/// equality checks a row's own-ness is decided by) does not.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct TeamIdentityDto {
+    /// The account's login.
+    pub login: String,
+    /// The account's display name.
+    pub display_name: String,
 }
 
 /// What this machine remembers about a team server, none of which

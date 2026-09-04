@@ -158,6 +158,7 @@ describe("why a stored sign-in was refused", () => {
       user: "u1",
       reason: null,
     });
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     await sharedCatalog.resume();
     expect(sharedCatalog.session).toBe("u1");
     expect(sharedCatalog.storedRejectedReason).toBeNull();
@@ -200,6 +201,7 @@ describe("signing in through the provider", () => {
 
   it("signs in with the server and the remember box and nothing typed", async () => {
     mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(null); // stored_team_connection
     apiMock.mockResolvedValueOnce({ teams: [] }); // my teams
     await sharedCatalog.connectWithProvider("http://127.0.0.1:8787", true);
@@ -233,6 +235,7 @@ describe("signing in through the provider", () => {
     ).resolves.toBe(false);
     expect(mutateMock).toHaveBeenCalledTimes(1);
 
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(null); // stored_team_connection
     apiMock.mockResolvedValueOnce({ teams: [] }); // my teams
     finish("u1");
@@ -358,6 +361,8 @@ describe("what the panel shows", () => {
     // says does not exist would be back.
     sharedCatalog.session = "u1";
     apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
+    apiMock.mockResolvedValueOnce({ teams: [] }); // my_teams
     apiMock.mockResolvedValueOnce([line("l1", "shared")]);
 
     await sharedCatalog.openPanel();
@@ -1373,6 +1378,39 @@ describe("walking the ledger", () => {
   });
 });
 
+describe("the signed-in account's identity (#218)", () => {
+  it("reads the login and display name a session refresh answers with", async () => {
+    apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce({ login: "alice", display_name: "Alice" });
+
+    await sharedCatalog.refreshSession();
+
+    expect(apiMock).toHaveBeenCalledWith("team_server_identity");
+    expect(sharedCatalog.identity).toEqual({
+      login: "alice",
+      display_name: "Alice",
+    });
+  });
+
+  it("reads nothing while this window is talking to no team", async () => {
+    apiMock.mockResolvedValueOnce(null); // refreshSession answers nobody
+    apiMock.mockResolvedValueOnce(null); // team_server_identity
+
+    await sharedCatalog.refreshSession();
+
+    expect(sharedCatalog.identity).toBeNull();
+  });
+
+  it("forgets the identity on disconnect, the same as the session", async () => {
+    sharedCatalog.identity = { login: "alice", display_name: "Alice" };
+    apiMock.mockResolvedValueOnce(undefined);
+
+    await sharedCatalog.disconnect();
+
+    expect(sharedCatalog.identity).toBeNull();
+  });
+});
+
 describe("the teams to pick from", () => {
   // The read the typed team id was waiting for. What these pin is that
   // it belongs to the connection rather than to a team — it is read
@@ -1386,6 +1424,7 @@ describe("the teams to pick from", () => {
   it("reads them when the panel opens on a connection", async () => {
     sharedCatalog.session = "u1";
     apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce({
       teams: [
         { team_id: "t1", role: "owner", created_at_ms: 1 },
@@ -1416,6 +1455,7 @@ describe("the teams to pick from", () => {
 
   it("reads them on connecting, which is the phase they are for", async () => {
     mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     // What the connection stored, read back before the teams are:
     // a login that did not ask to be remembered stores nothing, and
     // this is the read that says which (#204).
@@ -1433,14 +1473,32 @@ describe("the teams to pick from", () => {
   it("reads them again after founding one", async () => {
     // The list is one shorter than the truth until it does, and the
     // person who just founded a team is the likeliest to pick it.
-    mutateMock.mockResolvedValueOnce({ team_id: "t9" });
+    mutateMock.mockResolvedValueOnce({ team_id: "t9", name: "Constellation" });
     apiMock.mockResolvedValueOnce({
-      teams: [{ team_id: "t9", role: "owner", created_at_ms: 3 }],
+      teams: [
+        { team_id: "t9", name: "Constellation", role: "owner", created_at_ms: 3 },
+      ],
     });
 
-    await sharedCatalog.createTeam();
+    await sharedCatalog.createTeam("Constellation");
 
     expect(sharedCatalog.teams.data.map((one) => one.team_id)).toEqual(["t9"]);
+  });
+
+  it("carries the name, or falls back to nothing for a team from before #218", async () => {
+    apiMock.mockResolvedValueOnce({
+      teams: [
+        { team_id: "t1", name: "Constellation", role: "owner", created_at_ms: 1 },
+        { team_id: "t2", name: null, role: "member", created_at_ms: 2 },
+      ],
+    });
+
+    await sharedCatalog.teams.load({});
+
+    expect(sharedCatalog.teams.data.map((one) => one.name)).toEqual([
+      "Constellation",
+      null,
+    ]);
   });
 
   it("drops them when the connection goes", async () => {
@@ -1526,13 +1584,17 @@ describe("the roster", () => {
   });
 
   it("answers a new team with its id, so a caller can name it", async () => {
-    mutateMock.mockResolvedValueOnce({ team_id: "t9" });
+    mutateMock.mockResolvedValueOnce({ team_id: "t9", name: "Constellation" });
 
-    const made = await sharedCatalog.createTeam();
+    const made = await sharedCatalog.createTeam("Constellation");
 
-    expect(mutateMock).toHaveBeenCalledWith("create_team", {}, "create a team");
+    expect(mutateMock).toHaveBeenCalledWith(
+      "create_team",
+      { name: "Constellation" },
+      "create a team",
+    );
     expect(made).toBe("t9");
-    expect(sharedCatalog.said).toContain("t9");
+    expect(sharedCatalog.said).toContain("Constellation");
   });
 
   it("takes the reader's own standing from what the read said", async () => {
@@ -1588,6 +1650,59 @@ describe("the roster", () => {
       "invite that account",
     );
     expect(sharedCatalog.roster.data?.members).toHaveLength(2);
+  });
+
+  it("re-reads the roster after letting somebody in by login (#218)", async () => {
+    sharedCatalog.teamId = "t1";
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce({
+      team_id: "t1",
+      members: [
+        {
+          user_id: "u1",
+          login: "alice",
+          display_name: "Alice",
+          role: "owner",
+        },
+        {
+          user_id: "u2",
+          login: "hoshino",
+          display_name: "Hoshino",
+          role: "member",
+        },
+      ],
+      viewer: { role: "owner", admin: false },
+    });
+
+    await sharedCatalog.inviteMemberByLogin("hoshino", "member");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "invite_team_member_by_login",
+      { teamIdRaw: "t1", login: "hoshino", role: "member" },
+      "invite that account",
+    );
+    expect(sharedCatalog.roster.data?.members.map((m) => m.login)).toEqual([
+      "alice",
+      "hoshino",
+    ]);
+    expect(
+      sharedCatalog.roster.data?.members.map((m) => m.display_name),
+    ).toEqual(["Alice", "Hoshino"]);
+  });
+
+  it("carries the id and the name a rename answers with (#218)", async () => {
+    sharedCatalog.teamId = "t1";
+    mutateMock.mockResolvedValueOnce({ team_id: "t1", name: "Renamed" });
+    apiMock.mockResolvedValueOnce({ teams: [] });
+
+    await sharedCatalog.renameTeam("Renamed");
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      "rename_team",
+      { teamIdRaw: "t1", name: "Renamed" },
+      "rename this team",
+    );
+    expect(sharedCatalog.said).toContain("Renamed");
   });
 
   it("names each of the three member-shaped writes to its own command", async () => {
@@ -1723,8 +1838,10 @@ describe("the connection this machine remembers", () => {
 
   it("tries what it remembers when the panel opens on no session", async () => {
     apiMock.mockResolvedValueOnce(null); // refreshSession answers nobody
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity, no session yet
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockResolvedValueOnce({ outcome: "connected", user: "u1" });
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity, after the silent connect
     apiMock.mockResolvedValueOnce({ teams: [] });
 
     await sharedCatalog.openPanel();
@@ -1738,6 +1855,7 @@ describe("the connection this machine remembers", () => {
     // The session a window has is the one it keeps: a second login
     // would replace it with an identical one for no reason.
     apiMock.mockResolvedValueOnce("u1"); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce({ teams: [] });
 
     await sharedCatalog.openPanel();
@@ -1750,6 +1868,7 @@ describe("the connection this machine remembers", () => {
     // the login it carries is what the person is about to type a
     // password beside.
     apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockResolvedValueOnce({ outcome: "rejected", user: null });
 
@@ -1762,6 +1881,7 @@ describe("the connection this machine remembers", () => {
 
   it("says nothing when there was nothing to try", async () => {
     apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(null); // nothing stored
 
     await sharedCatalog.openPanel();
@@ -1780,6 +1900,7 @@ describe("the connection this machine remembers", () => {
     // how one dismissed prompt empties a form of a connection this
     // machine still has.
     apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockResolvedValueOnce({ outcome: "nothing", user: null });
     apiMock.mockResolvedValueOnce(stored); // the file survived
@@ -1796,6 +1917,7 @@ describe("the connection this machine remembers", () => {
     // is gone, so the command dropped the file it was the sole index
     // of, and the form has nothing left to pre-fill from.
     apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockResolvedValueOnce({ outcome: "nothing", user: null });
     apiMock.mockResolvedValueOnce(null); // the file went with the entry
@@ -1812,6 +1934,7 @@ describe("the connection this machine remembers", () => {
     // credential, so nothing is forgotten and nothing is reported: the
     // window lands on the form, which is where it started.
     apiMock.mockResolvedValueOnce(null); // refreshSession
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockRejectedValueOnce(new Error("connection refused"));
 
@@ -1823,6 +1946,7 @@ describe("the connection this machine remembers", () => {
 
   it("carries the choice to be remembered into the login", async () => {
     mutateMock.mockResolvedValueOnce("u1");
+    apiMock.mockResolvedValueOnce(null); // refreshIdentity
     apiMock.mockResolvedValueOnce(stored);
     apiMock.mockResolvedValueOnce({ teams: [] });
 

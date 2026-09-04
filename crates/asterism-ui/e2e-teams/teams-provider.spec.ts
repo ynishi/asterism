@@ -29,11 +29,11 @@
 // a signed-in drawer does not show. The account it then signs in as
 // holds no password and was bound by `onPrepare` to the email address
 // the provider vouches for; the drawer names a session by the
-// account's id, and `onPrepare` passes the id `create-user` reported,
-// so which account signed in is asserted rather than inferred. It
-// disconnects at the end, which revokes nothing — the box was not
-// ticked, so no device token was minted — and the database goes with
-// the run.
+// account's login (#218), and `onPrepare` passes the login
+// `create-user` was given, so which account signed in is asserted
+// rather than inferred. It disconnects at the end, which revokes
+// nothing — the box was not ticked, so no device token was minted —
+// and the database goes with the run.
 import { browser } from "@wdio/globals";
 import fs from "node:fs";
 import path from "node:path";
@@ -46,7 +46,11 @@ const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
 const DRAWER = '[role="dialog"][aria-label="Team"]';
 
 /** What `onPrepare` put up, or a failure that says it did not. */
-function fixture(): { baseUrl: string; providerName: string; ssoId: string } {
+function fixture(): {
+  baseUrl: string;
+  providerName: string;
+  ssoLogin: string;
+} {
   const read = (name: string): string => {
     const value = process.env[name];
     if (!value) {
@@ -60,7 +64,7 @@ function fixture(): { baseUrl: string; providerName: string; ssoId: string } {
   return {
     baseUrl: read("E2E_TEAMS_BASE_URL"),
     providerName: read("E2E_TEAMS_PROVIDER_NAME"),
-    ssoId: read("E2E_TEAMS_SSO_ID"),
+    ssoLogin: read("E2E_TEAMS_SSO_LOGIN"),
   };
 }
 
@@ -201,7 +205,7 @@ function pageToken(page: string): string {
 describe("the team plane, through the identity provider", () => {
   it("signs in from the button, through the browser, back on loopback", async () => {
     const trail: string[] = [];
-    const { baseUrl, providerName, ssoId } = fixture();
+    const { baseUrl, providerName, ssoLogin } = fixture();
 
     await stage(trail, "open the shared-lines drawer", DRIVER_MS, async () => {
       if ((await drawerText()) === null) await clickIn(SHARED_ROW);
@@ -403,10 +407,10 @@ describe("the team plane, through the identity provider", () => {
     });
 
     // Back in the window: the command collected the session and the
-    // drawer names it by the account's id, for an account nobody typed.
-    // The id is the one `create-user` reported for the bound account,
-    // so this is the account the provider vouched for and not the one
-    // the roster spec left.
+    // drawer names it by the account's login (#218), for an account
+    // nobody typed. The login is the one `create-user` was given for
+    // the bound account, so this is the account the provider vouched
+    // for and not the one the roster spec left.
     await stage(
       trail,
       "the drawer reports the bound account's session",
@@ -421,9 +425,9 @@ describe("the team plane, through the identity provider", () => {
         if (text.includes(`Sign in with ${providerName}`)) {
           throw new Error("the form is still showing beside the session");
         }
-        if (!text.includes(ssoId)) {
+        if (!text.includes(ssoLogin)) {
           throw new Error(
-            `the drawer is signed in as somebody other than ${ssoId}: ${text}`,
+            `the drawer is signed in as somebody other than ${ssoLogin}: ${text}`,
           );
         }
       },

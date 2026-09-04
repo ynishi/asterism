@@ -102,6 +102,11 @@ const OTHER_LOGIN = "e2e-other";
 const WORK_LINE_NAME = "ROOT";
 const WORK_ENTRY_NAME = "cut-01";
 
+/** The first team's name (#218) — named here because
+ *  `teams-connect.spec.ts` asserts on it, matching a row in the rail
+ *  by what it now shows instead of by the id underneath. */
+const TEAM_NAME = "Constellation";
+
 /** The specs this suite runs, in the order argued for where `specs`
  *  is set below. */
 const SPECS = [
@@ -535,8 +540,7 @@ async function prepareFixture(): Promise<void> {
     ASTERISM_TEAMS_USER_PASSWORD: otherPassword,
   });
   // The account that signs in through the provider (#163): no
-  // password, bound to the address the provider will vouch for. Its
-  // id is what the drawer shows once signed in, so the spec gets it.
+  // password, bound to the address the provider will vouch for.
   const ssoId = createdUserId(
     serverCli([
       "create-user",
@@ -605,6 +609,7 @@ async function prepareFixture(): Promise<void> {
 
   process.env.E2E_TEAMS_PROVIDER_NAME = PROVIDER_NAME;
   process.env.E2E_TEAMS_SSO_ID = ssoId;
+  process.env.E2E_TEAMS_SSO_LOGIN = SSO_LOGIN;
 
   const session = await postJson<{ token: string; user_id: string }>(
     "/teams/auth/login",
@@ -612,7 +617,7 @@ async function prepareFixture(): Promise<void> {
   );
   const team = await postJson<{ team_id: string }>(
     "/teams/create",
-    { owner_user_id: null },
+    { name: TEAM_NAME, owner_user_id: null },
     session.token,
   );
 
@@ -620,15 +625,18 @@ async function prepareFixture(): Promise<void> {
   process.env.E2E_TEAMS_LOGIN = LOGIN;
   process.env.E2E_TEAMS_PASSWORD = password;
   process.env.E2E_TEAMS_ID = team.team_id;
+  process.env.E2E_TEAMS_NAME = TEAM_NAME;
 
-  // The invitee's id rather than its login. A membership row names an
-  // account by id, so that is what the invite form asks for, and a
-  // login is not something the roster could show back.
+  // Both forms of the invitee's name (#218): the login is what the
+  // invite form asks for first now, resolved on the server, and the
+  // id stays reachable for the spec that means to exercise that form
+  // instead.
   const other = await postJson<{ token: string; user_id: string }>(
     "/teams/auth/login",
     { login: OTHER_LOGIN, password: otherPassword },
   );
   process.env.E2E_TEAMS_OTHER_ID = other.user_id;
+  process.env.E2E_TEAMS_OTHER_LOGIN = OTHER_LOGIN;
 
   // A team the window's account is a member of rather than the owner
   // of. The roster spec needs one to leave from, and founding a team
@@ -636,7 +644,7 @@ async function prepareFixture(): Promise<void> {
   // So the second account founds this one and invites the first.
   const theirs = await postJson<{ team_id: string }>(
     "/teams/create",
-    { owner_user_id: null },
+    { name: "Their Team", owner_user_id: null },
     other.token,
   );
   await postJson(
@@ -684,7 +692,7 @@ async function prepareFixture(): Promise<void> {
 async function seedWorkableTeam(token: string): Promise<{ teamId: string }> {
   const team = await postJson<{ team_id: string }>(
     "/teams/create",
-    { owner_user_id: null },
+    { name: "Workable Team", owner_user_id: null },
     token,
   );
   const teamId = team.team_id;

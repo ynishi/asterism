@@ -143,12 +143,38 @@ async fn user(h: &Harness, login: &str, admin: bool) -> (Uuid, String) {
     (user_id, body["token"].as_str().unwrap().to_string())
 }
 
+/// Provisions an account whose login and display name differ, and logs
+/// it in, returning `(user_id, token)` (#218: the roster reads both,
+/// and a test using [`user`] alone cannot tell them apart).
+async fn user_named(h: &Harness, login: &str, display_name: &str) -> (Uuid, String) {
+    let user_id = h
+        .ctx
+        .auth
+        .create_account(login, display_name, GOOD, false, now_ms())
+        .await
+        .expect("create account");
+    let (status, body) = call(
+        &h.router,
+        post(
+            "/teams/auth/login",
+            serde_json::json!({ "login": login, "password": GOOD }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "login for {login}: {body}");
+    (user_id, body["token"].as_str().unwrap().to_string())
+}
+
 /// Creates a team through the route as `token`'s user, returning its
 /// id.
 async fn create_team(h: &Harness, token: &str) -> String {
     let (status, body) = call(
         &h.router,
-        post_authed("/teams/create", token, serde_json::json!({})),
+        post_authed(
+            "/teams/create",
+            token,
+            serde_json::json!({"name": "a team"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "create team: {body}");
@@ -330,7 +356,7 @@ async fn closed_registration_flips_creation_to_an_admin() {
         post_authed(
             "/teams/create",
             &op,
-            serde_json::json!({ "owner_user_id": alice_id.to_string() }),
+            serde_json::json!({ "name": "a team", "owner_user_id": alice_id.to_string() }),
         ),
     )
     .await;
@@ -369,7 +395,7 @@ async fn a_user_founds_their_own_team_and_only_their_own() {
         post_authed(
             "/teams/create",
             &alice,
-            serde_json::json!({ "owner_user_id": alice_id.to_string() }),
+            serde_json::json!({ "name": "a team", "owner_user_id": alice_id.to_string() }),
         ),
     )
     .await;
@@ -920,6 +946,209 @@ async fn a_member_leaves_and_the_last_owner_cannot() {
         1,
         "the refusal moved nothing: {after}"
     );
+
+    h.driver.shutdown().await.unwrap();
+}
+
+/// A team is named at founding, and the name is what every read of it
+/// carries from then on (#218).
+#[tokio::test]
+async fn a_team_is_named_at_founding_and_the_name_reads_back() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+
+    let (status, created) = call(
+        &h.router,
+        post_authed(
+            "/teams/create",
+            &alice,
+            serde_json::json!({ "name": "Constellation" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "create: {created}");
+    assert_eq!(created["name"], "Constellation");
+    let team_id = created["team_id"].as_str().unwrap().to_string();
+
+    let (status, mine) = call(&h.router, get_authed("/teams", &alice)).await;
+    assert_eq!(status, StatusCode::OK, "my teams: {mine}");
+    let rows = mine["teams"].as_array().expect("a teams array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["team_id"], team_id);
+    assert_eq!(rows[0]["name"], "Constellation");
+
+    // A blank name is refused the way a blank display name always was.
+    let (status, refused) = call(
+        &h.router,
+        post_authed("/teams/create", &alice, serde_json::json!({ "name": "  " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "blank name: {refused}");
+
+    h.driver.shutdown().await.unwrap();
+}
+
+/// Renaming a team is an owner's verb, and the authority table refuses
+/// a plain member the way it refuses every other owner row (#218).
+#[tokio::test]
+async fn an_owner_renames_the_team_and_a_member_cannot() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (bob_id, bob) = user(&h, "bob", false).await;
+    let team = create_team(&h, &alice).await;
+    let (status, invited) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": bob_id.to_string(), "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invite: {invited}");
+
+    let (status, refused) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/rename"),
+            &bob,
+            serde_json::json!({ "name": "Bob's Team" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "member rename: {refused}");
+
+    let (status, renamed) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/rename"),
+            &alice,
+            serde_json::json!({ "name": "Renamed" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "owner rename: {renamed}");
+    assert_eq!(renamed["team_id"], team);
+    assert_eq!(renamed["name"], "Renamed");
+
+    let (status, mine) = call(&h.router, get_authed("/teams", &alice)).await;
+    assert_eq!(status, StatusCode::OK, "my teams: {mine}");
+    let row = mine["teams"].as_array().expect("teams").first().unwrap();
+    assert_eq!(row["name"], "Renamed", "the rename reads back: {mine}");
+
+    h.driver.shutdown().await.unwrap();
+}
+
+/// The roster reads a login and a display name live, not stamped
+/// (#218) — the distinction the roster's own field carries against the
+/// ledger.
+#[tokio::test]
+async fn the_roster_reads_logins_and_display_names_live() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (hoshino_id, _hoshino) = user_named(&h, "hoshino", "Hoshino").await;
+    let team = create_team(&h, &alice).await;
+    let (status, invited) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": hoshino_id.to_string(), "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invite: {invited}");
+
+    let (status, roster) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "roster: {roster}");
+    let row = roster["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|row| row["user_id"] == hoshino_id.to_string())
+        .expect("hoshino's row");
+    assert_eq!(row["login"], "hoshino");
+    assert_eq!(row["display_name"], "Hoshino");
+
+    h.driver.shutdown().await.unwrap();
+}
+
+/// An invite typed as a login lands the same membership row an invite
+/// typed as an id does (#218's own verification).
+#[tokio::test]
+async fn invite_by_login_lands_the_same_row_as_invite_by_id() {
+    let h = harness(RegistrationPolicy::Open).await;
+    let (_alice_id, alice) = user(&h, "alice", false).await;
+    let (hoshino_id, _hoshino) = user_named(&h, "hoshino", "Hoshino").await;
+    let team = create_team(&h, &alice).await;
+
+    let (status, invited) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "login": "hoshino", "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invite by login: {invited}");
+
+    let (status, roster) = call(
+        &h.router,
+        get_authed(&format!("/teams/{team}/roster"), &alice),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "roster: {roster}");
+    let row = roster["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .find(|row| row["user_id"] == hoshino_id.to_string());
+    assert!(
+        row.is_some(),
+        "the login-invited account never reached the roster: {roster}"
+    );
+    assert_eq!(row.unwrap()["role"], "member");
+
+    // Both set, or neither, is refused rather than guessed at.
+    let (status, refused) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "neither set: {refused}");
+
+    let (status, refused) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "user_id": hoshino_id.to_string(), "login": "hoshino", "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "both set: {refused}");
+
+    // An unknown login is refused rather than silently inviting
+    // nobody.
+    let (status, refused) = call(
+        &h.router,
+        post_authed(
+            &format!("/teams/{team}/members/invite"),
+            &alice,
+            serde_json::json!({ "login": "nobody-by-this-name", "role": "member" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "unknown login: {refused}");
 
     h.driver.shutdown().await.unwrap();
 }

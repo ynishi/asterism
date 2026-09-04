@@ -204,6 +204,10 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("grant_team_owner", "talks to a team, not to this process"),
     ("invite_team_member", "talks to a team, not to this process"),
+    (
+        "invite_team_member_by_login",
+        "talks to a team, not to this process",
+    ),
     ("leave_team", "talks to a team, not to this process"),
     ("list_shared_lines", "talks to a team, not to this process"),
     (
@@ -225,6 +229,7 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ),
     ("push_shared_round", "talks to a team, not to this process"),
     ("remove_team_member", "talks to a team, not to this process"),
+    ("rename_team", "talks to a team, not to this process"),
     (
         "revoke_team_device_token",
         "talks to a team, not to this process",
@@ -251,6 +256,10 @@ const COMMANDS_WITHOUT_ROUTE: &[(&str, &str)] = &[
     ("team_auth_provider", "talks to a team, not to this process"),
     ("team_ledger_page", "talks to a team, not to this process"),
     ("team_roster", "talks to a team, not to this process"),
+    (
+        "team_server_identity",
+        "talks to a team, not to this process",
+    ),
     (
         "team_server_session",
         "talks to a team, not to this process",
