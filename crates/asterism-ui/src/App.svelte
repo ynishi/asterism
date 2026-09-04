@@ -2,11 +2,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { mutate } from "./lib/mutate";
   import { summariseBulk } from "./lib/bulk-status";
-  import { untrack } from "svelte";
+  import { untrack, tick } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { VList } from "virtua/svelte";
+  import { VList, type VListHandle } from "virtua/svelte";
   import ActiveFilters from "./ActiveFilters.svelte";
   import CardActionIcons from "./CardActionIcons.svelte";
   import ConstellationBurst from "./ConstellationBurst.svelte";
@@ -845,6 +845,46 @@
   function closeDetail() {
     openAssetId = null;
     interaction.remove("detail");
+  }
+
+  /// "Show me this where I keep it" (#189) — DetailPane's ask,
+  /// answered here because the grid and the persona filter are App's.
+  ///
+  /// Closes the pane first: reveal is a move, and there is nothing to
+  /// see it move to with the pane still covering the grid. Switches
+  /// `activePersona` when the asset belongs to a different one —
+  /// `gridSelection.restore`'s precedent for going where a thing lives
+  /// rather than filtering around it — and says so on the status line,
+  /// the same wording a drop or a paste already announces a persona
+  /// with (#189's "the person has to be able to see what changed").
+  /// `loadAssets()` is called directly rather than left to the
+  /// filter-change effect's debounce: that effect still fires, reads
+  /// the same `fetchKey()`, and finds this call already served it.
+  ///
+  /// If the asset is still off the page after the switch, something
+  /// other than persona is hiding it — a search, a modality, a group —
+  /// and this says so rather than guessing which to clear.
+  async function revealInGrid(assetId: string, personaId: string): Promise<void> {
+    closeDetail();
+    const switched = activeFilter.activePersona !== personaId;
+    if (switched) {
+      activeFilter.activePersona = personaId;
+      await loadAssets();
+    }
+    await tick();
+    const index = filteredRows.findIndex(
+      (row) =>
+        row.kind === "cards" &&
+        row.items.some((it) => it.kind === "message" && it.card.id === assetId),
+    );
+    if (index === -1) {
+      status = switched
+        ? `switched to ${personaName(personaId)} — another filter is hiding this asset`
+        : "another filter is hiding this asset";
+      return;
+    }
+    gridVListRef?.scrollToIndex(index, { align: "center", smooth: true });
+    if (switched) status = `switched to ${personaName(personaId)}`;
   }
   async function navigateDetail(delta: number) {
     detailPaneRef?.navigate?.(delta);
@@ -4266,6 +4306,10 @@
   const CARD_MIN_PX = 180;
   const GRID_GAP_PX = 10; // 0.6rem @ 16px root, close enough for width math.
   let gridWrapperEl = $state<HTMLDivElement | null>(null);
+  // The VList instance, reached for exactly one thing: scrolling to a
+  // row from outside the grid's own scroll gestures (#189's
+  // `revealInGrid`, below).
+  let gridVListRef = $state<VListHandle | null>(null);
   let gridWrapperWidth = $state(0);
   let gridCols = $derived(
     Math.max(
@@ -5965,7 +6009,12 @@
         onmousedown={onGridMouseDown}
         role="presentation"
       >
-        <VList data={filteredRows} getKey={(row, _i) => row.key} style="height: 100%;">
+        <VList
+          bind:this={gridVListRef}
+          data={filteredRows}
+          getKey={(row, _i) => row.key}
+          style="height: 100%;"
+        >
           {#snippet children(row, _rowIndex)}
             {#if row.kind === "header"}
               <div
@@ -6295,6 +6344,7 @@
     onSaveLabels={saveLabels}
     onSetAsWallpaper={setAsWallpaper}
     onRefreshCounts={() => { void loadSidebarCounts(); void loadTagCounts(); }}
+    onRevealInGrid={revealInGrid}
   />
 </div>
 

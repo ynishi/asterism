@@ -103,6 +103,12 @@
     // `saveModality` before the prop declaration was lost in a refactor
     // (since restored).
     onRefreshCounts: () => void;
+    // "Show me this where I keep it" (#189) — the other half of what
+    // opening a tile from the forge answers. App owns the grid and the
+    // persona filter, so this only carries the ask: which asset, and
+    // the persona it belongs to, so App can decide whether showing it
+    // means switching libraries first.
+    onRevealInGrid: (assetId: string, personaId: string) => void;
   }
 
   let {
@@ -113,6 +119,7 @@
     onSaveLabels,
     onSetAsWallpaper,
     onRefreshCounts,
+    onRevealInGrid,
   }: Props = $props();
 
   // Sibling asset ids for arrow-key navigation — derived straight
@@ -1384,6 +1391,11 @@
     if (!detail || activeFilter.activePersona === null) return;
     await onSetAsWallpaper(detail.asset.id);
   }
+
+  function handleRevealInGrid() {
+    if (!detail) return;
+    onRevealInGrid(detail.asset.id, detail.asset.persona_id);
+  }
 </script>
 
 {#if detail || detailLoading}
@@ -2025,6 +2037,23 @@
                 {/if}
               {/if}
             </dl>
+
+            <!-- The other half of #182's answer to "what is this" —
+                 "show me this where I keep it" (#189). Always offered:
+                 useful from the forge, where the grid may not even be
+                 on this asset's persona, and harmless from the grid
+                 itself, where it just re-centers on a card already
+                 there. -->
+            <div class="reveal-action">
+              <button
+                type="button"
+                class="reveal-btn"
+                onclick={handleRevealInGrid}
+                title="Scroll the grid to this asset, switching persona first if it belongs to a different one"
+              >
+                ↗ Show in grid
+              </button>
+            </div>
 
             {#if detailKind === "image" && activeFilter.activePersona !== null}
               <!-- Persona theme action — only for image assets and
@@ -3181,6 +3210,26 @@
   .wallpaper-current {
     font-size: 0.75rem;
     color: #4a6a1a;
+  }
+
+  /* -----------------------------------------------------------------
+   * Reveal-in-grid action (#189)
+   * ----------------------------------------------------------------- */
+  .reveal-action {
+    margin-top: 0.6rem;
+  }
+  .reveal-btn {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid #d0d0d0;
+    border-radius: 3px;
+    background: #fafafa;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #333;
+  }
+  .reveal-btn:hover {
+    background: #e9f0ff;
+    color: #1a3a7a;
   }
 
   /* -----------------------------------------------------------------
