@@ -1128,9 +1128,10 @@ class SharedCatalog {
       "invite that account",
     );
     await this.roster.load({ teamId: this.teamId });
-    // The id form is reached for when the login is not known (see
-    // above), but the roster read just above answers with it anyway
-    // — the account just invited is a row on it now.
+    // The id form is reached for when the login is not known
+    // (`inviteMemberByLogin`'s own doc, below), but the roster read
+    // just above answers with it anyway — the account just invited
+    // is a row on it now.
     const memberLogin =
       this.roster.data?.members.find((m) => m.user_id === userId)?.login ?? userId;
     this.said = `Invited ${memberLogin} as ${role}.`;
