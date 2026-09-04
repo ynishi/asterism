@@ -67,8 +67,9 @@
   import { sharedCatalog } from "./lib/stores/shared.svelte";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
-  import type { ForgeOpDto, ForgeRoundDto } from "./bindings";
+  import type { ForgeOpDto } from "./bindings";
   import { endingWord } from "./lib/formatters";
+  import ForgeRoundLog from "./ForgeRoundLog.svelte";
 
   const work = $derived(sharedCatalog.work);
   const ended = $derived(work !== null && work.close !== null);
@@ -201,20 +202,6 @@
 
   function when(ms: number): string {
     return new Date(ms).toLocaleString();
-  }
-
-  /** What to call an entry an operation names — the op's own name when
-   *  it carries one, and otherwise whatever the fold has for it. */
-  function opName(op: ForgeOpDto): string {
-    return (
-      op.name ??
-      projected.find((row) => row.entryId === op.entry_id)?.name ??
-      op.entry_id
-    );
-  }
-
-  function summarise(round: ForgeRoundDto): string {
-    return `${round.ops.length} ${round.ops.length === 1 ? "operation" : "operations"}`;
   }
 </script>
 
@@ -412,37 +399,11 @@
     </p>
   {/if}
 
-  <!-- The log, oldest first: the order the chain holds and the order
-       somebody reads a piece of work in. -->
-  <h4>What was asked for</h4>
-  <ol class="rounds">
-    {#each work.rounds as round (round.id)}
-      <li>
-        <p class="round-head">
-          <span>{summarise(round)}</span>
-          <span class="quiet">{when(round.at_ms)}</span>
-        </p>
-        {#if round.note !== null}
-          <p class="quiet note">{round.note}</p>
-        {/if}
-        <ul class="ops">
-          {#each round.ops as op (op.entry_id + op.kind)}
-            <li>
-              <!-- The verb is stated rather than read off what moved:
-                   an operation carries one, which a change row does
-                   not. -->
-              <span class="kind">{op.kind}</span>
-              <span class="op-name">{opName(op)}</span>
-            </li>
-          {/each}
-        </ul>
-      </li>
-    {/each}
-  </ol>
-
-  {#if work.rounds.length === 0}
-    <p class="quiet">Nothing asked for yet.</p>
-  {/if}
+  <!-- The log, factored out to `ForgeRoundLog` (#217): identical to
+       `ForgeWork`'s copy except for the "say something" verb, which
+       this plane does not carry (no `onTalkAboutRound`/`onTalkAboutOp`
+       — the member's client has no thread commands). -->
+  <ForgeRoundLog rounds={work.rounds} {projected} />
 
   {#if !ended}
     <div class="close">
@@ -472,8 +433,7 @@
     font-size: 0.82rem;
     font-weight: 500;
   }
-  ul,
-  ol {
+  ul {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -577,27 +537,6 @@
     cursor: pointer;
     font-size: 0.72rem;
     padding: 0.1rem 0.4rem;
-  }
-  .rounds > li {
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
-    padding: 0.4rem 0;
-  }
-  .round-head {
-    display: flex;
-    gap: 0.6rem;
-    margin: 0;
-    font-size: 0.78rem;
-  }
-  .ops li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.78rem;
-    padding: 0.15rem 0;
-  }
-  .kind {
-    min-width: 4rem;
-    opacity: 0.75;
   }
   .op-name {
     overflow: hidden;
