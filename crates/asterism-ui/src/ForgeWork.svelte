@@ -44,17 +44,13 @@
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
+  import ForgeRoundLog from "./ForgeRoundLog.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { baseName } from "./lib/basename";
   import { endingWord } from "./lib/formatters";
-  import type {
-    AssetCardDto,
-    ForgeLineDto,
-    ForgeOpDto,
-    ForgeRoundDto,
-  } from "./bindings";
+  import type { AssetCardDto, ForgeLineDto, ForgeOpDto } from "./bindings";
 
   let { line }: { line: ForgeLineDto } = $props();
 
@@ -300,22 +296,6 @@
     if (card.media === "image" || card.media === "video") return "";
     return card.cover ?? (card.media === "none" ? "no preview" : card.media);
   }
-
-  /** What to call an entry an operation names. The op's own name when
-   *  it carries one, and otherwise whatever the fold has for it — which
-   *  may be a name another round of this work asked for rather than one
-   *  the line has ever said. */
-  function opName(op: ForgeOpDto): string {
-    return (
-      op.name ??
-      projected.find((row) => row.entryId === op.entry_id)?.name ??
-      op.entry_id
-    );
-  }
-
-  function summarise(round: ForgeRoundDto): string {
-    return `${round.ops.length} ${round.ops.length === 1 ? "operation" : "operations"}`;
-  }
 </script>
 
 {#if forgeCatalog.working === null}
@@ -514,62 +494,35 @@
     {/if}
   {/if}
 
-  <!-- The log. Oldest first, which is the order the chain holds and the
-       order somebody reads a piece of work in — unlike the line's
-       history, where the question is what happened last. -->
-  <h4>What was asked for</h4>
-  <ol class="rounds">
-    {#each work.rounds as round (round.id)}
-      <li>
-        <p class="round-head">
-          <span>{summarise(round)}</span>
-          <span class="quiet">{when(round.at_ms)}</span>
-          <button
-            class="talk-about"
-            onclick={() =>
-              forgeCatalog.talkAbout({
-                kind: "round",
-                about: "this round",
-                pursuitId: work.id,
-                nodeId: round.id,
-              })}
-          >say something</button>
-        </p>
-        {#if round.note !== null}
-          <p class="quiet note">{round.note}</p>
-        {/if}
-        <ul class="ops">
-          {#each round.ops as op (op.entry_id + op.kind)}
-            <li>
-              <!-- The verb is stated rather than read off what moved:
-                   an operation carries one, which a change row does
-                   not. -->
-              <span class="kind">{op.kind}</span>
-              <span class="op-name">{opName(op)}</span>
-              <!-- An entry as *that round* had it, which is why the
-                   round is named beside it: the same entry in two
-                   rounds is two things to talk about. -->
-              <button
-                class="talk-about"
-                onclick={() =>
-                  forgeCatalog.talkAbout({
-                    kind: "entry",
-                    about: opName(op),
-                    pursuitId: work.id,
-                    nodeId: round.id,
-                    entryId: op.entry_id,
-                  })}
-              >say something</button>
-            </li>
-          {/each}
-        </ul>
-      </li>
-    {/each}
-  </ol>
-
-  {#if work.rounds.length === 0}
-    <p class="quiet">Nothing asked for yet.</p>
-  {/if}
+  <!-- The log, factored out to `ForgeRoundLog` (#217): identical to
+       `SharedLineWork`'s copy except for the "say something" verb,
+       which only this plane has, and the divider colour, which the
+       two files never shared either. -->
+  <ForgeRoundLog
+    rounds={work.rounds}
+    {projected}
+    dividerColor="rgba(128, 128, 128, 0.25)"
+    onTalkAboutRound={(round) =>
+      forgeCatalog.talkAbout({
+        kind: "round",
+        about: "this round",
+        pursuitId: work.id,
+        nodeId: round.id,
+      })}
+    onTalkAboutOp={(round, op) =>
+      forgeCatalog.talkAbout({
+        kind: "entry",
+        // `ForgeRoundLog`'s own `opName` repeated: a callback argument
+        // cannot reach a function private to the component it is
+        // passed into.
+        about: op.name ??
+          projected.find((row) => row.entryId === op.entry_id)?.name ??
+          op.entry_id,
+        pursuitId: work.id,
+        nodeId: round.id,
+        entryId: op.entry_id,
+      })}
+  />
 
   {#if !ended}
     <div class="compose">
@@ -618,8 +571,7 @@
     font-size: 0.82rem;
     font-weight: 500;
   }
-  ul,
-  ol {
+  ul {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -779,23 +731,6 @@
     display: flex;
     gap: 0.3rem;
     margin-left: auto;
-  }
-  .rounds > li {
-    border-top: 1px solid rgba(128, 128, 128, 0.25);
-    padding: 0.4rem 0;
-  }
-  .round-head {
-    display: flex;
-    gap: 0.6rem;
-    margin: 0;
-    font-size: 0.78rem;
-  }
-  .ops li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.78rem;
-    padding: 0.15rem 0;
   }
   .kind {
     min-width: 4rem;
