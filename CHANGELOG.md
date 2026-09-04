@@ -1200,14 +1200,23 @@ and this project adheres to
   and two stores still (#148 decision 16) — what they share is the shape.
 
 - **The team picker on "Hand to a team" and the remove-member confirm now name
-  who they mean** (#229). #218 named every screen on the team plane, but two
-  were built or read from elsewhere and its sweep did not reach them: the
-  promote picker (#219) still listed `team_id · role`, and the remove-member
-  confirm (predating #218) still read the raw account id in a dialog whose
-  roster row above it already resolved a login. Both now fall back to the id
-  only where no name is on hand — the picker's `<option>` keeps the id on its
-  `title`, the way a team row already does (#218) — and neither reads further
-  than the object it already had.
+  who they mean** (#229). #218 named every screen on the team plane, but its
+  sweep did not reach everywhere: the promote picker (#219) still listed
+  `team_id · role`, and the remove-member confirm (predating #218) still read
+  the raw account id in a dialog whose roster row above it already resolved a
+  login. Both now fall back to the id only where no name is on hand — the
+  picker's `<option>` keeps the id on its `title`, the way a team row already
+  does (#218) — and neither reads further than the object it already had. Six
+  more places the sweep missed, the toasts each write leaves behind, are their
+  own entry below.
+
+- **The six sentences a team-plane write leaves behind name who and which team
+  too.** Inviting, removing, granting or revoking owner, leaving and deleting a
+  team all set the toast under the drawer to a sentence naming a raw `userId` or
+  `teamId`, on the same terms the promote picker and the remove confirm did
+  before #229. Each now reads a login from the roster already loaded to draw the
+  row its button sits on, or a team's name from the same list the drawer's own
+  rail already reads, falling back to the id where neither has an answer.
 
 - **A `CLAUDE*.md` is ignored wherever it sits, and so is a nested `.claude/`.**
   The ignore list named the root `CLAUDE.md`, which is not where the risk lives.
