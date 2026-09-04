@@ -402,8 +402,13 @@
   <!-- The log, factored out to `ForgeRoundLog` (#217): identical to
        `ForgeWork`'s copy except for the "say something" verb, which
        this plane does not carry (no `onTalkAboutRound`/`onTalkAboutOp`
-       — the member's client has no thread commands). -->
-  <ForgeRoundLog rounds={work.rounds} {projected} />
+       — the member's client has no thread commands), and the divider
+       colour, which the two files never shared either. -->
+  <ForgeRoundLog
+    rounds={work.rounds}
+    {projected}
+    dividerColor="rgba(255, 255, 255, 0.14)"
+  />
 
   {#if !ended}
     <div class="close">

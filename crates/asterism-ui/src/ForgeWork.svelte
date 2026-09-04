@@ -496,10 +496,12 @@
 
   <!-- The log, factored out to `ForgeRoundLog` (#217): identical to
        `SharedLineWork`'s copy except for the "say something" verb,
-       which only this plane has. -->
+       which only this plane has, and the divider colour, which the
+       two files never shared either. -->
   <ForgeRoundLog
     rounds={work.rounds}
     {projected}
+    dividerColor="rgba(128, 128, 128, 0.25)"
     onTalkAboutRound={(round) =>
       forgeCatalog.talkAbout({
         kind: "round",
@@ -510,6 +512,9 @@
     onTalkAboutOp={(round, op) =>
       forgeCatalog.talkAbout({
         kind: "entry",
+        // `ForgeRoundLog`'s own `opName` repeated: a callback argument
+        // cannot reach a function private to the component it is
+        // passed into.
         about: op.name ??
           projected.find((row) => row.entryId === op.entry_id)?.name ??
           op.entry_id,

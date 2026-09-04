@@ -5,31 +5,44 @@
   // markup for this one section, and the difference between them was
   // never the row shape. It was one optional verb.
   //
-  // `ForgeWork` lets a reader start a conversation about a round or an
-  // entry within it (`forgeCatalog.talkAbout`); `SharedLineWork` has no
-  // such verb — the member's client carries no thread commands, which
-  // `sharedCatalog`'s own header records. So the "say something"
-  // buttons are the one thing this component does not own outright:
-  // `onTalkAboutRound` / `onTalkAboutOp` are optional, and a caller
-  // that omits them gets the log without the buttons rather than
-  // buttons that do nothing.
+  // `ForgeWork` lets a reader open the conversation about a round or an
+  // entry within it (`forgeCatalog.talkAbout` — "shows what is said
+  // about one thing, and reads it"; starting one from there is
+  // `openTalk`'s to do). `SharedLineWork` has no such verb — the
+  // member's client carries no thread commands, which `sharedCatalog`'s
+  // own header records. So the "say something" buttons are the one
+  // thing this component does not own outright: `onTalkAboutRound` /
+  // `onTalkAboutOp` are optional, and a caller that omits them gets the
+  // log without the buttons rather than buttons that do nothing.
   //
   // `projected` stays a prop rather than something this reads off a
-  // store, for the reason `ForgeWork`'s own copy of `opName` states: a
-  // round can name an asset the line has never held, so the entry name
-  // behind an op may come from either side, and only the caller knows
-  // which `Resource` to ask.
+  // store, because there are two catalogs to read it from (#148
+  // decision 16): `forgeCatalog.projection` here, `sharedCatalog.projection`
+  // in `SharedLineWork`, and only the caller knows which one names this
+  // work's entries. Each is a getter over two `Resource`s, not a
+  // `Resource` this component could ask for on its own — and a round
+  // can in any case name an asset the line has never held, which is why
+  // the projection carries its own answer rather than reading one off
+  // `forgeCatalog.cards`/`sharedCatalog.cards` directly.
+  //
+  // `dividerColor` is a prop rather than a fixed rule for the same
+  // reason the verb is optional: the two callers never agreed on it.
+  // `ForgeWork` drew this divider in `rgba(128, 128, 128, 0.25)`,
+  // `SharedLineWork` in `rgba(255, 255, 255, 0.14)` — a difference this
+  // component would otherwise erase by picking one of the two.
   import type { ForgeOpDto, ForgeRoundDto } from "./bindings";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
 
   interface Props {
     rounds: ForgeRoundDto[];
     projected: ForgeProjectedEntry[];
+    dividerColor: string;
     onTalkAboutRound?: (round: ForgeRoundDto) => void;
     onTalkAboutOp?: (round: ForgeRoundDto, op: ForgeOpDto) => void;
   }
 
-  let { rounds, projected, onTalkAboutRound, onTalkAboutOp }: Props = $props();
+  let { rounds, projected, dividerColor, onTalkAboutRound, onTalkAboutOp }: Props =
+    $props();
 
   function when(ms: number): string {
     return new Date(ms).toLocaleString();
@@ -56,7 +69,7 @@
      somebody reads a piece of work in — unlike a line's history, where
      the question is what happened last. -->
 <h4>What was asked for</h4>
-<ol class="rounds">
+<ol class="rounds" style:--divider-color={dividerColor}>
   {#each rounds as round (round.id)}
     <li>
       <p class="round-head">
@@ -112,7 +125,7 @@
     padding: 0;
   }
   .rounds > li {
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid var(--divider-color);
     padding: 0.4rem 0;
   }
   .round-head {
