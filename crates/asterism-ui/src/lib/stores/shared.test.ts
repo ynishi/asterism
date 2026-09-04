@@ -1630,14 +1630,14 @@ describe("the roster", () => {
     expect(sharedCatalog.iAmAdmin).toBe(true);
   });
 
-  it("re-reads the roster after letting somebody in", async () => {
+  it("re-reads the roster after letting somebody in, and names the toast by the login the reload answers with", async () => {
     sharedCatalog.teamId = "t1";
     mutateMock.mockResolvedValueOnce(null);
     apiMock.mockResolvedValueOnce({
       team_id: "t1",
       members: [
-        { user_id: "u1", role: "owner" },
-        { user_id: "u2", role: "member" },
+        { user_id: "u1", login: "alice", display_name: "Alice", role: "owner" },
+        { user_id: "u2", login: "hoshino", display_name: "Hoshino", role: "member" },
       ],
       viewer: { role: "owner", admin: false },
     });
@@ -1650,6 +1650,7 @@ describe("the roster", () => {
       "invite that account",
     );
     expect(sharedCatalog.roster.data?.members).toHaveLength(2);
+    expect(sharedCatalog.said).toContain("hoshino");
   });
 
   it("re-reads the roster after letting somebody in by login (#218)", async () => {
@@ -1705,23 +1706,19 @@ describe("the roster", () => {
     expect(sharedCatalog.said).toContain("Renamed");
   });
 
-  it("names each of the three member-shaped writes to its own command", async () => {
+  it("names each of the three member-shaped writes to its own command, and its toast by the login on the roster it read before writing", async () => {
     sharedCatalog.teamId = "t1";
     const rows = {
       team_id: "t1",
-      members: [{ user_id: "u1", role: "owner" }],
+      members: [
+        { user_id: "u1", login: "alice", display_name: "Alice", role: "owner" },
+        { user_id: "u2", login: "hoshino", display_name: "Hoshino", role: "member" },
+      ],
       viewer: { role: "owner", admin: false },
     };
 
-    mutateMock.mockResolvedValueOnce(null);
     apiMock.mockResolvedValueOnce(rows);
-    await sharedCatalog.removeMember("u2");
-    expect(mutateMock).toHaveBeenLastCalledWith(
-      "remove_team_member",
-      { teamIdRaw: "t1", userId: "u2" },
-      "remove that member",
-    );
-
+    await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);
     apiMock.mockResolvedValueOnce(rows);
     await sharedCatalog.grantOwner("u2");
@@ -1730,6 +1727,7 @@ describe("the roster", () => {
       { teamIdRaw: "t1", userId: "u2" },
       "make that member an owner",
     );
+    expect(sharedCatalog.said).toContain("hoshino");
 
     mutateMock.mockResolvedValueOnce(null);
     apiMock.mockResolvedValueOnce(rows);
@@ -1739,6 +1737,17 @@ describe("the roster", () => {
       { teamIdRaw: "t1", userId: "u2" },
       "take back the owner role",
     );
+    expect(sharedCatalog.said).toContain("hoshino");
+
+    mutateMock.mockResolvedValueOnce(null);
+    apiMock.mockResolvedValueOnce(rows);
+    await sharedCatalog.removeMember("u2");
+    expect(mutateMock).toHaveBeenLastCalledWith(
+      "remove_team_member",
+      { teamIdRaw: "t1", userId: "u2" },
+      "remove that member",
+    );
+    expect(sharedCatalog.said).toContain("hoshino");
   });
 
   it("stops looking at a team it deleted", async () => {
@@ -1750,7 +1759,7 @@ describe("the roster", () => {
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);
-    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+    apiMock.mockResolvedValueOnce({ teams: [] }); // one shorter now
 
     await sharedCatalog.deleteTeam();
 
@@ -1781,7 +1790,7 @@ describe("the roster", () => {
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);
-    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+    apiMock.mockResolvedValueOnce({ teams: [] }); // one shorter now
 
     await sharedCatalog.removeMember("u1");
 
@@ -1803,7 +1812,7 @@ describe("the roster", () => {
     });
     await sharedCatalog.roster.load({ teamId: "t1" });
     mutateMock.mockResolvedValueOnce(null);
-    apiMock.mockResolvedValueOnce([]); // the teams list, one shorter now
+    apiMock.mockResolvedValueOnce({ teams: [] }); // one shorter now
 
     await sharedCatalog.leaveTeam();
 
