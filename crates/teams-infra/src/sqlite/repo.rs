@@ -47,7 +47,9 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use rusqlite_isle::AsyncIsle;
 use teams_core::DomainError;
 use teams_core::domain::head_registry::TagHeadEntry;
-use teams_core::domain::identity::{LedgerActor, Membership, Role, TeamMembership, TeamRoster};
+use teams_core::domain::identity::{
+    LedgerActor, Membership, Role, Team, TeamMembership, TeamRoster,
+};
 use teams_core::domain::ledger::{
     BLOB_COPY_COMPLETED, BLOB_LINK_PURGE_MARKED, BLOB_LINK_PURGE_UNMARKED, BLOB_LINK_RECLAIMED,
     EventKind, EventSeq, LedgerEvent, MEMBERSHIP_ADDED, MEMBERSHIP_REMOVED, ROLE_CHANGED,
@@ -131,11 +133,12 @@ impl SqliteTeamsRepository {
     /// acted.
     pub async fn create_team(
         &self,
-        team_id: Uuid,
+        team: Team,
         founding_owner: Membership,
         actor: LedgerActor,
         occurred_at_ms: i64,
     ) -> Result<LedgerEvent, DomainError> {
+        let team_id = team.team_id();
         if founding_owner.team_id != team_id {
             return Err(DomainError::Validation(format!(
                 "founding owner row belongs to team {}, not {team_id}",
@@ -149,6 +152,7 @@ impl SqliteTeamsRepository {
                     .into(),
             ));
         }
+        let name = team.name().to_string();
         self.write_tx(move |tx| {
             if team_exists_in_tx(tx, team_id)? {
                 return Ok(Err(DomainError::Validation(format!(
@@ -156,8 +160,8 @@ impl SqliteTeamsRepository {
                 ))));
             }
             tx.execute(
-                "INSERT INTO team (id, created_at) VALUES (?1, ?2)",
-                params![team_id, occurred_at_ms],
+                "INSERT INTO team (id, created_at, name) VALUES (?1, ?2, ?3)",
+                params![team_id, occurred_at_ms, name],
             )?;
             tx.execute(
                 "INSERT INTO membership (team_id, user_id, role) VALUES (?1, ?2, ?3)",
@@ -177,10 +181,40 @@ impl SqliteTeamsRepository {
                 serde_json::json!({
                     "founding_owner": founding_owner.user_id,
                     "role": founding_owner.role.as_str(),
+                    "name": name,
                 }),
             )
         })
         .await
+    }
+
+    /// Renames a team. No ledger event: a team's name is not stamped
+    /// anywhere the way an actor's is (`Team`'s own doc says why), so
+    /// there is nothing for a rename to leave a receipt about beyond
+    /// the row itself.
+    ///
+    /// Refuses a team that does not exist — an update matching zero
+    /// rows is what says so — the same shape `add_member`,
+    /// `delete_team` and the other writes gated on
+    /// `team_exists_in_tx` refuse with. Unlike them, this is checked
+    /// on the `UPDATE`'s own row count rather than a separate lookup:
+    /// there is no second write in the same transaction whose absence
+    /// needs pre-empting.
+    pub async fn rename_team(&self, team_id: Uuid, name: String) -> Result<(), DomainError> {
+        let changed = self
+            .isle
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE team SET name = ?2 WHERE id = ?1",
+                    params![team_id, name],
+                )
+            })
+            .await
+            .map_err(infra_err)?;
+        if changed == 0 {
+            return Err(DomainError::Validation(format!("team {team_id} not found")));
+        }
+        Ok(())
     }
 
     /// Deletes a team, appending `teams.team.deleted/1`.
@@ -845,27 +879,28 @@ impl SqliteTeamsRepository {
     /// The role goes through [`Role::parse`] on the way out for the
     /// reason [`Self::roster`] gives.
     pub async fn teams_of_user(&self, user_id: Uuid) -> Result<Vec<TeamMembership>, DomainError> {
-        let rows: Vec<(Uuid, String, i64)> = self
+        let rows: Vec<(Uuid, String, i64, Option<String>)> = self
             .isle
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT m.team_id, m.role, t.created_at
+                    "SELECT m.team_id, m.role, t.created_at, t.name
                      FROM membership m
                      JOIN team t ON t.id = m.team_id
                      WHERE m.user_id = ?1
                      ORDER BY t.created_at, m.team_id",
                 )?;
                 let rows = stmt.query_map(params![user_id], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                 })?;
                 rows.collect()
             })
             .await
             .map_err(infra_err)?;
         rows.into_iter()
-            .map(|(team_id, role, created_at)| {
+            .map(|(team_id, role, created_at, name)| {
                 Ok(TeamMembership {
                     team_id,
+                    name,
                     role: Role::parse(&role)?,
                     created_at,
                 })
@@ -1551,7 +1586,7 @@ mod tests {
         let owner_id = Uuid::now_v7();
         let actor = actor_for(owner_id);
         repo.create_team(
-            team_id,
+            Team::new(team_id, "a team").unwrap(),
             membership(team_id, owner_id, Role::Owner),
             actor.clone(),
             T0,
@@ -1610,7 +1645,7 @@ mod tests {
         // A member-roled founding row would create a zero-owner team.
         let refused = repo
             .create_team(
-                team_id,
+                Team::new(team_id, "a team").unwrap(),
                 membership(team_id, user, Role::Member),
                 actor_for(user),
                 T0,
@@ -1621,7 +1656,7 @@ mod tests {
         // A founding row for a different team is malformed.
         let refused = repo
             .create_team(
-                team_id,
+                Team::new(team_id, "a team").unwrap(),
                 membership(Uuid::now_v7(), user, Role::Owner),
                 actor_for(user),
                 T0,

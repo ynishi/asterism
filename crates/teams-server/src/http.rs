@@ -162,7 +162,7 @@ use teams_contract::dto::{
 use teams_core::DomainError;
 use teams_core::domain::head_registry::TagHeadEntry;
 use teams_core::domain::identity::{
-    ActorStamp, CreationActor, InstanceAdmin, LedgerActor, Membership, Role, TeamAuthority,
+    ActorStamp, CreationActor, InstanceAdmin, LedgerActor, Membership, Role, Team, TeamAuthority,
     TeamVerb, may_create_team, verb_allowed,
 };
 use teams_core::domain::ledger::LedgerEvent;
@@ -177,12 +177,12 @@ use teams_infra::sqlite::map::{subject_from_ref, subject_to_ref};
 // any of them.
 use asterism_teams_wire::command::{
     CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand, InviteMemberCommand, LoginCommand,
-    MintDeviceTokenCommand, RemoveMemberCommand, RevokeOwnerCommand,
+    MintDeviceTokenCommand, RemoveMemberCommand, RenameTeamCommand, RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
     AccountEventDto, AccountEventsDto, DeviceTokenDto, DeviceTokenMintedDto, DeviceTokensDto,
-    LedgerEventDto, LedgerPageDto, MyTeamDto, MyTeamsDto, RosterDto, RosterMemberDto, SessionDto,
-    SubjectRefDto, TeamCreatedDto, ViewerDto,
+    LedgerEventDto, LedgerPageDto, MyTeamDto, MyTeamsDto, RenamedTeamDto, RosterDto,
+    RosterMemberDto, SessionDto, SubjectRefDto, TeamCreatedDto, ViewerDto,
 };
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
@@ -494,6 +494,7 @@ pub fn router(ctx: Arc<TeamsCtx>) -> Router {
 
     let team_scoped = Router::new()
         .route("/teams/{team_id}/delete", post(delete_team))
+        .route("/teams/{team_id}/rename", post(rename_team))
         .route("/teams/{team_id}/roster", get(roster))
         .route("/teams/{team_id}/events", get(events))
         .route("/teams/{team_id}/members/invite", post(invite_member))
@@ -703,6 +704,7 @@ const fn verb_name(verb: TeamVerb) -> &'static str {
         TeamVerb::Remove => "removing a member",
         TeamVerb::GrantOwner => "granting the owner role",
         TeamVerb::RevokeOwner => "revoking the owner role",
+        TeamVerb::Rename => "renaming the team",
         TeamVerb::Purge => "purging the team's storage",
         TeamVerb::ForgeWork => "working on this team's forge",
         TeamVerb::ForgeDiscard => "discarding a line",
@@ -1225,6 +1227,7 @@ async fn create_team(
         ))));
     }
     let team_id = Uuid::now_v7();
+    let team = Team::new(team_id, cmd.name)?;
     let founding_owner = Membership {
         user_id: owner_user_id,
         team_id,
@@ -1235,18 +1238,32 @@ async fn create_team(
     } else {
         Capacity::Member
     };
+    let name = team.name().to_string();
     let event = ctx
         .repo
-        .create_team(
-            team_id,
-            founding_owner,
-            stamp(&account, capacity)?,
-            now_ms(),
-        )
+        .create_team(team, founding_owner, stamp(&account, capacity)?, now_ms())
         .await?;
     Ok(Json(TeamCreatedDto {
         team_id: team_id.to_string(),
+        name,
         event: event_dto(&event)?,
+    }))
+}
+
+/// `POST /teams/{team_id}/rename` — owner only (#218).
+async fn rename_team(
+    State(ctx): State<Arc<TeamsCtx>>,
+    Extension(access): Extension<TeamAccess>,
+    Json(cmd): Json<RenameTeamCommand>,
+) -> Result<Json<RenamedTeamDto>, ApiError> {
+    decide(&access, TeamVerb::Rename)?;
+    // Validated for the blank-name refusal, not stored as a `Team` —
+    // there is nothing else about the row this route reads first.
+    let name = Team::new(access.team_id, cmd.name)?.name().to_string();
+    ctx.repo.rename_team(access.team_id, name.clone()).await?;
+    Ok(Json(RenamedTeamDto {
+        team_id: access.team_id.to_string(),
+        name,
     }))
 }
 
@@ -1277,8 +1294,28 @@ async fn invite_member(
     Json(cmd): Json<InviteMemberCommand>,
 ) -> Result<Json<LedgerEventDto>, ApiError> {
     let capacity = decide(&access, TeamVerb::Invite)?;
-    let user_id = parse_uuid(&cmd.user_id, "user_id")?;
     let role = Role::parse(&cmd.role)?;
+    // Exactly one of the two names the invitee (#218) — the command's
+    // own doc states the rule this enforces.
+    let user_id = match (&cmd.user_id, &cmd.login) {
+        (Some(raw), None) => parse_uuid(raw, "user_id")?,
+        (None, Some(login)) => {
+            ctx.auth
+                .account_by_login(login)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::Domain(DomainError::Validation(format!(
+                        "no account with login {login:?} on this instance"
+                    )))
+                })?
+                .user_id
+        }
+        (Some(_), Some(_)) | (None, None) => {
+            return Err(ApiError::Domain(DomainError::Validation(
+                "exactly one of user_id / login must be set".to_string(),
+            )));
+        }
+    };
     if ctx.auth.account(user_id).await?.is_none() {
         return Err(ApiError::Domain(DomainError::Validation(format!(
             "user {user_id} has no account on this instance"
@@ -1447,6 +1484,7 @@ async fn my_teams(
             .into_iter()
             .map(|row| MyTeamDto {
                 team_id: row.team_id.to_string(),
+                name: row.name,
                 role: row.role.as_str().to_string(),
                 created_at_ms: row.created_at,
             })
@@ -1461,16 +1499,33 @@ async fn roster(
     Extension(access): Extension<TeamAccess>,
 ) -> Result<Json<RosterDto>, ApiError> {
     let roster = ctx.repo.roster(access.team_id).await?;
+    // Read live, per member, on purpose (#218): the roster says what a
+    // login and a display name *are now*, the ledger's stamp says what
+    // they *read then* — a batch join would answer the same question,
+    // but a roster is small and this is the same one-account-at-a-time
+    // read `stamp` already makes, just from a row instead of from the
+    // caller's own already-resolved account.
+    let mut members = Vec::with_capacity(roster.members().len());
+    for row in roster.members() {
+        let account = ctx.auth.account(row.user_id).await?;
+        let (login, display_name) = match account {
+            Some(account) => (account.login, account.display_name),
+            // No account behind the row is a data question this route
+            // does not have an answer to invent; falling back to the
+            // id is the same shortage every membership row read as
+            // before #218.
+            None => (row.user_id.to_string(), row.user_id.to_string()),
+        };
+        members.push(RosterMemberDto {
+            user_id: row.user_id.to_string(),
+            login,
+            display_name,
+            role: row.role.as_str().to_string(),
+        });
+    }
     Ok(Json(RosterDto {
         team_id: access.team_id.to_string(),
-        members: roster
-            .members()
-            .iter()
-            .map(|row| RosterMemberDto {
-                user_id: row.user_id.to_string(),
-                role: row.role.as_str().to_string(),
-            })
-            .collect(),
+        members,
         // Said rather than left to be derived. The gate worked this
         // out to let the request through, and a caller with no row —
         // an admin — cannot be found in the rows at all.

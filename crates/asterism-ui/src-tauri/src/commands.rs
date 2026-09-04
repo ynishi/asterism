@@ -103,10 +103,10 @@ use asterism_contract::query::{
     GetAssetDetailQuery, ListAssetsQuery, ListObservationsQuery, SearchAssetsQuery,
 };
 use asterism_contract::teams::{
-    MyTeamDto, MyTeamsDto, PromotedAssetDto, StoredTeamConnectDto, StoredTeamConnectOutcome,
-    StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto, TeamDeviceTokensDto,
-    TeamLedgerEventDto, TeamLedgerPageDto, TeamProviderDto, TeamRosterDto, TeamRosterMemberDto,
-    TeamRosterViewerDto, TeamSubjectRefDto,
+    MyTeamDto, MyTeamsDto, PromotedAssetDto, RenamedTeamDto, StoredTeamConnectDto,
+    StoredTeamConnectOutcome, StoredTeamConnectionDto, TeamCreatedDto, TeamDeviceTokenDto,
+    TeamDeviceTokensDto, TeamIdentityDto, TeamLedgerEventDto, TeamLedgerPageDto, TeamProviderDto,
+    TeamRosterDto, TeamRosterMemberDto, TeamRosterViewerDto, TeamSubjectRefDto,
 };
 use asterism_core::DomainError;
 use asterism_core::application::mapping::{
@@ -3808,6 +3808,23 @@ pub async fn team_server_session(state: State<'_, AppState>) -> Result<Option<St
         .and_then(|held| held.client.user_id().map(ToString::to_string)))
 }
 
+/// The signed-in account's login and display name, or nothing while
+/// this window is talking to no team (#218) — "Signed in as" reads
+/// this rather than the bare id [`team_server_session`] answers with.
+#[tauri::command]
+pub async fn team_server_identity(
+    state: State<'_, AppState>,
+) -> Result<Option<TeamIdentityDto>, UiError> {
+    Ok(state.teams.lock().await.as_ref().and_then(|held| {
+        held.client
+            .identity()
+            .map(|(login, display_name)| TeamIdentityDto {
+                login: login.to_string(),
+                display_name: display_name.to_string(),
+            })
+    }))
+}
+
 /// Every line a team hosts, without its history.
 ///
 /// The panel these go in is its own, separate from the local lines —
@@ -3843,6 +3860,7 @@ pub async fn my_teams(state: State<'_, AppState>) -> Result<MyTeamsDto, UiError>
             .into_iter()
             .map(|team| MyTeamDto {
                 team_id: team.team_id,
+                name: team.name,
                 role: team.role,
                 created_at_ms: team.created_at_ms,
             })
@@ -3874,6 +3892,8 @@ pub async fn team_roster(
             .into_iter()
             .map(|member| TeamRosterMemberDto {
                 user_id: member.user_id,
+                login: member.login,
+                display_name: member.display_name,
                 role: member.role,
             })
             .collect(),
@@ -3887,11 +3907,15 @@ pub async fn team_roster(
 /// Founds a team on the connected server, owned by the signed-in
 /// account.
 ///
-/// Answers with the id alone. The wire also returns the ledger event
-/// the creation appended, and a screen reads that where every other
-/// act of the team's is read rather than out of a write's response.
+/// Answers with the id and the name it was just given. The wire also
+/// returns the ledger event the creation appended, and a screen reads
+/// that where every other act of the team's is read rather than out
+/// of a write's response.
 #[tauri::command]
-pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, UiError> {
+pub async fn create_team(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<TeamCreatedDto, UiError> {
     let client = teams_client(&state).await?;
     // The owner is named rather than left implicit, and that is the
     // one form that works for whoever is signed in. The server refuses
@@ -3902,11 +3926,30 @@ pub async fn create_team(state: State<'_, AppState>) -> Result<TeamCreatedDto, U
     // fill.
     let owner = client.user_id().map(str::to_string);
     let created = client
-        .create_team(owner.as_deref())
+        .create_team(&name, owner.as_deref())
         .await
         .map_err(teams_error)?;
     Ok(TeamCreatedDto {
         team_id: created.team_id,
+        name: created.name,
+    })
+}
+
+/// Renames a team — an owner's verb (#218).
+#[tauri::command]
+pub async fn rename_team(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    name: String,
+) -> Result<RenamedTeamDto, UiError> {
+    let client = teams_client(&state).await?;
+    let renamed = client
+        .rename_team(team_id(&team_id_raw, "team id")?, &name)
+        .await
+        .map_err(teams_error)?;
+    Ok(RenamedTeamDto {
+        team_id: renamed.team_id,
+        name: renamed.name,
     })
 }
 
@@ -3935,6 +3978,25 @@ pub async fn invite_team_member(
     let client = teams_client(&state).await?;
     client
         .invite_member(team_id(&team_id_raw, "team id")?, &user_id, &role)
+        .await
+        .map_err(teams_error)?;
+    Ok(())
+}
+
+/// Invites an account into the team by login rather than by id
+/// (#218) — the form "Let somebody in" reaches for first, the id form
+/// staying reachable through [`invite_team_member`] for when the
+/// login is not known.
+#[tauri::command]
+pub async fn invite_team_member_by_login(
+    state: State<'_, AppState>,
+    team_id_raw: String,
+    login: String,
+    role: String,
+) -> Result<(), UiError> {
+    let client = teams_client(&state).await?;
+    client
+        .invite_member_by_login(team_id(&team_id_raw, "team id")?, &login, &role)
         .await
         .map_err(teams_error)?;
     Ok(())

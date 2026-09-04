@@ -1082,6 +1082,24 @@ and this project adheres to
 
 ### Changed
 
+- **A team is named on every screen now, and so is everyone in it** (#218). A
+  team had no name — "Start a team of your own" asked nothing — and everyone in
+  it read as a UUID: a roster row carried a user id and a role, an invite form
+  asked for one, and "Signed in as" printed the account's raw id even though the
+  session already carried its login and display name.
+
+  A team now has a name, asked for at founding and changeable afterwards by an
+  owner (`POST /teams/{team_id}/rename`, the same owner-only authority row
+  `grant`/`revoke owner` already sit on). The column is nullable — a team
+  founded before this migration reads `name: null` and falls back to its id, the
+  same shortage every team read as before. A roster row reads an account's
+  current login and display name instead of its id, fetched live per member —
+  the distinction the roster's own note already drew and keeps drawing: the
+  ledger's stamp says what a name read at write time, this says what it is now.
+  "Let somebody in" asks for a login first, resolved on the server, with the id
+  form staying reachable behind a disclosure. "Signed in as" reads the login the
+  session already carried, not the bare id.
+
 - **The same act reads the same on both planes, one word each** (#220).
   `promote` named four things — handing an asset to a team, raising a roster
   member to owner, turning a tag or a snapshot into a Group, and a trained model

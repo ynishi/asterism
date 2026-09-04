@@ -143,6 +143,10 @@
   // empty while their reach is not — opens it once.
   let byIdOpen = $state(false);
 
+  // What "Start a team of your own" asks for (#218) — a team is named
+  // at founding rather than left to read as an id.
+  let newTeamName = $state("");
+
   // The local lines the publish form picks from. Read once, the first
   // time a team is on, because that is when the form can be shown;
   // `forgeCatalog` reads the same list when its own drawer opens, and
@@ -292,11 +296,16 @@
     }
   }
 
-  // Founding a team names it too. Somebody who just made one wants to
-  // be looking at it, and the alternative is copying an id out of a
+  // Founding a team names it too (#218) — asked for here rather than
+  // left to read as an id. Somebody who just made one wants to be
+  // looking at it, and the alternative is copying an id out of a
   // message into the field directly above.
-  async function makeTeam() {
-    const teamId = await sharedCatalog.createTeam();
+  async function makeTeam(event: Event) {
+    event.preventDefault();
+    const name = newTeamName.trim();
+    if (name === "") return;
+    const teamId = await sharedCatalog.createTeam(name);
+    newTeamName = "";
     teamField = teamId;
     await sharedCatalog.lookAt(teamId);
     await refreshOpenTab();
@@ -322,8 +331,43 @@
   const iOwn = $derived(sharedCatalog.myRole === "owner");
   const mayDelete = $derived(iOwn || sharedCatalog.iAmAdmin);
 
+  // The team on's own name, or its id for a team from before #218 —
+  // read off the same list the rail's rows draw from rather than a
+  // second read, since founding or picking one already put it there.
+  const currentTeamName = $derived(
+    sharedCatalog.teams.data.find((t) => t.team_id === sharedCatalog.teamId)
+      ?.name ?? sharedCatalog.teamId,
+  );
+
+  // The rename field, seeded from the team on and re-seeded when
+  // *which team* changes — switching teams mid-edit is switching what
+  // a typed name would rename, so there is nothing to preserve across
+  // that. Keyed on `teamId` rather than on `currentTeamName` itself:
+  // a successful rename of the team already on also changes
+  // `currentTeamName`, by reloading the list the name is read from,
+  // and re-seeding on that would overwrite whatever the field holds
+  // — the name just submitted, or the start of a second edit typed
+  // before the first request answered — with what is now stale
+  // input read back as if it were fresh.
+  let renameValue = $state("");
+  $effect(() => {
+    void sharedCatalog.teamId;
+    renameValue = untrack(() => currentTeamName);
+  });
+
+  let inviteLogin = $state("");
   let inviteId = $state("");
   let inviteRole = $state("member");
+  // Closed to begin with (#218), the same reason `byIdOpen` is: the
+  // login form above it is the one a person reaches for first, and
+  // this is reachable for when the login is not known.
+  let inviteByIdOpen = $state(false);
+
+  async function inviteByLogin(event: Event) {
+    event.preventDefault();
+    await sharedCatalog.inviteMemberByLogin(inviteLogin.trim(), inviteRole);
+    inviteLogin = "";
+  }
 
   async function invite(event: Event) {
     event.preventDefault();
@@ -583,7 +627,7 @@
         <div class="rail">
         <div class="drawer-session">
           <span title={sharedCatalog.session ?? undefined}>
-            Signed in as {sharedCatalog.session}
+            Signed in as {sharedCatalog.identity?.login ?? sharedCatalog.session}
           </span>
           <button type="button" onclick={() => sharedCatalog.disconnect()}>
             Disconnect
@@ -652,13 +696,13 @@
         {/if}
 
         <!-- The teams this account is in, which is what the field
-             below used to be the only way to name. Ids rather than
-             names because a team has none, which `TeamMembership` in
-             the team plane's domain argues — a different shortage from
-             the roster's, where the person has a name and the row does
-             not carry it. The role is shown beside each because
-             it is the fact a reader chooses on; the creation time is
-             what the rows are ordered by and is not drawn. -->
+             below used to be the only way to name. Named now (#218):
+             a team founded before the migration that added the column
+             reads `name: null` and falls back to its id, the same
+             shortage every team read as before. The role is shown
+             beside each because it is the fact a reader chooses on;
+             the creation time is what the rows are ordered by and is
+             not drawn. -->
         <h4 class="rail-head">Teams</h4>
         {#if sharedCatalog.teams.loading}
           <p class="drawer-empty">reading your teams…</p>
@@ -685,7 +729,7 @@
                   onclick={() => choose(team.team_id)}
                   title={team.team_id}
                 >
-                  <span class="row-title mono">{team.team_id}</span>
+                  <span class="row-title truncate">{team.name ?? team.team_id}</span>
                   <span class="row-standing">{team.role}</span>
                 </button>
               </li>
@@ -709,10 +753,23 @@
              picking a row or submitting the field both name one, and
              neither has an undo — so an offer that only appeared before
              the first would be an offer somebody could take exactly
-             once per window. -->
-        <button type="button" class="make-team" onclick={makeTeam}>
-          Start a team of your own
-        </button>
+             once per window.
+
+             Asks for a name (#218) rather than the bare press it used
+             to be — a team is named at founding, not left to read as
+             the id underneath. -->
+        <form class="drawer-form make-team" onsubmit={makeTeam}>
+          <label>
+            Start a team of your own
+            <input
+              type="text"
+              bind:value={newTeamName}
+              placeholder="team name"
+              required
+            />
+          </label>
+          <button type="submit">Found it</button>
+        </form>
 
         <!-- Kept, and folded away. It names a team the list above does
              not hold, and the reader that has is the instance admin:
@@ -1038,31 +1095,55 @@
         {/if}
 
         {#if sharedCatalog.phase === "ready" && tab === "roster"}
-          <!-- Ids rather than names, and the note says so where a
-               reader would otherwise compare this tab with the ledger
-               and wonder. A membership row holds a user id and a role;
-               the name on a ledger event is a snapshot the act took,
-               and there is no equivalent to read here. -->
+          <!-- A membership row's login and display name are read live
+               at roster time (#218), not stamped — the note says so
+               where a reader would otherwise compare this tab with
+               the ledger and wonder: a ledger event's name is a
+               snapshot the act took, a different question from what
+               a name is now. -->
           <p class="drawer-note">
-            Who is in this team. Accounts are shown by id — a membership
-            row carries no name, unlike an act in the ledger, which
-            keeps the name it read when it happened.
+            Who is in this team, by their current login and display
+            name — the ledger keeps what a name read when an act
+            happened, which this does not.
           </p>
 
           {#if iOwn}
-            <!-- Above the rows because it adds one, and the rows are
-                 what it adds to. An id rather than a name to invite
-                 by, and not for the reason the note above gives: that
-                 one is about rows that already exist. An invitee has
-                 none, and a team has no directory to search for
-                 somebody who is not in it yet. -->
-            <form class="drawer-form drawer-invite" onsubmit={invite}>
+            <!-- The team's own name, changeable here (#218) — an
+                 owner's verb, per the authority table. Nowhere else on
+                 this tab depends on `iOwn` reading before this does,
+                 since the roster read that resolves it is what put the
+                 form on screen at all. -->
+            <form
+              class="drawer-form rename-team"
+              onsubmit={(event) => {
+                event.preventDefault();
+                const name = renameValue.trim();
+                if (name === "" || name === currentTeamName) return;
+                void sharedCatalog.renameTeam(name);
+              }}
+            >
+              <label>
+                This team's name
+                <input type="text" bind:value={renameValue} required />
+              </label>
+              <button type="submit" disabled={renameValue.trim() === ""}
+                >Rename</button
+              >
+            </form>
+
+            <!-- Login first (#218): the form a person reaches for to
+                 let somebody in by the name they know them under,
+                 resolved on the server. The id form stays reachable
+                 below for when the login is not known — a team has no
+                 directory to search for somebody who is not in it
+                 yet, so an id is sometimes all there is. -->
+            <form class="drawer-form drawer-invite" onsubmit={inviteByLogin}>
               <label>
                 Let somebody in
                 <input
                   type="text"
-                  bind:value={inviteId}
-                  placeholder="account id"
+                  bind:value={inviteLogin}
+                  placeholder="login"
                   required
                 />
               </label>
@@ -1075,6 +1156,36 @@
               </label>
               <button type="submit">Invite</button>
             </form>
+
+            <button
+              type="button"
+              class="disclose invite-by-id-toggle"
+              aria-expanded={inviteByIdOpen}
+              onclick={() => (inviteByIdOpen = !inviteByIdOpen)}
+            >
+              {inviteByIdOpen ? "▾" : "▸"} invite by id instead
+            </button>
+            {#if inviteByIdOpen}
+              <form class="drawer-form invite-by-id" onsubmit={invite}>
+                <label>
+                  Account id
+                  <input
+                    type="text"
+                    bind:value={inviteId}
+                    placeholder="account id"
+                    required
+                  />
+                </label>
+                <label>
+                  As
+                  <select bind:value={inviteRole}>
+                    <option value="member">member</option>
+                    <option value="owner">owner</option>
+                  </select>
+                </label>
+                <button type="submit">Invite</button>
+              </form>
+            {/if}
           {/if}
 
           {#if sharedCatalog.roster.loading}
@@ -1098,7 +1209,13 @@
             <ul class="drawer-list roster" role="list">
               {#each sharedCatalog.roster.data.members as member (member.user_id)}
                 <li class="member" class:you={member.user_id === sharedCatalog.session}>
-                  <span class="member-id">{member.user_id}</span>
+                  <!-- Login and display name, read live (#218) — the
+                       id is still there, on the title, for whoever
+                       needs to match a row against one. -->
+                  <span class="member-id" title={member.user_id}>
+                    {member.login}{#if member.display_name !== member.login}
+                      &nbsp;({member.display_name}){/if}
+                  </span>
                   <span class="member-role">
                     {member.role}{#if member.user_id === sharedCatalog.session}
                       &nbsp;· you{/if}
@@ -1455,16 +1572,6 @@
     opacity: 1;
     border-bottom-color: currentColor;
   }
-  .make-team {
-    background: none;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 0.2rem;
-    color: inherit;
-    cursor: pointer;
-    font-size: 0.74rem;
-    margin-top: 0.5rem;
-    padding: 0.3rem 0.55rem;
-  }
   .roster .member {
     display: flex;
     align-items: baseline;
@@ -1625,12 +1732,10 @@
   .teams .drawer-row.active {
     font-weight: 600;
   }
-  /* One line, cut at the right edge: a team id drawn in a 15rem rail
-     would otherwise break at its hyphens. The whole id is the row's
-     title. */
-  .mono {
-    font-family: ui-monospace, monospace;
-    font-size: 0.72rem;
+  /* One line, cut at the right edge: a team name — or, for one from
+     before #218, its id — drawn in a 15rem rail would otherwise wrap
+     or overflow. The whole thing is the row's title. */
+  .truncate {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

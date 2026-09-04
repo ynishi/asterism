@@ -609,12 +609,14 @@ and an actor's display name is a snapshot rather than a lookup.
 - `MyTeamDto` — One team the account belongs to.
 - `MyTeamsDto` — The teams this window's account belongs to.
 - `PromotedAssetDto` — What a promotion left behind, as a screen needs to read it.
+- `RenamedTeamDto` — What renaming a team answers with (#218).
 - `StoredTeamConnectDto` — What came of trying to connect from what this machine had stored
 - `StoredTeamConnectOutcome` — The three ends of a silent reconnect.
 - `StoredTeamConnectionDto` — What this machine remembers about a team server, none of which
 - `TeamCreatedDto` — What founding a team answers with.
 - `TeamDeviceTokenDto` — One device token as its owner sees it.
 - `TeamDeviceTokensDto` — The device tokens this window's account holds, on whatever machines
+- `TeamIdentityDto` — The signed-in account's identity, as "Signed in as" reads it
 - `TeamLedgerEventDto` — One act, as the ledger recorded it.
 - `TeamLedgerPageDto` — One page of a team's ledger, oldest first.
 - `TeamProviderDto` — The identity provider a team server signs people in through, as
@@ -14239,6 +14241,7 @@ session token → user_id → membership gate).
 - `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
 - `OidcAttemptCommand` — Starts a sign-in through the provider
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
+- `RenameTeamCommand` — Renames a team (`POST /teams/{team_id}/rename`, #218) — an
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 
@@ -14275,6 +14278,7 @@ reason its migration gives.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `OidcAttemptDto` — A sign-in attempt through the provider
 - `OidcProviderDto` — One identity provider, as a connect form names it.
+- `RenamedTeamDto` — The result of `POST /teams/{team_id}/rename` (#218).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.
@@ -14514,6 +14518,7 @@ other.
 - `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
 - `invite_team_member` — Invites an account into the team, in the role named.
+- `invite_team_member_by_login` — Invites an account into the team by login rather than by id
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
 - `leave_team` — Takes the signed-in account out of the team.
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
@@ -14600,6 +14605,7 @@ other.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
 - `rename_tag` — Renames a tag channel in place — the command twin of
+- `rename_team` — Renames a team — an owner's verb (#218).
 - `reopen_forge_line` — Takes it back out.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
@@ -14632,6 +14638,7 @@ other.
 - `team_auth_provider` — What a team server offers besides a password (#163), or `None`.
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_roster` — Who is in a team, in what role, and what the reader may do there.
+- `team_server_identity` — The signed-in account's login and display name, or nothing while
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
@@ -15238,6 +15245,7 @@ same three lines instead of re-deriving them.
 - `Membership` — One `(user, team, role)` row — a user's standing inside one team.
 - `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
 - `Role` — A member's role within one team.
+- `Team` — A team, named (#218).
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
 - `TeamMembership` — One team a given user belongs to, read from that user's side.
 - `TeamRoster` — One team's membership set — the value every membership invariant is

@@ -43,12 +43,13 @@ use asterism_core::error::DomainError;
 use asterism_teams_wire::command::{
     CollectOidcAttemptCommand, CreateTeamCommand, DeviceLoginCommand, GrantOwnerCommand,
     HaveContentCommand, InviteMemberCommand, LoginCommand, MintDeviceTokenCommand,
-    OidcAttemptCommand, RemoveMemberCommand, ResolveContentCommand, RevokeOwnerCommand,
+    OidcAttemptCommand, RemoveMemberCommand, RenameTeamCommand, ResolveContentCommand,
+    RevokeOwnerCommand,
 };
 use asterism_teams_wire::dto::{
     AuthProvidersDto, ContentEnteredDto, DeviceTokenMintedDto, DeviceTokensDto, HeldContentDto,
-    LedgerEventDto, LedgerPageDto, MyTeamsDto, OidcAttemptDto, ResolvedContentDto, RosterDto,
-    SessionDto, TeamCreatedDto,
+    LedgerEventDto, LedgerPageDto, MyTeamsDto, OidcAttemptDto, RenamedTeamDto, ResolvedContentDto,
+    RosterDto, SessionDto, TeamCreatedDto,
 };
 use asterism_teams_wire::projection::{
     EntryProjectionDto, EntryProjectionEnvelope, WithProjections,
@@ -172,6 +173,15 @@ impl TeamsClient {
     /// display name moves.
     pub fn user_id(&self) -> Option<&str> {
         self.session.as_ref().map(|it| it.user_id.as_str())
+    }
+
+    /// The signed-in account's login and display name (#218) — "Signed
+    /// in as" reads this rather than [`Self::user_id`], which stays
+    /// the id namespace decision 6 wants for subjects.
+    pub fn identity(&self) -> Option<(&str, &str)> {
+        self.session
+            .as_ref()
+            .map(|it| (it.login.as_str(), it.display_name.as_str()))
     }
 
     fn url(&self, path: &str) -> String {
@@ -426,16 +436,36 @@ impl TeamsClient {
     // A team.
     // ------------------------------------------------------------------
 
-    /// Founds a team (`POST /teams/create`).
+    /// Founds a team (`POST /teams/create`), named (#218) — a team
+    /// asked for at founding rather than left to read as its id.
     pub async fn create_team(
         &self,
+        name: &str,
         owner_user_id: Option<&str>,
     ) -> Result<TeamCreatedDto, TeamsClientError> {
         self.post(
             "/teams/create",
             "create_team",
             &CreateTeamCommand {
+                name: name.to_string(),
                 owner_user_id: owner_user_id.map(str::to_string),
+            },
+        )
+        .await
+    }
+
+    /// Renames a team (#218) — an owner's verb, per the authority
+    /// table.
+    pub async fn rename_team(
+        &self,
+        team: TeamScopedId,
+        name: &str,
+    ) -> Result<RenamedTeamDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/rename"),
+            "rename_team",
+            &RenameTeamCommand {
+                name: name.to_string(),
             },
         )
         .await
@@ -477,7 +507,30 @@ impl TeamsClient {
             &format!("/teams/{team}/members/invite"),
             "invite_member",
             &InviteMemberCommand {
-                user_id: user_id.to_string(),
+                user_id: Some(user_id.to_string()),
+                login: None,
+                role: role.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Invites a user into the team by login rather than by id (#218)
+    /// — the form "Let somebody in" reaches for first, the id form
+    /// staying reachable through [`Self::invite_member`] for when the
+    /// login is not known.
+    pub async fn invite_member_by_login(
+        &self,
+        team: TeamScopedId,
+        login: &str,
+        role: &str,
+    ) -> Result<LedgerEventDto, TeamsClientError> {
+        self.post(
+            &format!("/teams/{team}/members/invite"),
+            "invite_member_by_login",
+            &InviteMemberCommand {
+                user_id: None,
+                login: Some(login.to_string()),
                 role: role.to_string(),
             },
         )

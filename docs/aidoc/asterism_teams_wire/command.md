@@ -29,6 +29,7 @@ session token → user_id → membership gate).
 - `MintDeviceTokenCommand` — Asks for a device token (`POST /teams/auth/device`, #204).
 - `OidcAttemptCommand` — Starts a sign-in through the provider
 - `RemoveMemberCommand` — Removes a member (`POST /teams/{team_id}/members/remove`, owner
+- `RenameTeamCommand` — Renames a team (`POST /teams/{team_id}/rename`, #218) — an
 - `ResolveContentCommand` — Asks what a team holds for a list of its own asset ids
 - `RevokeOwnerCommand` — Revokes the owner role (`POST /teams/{team_id}/owners/revoke`,
 

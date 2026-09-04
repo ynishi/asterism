@@ -445,6 +445,7 @@ pub fn run() {
             commands::connect_team_server,
             commands::disconnect_team_server,
             commands::team_server_session,
+            commands::team_server_identity,
             // The other way in (#163): what the server offers besides
             // a password, and the sign-in that goes through the browser
             // and comes back on loopback.
@@ -477,7 +478,9 @@ pub fn run() {
             commands::my_teams,
             commands::team_roster,
             commands::create_team,
+            commands::rename_team,
             commands::invite_team_member,
+            commands::invite_team_member_by_login,
             commands::remove_team_member,
             commands::grant_team_owner,
             commands::revoke_team_owner,

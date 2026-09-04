@@ -236,7 +236,7 @@ fn file_name_str(path: &Path) -> Result<&str, DomainError> {
 mod tests {
     use super::*;
     use sha2::{Digest as _, Sha256};
-    use teams_core::domain::identity::{ActorStamp, LedgerActor, Membership, Role};
+    use teams_core::domain::identity::{ActorStamp, LedgerActor, Membership, Role, Team};
     use teams_core::domain::store::{DeclaredDigest, TeamBlobLink};
     use teams_core::port::blob::BlobStore as _;
     use uuid::Uuid;
@@ -274,7 +274,7 @@ mod tests {
             display_name: "Hoshino".into(),
         });
         repo.create_team(
-            team_id,
+            Team::new(team_id, "a team").unwrap(),
             Membership {
                 user_id: owner_id,
                 team_id,

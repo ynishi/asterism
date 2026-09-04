@@ -176,7 +176,7 @@ async fn create_team(h: &Harness, token: &str) -> String {
             .uri("/teams/create")
             .header("content-type", "application/json")
             .header("authorization", format!("Bearer {token}"))
-            .body(Body::from("{}"))
+            .body(Body::from(r#"{"name":"a team"}"#))
             .unwrap(),
     )
     .await;

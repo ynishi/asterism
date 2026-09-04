@@ -97,6 +97,54 @@ impl User {
     }
 }
 
+/// A team, named (#218).
+///
+/// The `User` pattern, one method shorter: `team_id` immutable,
+/// `name` set once at construction. Unlike a user's, a rename never
+/// starts from one of these in memory — the write path validates the
+/// new name fresh, through [`Self::new`], and persists it without
+/// ever loading the row it is replacing — so there is no `rename`
+/// method here the way [`User::rename`] answers for a user's, and no
+/// `Team::stamp` either: nothing stamps a team's name the way
+/// [`ActorStamp`] stamps a user's — a rename changes what every
+/// screen shows a team as, on every past ledger entry too, which is
+/// right: the ledger's stamps are about who acted, never about which
+/// team the row belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Team {
+    team_id: Uuid,
+    name: String,
+}
+
+impl Team {
+    /// Builds a team. The id is taken rather than minted, for the
+    /// reason [`User::new`] gives.
+    ///
+    /// A blank name is refused, the same rule as a user's: a team a
+    /// person cannot tell apart from another by name is not what
+    /// "asked for at founding" (#218) means.
+    pub fn new(team_id: Uuid, name: impl Into<String>) -> Result<Self, DomainError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(DomainError::Validation(
+                "team name is blank; a team asked for at founding needs one".into(),
+            ));
+        }
+        Ok(Self { team_id, name })
+    }
+
+    /// The immutable id — the handle underneath the name, and what
+    /// "Open a team by id…" still takes.
+    pub fn team_id(&self) -> Uuid {
+        self.team_id
+    }
+
+    /// The current name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// A member's role within one team.
 ///
 /// Stored as TEXT and validated here in app code rather than as a
@@ -182,17 +230,18 @@ pub struct Membership {
 /// subject it was asked about; [`TeamRoster`] keeps its `team_id`,
 /// because that is what its rows are validated against.
 ///
-/// **The team is an id and a time, because that is all a team is.**
-/// Nothing in this model names one — not the `team` row, not an event
-/// kind — so a surface listing these shows ids. That is a different
-/// shortage from the roster's: a user *has* a display name and the
-/// ledger stamps it, and the roster shows ids only because a
-/// membership row does not carry one. Giving a team a name is a change
-/// to this model rather than a field this struct forgot.
+/// **A team may have a name now (#218).** Every team founded since
+/// carries one — [`Team::new`] refuses a blank one — so `None` here
+/// means a team from before the migration that added the column,
+/// rather than a founding that skipped it. A surface listing these
+/// falls back to the id for that one case, the way every surface
+/// listing a team did before this field existed.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TeamMembership {
     /// The team.
     pub team_id: Uuid,
+    /// The team's name, or `None` for a team from before #218.
+    pub name: Option<String>,
     /// What this user is in it, already validated ([`Role::parse`]).
     pub role: Role,
     /// When the team was created, unix epoch milliseconds.
@@ -356,6 +405,8 @@ pub enum TeamVerb {
     GrantOwner,
     /// Revoke the owner role.
     RevokeOwner,
+    /// Rename the team (#218).
+    Rename,
     /// The purge two-step over the team's blob links — mark, unmark
     /// during the grace window, reclaim after it (the same trash→purge
     /// discipline as core). One verb for all three arms: they share an
@@ -443,6 +494,7 @@ pub const fn verb_allowed(authority: TeamAuthority, verb: TeamVerb) -> bool {
         | TeamVerb::Remove
         | TeamVerb::GrantOwner
         | TeamVerb::RevokeOwner
+        | TeamVerb::Rename
         | TeamVerb::ForgeDiscard => {
             matches!(authority, TeamAuthority::Member(Role::Owner))
         }
@@ -788,6 +840,7 @@ mod tests {
             TeamVerb::Remove,
             TeamVerb::GrantOwner,
             TeamVerb::RevokeOwner,
+            TeamVerb::Rename,
             TeamVerb::Purge,
             TeamVerb::ForgeDiscard,
         ] {

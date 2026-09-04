@@ -264,8 +264,19 @@ pub struct DeviceTokenDto {
 pub struct TeamCreatedDto {
     /// The new team's id — the path segment of every team-scoped route.
     pub team_id: String,
+    /// The name it was founded with (#218).
+    pub name: String,
     /// The `teams.team.created/1` event the creation appended.
     pub event: LedgerEventDto,
+}
+
+/// The result of `POST /teams/{team_id}/rename` (#218).
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RenamedTeamDto {
+    /// The team that was renamed.
+    pub team_id: String,
+    /// Its name now.
+    pub name: String,
 }
 
 /// The team's current membership set, and what the caller may do in
@@ -302,10 +313,21 @@ pub struct ViewerDto {
 }
 
 /// One membership row as the roster lists it.
+///
+/// `login` and `display_name` are read live from the account at roster
+/// time (#218), not stamped — the distinction the roster's own
+/// sentence draws against the ledger: this says what a name *is now*,
+/// the ledger's stamp says what it *read then*. A rename between two
+/// roster reads changes this field on the next one and nothing it
+/// carried on the last.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct RosterMemberDto {
     /// The member.
     pub user_id: String,
+    /// The account's current login.
+    pub login: String,
+    /// The account's current display name.
+    pub display_name: String,
     /// The member's current role: `"owner"` or `"member"`.
     pub role: String,
 }
@@ -325,13 +347,15 @@ pub struct MyTeamsDto {
 
 /// One team the caller belongs to.
 ///
-/// **No name, because a team has none** — `TeamMembership` in the
-/// domain is where that is argued. Nothing on this wire carries a
-/// label for a team either, so a row is an id, a role and a time.
+/// **`name` is `None` only for a team from before #218** —
+/// `TeamMembership` in the domain, which this projects, is where that
+/// reading is argued. Every team founded since carries one.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct MyTeamDto {
     /// The team, and what its scoped routes are named by.
     pub team_id: String,
+    /// The team's name, or `None` for a team from before #218.
+    pub name: Option<String>,
     /// What the caller is in it: `"owner"` or `"member"`.
     ///
     /// Free, in the sense that costs a read nothing: the membership

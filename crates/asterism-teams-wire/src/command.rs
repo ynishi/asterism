@@ -130,6 +130,15 @@ pub struct MintDeviceTokenCommand {
 /// is closed.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct CreateTeamCommand {
+    /// The team's name (#218) — asked for at founding, refused blank
+    /// the way [`teams_core::domain::identity::Team::new`] refuses
+    /// it. `#[serde(default)]` so a request from before this field
+    /// existed decodes rather than 422s on the wire — the domain's
+    /// blank-name refusal is what turns a missing name into a `400`,
+    /// with a message that says why, instead of a bare deserialize
+    /// failure.
+    #[serde(default)]
+    pub name: String,
     /// The founding owner's user id.
     ///
     /// **Required when an admin creates the team**: an admin is never
@@ -141,12 +150,33 @@ pub struct CreateTeamCommand {
     pub owner_user_id: Option<String>,
 }
 
+/// Renames a team (`POST /teams/{team_id}/rename`, #218) — an
+/// owner-only verb, per the authority table.
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
+pub struct RenameTeamCommand {
+    /// The new name. Refused blank, the same rule founding applies.
+    pub name: String,
+}
+
 /// Invites a user into the team (`POST /teams/{team_id}/members/invite`,
 /// owner only).
+///
+/// **Exactly one of `user_id` / `login` (#218).** A login is resolved
+/// to an account on the server, the same way it always was implicit
+/// in `user_id` being an account's id; the id form stays reachable for
+/// when the login is not known, or is ambiguous to type by hand. Both
+/// set, or neither, is a `400` — the command names one invitee, not a
+/// choice between two.
 #[derive(Debug, Clone, Serialize, Deserialize, SchemaBridge)]
 pub struct InviteMemberCommand {
-    /// The invitee — must hold an account on this instance.
-    pub user_id: String,
+    /// The invitee's account id — must hold an account on this
+    /// instance. Mutually exclusive with `login`.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// The invitee's login, resolved to an account on the server.
+    /// Mutually exclusive with `user_id`.
+    #[serde(default)]
+    pub login: Option<String>,
     /// The role the invitee joins with: `"owner"` or `"member"`
     /// (validated by the domain's parser; anything else is a `400`).
     pub role: String,

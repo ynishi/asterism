@@ -278,7 +278,7 @@ async fn a_locked_account_is_refused_every_way_in_while_its_stamps_keep_resolvin
             "POST",
             "/teams/create",
             Some(&session),
-            Some(serde_json::json!({})),
+            Some(serde_json::json!({"name": "a team"})),
         ),
     )
     .await;

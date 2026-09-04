@@ -29,6 +29,7 @@ reason its migration gives.
 - `MyTeamsDto` — The teams the caller is a member of (`GET /teams`).
 - `OidcAttemptDto` — A sign-in attempt through the provider
 - `OidcProviderDto` — One identity provider, as a connect form names it.
+- `RenamedTeamDto` — The result of `POST /teams/{team_id}/rename` (#218).
 - `ResolvedContentDto` — The bulk resolve's answer
 - `RosterDto` — The team's current membership set, and what the caller may do in
 - `RosterMemberDto` — One membership row as the roster lists it.

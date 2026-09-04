@@ -37,6 +37,7 @@ same three lines instead of re-deriving them.
 - `Membership` — One `(user, team, role)` row — a user's standing inside one team.
 - `RegistrationPolicy` — Whether the instance accepts team creation from ordinary users, or
 - `Role` — A member's role within one team.
+- `Team` — A team, named (#218).
 - `TeamAuthority` — Who is asking, reduced to what the authority table cares about:
 - `TeamMembership` — One team a given user belongs to, read from that user's side.
 - `TeamRoster` — One team's membership set — the value every membership invariant is

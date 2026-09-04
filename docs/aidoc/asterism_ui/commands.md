@@ -140,6 +140,7 @@ other.
 - `head_status` — Which trained head scores tags, and what a next training run would
 - `hydrate_cards` — Batch-hydrates cards by id. Companion to `list_asset_index` —
 - `invite_team_member` — Invites an account into the team, in the role named.
+- `invite_team_member_by_login` — Invites an account into the team by login rather than by id
 - `jobs_stats` — Snapshot of the apalis `Jobs` table used by the UI progress
 - `leave_team` — Takes the signed-in account out of the team.
 - `link_group` — Connects a Group into another Group (cycle- / persona-guarded).
@@ -226,6 +227,7 @@ other.
 - `rename_group` — Renames a Group.
 - `rename_session` — Renames a Session (title-only write). Passing `title: null`
 - `rename_tag` — Renames a tag channel in place — the command twin of
+- `rename_team` — Renames a team — an owner's verb (#218).
 - `reopen_forge_line` — Takes it back out.
 - `reorder_group_assets` — Rewrites the front-to-back order of a Group's assets after a drag.
 - `reorder_group_children` — Rewrites the order of a Group's child groups.
@@ -258,6 +260,7 @@ other.
 - `team_auth_provider` — What a team server offers besides a password (#163), or `None`.
 - `team_ledger_page` — One page of a team's ledger, seq ascending (#148 decision 18).
 - `team_roster` — Who is in a team, in what role, and what the reader may do there.
+- `team_server_identity` — The signed-in account's login and display name, or nothing while
 - `team_server_session` — Whether this window is talking to a team server.
 - `train_tag_head` — Enqueues a `HeadTrain` run over the rulings under the bound
 - `trash_asset` — Moves an asset to the trash (reversible).
