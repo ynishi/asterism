@@ -375,9 +375,10 @@
     inviteId = "";
   }
 
-  // Removing somebody and deleting a team both ask first, and the two
-  // other row verbs do not: a role change is undone by the button
-  // beside it, and these two are not undone by anything.
+  // Removing somebody, deleting a team, and leaving (askLeave, below)
+  // all ask first, and are not undone by anything. A role change is
+  // the one row verb that does not: it is undone by the button
+  // beside it.
   async function askRemove(userId: string, login: string) {
     const ok = await confirmCatalog.open({
       title: "Remove this member?",
