@@ -85,6 +85,7 @@
   // as an id, since this machine knows every one of them.
   import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
+  import TabStrip from "./TabStrip.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { isDeparture, sharedCatalog } from "./lib/stores/shared.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
@@ -855,23 +856,18 @@
             Pick a team, or open one by id, to see the lines it hosts.
           </p>
         {:else}
-          <nav class="drawer-tabs" aria-label="What to read about this team">
-            <button
-              type="button"
-              class:active={tab === "lines"}
-              onclick={() => (tab = "lines")}
-            >lines</button>
-            <button
-              type="button"
-              class:active={tab === "roster"}
-              onclick={toRoster}
-            >members</button>
-            <button
-              type="button"
-              class:active={tab === "ledger"}
-              onclick={toLedger}
-            >ledger</button>
-          </nav>
+          <!-- Row shared with `ForgePanel` as `TabStrip` (#217). -->
+          <div class="drawer-tabs">
+            <TabStrip
+              ariaLabel="What to read about this team"
+              tabs={[
+                { key: "lines", label: "lines", onSelect: () => (tab = "lines") },
+                { key: "roster", label: "members", onSelect: toRoster },
+                { key: "ledger", label: "ledger", onSelect: toLedger },
+              ]}
+              active={tab}
+            />
+          </div>
         {/if}
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
@@ -919,23 +915,18 @@
             </p>
           {/if}
 
-          <nav class="drawer-tabs line-tabs" aria-label="What to read about this line">
-            <button
-              type="button"
-              class:active={lineTab === "contents"}
-              onclick={() => (lineTab = "contents")}
-            >on the line</button>
-            <button
-              type="button"
-              class:active={lineTab === "work"}
-              onclick={() => (lineTab = "work")}
-            >work</button>
-            <button
-              type="button"
-              class:active={lineTab === "history"}
-              onclick={() => (lineTab = "history")}
-            >history</button>
-          </nav>
+          <!-- Row shared with `ForgePanel` as `TabStrip` (#217). -->
+          <div class="drawer-tabs line-tabs">
+            <TabStrip
+              ariaLabel="What to read about this line"
+              tabs={[
+                { key: "contents", label: "on the line", onSelect: () => (lineTab = "contents") },
+                { key: "work", label: "work", onSelect: () => (lineTab = "work") },
+                { key: "history", label: "history", onSelect: () => (lineTab = "history") },
+              ]}
+              active={lineTab}
+            />
+          </div>
 
           {#if lineTab === "contents"}
             {#if sharedCatalog.states.loading}
@@ -1558,24 +1549,7 @@
     color: #ff9d9d;
   }
   .drawer-tabs {
-    display: flex;
-    gap: 0.15rem;
     margin: 0.8rem 0 0.2rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .drawer-tabs button {
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: inherit;
-    cursor: pointer;
-    font-size: 0.8rem;
-    padding: 0.3rem 0.55rem;
-    opacity: 0.6;
-  }
-  .drawer-tabs button.active {
-    opacity: 1;
-    border-bottom-color: currentColor;
   }
   .roster .member {
     display: flex;

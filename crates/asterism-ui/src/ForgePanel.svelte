@@ -45,6 +45,7 @@
   // says which line, and hands that line down.
   import ForgeWork from "./ForgeWork.svelte";
   import ForgeTalk from "./ForgeTalk.svelte";
+  import TabStrip from "./TabStrip.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
   import { detailRequest } from "./lib/stores/detail-request.svelte";
   import { gridSelection } from "./lib/stores/grid-selection.svelte";
@@ -427,20 +428,18 @@
         {/if}
       </div>
 
-      <div class="tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === "contents"}
-          onclick={() => (tab = "contents")}
-        >on the line</button>
-        <button
-          role="tab"
-          aria-selected={tab === "work"}
-          onclick={() => (tab = "work")}
-        >work</button>
-        <button role="tab" aria-selected={tab === "history"} onclick={toHistory}>
-          history
-        </button>
+      <!-- Row shared with `SharedLinesPanel` as `TabStrip` (#217); this
+           file's own values are the ones that component kept. -->
+      <div class="tabs">
+        <TabStrip
+          ariaLabel="What to read about this line"
+          tabs={[
+            { key: "contents", label: "on the line", onSelect: () => (tab = "contents") },
+            { key: "work", label: "work", onSelect: () => (tab = "work") },
+            { key: "history", label: "history", onSelect: toHistory },
+          ]}
+          active={tab}
+        />
       </div>
 
       {#if tab === "contents"}
@@ -716,21 +715,7 @@
     margin-left: auto;
   }
   .tabs {
-    display: flex;
-    gap: 0.8rem;
     margin: 0.6rem 0;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
-  }
-  .tabs button {
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: inherit;
-    cursor: pointer;
-    padding: 0.3rem 0;
-  }
-  .tabs button[aria-selected="true"] {
-    border-bottom-color: currentColor;
   }
   .entries {
     display: grid;
