@@ -111,6 +111,11 @@
 {/if}
 
 <style>
+  h4 {
+    margin: 0.9rem 0 0.3rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
   .quiet {
     opacity: 0.7;
     font-size: 0.78rem;
