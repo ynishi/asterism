@@ -258,11 +258,11 @@
 
   {#if sharedCatalog.session === null}
     <p class="quiet">
-      Not connected to a team server. The shared-lines drawer is where a
+      Not connected to a team server. The team drawer is where a
       connection is made.
     </p>
     <button type="button" onclick={() => sharedCatalog.openPanel()}>
-      open shared lines
+      open the team drawer
     </button>
   {:else}
     <!-- The target, top down: which team, which of its lines, which
@@ -281,7 +281,7 @@
         {:else if noTeams}
           <span class="quiet">
             You are not a member of any team on this server. Founding
-            one, or opening one by id, starts from the shared-lines
+            one, or opening one by id, starts from the team
             drawer.
           </span>
         {:else}
@@ -316,7 +316,7 @@
           {:else if noLines}
             <span class="quiet">
               This team hosts no lines. Publishing one starts from the
-              shared-lines drawer.
+              team drawer.
             </span>
           {:else}
             <select
@@ -365,7 +365,7 @@
 
     {#if noTeams || noLines}
       <button type="button" onclick={() => sharedCatalog.openPanel()}>
-        open shared lines
+        open the team drawer
       </button>
     {:else if line !== null && sharedCatalog.pursuits.answered && !sharedCatalog.pursuits.error}
       <label class="call-it">

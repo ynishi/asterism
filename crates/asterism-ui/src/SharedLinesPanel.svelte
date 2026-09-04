@@ -402,7 +402,7 @@
     onkeydown={(e) => e.key === "Escape" && sharedCatalog.closePanel()}
     role="button"
     tabindex="-1"
-    aria-label="Close shared lines"
+    aria-label="Close the team"
   >
     <div
       class="drawer"
@@ -410,10 +410,10 @@
       onkeydown={(e) => e.stopPropagation()}
       role="dialog"
       tabindex="-1"
-      aria-label="Shared lines"
+      aria-label="Team"
     >
       <header class="drawer-head">
-        <h3>Shared lines</h3>
+        <h3>Team</h3>
         <button
           class="drawer-close"
           onclick={() => sharedCatalog.closePanel()}
@@ -426,10 +426,20 @@
            qualifier is #204's: a device token may be on this machine,
            in the keychain, and it is not one of these lines. One line
            under the title rather than a paragraph above everything:
-           it is the drawer's standing, not a step on the way in. -->
+           it is the drawer's standing, not a step on the way in.
+
+           Three verbs cross this boundary and each lives where it
+           acts rather than here — clone on a shared line's contents,
+           publish under the shared lines list, promote on the asset
+           — so this sentence names all three and which is which
+           (#220), where the drawer that stands for the boundary is
+           the one place a person reading it fresh would look. -->
       <p class="drawer-sub">
         Hosted by a team and read from it — none of the work shown here
-        is stored on this machine; cloning is how you take a copy.
+        is stored on this machine. Three verbs cross this boundary:
+        clone takes a copy of what a shared line holds, publish sends a
+        line of yours the other way, and promote — on the asset itself
+        — hands one over.
       </p>
 
       {#if sharedCatalog.providerAttempt !== null}
@@ -1110,7 +1120,7 @@
                           onclick={() =>
                             sharedCatalog.revokeOwner(member.user_id)}
                           title="Step down to being a member of this team"
-                        >demote</button>
+                        >make member</button>
                       {/if}
                       <button
                         type="button"
@@ -1126,14 +1136,14 @@
                           onclick={() =>
                             sharedCatalog.revokeOwner(member.user_id)}
                           title="Put this owner back to being a member"
-                        >demote</button>
+                        >make member</button>
                       {:else}
                         <button
                           type="button"
                           onclick={() =>
                             sharedCatalog.grantOwner(member.user_id)}
                           title="Make this member an owner"
-                        >promote</button>
+                        >make owner</button>
                       {/if}
                       <button
                         type="button"

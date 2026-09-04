@@ -104,6 +104,22 @@ export function fmtBytes(n: number | null): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// What a pursuit close's outcome reads as, in the words the close
+// buttons themselves use (#220) — `satisfied` and `abandoned` are the
+// domain's own tokens, not the screen's, so a row or a header printing
+// one verbatim is a third vocabulary next to "Closed" and "close · …".
+// Shared by `ForgeWork` and `SharedLineWork` rather than duplicated:
+// the two close buttons' own text is `close · put it on the line` and
+// `close · abandon`, and a second copy of this mapping is a second
+// place those two strings could drift out of step with it. A token
+// that is not one of the two answers itself, honestly, rather than
+// being guessed at.
+export function endingWord(outcome: string): string {
+  if (outcome === "satisfied") return "closed · put it on the line";
+  if (outcome === "abandoned") return "closed · abandon";
+  return outcome;
+}
+
 export function fmtDateTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");

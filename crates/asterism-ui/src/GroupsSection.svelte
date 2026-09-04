@@ -769,9 +769,9 @@
         type="button"
         class="query-menu-item"
         onclick={() => openProvenanceSnapshot(queryMenu!.group)}
-        title="Open the frozen Snapshot this group was promoted from"
+        title="Open the frozen Snapshot this group was grouped from"
       >
-        ◇ Promoted from · {queryMenu.group.origin_snapshot_id.slice(0, 8)}
+        ◇ Grouped from · {queryMenu.group.origin_snapshot_id.slice(0, 8)}
       </button>
     {/if}
     {#if queryMenuError}

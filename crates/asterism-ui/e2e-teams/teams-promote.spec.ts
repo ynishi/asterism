@@ -68,8 +68,8 @@ const POLL_GAP_MS = 250;
  *  work the grid does behind it. */
 const GRID_RELOAD_MS = 30_000;
 
-const SHARED_ROW = 'aside.sidebar button[title^="Lines a team hosts"]';
-const DRAWER = '[role="dialog"][aria-label="Shared lines"]';
+const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
+const DRAWER = '[role="dialog"][aria-label="Team"]';
 const TEAM_TABS = `${DRAWER} .drawer-tabs`;
 const LINE_TABS = `${DRAWER} .line-tabs`;
 const PROMOTE = ".detail-panel .promote";

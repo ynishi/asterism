@@ -59,8 +59,8 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-const SHARED_ROW = 'aside.sidebar button[title^="Lines a team hosts"]';
-const DRAWER = '[role="dialog"][aria-label="Shared lines"]';
+const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
+const DRAWER = '[role="dialog"][aria-label="Team"]';
 /** The tabs under a team, and the tabs under a line, which are two
  *  strips. Both carry `.drawer-tabs` so they are drawn alike; only the
  *  inner one carries `.line-tabs`, and the outer one is the first in

@@ -53,8 +53,8 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-const SHARED_ROW = 'aside.sidebar button[title^="Lines a team hosts"]';
-const DRAWER = '[role="dialog"][aria-label="Shared lines"]';
+const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
+const DRAWER = '[role="dialog"][aria-label="Team"]';
 
 /** What `onPrepare` put up, or a failure that says it did not. */
 function fixture(): {

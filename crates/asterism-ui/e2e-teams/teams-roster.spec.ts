@@ -44,8 +44,8 @@ const ROUND_TRIP_MS = 20_000;
 const COLD_MS = 60_000;
 const POLL_GAP_MS = 250;
 
-const SHARED_ROW = 'aside.sidebar button[title^="Lines a team hosts"]';
-const DRAWER = '[role="dialog"][aria-label="Shared lines"]';
+const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
+const DRAWER = '[role="dialog"][aria-label="Team"]';
 
 /** What `onPrepare` put up, or a failure that says it did not. */
 function fixture(): {
@@ -221,6 +221,26 @@ function rowText(container: string, rowText: string): Promise<string | null> {
   );
 }
 
+/**
+ * Reads a row's `.member-role` span rather than the whole row: the
+ * controls (#220) are `make owner` / `make member`, so a row offering
+ * either always carries both words somewhere, and only the role span
+ * itself says which one the row is.
+ */
+function roleOfRow(container: string, rowText: string): Promise<string | null> {
+  return browser.execute(
+    (sel: string, row: string) => {
+      const found = Array.from(document.querySelectorAll(sel)).find(
+        (candidate) => (candidate.textContent ?? "").includes(row),
+      );
+      const role = found?.querySelector(".member-role");
+      return role == null ? null : (role.textContent ?? "");
+    },
+    container,
+    rowText,
+  );
+}
+
 /** Types into a field the way a person does, for `bind:value`'s sake. */
 async function fill(selector: string, value: string): Promise<void> {
   const field = await $(selector);
@@ -354,24 +374,24 @@ describe("the roster's writes", () => {
     await snap("roster-02-invited");
 
     // Both ways, because the pair is one control that swaps: a row
-    // showing promote after a demote is the assertion that the write
-    // landed and the re-read saw it.
+    // offering `make owner` again after `make member` is the assertion
+    // that the write landed and the re-read saw it.
     await stage(trail, "make them an owner", ROUND_TRIP_MS, async () => {
-      await clickOnRow(ROSTER_ROW, otherId, "promote");
+      await clickOnRow(ROSTER_ROW, otherId, "make owner");
       await pollUntil(
         async () =>
-          ((await rowText(ROSTER_ROW, otherId)) ?? "").includes("owner"),
+          ((await roleOfRow(ROSTER_ROW, otherId)) ?? "").includes("owner"),
         "the promoted member never read back as an owner",
         ROUND_TRIP_MS,
       );
     });
 
     await stage(trail, "put them back to a member", ROUND_TRIP_MS, async () => {
-      await clickOnRow(ROSTER_ROW, otherId, "demote");
+      await clickOnRow(ROSTER_ROW, otherId, "make member");
       await pollUntil(
         async () => {
-          const row = (await rowText(ROSTER_ROW, otherId)) ?? "";
-          return row.includes("member") && !row.includes("owner");
+          const role = (await roleOfRow(ROSTER_ROW, otherId)) ?? "";
+          return role.includes("member") && !role.includes("owner");
         },
         "the demoted owner never read back as a member",
         ROUND_TRIP_MS,
@@ -484,7 +504,7 @@ describe("the roster's writes", () => {
     // step down from.
     await stage(trail, "leave it", ROUND_TRIP_MS, async () => {
       const own = (await rowText(ROSTER_ROW, "· you")) ?? "";
-      if (own.includes("demote")) {
+      if (own.includes("make member")) {
         throw new Error(`a member's own row offered a step down: ${own}`);
       }
       await clickOnRow(ROSTER_ROW, "· you", "leave");

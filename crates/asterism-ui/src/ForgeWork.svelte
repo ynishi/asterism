@@ -48,6 +48,7 @@
   import { promptCatalog } from "./lib/stores/prompt.svelte";
   import { thumbCatalog } from "./lib/stores/thumb.svelte";
   import { baseName } from "./lib/basename";
+  import { endingWord } from "./lib/formatters";
   import type {
     AssetCardDto,
     ForgeLineDto,
@@ -340,13 +341,13 @@
     {#if forgeCatalog.endedWork.length > 0}
       <!-- Dimmed and listed apart, for the reason the store's `pursuits`
            read keeps them at all. -->
-      <h4>Ended</h4>
+      <h4>Closed</h4>
       <ul class="work-list ended">
         {#each forgeCatalog.endedWork as item (item.id)}
           <li>
             <button onclick={() => forgeCatalog.selectPursuit(item.id)}>
               <span>{item.title ?? "(untitled)"}</span>
-              <span class="quiet">{item.close?.outcome}</span>
+              <span class="quiet">{item.close ? endingWord(item.close.outcome) : ""}</span>
             </button>
           </li>
         {/each}
@@ -354,7 +355,7 @@
     {/if}
 
     <form class="new-work" onsubmit={open}>
-      <h4>Open a pursuit</h4>
+      <h4>Open work</h4>
       <label>
         Title
         <input type="text" bind:value={newTitle} placeholder="optional" />
@@ -379,7 +380,7 @@
     </button>
     <strong>{work.title ?? "(untitled)"}</strong>
     <span class="quiet">
-      {work.close === null ? "open" : work.close.outcome}
+      {work.close === null ? "open" : endingWord(work.close.outcome)}
     </span>
     <!-- Talking about work that has ended is not offered less: what was
          said about a piece of work is often said after it. -->
@@ -604,7 +605,7 @@
     </div>
   {:else if work.close !== null}
     <p class="quiet">
-      Ended {when(work.close.at_ms)}{work.close.note !== null
+      Closed {when(work.close.at_ms)}{work.close.note !== null
         ? ` — ${work.close.note}`
         : ""}
     </p>

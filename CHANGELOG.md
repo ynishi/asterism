@@ -1082,6 +1082,37 @@ and this project adheres to
 
 ### Changed
 
+- **The same act reads the same on both planes, one word each** (#220).
+  `promote` named four things — handing an asset to a team, raising a roster
+  member to owner, turning a tag or a snapshot into a Group, and a trained model
+  head taking effect. Only the first is the domain's own word (#66, #148); the
+  roster's controls now read `make owner` / `make member`, the Group family
+  reads `group` / `Group-ify` throughout, and the model head reads `staged` /
+  `stage` — paired with the existing "restart" badge's "takes effect on next
+  launch". `SettingsModel`'s job-progress verdict text is untouched: it is the
+  backend's own words, by the component's own design.
+
+  The team drawer's title and aria-labels move from "Shared lines" to "Team",
+  and the sidebar rows from "lines" / "shared lines" to "Forge" / "Team" to
+  match — the drawer holds the session, the devices, the roster and the ledger,
+  of which lines are one tab, so "Shared lines" named the smaller thing. Its
+  one-line standing note, which explained only `clone`, now names all three
+  verbs that cross the team boundary and which is which: clone on a shared
+  line's contents, publish under the shared lines list, promote on the asset.
+
+  `work` was the tab and `pursuit` was the button; both now say `work`. The
+  ended-work list read "Ended", the close button read "close · …", and the row
+  itself printed the raw domain token `satisfied` / `abandoned` verbatim — three
+  vocabularies for one ending. The heading and trailing summary now read
+  "Closed", and a new `endingWord()` in `lib/formatters.ts` — shared by
+  `ForgeWork` and `SharedLineWork` rather than duplicated — translates the two
+  domain tokens into the two close buttons' own words,
+  `closed · put it on the line` / `closed · abandon`.
+
+  Scope is UI-visible text only: Tauri command names, DTO fields and identifiers
+  that still say `promote` (`promote_tag_to_group`, `TagHead.promoted`) are
+  internal rather than words a person reads, and stay as they are.
+
 - **A shared line's work reads what it collides with and how far it is behind,
   and a refusal names why** (#211). `SharedLineWork` showed neither: a close
   could be refused by a landing it never displayed, and `pushRound` by a
