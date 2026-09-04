@@ -2,8 +2,10 @@
   // The round log — "What was asked for" — factored out of `ForgeWork`
   // and `SharedLineWork` (#217): the two files carried byte-identical
   // `when` / `opName` / `summarise` functions and near-identical
-  // markup for this one section, and the difference between them was
-  // never the row shape. It was one optional verb.
+  // markup for this one section. The row shape itself never differed;
+  // what did was one optional verb and one CSS value, both named below
+  // (`onTalkAboutRound`/`onTalkAboutOp`, `dividerColor`) rather than
+  // picked once and imposed on both callers.
   //
   // `ForgeWork` lets a reader open the conversation about a round or an
   // entry within it (`forgeCatalog.talkAbout` — "shows what is said
