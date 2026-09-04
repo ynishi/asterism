@@ -4755,9 +4755,9 @@
         },
       );
       dispatchCatalog.flash(
-        `Promoted · Group “${result.name}” · ${result.asset_count} asset(s)`,
+        `Grouped · Group “${result.name}” · ${result.asset_count} asset(s)`,
       );
-      // The pick is consumed by the promote (an operation ends
+      // The pick is consumed by the group-ify (an operation ends
       // the volatile selection).
       clearSelection();
       void loadGroupCounts();
@@ -5417,15 +5417,15 @@
           onclick={() => void forgeCatalog.openPanel()}
           title="Lines on this machine: what each holds, and how it got there."
         >
-          ○ lines
+          ○ Forge
         </button>
       </li>
       <li>
         <button
           onclick={() => void sharedCatalog.openPanel()}
-          title="Lines a team hosts. Read from the team's server, not from here."
+          title="A team's lines, members and ledger. Read from its server, not from here."
         >
-          ○ shared lines
+          ○ Team
         </button>
       </li>
     </ul>

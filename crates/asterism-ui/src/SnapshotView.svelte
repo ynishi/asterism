@@ -255,7 +255,7 @@
   async function promote() {
     if (!snapshot || busy) return;
     const name = await onPromptName(
-      "Promote snapshot to Group",
+      "Group-ify this snapshot",
       "unique per persona",
     );
     if (!name || !name.trim()) return;
@@ -273,12 +273,12 @@
         },
       );
       onFlash(
-        `Promoted · Group “${result.name}” · ${result.asset_count} asset(s)`,
+        `Grouped · Group “${result.name}” · ${result.asset_count} asset(s)`,
       );
       onLoadGroupCounts();
       dispatchCatalog.closeSnapshot();
     } catch (e) {
-      onFlash(`Promote failed: ${String(e)}`, 6000);
+      onFlash(`Group-ify failed: ${String(e)}`, 6000);
     } finally {
       busy = false;
     }

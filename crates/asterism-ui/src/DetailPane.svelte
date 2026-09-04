@@ -1060,7 +1060,7 @@
       await assetPageCatalog.reload();
     } catch (error) {
       console.warn("promote_tag_to_group failed", error);
-      onSetStatus(`promote error: ${JSON.stringify(error)}`);
+      onSetStatus(`group error: ${JSON.stringify(error)}`);
     } finally {
       promotingTagId = null;
     }
@@ -2065,11 +2065,11 @@
                     class:tag-chip-promoted={isTagPromoted(t.name)}
                     onclick={() => promoteTag(t.id, t.name)}
                     title={isTagPromoted(t.name)
-                      ? `Already promoted to Group ~${t.name}`
-                      : `Promote #${t.name} into a Group (▤)`}
+                      ? `Already grouped as ~${t.name}`
+                      : `Group #${t.name} (▤)`}
                     aria-label={isTagPromoted(t.name)
-                      ? `Tag ${t.name} is already promoted`
-                      : `Promote tag ${t.name} into a Group`}
+                      ? `Tag ${t.name} is already grouped`
+                      : `Group tag ${t.name}`}
                   >{isTagPromoted(t.name) ? "✓" : "▤"}</button>
                   <button
                     type="button"

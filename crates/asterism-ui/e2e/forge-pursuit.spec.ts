@@ -367,7 +367,7 @@ async function sweepLeftovers(trail: string[]): Promise<void> {
             () =>
               document
                 .querySelector('[role="dialog"][aria-label="Forge"] .work-head')
-                ?.textContent?.includes("abandoned") ?? false,
+                ?.textContent?.includes("closed · abandon") ?? false,
           ),
         "abandoning the piece of work did not take",
       );
@@ -429,8 +429,8 @@ async function sweepLeftovers(trail: string[]): Promise<void> {
 /// Both tests do this and the second does it twice, which is the whole
 /// point of the second: a line is worked more than once.
 async function openWorkTitled(trail: string[], title: string): Promise<void> {
-  await stage(trail, `open a pursuit: ${title}`, DRIVER_MS, () =>
-    pressLabelled(`${DRAWER} .line header`, "open a pursuit"),
+  await stage(trail, `open work: ${title}`, DRIVER_MS, () =>
+    pressLabelled(`${DRAWER} .line header`, "open work"),
   );
   await stage(trail, "fill the new-work form", DRIVER_MS, () =>
     browser.execute((wanted: string) => {
@@ -471,7 +471,7 @@ async function closeWork(trail: string[], label: string): Promise<void> {
           '[role="dialog"][aria-label="Forge"] .work-head',
         );
         const said = head?.textContent ?? "";
-        return said.includes("satisfied") || said.includes("abandoned");
+        return said.includes("closed");
       }),
     "closing the work did not change what it says about itself",
   );
@@ -608,8 +608,8 @@ describe("a pursuit against a line", () => {
 
     // The header button is the one #180 left disabled. Pressing it is
     // what proves the work tab is reachable the way the design says.
-    await stage(trail, "press open a pursuit", DRIVER_MS, () =>
-      pressLabelled(`${DRAWER} .line header`, "open a pursuit"),
+    await stage(trail, "press open work", DRIVER_MS, () =>
+      pressLabelled(`${DRAWER} .line header`, "open work"),
     );
     await stage(trail, "fill the new-work form", DRIVER_MS, () =>
       browser.execute((title: string) => {
@@ -759,7 +759,7 @@ describe("a pursuit against a line", () => {
           () =>
             document
               .querySelector('[role="dialog"][aria-label="Forge"] .work-head')
-              ?.textContent?.includes("satisfied") ?? false,
+              ?.textContent?.includes("put it on the line") ?? false,
         ),
       "closing the work did not change what it says about itself",
     );

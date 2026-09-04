@@ -377,7 +377,7 @@
       <header>
         <h3>{current.name}</h3>
         <span class="quiet">{current.standing}</span>
-        <!-- It says open a pursuit, so it lands where one is opened.
+        <!-- It says open work, so it lands where work is opened.
              Switching to the tab is not enough: a piece of work being
              read stays showing, and the form to start another is behind
              a "← all work" nobody was told to press. Letting go of what
@@ -389,7 +389,7 @@
             tab = "work";
           }}
         >
-          open a pursuit
+          open work
         </button>
       </header>
 

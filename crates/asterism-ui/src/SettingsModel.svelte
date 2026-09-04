@@ -178,7 +178,7 @@
       {/if}
       {#if head.promoted && head.promoted !== head.bound}
         <span class="model-hint">
-          promoted: {head.promoted}{head.run
+          staged: {head.promoted}{head.run
             ? ""
             : " — its artifact cannot be read, so the next launch falls back to zero-shot"}
         </span>
@@ -223,7 +223,7 @@
       <span class="model-label">Train a head</span>
       <span class="model-hint">
         Learn from your own accepted and rejected suggestions. A new head
-        is promoted only if it beats zero-shot on held-out rulings.
+        is staged only if it beats zero-shot on held-out rulings.
       </span>
     </div>
     <button
@@ -254,7 +254,7 @@
     <button
       class="model-action"
       disabled={busy || !hasEncoder || artifactText.trim() === ""}
-      title="Verify and install the pasted head, then promote it"
+      title="Verify and install the pasted head, then stage it"
       onclick={pull}
     >
       Install
