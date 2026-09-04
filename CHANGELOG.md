@@ -669,6 +669,21 @@ and this project adheres to
   answers are checked at all — a unit test asserts the shape its own author
   wrote down twice.
 
+- **A detail pane opened from a line can reach the asset in the grid** (#189).
+  #182 answered "what is this" with a pane that comes up over whatever opened
+  it; nothing answered "show me this where I keep it" — the other half, and a
+  different question, because answering it moves the grid. A new "Show in grid"
+  button, offered on every asset the pane shows, closes the pane, steps the
+  forge drawer aside if that is what opened it, switches the persona filter when
+  the asset belongs to one the grid is not already showing, and scrolls to it.
+  The persona switch is announced on the status line — the same `personaName()`
+  a drop or a paste already reads through — because a filter that moved without
+  saying so is a library the reader did not ask to be looking at. If the asset
+  is still off the page afterward, something other than persona is keeping it
+  there (a search, a modality, a group, the 🎲 draw, the trash side, the
+  retrieval shortlist's cap), and the status line says so rather than guessing
+  which of those to clear.
+
 - **The forge's catalog, and the design its four screens share** (#177). #170
   lists four surfaces and says what each one lands; what it did not say is what
   any of them looks like, and the first one cannot be opened without deciding
