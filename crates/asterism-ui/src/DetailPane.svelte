@@ -2039,17 +2039,17 @@
             </dl>
 
             <!-- The other half of #182's answer to "what is this" —
-                 "show me this where I keep it" (#189). Always offered:
-                 useful from the forge, where the grid may not even be
-                 on this asset's persona, and harmless from the grid
-                 itself, where it just re-centers on a card already
-                 there. -->
+                 "show me this where I keep it" (#189). Always offered
+                 rather than gated on persona or media kind (contrast
+                 the wallpaper action below): usefulness is App's own
+                 call, made once at `revealInGrid`'s definition rather
+                 than guessed at twice by re-deriving its rule here. -->
             <div class="reveal-action">
               <button
                 type="button"
                 class="reveal-btn"
                 onclick={handleRevealInGrid}
-                title="Scroll the grid to this asset, switching persona first if it belongs to a different one"
+                title="Show this asset in the grid — steps the forge drawer aside and switches persona first if either is in the way"
               >
                 ↗ Show in grid
               </button>
