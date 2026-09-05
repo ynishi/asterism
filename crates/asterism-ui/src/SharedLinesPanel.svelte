@@ -571,7 +571,7 @@
              under it would be written over when the wait ended — the
              store refuses one too — and the wait has a cancel of its
              own above. -->
-        <form class="drawer-form" onsubmit={connect}>
+        <form class="drawer-form drawer-signin" onsubmit={connect}>
           <label>
             Server
             <input
@@ -1557,6 +1557,17 @@
     flex-direction: row !important;
     align-items: center;
     gap: 0.4rem;
+  }
+  /* The sign-in stops short of the drawer's edge. Every other form
+     here is filling in something about work already on screen beside
+     it, and takes the column's width for the same reason the column
+     has it. This one is the whole panel until it succeeds, so it took
+     the whole width with it: a password field the better part of
+     600px across, which the window opening at 1280 rather than 800
+     (#239) makes the state it opens in. A field is as wide as what
+     goes in it. */
+  .drawer-signin {
+    max-width: 24rem;
   }
   .drawer-publish {
     border-top: 1px solid rgba(255, 255, 255, 0.12);
