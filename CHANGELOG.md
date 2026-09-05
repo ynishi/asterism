@@ -1098,6 +1098,41 @@ and this project adheres to
 
 ### Changed
 
+- **The window opens at a size the UI asks for** (#239). 1280×860 rather than
+  800×600, and a floor under it. The number is the UI's own: `DetailPane`'s
+  panel is `width: min(96vw, 1200px)`, so at 800 it was clamped to 768 — about
+  three fifths of the width it was drawn for — and `max-height: 96vh` met the
+  same wall at 600 tall. Deliberately neither maximized nor full screen: a full
+  screen window on macOS takes a Space of its own, so reaching anything beside
+  it costs a switch. `min_inner_size` is new; nothing had stopped the window
+  being dragged below the point where 180px of sidebar beside a grid of
+  `minmax(180px, 1fr)` cards is still an arrangement.
+
+  Two smaller things the same pass. The page's favicon pointed at
+  `/album-logo.svg` — a file this crate does not contain, under another
+  product's name; it points at the bundle's own master now, by relative path, so
+  one file serves both. And `copyright` and `category` are set, both of which
+  are read — `category` becomes `LSApplicationCategoryType` and `copyright`
+  shows in the bundle's information. The copyright line is the one `LICENSE-MIT`
+  already declares.
+
+- **The sidebar's filter bands show their own labels** (#239). Length, Size and
+  Pixels were rendering about two characters of their `min` and `max`
+  placeholders. The row never fitted: on one line it asks for roughly 207px
+  inside the 137px a 180px sidebar leaves, and the inputs were the only children
+  with `min-width: 0`, so the whole shortfall landed on them. The label takes
+  its own line now, the number spinner is gone — 15px of a 44px box, and a
+  filter threshold is typed rather than stepped — and the unit is sized by its
+  own text instead of by the widest of `s`, `MB` and `MP`. All three bands stand
+  the same height.
+
+- **The team drawer's sign-in stops short of the drawer's edge** (#239). Server,
+  Login and Password were taking the drawer's full body width — 795px each,
+  which the window opening at 1280 makes the state it opens in rather than
+  something to widen the window and find. Capped at 24rem, and on that form
+  alone: the other forms in the drawer sit beside the work they act on and have
+  not asked for one.
+
 - **The app carries its own icon** (#238). What shipped until now was the teal
   and yellow interlocking rings `create-tauri-app` writes into every new
   project. In its place: three white stars joined into a triangle, over an
