@@ -6,10 +6,11 @@
       rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon-1024.png
       npx tauri icon /tmp/icon-1024.png
 
-  `npx tauri` rather than `cargo tauri`: the CLI this repository pins is the
-  npm one (`@tauri-apps/cli` in crates/asterism-ui/package.json), which is
-  what the Justfile and the release workflow reach for. A `cargo-tauri` on
-  somebody's machine is a different, unpinned version.
+  `npx tauri` rather than `cargo tauri`: the CLI this comes out of is the npm
+  one. `crates/asterism-ui/package.json` asks for `@tauri-apps/cli` by range;
+  `package-lock.json` is what pins a version, and CI installs from it with
+  `npm ci`. The Justfile and the release workflow both reach for that binary.
+  A `cargo-tauri` on somebody's machine is a different, unpinned version.
 
   Three things fix the numbers below.
 
@@ -20,21 +21,45 @@
      This is the part that is version-conditional and the part a first pass
      of this icon got wrong. macOS 26 masks every app icon to a squircle
      itself, and artwork drawn for that generation is full bleed with no
-     corners of its own. macOS 25 and earlier do not mask: they draw what
-     the bundle carries. A full-bleed square shipped to those releases is a
-     hard-cornered tile roughly a quarter larger than every icon beside it
-     in the Dock, which is what a render of it next to a real Dock showed.
-     This repository declares no `minimumSystemVersion`, so it ships to
-     both, and the inset version is the one that degrades gracefully: on 26
-     the mask lands inside a shape that is already the right one.
+     corners of its own. macOS 15 and earlier — Apple's numbering runs 15
+     then 26, so there is no 16 through 25 to leave out — do not mask: they
+     draw what the bundle carries. A full-bleed square shipped to those
+     releases is a hard-cornered tile roughly a quarter larger than every
+     icon beside it in the Dock, which is what a render of it next to a
+     real Dock showed.
 
-  2. Heavy strokes, because the mark has to survive downscaling. Rendered at
-     16px a 1%-of-canvas stroke disappears and a 3% one leaves a smudge. The
-     48px stroke here is 4.7% of the 1024 canvas and the stars are 20.3% and
-     12.5% of it, measured before the tile's 0.8047 scale is applied. That
-     weight is also what matches the density of the icons this one sits
-     beside in a Dock; a lighter mark reads as washed out rather than as
-     restraint.
+     Nothing here sets a floor, so the bundle reaches both, and the inset
+     tile is the version that is wrong in the cheaper direction: under 26's
+     mask it sits inside the shape the system draws, so it reads somewhat
+     smaller than artwork made full bleed for that generation. That is a
+     cost rather than a free choice, and it is the one claim here that has
+     not been measured — this machine runs 15.7.3 and cannot show what 26
+     does with the file.
+
+     The margin rides into `icon.ico` and the `Square*Logo.png` tiles too,
+     which draw unmasked and would not have asked for it. That is the price
+     of one master, taken deliberately: a second source for Windows is a
+     second thing to keep in step.
+
+  2. Heavy strokes, because the mark has to survive downscaling. The two
+     thresholds come from rendering this mark at 16px while it was still
+     full bleed: a stroke 1% of the canvas disappeared, one at 3% left a
+     smudge. Both are fractions of the whole 1024 canvas, because the whole
+     canvas is what maps to the icon slot.
+
+     On that same scale the stroke below is 3.8% — authored at 48px, then
+     carried through the tile's 0.8047 scale, so 38.6px delivered, or 0.60px
+     at a 16px render. It is 4.7% of the 824 tile, which is why it holds the
+     weight it had before the tile existed; the tile is what the eye
+     compares it against, and the canvas is what the thresholds are in. The
+     stars are 16.3% and 10.1% of the canvas, 20.3% and 12.5% of the tile.
+
+     So the margin over the smudge threshold is 3.8 against 3, narrower than
+     it was full bleed. Measured on the file as it stands, the triangle
+     survives at 16px with the strokes rendering as partial alpha rather
+     than solid white, and the mark is clean at 32px. That weight is also
+     what matches the density of the icons this one sits beside in a Dock; a
+     lighter mark reads as washed out rather than as restraint.
 
   3. Flat: no glow, no bevel, no baked highlight. Nothing in this pipeline
      adds them and nothing removes them either, so a highlight painted here
@@ -60,8 +85,8 @@
     <rect x="100" y="100" width="824" height="824" fill="url(#sky)"/>
 
     <!-- The mark is authored against the full 1024 canvas and then placed
-         inside the tile, so the percentages in the header stay readable
-         against these numbers rather than against scaled ones. -->
+         inside the tile. The header gives every figure twice for that
+         reason: once as drawn here, once as delivered through this scale. -->
     <g transform="translate(100,100) scale(0.8046875)">
       <g stroke="#ffffff" stroke-width="48" stroke-linecap="round" fill="none">
         <line x1="300" y1="726" x2="618" y2="272"/>
