@@ -1654,6 +1654,16 @@ md-check:
 # a deliberate refusal rather than an omission. Cost is a reason to run
 # it deliberately, not a reason to leave the only surface that can check
 # the grid out of reach.
+#
+# The run leaves what it saw. Every stage writes a frame to
+# `workspace/test-logs/e2e-screens/<run>/`, newest ten runs kept, and a
+# failing test adds one more named after itself. That is how a change
+# gets looked at without a person at the keyboard: the window this
+# opens is not something an agent can read, and the frames are. Said
+# here because it is a property of this recipe, and because an agent
+# that did not know it spent an afternoon reaching for `dev-headless`
+# — which serves no frontend, as its name and its `--headless` rustdoc
+# both say.
 
 # Run the desktop e2e suite in a real window (minutes; builds a binary).
 [group('check')]

@@ -248,8 +248,9 @@
 
 <style>
   /* Mirror the settings-panel `.shortcut-table` tone (App.svelte):
-     #f7f5ee header, #eee row borders, mono slug cells. Kept scoped
-     here rather than promoted to a shared stylesheet. */
+     the same header surface, row-border and mono slug cells. Kept
+     scoped here rather than promoted to a shared stylesheet — which
+     is why the two have to be changed together. */
   .modality-table {
     width: 100%;
     border-collapse: collapse;
@@ -258,14 +259,14 @@
   .modality-table th {
     text-align: left;
     padding: 0.35rem 0.6rem;
-    background: #f7f5ee;
-    color: #556;
+    background: var(--surface-hover);
+    color: var(--ink-secondary);
     font-weight: 600;
   }
   .modality-table td {
     padding: 0.3rem 0.6rem;
-    border-top: 1px solid #eee;
-    color: #333;
+    border-top: 1px solid var(--line-faint);
+    color: var(--ink);
     vertical-align: middle;
   }
   .modality-table th.num,
@@ -280,7 +281,7 @@
   .modality-table td.slug,
   .unregistered .slug {
     font-family: ui-monospace, "SF Mono", monospace;
-    color: #4a3a90;
+    color: var(--accent-ink);
     white-space: nowrap;
   }
   td.order {
@@ -291,47 +292,47 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: #888;
+    color: var(--ink-muted);
     font-size: 0.75rem;
     padding: 0 0.1rem;
     line-height: 1;
   }
   td.order button:hover:not(:disabled) {
-    color: #223;
+    color: var(--ink);
   }
   td.order button:disabled {
-    color: #ddd;
+    color: var(--ink-secondary);
     cursor: default;
   }
   .label-input {
     width: 100%;
     box-sizing: border-box;
     padding: 0.2rem 0.35rem;
-    border: 1px solid #ddd;
+    border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 0.8rem;
     font-family: inherit;
-    color: #333;
+    color: var(--ink);
   }
   .terminal-toggle {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
   }
   .del {
     background: none;
     border: none;
     cursor: pointer;
-    color: #b46;
+    color: var(--danger-ink);
     font-size: 0.8rem;
   }
   .del:hover:not(:disabled) {
-    color: #922;
+    color: var(--ink);
   }
   .del:disabled {
-    color: #ddd;
+    color: var(--ink-secondary);
     cursor: default;
   }
   .add-row {
@@ -343,11 +344,11 @@
   .add-slug,
   .add-label {
     padding: 0.25rem 0.4rem;
-    border: 1px solid #ddd;
+    border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 0.8rem;
     font-family: inherit;
-    color: #333;
+    color: var(--ink);
   }
   .add-slug {
     width: 8rem;
@@ -359,17 +360,17 @@
   .add-btn,
   .register-btn {
     padding: 0.25rem 0.7rem;
-    border: 1px solid #c9c4e0;
+    border: 1px solid var(--accent-line-strong);
     border-radius: 4px;
-    background: #f2f0fb;
-    color: #4a3a90;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
   }
   .add-btn:hover:not(:disabled),
   .register-btn:hover:not(:disabled) {
-    background: #e7e3f7;
+    background: var(--accent-surface-strong);
   }
   .add-btn:disabled,
   .register-btn:disabled {
@@ -379,7 +380,7 @@
   .unregistered-head {
     margin: 1rem 0 0.3rem;
     font-size: 0.78rem;
-    color: #888;
+    color: var(--ink-muted);
   }
   .unregistered {
     list-style: none;
@@ -394,7 +395,7 @@
     font-size: 0.82rem;
   }
   .unregistered .num {
-    color: #999;
+    color: var(--ink-faint);
     font-variant-numeric: tabular-nums;
   }
   .unregistered .register-btn {
@@ -403,10 +404,10 @@
   .modality-error {
     margin: 0.5rem 0;
     padding: 0.4rem 0.6rem;
-    background: #fdecec;
-    border: 1px solid #f3c6c6;
+    background: var(--danger-surface);
+    border: 1px solid var(--danger-line);
     border-radius: 4px;
-    color: #922;
+    color: var(--danger-ink);
     font-size: 0.8rem;
   }
 </style>

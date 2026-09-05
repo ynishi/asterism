@@ -29,6 +29,15 @@ export default defineConfig(async () => ({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+
+    // `css: false` is Vitest's default and it replaces a CSS module
+    // with an empty string — including one asked for as `?raw`, which
+    // is how `palette.test.ts` reads the palette it holds the tree to.
+    // Blanked, that suite reports every name in the app as undefined.
+    // Nothing else here imports CSS: `app.css` reaches the app through
+    // `main.ts`, which no test loads, so turning this on costs the
+    // suite one file it would otherwise skip.
+    css: true,
   },
 
   // Svelte ships separate server and client builds. Under Vitest the

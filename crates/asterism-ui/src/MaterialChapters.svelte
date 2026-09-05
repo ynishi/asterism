@@ -442,9 +442,9 @@
     flex-shrink: 0;
     box-sizing: border-box;
     padding: 0.4rem 0.5rem;
-    background: #ffffff;
-    color: #1f1e33;
-    border: 1px solid #e4e1f4;
+    background: var(--surface-raised);
+    color: var(--ink);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
   }
 
@@ -460,20 +460,20 @@
     display: inline-flex;
     align-items: baseline;
     gap: 0.3rem;
-    background: rgba(250, 204, 21, 0.12);
-    border: 1px solid rgba(250, 204, 21, 0.4);
+    background: var(--warning-surface);
+    border: 1px solid var(--warning-line);
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
     font-size: 0.75rem;
-    color: #4a3908;
+    color: var(--warning-ink);
     cursor: pointer;
   }
   .chapter-band:hover {
-    background: rgba(250, 204, 21, 0.24);
+    background: var(--warning-surface-strong);
   }
   .chapter-band.active {
-    background: rgba(250, 204, 21, 0.34);
-    border-color: #d9a706;
+    background: var(--warning-surface);
+    border-color: var(--warning-fill);
   }
   /* A band one owns reads as one's own before the buttons say so. */
   .chapter-band.mine {
@@ -481,26 +481,26 @@
   }
   .chapter-band-default {
     font-size: 0.62rem;
-    color: #6b571a;
+    color: var(--warning-ink);
   }
   .chapter-band-add,
   .chapter-band-action {
     background: none;
-    border: 1px solid #d6d3ec;
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     padding: 0.15rem 0.5rem;
     font-size: 0.68rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     cursor: pointer;
   }
   .chapter-band-add:hover:not(:disabled),
   .chapter-band-action:hover:not(:disabled) {
-    background: #f4f2ff;
+    background: var(--accent-surface);
   }
   .chapter-band-action.danger:hover:not(:disabled) {
-    color: #d0393b;
-    border-color: #e8b4b5;
-    background: #fdf3f3;
+    color: var(--danger-ink);
+    border-color: var(--danger-line);
+    background: var(--surface-raised);
   }
   .chapter-band-add:disabled,
   .chapter-band-action:disabled {
@@ -513,7 +513,7 @@
     position: relative;
     width: 100%;
     height: 14px;
-    background: rgba(250, 204, 21, 0.18);
+    background: var(--warning-surface);
     border-radius: 3px;
   }
   .chapter-tick {
@@ -525,11 +525,11 @@
     padding: 0;
     border: none;
     border-radius: 1px;
-    background: #d9a706;
+    background: var(--warning-fill);
     cursor: pointer;
   }
   .chapter-tick:hover {
-    background: #a37a04;
+    background: var(--warning-fill-hover);
     width: 5px;
     margin-left: -2px;
   }
@@ -538,7 +538,7 @@
     top: -2px;
     width: 1px;
     height: calc(100% + 4px);
-    background: rgba(31, 30, 51, 0.8);
+    background: var(--ink);
     pointer-events: none;
   }
 
@@ -559,8 +559,8 @@
     align-items: baseline;
     gap: 0.4rem;
     padding: 0.15rem 0.3rem;
-    border-left: 3px solid #d9a706;
-    background: rgba(250, 204, 21, 0.08);
+    border-left: 3px solid var(--warning-fill);
+    background: var(--warning-surface);
     border-radius: 3px;
   }
   .chapter-row.mine {
@@ -578,7 +578,7 @@
   .chapter-time {
     font-family: "SF Mono", ui-monospace, monospace;
     font-size: 0.7rem;
-    color: #6b571a;
+    color: var(--warning-ink);
   }
   .chapter-title {
     flex: 1;
@@ -595,20 +595,20 @@
     padding: 0.1rem 0.35rem;
     font-size: 0.78rem;
     font-family: inherit;
-    background: #fffdf5;
-    border: 1px solid #e6dcb4;
+    background: var(--surface-raised);
+    border: 1px solid var(--warning-line);
     border-radius: 3px;
     outline: none;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .chapter-title-input:focus {
-    border-color: #d9a706;
-    background: #ffffff;
+    border-color: var(--warning-fill);
+    background: var(--surface-raised);
   }
   .chapter-row-action {
     background: none;
     border: none;
-    color: #b7b1e5;
+    color: var(--accent-ink-dim);
     cursor: pointer;
     font-size: 0.72rem;
     line-height: 1;
@@ -616,10 +616,10 @@
     flex-shrink: 0;
   }
   .chapter-row-action:hover:not(:disabled) {
-    color: #4a3908;
+    color: var(--warning-ink);
   }
   .chapter-row-action.danger:hover:not(:disabled) {
-    color: #d0393b;
+    color: var(--danger-ink);
   }
   .chapter-row-action:disabled {
     opacity: 0.5;
@@ -627,7 +627,7 @@
   }
   .chapter-note {
     font-size: 0.72rem;
-    color: #9c98c9;
+    color: var(--accent-ink);
     padding: 0.15rem 0.3rem;
   }
 
@@ -641,7 +641,7 @@
   .chapter-at {
     font-family: "SF Mono", ui-monospace, monospace;
     font-size: 0.7rem;
-    color: #6b571a;
+    color: var(--warning-ink);
     flex-shrink: 0;
   }
   .chapter-input {
@@ -651,20 +651,20 @@
     padding: 0.25rem 0.45rem;
     font-size: 0.78rem;
     font-family: inherit;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .chapter-input:focus {
-    border-color: #d9a706;
-    background: #ffffff;
+    border-color: var(--warning-fill);
+    background: var(--surface-raised);
   }
   .chapter-add-btn {
     padding: 0.25rem 0.7rem;
-    background: #d9a706;
-    color: #ffffff;
+    background: var(--warning-fill);
+    color: var(--warning-on-fill);
     border: none;
     border-radius: 4px;
     font-size: 0.75rem;
@@ -672,7 +672,7 @@
     flex-shrink: 0;
   }
   .chapter-add-btn:hover:not(:disabled) {
-    background: #b98d05;
+    background: var(--warning-fill-hover);
   }
   .chapter-add-btn:disabled {
     opacity: 0.5;
@@ -681,6 +681,6 @@
   .chapter-error {
     margin: 0;
     font-size: 0.7rem;
-    color: #d0393b;
+    color: var(--danger-ink);
   }
 </style>

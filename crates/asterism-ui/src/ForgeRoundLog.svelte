@@ -29,9 +29,9 @@
   //
   // `dividerColor` is a prop rather than a fixed rule for the same
   // reason the verb is optional: the two callers never agreed on it.
-  // `ForgeWork` drew this divider in `rgba(128, 128, 128, 0.25)`,
-  // `SharedLineWork` in `rgba(255, 255, 255, 0.14)` — a difference this
-  // component would otherwise erase by picking one of the two.
+  // `ForgeWork` draws this divider in `--line`, `SharedLineWork` in
+  // `--wash-up-strong` — a difference this component would otherwise
+  // erase by picking one of the two.
   import type { ForgeOpDto, ForgeRoundDto } from "./bindings";
   import type { ForgeProjectedEntry } from "./lib/forge-projection";
 

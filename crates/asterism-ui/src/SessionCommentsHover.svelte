@@ -363,15 +363,15 @@
     position: fixed;
     width: 340px;
     max-height: 380px;
-    background: #ffffff;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 8px;
-    box-shadow: 0 12px 30px rgba(23, 22, 42, 0.25);
+    box-shadow: 0 12px 30px var(--shadow-color);
     z-index: 55;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .head {
     display: flex;
@@ -379,10 +379,10 @@
     align-items: center;
     font-size: 0.72rem;
     padding: 0.35rem 0.5rem 0.35rem 0.7rem;
-    background: #f5f4ff;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-weight: 600;
-    border-bottom: 1px solid #eae7f8;
+    border-bottom: 1px solid var(--accent-line);
   }
   .head-title {
     letter-spacing: 0.02em;
@@ -390,14 +390,14 @@
   .close-btn {
     background: transparent;
     border: none;
-    color: #6a67a4;
+    color: var(--accent-ink);
     cursor: pointer;
     font-size: 0.85rem;
     line-height: 1;
     padding: 0.1rem 0.35rem;
   }
   .close-btn:hover {
-    color: #1f1e33;
+    color: var(--ink);
   }
   .rows {
     list-style: none;
@@ -410,9 +410,9 @@
     gap: 0.4rem;
   }
   .row {
-    border-left: 2px solid #5850ff;
+    border-left: 2px solid var(--accent-line-strong);
     padding: 0.3rem 0.5rem;
-    background: #f5f4ff;
+    background: var(--accent-surface);
     border-radius: 3px;
     font-size: 0.75rem;
     display: flex;
@@ -420,8 +420,8 @@
     gap: 0.15rem;
   }
   .row.persona {
-    border-left-color: #b47bff;
-    background: #f8f3ff;
+    border-left-color: var(--accent-line-strong);
+    background: var(--accent-surface);
   }
   .row-head {
     display: flex;
@@ -441,37 +441,37 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #eae7f8;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-size: 0.55rem;
     font-weight: 600;
     flex-shrink: 0;
   }
   .avatar-placeholder.user {
-    background: #eceff8;
-    color: #4a4a80;
+    background: var(--accent-surface-strong);
+    color: var(--ink);
   }
   .author {
     font-weight: 600;
-    color: #2f2c5c;
+    color: var(--ink);
     flex-shrink: 0;
   }
   .time {
     margin-left: auto;
     font-variant-numeric: tabular-nums;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-size: 0.65rem;
   }
   .body {
     margin: 0;
-    color: #1f1e33;
+    color: var(--ink);
     line-height: 1.4;
     white-space: pre-wrap;
     word-break: break-word;
   }
   .asset-hint {
     margin: 0;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-size: 0.65rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -481,34 +481,34 @@
     margin: 0;
     padding: 1rem 0.75rem;
     text-align: center;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-size: 0.75rem;
   }
   .error {
     margin: 0;
     padding: 0.6rem 0.75rem;
-    color: #b46;
-    background: #fdecec;
-    border-top: 1px solid #f3c6c6;
+    color: var(--danger-ink);
+    background: var(--danger-surface);
+    border-top: 1px solid var(--danger-line);
     font-size: 0.75rem;
   }
   /* Compose section — mirrors DetailPane's comment compose tone
-     (light lavender frame, monotone textarea, primary Post button)
+     (accent-tinted frame, monotone textarea, primary Post button)
      so the Session and Message comment compose UIs stay visually
      unified. */
   .compose {
-    border-top: 1px solid #eae7f8;
+    border-top: 1px solid var(--accent-line);
     padding: 0.5rem 0.6rem;
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    background: #fafaff;
+    background: var(--surface-raised);
   }
   .compose-head {
     display: flex;
     gap: 0.6rem;
     font-size: 0.68rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
   }
   .kind-toggle {
     display: inline-flex;
@@ -521,17 +521,17 @@
     box-sizing: border-box;
     min-height: 3rem;
     padding: 0.3rem 0.4rem;
-    border: 1px solid #d6d3ec;
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
-    background: #fff;
-    color: #1f1e33;
+    background: var(--surface-raised);
+    color: var(--ink);
     font-size: 0.75rem;
     font-family: inherit;
     resize: vertical;
   }
   .compose-input:focus {
     outline: none;
-    border-color: #8f88d6;
+    border-color: var(--accent-line-strong);
   }
   .compose-error {
     padding: 0.3rem 0.4rem;
@@ -546,11 +546,11 @@
   }
   .compose-hint {
     font-size: 0.62rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
   }
   .post-btn {
-    background: #5850ff;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border: none;
     border-radius: 4px;
     padding: 0.25rem 0.7rem;
@@ -559,10 +559,10 @@
     cursor: pointer;
   }
   .post-btn:disabled {
-    background: #c8c4ea;
+    background: var(--accent-surface-strong);
     cursor: not-allowed;
   }
   .post-btn:hover:not(:disabled) {
-    background: #4a43e6;
+    background: var(--accent-fill-hover);
   }
 </style>

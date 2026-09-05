@@ -249,8 +249,8 @@
     gap: 0.3rem;
     padding: 0.4rem 0.6rem;
     margin: 0 0 0.5rem;
-    background: #f7f7fb;
-    border: 1px solid #e6e5f0;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 8px;
   }
 
@@ -258,7 +258,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #9a97b0;
+    color: var(--accent-ink);
     margin-right: 0.15rem;
   }
 
@@ -269,72 +269,76 @@
     padding: 0.12rem 0.55rem;
     font-size: 0.72rem;
     font-family: inherit;
-    color: #7a76c9;
-    background: #f0effc;
-    border: 1px solid #d9d5f2;
+    /* Neutral, so that each axis below reads as a hue against it. The
+       base wore the accent until the palette landed, which left the
+       persona axis — also accent — indistinguishable from a chip
+       carrying no axis at all. */
+    color: var(--ink-secondary);
+    background: var(--surface-hover);
+    border: 1px solid var(--line);
     border-radius: 999px;
     cursor: pointer;
   }
   .afb-chip:hover {
-    background: #e2ddf9;
-    color: #5a55b2;
+    background: var(--surface-active);
+    color: var(--ink);
   }
 
   /* Per-axis palettes so the axes read apart at a glance. Kept in the
      same hue families as the sidebar chips they replace. */
   .afb-chip.group {
-    background: #eef7f4;
-    border-color: #c8e4d6;
-    color: #4a8f78;
+    background: var(--success-surface);
+    border-color: var(--success-line);
+    color: var(--success-ink);
   }
   .afb-chip.group:hover {
-    background: #d9ede4;
-    color: #2f6e5a;
+    background: var(--success-surface-strong);
+    color: var(--success-ink);
   }
   .afb-chip.session {
-    background: #fdf6f0;
-    border-color: #f0d5c0;
-    color: #b28860;
+    background: var(--surface-hover);
+    border-color: var(--warning-line);
+    color: var(--warning-ink);
   }
   .afb-chip.session:hover {
-    background: #f7e5d3;
-    color: #8a6540;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
   }
   .afb-chip.persona {
-    background: #eef2fb;
-    border-color: #ccd8f0;
-    color: #5670b0;
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
+    color: var(--accent-ink);
   }
   .afb-chip.persona:hover {
-    background: #dce6f8;
-    color: #3d569a;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
   .afb-chip.modality {
-    background: #f5f0fa;
-    border-color: #e0d0ee;
-    color: #8a5fb0;
+    background: var(--accent-surface);
+    border-color: var(--cat-orchid);
+    color: var(--cat-orchid);
   }
   .afb-chip.modality:hover {
-    background: #ebdcf6;
-    color: #6d4394;
+    background: var(--accent-surface-strong);
+    color: var(--cat-orchid);
   }
   .afb-chip.label {
-    background: #fdf3f6;
-    border-color: #f0cdd8;
-    color: #b25f7d;
+    background: var(--danger-surface);
+    border-color: var(--danger-line);
+    color: var(--danger-ink);
   }
   .afb-chip.label:hover {
-    background: #f7dbe4;
-    color: #8f4361;
+    background: var(--danger-surface-strong);
+    color: var(--danger-ink);
   }
   .afb-chip.search {
-    background: #f0f6f9;
-    border-color: #cfe1ec;
-    color: #4f7d99;
+    background: var(--info-surface);
+    border-color: var(--info-line);
+    color: var(--info-ink);
   }
   .afb-chip.search:hover {
-    background: #dcecf4;
-    color: #35637d;
+    background: var(--info-surface-strong);
+    color: var(--info-ink);
   }
 
   /* Reads as a qualifier on the tag chips it follows, not as another
@@ -345,7 +349,7 @@
     gap: 0.2rem;
     font-size: 0.68rem;
     letter-spacing: 0.03em;
-    color: #7a76c9;
+    color: var(--accent-ink);
     cursor: pointer;
     user-select: none;
   }
@@ -363,13 +367,15 @@
   }
 
   /* Stands in for the glyph the other chips lead with (◈ / ▤ / ▣).
-     The hairline keeps White legible against the chip. */
+     The catalogue runs from White to Black, so whichever end the app
+     is dark or light at, one of them meets the chip it sits on; the
+     hairline is what keeps that one an edge rather than a hole. */
   .afb-swatch {
     display: inline-block;
     width: 0.6rem;
     height: 0.6rem;
     border-radius: 2px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--line-strong);
     vertical-align: -1px;
   }
 
@@ -387,19 +393,19 @@
     padding: 0.1rem 0.4rem;
     font-size: 0.72rem;
     font-family: inherit;
-    color: #7a76c9;
+    color: var(--accent-ink);
     cursor: pointer;
     line-height: 1.3;
   }
   .afb-ctrl:hover {
-    background: #ecebfa;
-    border-color: #d9d5f2;
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
   }
   .afb-clear-all {
-    color: #b05656;
+    color: var(--danger-ink);
   }
   .afb-clear-all:hover {
-    background: #fbeaea;
-    border-color: #f0cccc;
+    background: var(--danger-surface);
+    border-color: var(--danger-line);
   }
 </style>

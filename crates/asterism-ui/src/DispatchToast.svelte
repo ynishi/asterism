@@ -27,11 +27,11 @@
     left: 50%;
     transform: translateX(-50%);
     padding: 0.5rem 1rem;
-    background: #1f1e33;
-    color: #e9e7ff;
+    background: var(--accent-surface-strong);
+    color: var(--ink);
     border-radius: 6px;
     font-size: 0.85rem;
-    box-shadow: 0 6px 18px rgba(23, 22, 42, 0.3);
+    box-shadow: 0 6px 18px var(--shadow-color);
     z-index: 45;
     max-width: 60ch;
   }

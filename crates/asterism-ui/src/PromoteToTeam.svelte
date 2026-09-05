@@ -469,7 +469,7 @@
 
 <style>
   .promote {
-    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    border-top: 1px solid var(--line);
     margin-top: 0.9rem;
     padding-top: 0.7rem;
   }
@@ -500,7 +500,7 @@
     font-weight: 600;
   }
   .travels {
-    border-left: 2px solid rgba(128, 128, 128, 0.4);
+    border-left: 2px solid var(--line);
     padding-left: 0.5rem;
   }
   form {
@@ -519,7 +519,7 @@
   button {
     align-self: flex-start;
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;

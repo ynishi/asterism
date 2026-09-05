@@ -182,10 +182,10 @@
   .profile-card {
     position: fixed;
     z-index: 800;
-    background: #fff;
-    border: 1px solid #d9d5f2;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 8px;
-    box-shadow: 0 12px 32px rgba(30, 20, 90, 0.15);
+    box-shadow: 0 12px 32px var(--shadow-color);
     padding: 0.7rem 0.85rem;
     min-width: 240px;
     max-width: 300px;
@@ -201,7 +201,7 @@
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: #eee9ff;
+    background: var(--accent-surface);
     overflow: hidden;
     flex-shrink: 0;
     display: flex;
@@ -214,7 +214,7 @@
     object-fit: cover;
   }
   .profile-card-avatar-fallback {
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-size: 1.1rem;
   }
   .profile-card-name-block {
@@ -225,27 +225,27 @@
   }
   .profile-card-name {
     font-weight: 600;
-    color: #223;
+    color: var(--ink);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .profile-card-role {
     font-size: 0.7rem;
-    color: #6c58c3;
-    background: #eee9ff;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
     padding: 0.05rem 0.4rem;
     border-radius: 3px;
     align-self: flex-start;
   }
   .profile-card-bio {
     margin: 0 0 0.55rem;
-    color: #445;
+    color: var(--ink-secondary);
     font-size: 0.8rem;
     line-height: 1.35;
   }
   .profile-card-bio.dim {
-    color: #999;
+    color: var(--ink-faint);
     font-style: italic;
   }
   .profile-card-form {
@@ -260,13 +260,13 @@
   }
   .profile-card-form span {
     font-size: 0.7rem;
-    color: #666;
+    color: var(--ink-secondary);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
   .profile-card-form input {
     padding: 0.25rem 0.4rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 0.85rem;
   }
@@ -279,23 +279,23 @@
   .profile-card-cancel,
   .profile-card-edit {
     padding: 0.2rem 0.6rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.75rem;
-    color: #333;
+    color: var(--ink);
   }
   .profile-card-save {
-    background: #6c58c3;
-    color: #fff;
-    border-color: #6c58c3;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-fill);
   }
   .profile-card-save:hover {
-    background: #5847ab;
+    background: var(--accent-fill-hover);
   }
   .profile-card-cancel:hover,
   .profile-card-edit:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
 </style>

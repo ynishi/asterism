@@ -195,10 +195,52 @@ pub fn run() {
                     asterism_infra::paths::DataProfile::Dogfood => "Asterism".to_string(),
                     other => format!("Asterism — {}", other.as_str().to_ascii_uppercase()),
                 };
+                // The size is the UI's own number rather than a taste.
+                // `DetailPane.svelte`'s `.detail-panel` is
+                // `width: min(96vw, 1200px)`, so the panel reaches the
+                // width it was drawn for only past 1250px of window; at
+                // the 800 this used to open at it was clamped to 768,
+                // about three fifths of what it asks for. `max-height:
+                // 96vh` meets the same wall at 600 tall.
+                //
+                // Deliberately neither maximized nor full screen. A full
+                // screen window on macOS gets a Space of its own, so
+                // reaching anything beside it — a ComfyUI tab, a
+                // terminal — costs a Space switch; a large ordinary
+                // window stays where the rest of the work is.
+                //
+                // The floor is the shell's: `180px` of sidebar beside a
+                // grid of `minmax(180px, 1fr)` cards, which needs room
+                // for three of them before the arrangement stops being
+                // one. Without it the window dragged down to nothing.
+                // The frontend declares `color-scheme: dark` and means
+                // it: there is one value set and no light one to fall
+                // back to. Two pieces of this window are the operating
+                // system's rather than the stylesheet's, and both have
+                // to be told the same thing or the app arrives with a
+                // seam down the middle of it.
+                //
+                // `theme` is the title bar. Left as `None` it follows
+                // the OS, so an app that is always dark wore a light
+                // title bar on a light Mac — visible in every
+                // screenshot and the one part of the window CSS cannot
+                // reach.
+                //
+                // `background_color` is what the window is before the
+                // webview has painted anything. On macOS it reaches the
+                // window layer only (the webview layer is not
+                // implemented there), which is exactly the layer that
+                // shows during launch. `#16151c` is `--surface` from
+                // `app.css` — the value is duplicated because a
+                // stylesheet cannot hand a colour to a window builder,
+                // and this is the only place that copy exists.
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                     .title(title)
-                    .inner_size(800.0, 600.0)
+                    .inner_size(1280.0, 860.0)
+                    .min_inner_size(960.0, 640.0)
                     .resizable(true)
+                    .theme(Some(tauri::Theme::Dark))
+                    .background_color(tauri::window::Color(0x16, 0x15, 0x1c, 255))
                     .build()?;
             }
 

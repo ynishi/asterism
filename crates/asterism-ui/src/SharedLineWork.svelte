@@ -407,7 +407,7 @@
   <ForgeRoundLog
     rounds={work.rounds}
     {projected}
-    dividerColor="rgba(255, 255, 255, 0.14)"
+    dividerColor="var(--wash-up-strong)"
   />
 
   {#if !ended}
@@ -449,15 +449,15 @@
     margin: 0.3rem 0;
   }
   .error {
-    color: #ff9d9d;
+    color: var(--danger-ink);
     opacity: 1;
   }
   .warn {
-    border-left: 2px solid rgba(220, 170, 90, 0.7);
+    border-left: 2px solid var(--warning-line);
     padding-left: 0.5rem;
   }
   .collisions {
-    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    border-left: 2px solid var(--danger-line);
     padding-left: 0.5rem;
     margin: 0.5rem 0;
   }
@@ -471,7 +471,7 @@
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.78rem;
-    border-left: 2px solid rgba(255, 255, 255, 0.3);
+    border-left: 2px solid var(--line-strong);
     padding-left: 0.5rem;
   }
   .said button {
@@ -536,7 +536,7 @@
   .close button,
   .quiet button {
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border: 1px solid var(--line-strong);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
@@ -565,7 +565,7 @@
     gap: 0.35rem;
     margin-top: 1rem;
     padding-top: 0.7rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    border-top: 1px solid var(--line);
   }
   .new-work label,
   .close label {
@@ -578,7 +578,7 @@
   .new-work button {
     align-self: flex-start;
     background: none;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border: 1px solid var(--line-strong);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;

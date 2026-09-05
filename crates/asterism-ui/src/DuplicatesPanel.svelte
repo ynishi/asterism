@@ -614,7 +614,7 @@
   .dup-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(20, 18, 16, 0.35);
+    background: var(--wash-down);
     z-index: 40;
   }
 
@@ -626,9 +626,9 @@
     width: min(880px, 90vw);
     max-height: 85vh;
     overflow-y: auto;
-    background: #faf9f5;
+    background: var(--surface-raised);
     border-radius: 8px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 12px 40px var(--shadow-color);
     padding: 1rem 1.25rem 1.5rem;
     z-index: 41;
   }
@@ -648,26 +648,26 @@
     background: none;
     border: none;
     font-size: 0.9rem;
-    color: #777;
+    color: var(--ink-muted);
     cursor: pointer;
   }
 
   .dup-h3 {
     font-size: 0.85rem;
     margin: 1rem 0 0.15rem;
-    color: #3a3733;
+    color: var(--ink);
   }
 
   .dup-lead {
     margin: 0 0 0.5rem;
     font-size: 0.8rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
 
   .dup-exclusion {
     margin: 0 0 0.5rem;
     font-size: 0.75rem;
-    color: #8a6d3b;
+    color: var(--warning-ink);
   }
 
   .dup-axes {
@@ -680,19 +680,19 @@
     font-family: inherit;
     font-size: 0.72rem;
     padding: 0.25rem 0.5rem;
-    border: 1px solid #d8d4c8;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #f4f2ec;
-    color: #555;
+    background: var(--surface-hover);
+    color: var(--ink-secondary);
     cursor: pointer;
   }
   .dup-axis:hover:enabled {
-    background: #eceae2;
+    background: var(--surface-active);
   }
   .dup-axis.on {
-    background: #e2ded1;
-    border-color: #b9b3a1;
-    color: #3a3733;
+    background: var(--line-strong);
+    border-color: var(--line-strong);
+    color: var(--ink);
   }
   .dup-axis:disabled {
     opacity: 0.5;
@@ -702,13 +702,13 @@
   .dup-axis-badge {
     margin: 0 0 0.4rem;
     font-size: 0.7rem;
-    color: #7a7594;
+    color: var(--accent-ink);
   }
 
   .dup-queued {
     margin: 0 0 0.4rem;
     font-size: 0.75rem;
-    color: #4a6b52;
+    color: var(--success-ink);
   }
 
   .dup-conflict-actions {
@@ -719,23 +719,23 @@
 
   .dup-role {
     margin-left: 0.3rem;
-    color: #7a7594;
+    color: var(--accent-ink);
   }
 
   .dup-note {
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
     margin: 0 0 0.75rem;
   }
 
   .dup-pending {
     display: block;
-    color: #8a6d3b;
+    color: var(--warning-ink);
   }
 
   .dup-error {
     font-size: 0.8rem;
-    color: #a4423a;
+    color: var(--danger-ink);
     margin: 0 0 0.75rem;
   }
 
@@ -746,10 +746,10 @@
   }
 
   .dup-group {
-    border: 1px solid #e6e3da;
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 0.6rem;
-    background: #fff;
+    background: var(--surface-raised);
   }
   .dup-group.busy {
     opacity: 0.6;
@@ -774,7 +774,7 @@
     height: 110px;
     object-fit: cover;
     border-radius: 4px;
-    background: #efefe9;
+    background: var(--surface-hover);
   }
 
   figcaption {
@@ -782,7 +782,7 @@
     flex-direction: column;
     gap: 0.2rem;
     font-size: 0.72rem;
-    color: #555;
+    color: var(--ink-secondary);
   }
 
   .dup-name {
@@ -792,12 +792,12 @@
   }
 
   .dup-meta {
-    color: #999;
+    color: var(--ink-faint);
   }
 
   .dup-oldest {
     margin-left: 0.3rem;
-    color: #7a7594;
+    color: var(--accent-ink);
   }
 
   .dup-pick {
@@ -812,13 +812,13 @@
     font-family: inherit;
     font-size: 0.72rem;
     padding: 0.25rem 0.4rem;
-    border: 1px solid #d8d4c8;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #f4f2ec;
+    background: var(--surface-hover);
     cursor: pointer;
   }
   .dup-keep:hover:enabled {
-    background: #eceae2;
+    background: var(--surface-active);
   }
   .dup-keep:disabled {
     opacity: 0.5;

@@ -1098,6 +1098,124 @@ and this project adheres to
 
 ### Changed
 
+- **A dark ground, and colours that are named once** (#240). `DetailPane`
+  already put an image on `#1a1a1a`; everything around that stage was light, so
+  the grid — where a selection is actually made, hundreds of thumbnails at a
+  time — reported its contents against a near-white surround, and the detail
+  view a click later did not. The app opens dark now, and `color-scheme` says
+  `dark` rather than the `light dark` it had claimed while every colour it
+  painted itself was a light-mode literal: the form controls, the scrollbars and
+  the canvas behind the page were the user agent's to draw in whichever mode the
+  OS was set to, and they were the only part of the window that obeyed.
+
+  **The colours had to be collapsed before they could be inverted.** There were
+  1256 colour literals across 41 of the 45 components, 368 of them distinct and
+  188 written exactly once — not 368 decisions but about thirty, each written
+  down a dozen times slightly differently: seventeen neutral lightnesses with
+  near-duplicates piled at each, and 158 settings of a single violet. They are
+  named once in `app.css` now, in a role vocabulary that says where each one
+  belongs — `-fill` and `-on-fill` and `-ink` and `-surface` and `-line`,
+  because a name that does not carry its role gets applied to whatever the
+  reader assumed. The colours that stayed outside are the swatch representatives
+  in `lib/stores/color.svelte.ts`, which are a derived fact of each image rather
+  than a design decision. A light set, if anybody wants one, is a second block
+  of values there rather than a second pass over 41 files.
+
+  **What a mechanical substitution cannot decide.** Ten hover and focus rules
+  had used two neighbouring tints for their base and their state, both of which
+  landed on one name and left the state invisible. Light tints in one lightness
+  band fell through to their family's saturated fill, which is how a pale olive
+  background became amber under text that then read at 1.35:1. Selection rings
+  turned black, because a ring is a `box-shadow` and every `box-shadow` looked
+  like a shadow. And a status colour is not a categorical one: borrowing
+  `danger` to tell one author apart from another made a persona's own message
+  carry the colour that elsewhere means destroy. Each of those is a distinction
+  the old literals held only by being different from each other, and naming them
+  is what made the loss visible — three review passes found them, and the names
+  are also what let them be fixed in one place each.
+
+  **The invariants underneath all of that are now a test rather than a
+  paragraph.** `palette.test.ts` reads `app.css` and every component and refuses
+  a colour literal in a style block, a name the palette does not define, a name
+  nothing reads, a hover or focus rule whose every declaration equals its base,
+  and — in each rule that states both its ink and its ground — a pair below the
+  contrast bar `app.css` states. It also holds the boundary the palette had
+  quietly crossed: a component may write `var(--hook, real value)` so a host can
+  retheme it, and the palette may not define any of those names. Defining one
+  kills the fallback behind it, which is how a global `--danger` turned four
+  labels into the fill colour at 3.2:1 with every gate green. Each claim was
+  seeded back into a throwaway component to confirm it fails — reinstating
+  `--danger` in `app.css` reproduces that defect and names all three files —
+  since a check that has never failed has not been shown to work.
+
+- **The window opens at a size the UI asks for** (#239). 1280×860 rather than
+  800×600, and a floor under it. The number is the UI's own: `DetailPane`'s
+  panel is `width: min(96vw, 1200px)`, so at 800 it was clamped to 768 — about
+  three fifths of the width it was drawn for — and `max-height: 96vh` met the
+  same wall at 600 tall. Deliberately neither maximized nor full screen: a full
+  screen window on macOS takes a Space of its own, so reaching anything beside
+  it costs a switch. `min_inner_size` is new; nothing had stopped the window
+  being dragged below the point where 180px of sidebar beside a grid of
+  `minmax(180px, 1fr)` cards is still an arrangement.
+
+  Two smaller things the same pass. The page's favicon pointed at
+  `/album-logo.svg` — a file this crate does not contain, under another
+  product's name; it points at the bundle's own master now, by relative path, so
+  one file serves both. And `copyright` and `category` are set, both of which
+  are read — `category` becomes `LSApplicationCategoryType` and `copyright`
+  shows in the bundle's information. The copyright line is the one `LICENSE-MIT`
+  already declares.
+
+  **And the two pieces of the window the stylesheet cannot reach**, found by
+  opening the Dogfood build once #240 had made the app dark. The title bar took
+  whichever appearance the system was in, so an app with one value set and no
+  light one to fall back to wore a light bar across the top of it on a light
+  Mac; the window is built with `theme: Dark` now. And nothing was painted
+  between the window opening and the first frame of the UI, because the builder
+  named no `background_color` and `index.html` declared no `color-scheme` — the
+  stylesheet arrives a module load after the document is parsed. Both are stated
+  now, and `--surface` is duplicated into the window builder because a
+  stylesheet cannot hand a colour to one.
+
+- **The sidebar's filter bands show their own labels** (#239). Length, Size and
+  Pixels were rendering about two characters of their `min` and `max`
+  placeholders. The row never fitted: on one line it asks for roughly 207px
+  inside the 137px a 180px sidebar leaves, and the inputs were the only children
+  with `min-width: 0`, so the whole shortfall landed on them. The label takes
+  its own line now, the number spinner is gone — 15px of a 44px box, and a
+  filter threshold is typed rather than stepped — and the unit is sized by its
+  own text instead of by the widest of `s`, `MB` and `MP`. All three bands stand
+  the same height.
+
+- **The team drawer's sign-in stops short of the drawer's edge** (#239). Server,
+  Login and Password were taking the drawer's full body width — 795px each,
+  which the window opening at 1280 makes the state it opens in rather than
+  something to widen the window and find. Capped at 24rem, and on that form
+  alone: the other forms in the drawer sit beside the work they act on and have
+  not asked for one.
+
+- **The app carries its own icon** (#238). What shipped until now was the teal
+  and yellow interlocking rings `create-tauri-app` writes into every new
+  project. In its place: three white stars joined into a triangle, over an
+  indigo-to-black ground — the name read literally, and the shape the
+  application already has. `icons/icon.svg` is the master and the file to edit;
+  the sixteen rasters beside it are `npx tauri icon` output and are regenerated
+  rather than touched.
+
+  **The artwork carries its own rounded tile, because it ships to two macOS
+  generations that disagree about who draws one.** macOS 26 masks every app icon
+  to a squircle itself and wants full-bleed artwork; macOS 15 and earlier draw
+  what the bundle carries and want Apple's template geometry, an 824×824 tile
+  inset in a 1024 canvas. Nothing here sets a `minimumSystemVersion`, so the
+  bundle reaches both, and the inset tile is the version that is wrong in the
+  cheaper direction — under 26's mask it reads somewhat smaller, where
+  full-bleed artwork on 15 is a hard-cornered square a quarter larger than every
+  icon beside it in the Dock. The first pass of this icon shipped full-bleed on
+  the reasoning that the system masks it, which is true of one of the two. The
+  same margin rides into `icon.ico` and the `Square*Logo.png` tiles, which draw
+  unmasked and would not have asked for it; that is the price of keeping one
+  master.
+
 - **The forge and the shared-lines drawer's two-column shells share their gap
   and rail width now** (#217). The same check the tab strip's departure got: the
   shell's mechanism (a flex row, a fixed-width rail, a flexible body) was

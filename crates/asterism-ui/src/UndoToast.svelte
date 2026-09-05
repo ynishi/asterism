@@ -96,11 +96,11 @@
     align-items: center;
     gap: 0.75rem;
     padding: 0.5rem 0.6rem 0.5rem 1rem;
-    background: #1f1e33;
-    color: #e9e7ff;
+    background: var(--accent-surface-strong);
+    color: var(--ink);
     border-radius: 6px;
     font-size: 0.85rem;
-    box-shadow: 0 6px 18px rgba(23, 22, 42, 0.3);
+    box-shadow: 0 6px 18px var(--shadow-color);
     z-index: 46;
     max-width: 60ch;
   }
@@ -130,12 +130,12 @@
     align-items: flex-start;
     gap: 0.75rem;
     padding: 0.6rem 0.6rem 0.6rem 1rem;
-    background: #33202a;
-    color: #ffe9ef;
-    border-left: 3px solid #ff6f8f;
+    background: var(--danger-surface);
+    color: var(--danger-ink);
+    border-left: 3px solid var(--danger-fill);
     border-radius: 6px;
     font-size: 0.85rem;
-    box-shadow: 0 6px 18px rgba(23, 22, 42, 0.3);
+    box-shadow: 0 6px 18px var(--shadow-color);
     z-index: 47;
     max-width: 60ch;
   }
@@ -154,7 +154,7 @@
     font-weight: 600;
   }
   .refusal-toast-detail {
-    color: #e0b8c4;
+    color: var(--danger-ink);
     font-size: 0.8rem;
   }
   .undo-toast-message {
@@ -166,29 +166,29 @@
     flex: none;
     padding: 0.25rem 0.7rem;
     border-radius: 5px;
-    border: 1px solid #6f68ff;
+    border: 1px solid var(--accent-line-strong);
     background: transparent;
-    color: #b9b4ff;
+    color: var(--accent-ink-dim);
     font-family: inherit;
     font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;
   }
   .undo-toast-action:hover {
-    background: #2c2a4d;
-    color: #e9e7ff;
+    background: var(--accent-surface-strong);
+    color: var(--ink);
   }
   .undo-toast-dismiss {
     flex: none;
     padding: 0.15rem 0.35rem;
     border: none;
     background: transparent;
-    color: #8f8bb5;
+    color: var(--accent-ink);
     font-family: inherit;
     font-size: 0.8rem;
     cursor: pointer;
   }
   .undo-toast-dismiss:hover {
-    color: #e9e7ff;
+    color: var(--ink);
   }
 </style>

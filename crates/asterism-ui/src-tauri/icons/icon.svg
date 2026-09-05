@@ -1,0 +1,103 @@
+<!--
+  The app icon's master. Every PNG, the .icns and the .ico in this directory
+  are `tauri icon` output from a 1024px render of this file, so this is the
+  one to edit and the rest are regenerated rather than touched:
+
+      rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon-1024.png
+      npx tauri icon /tmp/icon-1024.png
+
+  `npx tauri` rather than `cargo tauri`: the CLI this comes out of is the npm
+  one. `crates/asterism-ui/package.json` asks for `@tauri-apps/cli` by range;
+  `package-lock.json` is what pins a version, and CI installs from it with
+  `npm ci`. The Justfile and the release workflow both reach for that binary.
+  A `cargo-tauri` on somebody's machine is a different, unpinned version.
+
+  Three things fix the numbers below.
+
+  1. The artwork carries its own rounded rectangle and its own margin —
+     Apple's template geometry, an 824x824 tile centred in a 1024 canvas
+     with ~100px transparent on each side, corner radius 185.4.
+
+     This is the part that is version-conditional and the part a first pass
+     of this icon got wrong. macOS 26 masks every app icon to a squircle
+     itself, and artwork drawn for that generation is full bleed with no
+     corners of its own. macOS 15 and earlier — Apple's numbering runs 15
+     then 26, so there is no 16 through 25 to leave out — do not mask: they
+     draw what the bundle carries. A full-bleed square shipped to those
+     releases is a hard-cornered tile roughly a quarter larger than every
+     icon beside it in the Dock, which is what a render of it next to a
+     real Dock showed.
+
+     Nothing here sets a floor, so the bundle reaches both, and the inset
+     tile is the version that is wrong in the cheaper direction: under 26's
+     mask it sits inside the shape the system draws, so it reads somewhat
+     smaller than artwork made full bleed for that generation. That is a
+     cost rather than a free choice, and it is the one claim here that has
+     not been measured — this machine runs 15.7.3 and cannot show what 26
+     does with the file.
+
+     The margin rides into `icon.ico` and the `Square*Logo.png` tiles too,
+     which draw unmasked and would not have asked for it. That is the price
+     of one master, taken deliberately: a second source for Windows is a
+     second thing to keep in step.
+
+  2. Heavy strokes, because the mark has to survive downscaling. The two
+     thresholds come from rendering this mark at 16px while it was still
+     full bleed: a stroke 1% of the canvas disappeared, one at 3% left a
+     smudge. Both are fractions of the whole 1024 canvas, because the whole
+     canvas is what maps to the icon slot.
+
+     On that same scale the stroke below is 3.8% — authored at 48px, then
+     carried through the tile's 0.8047 scale, so 38.6px delivered, or 0.60px
+     at a 16px render. It is 4.7% of the 824 tile, which is why it holds the
+     weight it had before the tile existed; the tile is what the eye
+     compares it against, and the canvas is what the thresholds are in. The
+     stars are 16.3% and 10.1% of the canvas, 20.3% and 12.5% of the tile.
+
+     So the margin over the smudge threshold is 3.8 against 3, narrower than
+     it was full bleed. Measured on the file as it stands, the triangle
+     survives at 16px with the strokes rendering as partial alpha rather
+     than solid white, and the mark is clean at 32px. That weight is also
+     what matches the density of the icons this one sits beside in a Dock; a
+     lighter mark reads as washed out rather than as restraint.
+
+  3. Flat: no glow, no bevel, no baked highlight. Nothing in this pipeline
+     adds them and nothing removes them either, so a highlight painted here
+     is one that cannot be lit differently later.
+
+  What the mark is, and why it is this: see the name's own explanation in
+  README.md. What matters for editing the geometry is that the large star is
+  where the eye lands, and the two small ones hang off it.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#211d6b"/>
+      <stop offset="55%" stop-color="#141134"/>
+      <stop offset="100%" stop-color="#08080f"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#sky)"/>
+
+    <!-- The mark is authored against the full 1024 canvas and then placed
+         inside the tile. The header gives every figure twice for that
+         reason: once as drawn here, once as delivered through this scale. -->
+    <g transform="translate(100,100) scale(0.8046875)">
+      <g stroke="#ffffff" stroke-width="48" stroke-linecap="round" fill="none">
+        <line x1="300" y1="726" x2="618" y2="272"/>
+        <line x1="618" y1="272" x2="840" y2="576"/>
+        <line x1="840" y1="576" x2="300" y2="726"/>
+      </g>
+      <g fill="#ffffff">
+        <circle cx="300" cy="726" r="104"/>
+        <circle cx="618" cy="272" r="64"/>
+        <circle cx="840" cy="576" r="64"/>
+      </g>
+    </g>
+  </g>
+</svg>

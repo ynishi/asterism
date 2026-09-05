@@ -74,7 +74,7 @@
      graduates out of App (wave 9). */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -90,10 +90,10 @@
      Groups section uses, so "drag a card onto a sidebar row to file
      it" reads the same way on both axes. */
   li.drop-target {
-    outline: 2px dashed #b5b1e2;
+    outline: 2px dashed var(--accent-line-strong);
     outline-offset: -2px;
     border-radius: 4px;
-    background: #f2f1fb;
+    background: var(--accent-surface);
   }
 
   button {
@@ -101,7 +101,7 @@
     border: none;
     padding: 0.2rem 0.3rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -109,22 +109,22 @@
     font-family: inherit;
   }
   button:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
   button.active {
-    color: #111;
+    color: var(--ink);
     font-weight: 600;
-    background: #eceae2;
+    background: var(--surface-active);
   }
 
   .sidebar-count {
     float: right;
     font-size: 0.7rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     font-variant-numeric: tabular-nums;
     padding-left: 0.4rem;
   }
   button.active .sidebar-count {
-    color: #7a7594;
+    color: var(--accent-ink);
   }
 </style>

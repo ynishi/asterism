@@ -171,8 +171,8 @@
      (`auto-fill minmax(180px, 1fr)`) without a size discontinuity. */
   .card {
     position: relative;
-    background: #fff;
-    border: 1px solid #e6e6e2;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
     border-radius: 8px;
     padding: 0.6rem;
     min-height: 90px;
@@ -185,12 +185,12 @@
      plain Message tile at a glance. */
   .session-card {
     text-align: left;
-    border: 1px solid #eeecf8;
+    border: 1px solid var(--line-faint);
     cursor: pointer;
     font-family: inherit;
   }
   .session-card:hover {
-    background: #f8f7fd;
+    background: var(--surface-hover);
   }
 
   /* Card header row (mirrors App's `.card-head`). */
@@ -201,7 +201,7 @@
   }
   .date {
     font-size: 0.65rem;
-    color: #aaa;
+    color: var(--ink-faint);
   }
 
   /* Cover preview — 3-line clamp (messages grid uses the same limit). */
@@ -223,12 +223,12 @@
     justify-content: space-between;
     align-items: baseline;
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     margin-top: 0.3rem;
   }
   .session-count {
-    background: #f0effc;
-    color: #7a76c9;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     padding: 0.05rem 0.3rem;
     border-radius: 3px;
     font-variant-numeric: tabular-nums;
@@ -242,7 +242,7 @@
      same treatment as the messages grid. */
   .persona-name {
     font-size: 0.65rem;
-    color: #bbb;
+    color: var(--ink-faint);
     margin: 0;
   }
 
@@ -256,19 +256,19 @@
     padding: 0.05rem 0.35rem;
     font-size: 0.75rem;
     font-family: inherit;
-    color: #333;
+    color: var(--ink);
     background: transparent;
     border: 1px solid transparent;
     border-radius: 4px;
   }
   .title-input:hover {
-    border-color: #eee;
-    background: #fafafa;
+    border-color: var(--line-faint);
+    background: var(--surface-raised);
   }
   .title-input:focus {
     outline: none;
-    border-color: #c9c4e0;
-    background: #fff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
 
   /* Delete button. */
@@ -276,16 +276,16 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: #b46;
+    color: var(--danger-ink);
     font-size: 0.8rem;
     padding: 0 0.25rem;
     line-height: 1;
   }
   .del:hover:not(:disabled) {
-    color: #922;
+    color: var(--ink);
   }
   .del:disabled {
-    color: #ddd;
+    color: var(--ink-secondary);
     cursor: default;
   }
 
@@ -312,10 +312,10 @@
   .session-error {
     margin: 0.4rem 0 0;
     padding: 0.4rem 0.6rem;
-    background: #fdecec;
-    border: 1px solid #f3c6c6;
+    background: var(--danger-surface);
+    border: 1px solid var(--danger-line);
     border-radius: 4px;
-    color: #922;
+    color: var(--danger-ink);
     font-size: 0.75rem;
   }
 </style>

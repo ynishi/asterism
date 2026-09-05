@@ -2,8 +2,18 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/album-logo.svg" />
+    <!-- The bundle's own master, not a copy of it: Vite resolves this
+         relative path and emits the file into the build, so the mark
+         has one source. -->
+    <link rel="icon" type="image/svg+xml" href="./src-tauri/icons/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `app.css` says this too, and this is the copy that arrives in
+         time. The stylesheet is imported from `main.ts`, so it applies
+         a module load after the document is parsed; until then the
+         page has no colour scheme and the user agent paints its
+         default. Declared here, the canvas is dark from the first
+         frame. -->
+    <meta name="color-scheme" content="dark" />
     <title>Asterism</title>
   </head>
   <body>

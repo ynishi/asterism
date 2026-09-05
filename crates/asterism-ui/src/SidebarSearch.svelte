@@ -110,31 +110,31 @@
     border: none;
     font-size: 0.8rem;
     line-height: 1;
-    color: #8a86ff;
+    color: var(--accent-ink);
     cursor: pointer;
   }
 
   .search-mode:hover {
-    color: #5a55b2;
+    color: var(--ink);
   }
 
   .search-mode.exact {
-    color: #4f7d99;
+    color: var(--info-ink);
   }
 
   .search {
     width: 100%;
     padding: 0.35rem 1.5rem 0.35rem 1.75rem;
     font-size: 0.8rem;
-    border: 1px solid #d8d8d0;
+    border: 1px solid var(--line);
     border-radius: 5px;
-    background: #fff;
+    background: var(--surface-raised);
     box-sizing: border-box;
   }
 
   .search:focus {
     outline: none;
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
 
   .search-clear {
@@ -150,12 +150,12 @@
     background: none;
     border: none;
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
     cursor: pointer;
     line-height: 1;
   }
 
   .search-clear:hover {
-    color: #444;
+    color: var(--ink-secondary);
   }
 </style>
