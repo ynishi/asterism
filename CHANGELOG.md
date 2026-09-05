@@ -415,8 +415,9 @@ and this project adheres to
   surfaces, so it builds the frame as well: #190's design said the tabs were a
   design and not a component and that the first surface to land would build
   them, and this is that surface. The connection and the team sit above the
-  tabs, because they are what the tabs are answers about; publishing sits inside
-  the lines tab, because it seeds a line.
+  tabs, because they are what the tabs are answers about; publishing is gated on
+  the lines tab, because it seeds a line (#217 later moves the form itself to
+  the rail, keeping the same gate).
 
   **The read's shape decides more than taste does.** A ledger has no final page
   and the wire says so: a page that fills its limit always carries a cursor, and
@@ -1217,10 +1218,11 @@ and this project adheres to
 - **The shared-lines drawer gives the line its room** (#217). It is the forge
   drawer's width now, `min(52rem, 96vw)`, and draws the same two columns: a rail
   on the left with who is signed in, the teams this account is in, and — once a
-  team is on — its lines; the body on the right with the team's three tabs, and
-  inside `lines` either the open line's frame or the publish form. Before this
-  the drawer was one column at 30rem, and everything a person had to pass stayed
-  on screen above the line, so with a pursuit open the work began in the bottom
+  team is on — its lines, with the form that publishes one of this machine's own
+  at their foot; the body on the right with the team's three tabs, and inside
+  `lines`, once the team has one to open, the open line's frame. Before this the
+  drawer was one column at 30rem, and everything a person had to pass stayed on
+  screen above the line, so with a pursuit open the work began in the bottom
   tenth. The typed team id, which the instance admin still needs, sits behind
   "open a team by id" in the rail and folds away once it has named one; the
   publish form picks the local line from this machine's own list, read through

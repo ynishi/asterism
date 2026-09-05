@@ -30,10 +30,11 @@
   //
   // What this component adds is where everything else goes. The
   // connection and the team are what the tabs are answers about, so
-  // they are picked from before the tabs are read. Publishing sits
-  // *inside* the lines tab, because it seeds a line and a line is what
-  // that tab is for. Founding a team sits with the teams, argued where
-  // the control is.
+  // they are picked from before the tabs are read. Publishing is
+  // gated on the lines tab, because it seeds a line and a line is what
+  // that tab is for — though the form itself sits in the rail, at the
+  // lines list's own foot, argued under "Two columns" below. Founding
+  // a team sits with the teams, argued where the control is.
   //
   // # Two columns, the forge's width (#217)
   //
@@ -48,9 +49,11 @@
   // began in the bottom tenth.
   //
   // The rail holds what is picked from: who is signed in, the teams,
-  // and — once a team is on — its lines. The body holds what is read
-  // about the pick: the team's three tabs, and inside `lines` either
-  // the open line's frame or the publish form. Typing a team id, which
+  // and — once a team is on — its lines, with the form that publishes
+  // one of this machine's own at their foot (#217). The body holds
+  // what is read about the pick: the team's three tabs, and inside
+  // `lines`, once a team has one to open, the open line's frame.
+  // Typing a team id, which
   // the instance admin still needs (their list is empty while their
   // reach is not), sits behind a disclosure in the rail rather than as
   // a form beside a list that already holds the same rows.
@@ -70,21 +73,26 @@
   // by drift rather than by anything the reasoning argued for. The
   // shell is the one of #217's three asks that remains a departure.
   //
-  // Two more of #217's asks are not built as written, on purpose. The
+  // One more of #217's asks is not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
   // their own disclosure rather than both behind a menu, security
   // over the literal ask: a menu hides the one verb that ends the
   // connection and the list that says which machines can open one
   // behind an extra click, which is the wrong side to add friction to.
-  // And the publish form is not at the rail's foot: it belongs
-  // to the lines tab (below), and a form at the rail's foot would stand
-  // under the roster and the ledger too, offering to seed a line from
-  // tabs that are not about lines.
   //
-  // Publishing stays with the lines tab. It seeds another line, which
-  // is a thing to do from where the lines are read — and the local line
-  // it seeds from is picked from the forge's own list rather than typed
-  // as an id, since this machine knows every one of them.
+  // The publish form, by contrast, is built where #217 asked: at the
+  // lines list's own foot in the rail (below), gated the same way it
+  // always was — a team on (`ready`), the lines tab open, and no line
+  // picked — rather than by anything about sitting in the rail now.
+  // Everywhere else the rail draws the same no matter which of the
+  // body's tabs is open; this is the one thing in it that reads `tab`
+  // at all, and the reason is the same one #217's own reasoning for
+  // not putting it there gave: offering to seed a line is a thing to
+  // do from where the lines are read, not from the roster or the
+  // ledger, so the guard the departure needed stays even though the
+  // position no longer does. The local line it seeds from is picked
+  // from the forge's own list rather than typed as an id, since this
+  // machine knows every one of them.
   import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
   import TabStrip from "./TabStrip.svelte";
@@ -844,6 +852,72 @@
               {/each}
             </ul>
           {/if}
+
+          <!-- Publishing, at the lines list's own foot (#217). The
+               re-enactment is chosen here or never: a line seeded with
+               its current state cannot be given its history
+               afterwards.
+
+               Three conditions, unchanged from before this moved:
+               `sharedCatalog.phase === "ready"` from the `{#if}` this
+               sits inside, since offering to seed a line on a team
+               nobody has named is offering to publish to nobody;
+               `tab === "lines"`, since this is the one thing in the
+               rail that reads `tab` at all, and only because seeding a
+               line is a thing to do from where the lines are read, not
+               from the roster or the ledger; and `current === null`,
+               since a line the rail is already reading needs no second
+               one seeded beside it. -->
+          {#if tab === "lines" && current === null}
+            <form class="drawer-form drawer-publish" onsubmit={publish}>
+              <h4>Publish a line of mine</h4>
+              <!-- Picked from this machine's lines rather than typed as
+                   an id (#217): the forge knows every one of them. The
+                   typed field stays for the case the list is empty or
+                   unread, because a line that exists and is not listed
+                   should still be publishable. -->
+              <label>
+                Local line
+                {#if forgeCatalog.lines.data.length > 0}
+                  <select bind:value={publishLineId} required>
+                    <option value="" disabled>choose…</option>
+                    {#each forgeCatalog.lines.data as line (line.id)}
+                      <option value={line.id}>{line.name} · {line.standing}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input
+                    type="text"
+                    bind:value={publishLineId}
+                    placeholder="line id"
+                    required
+                  />
+                {/if}
+              </label>
+              <label>
+                Call it
+                <input type="text" bind:value={publishName} required />
+              </label>
+              <label class="drawer-check">
+                <input type="checkbox" bind:checked={reenact} />
+                Re-enact the whole chain
+              </label>
+              <p class="drawer-cost">
+                {#if reenact}
+                  The team's line will be <strong>re-enacted</strong>: one
+                  change point for each of mine, every act stamped to me
+                  rather than to whoever made the work, and every content
+                  the line ever named sent — including what has since been
+                  replaced. Work logs and conversations do not go.
+                {:else}
+                  The team gets what the line holds now, as a single change
+                  point. Choose re-enactment before publishing if you want
+                  the chain; it cannot be added to the line afterwards.
+                {/if}
+              </p>
+              <button type="submit">Publish</button>
+            </form>
+          {/if}
         {/if}
         </div>
 
@@ -874,8 +948,8 @@
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
           <!-- The line's frame is what this chain renders, and this arm
-               is what keeps it off the other tabs. The publish form
-               below carries its own condition. -->
+               is what keeps it off the other tabs. The publish form is
+               in the rail now, on its own condition, not here. -->
         {:else if current !== null}
           <!-- A line, beside the list it was picked from, argued in
                this component's header.
@@ -1028,68 +1102,25 @@
             Pick a line on the left to read what is on it, the work
             against it, and its history.
           </p>
-        {/if}
-
-        <!-- Publishing. The re-enactment is chosen here or never:
-             a line seeded with its current state cannot be given its
-             history afterwards.
-
-             Behind `ready` for the same reason the lines list is: it
-             seeds a line on the team that is on, and with no team
-             named it would be offering to publish to nobody. It gives
-             way when a line is open, because the body holds one thing
-             at a time — the line's frame, or this — and seeding
-             another line is a thing to do from the tab the lines are
-             read on. -->
-        {#if sharedCatalog.phase === "ready" && tab === "lines" && current === null}
-          <form class="drawer-form drawer-publish" onsubmit={publish}>
-            <h4>Publish a line of mine</h4>
-            <!-- Picked from this machine's lines rather than typed as
-                 an id (#217): the forge knows every one of them. The
-                 typed field stays for the case the list is empty or
-                 unread, because a line that exists and is not listed
-                 should still be publishable. -->
-            <label>
-              Local line
-              {#if forgeCatalog.lines.data.length > 0}
-                <select bind:value={publishLineId} required>
-                  <option value="" disabled>choose…</option>
-                  {#each forgeCatalog.lines.data as line (line.id)}
-                    <option value={line.id}>{line.name} · {line.standing}</option>
-                  {/each}
-                </select>
-              {:else}
-                <input
-                  type="text"
-                  bind:value={publishLineId}
-                  placeholder="line id"
-                  required
-                />
-              {/if}
-            </label>
-            <label>
-              Call it
-              <input type="text" bind:value={publishName} required />
-            </label>
-            <label class="drawer-check">
-              <input type="checkbox" bind:checked={reenact} />
-              Re-enact the whole chain
-            </label>
-            <p class="drawer-cost">
-              {#if reenact}
-                The team's line will be <strong>re-enacted</strong>: one
-                change point for each of mine, every act stamped to me
-                rather than to whoever made the work, and every content
-                the line ever named sent — including what has since been
-                replaced. Work logs and conversations do not go.
-              {:else}
-                The team gets what the line holds now, as a single change
-                point. Choose re-enactment before publishing if you want
-                the chain; it cannot be added to the line afterwards.
-              {/if}
-            </p>
-            <button type="submit">Publish</button>
-          </form>
+        {:else if !sharedCatalog.lines.answered || sharedCatalog.lines.loading || sharedCatalog.lines.error !== null}
+          <!-- An empty `data` array is not the same claim as an
+               answered, error-free read of zero lines (the rail's own
+               chain above draws this same distinction with `loading`
+               and `error` first): a read still in flight or one that
+               failed is not "this team hosts no lines," and saying so
+               here would repeat the mistake `Resource.answered` exists
+               to catch. The rail already shows its own loading and
+               error states; the body says nothing rather than guess. -->
+        {:else}
+          <!-- Answered, without error, and empty: this team really
+               does host no lines yet. The rail's own empty state says
+               so too; the body's job here is only to point at where
+               the fix for that is, since the publish form moved out
+               from under it and left nothing else to show. -->
+          <p class="drawer-empty">
+            Publish one of this machine's lines from the rail on the
+            left to give this team its first.
+          </p>
         {/if}
 
         {#if sharedCatalog.phase === "ready" && tab === "roster"}
