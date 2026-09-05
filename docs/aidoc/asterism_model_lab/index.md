@@ -1,4 +1,4 @@
-# asterism-model-lab 0.0.0
+# asterism-model-lab 0.1.0
 
 # asterism-model-lab — provider-side model preparation (#112)
 

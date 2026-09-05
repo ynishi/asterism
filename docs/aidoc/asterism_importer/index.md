@@ -1,4 +1,4 @@
-# asterism-importer 0.0.0
+# asterism-importer 0.1.0
 
 Unified CLI for all built-in Asterism import adapters.
 

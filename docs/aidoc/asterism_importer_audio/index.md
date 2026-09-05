@@ -1,4 +1,4 @@
-# asterism-importer-audio 0.0.0
+# asterism-importer-audio 0.1.0
 
 Audio import adapter — turns a scanned audio file into
 `Footprint::Audio`.
