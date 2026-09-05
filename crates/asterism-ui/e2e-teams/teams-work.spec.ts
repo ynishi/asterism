@@ -62,9 +62,11 @@ const POLL_GAP_MS = 250;
 const SHARED_ROW = 'aside.sidebar button[title^="A team\'s lines"]';
 const DRAWER = '[role="dialog"][aria-label="Team"]';
 /** The tabs under a team, and the tabs under a line, which are two
- *  strips. Both carry `.drawer-tabs` so they are drawn alike; only the
- *  inner one carries `.line-tabs`, and the outer one is the first in
- *  the document, which is what `querySelector` answers with. */
+ *  strips. Both sit in a `.drawer-tabs` wrapper that positions a
+ *  `TabStrip` (#217) — the wrapper no longer carries the row's own
+ *  look, only its outer margin. Only the inner one carries
+ *  `.line-tabs`, and the outer one is the first in the document, which
+ *  is what `querySelector` answers with. */
 const TEAM_TABS = `${DRAWER} .drawer-tabs`;
 const LINE_TABS = `${DRAWER} .line-tabs`;
 

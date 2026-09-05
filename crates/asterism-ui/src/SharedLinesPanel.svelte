@@ -59,15 +59,16 @@
   // (#148 decision 16, #170 §1): two sources, two panels. What they
   // share is the shape — and, where the shape is code rather than CSS,
   // the code: `axes()` reads a change row the same way for both and
-  // lives in `lib/forge-projection.ts`, and the fold's rows are
+  // lives in `lib/forge-projection.ts`; the fold's rows are
   // `ForgeRoundLog.svelte`, shared between `SharedLineWork` and
-  // `ForgeWork`. The shell and the tab strip stay as each file's own
-  // markup, because a component for a flex row of two columns or a row
-  // of three buttons would carry less than its props do — but the fold
-  // did carry more than its props (a divider colour and, on the forge
-  // side only, two callbacks), which is why it is the one of #217's
-  // three asks this drawer builds. The shell and the tab strip are the
-  // departure that remains.
+  // `ForgeWork`; and both of this file's tab rows are `TabStrip.svelte`,
+  // shared with `ForgePanel`'s. The shell stays as each file's own
+  // markup, because a component for a flex row of two columns would
+  // carry less than its props do — the same reasoning that would once
+  // have kept the tab strip out too, until reading it against the
+  // actual markup showed the two files' row of three buttons diverged
+  // by drift rather than by anything the reasoning argued for. The
+  // shell is the one of #217's three asks that remains a departure.
   //
   // Two more of #217's asks are not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
@@ -85,6 +86,7 @@
   // as an id, since this machine knows every one of them.
   import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
+  import TabStrip from "./TabStrip.svelte";
   import { confirmCatalog } from "./lib/stores/confirm.svelte";
   import { isDeparture, sharedCatalog } from "./lib/stores/shared.svelte";
   import { forgeCatalog } from "./lib/stores/forge.svelte";
@@ -855,23 +857,18 @@
             Pick a team, or open one by id, to see the lines it hosts.
           </p>
         {:else}
-          <nav class="drawer-tabs" aria-label="What to read about this team">
-            <button
-              type="button"
-              class:active={tab === "lines"}
-              onclick={() => (tab = "lines")}
-            >lines</button>
-            <button
-              type="button"
-              class:active={tab === "roster"}
-              onclick={toRoster}
-            >members</button>
-            <button
-              type="button"
-              class:active={tab === "ledger"}
-              onclick={toLedger}
-            >ledger</button>
-          </nav>
+          <!-- Row shared with `ForgePanel` as `TabStrip` (#217). -->
+          <div class="drawer-tabs">
+            <TabStrip
+              ariaLabel="What to read about this team"
+              tabs={[
+                { key: "lines", label: "lines", onSelect: () => (tab = "lines") },
+                { key: "roster", label: "members", onSelect: toRoster },
+                { key: "ledger", label: "ledger", onSelect: toLedger },
+              ]}
+              active={tab}
+            />
+          </div>
         {/if}
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
@@ -919,23 +916,18 @@
             </p>
           {/if}
 
-          <nav class="drawer-tabs line-tabs" aria-label="What to read about this line">
-            <button
-              type="button"
-              class:active={lineTab === "contents"}
-              onclick={() => (lineTab = "contents")}
-            >on the line</button>
-            <button
-              type="button"
-              class:active={lineTab === "work"}
-              onclick={() => (lineTab = "work")}
-            >work</button>
-            <button
-              type="button"
-              class:active={lineTab === "history"}
-              onclick={() => (lineTab = "history")}
-            >history</button>
-          </nav>
+          <!-- Row shared with `ForgePanel` as `TabStrip` (#217). -->
+          <div class="drawer-tabs line-tabs">
+            <TabStrip
+              ariaLabel="What to read about this line"
+              tabs={[
+                { key: "contents", label: "on the line", onSelect: () => (lineTab = "contents") },
+                { key: "work", label: "work", onSelect: () => (lineTab = "work") },
+                { key: "history", label: "history", onSelect: () => (lineTab = "history") },
+              ]}
+              active={lineTab}
+            />
+          </div>
 
           {#if lineTab === "contents"}
             {#if sharedCatalog.states.loading}
@@ -1558,24 +1550,7 @@
     color: #ff9d9d;
   }
   .drawer-tabs {
-    display: flex;
-    gap: 0.15rem;
     margin: 0.8rem 0 0.2rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .drawer-tabs button {
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: inherit;
-    cursor: pointer;
-    font-size: 0.8rem;
-    padding: 0.3rem 0.55rem;
-    opacity: 0.6;
-  }
-  .drawer-tabs button.active {
-    opacity: 1;
-    border-bottom-color: currentColor;
   }
   .roster .member {
     display: flex;
