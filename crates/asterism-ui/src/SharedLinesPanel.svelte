@@ -1102,9 +1102,19 @@
             Pick a line on the left to read what is on it, the work
             against it, and its history.
           </p>
+        {:else if !sharedCatalog.lines.answered || sharedCatalog.lines.loading || sharedCatalog.lines.error !== null}
+          <!-- An empty `data` array is not the same claim as an
+               answered, error-free read of zero lines (the rail's own
+               chain above draws this same distinction with `loading`
+               and `error` first): a read still in flight or one that
+               failed is not "this team hosts no lines," and saying so
+               here would repeat the mistake `Resource.answered` exists
+               to catch. The rail already shows its own loading and
+               error states; the body says nothing rather than guess. -->
         {:else}
-          <!-- The rail's own empty state already says this team hosts
-               no lines; the body's job here is only to point at where
+          <!-- Answered, without error, and empty: this team really
+               does host no lines yet. The rail's own empty state says
+               so too; the body's job here is only to point at where
                the fix for that is, since the publish form moved out
                from under it and left nothing else to show. -->
           <p class="drawer-empty">
