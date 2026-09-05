@@ -1,30 +1,48 @@
 <!--
-  The app icon's master. Every PNG, the .icns and the .ico beside it are
-  `cargo tauri icon` output from a 1024px render of this file — so this is
-  the one to edit, and the others are regenerated rather than touched:
+  The app icon's master. Every PNG, the .icns and the .ico in this directory
+  are `tauri icon` output from a 1024px render of this file, so this is the
+  one to edit and the rest are regenerated rather than touched:
 
       rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon-1024.png
       npx tauri icon /tmp/icon-1024.png
 
-  Three constraints hold the numbers below, and each was measured rather
-  than assumed:
+  `npx tauri` rather than `cargo tauri`: the CLI this repository pins is the
+  npm one (`@tauri-apps/cli` in crates/asterism-ui/package.json), which is
+  what the Justfile and the release workflow reach for. A `cargo-tauri` on
+  somebody's machine is a different, unpinned version.
 
-  1. Full bleed, square, no rounded corners. macOS applies the squircle
-     mask itself; a source that rounds its own corners leaves a gap
-     inside that mask.
-  2. Heavy strokes, because the mark has to survive downscaling. At
-     16px a 1%-of-canvas stroke vanishes and a 3% one leaves a smudge;
-     the 48px stroke here is 4.7%, and the stars are 20% and 12.5% of
-     the canvas. That weight also matches the density of the icons this
-     one sits beside in a Dock — a lighter mark reads as washed out
-     rather than as restraint.
-  3. Flat. No glow, no bevel, no baked highlight: Icon Composer and the
-     Liquid Glass compositor generate their own, and art that carries
-     its own fights them.
+  Three things fix the numbers below.
 
-  The mark is the name read literally — an asterism is a recognisable
-  pattern of stars, and this application's own shape is points joined by
-  lines. The large star is where the eye lands first.
+  1. The artwork carries its own rounded rectangle and its own margin —
+     Apple's template geometry, an 824x824 tile centred in a 1024 canvas
+     with ~100px transparent on each side, corner radius 185.4.
+
+     This is the part that is version-conditional and the part a first pass
+     of this icon got wrong. macOS 26 masks every app icon to a squircle
+     itself, and artwork drawn for that generation is full bleed with no
+     corners of its own. macOS 25 and earlier do not mask: they draw what
+     the bundle carries. A full-bleed square shipped to those releases is a
+     hard-cornered tile roughly a quarter larger than every icon beside it
+     in the Dock, which is what a render of it next to a real Dock showed.
+     This repository declares no `minimumSystemVersion`, so it ships to
+     both, and the inset version is the one that degrades gracefully: on 26
+     the mask lands inside a shape that is already the right one.
+
+  2. Heavy strokes, because the mark has to survive downscaling. Rendered at
+     16px a 1%-of-canvas stroke disappears and a 3% one leaves a smudge. The
+     48px stroke here is 4.7% of the 1024 canvas and the stars are 20.3% and
+     12.5% of it, measured before the tile's 0.8047 scale is applied. That
+     weight is also what matches the density of the icons this one sits
+     beside in a Dock; a lighter mark reads as washed out rather than as
+     restraint.
+
+  3. Flat: no glow, no bevel, no baked highlight. Nothing in this pipeline
+     adds them and nothing removes them either, so a highlight painted here
+     is one that cannot be lit differently later.
+
+  What the mark is, and why it is this: see the name's own explanation in
+  README.md. What matters for editing the geometry is that the large star is
+  where the eye lands, and the two small ones hang off it.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
@@ -33,19 +51,28 @@
       <stop offset="55%" stop-color="#141134"/>
       <stop offset="100%" stop-color="#08080f"/>
     </linearGradient>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
+    </clipPath>
   </defs>
 
-  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#sky)"/>
 
-  <g stroke="#ffffff" stroke-width="48" stroke-linecap="round" fill="none">
-    <line x1="300" y1="726" x2="618" y2="272"/>
-    <line x1="618" y1="272" x2="840" y2="576"/>
-    <line x1="840" y1="576" x2="300" y2="726"/>
-  </g>
-
-  <g fill="#ffffff">
-    <circle cx="300" cy="726" r="104"/>
-    <circle cx="618" cy="272" r="64"/>
-    <circle cx="840" cy="576" r="64"/>
+    <!-- The mark is authored against the full 1024 canvas and then placed
+         inside the tile, so the percentages in the header stay readable
+         against these numbers rather than against scaled ones. -->
+    <g transform="translate(100,100) scale(0.8046875)">
+      <g stroke="#ffffff" stroke-width="48" stroke-linecap="round" fill="none">
+        <line x1="300" y1="726" x2="618" y2="272"/>
+        <line x1="618" y1="272" x2="840" y2="576"/>
+        <line x1="840" y1="576" x2="300" y2="726"/>
+      </g>
+      <g fill="#ffffff">
+        <circle cx="300" cy="726" r="104"/>
+        <circle cx="618" cy="272" r="64"/>
+        <circle cx="840" cy="576" r="64"/>
+      </g>
+    </g>
   </g>
 </svg>
