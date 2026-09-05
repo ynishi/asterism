@@ -1098,6 +1098,20 @@ and this project adheres to
 
 ### Changed
 
+- **The forge and the shared-lines drawer's two-column shells share their gap
+  and rail width now** (#217). The same check the tab strip's departure got: the
+  shell's mechanism (a flex row, a fixed-width rail, a flexible body) was
+  already identical between the two drawers, but the gap and the rail's width
+  had drifted — 1.2rem and 15rem in the shared-lines drawer, 1rem and 12rem in
+  the forge's — with nothing arguing for the difference. `--drawer-shell-gap`
+  and `--drawer-rail-width` in `app.css` hold the one answer both files read
+  now, unified to the forge's values. The shared-lines drawer's rail visibly
+  narrows from 15rem to 12rem as a result, on the row with the most text per
+  line. The shell's markup stays a departure from #217's Shape section — the two
+  rails hold substantively different content, so a shared component would need
+  snippets for content neither file's counterpart has — but its values no longer
+  are.
+
 - **The forge and the shared-lines drawer draw their tabs the same way now**
   (#217). #217's own Shape section asked for the tab strip as a component shared
   between the two, and the shared-lines drawer's own header had recorded the
