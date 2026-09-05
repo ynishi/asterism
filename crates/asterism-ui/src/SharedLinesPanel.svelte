@@ -67,11 +67,19 @@
   // `ForgeWork`; and both of this file's tab rows are `TabStrip.svelte`,
   // shared with `ForgePanel`'s. The shell stays as each file's own
   // markup, because a component for a flex row of two columns would
-  // carry less than its props do — the same reasoning that would once
-  // have kept the tab strip out too, until reading it against the
-  // actual markup showed the two files' row of three buttons diverged
-  // by drift rather than by anything the reasoning argued for. The
-  // shell is the one of #217's three asks that remains a departure.
+  // carry less than its props do, and the two rails hold nothing
+  // alike enough for a snippet to be worth passing in — that much of
+  // the departure holds. What did not hold, checked the same way the
+  // tab strip's reasoning was, is the two shells' actual values: the
+  // gap and the rail's fixed width had drifted (1.2rem/15rem here,
+  // `ForgePanel`'s 1rem/12rem there) with nothing arguing for the
+  // difference, the same shape the tab strip's drift took.
+  // `--drawer-shell-gap` and `--drawer-rail-width` in `app.css` hold
+  // the one answer both files read now, unified to `ForgePanel`'s
+  // values — `ForgePanel`'s `.lines` picked up the `min-width: 0` this
+  // file's `.rail` already had, so the rule sets match as well as the
+  // values do. The shell's markup stays a departure from #217's Shape
+  // section; its values no longer are.
   //
   // One more of #217's asks is not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
@@ -1488,11 +1496,11 @@
   }
   .team-plane {
     display: flex;
-    gap: 1.2rem;
+    gap: var(--drawer-shell-gap);
     align-items: flex-start;
   }
   .rail {
-    flex: 0 0 15rem;
+    flex: 0 0 var(--drawer-rail-width);
     min-width: 0;
   }
   .body {
@@ -1745,8 +1753,8 @@
     font-weight: 600;
   }
   /* One line, cut at the right edge: a team name — or, for one from
-     before #218, its id — drawn in a 15rem rail would otherwise wrap
-     or overflow. The whole thing is the row's title. */
+     before #218, its id — drawn in the rail would otherwise wrap or
+     overflow. The whole thing is the row's title. */
   .truncate {
     min-width: 0;
     overflow: hidden;
