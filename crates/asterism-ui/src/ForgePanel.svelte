@@ -677,6 +677,7 @@
   }
   .lines {
     flex: 0 0 var(--drawer-rail-width);
+    min-width: 0;
   }
   .line {
     flex: 1 1 auto;

@@ -71,13 +71,15 @@
   // alike enough for a snippet to be worth passing in — that much of
   // the departure holds. What did not hold, checked the same way the
   // tab strip's reasoning was, is the two shells' actual values: the
-  // gap and the rail's fixed width had drifted (1rem/12rem here,
-  // 1.2rem/15rem there) with nothing arguing for the difference, the
-  // same shape the tab strip's drift took. `--drawer-shell-gap` and
-  // `--drawer-rail-width` in `app.css` hold the one answer both files
-  // read now, unified to `ForgePanel`'s values. The shell's markup is
-  // the one of #217's three asks that remains a departure; its values
-  // no longer are.
+  // gap and the rail's fixed width had drifted (1.2rem/15rem here,
+  // `ForgePanel`'s 1rem/12rem there) with nothing arguing for the
+  // difference, the same shape the tab strip's drift took.
+  // `--drawer-shell-gap` and `--drawer-rail-width` in `app.css` hold
+  // the one answer both files read now, unified to `ForgePanel`'s
+  // values — `ForgePanel`'s `.lines` picked up the `min-width: 0` this
+  // file's `.rail` already had, so the rule sets match as well as the
+  // values do. The shell's markup stays a departure from #217's Shape
+  // section; its values no longer are.
   //
   // One more of #217's asks is not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
@@ -1751,8 +1753,8 @@
     font-weight: 600;
   }
   /* One line, cut at the right edge: a team name — or, for one from
-     before #218, its id — drawn in a 15rem rail would otherwise wrap
-     or overflow. The whole thing is the row's title. */
+     before #218, its id — drawn in the rail would otherwise wrap or
+     overflow. The whole thing is the row's title. */
   .truncate {
     min-width: 0;
     overflow: hidden;
