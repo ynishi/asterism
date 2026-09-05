@@ -8,8 +8,29 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-06
+
 ### Added
 
+- **A gate that holds the two licence planes apart** (#242).
+  `just licence-check` reads the workspace manifests and the lockfile closure,
+  and fails when a member on the workspace's `MIT OR Apache-2.0` reaches one of
+  the four `AGPL-3.0-or-later` crates at any depth — or when a `teams-*` crate
+  stops declaring AGPL, since otherwise the first assertion could be defeated by
+  deleting a line rather than by adding one. README's licence section has said
+  since #162 that the forbidden direction stays empty; nothing but that sentence
+  said so. The one mechanical boundary in the tree, `tests/boundary.rs`, answers
+  for the wire crate's vocabulary, so a line reading
+  `teams-core = { path = "../../teams-core" }` in the UI manifest passed it,
+  passed clippy, passed every recipe `check` composes, and put AGPL code inside
+  a notarized app. In `check-shared`, so a pull request is asked the same
+  question `main` is.
+- **The licence texts inside the bundle** (#242). `LICENSE-MIT` and
+  `LICENSE-APACHE` are bundle resources, so the signed DMG carries the notices
+  the code it ships asks to travel with it — MIT's, and Apache-2.0 §4(a) and
+  §4(d). The bundle had a copyright string and no licence file of any kind.
+  `LICENSE-AGPL` joins them on the day a teams binary is ever bundled, and not
+  before: the app's dependency closure holds none of the four.
 - **An admin's reach over somebody else's sign-in** (#213). An instance admin
   can now take back every live device token an account holds
   (`DELETE /teams/admin/accounts/{user_id}/devices`, after `GET …/devices` to
@@ -1098,6 +1119,21 @@ and this project adheres to
 
 ### Changed
 
+- **A version that distinguishes releases** (#242). The workspace carried
+  `0.0.0` and so did all 29 members, `tauri.conf.json`, and the frontend package
+  — one number that never moved. It is `0.1.0` now, which is what the release
+  workflow's own guard compares a tag against before it builds anything.
+  `/asterism/health` and the MCP server info follow it without being edited;
+  they read `CARGO_PKG_VERSION` rather than restating it.
+- **The manifest names the release that wrote it** (#242).
+  `claim_generator_info` carries `version` again. It was withdrawn because the
+  only value available was the `0.0.0` every build shared, which puts a claim
+  into a signed, uncorrectable document that says nothing confidently; the note
+  left in its place said the field comes back when releases start carrying a
+  number that distinguishes them, and this is that release. The XMP packet still
+  declines the same claim, for the second of the two reasons it had: nothing in
+  it may be read off anything but the record, or two stamps of one unchanged
+  record would render different bytes across a bump.
 - **A dark ground, and colours that are named once** (#240). `DetailPane`
   already put an image on `#1a1a1a`; everything around that stage was light, so
   the grid — where a selection is actually made, hundreds of thumbnails at a
@@ -4572,4 +4608,5 @@ and this project adheres to
   (default 14); a malformed or non-positive value is refused at startup rather
   than silently replaced.
 
-[Unreleased]: https://github.com/ynishi/asterism/commits/main
+[Unreleased]: https://github.com/ynishi/asterism/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ynishi/asterism/releases/tag/v0.1.0
