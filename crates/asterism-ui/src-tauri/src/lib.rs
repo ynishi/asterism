@@ -195,9 +195,28 @@ pub fn run() {
                     asterism_infra::paths::DataProfile::Dogfood => "Asterism".to_string(),
                     other => format!("Asterism — {}", other.as_str().to_ascii_uppercase()),
                 };
+                // The size is the UI's own number rather than a taste.
+                // `DetailPane.svelte`'s `.detail-panel` is
+                // `width: min(96vw, 1200px)`, so the panel reaches the
+                // width it was drawn for only past 1250px of window; at
+                // the 800 this used to open at it was clamped to 768,
+                // about three fifths of what it asks for. `max-height:
+                // 96vh` meets the same wall at 600 tall.
+                //
+                // Deliberately neither maximized nor full screen. A full
+                // screen window on macOS gets a Space of its own, so
+                // reaching anything beside it — a ComfyUI tab, a
+                // terminal — costs a Space switch; a large ordinary
+                // window stays where the rest of the work is.
+                //
+                // The floor is the shell's: `180px` of sidebar beside a
+                // grid of `minmax(180px, 1fr)` cards, which needs room
+                // for three of them before the arrangement stops being
+                // one. Without it the window dragged down to nothing.
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                     .title(title)
-                    .inner_size(800.0, 600.0)
+                    .inner_size(1280.0, 860.0)
+                    .min_inner_size(960.0, 640.0)
                     .resizable(true)
                     .build()?;
             }
