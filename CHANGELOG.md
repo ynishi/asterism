@@ -1098,6 +1098,56 @@ and this project adheres to
 
 ### Changed
 
+- **A dark ground, and colours that are named once** (#240). `DetailPane`
+  already put an image on `#1a1a1a`; everything around that stage was light, so
+  the grid — where a selection is actually made, hundreds of thumbnails at a
+  time — reported its contents against a near-white surround, and the detail
+  view a click later did not. The app opens dark now, and `color-scheme` says
+  `dark` rather than the `light dark` it had claimed while every colour it
+  painted itself was a light-mode literal: the form controls, the scrollbars and
+  the canvas behind the page were the user agent's to draw in whichever mode the
+  OS was set to, and they were the only part of the window that obeyed.
+
+  **The colours had to be collapsed before they could be inverted.** There were
+  1256 colour literals across 41 of the 45 components, 368 of them distinct and
+  188 written exactly once — not 368 decisions but about thirty, each written
+  down a dozen times slightly differently: seventeen neutral lightnesses with
+  near-duplicates piled at each, and 158 settings of a single violet. They are
+  named once in `app.css` now, in a role vocabulary that says where each one
+  belongs — `-fill` and `-on-fill` and `-ink` and `-surface` and `-line`,
+  because a name that does not carry its role gets applied to whatever the
+  reader assumed. The colours that stayed outside are the swatch representatives
+  in `lib/stores/color.svelte.ts`, which are a derived fact of each image rather
+  than a design decision. A light set, if anybody wants one, is a second block
+  of values there rather than a second pass over 41 files.
+
+  **What a mechanical substitution cannot decide.** Ten hover and focus rules
+  had used two neighbouring tints for their base and their state, both of which
+  landed on one name and left the state invisible. Light tints in one lightness
+  band fell through to their family's saturated fill, which is how a pale olive
+  background became amber under text that then read at 1.35:1. Selection rings
+  turned black, because a ring is a `box-shadow` and every `box-shadow` looked
+  like a shadow. And a status colour is not a categorical one: borrowing
+  `danger` to tell one author apart from another made a persona's own message
+  carry the colour that elsewhere means destroy. Each of those is a distinction
+  the old literals held only by being different from each other, and naming them
+  is what made the loss visible — three review passes found them, and the names
+  are also what let them be fixed in one place each.
+
+  **The invariants underneath all of that are now a test rather than a
+  paragraph.** `palette.test.ts` reads `app.css` and every component and refuses
+  a colour literal in a style block, a name the palette does not define, a name
+  nothing reads, a hover or focus rule whose every declaration equals its base,
+  and — in each rule that states both its ink and its ground — a pair below the
+  contrast bar `app.css` states. It also holds the boundary the palette had
+  quietly crossed: a component may write `var(--hook, real value)` so a host can
+  retheme it, and the palette may not define any of those names. Defining one
+  kills the fallback behind it, which is how a global `--danger` turned four
+  labels into the fill colour at 3.2:1 with every gate green. Each claim was
+  seeded back into a throwaway component to confirm it fails — reinstating
+  `--danger` in `app.css` reproduces that defect and names all three files —
+  since a check that has never failed has not been shown to work.
+
 - **The window opens at a size the UI asks for** (#239). 1280×860 rather than
   800×600, and a floor under it. The number is the UI's own: `DetailPane`'s
   panel is `width: min(96vw, 1200px)`, so at 800 it was clamped to 768 — about
