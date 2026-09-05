@@ -472,9 +472,9 @@ aidoc-guard:
 # workspace rather than the size of the change. `rust-fmt-check` reads
 # files and compiles nothing; `bindings-check` builds one package;
 # `ui-test`, `ui-check` and `ui-build` are seconds of Node;
-# `cross-member-check` reads text and compiles nothing. The two
-# left out — clippy and the test suite — compile every crate, and one
-# of them links every test binary.
+# `cross-member-check` and `licence-check` read text and compile
+# nothing. The two left out — clippy and the test suite — compile every
+# crate, and one of them links every test binary.
 #
 # `aidoc-guard` sits here rather than with those two despite doing a
 # rustdoc pass over the workspace: it is not narrowable by package,
@@ -482,7 +482,7 @@ aidoc-guard:
 #
 # Every gate whose cost does not scale with the workspace.
 [group('check')]
-check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard cross-member-check
+check-shared: rust-fmt-check md-check bindings-check ui-test ui-check ui-build aidoc-guard cross-member-check licence-check
 
 # Run all Rust and frontend checks. The definition of green, and what
 # `main` gets.
@@ -739,6 +739,19 @@ commit-msg-check *args:
 [group('allow-agent')]
 cross-member-check:
     python3 "{{ project_root }}/scripts/check-cross-member-readers.py"
+
+# Hold the AGPL and MIT/Apache planes apart. README's licence section
+# says the direction an `asterism-*` crate depending on a `teams-*` crate
+# would open stays empty; until this recipe nothing but that sentence
+# said so, and `tests/boundary.rs` — the only mechanical boundary in the
+# tree — answers for the wire crate's vocabulary rather than for the
+# licence. The script's doc carries the two assertions and why the
+# closure is read out of the lockfile rather than the manifests. In
+# `check-shared`, so a pull request is asked the same question `main` is.
+[group('check')]
+[group('allow-agent')]
+licence-check:
+    python3 "{{ project_root }}/scripts/check-licence-planes.py"
 
 # The last gate before a branch is handed over, and the agent that built
 # the branch is the one that runs it. It writes to nothing remote — so
