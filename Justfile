@@ -743,11 +743,11 @@ cross-member-check:
 # Hold the AGPL and MIT/Apache planes apart. README's licence section
 # says the direction an `asterism-*` crate depending on a `teams-*` crate
 # would open stays empty; until this recipe nothing but that sentence
-# said so, and `tests/boundary.rs` — the only mechanical boundary in the
-# tree — answers for the wire crate's vocabulary rather than for the
-# licence. The script's doc carries the two assertions and why the
-# closure is read out of the lockfile rather than the manifests. In
-# `check-shared`, so a pull request is asked the same question `main` is.
+# said so. The script's doc carries the two assertions and why both
+# answers come from `cargo metadata --locked`. In `check-shared`, so a
+# pull request is asked the same question `main` is.
+
+# Check that the permissive plane never reaches an AGPL crate.
 [group('check')]
 [group('allow-agent')]
 licence-check:

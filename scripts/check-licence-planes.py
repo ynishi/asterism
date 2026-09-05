@@ -5,120 +5,98 @@ Four crates carry `AGPL-3.0-or-later` and every other member inherits the
 workspace's `MIT OR Apache-2.0`. README's licence section states what that
 arrangement rests on: the direction an `asterism-*` crate depending on a
 `teams-*` crate would open stays empty. Until this script that was a claim
-nothing checked. `crates/asterism-ui/src-tauri/tests/boundary.rs` is the one
-mechanical boundary test in the tree and its subject is the wire crate's
-vocabulary, so a line reading `teams-core = { path = "../../teams-core" }` in
-the UI manifest passed it, passed clippy, passed every recipe `check`
-composes, and put AGPL code inside a notarized app.
+nothing checked. `crates/asterism-ui/src-tauri/tests/boundary.rs` is the
+boundary test that sits closest to it, and its subject is the wire crate's
+vocabulary rather than the licence — so a line reading
+`teams-core = { path = "../../teams-core" }` in the UI manifest would have
+passed it, passed clippy, and passed every recipe `check` composes.
 
 Two assertions, and the second is the one worth having:
 
 - **The planes are declared.** A member whose package name begins `teams-`
-  says `license = "AGPL-3.0-or-later"`; every other member says
-  `license.workspace = true`. Without this the second assertion can be
-  defeated by deleting a line rather than by adding one — a `teams-core`
-  that stopped declaring AGPL would simply read as permissive here.
+  is licensed `AGPL-3.0-or-later`; every other member is licensed
+  `MIT OR Apache-2.0`. Without this the second assertion can be defeated by
+  deleting a line rather than by adding one — a `teams-core` that stopped
+  declaring AGPL would simply read as permissive here.
 - **The forbidden direction is empty.** No member on the permissive plane
-  reaches an AGPL member through the lockfile's dependency graph.
+  reaches an AGPL member through the dependency graph.
 
-The closure is read out of `Cargo.lock` rather than out of the manifests,
-because the edge that matters is not always written down where it is made:
-`asterism-ui` names `asterism-teams-client` and nothing else, and what makes
-that safe is everything `asterism-teams-client` does *not* reach. A
-manifest-only check would answer for one hop and call it a boundary.
+Both answers come from `cargo metadata`, and every part of that choice is
+load-bearing:
 
-`Cargo.lock` merges normal, build and dev dependencies into one list, so a
-dev-dependency on an AGPL crate counts here too. That is deliberate and it is
-stricter than distribution requires — a test binary is not shipped — but the
-arrangement being guarded is that the permissive plane does not link the AGPL
-one at all, and a rule with an exception for test binaries is a rule with a
-place to put the next exception.
+- **`--locked`** makes the resolution answer for the manifests as they are
+  now. A crossing written into a manifest and not yet resolved is a failure
+  here rather than a pass, which is what a check reading a stale `Cargo.lock`
+  by itself would have given.
+- **The resolver's licence field** rather than a line scan of the manifests.
+  A regex over TOML cannot see which table a key sits in, so a `license`
+  under `[package.metadata.*]` reads as the package's own; and a manifest
+  shaped in a way the scan does not expect drops the member out of the check
+  silently, in the passing direction. What is compared here is the licence
+  cargo itself resolves, inheritance included.
+- **The resolved graph** rather than the manifests' own dependency tables.
+  The edge that matters is not always written where it is made: of the team
+  plane, `asterism-ui` names `asterism-teams-client` and nothing else, and
+  what makes that safe is everything `asterism-teams-client` does not reach.
+  A manifest-only check answers for one hop and calls it a boundary.
+
+The graph is read with no platform filter and with every dependency kind in
+it, so a dev-dependency and a target-gated dependency both count. That is
+stricter than distribution requires — a test binary is not shipped, and a
+Windows-only edge is not in a macOS bundle — and each of those is an
+over-approximation in the safe direction. The arrangement being guarded is
+that the permissive plane does not link the AGPL one at all, and a rule with
+an exception for test binaries is a rule with a place to put the next
+exception.
 """
 
 from __future__ import annotations
 
-import re
+import json
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 AGPL = "AGPL-3.0-or-later"
+PERMISSIVE = "MIT OR Apache-2.0"
 AGPL_PREFIX = "teams-"
 
-PACKAGE_NAME = re.compile(r'^\[package\][^[]*?^name\s*=\s*"([^"]+)"', re.M | re.S)
-LICENCE = re.compile(r"^license\s*=\s*\"([^\"]+)\"", re.M)
-INHERITED = re.compile(r"^license\.workspace\s*=\s*true", re.M)
+
+def metadata() -> dict:
+    """`cargo metadata` for this workspace, or exit saying why not."""
+    result = subprocess.run(
+        [
+            "cargo",
+            "metadata",
+            "--format-version",
+            "1",
+            "--offline",
+            "--locked",
+            "--manifest-path",
+            str(ROOT / "Cargo.toml"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(
+            "cargo metadata --locked --offline failed, so nothing here can "
+            "answer for the workspace. A lockfile that does not match the "
+            "manifests is the usual cause, and running a build or "
+            "`cargo metadata` without --locked is what settles it:\n"
+            + result.stderr.strip()
+        )
+    return json.loads(result.stdout)
 
 
-def members() -> dict[str, str]:
-    """Package name -> manifest path, relative, read from the root manifest."""
-    lines = (ROOT / "Cargo.toml").read_text().splitlines()
-    dirs: list[str] = []
-    inside = False
-    for line in lines:
-        if line.startswith("members"):
-            inside = True
-            continue
-        if inside and line.startswith("]"):
-            break
-        if inside:
-            entry = line.strip()
-            if entry.startswith("#") or not entry:
-                continue
-            dirs.append(entry.strip('",'))
-    out: dict[str, str] = {}
-    for d in dirs:
-        manifest = ROOT / d / "Cargo.toml"
-        if not manifest.is_file():
-            continue
-        name = PACKAGE_NAME.search(manifest.read_text())
-        if name:
-            out[name.group(1)] = f"{d}/Cargo.toml"
-    if not out:
-        sys.exit("no workspace members parsed out of Cargo.toml")
-    return out
-
-
-def graph() -> dict[str, set[str]]:
-    """Package name -> the names it depends on, out of the lockfile.
-
-    Versions are dropped: two copies of one crate at different versions
-    are the same node for this question, and no workspace member has a
-    second version of itself to confuse with.
-    """
-    out: dict[str, set[str]] = {}
-    name: str | None = None
-    deps: set[str] = set()
-    in_deps = False
-    for line in (ROOT / "Cargo.lock").read_text().splitlines():
-        if line.startswith("[[package]]"):
-            if name:
-                out.setdefault(name, set()).update(deps)
-            name, deps, in_deps = None, set(), False
-            continue
-        if line.startswith("name = "):
-            name = line.split('"')[1]
-            continue
-        if line.startswith("dependencies = ["):
-            in_deps = True
-            continue
-        if in_deps:
-            if line.startswith("]"):
-                in_deps = False
-                continue
-            deps.add(line.strip().strip('",').split(" ")[0])
-    if name:
-        out.setdefault(name, set()).update(deps)
-    return out
-
-
-def reaches(start: str, edges: dict[str, set[str]], targets: set[str]) -> list[str]:
-    """The first path from `start` to any target, or an empty list."""
+def reaches(start: str, edges: dict[str, list[str]], targets: set[str]) -> list[str]:
+    """The shortest path from `start` to any target, or an empty list."""
     seen = {start}
     queue: list[list[str]] = [[start]]
     while queue:
         path = queue.pop(0)
-        for dep in sorted(edges.get(path[-1], set())):
+        for dep in edges.get(path[-1], []):
             if dep in targets:
                 return path + [dep]
             if dep not in seen:
@@ -128,34 +106,38 @@ def reaches(start: str, edges: dict[str, set[str]], targets: set[str]) -> list[s
 
 
 def main() -> int:
-    manifests = members()
-    failures: list[str] = []
+    meta = metadata()
+    packages = {p["id"]: p for p in meta["packages"]}
+    members = list(meta["workspace_members"])
+    if not members:
+        sys.exit("cargo metadata reported no workspace members")
 
+    resolve = meta.get("resolve")
+    if not resolve:
+        sys.exit("cargo metadata reported no resolved graph to walk")
+    edges = {node["id"]: list(node["dependencies"]) for node in resolve["nodes"]}
+
+    failures: list[str] = []
     agpl: set[str] = set()
     permissive: set[str] = set()
-    for name, manifest in sorted(manifests.items()):
-        text = (ROOT / manifest).read_text()
-        declared = LICENCE.search(text)
-        inherits = INHERITED.search(text) is not None
-        if name.startswith(AGPL_PREFIX):
-            if declared and declared.group(1) == AGPL:
-                agpl.add(name)
-            else:
-                said = declared.group(1) if declared else "the workspace licence"
-                failures.append(
-                    f"{manifest}: a {AGPL_PREFIX}* crate says {said}, and the "
-                    f"teams plane is licensed {AGPL} — declare it at the field "
-                    f"or move the crate off the prefix"
-                )
-        elif inherits and not declared:
-            permissive.add(name)
-        else:
-            said = declared.group(1) if declared else "no licence at all"
-            failures.append(
-                f"{manifest}: says {said}; a member outside the teams plane "
-                f"takes license.workspace = true, so that the workspace "
-                f"manifest stays the one place the permissive terms are stated"
+    for member in sorted(members, key=lambda i: packages[i]["name"]):
+        package = packages[member]
+        name = package["name"]
+        licence = package.get("license")
+        wanted = AGPL if name.startswith(AGPL_PREFIX) else PERMISSIVE
+        if licence == wanted:
+            (agpl if wanted == AGPL else permissive).add(member)
+            continue
+        said = f"is licensed {licence}" if licence else "declares no licence"
+        where = Path(package["manifest_path"]).relative_to(ROOT)
+        failures.append(
+            f"{where}: {name} {said}, and a member "
+            + (
+                f"named {AGPL_PREFIX}* is the teams plane, licensed {wanted}"
+                if wanted == AGPL
+                else f"outside the teams plane is licensed {wanted}"
             )
+        )
 
     if not agpl:
         failures.append(
@@ -163,15 +145,15 @@ def main() -> int:
             f"script goes with it, or its declarations did"
         )
 
-    edges = graph()
-    for name in sorted(permissive):
-        path = reaches(name, edges, agpl)
+    for member in sorted(permissive, key=lambda i: packages[i]["name"]):
+        path = reaches(member, edges, agpl)
         if path:
+            names = [packages[i]["name"] for i in path]
             failures.append(
-                f"{name} reaches {path[-1]} ({AGPL}) through "
-                f"{' -> '.join(path)}: the permissive plane does not link the "
-                f"AGPL one, and this edge would put AGPL code wherever "
-                f"{name} ships"
+                f"{names[0]} reaches {names[-1]} ({AGPL}) through "
+                f"{' -> '.join(names)}: the permissive plane does not link "
+                f"the AGPL one, and this edge would put AGPL code wherever "
+                f"{names[0]} ships"
             )
 
     if failures:
