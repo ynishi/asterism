@@ -2,6 +2,12 @@
 
 :root {
   color-scheme: light dark;
+  /* Shared between `ForgePanel` and `SharedLinesPanel`'s two-column
+     shell (#217): the gap between rail and body, and the rail's own
+     fixed width, unified to `ForgePanel`'s values rather than left to
+     drift the way the tab strip's did before it was shared. */
+  --drawer-shell-gap: 1rem;
+  --drawer-rail-width: 12rem;
 }
 
 * {

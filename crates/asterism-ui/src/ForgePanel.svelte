@@ -672,11 +672,11 @@
   }
   .forge {
     display: flex;
-    gap: 1rem;
+    gap: var(--drawer-shell-gap);
     align-items: flex-start;
   }
   .lines {
-    flex: 0 0 12rem;
+    flex: 0 0 var(--drawer-rail-width);
   }
   .line {
     flex: 1 1 auto;
