@@ -13,24 +13,28 @@ and this project adheres to
 ### Added
 
 - **A gate that holds the two licence planes apart** (#242).
-  `just licence-check` reads the workspace manifests and the lockfile closure,
-  and fails when a member on the workspace's `MIT OR Apache-2.0` reaches one of
-  the four `AGPL-3.0-or-later` crates at any depth — or when a `teams-*` crate
-  stops declaring AGPL, since otherwise the first assertion could be defeated by
-  deleting a line rather than by adding one. README's licence section has said
-  since #162 that the forbidden direction stays empty; nothing but that sentence
-  said so. The one mechanical boundary in the tree, `tests/boundary.rs`, answers
-  for the wire crate's vocabulary, so a line reading
-  `teams-core = { path = "../../teams-core" }` in the UI manifest passed it,
-  passed clippy, passed every recipe `check` composes, and put AGPL code inside
-  a notarized app. In `check-shared`, so a pull request is asked the same
-  question `main` is.
+  `just licence-check` fails when a member on the workspace's
+  `MIT OR Apache-2.0` reaches one of the four `AGPL-3.0-or-later` crates at any
+  depth — or when a `teams-*` crate stops being licensed AGPL, since otherwise
+  the first assertion could be defeated by deleting a line rather than by adding
+  one. Both answers come from `cargo metadata --locked`, so the resolver decides
+  what a licence field says and what depends on what, and a crossing written
+  into a manifest but not yet resolved fails here rather than passing. README's
+  licence section has said since #162 that the forbidden direction stays empty,
+  and nothing but that sentence said so: the boundary test nearest to it,
+  `tests/boundary.rs` in the UI crate, answers for the wire crate's vocabulary,
+  so a line reading `teams-core = { path = "../../teams-core" }` in the UI
+  manifest would have passed it, passed clippy, and passed every recipe `check`
+  composes. In `check-shared`, so a pull request is asked the same question
+  `main` is.
 - **The licence texts inside the bundle** (#242). `LICENSE-MIT` and
-  `LICENSE-APACHE` are bundle resources, so the signed DMG carries the notices
-  the code it ships asks to travel with it — MIT's, and Apache-2.0 §4(a) and
-  §4(d). The bundle had a copyright string and no licence file of any kind.
-  `LICENSE-AGPL` joins them on the day a teams binary is ever bundled, and not
-  before: the app's dependency closure holds none of the four.
+  `LICENSE-APACHE` are bundle resources now, which is what puts the notices the
+  shipped code asks to travel with it — MIT's, and Apache-2.0 §4(a) and §4(d) —
+  into the app: the bundle had a copyright string and no licence file of any
+  kind. No release has been built from this, so the config is what changed and
+  the artefact is what the first release run will show. `LICENSE-AGPL` joins
+  them on the day a teams binary is ever bundled, and not before: the app's
+  dependency closure holds none of the four.
 - **An admin's reach over somebody else's sign-in** (#213). An instance admin
   can now take back every live device token an account holds
   (`DELETE /teams/admin/accounts/{user_id}/devices`, after `GET …/devices` to
@@ -3834,6 +3838,13 @@ and this project adheres to
   at any value; it now asserts the field is absent. The packet one compared two
   renderings inside one build, which cannot see a difference that moves both
   sides together; it now pins the toolkit attribute literally.
+
+  The manifest half did not stay that way, and both paragraphs above describe
+  the tree between this change and v0.1.0 rather than the release they sit
+  under: giving the workspace a number that distinguishes releases is the
+  condition the comment left in `claim_generator_info`'s place named, so the
+  field and a test that can fail came back with it (#242). The packet half
+  stands, for the second of the two reasons this entry gives it.
 
 - **The series key no longer borrows its canonical form from a dependency**
   (#14) — `series::render` hashes a `serde_json::Value` parsed out of a

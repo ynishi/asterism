@@ -204,8 +204,11 @@ defined in [PUBLIC_DEVELOPMENT.md](PUBLIC_DEVELOPMENT.md).
 
 ## Licence
 
-Licensing is declared **per crate** (the `license` field in each crate's
-`Cargo.toml`). The local-first core is licensed under either of
+Licensing is **per crate**, and stated in two places on purpose: the workspace
+manifest carries the permissive terms once and every crate on that plane
+inherits them, while each crate that is licensed otherwise says so at its own
+`license` field. `just licence-check` holds the tree to that arrangement. The
+local-first core is licensed under either of
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
