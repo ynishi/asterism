@@ -1097,6 +1097,19 @@ and this project adheres to
 
 ### Changed
 
+- **The forge and the shared-lines drawer draw their tabs the same way now**
+  (#217). #217's own Shape section asked for the tab strip as a component shared
+  between the two, and the shared-lines drawer's own header had recorded the
+  departure with a reason that turned out not to hold: reading the two files'
+  tab rows against each other showed their differences in gap, border colour,
+  button padding and font size were drift nobody had ever unified, not a design
+  choice. `TabStrip.svelte` is the shared component, carrying the forge's own
+  values; the shared-lines drawer's two tab rows (a team's three tabs, and a
+  line's three) visibly change as a result — no more dimming on an inactive tab,
+  a different border colour and gap — and both rows also gain the ARIA a tab
+  strip should have (`role="tablist"` / `role="tab"` / `aria-selected`), which
+  neither file's rows carried in full before.
+
 - **A team is named on every screen now, and so is everyone in it** (#218). A
   team had no name — "Start a team of your own" asked nothing — and everyone in
   it read as a UUID: a roster row carried a user id and a role, an invite form
