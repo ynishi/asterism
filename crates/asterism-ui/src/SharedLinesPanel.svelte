@@ -72,10 +72,11 @@
   //
   // Two more of #217's asks are not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
-  // their own disclosure rather than both behind a menu: a menu hides
-  // the one verb that ends the connection and the list that says which
-  // machines can open one, and a row plus a disclosure is the same
-  // height. And the publish form is not at the rail's foot: it belongs
+  // their own disclosure rather than both behind a menu, security
+  // over the literal ask: a menu hides the one verb that ends the
+  // connection and the list that says which machines can open one
+  // behind an extra click, which is the wrong side to add friction to.
+  // And the publish form is not at the rail's foot: it belongs
   // to the lines tab (below), and a form at the rail's foot would stand
   // under the roster and the ledger too, offering to seed a line from
   // tabs that are not about lines.
