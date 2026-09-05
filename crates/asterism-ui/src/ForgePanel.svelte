@@ -429,7 +429,10 @@
       </div>
 
       <!-- Row shared with `SharedLinesPanel` as `TabStrip` (#217); this
-           file's own values are the ones that component kept. -->
+           file's own CSS values are the ones the component kept. The
+           `ariaLabel` below is not this file's own — it came from
+           `SharedLinesPanel`'s line row, which had one where this row
+           never did. -->
       <div class="tabs">
         <TabStrip
           ariaLabel="What to read about this line"

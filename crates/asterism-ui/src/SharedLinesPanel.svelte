@@ -59,15 +59,16 @@
   // (#148 decision 16, #170 §1): two sources, two panels. What they
   // share is the shape — and, where the shape is code rather than CSS,
   // the code: `axes()` reads a change row the same way for both and
-  // lives in `lib/forge-projection.ts`, and the fold's rows are
+  // lives in `lib/forge-projection.ts`; the fold's rows are
   // `ForgeRoundLog.svelte`, shared between `SharedLineWork` and
-  // `ForgeWork`. The shell and the tab strip stay as each file's own
-  // markup, because a component for a flex row of two columns or a row
-  // of three buttons would carry less than its props do — but the fold
-  // did carry more than its props (a divider colour and, on the forge
-  // side only, two callbacks), which is why it is the one of #217's
-  // three asks this drawer builds. The shell and the tab strip are the
-  // departure that remains.
+  // `ForgeWork`; and both of this file's tab rows are `TabStrip.svelte`,
+  // shared with `ForgePanel`'s. The shell stays as each file's own
+  // markup, because a component for a flex row of two columns would
+  // carry less than its props do — the same reasoning that would once
+  // have kept the tab strip out too, until reading it against the
+  // actual markup showed the two files' row of three buttons diverged
+  // by drift rather than by anything the reasoning argued for. The
+  // shell is the one of #217's three asks that remains a departure.
   //
   // Two more of #217's asks are not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind

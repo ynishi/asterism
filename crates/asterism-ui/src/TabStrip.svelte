@@ -3,11 +3,12 @@
   // instances of the same row of buttons, one active, that differed
   // only because nobody had unified them, not because any of the
   // difference was intentional. `ForgePanel`'s gap, border colour,
-  // button padding and lack of dimming on the inactive tabs are the
-  // values kept here; `SharedLinesPanel`'s two tab rows now render the
-  // same way — the visible change this brings, matching the shape
-  // `SharedLinesPanel`'s own header already argued for (decision 19:
-  // "the three tabs are the forge's three answers about one line").
+  // button padding, font size and lack of dimming on the inactive tabs
+  // are the values kept here; `SharedLinesPanel`'s two tab rows now
+  // render the same way, which is a visible change on that plane — no
+  // more dimmed inactive tabs, a different border colour and gap, and
+  // a font size no longer set explicitly (`ForgePanel`'s row never set
+  // one either).
   //
   // What stays out of this component is any prop for gap, colour,
   // padding or size: a caller position its own outer margin with a
@@ -16,13 +17,14 @@
   // something that no longer varies between callers.
   //
   // ARIA: `ForgePanel`'s row already carried `role="tablist"` /
-  // `role="tab"` / `aria-selected` — activating a tab here only ever
-  // reveals a sibling panel already on screen (lazily loading it, in
-  // `ForgePanel`'s `history` and both of `SharedLinesPanel`'s `roster`
-  // and `ledger`), never a navigation or a write — which is the WAI-ARIA
-  // tabs pattern's own precondition. `SharedLinesPanel`'s two rows had
-  // no ARIA at all; they get the same role here rather than a prop
-  // deciding whether they should.
+  // `role="tab"` / `aria-selected`, with no `aria-label`;
+  // `SharedLinesPanel`'s two rows carried an `aria-label` (kept here as
+  // `ariaLabel`) but neither role nor `aria-selected`. Both get all of
+  // it now rather than a prop deciding which caller earns which half:
+  // activating a tab here only ever reveals a sibling panel already on
+  // screen (lazily loading it, in `ForgePanel`'s `history` and both of
+  // `SharedLinesPanel`'s `roster` and `ledger`), never a navigation or
+  // a write — which is the WAI-ARIA tabs pattern's own precondition.
   interface Tab {
     key: string;
     label: string;
@@ -40,7 +42,12 @@
 
 <div class="tab-strip" role="tablist" aria-label={ariaLabel}>
   {#each tabs as t (t.key)}
-    <button role="tab" aria-selected={t.key === active} onclick={t.onSelect}>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={t.key === active}
+      onclick={t.onSelect}
+    >
       {t.label}
     </button>
   {/each}
