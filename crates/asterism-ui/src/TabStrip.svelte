@@ -57,7 +57,7 @@
   .tab-strip {
     display: flex;
     gap: 0.8rem;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+    border-bottom: 1px solid var(--line);
   }
   .tab-strip button {
     background: none;

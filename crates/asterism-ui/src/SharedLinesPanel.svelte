@@ -1446,7 +1446,7 @@
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--wash-down);
     z-index: 60;
     border: 0;
     padding: 0;
@@ -1460,9 +1460,9 @@
        lists stay in view while a line is read (#217). */
     width: min(52rem, 96vw);
     overflow-y: auto;
-    background: var(--panel-bg, #1b1b1e);
-    color: var(--panel-fg, #e8e8ea);
-    box-shadow: -0.5rem 0 1.5rem rgba(0, 0, 0, 0.4);
+    background: var(--panel-bg, var(--surface-stage));
+    color: var(--panel-fg, var(--ink-secondary));
+    box-shadow: -0.5rem 0 1.5rem var(--shadow-color-strong);
     padding: 1rem 1.15rem 2rem;
     box-sizing: border-box;
   }
@@ -1570,7 +1570,7 @@
     max-width: 24rem;
   }
   .drawer-publish {
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid var(--line);
     padding-top: 0.9rem;
   }
   .drawer-publish h4 {
@@ -1598,7 +1598,7 @@
     opacity: 0.7;
   }
   .drawer-error {
-    color: #ff9d9d;
+    color: var(--danger-ink);
   }
   .drawer-tabs {
     margin: 0.8rem 0 0.2rem;
@@ -1608,7 +1608,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
     padding: 0.4rem 0.1rem;
     font-size: 0.78rem;
   }
@@ -1664,7 +1664,7 @@
     grid-template-columns: 1fr auto;
     align-items: baseline;
     gap: 0.15rem 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
     padding: 0.45rem 0.1rem;
     font-size: 0.78rem;
   }
@@ -1686,7 +1686,7 @@
     font-weight: 400;
   }
   .ledger .event {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
     padding: 0.45rem 0.1rem;
     font-size: 0.78rem;
   }
@@ -1729,7 +1729,7 @@
     font-size: 0.7rem;
     margin: 0.2rem 0 0;
     padding: 0.35rem 0.45rem;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--wash-up);
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -1753,7 +1753,7 @@
     gap: 0.5rem;
     background: none;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
     color: inherit;
     cursor: pointer;
     padding: 0.45rem 0.1rem;
@@ -1800,7 +1800,7 @@
     gap: 0.5rem;
     background: none;
     border: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--line);
     color: inherit;
     cursor: pointer;
     font-size: 0.78rem;

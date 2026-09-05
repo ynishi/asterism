@@ -160,13 +160,16 @@
 {/if}
 
 <style>
-  /* Quick Look floats over the grid without dimming it to black —
-     the point is a glance, not a modal context switch. A whisper of
-     backdrop tint keeps the panel edges readable on busy grids. */
+  /* Quick Look floats over the grid rather than replacing it — the
+     point is a glance, not a modal context switch. `--wash-down` is
+     what the drawers and dialogs take as well; the two that reach for
+     `--scrim` are the ones that cover the whole shell, and this is
+     deliberately not one of them. Enough to keep the panel edges
+     readable on a busy grid, not enough to make the grid a memory. */
   .ql-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(30, 28, 50, 0.18);
+    background: var(--wash-down);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -174,10 +177,10 @@
   }
 
   .ql-panel {
-    background: #fffef9;
-    border: 1px solid #d9d5f2;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 12px;
-    box-shadow: 0 12px 36px rgba(80, 70, 160, 0.22);
+    box-shadow: 0 12px 36px var(--shadow-color-strong);
     width: min(720px, 76vw);
     max-height: 78vh;
     display: flex;
@@ -190,52 +193,52 @@
     align-items: center;
     gap: 0.6rem;
     padding: 0.55rem 0.8rem;
-    border-bottom: 1px solid #eeecf8;
+    border-bottom: 1px solid var(--accent-line);
     font-size: 0.75rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
 
   .ql-badge {
     padding: 0.05rem 0.5rem;
     border-radius: 999px;
-    background: #eeecff;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     text-transform: uppercase;
     font-size: 0.6rem;
     letter-spacing: 0.04em;
   }
 
   .ql-persona {
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-weight: 600;
   }
 
   .ql-operator {
     padding: 0.05rem 0.45rem;
     border-radius: 999px;
-    border: 1px solid #e2e0f4;
-    color: #8a86b8;
+    border: 1px solid var(--accent-line);
+    color: var(--accent-ink);
     font-size: 0.62rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
   .ql-date {
-    color: #999;
+    color: var(--ink-faint);
     font-variant-numeric: tabular-nums;
   }
 
   .ql-open {
     margin-left: auto;
     padding: 0.1rem 0.55rem;
-    background: #eeecff;
-    color: #3d38a8;
-    border: 1px solid #d3d0f0;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     font-size: 0.65rem;
     cursor: pointer;
   }
   .ql-open:hover {
-    background: #dcd7ff;
+    background: var(--accent-surface-strong);
   }
 
   .ql-close {
@@ -247,13 +250,13 @@
     background: transparent;
     border: none;
     border-radius: 4px;
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.75rem;
     cursor: pointer;
   }
   .ql-close:hover {
-    background: #f0eefa;
-    color: #333;
+    background: var(--accent-surface);
+    color: var(--ink);
   }
 
   .ql-image {
@@ -262,35 +265,35 @@
     max-height: calc(78vh - 5.4rem);
     object-fit: contain;
     margin: 0 auto;
-    background: #f6f5ff;
+    background: var(--accent-surface);
   }
 
   .ql-mode-strip {
     display: flex;
     gap: 0.25rem;
     padding: 0.35rem 0.6rem;
-    border-bottom: 1px solid #eeecf8;
-    background: #f6f5ff;
+    border-bottom: 1px solid var(--accent-line);
+    background: var(--accent-surface);
     flex-shrink: 0;
   }
   .ql-mode-chip {
     padding: 0.1rem 0.5rem;
-    border: 1px solid #d3d0f0;
+    border: 1px solid var(--accent-line);
     border-radius: 3px;
-    background: #fffef9;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.68rem;
-    color: #555;
+    color: var(--ink-secondary);
     text-transform: lowercase;
     font-family: ui-monospace, "SF Mono", monospace;
   }
   .ql-mode-chip:hover {
-    background: #eeecff;
+    background: var(--accent-surface);
   }
   .ql-mode-chip.active {
-    background: #6c58c3;
-    border-color: #6c58c3;
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
 
   .ql-text {
@@ -298,7 +301,7 @@
     padding: 0.8rem 1rem;
     font-size: 0.85rem;
     line-height: 1.55;
-    color: #333;
+    color: var(--ink);
   }
   .ql-raw,
   .ql-term {
@@ -312,36 +315,36 @@
     font-family: ui-monospace, "SF Mono", "Menlo", monospace;
   }
   .ql-raw {
-    color: #333;
-    background: #fffef9;
+    color: var(--ink);
+    background: var(--surface-raised);
   }
   .ql-term {
-    background: #14161c;
-    color: #f4f4f8;
+    background: var(--surface-stage);
+    color: var(--ink-secondary);
     font-size: 0.82rem;
     line-height: 1.55;
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 0 1px var(--shadow-color-strong);
   }
   .ql-html {
     display: block;
     width: 100%;
     height: calc(78vh - 6rem);
-    border: 1px solid #eeecf8;
-    background: #fff;
+    border: 1px solid var(--accent-line);
+    background: var(--surface-raised);
   }
 
   .ql-loading {
     padding: 2rem;
     text-align: center;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-size: 0.8rem;
   }
 
   .ql-hint {
     padding: 0.35rem 0.8rem;
-    border-top: 1px solid #eeecf8;
+    border-top: 1px solid var(--accent-line);
     font-size: 0.62rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     text-align: center;
     user-select: none;
   }

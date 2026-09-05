@@ -1,6 +1,6 @@
 <script lang="ts">
-  // CardActionIcons — the Eagle-style Floating icon strip that sits
-  // inside the card on hover. Extracted from the inline block that
+  // CardActionIcons — the Floating icon strip that sits inside the
+  // card on hover. Extracted from the inline block that
   // used to live under `App.svelte` (grid Messages card, line 4724-
   // 4757 pre-refactor) so both the Messages grid Card and the
   // SessionsView tile can consume one uniform Floating.
@@ -130,8 +130,8 @@
 </div>
 
 <style>
-  /* Card action-icon strip — Eagle-style floating menu inside the
-     card. Hidden until the pointer settles on the card so it does
+  /* Card action-icon strip — the floating menu inside the card.
+     Hidden until the pointer settles on the card so it does
      not add visual noise to the default grid state. Each icon is
      a hover target that opens its own overlay; `.filled` indicates
      the target already has content.
@@ -149,10 +149,10 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.12s;
-    background: rgba(255, 255, 255, 0.85);
+    background: var(--wash-up-strong);
     border-radius: 999px;
     padding: 2px 4px;
-    box-shadow: 0 1px 3px rgba(23, 22, 42, 0.15);
+    box-shadow: 0 1px 3px var(--shadow-color);
     z-index: 2;
   }
   :global(.card:hover .card-action-icons) {
@@ -187,7 +187,7 @@
   }
   :global(.card-action-icon:hover) {
     opacity: 1;
-    background: rgba(88, 80, 255, 0.12);
+    background: var(--accent-surface);
     transform: scale(1.12);
   }
   :global(.card-action-icon.filled) {

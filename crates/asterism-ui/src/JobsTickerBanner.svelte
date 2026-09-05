@@ -80,10 +80,10 @@
     gap: 0.35rem;
     margin: 0 0 0.55rem;
     padding: 0.25rem 0.35rem;
-    background: #f5f4fb;
-    border: 1px solid #ecebfa;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-size: 0.72rem;
     flex-wrap: wrap;
     width: 100%;
@@ -92,15 +92,15 @@
     cursor: pointer;
   }
   .jobs-ticker:hover {
-    background: #ecebfa;
-    border-color: #d9d5f2;
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
   }
 
   .jobs-ticker-dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #7a76c9;
+    background: var(--accent-fill);
     animation: jobs-ticker-pulse 1.4s ease-in-out infinite;
   }
   /* Idle state: no pulse — the chip is a static entry point when the
@@ -120,8 +120,8 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    background: #fff;
-    border: 1px solid #d9d5f2;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
     padding: 0.05rem 0.4rem;
   }
@@ -132,17 +132,17 @@
 
   .jobs-ticker-gauge {
     font-weight: 600;
-    color: #4d488a;
+    color: var(--accent-ink);
     padding-right: 0.15rem;
   }
 
   .jobs-ticker-sub {
-    color: #888;
+    color: var(--ink-muted);
     font-size: 0.68rem;
     padding: 0 0.15rem;
   }
 
   .jobs-ticker-failed {
-    color: #b04a4a;
+    color: var(--danger-ink);
   }
 </style>

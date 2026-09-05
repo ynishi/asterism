@@ -133,7 +133,7 @@
      (wave 9). */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -150,7 +150,7 @@
     border: none;
     padding: 0.2rem 0.3rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -158,12 +158,12 @@
     font-family: inherit;
   }
   button:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
   button.active {
-    color: #111;
+    color: var(--ink);
     font-weight: 600;
-    background: #eceae2;
+    background: var(--surface-active);
   }
 
   /* Tags-specific two-column row (name + count). */
@@ -179,15 +179,15 @@
     padding: 0.28rem 0.5rem;
     margin: 0.2rem 0 0.35rem;
     font-size: 0.8rem;
-    border: 1px solid #d6d3ec;
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
-    background: #f8f7ff;
+    background: var(--accent-surface);
     color: inherit;
     outline: none;
   }
   .tags-filter:focus {
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .tag-name {
     overflow: hidden;
@@ -196,24 +196,24 @@
   }
   .tag-count {
     font-size: 0.6rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
   }
   .tags-toggle {
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-style: italic;
   }
   .tags-empty {
     font-size: 0.65rem;
-    color: #999;
+    color: var(--ink-faint);
     padding: 0.2rem 0.4rem;
     list-style: none;
   }
   .tags-active-count {
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     font-weight: normal;
   }
 </style>

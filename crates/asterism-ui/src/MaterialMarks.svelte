@@ -264,9 +264,9 @@
     flex-shrink: 0;
     box-sizing: border-box;
     padding: 0.4rem 0.5rem;
-    background: #ffffff;
-    color: #1f1e33;
-    border: 1px solid #e4e1f4;
+    background: var(--surface-raised);
+    color: var(--ink);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
   }
 
@@ -275,7 +275,7 @@
     position: relative;
     width: 100%;
     height: 18px;
-    background: rgba(120, 116, 160, 0.18);
+    background: var(--accent-surface);
     border-radius: 3px;
   }
   .mark-tick {
@@ -287,23 +287,23 @@
     padding: 0;
     border: none;
     border-radius: 1px;
-    background: #5850ff;
+    background: var(--accent-fill);
     cursor: pointer;
   }
   .mark-tick:hover {
-    background: #2f28c8;
+    background: var(--accent-fill-hover);
     width: 5px;
     margin-left: -2px;
   }
   .mark-tick.current {
-    background: #f472b6;
+    background: var(--cat-rose);
   }
   .mark-playhead {
     position: absolute;
     top: -2px;
     width: 1px;
     height: calc(100% + 4px);
-    background: rgba(31, 30, 51, 0.8);
+    background: var(--ink);
     pointer-events: none;
   }
 
@@ -323,16 +323,16 @@
     align-items: baseline;
     gap: 0.4rem;
     padding: 0.15rem 0.3rem;
-    border-left: 3px solid #5850ff;
-    background: rgba(88, 80, 255, 0.08);
+    border-left: 3px solid var(--accent-line-strong);
+    background: var(--accent-surface);
     border-radius: 3px;
   }
   .mark-row.persona {
-    border-left-color: #b47bff;
-    background: rgba(180, 123, 255, 0.1);
+    border-left-color: var(--cat-orchid);
+    background: var(--accent-surface);
   }
   .mark-row.current {
-    background: rgba(244, 114, 182, 0.16);
+    background: var(--surface-hover);
   }
   .mark-jump {
     flex: 1;
@@ -351,7 +351,7 @@
   .mark-time {
     font-family: "SF Mono", ui-monospace, monospace;
     font-size: 0.7rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     flex-shrink: 0;
   }
   .mark-body {
@@ -363,13 +363,13 @@
   }
   .mark-author {
     font-size: 0.62rem;
-    color: #9793c9;
+    color: var(--accent-ink);
     flex-shrink: 0;
   }
   .mark-delete {
     background: none;
     border: none;
-    color: #b7b1e5;
+    color: var(--accent-ink-dim);
     cursor: pointer;
     font-size: 0.72rem;
     line-height: 1;
@@ -377,11 +377,11 @@
     flex-shrink: 0;
   }
   .mark-delete:hover {
-    color: #d0393b;
+    color: var(--danger-ink);
   }
   .mark-empty {
     font-size: 0.72rem;
-    color: #9c98c9;
+    color: var(--accent-ink);
     padding: 0.15rem 0.3rem;
   }
 
@@ -395,7 +395,7 @@
   .mark-at {
     font-family: "SF Mono", ui-monospace, monospace;
     font-size: 0.7rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     flex-shrink: 0;
   }
   .mark-input {
@@ -405,20 +405,20 @@
     padding: 0.25rem 0.45rem;
     font-size: 0.78rem;
     font-family: inherit;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .mark-input:focus {
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .mark-post-btn {
     padding: 0.25rem 0.7rem;
-    background: #5850ff;
-    color: #ffffff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border: none;
     border-radius: 4px;
     font-size: 0.75rem;
@@ -426,7 +426,7 @@
     flex-shrink: 0;
   }
   .mark-post-btn:hover:not(:disabled) {
-    background: #4a42e0;
+    background: var(--accent-fill-hover);
   }
   .mark-post-btn:disabled {
     opacity: 0.5;
@@ -435,6 +435,6 @@
   .mark-error {
     margin: 0;
     font-size: 0.7rem;
-    color: #d0393b;
+    color: var(--danger-ink);
   }
 </style>

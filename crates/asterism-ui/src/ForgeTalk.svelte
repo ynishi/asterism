@@ -196,7 +196,7 @@
 
 <style>
   .talk {
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    border-top: 1px solid var(--line);
     margin-top: 0.9rem;
     padding-top: 0.5rem;
   }
@@ -224,7 +224,7 @@
     padding: 0;
   }
   .thread {
-    border-left: 2px solid rgba(128, 128, 128, 0.3);
+    border-left: 2px solid var(--line);
     margin: 0.5rem 0;
     padding-left: 0.5rem;
   }
@@ -242,7 +242,7 @@
     margin: 0.1rem 0 0;
   }
   .revisions {
-    border-left: 1px solid rgba(128, 128, 128, 0.3);
+    border-left: 1px solid var(--line);
     margin: 0.2rem 0 0.3rem 0.4rem;
     padding-left: 0.5rem;
     font-size: 0.76rem;
@@ -267,7 +267,7 @@
   }
   button {
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;

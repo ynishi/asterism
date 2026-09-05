@@ -162,8 +162,8 @@
   );
   let profileCloseTimer: number | null = null;
 
-  // Card action-icon menu — the strip of Eagle-style icons that
-  // floats inside the card while the pointer is over it. Hovering
+  // Card action-icon menu — the strip of icons that floats inside
+  // the card while the pointer is over it. Hovering
   // an icon opens the corresponding panel; the card itself no
   // longer auto-opens the Thread overlay, so a bare pass-through
   // does not disturb the grid.
@@ -318,7 +318,7 @@
   // "recency" preserves the historical `occurred_at` DESC order the
   // server delivers; the other axes bucket by the field first and
   // then fall back to `occurred_at` DESC so items inside a bucket
-  // still land newest-first (Lightroom-style grid segment order).
+  // still land newest-first.
   // - `tag` = first user-facing `labels[0]`, skipping the internal
   //   `persona:` / `journal_kind:` prefixes so buckets read as tag
   //   names, not routing metadata.
@@ -2421,9 +2421,10 @@
         if (internalDragging) return;
         // Sidebar-persona targeting: if the drop lands on top of a
         // persona row in the sidebar, that persona wins over the
-        // currently-active filter — matches the "drop on the folder
-        // to file it there" affordance from Finder / Eagle. We hit-
-        // test via `elementFromPoint` at the drop coordinates (the
+        // currently-active filter: a drop names its own destination,
+        // and the row under the pointer is the more specific of the
+        // two. We hit-test via `elementFromPoint` at the drop
+        // coordinates (the
         // Tauri payload reports physical pixels, so scale by
         // `devicePixelRatio` back to CSS space).
         let targetPersona = activeFilter.activePersona;
@@ -4338,12 +4339,12 @@
   // Grouping key derivation. When `sortMode` isn't Recency, the
   // grid inserts a lightweight header row every time the bucket
   // key changes so the user can read the axis boundaries at a
-  // glance (Lightroom's "grid segmentation" pattern). Recency
+  // glance. Recency
   // still renders flat because a per-day header would fire on
   // every timestamp.
   // Time-axis header bucketing. Same divider mechanism as
   // persona / modality / tag / group, but the raw timestamp is rounded
-  // into a Finder/Photos-style hybrid: today, yesterday, weekday for
+  // into coarser names as it recedes: today, yesterday, weekday for
   // the last 7 days, then YYYY-MM further back. Rounding is what makes
   // per-row header explosion (the reason time axes were originally
   // skipped) a non-issue — clustered assets in the same day / month
@@ -6234,8 +6235,8 @@
                     </div>
                   {/if}
                   <p class="persona-name">{personaName(rc.persona_id)}</p>
-                  <!-- Card action-icon strip (Eagle-style): floats
-                       inside the card on hover. W1 hover regrammar:
+                  <!-- Card action-icon strip: floats inside the card
+                       on hover. W1 hover regrammar:
                        hover only reveals the strip; ✦ is the sole
                        aim-hover target
                        (view-only panel, opens at 0 ms beside the
@@ -6934,25 +6935,25 @@
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #f7f7f5;
-    color: #1a1a1a;
+    background: var(--surface);
+    color: var(--ink);
   }
 
   .layout {
     display: grid;
     grid-template-columns: 180px 1fr;
     /* Pin the outer frame to the viewport so the sidebar + mode
-       toggle stay in place while the grid scrolls internally
-       (Eagle-style: fixed chrome, scroll only where the data
-       lives). Individual scroll regions manage their own overflow. */
+       toggle stay in place while the grid scrolls internally: the
+       chrome is fixed, and scrolling happens only where the data
+       lives. Individual scroll regions manage their own overflow. */
     height: 100vh;
     overflow: hidden;
   }
 
   .sidebar {
-    border-right: 1px solid #e2e2de;
+    border-right: 1px solid var(--line);
     padding: 1rem;
-    background: #fbfbf9;
+    background: var(--surface-raised);
     /* Sidebar owns its scroll — some persona lists get long, and
        we still want the persona picker reachable without dragging
        the whole page. */
@@ -6975,18 +6976,18 @@
     gap: 0.5rem;
     padding: 0.35rem 0.75rem;
     font-size: 0.75rem;
-    color: #6a5c3a;
-    background: linear-gradient(90deg, #fef7d6 0%, #fdf0b4 50%, #fef7d6 100%);
+    color: var(--warning-ink);
+    background: linear-gradient(90deg, var(--warning-surface) 0%, var(--warning-surface) 50%, var(--warning-surface) 100%);
     background-size: 200% 100%;
     animation: rebuild-shimmer 1.6s ease-in-out infinite;
-    border-bottom: 1px solid #efe0a0;
+    border-bottom: 1px solid var(--warning-line);
     pointer-events: none;
   }
   .rebuild-spinner {
     display: inline-block;
     width: 0.7rem;
     height: 0.7rem;
-    border: 2px solid #d4c383;
+    border: 2px solid var(--warning-fill);
     border-top-color: transparent;
     border-radius: 50%;
     animation: rebuild-spin 0.9s linear infinite;
@@ -7017,8 +7018,8 @@
     margin-left: 0.35rem;
     padding: 0.08rem 0.32rem;
     border-radius: 4px;
-    color: #fff;
-    background: #c04a52;
+    color: var(--danger-on-fill);
+    background: var(--danger-fill);
     font-size: 0.58rem;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -7028,11 +7029,11 @@
   }
 
   .profile-badge.bench {
-    background: #7560b4;
+    background: var(--accent-fill);
   }
 
   .status {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.7rem;
     margin: 0 0 1rem;
   }
@@ -7046,15 +7047,15 @@
     width: 100%;
     padding: 0.35rem 1.5rem 0.35rem 0.5rem;
     font-size: 0.8rem;
-    border: 1px solid #d8d8d0;
+    border: 1px solid var(--line);
     border-radius: 5px;
-    background: #fff;
+    background: var(--surface-raised);
     box-sizing: border-box;
   }
 
   .search:focus {
     outline: none;
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
 
   .search-clear {
@@ -7070,13 +7071,13 @@
     background: none;
     border: none;
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
     cursor: pointer;
     line-height: 1;
   }
 
   .search-clear:hover {
-    color: #444;
+    color: var(--ink-secondary);
   }
 
   /* Active-filter chips band in the sidebar. Wraps flexibly so a
@@ -7106,7 +7107,7 @@
     padding: 0 0.25rem;
     font-size: 0.85rem;
     line-height: 1.1;
-    color: #7a76c9;
+    color: var(--accent-ink);
     cursor: pointer;
     /* Undo the sidebar `<h2>` uppercase transform so the icon
        glyph paints as itself instead of a hollow arrow. */
@@ -7115,8 +7116,8 @@
   }
 
   .reset-icon:hover {
-    background: #ecebfa;
-    border-color: #d9d5f2;
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
   }
 
   .reset-all {
@@ -7126,7 +7127,7 @@
     border: 1px solid transparent;
     padding: 0.2rem 0.35rem;
     font-size: 0.7rem;
-    color: #9c9a89;
+    color: var(--ink-faint);
     cursor: pointer;
     text-align: left;
     margin-bottom: 0.5rem;
@@ -7134,12 +7135,12 @@
   }
 
   .reset-all:hover {
-    color: #444;
-    background: #f2f0ea;
+    color: var(--ink-secondary);
+    background: var(--surface-hover);
   }
 
   .count-hint {
-    color: #8a86ff;
+    color: var(--accent-ink);
     margin-left: 0.4rem;
     font-style: italic;
   }
@@ -7154,14 +7155,14 @@
     border: none;
     font: inherit;
     font-style: italic;
-    color: #7a76c9;
+    color: var(--accent-ink);
     text-decoration: underline;
     text-underline-offset: 0.15em;
     cursor: pointer;
   }
 
   .count-escape:hover {
-    color: #5a55b2;
+    color: var(--ink);
   }
 
   /*
@@ -7175,17 +7176,17 @@
     height: 100%;
     background: repeating-linear-gradient(
       45deg,
-      #ecebe4,
-      #ecebe4 4px,
-      #e5e3da 4px,
-      #e5e3da 8px
+      var(--surface-hover),
+      var(--surface-hover) 4px,
+      var(--surface-active) 4px,
+      var(--surface-active) 8px
     );
     border-radius: 4px;
   }
 
   .sidebar h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -7200,10 +7201,10 @@
   /* Drop target while a card is over the row — same affordance as the
      Modality / Groups sections, so every sidebar drop reads alike. */
   .sidebar li.drop-target {
-    outline: 2px dashed #b5b1e2;
+    outline: 2px dashed var(--accent-line-strong);
     outline-offset: -2px;
     border-radius: 4px;
-    background: #f2f1fb;
+    background: var(--accent-surface);
   }
 
   .sidebar button {
@@ -7211,7 +7212,7 @@
     border: none;
     padding: 0.2rem 0.3rem;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -7219,13 +7220,13 @@
   }
 
   .sidebar button:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
 
   .sidebar button.active {
-    color: #111;
+    color: var(--ink);
     font-weight: 600;
-    background: #eceae2;
+    background: var(--surface-active);
   }
 
   /* `.sidebar-count` + `.sidebar button.active .sidebar-count` moved
@@ -7248,7 +7249,7 @@
   }
 
   .count {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.75rem;
   }
 
@@ -7263,9 +7264,9 @@
     gap: 0.5rem;
     margin: 0.35rem 0 0.6rem;
     padding: 0.4rem 0.5rem;
-    border: 1px solid #e3e1f2;
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
-    background: #faf9ff;
+    background: var(--surface-raised);
   }
   /* Pushes `Empty Trash` to the far edge: it acts on the whole trash
      rather than on the selection the other two read, and putting a
@@ -7275,16 +7276,16 @@
   }
   .trash-toolbar-btn {
     padding: 0.3rem 0.75rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--line);
     border-radius: 5px;
-    background: #ffffff;
-    color: #3a3856;
+    background: var(--surface-raised);
+    color: var(--ink);
     font-family: inherit;
     font-size: 0.8rem;
     cursor: pointer;
   }
   .trash-toolbar-btn:hover:not(:disabled) {
-    background: #f2f2f6;
+    background: var(--surface-hover);
   }
   /* Disabled, not hidden: the buttons say what the toolbar can do, and
      a control that vanishes when it cannot run teaches nothing about
@@ -7296,11 +7297,11 @@
   /* Same warning tone the confirm modal and the menu's removal tier
      use — a destructive action is marked before it is taken. */
   .trash-toolbar-danger {
-    color: #c0392b;
-    border-color: #e0b4ae;
+    color: var(--danger-ink);
+    border-color: var(--danger-line);
   }
   .trash-toolbar-danger:hover:not(:disabled) {
-    background: #fdf1ef;
+    background: var(--danger-surface);
   }
 
   .grid {
@@ -7338,8 +7339,8 @@
     position: fixed;
     z-index: 35;
     pointer-events: none;
-    background: rgba(88, 80, 255, 0.12);
-    border: 1px solid rgba(88, 80, 255, 0.55);
+    background: var(--accent-surface);
+    border: 1px solid var(--accent-line);
     border-radius: 2px;
   }
 
@@ -7353,12 +7354,12 @@
     pointer-events: none;
     transform: translate(12px, 12px);
     padding: 0.15rem 0.45rem;
-    background: #5850ff;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border-radius: 4px;
     font-size: 0.7rem;
     font-variant-numeric: tabular-nums;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px var(--shadow-color);
   }
 
   .grid-row {
@@ -7380,32 +7381,31 @@
   }
 
   /* Group-boundary header inside the virtualised grid. Kept
-     lightweight (1 line, muted purple) so it separates buckets
-     without competing with the cards visually — Lightroom's
-     segment header treatment adapted for the Asterism palette. */
+     lightweight — one line, in `--accent-ink` rather than `--ink` —
+     so it separates buckets without competing with the cards. */
   .grid-group-header {
     font-size: 0.78rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-weight: 600;
     margin: 0.3rem 0 0.35rem;
     padding: 0.15rem 0.05rem;
-    border-bottom: 1px solid #ecebfa;
+    border-bottom: 1px solid var(--accent-line);
   }
   /* The time band a run of buckets falls into, under the `Recent`
      order. It has to outrank the bucket header it introduces, or the
      two read as siblings and the nesting is lost — hence the larger
-     type, the darker ink, and the solid rule against the bucket
-     header's hairline. The extra top margin is the gap that makes the
+     type, full-strength `--ink` against the bucket header's
+     `--accent-ink`, and the solid rule against its hairline. The extra top margin is the gap that makes the
      grouping visible without an indent (indenting the minor header
      would misalign it with the card grid it captions). */
   .grid-group-header.major {
     font-size: 0.92rem;
-    color: #4b47a8;
+    color: var(--ink);
     font-weight: 700;
     letter-spacing: 0.01em;
     margin: 1.1rem 0 0.15rem;
     padding-bottom: 0.28rem;
-    border-bottom: 2px solid #cfcbee;
+    border-bottom: 2px solid var(--accent-line);
   }
   /* No leading gap when a major header opens the list — the grid's own
      top padding already provides it. */
@@ -7414,8 +7414,8 @@
   }
 
   .card {
-    background: #fff;
-    border: 1px solid #e6e6e2;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
     border-radius: 8px;
     padding: 0.6rem;
     min-height: 90px;
@@ -7423,7 +7423,7 @@
   }
 
   .card.hovered {
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
     transform: translateY(-1px);
   }
 
@@ -7432,16 +7432,16 @@
      the user has scrolled from the anchor. The ring stacks with
      `.hovered` — `box-shadow` composes cleanly. */
   .card.selected {
-    border-color: #5850ff;
+    border-color: var(--accent-line-strong);
     box-shadow:
-      0 0 0 2px #5850ff,
-      0 2px 6px rgba(88, 80, 255, 0.25);
-    background: #f5f4ff;
+      0 0 0 2px var(--accent-fill),
+      0 2px 6px var(--accent-glow);
+    background: var(--accent-surface);
   }
   .card.selected.hovered {
     box-shadow:
-      0 0 0 2px #5850ff,
-      0 4px 10px rgba(88, 80, 255, 0.35);
+      0 0 0 2px var(--accent-fill),
+      0 4px 10px var(--accent-glow);
   }
 
   /* Drag cues: any Messages-view card can be picked up (drag-mode),
@@ -7467,7 +7467,7 @@
     -webkit-user-drag: none;
   }
   .card.drop-target {
-    border-left: 3px solid #7a76c9;
+    border-left: 3px solid var(--accent-line-strong);
     padding-left: calc(0.6rem - 2px);
   }
 
@@ -7479,17 +7479,17 @@
 
   .badge {
     font-size: 0.65rem;
-    background: #eceae2;
+    background: var(--surface-active);
     border-radius: 4px;
     padding: 0.05rem 0.35rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
 
   /* A container reads as a container at a glance — same badge shape,
      the sidebar's Grouping accent so the two surfaces agree. */
   .badge-collection {
-    background: #e4e2f5;
-    color: #5b56a8;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
 
   .cover-collection {
@@ -7499,13 +7499,13 @@
   .collection-meta {
     margin: 0.15rem 0 0;
     font-size: 0.7rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     font-variant-numeric: tabular-nums;
   }
 
   .date {
     font-size: 0.65rem;
-    color: #aaa;
+    color: var(--ink-faint);
   }
 
   .cover {
@@ -7521,7 +7521,7 @@
 
   .cover-image {
     font-size: 0.7rem;
-    color: #888;
+    color: var(--ink-muted);
     -webkit-line-clamp: 1;
     line-clamp: 1;
     margin-top: 0.35rem;
@@ -7543,8 +7543,8 @@
 
   /* Match highlight injected by tantivy `SnippetGenerator.to_html()` — <b> tags around matched terms. */
   .cover-snippet :global(b) {
-    background: #fff2a8;
-    color: #333;
+    background: var(--warning-surface);
+    color: var(--ink);
     font-weight: 600;
     padding: 0 1px;
     border-radius: 2px;
@@ -7557,8 +7557,8 @@
    */
   .score-badge {
     font-size: 0.6rem;
-    background: #4d6cc9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border-radius: 3px;
     padding: 0.05rem 0.35rem;
     margin-left: 0.3rem;
@@ -7602,15 +7602,15 @@
   /* Hovered card in clean mode brings the frame back so the User
      still gets the "which card am I on" affordance. */
   .content.clean-mode .card:hover {
-    background: #ffffff;
-    border-color: #e6e6e2;
+    background: var(--surface-raised);
+    border-color: var(--line);
   }
   .grid-wrapper.clean-mode .card-head {
     margin-bottom: 0.2rem;
   }
   .clean-basename {
     font-size: 0.72rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     margin: 0.1rem 0 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -7636,7 +7636,7 @@
     width: 24px;
     height: 12px;
     border-radius: 999px;
-    background: #d6d3ec;
+    background: var(--accent-surface-strong);
     position: relative;
     transition: background 0.12s;
   }
@@ -7647,27 +7647,27 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    background: var(--surface-raised);
+    box-shadow: 0 1px 2px var(--shadow-color);
     transition: transform 0.12s;
   }
   .clean-toggle.on .clean-toggle-track {
-    background: #5850ff;
+    background: var(--accent-fill);
   }
   .clean-toggle.on .clean-toggle-knob {
     transform: translateX(12px);
   }
   .clean-toggle-label {
-    color: #6a67a4;
+    color: var(--accent-ink);
     letter-spacing: 0.02em;
   }
   .clean-toggle.on .clean-toggle-label {
-    color: #5850ff;
+    color: var(--accent-ink);
     font-weight: 600;
   }
 
-  /* Card action-icon strip — Eagle-style floating menu inside the
-     card. The strip itself now lives in `CardActionIcons.svelte`,
+  /* Card action-icon strip — the floating menu inside the card.
+     The strip itself now lives in `CardActionIcons.svelte`,
      which owns the `.card-action-icons` /
      `.card-action-icon` / `.filled` selectors as `:global` so the
      hover cascade fires from either the Messages grid `.card` or
@@ -7693,23 +7693,23 @@
     position: fixed;
     width: 300px;
     max-height: 320px;
-    background: #ffffff;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 8px;
-    box-shadow: 0 12px 30px rgba(23, 22, 42, 0.25);
+    box-shadow: 0 12px 30px var(--shadow-color);
     z-index: 55;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .card-thread-head {
     font-size: 0.72rem;
     padding: 0.35rem 0.7rem;
-    background: #f5f4ff;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-weight: 600;
-    border-bottom: 1px solid #eae7f8;
+    border-bottom: 1px solid var(--accent-line);
   }
   .card-thread-list {
     list-style: none;
@@ -7723,21 +7723,21 @@
     gap: 0.3rem;
   }
   .card-thread-post {
-    border-left: 2px solid #5850ff;
+    border-left: 2px solid var(--accent-line-strong);
     padding: 0.2rem 0.45rem;
-    background: #f5f4ff;
+    background: var(--accent-surface);
     border-radius: 3px;
     font-size: 0.75rem;
     display: flex;
     gap: 0.4rem;
   }
   .card-thread-post.persona {
-    border-left-color: #b47bff;
-    background: #f8f3ff;
+    border-left-color: var(--accent-line-strong);
+    background: var(--accent-surface);
   }
   .card-thread-author {
     font-weight: 600;
-    color: #2f2c5c;
+    color: var(--ink);
     flex-shrink: 0;
   }
   .card-thread-avatar {
@@ -7752,8 +7752,8 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: #eae7f8;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-size: 0.55rem;
     display: inline-flex;
     align-items: center;
@@ -7763,8 +7763,8 @@
     align-self: flex-start;
   }
   .card-thread-avatar-placeholder.user {
-    background: #5850ff;
-    color: #ffffff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .card-thread-toggle button {
     display: inline-flex;
@@ -7775,8 +7775,8 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #eae7f8;
-    color: #6a67a4;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     font-size: 0.5rem;
     display: inline-flex;
     align-items: center;
@@ -7784,8 +7784,8 @@
     font-weight: 700;
   }
   .card-thread-toggle-avatar.user {
-    background: #5850ff;
-    color: #ffffff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .card-thread-toggle-avatar-img {
     width: 16px;
@@ -7794,27 +7794,27 @@
     object-fit: cover;
   }
   .card-thread-toggle button.active .card-thread-toggle-avatar {
-    background: #ffffff;
-    color: #5850ff;
+    background: var(--surface-raised);
+    color: var(--accent-ink);
   }
   .card-thread-body {
-    color: #1f1e33;
+    color: var(--ink);
     white-space: pre-wrap;
     line-height: 1.3;
   }
   .card-thread-empty {
-    color: #9c98c9;
+    color: var(--accent-ink);
     font-size: 0.72rem;
     padding: 0.3rem 0.5rem;
     text-align: center;
   }
   .card-thread-compose {
-    border-top: 1px solid #eae7f8;
+    border-top: 1px solid var(--accent-line);
     padding: 0.4rem 0.55rem;
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
-    background: #fafafd;
+    background: var(--surface-raised);
   }
   .card-thread-toggle {
     display: flex;
@@ -7823,20 +7823,20 @@
   .card-thread-toggle button {
     padding: 0.15rem 0.55rem;
     font-size: 0.68rem;
-    background: #ffffff;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 3px;
     cursor: pointer;
-    color: #6a67a4;
+    color: var(--accent-ink);
   }
   .card-thread-toggle button:disabled {
     opacity: 0.35;
     cursor: not-allowed;
   }
   .card-thread-toggle button.active {
-    background: #5850ff;
-    color: #ffffff;
-    border-color: #5850ff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-line-strong);
   }
   .card-thread-input {
     width: 100%;
@@ -7846,28 +7846,28 @@
     font-size: 0.78rem;
     font-family: inherit;
     line-height: 1.35;
-    background: #ffffff;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
     color: inherit;
     resize: vertical;
   }
   .card-thread-input:focus {
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
   .card-thread-post-btn {
     align-self: flex-end;
     padding: 0.3rem 0.9rem;
-    background: #5850ff;
-    color: #ffffff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border: none;
     border-radius: 4px;
     font-size: 0.75rem;
     cursor: pointer;
   }
   .card-thread-post-btn:hover:not(:disabled) {
-    background: #4a42e0;
+    background: var(--accent-fill-hover);
   }
   .card-thread-post-btn:disabled {
     opacity: 0.5;
@@ -7890,21 +7890,21 @@
     padding: 0;
     font-size: 0.9rem;
     line-height: 1;
-    color: rgba(0, 0, 0, 0.08);
+    color: var(--ink-faint);
     cursor: pointer;
     transition: color 0.08s;
   }
   .card:hover .rating-star {
-    color: rgba(0, 0, 0, 0.25);
+    color: var(--ink-faint);
   }
   .rating-star.filled {
-    color: #f5a623;
+    color: var(--warning-ink);
   }
   .card:hover .rating-star.filled {
-    color: #f5a623;
+    color: var(--warning-ink);
   }
   .rating-star:hover {
-    color: #f5a623;
+    color: var(--warning-ink);
     transform: scale(1.15);
   }
 
@@ -7922,7 +7922,7 @@
   .palette-swatch {
     flex: 1;
     display: block;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    box-shadow: inset 0 0 0 1px var(--shadow-color);
     transition: transform 0.08s;
   }
   .card:hover .palette-strip {
@@ -7934,7 +7934,7 @@
     aspect-ratio: 4 / 3;
     overflow: hidden;
     border-radius: 5px;
-    background: #eceae2;
+    background: var(--surface-stage);
     margin-bottom: 0.35rem;
   }
 
@@ -7954,8 +7954,8 @@
 
   .label {
     font-size: 0.6rem;
-    color: #7a76c9;
-    background: #f0effc;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
     border-radius: 3px;
     padding: 0.05rem 0.3rem;
   }
@@ -7976,19 +7976,19 @@
     font-family: inherit;
   }
   .label-tag:hover {
-    background: #e2ddf9;
-    color: #5a55b2;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
   /* Active state = this chip's tag is already in the multi-tag
      filter set. Signals "clicking me is a no-op" so the user does
      not expect the chip to toggle off. */
   .label-tag-active {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .label-tag-active:hover {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     cursor: default;
   }
 
@@ -8003,16 +8003,16 @@
     margin-left: 0.3rem;
     padding: 0.1rem 0.5rem;
     font-size: 0.7rem;
-    color: #7a76c9;
-    background: #f0effc;
-    border: 1px solid #d9d5f2;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     cursor: pointer;
     font-family: inherit;
   }
   .active-tag-chip:hover {
-    background: #e2ddf9;
-    color: #5a55b2;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
   .chip-x {
     font-size: 0.6rem;
@@ -8043,13 +8043,13 @@
      .active-tag-chip but a distinct palette so users can tell
      tag-axis and group-axis filters apart at a glance. */
   .group-chip {
-    background: #eef7f4;
-    border-color: #c8e4d6;
-    color: #4a8f78;
+    background: var(--success-surface);
+    border-color: var(--success-line);
+    color: var(--success-ink);
   }
   .group-chip:hover {
-    background: #d9ede4;
-    color: #2f6e5a;
+    background: var(--success-surface-strong);
+    color: var(--success-ink);
   }
 
   /* Sidebar Groups/Dirs cascade (.group-row + variants / .group-edit /
@@ -8070,14 +8070,14 @@
   }
   .child-band-label {
     font-size: 0.65rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
   }
   .child-chip {
     display: inline-flex;
     align-items: stretch;
-    border: 1px solid #c8e4d6;
+    border: 1px solid var(--success-line);
     border-radius: 999px;
-    background: #eef7f4;
+    background: var(--success-surface);
     overflow: hidden;
   }
   .child-chip-name {
@@ -8086,32 +8086,32 @@
     gap: 0.3rem;
     padding: 0.1rem 0.2rem 0.1rem 0.55rem;
     font-size: 0.7rem;
-    color: #4a8f78;
+    color: var(--success-ink);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .child-chip-name:hover {
-    background: #d9ede4;
-    color: #2f6e5a;
+    background: var(--success-surface);
+    color: var(--success-ink);
   }
   .child-chip-count {
     font-size: 0.6rem;
-    color: #7ab89a;
+    color: var(--success-ink);
     font-variant-numeric: tabular-nums;
   }
   .child-chip-x {
     padding: 0 0.45rem 0 0.25rem;
     font-size: 0.55rem;
-    color: #9cc4b1;
+    color: var(--success-ink);
     background: transparent;
     border: none;
     cursor: pointer;
     font-family: inherit;
   }
   .child-chip-x:hover {
-    color: #d47272;
+    color: var(--danger-ink);
   }
 
   /* Content-type filter band — appears above the grid inside a
@@ -8128,7 +8128,7 @@
   }
   .flag-band-label {
     font-size: 0.62rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     letter-spacing: 0.08em;
     margin-right: 0.2rem;
   }
@@ -8137,10 +8137,10 @@
     align-items: center;
     gap: 0.3rem;
     padding: 0.15rem 0.55rem;
-    border: 1px solid #d9d5f2;
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
-    background: #fff;
-    color: #4a4a4a;
+    background: var(--surface-raised);
+    color: var(--ink-secondary);
     cursor: pointer;
     font-family: inherit;
     font-size: 0.7rem;
@@ -8148,13 +8148,13 @@
     transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
   }
   .flag-chip:hover {
-    border-color: #7a76c9;
-    color: #2a2a2a;
+    border-color: var(--accent-line-strong);
+    color: var(--ink);
   }
   .flag-chip.active {
-    background: #7a76c9;
-    border-color: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-line-strong);
+    color: var(--accent-on-fill);
   }
   .flag-icon {
     font-size: 0.85rem;
@@ -8175,13 +8175,13 @@
     padding: 0.15rem 0.45rem;
     border: none;
     background: transparent;
-    color: #9a96d9;
+    color: var(--accent-ink);
     cursor: pointer;
     font-family: inherit;
     font-size: 0.7rem;
   }
   .flag-clear:hover {
-    color: #d47272;
+    color: var(--danger-ink);
   }
 
   /* Per-card content-flag badges — small emoji chips lined up next
@@ -8196,7 +8196,7 @@
     padding: 0 0.15rem;
     margin-left: 0.15rem;
     border-radius: 4px;
-    background: #f0efe9;
+    background: var(--surface-hover);
     font-size: 0.7rem;
     line-height: 1;
   }
@@ -8214,8 +8214,8 @@
     padding: 0 0.2rem;
     margin-left: 0.15rem;
     border-radius: 4px;
-    background: #fff2d6;
-    color: #7a5a10;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
     font-size: 0.68rem;
     line-height: 1;
   }
@@ -8255,7 +8255,7 @@
     gap: 0.3rem;
     font-family: inherit;
     font-size: 0.72rem;
-    color: #666;
+    color: var(--ink-secondary);
     cursor: pointer;
     user-select: none;
   }
@@ -8270,8 +8270,8 @@
   .lane-toggle {
     font-family: inherit;
     font-size: 0.72rem;
-    color: #7a76c9;
-    background: #f0effc;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
     border: 1px solid transparent;
     border-radius: 8px;
     padding: 0.2rem 0.65rem;
@@ -8279,12 +8279,12 @@
   }
 
   .lane-toggle:hover {
-    border-color: #d9d5f2;
+    border-color: var(--accent-line);
   }
 
   .lane-toggle.active {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
 
   /* `.jobs-ticker-*` cascade moved to JobsTickerBanner.svelte in
@@ -8299,7 +8299,7 @@
      and scroll internally so both surfaces stay visible. */
   .dir-lane {
     padding: 0.5rem 0.15rem 0.7rem;
-    border-bottom: 1px solid #e6e6e2;
+    border-bottom: 1px solid var(--line);
     margin-bottom: 0.5rem;
     max-height: 40vh;
     overflow-y: auto;
@@ -8318,7 +8318,7 @@
     align-items: baseline;
     gap: 0.3rem;
     font-size: 0.85rem;
-    color: #4d488a;
+    color: var(--accent-ink);
     font-weight: 600;
     flex-wrap: wrap;
   }
@@ -8327,7 +8327,7 @@
     background: transparent;
     border: none;
     padding: 0;
-    color: #7a76c9;
+    color: var(--accent-ink);
     font: inherit;
     cursor: pointer;
     text-transform: none;
@@ -8338,19 +8338,19 @@
   }
 
   .dir-lane-crumb-current {
-    color: #4d488a;
+    color: var(--accent-ink);
   }
 
   .dir-lane-crumb-sep {
-    color: #b8b3e8;
+    color: var(--accent-ink-dim);
     font-weight: 400;
   }
 
   .dir-lane-up {
     background: transparent;
-    border: 1px solid #d9d5f2;
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
-    color: #7a76c9;
+    color: var(--accent-ink);
     padding: 0 0.4rem;
     font-size: 0.75rem;
     cursor: pointer;
@@ -8358,7 +8358,7 @@
   }
 
   .dir-lane-up:hover:not(:disabled) {
-    background: #ecebfa;
+    background: var(--accent-surface);
   }
 
   .dir-lane-up:disabled {
@@ -8367,7 +8367,7 @@
   }
 
   .dir-lane-counts {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.7rem;
   }
 
@@ -8376,16 +8376,16 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
-    color: #999;
+    color: var(--ink-faint);
     padding: 0 0.35rem;
     cursor: pointer;
     font-size: 0.75rem;
   }
 
   .dir-lane-close:hover {
-    background: #ecebfa;
-    color: #4d488a;
-    border-color: #d9d5f2;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
+    border-color: var(--accent-line);
   }
 
   .dir-lane-row {
@@ -8397,13 +8397,13 @@
   }
 
   .dir-lane-label {
-    color: #7a76c9;
+    color: var(--accent-ink);
     font-size: 0.7rem;
     padding-right: 0.35rem;
   }
 
   .dir-lane-empty {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.75rem;
     margin: 0.3rem 0;
   }
@@ -8417,28 +8417,28 @@
   }
 
   .lane-tile {
-    background: #fbfbf9;
-    border: 1px solid #e6e6e2;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
     border-radius: 10px;
     padding: 0.35rem 0.35rem 0.4rem;
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
     font-family: inherit;
-    color: #444;
+    color: var(--ink-secondary);
     cursor: pointer;
     width: 96px;
   }
 
   .lane-tile:hover {
-    border-color: #b8b3e8;
-    color: #333;
+    border-color: var(--accent-line-strong);
+    color: var(--ink);
   }
 
   .lane-tile.active {
-    background: #ecebfa;
-    border-color: #7a76c9;
-    color: #4d488a;
+    background: var(--accent-surface);
+    border-color: var(--accent-line-strong);
+    color: var(--accent-ink);
   }
 
   .lane-tile-thumb {
@@ -8446,7 +8446,7 @@
     width: 100%;
     aspect-ratio: 1 / 1;
     border-radius: 6px;
-    background: #eee;
+    background: var(--surface-hover);
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -8460,12 +8460,12 @@
   }
 
   .lane-tile-thumb-dir {
-    background: #f4f0ff;
+    background: var(--accent-surface);
   }
 
   .lane-tile-icon {
     font-size: 1.6rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
     opacity: 0.7;
   }
 
@@ -8473,11 +8473,11 @@
     position: absolute;
     right: 4px;
     bottom: 4px;
-    background: rgba(255, 255, 255, 0.9);
+    background: var(--wash-up-strong);
     border-radius: 4px;
     padding: 0 4px;
     font-size: 0.65rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
     line-height: 1.4;
   }
 
@@ -8502,8 +8502,8 @@
   .dir-lane-apply-btn {
     font-family: inherit;
     font-size: 0.75rem;
-    color: #7a76c9;
-    background: #f0effc;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
     border: 1px solid transparent;
     border-radius: 8px;
     padding: 0.3rem 0.7rem;
@@ -8511,12 +8511,12 @@
   }
 
   .dir-lane-apply-btn:hover {
-    border-color: #d9d5f2;
+    border-color: var(--accent-line);
   }
 
   .dir-lane-apply-btn.active {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
 
   .dir-lane-apply-count {
@@ -8530,24 +8530,24 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.25rem 0.55rem;
-    background: #fbfbf9;
-    border: 1px solid #e6e6e2;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
     border-radius: 8px;
     font-family: inherit;
     font-size: 0.75rem;
-    color: #444;
+    color: var(--ink-secondary);
     cursor: pointer;
   }
 
   .group-chip-large:hover {
-    border-color: #b8b3e8;
-    color: #333;
+    border-color: var(--accent-line-strong);
+    color: var(--ink);
   }
 
   .group-chip-large.active {
-    background: #ecebfa;
-    border-color: #7a76c9;
-    color: #4d488a;
+    background: var(--accent-surface);
+    border-color: var(--accent-line-strong);
+    color: var(--accent-ink);
   }
 
   .group-chip-icon {
@@ -8555,24 +8555,24 @@
   }
 
   .group-chip-count {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.68rem;
-    background: #fff;
+    background: var(--surface-raised);
     padding: 0 0.25rem;
     border-radius: 4px;
-    border: 1px solid #ececec;
+    border: 1px solid var(--line-faint);
   }
 
   .group-chip-large.active .group-chip-count {
-    background: #fff;
-    border-color: #d9d5f2;
-    color: #7a76c9;
+    background: var(--surface-raised);
+    border-color: var(--accent-line);
+    color: var(--accent-ink);
   }
 
   .view-mode {
     display: inline-flex;
     gap: 0.15rem;
-    background: #f0effc;
+    background: var(--accent-surface);
     border-radius: 8px;
     padding: 0.15rem;
   }
@@ -8582,13 +8582,13 @@
     align-items: center;
     gap: 0.4rem;
     font-size: 0.72rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
   }
 
   .sort-picker select {
     font: inherit;
     color: inherit;
-    background: #f0effc;
+    background: var(--accent-surface);
     border: 1px solid transparent;
     border-radius: 6px;
     padding: 0.15rem 0.4rem;
@@ -8596,7 +8596,7 @@
   }
 
   .sort-picker select:hover {
-    border-color: #d9d5f2;
+    border-color: var(--accent-line);
   }
   .sort-picker label {
     display: inline-flex;
@@ -8607,8 +8607,8 @@
      chip shape as `select` so the toolbar keeps its rhythm, minus the
      affordances — nothing here is clickable. */
   .sort-manual {
-    background: #f0effc;
-    border: 1px solid #d9d5f2;
+    background: var(--accent-surface);
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
     padding: 0.15rem 0.4rem;
     cursor: default;
@@ -8627,45 +8627,45 @@
     opacity: 0.4;
   }
   aside.sidebar li.reorder-target {
-    border-top: 2px solid #6c58c3;
+    border-top: 2px solid var(--accent-fill);
   }
   .view-mode button {
     border: none;
     background: transparent;
     padding: 0.2rem 0.8rem;
     font-size: 0.72rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
     border-radius: 6px;
     cursor: pointer;
     font-family: inherit;
   }
   .view-mode button.active {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
 
   /* Sessions grid tile: same footprint as a message card but with a
      session-specific meta row (message count + occurrence range). */
   .session-card {
     text-align: left;
-    border: 1px solid #eeecf8;
+    border: 1px solid var(--accent-line);
     cursor: pointer;
     font-family: inherit;
   }
   .session-card:hover {
-    background: #f8f7fd;
+    background: var(--surface-raised);
   }
   .session-meta {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     font-size: 0.6rem;
-    color: #9a96d9;
+    color: var(--accent-ink);
     margin-top: 0.3rem;
   }
   .session-count {
-    background: #f0effc;
-    color: #7a76c9;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     padding: 0.05rem 0.3rem;
     border-radius: 3px;
     font-variant-numeric: tabular-nums;
@@ -8679,23 +8679,23 @@
      as the tag chips but a different glyph (⇱) so the two axes are
      visually distinct. */
   .session-chip {
-    background: #fdf6f0;
-    border-color: #f0d5c0;
-    color: #b28860;
+    background: var(--surface-hover);
+    border-color: var(--warning-line);
+    color: var(--warning-ink);
   }
   .session-chip:hover {
-    background: #f7e5d3;
-    color: #8a6540;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
   }
 
   .persona-name {
     font-size: 0.65rem;
-    color: #bbb;
+    color: var(--ink-faint);
     margin: 0;
   }
 
   .empty {
-    color: #999;
+    color: var(--ink-faint);
     font-size: 0.85rem;
   }
 
@@ -8712,18 +8712,18 @@
     align-items: center;
     gap: 0.45rem;
     padding: 0.3rem 0.8rem;
-    background: rgba(255, 254, 249, 0.95);
-    border: 1px solid #d9d5f2;
+    background: var(--wash-up-strong);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
-    box-shadow: 0 4px 14px rgba(80, 70, 160, 0.14);
+    box-shadow: 0 4px 14px var(--shadow-color-strong);
     font-size: 0.75rem;
-    color: #5a55b8;
+    color: var(--accent-ink);
   }
   .grid-loading-spinner {
     width: 12px;
     height: 12px;
-    border: 2px solid #d9d5f2;
-    border-top-color: #5a55b8;
+    border: 2px solid var(--accent-line);
+    border-top-color: var(--accent-fill);
     border-radius: 50%;
     animation: grid-loading-spin 0.8s linear infinite;
   }
@@ -8738,7 +8738,7 @@
   .detail-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(20, 18, 30, 0.72);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -8754,25 +8754,25 @@
     top: 0.4rem;
     right: 0.6rem;
     z-index: 2;
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid #d5d3ca;
+    background: var(--wash-up-strong);
+    border: 1px solid var(--line);
     border-radius: 999px;
     width: 1.9rem;
     height: 1.9rem;
     cursor: pointer;
-    color: #555;
+    color: var(--ink-secondary);
     font-size: 0.85rem;
   }
 
   .detail-close:hover {
-    color: #111;
-    background: #fff;
+    color: var(--ink);
+    background: var(--surface-raised);
   }
 
   .detail-loading {
     padding: 3rem;
     text-align: center;
-    color: #999;
+    color: var(--ink-faint);
     margin: 0;
   }
 
@@ -8793,18 +8793,18 @@
   /* Session Reader chip in the grid header (sits beside the ⇱
      session chip). */
   .reader-chip {
-    background: #f3f0fc;
-    border-color: #d9d5f2;
-    color: #6f6c9c;
+    background: var(--accent-surface);
+    border-color: var(--accent-line);
+    color: var(--accent-ink);
   }
   .reader-chip:hover {
-    background: #e2ddf9;
-    color: #4a4780;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
 
   /* Session Reader panel — a reading column, not a grid. */
   .reader-panel {
-    background: #fbfbf9;
+    background: var(--surface-raised);
     border-radius: 10px;
     width: min(94vw, 860px);
     max-height: 96vh;
@@ -8812,19 +8812,19 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 20px 60px var(--shadow-color-strong);
   }
   .reader-title {
     margin: 0;
     padding: 1rem 3rem 0.8rem 1.4rem;
     font-size: 0.95rem;
-    color: #111;
-    border-bottom: 1px solid #e2e2de;
+    color: var(--ink);
+    border-bottom: 1px solid var(--line);
     word-break: break-word;
   }
   .reader-count {
     font-size: 0.7rem;
-    color: #999;
+    color: var(--ink-faint);
     font-weight: normal;
   }
   .reader-scroll {
@@ -8835,20 +8835,20 @@
     margin-bottom: 1.1rem;
     padding: 0.6rem 0.8rem;
     border-radius: 8px;
-    border-left: 3px solid #e2e2de;
-    background: #fff;
+    border-left: 3px solid var(--line);
+    background: var(--surface-raised);
   }
   .reader-msg-user {
-    border-left-color: #7a76c9;
-    background: #f7f6fd;
+    border-left-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .reader-msg-assistant {
-    border-left-color: #7ab89a;
+    border-left-color: var(--success-fill);
   }
   .reader-msg-system,
   .reader-msg-tool {
-    border-left-color: #d8d8d0;
-    background: #fafaf7;
+    border-left-color: var(--line);
+    background: var(--surface-raised);
   }
   .reader-meta {
     display: flex;
@@ -8860,11 +8860,11 @@
     font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #9a96d9;
+    color: var(--accent-ink);
   }
   .reader-time {
     font-size: 0.62rem;
-    color: #bbb;
+    color: var(--ink-faint);
     font-variant-numeric: tabular-nums;
   }
   .reader-msg pre {
@@ -8873,7 +8873,7 @@
     line-height: 1.55;
     white-space: pre-wrap;
     word-break: break-word;
-    color: #2a2a2a;
+    color: var(--ink);
     font-family: inherit;
   }
   .reader-image {
@@ -8893,34 +8893,34 @@
   }
   .reader-mode-chip {
     padding: 0.1rem 0.5rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.7rem;
-    color: #555;
+    color: var(--ink-secondary);
     font-family: ui-monospace, "SF Mono", monospace;
   }
   .reader-mode-chip:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
   .reader-mode-chip.active {
-    background: #6c58c3;
-    border-color: #6c58c3;
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .reader-html {
     width: 100%;
     min-height: 40vh;
-    border: 1px solid #e2e2de;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
   }
   .reader-term {
     font-family: ui-monospace, "SF Mono", "Menlo", monospace !important;
     font-size: 0.8rem !important;
-    background: #14161c;
-    color: #f4f4f8 !important;
+    background: var(--surface-stage);
+    color: var(--ink-secondary) !important;
     padding: 0.8rem 1rem;
     border-radius: 4px;
     line-height: 1.55 !important;
@@ -8933,18 +8933,18 @@
     margin-left: 0.5rem;
     padding: 0.1rem 0.5rem;
     font-size: 0.62rem;
-    border: 1px solid #d9d5f2;
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
-    background: #fff;
-    color: #9a96d9;
+    background: var(--surface-raised);
+    color: var(--accent-ink);
     cursor: pointer;
     font-family: inherit;
     vertical-align: middle;
   }
   .reader-md-toggle.active {
-    background: #7a76c9;
-    border-color: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-line-strong);
+    color: var(--accent-on-fill);
   }
 
   /* Rendered-markdown body. `:global` because the nodes come from
@@ -8952,7 +8952,7 @@
   .reader-md {
     font-size: 0.82rem;
     line-height: 1.55;
-    color: #2a2a2a;
+    color: var(--ink);
     word-break: break-word;
   }
   .reader-md :global(p),
@@ -8977,13 +8977,13 @@
   .reader-md :global(code) {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.76rem;
-    background: #f0efe9;
+    background: var(--surface-hover);
     border-radius: 3px;
     padding: 0.05rem 0.25rem;
   }
   .reader-md :global(pre) {
-    background: #f4f3ee;
-    border: 1px solid #e6e4dc;
+    background: var(--surface-hover);
+    border: 1px solid var(--line);
     border-radius: 6px;
     padding: 0.55rem 0.7rem;
     overflow-x: auto;
@@ -8994,16 +8994,16 @@
     padding: 0;
   }
   .reader-md :global(blockquote) {
-    border-left: 3px solid #d9d5f2;
+    border-left: 3px solid var(--accent-line);
     padding-left: 0.7rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
   .reader-md :global(ul),
   .reader-md :global(ol) {
     padding-left: 1.3rem;
   }
   .reader-md :global(a) {
-    color: #5a55b2;
+    color: var(--accent-ink);
   }
   .reader-md :global(img) {
     max-width: 100%;
@@ -9014,12 +9014,12 @@
   }
   .reader-md :global(th),
   .reader-md :global(td) {
-    border: 1px solid #e2e2de;
+    border: 1px solid var(--line);
     padding: 0.2rem 0.5rem;
   }
   .reader-md :global(hr) {
     border: none;
-    border-top: 1px solid #e2e2de;
+    border-top: 1px solid var(--line);
     margin: 0.8rem 0;
   }
 
@@ -9050,42 +9050,43 @@
     border: 1px solid transparent;
   }
   .tag-chip-group:hover {
-    border-color: #d0d0d0;
+    border-color: var(--line);
   }
   .tag-chip-action {
-    background: #f6f6f6;
+    background: var(--surface-hover);
     border: none;
-    border-left: 1px solid #e4e4e4;
+    border-left: 1px solid var(--line);
     padding: 0 0.35rem;
     font-size: 0.8rem;
     line-height: 1;
     cursor: pointer;
-    color: #666;
+    color: var(--ink-secondary);
   }
   .tag-chip-action:hover {
-    background: #eaeaea;
-    color: #111;
+    background: var(--surface-active);
+    color: var(--ink);
   }
   .tag-chip-promote:hover {
-    background: #ffe9c9;
-    color: #7a4a00;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
   }
-  /* "Already promoted" state — the ✓ mark plus a muted olive tint
-     signals that a Group ~<tag> already exists for this persona,
+  /* "Already promoted" state — the ✓ mark plus a warning tint one
+     step past the one any un-promoted chip shows under the pointer,
+     signalling that a Group ~<tag> already exists for this persona,
      so a second click will error on the `(persona, name)` unique
      constraint. Kept clickable so the toast can echo the actual
      error and the user learns the tag is already snapshot'd. */
   .tag-chip-promote.tag-chip-promoted {
-    background: #eef3e7;
-    color: #4a6a1a;
+    background: var(--warning-surface-strong);
+    color: var(--warning-ink);
   }
   .tag-chip-promote.tag-chip-promoted:hover {
-    background: #dfe8d3;
-    color: #2c4a00;
+    background: var(--warning-fill);
+    color: var(--warning-on-fill);
   }
   .tag-chip-detach:hover {
-    background: #fde5e5;
-    color: #a00;
+    background: var(--danger-surface);
+    color: var(--danger-ink);
   }
 
   /* Inline "add tag" form under the tag list. Kept compact so it
@@ -9098,21 +9099,21 @@
   .tag-add-input {
     flex: 1;
     padding: 0.2rem 0.4rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
     font-size: 0.85rem;
   }
   .tag-add-btn {
     padding: 0 0.55rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-weight: 600;
-    color: #333;
+    color: var(--ink);
   }
   .tag-add-btn:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
 
   /* Persona wallpaper — rendered as a background layer under the
@@ -9137,7 +9138,7 @@
     position: absolute;
     inset: 0;
     background:
-      linear-gradient(rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.78)),
+      linear-gradient(var(--scrim), var(--scrim)),
       var(--persona-wallpaper);
     background-size: cover;
     background-position: center;
@@ -9150,16 +9151,16 @@
   .persona-wallpaper-clear {
     margin-left: 0.35rem;
     padding: 0 0.35rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.75rem;
-    color: #666;
+    color: var(--ink-secondary);
   }
   .persona-wallpaper-clear:hover {
-    background: #fde5e5;
-    color: #a00;
+    background: var(--danger-surface);
+    color: var(--danger-ink);
   }
 
   /* Full-window drop hint. Layers above every other UI so it is
@@ -9171,7 +9172,7 @@
     position: fixed;
     inset: 0;
     z-index: 900;
-    background: rgba(30, 80, 200, 0.18);
+    background: var(--accent-surface);
     backdrop-filter: blur(1.5px);
     display: flex;
     align-items: center;
@@ -9180,27 +9181,27 @@
     animation: dropOverlayIn 120ms ease-out;
   }
   .drop-overlay-inner {
-    background: rgba(255, 255, 255, 0.94);
-    border: 2px dashed #4d68d5;
+    background: var(--wash-up-strong);
+    border: 2px dashed var(--accent-fill);
     border-radius: 14px;
     padding: 1.6rem 2.6rem;
     text-align: center;
-    box-shadow: 0 10px 40px rgba(30, 80, 200, 0.15);
+    box-shadow: 0 10px 40px var(--shadow-color-strong);
   }
   .drop-overlay-icon {
     font-size: 2.4rem;
-    color: #4d68d5;
+    color: var(--accent-ink);
     line-height: 1;
     margin-bottom: 0.4rem;
   }
   .drop-overlay-title {
     font-size: 1rem;
     font-weight: 600;
-    color: #223;
+    color: var(--ink);
   }
   .drop-overlay-sub {
     font-size: 0.8rem;
-    color: #778;
+    color: var(--ink-muted);
     margin-top: 0.3rem;
   }
   @keyframes dropOverlayIn {
@@ -9215,13 +9216,13 @@
     background: transparent;
     border: none;
     font-size: 1rem;
-    color: #999;
+    color: var(--ink-faint);
     cursor: pointer;
     padding: 0 0.2rem;
     line-height: 1;
   }
   .settings-gear:hover {
-    color: #6c58c3;
+    color: var(--accent-ink);
   }
 
   /* Settings modal — chrome + shortcut table. */
@@ -9229,19 +9230,19 @@
     position: fixed;
     inset: 0;
     z-index: 950;
-    background: rgba(20, 22, 32, 0.55);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
   }
   .settings-panel {
-    background: #fff;
+    background: var(--surface-raised);
     border-radius: 10px;
     min-width: 520px;
     max-width: 720px;
     max-height: 80vh;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 20px 60px var(--shadow-color);
     cursor: default;
     display: flex;
     flex-direction: column;
@@ -9251,21 +9252,21 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.9rem 1.2rem;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--line-faint);
   }
   .settings-header h3 {
     margin: 0;
     font-size: 1rem;
-    color: #223;
+    color: var(--ink);
   }
   .settings-close {
     background: none;
     border: none;
     font-size: 1rem;
     cursor: pointer;
-    color: #888;
+    color: var(--ink-muted);
   }
-  .settings-close:hover { color: #223; }
+  .settings-close:hover { color: var(--ink); }
   .settings-body {
     padding: 1rem 1.2rem;
     overflow-y: auto;
@@ -9273,7 +9274,7 @@
   .settings-body h4 {
     margin: 0 0 0.6rem;
     font-size: 0.85rem;
-    color: #556;
+    color: var(--ink-secondary);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -9285,24 +9286,24 @@
   .shortcut-table th {
     text-align: left;
     padding: 0.35rem 0.6rem;
-    background: #f7f5ee;
-    color: #556;
+    background: var(--surface-hover);
+    color: var(--ink-secondary);
     font-weight: 600;
   }
   .shortcut-table td {
     padding: 0.35rem 0.6rem;
-    border-top: 1px solid #eee;
-    color: #333;
+    border-top: 1px solid var(--line-faint);
+    color: var(--ink);
   }
   .shortcut-table td.scope {
-    color: #888;
+    color: var(--ink-muted);
     font-size: 0.75rem;
     text-transform: uppercase;
   }
   .shortcut-table td.keys {
     font-family: ui-monospace, "SF Mono", monospace;
-    background: #fafafa;
-    color: #4a3a90;
+    background: var(--surface-raised);
+    color: var(--accent-ink);
     font-weight: 600;
     white-space: nowrap;
   }
@@ -9333,10 +9334,10 @@
   .card-menu {
     position: fixed;
     z-index: 960;
-    background: #fff;
-    border: 1px solid #d0d0d0;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
     border-radius: 6px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 8px 30px var(--shadow-color);
     padding: 0.3rem 0;
     min-width: 200px;
   }
@@ -9349,10 +9350,10 @@
     background: transparent;
     cursor: pointer;
     font-size: 0.85rem;
-    color: #223;
+    color: var(--ink);
   }
   .card-menu-item:hover {
-    background: #eee9ff;
+    background: var(--accent-surface);
   }
   /* Destructive tone (HIG): the entries that remove a card say so
      before they are clicked. Both tiers carry it — "Move to Trash" is
@@ -9360,10 +9361,10 @@
      it, and a tone that only appears on the unrecoverable one trains
      the eye to expect nothing from the other. */
   .card-menu-item-danger {
-    color: #a00;
+    color: var(--danger-ink);
   }
   .card-menu-item-danger:hover {
-    background: #fde5e5;
+    background: var(--danger-surface);
   }
   /* Rule above the destructive tier. The gap is doing the work of the
      separator as much as the line is: it is the thing that stops a
@@ -9374,7 +9375,7 @@
   .card-menu-sep {
     height: 1px;
     border: none;
-    background: #e8e8ee;
+    background: var(--surface-hover);
     margin: 0.3rem 0;
   }
   /* Inline SVG glyph sized and baseline-tuned to sit like the emoji
@@ -9395,14 +9396,14 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #778;
-    border-bottom: 1px solid #e8e8ee;
+    color: var(--ink-muted);
+    border-bottom: 1px solid var(--line-faint);
     margin-bottom: 0.2rem;
   }
   .card-menu-sub {
-    border-top: 1px solid #eee;
-    border-bottom: 1px solid #eee;
-    background: #fafaff;
+    border-top: 1px solid var(--line-faint);
+    border-bottom: 1px solid var(--line-faint);
+    background: var(--surface-raised);
     max-height: 11rem;
     overflow-y: auto;
     padding: 0.2rem 0;
@@ -9415,7 +9416,7 @@
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #99a;
+    color: var(--ink-faint);
     padding: 0.25rem 1.4rem 0.1rem;
   }
   .card-menu-tag-add {
@@ -9429,19 +9430,19 @@
     padding: 0.28rem 0.5rem;
     font-size: 0.82rem;
     font-family: inherit;
-    color: #223;
-    background: #fff;
-    border: 1px solid #ccd;
+    color: var(--ink);
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line-strong);
     border-radius: 6px;
   }
   .card-menu-tag-input:focus {
     outline: none;
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
   .card-menu-tag-addbtn {
     width: auto;
     flex: 0 0 auto;
-    border: 1px solid #ccd;
+    border: 1px solid var(--accent-line-strong);
     border-radius: 6px;
     padding: 0.28rem 0.7rem;
   }
@@ -9459,30 +9460,30 @@
     position: fixed;
     inset: 0;
     z-index: 1000;
-    background: rgba(20, 22, 32, 0.5);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
   }
   .drop-picker-panel {
-    background: #fff;
+    background: var(--surface-raised);
     border-radius: 10px;
     padding: 1.4rem 1.6rem;
     min-width: 340px;
     max-width: 440px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 20px 60px var(--shadow-color);
     cursor: default;
   }
   .drop-picker-title {
     margin: 0 0 0.35rem;
     font-size: 1rem;
-    color: #223;
+    color: var(--ink);
   }
   .drop-picker-sub {
     margin: 0 0 0.9rem;
     font-size: 0.8rem;
-    color: #778;
+    color: var(--ink-muted);
   }
   .drop-picker-personas {
     list-style: none;
@@ -9497,16 +9498,16 @@
     text-align: left;
     padding: 0.4rem 0.7rem;
     margin: 0.15rem 0;
-    border: 1px solid #d9d5f2;
+    border: 1px solid var(--accent-line);
     border-radius: 5px;
-    background: #fbfaff;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.9rem;
-    color: #333;
+    color: var(--ink);
   }
   .drop-picker-persona-btn:hover {
-    background: #eee9ff;
-    border-color: #b8afef;
+    background: var(--accent-surface);
+    border-color: var(--accent-line-strong);
   }
   .drop-picker-actions {
     display: flex;
@@ -9515,15 +9516,15 @@
   }
   .drop-picker-cancel {
     padding: 0.3rem 0.9rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--line);
     border-radius: 5px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
   }
   .drop-picker-cancel:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
 
   /* --- Dispatch toast ------------------------ */
@@ -9542,9 +9543,9 @@
     padding: 0.25rem 0.7rem;
     font-size: 0.8rem;
     font-family: inherit;
-    color: #5a55b2;
-    background: #f0effc;
-    border: 1px solid #d9d5f2;
+    color: var(--accent-ink);
+    background: var(--accent-surface);
+    border: 1px solid var(--accent-line);
     border-radius: 6px;
     cursor: pointer;
   }
@@ -9552,15 +9553,15 @@
     margin-left: 0.35rem;
     padding: 0 0.4rem;
     border-radius: 999px;
-    background: #6c58c3;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     font-size: 0.65rem;
     font-variant-numeric: tabular-nums;
   }
 
   .thread-open-btn:hover {
-    background: #e2ddf9;
-    color: #47429a;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
 
   /* `.dispatch-toast` moved to DispatchToast.svelte in wave C. */

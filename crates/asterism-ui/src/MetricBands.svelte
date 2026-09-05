@@ -160,7 +160,7 @@
      graduates out of App (wave 9). */
   h2 {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.25rem;
@@ -191,7 +191,7 @@
 
   .band-label {
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
     width: 100%;
     flex: none;
   }
@@ -211,22 +211,22 @@
     -webkit-appearance: textfield;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #333;
+    color: var(--ink);
     padding: 0.1rem 0.25rem;
-    border: 1px solid #ddd;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
     font-variant-numeric: tabular-nums;
   }
   .band input:focus {
     outline: none;
-    border-color: #8a86ff;
+    border-color: var(--accent-line-strong);
   }
 
   .band-sep,
   .band-unit {
     font-size: 0.75rem;
-    color: #999;
+    color: var(--ink-faint);
   }
   /* Sized by its own text — `s`, `MB`, `MP` are 5px to 22px, and the
      fixed 1.6rem spent the widest one's width on all three. */
@@ -238,7 +238,7 @@
     margin: 0 0.3rem;
     font-size: 0.7rem;
     line-height: 1.3;
-    color: #9c9a89;
+    color: var(--ink-faint);
   }
 
   .band-clear {
@@ -248,11 +248,11 @@
     padding: 0.1rem 0.3rem;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
     cursor: pointer;
     border-radius: 4px;
   }
   .band-clear:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
 </style>

@@ -1,7 +1,214 @@
-/* Global styles for Album UI */
+/* Global styles for Album UI.
+ *
+ * This file is the palette. Every colour the app paints itself is
+ * named here and nowhere else, and the three rules below are what
+ * make that claim mean something. `src/palette.test.ts` enforces
+ * them; each one is there because it was broken first.
+ *
+ *
+ * 1. WHO OWNS A NAME
+ *
+ * A custom property is one flat global namespace — there is no
+ * scoping, and shadow DOM does not help, because inheriting through
+ * the boundary is the point of them. So ownership has to be a rule
+ * somebody keeps, and here it is: **a name belongs either to this
+ * file or to a component, never to both.**
+ *
+ * A component owns a name when it writes `var(--name, <real value>)`
+ * without anybody declaring `--name`. That is an injection hook: the
+ * fallback is the live value, and a host may declare the name to
+ * retheme the component. `--asterism-surface`, `--asterism-text`,
+ * `--panel-bg`, `--panel-fg`, `--hairline`, `--accent` and `--danger`
+ * are all of them, and `palette.test.ts` holds the list.
+ *
+ * **Declaring one of those names here silently kills every fallback
+ * behind it.** Not an override — a substitution the browser makes
+ * with no warning, in whichever declarations happened to use the
+ * name. Defining `--danger` and `--accent` did exactly that to four
+ * labels in the settings panels, which then rendered the fill colour
+ * as text at 3.2:1, and every gate stayed green because none of them
+ * could see a `var()` that carried a fallback. That is why the palette
+ * calls its filled colours `--danger-fill` and `--accent-fill`, and
+ * why the check runs in both directions: this file defines no hook
+ * name, and no component reads a palette name through a fallback.
+ *
+ *
+ * 2. THE ROLE IS IN THE NAME
+ *
+ * `-fill`, `-fill-hover`, `-on-fill`, `-ink`, `-surface`,
+ * `-surface-strong`, `-line`. A bare family name — `--danger` meaning
+ * the filled red — is legible only to whoever wrote it; the next
+ * reader applies it to a background, a border or text with equal
+ * confidence, and one of those is wrong. Material 3 ships bare family
+ * names and gets away with it because every one of them is prefixed
+ * `--md-sys-color-`; Primer, Spectrum, Carbon and Lightning all put
+ * the property or the role word in the name instead. Bare *and*
+ * unprefixed, which is what this file had, is the combination nobody
+ * ships.
+ *
+ * `-on-fill` and `-ink` are the pair worth spelling out, because they
+ * were one word here and the merge is what produced the contrast
+ * failures. Text on a saturated fill and text on that family's tinted
+ * surface are different colours doing different jobs: white clears
+ * 4.5:1 on `--accent-fill` and `--danger-fill` and reaches 2.4:1 on
+ * `--warning-fill`, which is why `-on-fill` is named per family and
+ * cannot be assumed.
+ *
+ *
+ * 3. WHAT IS NOT WORTH DOING
+ *
+ * Recorded so the next reader does not spend the afternoon finding
+ * out, and because two of them look like the obvious fix.
+ *
+ * **Do not register these names with `@property`.** A registration
+ * with an `initial-value` makes `var(--x, fallback)` stop using the
+ * fallback — the browser substitutes the initial value instead. That
+ * is the exact mechanism of the defect in (1), applied globally and
+ * whether or not anything declares the name. It is a footgun for the
+ * hook contract, not a guard for it, and its type check cannot tell a
+ * fill from an ink because both are `<color>`.
+ *
+ * **Do not prefix all of these.** With the ownership check in place a
+ * `--ast-` prefix buys nothing and costs every call site again.
+ *
+ * **Do not reach for a token pipeline.** The DTCG format's `$type` is
+ * `color` for a fill and for an ink alike; it solves a build problem
+ * this app does not have.
+ */
 
 :root {
-  color-scheme: light dark;
+  /* Dark, and only dark. This is a tool for looking at images, and a
+     light surround makes every image in it read darker and flatter
+     than it is — the grid would misreport its own contents, and the
+     detail view a click later would not. `DetailPane` already put the
+     media stage on near-black before any of this existed; the rest of
+     the app was the exception, not the stage.
+
+     One value set. A light one is a second block of values under a
+     `prefers-color-scheme` query, plus `color-scheme` below — which
+     is why the colours are named here rather than written out at
+     every call site. */
+  color-scheme: dark;
+
+  /* Surfaces, by elevation. `stage` is the ground a pixel is judged
+     against, and it must not tint what sits on it. Everything else
+     carries a trace of the brand violet, which is what keeps the
+     shell from reading as grey card stock.
+
+     `hover` and `active` are named for where they came from and are
+     used as elevation generally: a raised thing that wants one more
+     step reaches for them whether or not a pointer is involved. */
+  --surface-stage: #0a0a0d;
+  --surface-sunken: #101017;
+  --surface: #16151c;
+  --surface-raised: #1e1d26;
+  --surface-hover: #26242f;
+  --surface-active: #2f2d3a;
+
+  /* Overlays. `wash-up` lightens what it covers and `wash-down`
+     darkens it, and `wash-down` is also what a modal backdrop takes —
+     which is most of its uses. `scrim` is the heavier one, for the
+     cases that have to obscure rather than dim: a control over media,
+     a wallpaper the cards have to stay readable against, and the two
+     modals that cover the whole shell rather than part of it. */
+  --wash-up: rgba(255, 255, 255, 0.05);
+  --wash-up-strong: rgba(255, 255, 255, 0.12);
+  --wash-down: rgba(0, 0, 0, 0.32);
+  --scrim: rgba(8, 7, 12, 0.72);
+  --scrim-strong: rgba(8, 7, 12, 0.88);
+  --shadow-color: rgba(0, 0, 0, 0.35);
+  --shadow-color-strong: rgba(0, 0, 0, 0.55);
+
+  /* Text, by how much of the reader's attention it is asking for.
+     The first three clear 4.5:1 on every surface above; `faint`
+     clears 3:1 on all of them and 4.5:1 only on the two darkest, and
+     it is where dates, counts and units belong. Empty-state sentences
+     sit in it too, which is a use the bar does not cover and worth
+     moving up rather than worth widening the rule for. */
+  --ink: #eeecf5;
+  --ink-secondary: #c3c0d0;
+  --ink-muted: #9895a8;
+  --ink-faint: #7d7a8c;
+
+  --line-faint: #23222c;
+  --line: #302e3b;
+  --line-strong: #464356;
+
+  /* The role vocabulary the families below share — the argument for
+     it is rule 2 at the top of this file.
+
+       -fill         the saturated colour — a background, or a border
+                     strong enough to act as one. Never text.
+       -fill-hover   that fill under the pointer.
+       -on-fill      text ON the fill, per family.
+       -ink          text on the family's own tinted surface.
+       -surface      the tinted panel, -strong its hover.
+       -line         that panel's edge.
+
+     How a state moves, here and in every family: a filled control
+     *deepens* on hover, the direction the light theme moved too.
+     Lightening is the reflex and it is wrong — the fill carries ink
+     chosen against it and has no contrast to spare. A tinted surface
+     goes the other way and lightens, moving further from the ink that
+     sits on it. A state that changes nothing but text brightens it to
+     `--ink`. */
+
+  /* The brand violet. */
+  --accent-fill: #6a63d8;
+  --accent-fill-hover: #574fc4;
+  --accent-on-fill: #ffffff;
+  --accent-ink: #a8a2f0;
+  --accent-ink-dim: #8a84c4;
+  --accent-surface: #1e1c30;
+  --accent-surface-strong: #2a2748;
+  --accent-line: #35315a;
+  --accent-line-strong: #4d4784;
+  /* The glow under a ring rather than the ring itself: the ring is
+     `--accent-fill` at zero blur and this is the offset shadow beneath
+     it, so the pick reads as lit rather than as dropped on a shelf.
+     Also serves alone as a focus halo. */
+  --accent-glow: rgba(106, 99, 216, 0.45);
+
+  /* Four status families over the vocabulary above. Each carries the
+     roles it is actually used in; completing a set for its own sake
+     leaves names nothing keeps true. */
+  --danger-fill: #c0474a;
+  --danger-fill-hover: #a83b3e;
+  --danger-on-fill: #ffffff;
+  --danger-ink: #f09292;
+  --danger-surface: #331a1d;
+  --danger-surface-strong: #47272b;
+  --danger-line: #5c2c30;
+
+  --success-fill: #5fb48f;
+  --success-ink: #8ad0b0;
+  --success-surface: #142a22;
+  --success-surface-strong: #1c3a2e;
+  --success-line: #2a4f3d;
+
+  --warning-fill: #cfa03a;
+  --warning-fill-hover: #b88c2c;
+  --warning-on-fill: #241c07;
+  --warning-ink: #e3bd6d;
+  --warning-surface: #2c2412;
+  --warning-surface-strong: #3d3119;
+  --warning-line: #4b3d1c;
+
+  --info-fill: #58a0bd;
+  --info-ink: #8ac6dd;
+  --info-surface: #142530;
+  --info-surface-strong: #1b3342;
+  --info-line: #294351;
+
+  /* Categorical hues. These say "different", not "good" or "bad", and
+     they exist because the status families above were being borrowed
+     to tell categories apart — which made a persona's own message
+     carry the colour that elsewhere means destroy. Anything painting
+     a category reaches here or for `--accent`, `--success`, `--info`
+     and `--warning`, whose hues read apart from these two. */
+  --cat-orchid: #b07bd8;
+  --cat-rose: #e070a8;
+
   /* Shared between `ForgePanel` and `SharedLinesPanel`'s two-column
      shell (#217): the gap between rail and body, and the rail's own
      fixed width, unified to `ForgePanel`'s values rather than left to

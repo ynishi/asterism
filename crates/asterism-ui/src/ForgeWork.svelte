@@ -501,7 +501,7 @@
   <ForgeRoundLog
     rounds={work.rounds}
     {projected}
-    dividerColor="rgba(128, 128, 128, 0.25)"
+    dividerColor="var(--line)"
     onTalkAboutRound={(round) =>
       forgeCatalog.talkAbout({
         kind: "round",
@@ -582,7 +582,7 @@
     margin: 0.3rem 0;
   }
   .warn {
-    border-left: 2px solid rgba(220, 170, 90, 0.7);
+    border-left: 2px solid var(--warning-line);
     padding-left: 0.5rem;
   }
   .work-list button {
@@ -628,7 +628,7 @@
     font-style: italic;
   }
   .collisions {
-    border-left: 2px solid rgba(220, 90, 90, 0.6);
+    border-left: 2px solid var(--danger-line);
     padding-left: 0.5rem;
     margin: 0.5rem 0;
   }
@@ -642,7 +642,7 @@
   .close button,
   .row-verbs button {
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;
@@ -661,7 +661,7 @@
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.78rem;
-    border-left: 2px solid rgba(128, 128, 128, 0.6);
+    border-left: 2px solid var(--line-strong);
     padding-left: 0.5rem;
   }
   .said button {
@@ -704,7 +704,7 @@
   }
   .tile:hover,
   .tile:focus-visible {
-    border-color: rgba(128, 128, 128, 0.55);
+    border-color: var(--line-strong);
   }
   .projected img,
   .no-content {
@@ -713,12 +713,12 @@
     flex: 0 0 auto;
     object-fit: cover;
     border-radius: 0.15rem;
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--wash-down);
   }
   .no-content {
     display: grid;
     place-items: center;
-    border: 1px dashed rgba(128, 128, 128, 0.5);
+    border: 1px dashed var(--line-strong);
     opacity: 0.6;
   }
   /* Solid rather than dashed, for the reason `ForgePanel` gives. */
@@ -754,7 +754,7 @@
     gap: 0.35rem;
     margin-top: 1rem;
     padding-top: 0.7rem;
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    border-top: 1px solid var(--line);
   }
   .new-work label,
   .close label {
@@ -767,7 +767,7 @@
   .new-work button {
     align-self: flex-start;
     background: none;
-    border: 1px solid rgba(128, 128, 128, 0.4);
+    border: 1px solid var(--line);
     border-radius: 0.2rem;
     color: inherit;
     cursor: pointer;

@@ -325,20 +325,29 @@
     const w = rect.width;
     const h = rect.height;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    // A canvas cannot reach a stylesheet, so the four colours below
+    // are read off the element instead of written here — custom
+    // properties inherit, so `:root`'s palette resolves at any depth.
+    // Written out, these would be the only colours in the app that a
+    // second value set in `app.css` could not reach.
+    const palette = getComputedStyle(canvas);
+    const tone = (name: string) => palette.getPropertyValue(name).trim();
+    ctx.fillStyle = tone("--wash-up");
     ctx.fillRect(0, 0, w, h);
     const mid = h / 2;
     const barW = w / peaks.length;
+    const playedTone = tone("--info");
+    const unplayedTone = tone("--ink-faint");
     for (let i = 0; i < peaks.length; i++) {
       const p = peaks[i];
       const barH = Math.max(1, p * h * 0.9);
       const played = i / peaks.length < progress;
-      ctx.fillStyle = played ? "#7dd3fc" : "rgba(255,255,255,0.32)";
+      ctx.fillStyle = played ? playedTone : unplayedTone;
       ctx.fillRect(i * barW, mid - barH / 2, Math.max(1, barW - 1), barH);
     }
     // playhead on top
     if (progress > 0 && progress <= 1) {
-      ctx.fillStyle = "#f472b6";
+      ctx.fillStyle = tone("--cat-rose");
       ctx.fillRect(progress * w - 1, 0, 2, h);
     }
   }
@@ -2259,7 +2268,7 @@
   .detail-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(20, 18, 30, 0.72);
+    background: var(--scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2270,7 +2279,7 @@
   }
 
   .detail-panel {
-    background: #fbfbf9;
+    background: var(--surface-raised);
     border-radius: 10px;
     width: min(96vw, 1200px);
     max-height: 96vh;
@@ -2278,7 +2287,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 20px 60px var(--shadow-color-strong);
   }
 
   .detail-close {
@@ -2286,24 +2295,24 @@
     top: 0.4rem;
     right: 0.6rem;
     z-index: 2;
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid #d5d3ca;
+    background: var(--wash-up-strong);
+    border: 1px solid var(--line);
     border-radius: 999px;
     width: 1.9rem;
     height: 1.9rem;
     cursor: pointer;
-    color: #555;
+    color: var(--ink-secondary);
     font-size: 0.85rem;
   }
   .detail-close:hover {
-    color: #111;
-    background: #fff;
+    color: var(--ink);
+    background: var(--surface-raised);
   }
 
   .detail-loading {
     padding: 3rem;
     text-align: center;
-    color: #999;
+    color: var(--ink-faint);
     margin: 0;
   }
 
@@ -2319,7 +2328,7 @@
    * Media containers per modality
    * ----------------------------------------------------------------- */
   .detail-media {
-    background: #1a1a1a;
+    background: var(--surface-stage);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2343,20 +2352,20 @@
     bottom: 0.6rem;
     width: 1.9rem;
     height: 1.9rem;
-    border: 1px solid rgba(255, 255, 255, 0.35);
+    border: 1px solid var(--line-strong);
     border-radius: 6px;
-    background: rgba(20, 18, 30, 0.55);
-    color: #eee;
+    background: var(--scrim);
+    color: var(--ink-secondary);
     font-size: 0.9rem;
     cursor: pointer;
     line-height: 1;
   }
   .detail-fullscreen-btn:hover {
-    background: rgba(20, 18, 30, 0.8);
+    background: var(--scrim-strong);
   }
 
   .detail-media-video {
-    background: #0c0b12;
+    background: var(--surface-stage);
     display: flex;
     /* Column since the marks panel joined the player: the two stack,
        the way the waveform and its chapter chips already do in the
@@ -2379,12 +2388,12 @@
   .detail-video-note {
     margin: 0;
     font-size: 0.85rem;
-    color: #9a96b0;
+    color: var(--accent-ink);
     text-align: center;
     max-width: 480px;
   }
   .detail-media-audio {
-    background: #f4f2ea;
+    background: var(--surface-hover);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2399,7 +2408,7 @@
   .detail-audio-cover {
     margin: 0;
     font-size: 0.85rem;
-    color: #555;
+    color: var(--ink-secondary);
     text-align: center;
     max-width: 480px;
     white-space: pre-wrap;
@@ -2418,7 +2427,7 @@
   .waveform-canvas {
     width: 100%;
     height: 72px;
-    background: #1e1a24;
+    background: var(--surface-sunken);
     border-radius: 4px;
     cursor: pointer;
     display: block;
@@ -2426,8 +2435,8 @@
   .waveform-placeholder {
     width: 100%;
     height: 72px;
-    background: #1e1a24;
-    color: rgba(255, 255, 255, 0.72);
+    background: var(--surface-sunken);
+    color: var(--ink-secondary);
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -2435,13 +2444,13 @@
     font-size: 0.8rem;
   }
   .waveform-placeholder.dim {
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--ink-muted);
   }
   /* -----------------------------------------------------------------
    * Text mode + render modes
    * ----------------------------------------------------------------- */
   .detail-media-text {
-    background: #fbfbf9;
+    background: var(--surface-raised);
     padding: 0;
     align-items: stretch;
     justify-content: flex-start;
@@ -2453,28 +2462,28 @@
     display: flex;
     gap: 0.25rem;
     padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid #e2e2de;
-    background: #f4f4f0;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-hover);
     flex-shrink: 0;
   }
   .detail-mode-chip {
     padding: 0.15rem 0.55rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.72rem;
-    color: #555;
+    color: var(--ink-secondary);
     text-transform: lowercase;
     font-family: ui-monospace, "SF Mono", monospace;
   }
   .detail-mode-chip:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
   .detail-mode-chip.active {
-    background: #6c58c3;
-    border-color: #6c58c3;
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .detail-text-body {
     padding: 1.2rem 1.5rem;
@@ -2488,18 +2497,18 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
-    color: #333;
+    color: var(--ink);
     font-family: inherit;
   }
   .detail-term {
     font-family: ui-monospace, "SF Mono", "Menlo", monospace !important;
     font-size: 0.82rem !important;
-    background: #14161c;
-    color: #f4f4f8 !important;
+    background: var(--surface-stage);
+    color: var(--ink-secondary) !important;
     padding: 0.9rem 1.1rem;
     border-radius: 4px;
     line-height: 1.55 !important;
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 0 1px var(--shadow-color-strong);
   }
   .detail-raw {
     font-family: ui-monospace, "SF Mono", monospace !important;
@@ -2509,14 +2518,14 @@
     width: 100%;
     height: 100%;
     min-height: 60vh;
-    border: 1px solid #e2e2de;
+    border: 1px solid var(--line);
     border-radius: 4px;
-    background: #fff;
+    background: var(--surface-raised);
   }
   .detail-md {
     font-size: 0.9rem;
     line-height: 1.55;
-    color: #222;
+    color: var(--ink);
   }
   .detail-md :global(h1),
   .detail-md :global(h2),
@@ -2524,7 +2533,7 @@
     margin: 1em 0 0.4em;
   }
   .detail-md :global(pre) {
-    background: #f4f4f0;
+    background: var(--surface-hover);
     padding: 0.7rem 0.9rem;
     border-radius: 4px;
     overflow-x: auto;
@@ -2533,7 +2542,7 @@
   }
   .detail-md :global(code) {
     font-family: ui-monospace, "SF Mono", monospace;
-    background: #f4f4f0;
+    background: var(--surface-hover);
     padding: 0.1em 0.35em;
     border-radius: 3px;
     font-size: 0.85em;
@@ -2548,36 +2557,36 @@
   }
   .detail-md :global(th),
   .detail-md :global(td) {
-    border: 1px solid #d9d5c8;
+    border: 1px solid var(--line);
     padding: 0.35em 0.6em;
     text-align: left;
   }
   .detail-md :global(blockquote) {
-    border-left: 3px solid #b8afef;
+    border-left: 3px solid var(--accent-line-strong);
     margin: 0.6em 0;
     padding: 0.15em 0 0.15em 0.9em;
-    color: #555;
+    color: var(--ink-secondary);
   }
 
   /* -----------------------------------------------------------------
    * Meta column (labels / tags / groups / note / provenance / thread)
    * ----------------------------------------------------------------- */
   .detail-meta {
-    border-left: 1px solid #e2e2de;
+    border-left: 1px solid var(--line);
     padding: 1.2rem 1rem;
     overflow-y: auto;
-    background: #fbfbf9;
+    background: var(--surface-raised);
   }
   .detail-meta h3 {
     font-size: 0.95rem;
     margin: 0 0 0.8rem;
-    color: #111;
+    color: var(--ink);
     padding-right: 2rem;
     word-break: break-word;
   }
   .detail-meta h4 {
     font-size: 0.7rem;
-    color: #888;
+    color: var(--ink-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin: 1rem 0 0.4rem;
@@ -2590,27 +2599,27 @@
     margin: 0;
   }
   .detail-meta dt {
-    color: #888;
+    color: var(--ink-muted);
     font-weight: 500;
   }
   .detail-meta dd {
-    color: #222;
+    color: var(--ink);
     margin: 0;
     word-break: break-word;
   }
   .detail-modality-select {
     font-size: 0.75rem;
     font-family: inherit;
-    background: #f0f0ec;
-    color: #333;
-    border: 1px solid #d0d0c8;
+    background: var(--surface-hover);
+    color: var(--ink);
+    border: 1px solid var(--line);
     border-radius: 3px;
     padding: 1px 4px;
     cursor: pointer;
   }
   .detail-modality-select:hover:not(:disabled) {
-    background: #e6e6e0;
-    border-color: #b0b0a0;
+    background: var(--surface-active);
+    border-color: var(--line-strong);
   }
   .detail-meta dd.mono,
   .detail-meta dd .mono {
@@ -2619,10 +2628,10 @@
   }
   .detail-meta dd.locator {
     word-break: break-all;
-    color: #555;
+    color: var(--ink-secondary);
   }
   .detail-meta dd.dim {
-    color: #999;
+    color: var(--ink-faint);
   }
   .detail-meta .tags {
     display: flex;
@@ -2646,7 +2655,7 @@
   }
 
   .tag-suggestion-accept {
-    color: var(--accent, #7bd88f);
+    color: var(--accent, var(--success-ink));
   }
 
   /* -----------------------------------------------------------------
@@ -2663,28 +2672,28 @@
     background: none;
     border: none;
     padding: 0;
-    color: #b7b1e5;
+    color: var(--accent-ink-dim);
     font-size: 0.7rem;
     cursor: pointer;
     line-height: 1;
   }
   .label-remove:hover {
-    color: #d0393b;
+    color: var(--danger-ink);
   }
   .label-add {
     font-size: 0.7rem;
     padding: 0.15rem 0.45rem;
     min-width: 6rem;
-    background: #fafafd;
-    border: 1px dashed #c6c0e8;
+    background: var(--surface-raised);
+    border: 1px dashed var(--accent-line-strong);
     border-radius: 3px;
     outline: none;
     color: inherit;
   }
   .label-add:focus {
     border-style: solid;
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
 
   /* -----------------------------------------------------------------
@@ -2699,18 +2708,18 @@
     padding: 0.2rem;
   }
   .transcript-msg {
-    border-left: 3px solid #e2e0f0;
+    border-left: 3px solid var(--accent-line);
     border-radius: 0 6px 6px 0;
     padding: 0.5rem 0.7rem;
-    background: #fbfbfd;
+    background: var(--surface-raised);
   }
   .transcript-msg-user {
-    border-left-color: #b5b1e2;
-    background: #f6f5fc;
+    border-left-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .transcript-msg-assistant {
-    border-left-color: #9ed0b8;
-    background: #fbfdfc;
+    border-left-color: var(--success-fill);
+    background: var(--surface-raised);
   }
   .transcript-meta {
     display: flex;
@@ -2723,23 +2732,23 @@
     font-size: 0.68rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #8a86ab;
+    color: var(--accent-ink);
   }
   .transcript-time {
     font-size: 0.68rem;
-    color: #bbb;
+    color: var(--ink-faint);
     font-variant-numeric: tabular-nums;
   }
   .transcript-text {
     margin: 0;
     font-size: 0.85rem;
     line-height: 1.5;
-    color: #333;
+    color: var(--ink);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .transcript-fallback {
-    color: #888;
+    color: var(--ink-muted);
   }
 
   .title-input {
@@ -2748,14 +2757,14 @@
     padding: 0.35rem 0.5rem;
     font-size: 0.85rem;
     font-family: inherit;
-    background: #fafafd;
-    border: 1px solid #e2e0f0;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 5px;
-    color: #333;
+    color: var(--ink);
   }
   .title-input:focus {
     outline: none;
-    border-color: #b5b1e2;
+    border-color: var(--accent-line-strong);
   }
 
   /* Container contents — a compact index, not a reader. Clicking a row
@@ -2770,7 +2779,7 @@
   }
   .member-empty {
     font-size: 0.78rem;
-    color: #aaa;
+    color: var(--ink-faint);
   }
   .member-row {
     display: flex;
@@ -2783,17 +2792,17 @@
     border-radius: 4px;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-secondary);
     text-align: left;
     cursor: pointer;
   }
   .member-row:hover {
-    background: #efefe9;
+    background: var(--surface-hover);
   }
   .member-ord {
     flex: 0 0 auto;
     min-width: 1.2rem;
-    color: #b5b1e2;
+    color: var(--accent-ink-dim);
     font-variant-numeric: tabular-nums;
   }
   .member-cover {
@@ -2816,20 +2825,20 @@
     font-size: 0.82rem;
     font-family: inherit;
     line-height: 1.4;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
     color: inherit;
     resize: vertical;
   }
   .note-input:focus {
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .note-saving {
     font-size: 0.65rem;
-    color: #7a76c9;
+    color: var(--accent-ink);
   }
 
   /* Cover (Description) editor — same tone as the Note editor but a
@@ -2847,16 +2856,16 @@
     font-size: 0.82rem;
     font-family: inherit;
     line-height: 1.4;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
     color: inherit;
     resize: vertical;
   }
   .cover-input:focus {
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
 
   /* -----------------------------------------------------------------
@@ -2879,51 +2888,51 @@
   }
   .thread-post {
     padding: 0.4rem 0.6rem;
-    border-left: 3px solid #5850ff;
-    background: #f5f4ff;
+    border-left: 3px solid var(--accent-line-strong);
+    background: var(--accent-surface);
     border-radius: 3px;
   }
   .thread-post.persona {
-    border-left-color: #b47bff;
-    background: #f8f3ff;
+    border-left-color: var(--accent-line-strong);
+    background: var(--accent-surface);
   }
   .thread-post-head {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
     font-size: 0.68rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     margin-bottom: 0.15rem;
   }
   .thread-author {
     font-weight: 600;
-    color: #2f2c5c;
+    color: var(--ink);
   }
   .thread-when {
     flex: 1;
-    color: #9793c9;
+    color: var(--accent-ink);
   }
   .thread-delete {
     background: none;
     border: none;
-    color: #b7b1e5;
+    color: var(--accent-ink-dim);
     cursor: pointer;
     font-size: 0.75rem;
     padding: 0;
     line-height: 1;
   }
   .thread-delete:hover {
-    color: #d0393b;
+    color: var(--danger-ink);
   }
   .thread-body {
     margin: 0;
     font-size: 0.82rem;
     line-height: 1.4;
     white-space: pre-wrap;
-    color: #1f1e33;
+    color: var(--ink);
   }
   .thread-empty {
-    color: #9c98c9;
+    color: var(--accent-ink);
     font-size: 0.75rem;
     padding: 0.4rem 0.6rem;
   }
@@ -2939,20 +2948,20 @@
   .thread-author-toggle button {
     padding: 0.2rem 0.6rem;
     font-size: 0.72rem;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 3px;
     cursor: pointer;
-    color: #6a67a4;
+    color: var(--accent-ink);
   }
   .thread-author-toggle button:disabled {
     opacity: 0.35;
     cursor: not-allowed;
   }
   .thread-author-toggle button.active {
-    background: #5850ff;
-    color: #ffffff;
-    border-color: #5850ff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
+    border-color: var(--accent-line-strong);
   }
   .thread-input {
     width: 100%;
@@ -2962,16 +2971,16 @@
     font-size: 0.82rem;
     font-family: inherit;
     line-height: 1.4;
-    background: #fafafd;
-    border: 1px solid #d6d3ec;
+    background: var(--surface-raised);
+    border: 1px solid var(--accent-line);
     border-radius: 4px;
     outline: none;
     color: inherit;
     resize: vertical;
   }
   .thread-input:focus {
-    border-color: #8a86ff;
-    background: #ffffff;
+    border-color: var(--accent-line-strong);
+    background: var(--surface-raised);
   }
   .thread-actions {
     display: flex;
@@ -2979,15 +2988,15 @@
   }
   .thread-post-btn {
     padding: 0.35rem 0.9rem;
-    background: #5850ff;
-    color: #ffffff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     border: none;
     border-radius: 4px;
     font-size: 0.82rem;
     cursor: pointer;
   }
   .thread-post-btn:hover:not(:disabled) {
-    background: #4a42e0;
+    background: var(--accent-fill-hover);
   }
   .thread-post-btn:disabled {
     opacity: 0.5;
@@ -3003,20 +3012,20 @@
     gap: 0.35rem;
     padding: 0.18rem 0.55rem;
     margin: 0.15rem 0.2rem 0.15rem 0;
-    background: #eeecff;
-    color: #3d38a8;
-    border: 1px solid #d3d0f0;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     font-size: 0.78rem;
     cursor: pointer;
   }
   .detail-selection-chip:hover {
-    background: #dcd7ff;
-    border-color: #b9b2f0;
+    background: var(--accent-surface-strong);
+    border-color: var(--accent-line-strong);
   }
   .detail-selection-count {
     font-size: 0.7rem;
-    color: #5850ff;
+    color: var(--accent-ink);
     font-variant-numeric: tabular-nums;
   }
 
@@ -3030,7 +3039,7 @@
   }
   .provenance-loading {
     font-size: 0.72rem;
-    color: #888;
+    color: var(--ink-muted);
     font-style: italic;
   }
   .provenance-lane {
@@ -3040,7 +3049,7 @@
   }
   .provenance-lane-label {
     font-size: 0.68rem;
-    color: #6a67a4;
+    color: var(--accent-ink);
     letter-spacing: 0.02em;
   }
   .provenance-lane-strip {
@@ -3053,17 +3062,17 @@
     align-items: center;
     gap: 0.35rem;
     padding: 0.2rem 0.55rem;
-    background: #f4f1ff;
-    color: #3d38a8;
-    border: 1px solid #dcd7ff;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
+    border: 1px solid var(--accent-line);
     border-radius: 999px;
     font-size: 0.75rem;
     cursor: pointer;
     max-width: 22ch;
   }
   .provenance-chip:hover {
-    background: #e6dfff;
-    border-color: #b9b2f0;
+    background: var(--accent-surface);
+    border-color: var(--accent-line-strong);
   }
   /* Hop distance from the open asset. Reads as a step number along
      the chain, so a 3-hop return trip is visibly further away than
@@ -3072,15 +3081,15 @@
     flex: none;
     min-width: 1.1rem;
     padding: 0 0.25rem;
-    background: #ded8fb;
-    color: #4f4b8c;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
     border-radius: 999px;
     font-size: 0.62rem;
     font-variant-numeric: tabular-nums;
     text-align: center;
   }
   .provenance-truncated {
-    color: #8b87c4;
+    color: var(--accent-ink);
     font-weight: 400;
   }
   .provenance-chip-cover {
@@ -3096,8 +3105,8 @@
   .label {
     display: inline-block;
     padding: 0.1rem 0.5rem;
-    background: #f0effc;
-    color: #7a76c9;
+    background: var(--accent-surface);
+    color: var(--accent-ink);
     border-radius: 3px;
     font-size: 0.72rem;
     line-height: 1.4;
@@ -3108,16 +3117,16 @@
     font-family: inherit;
   }
   .label-tag:hover {
-    background: #e2ddf9;
-    color: #5a55b2;
+    background: var(--accent-surface-strong);
+    color: var(--accent-ink);
   }
   .label-tag-active {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
   }
   .label-tag-active:hover {
-    background: #7a76c9;
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--accent-on-fill);
     cursor: default;
   }
   .tag-chip-group {
@@ -3128,37 +3137,37 @@
     border: 1px solid transparent;
   }
   .tag-chip-group:hover {
-    border-color: #d0d0d0;
+    border-color: var(--line);
   }
   .tag-chip-action {
-    background: #f6f6f6;
+    background: var(--surface-hover);
     border: none;
-    border-left: 1px solid #e4e4e4;
+    border-left: 1px solid var(--line);
     padding: 0 0.35rem;
     font-size: 0.8rem;
     line-height: 1;
     cursor: pointer;
-    color: #666;
+    color: var(--ink-secondary);
   }
   .tag-chip-action:hover {
-    background: #eaeaea;
-    color: #111;
+    background: var(--surface-active);
+    color: var(--ink);
   }
   .tag-chip-promote:hover {
-    background: #ffe9c9;
-    color: #7a4a00;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
   }
   .tag-chip-promote.tag-chip-promoted {
-    background: #eef3e7;
-    color: #4a6a1a;
+    background: var(--warning-surface-strong);
+    color: var(--warning-ink);
   }
   .tag-chip-promote.tag-chip-promoted:hover {
-    background: #dfe8d3;
-    color: #2c4a00;
+    background: var(--warning-fill);
+    color: var(--warning-on-fill);
   }
   .tag-chip-detach:hover {
-    background: #fde5e5;
-    color: #a00;
+    background: var(--danger-surface);
+    color: var(--danger-ink);
   }
   .tag-add-row {
     display: flex;
@@ -3168,21 +3177,21 @@
   .tag-add-input {
     flex: 1;
     padding: 0.2rem 0.4rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
     font-size: 0.85rem;
   }
   .tag-add-btn {
     padding: 0 0.55rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-weight: 600;
-    color: #333;
+    color: var(--ink);
   }
   .tag-add-btn:hover {
-    background: #eee;
+    background: var(--surface-hover);
   }
 
   /* -----------------------------------------------------------------
@@ -3196,20 +3205,20 @@
   }
   .wallpaper-btn {
     padding: 0.3rem 0.6rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.85rem;
-    color: #333;
+    color: var(--ink);
   }
   .wallpaper-btn:hover {
-    background: #ffe9c9;
-    color: #7a4a00;
+    background: var(--warning-surface);
+    color: var(--warning-ink);
   }
   .wallpaper-current {
     font-size: 0.75rem;
-    color: #4a6a1a;
+    color: var(--warning-ink);
   }
 
   /* -----------------------------------------------------------------
@@ -3220,16 +3229,16 @@
   }
   .reveal-btn {
     padding: 0.3rem 0.6rem;
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--line);
     border-radius: 3px;
-    background: #fafafa;
+    background: var(--surface-raised);
     cursor: pointer;
     font-size: 0.85rem;
-    color: #333;
+    color: var(--ink);
   }
   .reveal-btn:hover {
-    background: #e9f0ff;
-    color: #1a3a7a;
+    background: var(--accent-surface);
+    color: var(--ink);
   }
 
   /* -----------------------------------------------------------------
@@ -3239,7 +3248,7 @@
     position: fixed;
     inset: 0;
     z-index: 200;
-    background: #0c0b12;
+    background: var(--surface-stage);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3272,7 +3281,7 @@
     right: 0.8rem;
     bottom: 0.6rem;
     font-size: 0.65rem;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--ink-muted);
     pointer-events: none;
   }
   .fullscreen-nav {
@@ -3283,15 +3292,15 @@
     height: 4rem;
     border: none;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.55);
+    background: var(--wash-up);
+    color: var(--ink-muted);
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
   }
   .fullscreen-nav:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #fff;
+    background: var(--wash-up-strong);
+    color: var(--ink);
   }
   .fullscreen-nav-prev {
     left: 0.6rem;
