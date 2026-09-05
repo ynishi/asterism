@@ -1,0 +1,51 @@
+<!--
+  The app icon's master. Every PNG, the .icns and the .ico beside it are
+  `cargo tauri icon` output from a 1024px render of this file — so this is
+  the one to edit, and the others are regenerated rather than touched:
+
+      rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon-1024.png
+      npx tauri icon /tmp/icon-1024.png
+
+  Three constraints hold the numbers below, and each was measured rather
+  than assumed:
+
+  1. Full bleed, square, no rounded corners. macOS applies the squircle
+     mask itself; a source that rounds its own corners leaves a gap
+     inside that mask.
+  2. Heavy strokes, because the mark has to survive downscaling. At
+     16px a 1%-of-canvas stroke vanishes and a 3% one leaves a smudge;
+     the 48px stroke here is 4.7%, and the stars are 20% and 12.5% of
+     the canvas. That weight also matches the density of the icons this
+     one sits beside in a Dock — a lighter mark reads as washed out
+     rather than as restraint.
+  3. Flat. No glow, no bevel, no baked highlight: Icon Composer and the
+     Liquid Glass compositor generate their own, and art that carries
+     its own fights them.
+
+  The mark is the name read literally — an asterism is a recognisable
+  pattern of stars, and this application's own shape is points joined by
+  lines. The large star is where the eye lands first.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#211d6b"/>
+      <stop offset="55%" stop-color="#141134"/>
+      <stop offset="100%" stop-color="#08080f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+
+  <g stroke="#ffffff" stroke-width="48" stroke-linecap="round" fill="none">
+    <line x1="300" y1="726" x2="618" y2="272"/>
+    <line x1="618" y1="272" x2="840" y2="576"/>
+    <line x1="840" y1="576" x2="300" y2="726"/>
+  </g>
+
+  <g fill="#ffffff">
+    <circle cx="300" cy="726" r="104"/>
+    <circle cx="618" cy="272" r="64"/>
+    <circle cx="840" cy="576" r="64"/>
+  </g>
+</svg>
