@@ -9,9 +9,13 @@ hover-burst looks like.
 
 ## Status
 
-- **v0.0.0** — the initial cut is in place. Domain, application, SQLite schema,
-  job pipeline (`cover_gen` / `auto_tag` / `edge_rebuild`), the HTTP API server,
-  and the Tauri grid UI with hover-burst rendering all run end-to-end.
+- **v0.1.0** — the team plane is wired, visible, and licensed: a team hosts the
+  forge, a member's client promotes an asset onto a team-hosted line, and the
+  Forge and Team surfaces are in the app. The local-first half it stands on —
+  domain, application, SQLite schema, the job pipeline (`cover_gen` / `auto_tag`
+  / `edge_rebuild`), the HTTP API server, and the Tauri grid UI with hover-burst
+  rendering — runs end-to-end, and the release workflow signs and notarizes the
+  macOS build.
 - Nothing is published to crates.io (every crate has `publish = false`).
 - Data is isolated by local profile: release builds default to
   `~/.asterism/profiles/dogfood/`, debug builds to `~/.asterism/profiles/dev/`,
