@@ -1098,6 +1098,28 @@ and this project adheres to
 
 ### Changed
 
+- **The app carries its own icon** (#238). What shipped until now was the teal
+  and yellow interlocking rings `create-tauri-app` writes into every new
+  project. In its place: three white stars joined into a triangle, over an
+  indigo-to-black ground — the name read literally, and the shape the
+  application already has. `icons/icon.svg` is the master and the file to edit;
+  the sixteen rasters beside it are `npx tauri icon` output and are regenerated
+  rather than touched.
+
+  **The artwork carries its own rounded tile, because it ships to two macOS
+  generations that disagree about who draws one.** macOS 26 masks every app icon
+  to a squircle itself and wants full-bleed artwork; macOS 15 and earlier draw
+  what the bundle carries and want Apple's template geometry, an 824×824 tile
+  inset in a 1024 canvas. Nothing here sets a `minimumSystemVersion`, so the
+  bundle reaches both, and the inset tile is the version that is wrong in the
+  cheaper direction — under 26's mask it reads somewhat smaller, where
+  full-bleed artwork on 15 is a hard-cornered square a quarter larger than every
+  icon beside it in the Dock. The first pass of this icon shipped full-bleed on
+  the reasoning that the system masks it, which is true of one of the two. The
+  same margin rides into `icon.ico` and the `Square*Logo.png` tiles, which draw
+  unmasked and would not have asked for it; that is the price of keeping one
+  master.
+
 - **The forge and the shared-lines drawer's two-column shells share their gap
   and rail width now** (#217). The same check the tab strip's departure got: the
   shell's mechanism (a flex row, a fixed-width rail, a flexible body) was
