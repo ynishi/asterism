@@ -70,21 +70,21 @@
   // by drift rather than by anything the reasoning argued for. The
   // shell is the one of #217's three asks that remains a departure.
   //
-  // Two more of #217's asks are not built as written, on purpose. The
+  // One more of #217's asks is not built as written, on purpose. The
   // signed-in row keeps Disconnect beside it and the devices behind
   // their own disclosure rather than both behind a menu, security
   // over the literal ask: a menu hides the one verb that ends the
   // connection and the list that says which machines can open one
   // behind an extra click, which is the wrong side to add friction to.
-  // And the publish form is not at the rail's foot: it belongs
-  // to the lines tab (below), and a form at the rail's foot would stand
-  // under the roster and the ledger too, offering to seed a line from
-  // tabs that are not about lines.
   //
-  // Publishing stays with the lines tab. It seeds another line, which
-  // is a thing to do from where the lines are read — and the local line
-  // it seeds from is picked from the forge's own list rather than typed
-  // as an id, since this machine knows every one of them.
+  // The publish form, by contrast, is built where #217 asked: at the
+  // lines list's own foot in the rail (below), gated the same way it
+  // always was — `tab === "lines"` — since the rail draws the same
+  // regardless of which of the body's tabs is open, and offering to
+  // seed a line is a thing to do from where the lines are read, not
+  // from the roster or the ledger. The local line it seeds from is
+  // picked from the forge's own list rather than typed as an id, since
+  // this machine knows every one of them.
   import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
   import TabStrip from "./TabStrip.svelte";
@@ -844,6 +844,68 @@
               {/each}
             </ul>
           {/if}
+
+          <!-- Publishing, at the lines list's own foot (#217). The
+               re-enactment is chosen here or never: a line seeded with
+               its current state cannot be given its history
+               afterwards.
+
+               Still gated on `tab === "lines"`, unchanged from before
+               this moved: the rail draws the same regardless of which
+               of the body's tabs is open, and this offers to seed a
+               line, which only the lines tab is about. Also still
+               gated on `current === null`, since a line the rail is
+               already reading needs no second one seeded beside it. -->
+          {#if tab === "lines" && current === null}
+            <form class="drawer-form drawer-publish" onsubmit={publish}>
+              <h4>Publish a line of mine</h4>
+              <!-- Picked from this machine's lines rather than typed as
+                   an id (#217): the forge knows every one of them. The
+                   typed field stays for the case the list is empty or
+                   unread, because a line that exists and is not listed
+                   should still be publishable. -->
+              <label>
+                Local line
+                {#if forgeCatalog.lines.data.length > 0}
+                  <select bind:value={publishLineId} required>
+                    <option value="" disabled>choose…</option>
+                    {#each forgeCatalog.lines.data as line (line.id)}
+                      <option value={line.id}>{line.name} · {line.standing}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input
+                    type="text"
+                    bind:value={publishLineId}
+                    placeholder="line id"
+                    required
+                  />
+                {/if}
+              </label>
+              <label>
+                Call it
+                <input type="text" bind:value={publishName} required />
+              </label>
+              <label class="drawer-check">
+                <input type="checkbox" bind:checked={reenact} />
+                Re-enact the whole chain
+              </label>
+              <p class="drawer-cost">
+                {#if reenact}
+                  The team's line will be <strong>re-enacted</strong>: one
+                  change point for each of mine, every act stamped to me
+                  rather than to whoever made the work, and every content
+                  the line ever named sent — including what has since been
+                  replaced. Work logs and conversations do not go.
+                {:else}
+                  The team gets what the line holds now, as a single change
+                  point. Choose re-enactment before publishing if you want
+                  the chain; it cannot be added to the line afterwards.
+                {/if}
+              </p>
+              <button type="submit">Publish</button>
+            </form>
+          {/if}
         {/if}
         </div>
 
@@ -1028,68 +1090,6 @@
             Pick a line on the left to read what is on it, the work
             against it, and its history.
           </p>
-        {/if}
-
-        <!-- Publishing. The re-enactment is chosen here or never:
-             a line seeded with its current state cannot be given its
-             history afterwards.
-
-             Behind `ready` for the same reason the lines list is: it
-             seeds a line on the team that is on, and with no team
-             named it would be offering to publish to nobody. It gives
-             way when a line is open, because the body holds one thing
-             at a time — the line's frame, or this — and seeding
-             another line is a thing to do from the tab the lines are
-             read on. -->
-        {#if sharedCatalog.phase === "ready" && tab === "lines" && current === null}
-          <form class="drawer-form drawer-publish" onsubmit={publish}>
-            <h4>Publish a line of mine</h4>
-            <!-- Picked from this machine's lines rather than typed as
-                 an id (#217): the forge knows every one of them. The
-                 typed field stays for the case the list is empty or
-                 unread, because a line that exists and is not listed
-                 should still be publishable. -->
-            <label>
-              Local line
-              {#if forgeCatalog.lines.data.length > 0}
-                <select bind:value={publishLineId} required>
-                  <option value="" disabled>choose…</option>
-                  {#each forgeCatalog.lines.data as line (line.id)}
-                    <option value={line.id}>{line.name} · {line.standing}</option>
-                  {/each}
-                </select>
-              {:else}
-                <input
-                  type="text"
-                  bind:value={publishLineId}
-                  placeholder="line id"
-                  required
-                />
-              {/if}
-            </label>
-            <label>
-              Call it
-              <input type="text" bind:value={publishName} required />
-            </label>
-            <label class="drawer-check">
-              <input type="checkbox" bind:checked={reenact} />
-              Re-enact the whole chain
-            </label>
-            <p class="drawer-cost">
-              {#if reenact}
-                The team's line will be <strong>re-enacted</strong>: one
-                change point for each of mine, every act stamped to me
-                rather than to whoever made the work, and every content
-                the line ever named sent — including what has since been
-                replaced. Work logs and conversations do not go.
-              {:else}
-                The team gets what the line holds now, as a single change
-                point. Choose re-enactment before publishing if you want
-                the chain; it cannot be added to the line afterwards.
-              {/if}
-            </p>
-            <button type="submit">Publish</button>
-          </form>
         {/if}
 
         {#if sharedCatalog.phase === "ready" && tab === "roster"}
