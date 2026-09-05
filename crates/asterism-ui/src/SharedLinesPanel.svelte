@@ -30,10 +30,11 @@
   //
   // What this component adds is where everything else goes. The
   // connection and the team are what the tabs are answers about, so
-  // they are picked from before the tabs are read. Publishing sits
-  // *inside* the lines tab, because it seeds a line and a line is what
-  // that tab is for. Founding a team sits with the teams, argued where
-  // the control is.
+  // they are picked from before the tabs are read. Publishing is
+  // gated on the lines tab, because it seeds a line and a line is what
+  // that tab is for — though the form itself sits in the rail, at the
+  // lines list's own foot, argued under "Two columns" below. Founding
+  // a team sits with the teams, argued where the control is.
   //
   // # Two columns, the forge's width (#217)
   //
@@ -48,9 +49,11 @@
   // began in the bottom tenth.
   //
   // The rail holds what is picked from: who is signed in, the teams,
-  // and — once a team is on — its lines. The body holds what is read
-  // about the pick: the team's three tabs, and inside `lines` either
-  // the open line's frame or the publish form. Typing a team id, which
+  // and — once a team is on — its lines, with the form that publishes
+  // one of this machine's own at their foot (#217). The body holds
+  // what is read about the pick: the team's three tabs, and inside
+  // `lines`, once a team has one to open, the open line's frame.
+  // Typing a team id, which
   // the instance admin still needs (their list is empty while their
   // reach is not), sits behind a disclosure in the rail rather than as
   // a form beside a list that already holds the same rows.
@@ -79,12 +82,17 @@
   //
   // The publish form, by contrast, is built where #217 asked: at the
   // lines list's own foot in the rail (below), gated the same way it
-  // always was — `tab === "lines"` — since the rail draws the same
-  // regardless of which of the body's tabs is open, and offering to
-  // seed a line is a thing to do from where the lines are read, not
-  // from the roster or the ledger. The local line it seeds from is
-  // picked from the forge's own list rather than typed as an id, since
-  // this machine knows every one of them.
+  // always was — a team on (`ready`), the lines tab open, and no line
+  // picked — rather than by anything about sitting in the rail now.
+  // Everywhere else the rail draws the same no matter which of the
+  // body's tabs is open; this is the one thing in it that reads `tab`
+  // at all, and the reason is the same one #217's own reasoning for
+  // not putting it there gave: offering to seed a line is a thing to
+  // do from where the lines are read, not from the roster or the
+  // ledger, so the guard the departure needed stays even though the
+  // position no longer does. The local line it seeds from is picked
+  // from the forge's own list rather than typed as an id, since this
+  // machine knows every one of them.
   import { untrack } from "svelte";
   import SharedLineWork from "./SharedLineWork.svelte";
   import TabStrip from "./TabStrip.svelte";
@@ -850,12 +858,16 @@
                its current state cannot be given its history
                afterwards.
 
-               Still gated on `tab === "lines"`, unchanged from before
-               this moved: the rail draws the same regardless of which
-               of the body's tabs is open, and this offers to seed a
-               line, which only the lines tab is about. Also still
-               gated on `current === null`, since a line the rail is
-               already reading needs no second one seeded beside it. -->
+               Three conditions, unchanged from before this moved:
+               `sharedCatalog.phase === "ready"` from the `{#if}` this
+               sits inside, since offering to seed a line on a team
+               nobody has named is offering to publish to nobody;
+               `tab === "lines"`, since this is the one thing in the
+               rail that reads `tab` at all, and only because seeding a
+               line is a thing to do from where the lines are read, not
+               from the roster or the ledger; and `current === null`,
+               since a line the rail is already reading needs no second
+               one seeded beside it. -->
           {#if tab === "lines" && current === null}
             <form class="drawer-form drawer-publish" onsubmit={publish}>
               <h4>Publish a line of mine</h4>
@@ -936,8 +948,8 @@
 
         {#if sharedCatalog.phase === "no-team" || tab !== "lines"}
           <!-- The line's frame is what this chain renders, and this arm
-               is what keeps it off the other tabs. The publish form
-               below carries its own condition. -->
+               is what keeps it off the other tabs. The publish form is
+               in the rail now, on its own condition, not here. -->
         {:else if current !== null}
           <!-- A line, beside the list it was picked from, argued in
                this component's header.
@@ -1089,6 +1101,15 @@
           <p class="drawer-empty">
             Pick a line on the left to read what is on it, the work
             against it, and its history.
+          </p>
+        {:else}
+          <!-- The rail's own empty state already says this team hosts
+               no lines; the body's job here is only to point at where
+               the fix for that is, since the publish form moved out
+               from under it and left nothing else to show. -->
+          <p class="drawer-empty">
+            Publish one of this machine's lines from the rail on the
+            left to give this team its first.
           </p>
         {/if}
 

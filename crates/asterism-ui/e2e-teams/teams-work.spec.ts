@@ -305,8 +305,8 @@ describe("work against a team's line", () => {
 
     // Selecting a line opens its frame in the body beside the list, so
     // the way back is what says the frame is open — and the publish
-    // form, which the body holds when no line is, has to be gone with
-    // it.
+    // form, in the rail below the list and shown only when no line
+    // is, has to be gone with it.
     await stage(trail, "open the line", ROUND_TRIP_MS, async () => {
       // `.lines` rather than `.drawer-list`: the drawer holds two
       // lists that share the styling since #202 put the teams to pick
