@@ -1166,6 +1166,17 @@ and this project adheres to
   shows in the bundle's information. The copyright line is the one `LICENSE-MIT`
   already declares.
 
+  **And the two pieces of the window the stylesheet cannot reach**, found by
+  opening the Dogfood build once #240 had made the app dark. The title bar took
+  whichever appearance the system was in, so an app with one value set and no
+  light one to fall back to wore a light bar across the top of it on a light
+  Mac; the window is built with `theme: Dark` now. And nothing was painted
+  between the window opening and the first frame of the UI, because the builder
+  named no `background_color` and `index.html` declared no `color-scheme` — the
+  stylesheet arrives a module load after the document is parsed. Both are stated
+  now, and `--surface` is duplicated into the window builder because a
+  stylesheet cannot hand a colour to one.
+
 - **The sidebar's filter bands show their own labels** (#239). Length, Size and
   Pixels were rendering about two characters of their `min` and `max`
   placeholders. The row never fitted: on one line it asks for roughly 207px
