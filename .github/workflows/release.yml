@@ -45,9 +45,12 @@
 # ## Triggers
 #
 # A `v*` tag is the release path: build, notarize, then create a
-# *draft* release carrying the DMG. Draft on purpose — publishing is a
-# decision, not a side effect of pushing a tag, and the release notes
-# deserve a human pass before anyone can download against them.
+# *draft* release carrying the DMG and, beside it, the source of the
+# LGPL ffmpeg inside that DMG — the archive and the script that
+# configures it, which is what meets the licence's source offer. Draft
+# on purpose — publishing is a decision, not a side effect of pushing a
+# tag, and the release notes deserve a human pass before anyone can
+# download against them.
 #
 # `workflow_dispatch` is the rehearsal path: same build, same signing,
 # same notarization, but the DMG lands as a workflow artifact and no
@@ -74,8 +77,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-# `write` for the draft release and its asset. The rehearsal path never
-# uses it.
+# `write` for the draft release and the files attached to it. The
+# rehearsal path never uses it — its own copies go to a workflow
+# artifact, which needs no permission here.
 permissions:
   contents: write
 
@@ -208,21 +212,60 @@ jobs:
           spctl --assess --type execute --verbose=2 target/release/bundle/macos/Asterism.app
           xcrun stapler validate target/release/bundle/dmg/*.dmg
 
-      - name: attach the DMG to a draft release
+      # The DMG, and beside it the source of the LGPL binary inside it.
+      #
+      # The bundle carries an ffmpeg built from upstream source, and
+      # LGPL-2.1 §4 lets a distributor meet the source requirement by
+      # "offering equivalent access to copy the source code from the same
+      # place" the object code is offered from. This release is that
+      # place. Linking to ffmpeg.org instead would put the offer on
+      # somebody else's continued hosting of those exact bytes, and the
+      # offer is the distributor's to make. FFMPEG-NOTICE.md ships inside
+      # the app and names this release as where the source is, so the two
+      # have to arrive together or the notice is pointing at nothing.
+      #
+      # The build script goes up with it because the tarball alone does
+      # not say how it was configured, and the configuration is what
+      # makes the binary reproducible from that source.
+      - name: attach the DMG and the sidecar's source to a draft release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           dmg=$(ls target/release/bundle/dmg/*.dmg)
+          # Named from the stamp the build wrote rather than globbed.
+          # A glob would upload whatever archives `target/` happens to
+          # hold — an older version left behind by a bump, say — and
+          # FFMPEG-NOTICE.md inside the DMG names exactly one URL and
+          # one digest. The stamp says which one this build used.
+          stamp=target/ffmpeg-sidecar/.ffmpeg-version
+          ver=$(cut -d' ' -f1 "$stamp")
+          src="target/ffmpeg-sidecar/ffmpeg-$ver.tar.xz"
+          if [[ ! -f "$src" ]]; then
+            echo "the sidecar's source tarball is not on disk, so this" >&2
+            echo "release would offer the binary and not its source." >&2
+            echo "FFMPEG-NOTICE.md, inside the app, says it is here." >&2
+            exit 1
+          fi
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
               --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
+          gh release upload "$GITHUB_REF_NAME" \
+            "$dmg" "$src" scripts/build-ffmpeg-sidecar.sh --clobber
 
-      - name: keep the rehearsal's DMG
+      # The rehearsal keeps the same three files, for the reason the
+      # release path does. This repository is public, so a workflow
+      # artifact is downloadable by anyone who can read it, and what is
+      # in that artifact is a notarized DMG whose own notice says the
+      # source is beside the download. "Only a rehearsal" is a fact
+      # about why it was built, not about who can fetch it.
+      - name: keep the rehearsal's DMG and the sidecar's source
         if: github.event_name != 'push'
         uses: actions/upload-artifact@v4
         with:
           name: asterism-macos-dmg
-          path: target/release/bundle/dmg/*.dmg
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/ffmpeg-sidecar/ffmpeg-*.tar.xz
+            scripts/build-ffmpeg-sidecar.sh
           if-no-files-found: error

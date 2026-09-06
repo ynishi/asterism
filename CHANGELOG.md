@@ -8,6 +8,59 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **The ffmpeg sidecar's own terms, travelling with it** (#243). The app ships
+  an `ffmpeg` built from unmodified upstream source and spawns it as a separate
+  process, and until now nothing shipped beside it said where it came from or
+  under what terms. `LICENSE-LGPL-2.1` and `FFMPEG-NOTICE.md` are in the tree,
+  and the bundle is configured to carry them along with the two permissive texts
+  — which move out of the top of `Contents/Resources` into a `licenses/`
+  directory beside them. The notice carries what LGPL-2.1 §1 asks to accompany
+  each copy, reaching executables through §4 — the copyright line and the
+  warranty disclaimer — plus the configuration the binary was built with, the
+  tarball it was built from, and where that tarball can be had. It also carries
+  a credit that is not the LGPL's at all: FFmpeg's own `LICENSE.md` requires
+  crediting the Independent JPEG Group in accompanying documentation when only
+  executables are distributed, and the three libjpeg-derived files it names are
+  compiled into this build because `mjpeg` and the MPEG-family decoders select
+  them. `just dogfood-build` fails when any of the four does not reach
+  `Contents/Resources/licenses/`, which is what turns "configured to carry" into
+  something a release run answers for.
+- **The sidecar's source beside the download** (#243). The release run attaches
+  the ffmpeg tarball and the script that configures it to the same draft release
+  as the DMG, names the archive from the stamp the build wrote rather than
+  globbing for it, and fails rather than publishing a release without it.
+  LGPL-2.1 §4 lets a distributor meet the source requirement by offering the
+  source "from the same place" the binary is offered from; linking to ffmpeg.org
+  would put that offer on somebody else's continued hosting of those exact
+  bytes. The rehearsal path keeps the same three files in its workflow artifact
+  — this repository is public, so that artifact is downloadable by anyone who
+  can read it.
+
+### Changed
+
+- **The sidecar build verifies what it downloads** (#243). The script fetched a
+  tarball over the network, unpacked it and compiled it without checking what
+  arrived. It now compares the archive against a pinned SHA-256, and does so
+  before the fast path rather than after it: a run that finds the binary already
+  built still fetches the archive if it is missing and still hashes it, because
+  the release uploads that archive and the notice inside the app names its
+  digest. Provenance is established by hand — the 8.0 tarball checks out against
+  FFmpeg's release signing key, whose fingerprint matches the one published on
+  ffmpeg.org — and the digest is what carries that verification into later
+  builds. The stamp that decides whether to rebuild records the digest beside
+  the version, so correcting a pin without moving the version no longer matches
+  a warm `target/` and keeps a binary compiled from the rejected bytes.
+- **Two comments in the sidecar script named the wrong clause** (#243). Both
+  reached for LGPL-2.1 §6's system-library exception to explain why linking
+  `/usr/lib` and `/System/Library` is fine. The conclusion holds and the reason
+  is simpler: §6 governs a combined work — a program of your own linked against
+  the library — and what ships here is FFmpeg's own tool linked against FFmpeg's
+  own libraries, wholly LGPL, which §4 governs. Under §4 the frameworks the OS
+  ships are not part of FFmpeg's corresponding source, so no exception has to be
+  invoked.
+
 ## [0.1.0] - 2026-09-06
 
 ### Added

@@ -72,9 +72,14 @@ name: check
 # resolves to that same file — the entry costs nothing and covers a
 # checkout that has written its own `CLAUDE.md` under the directory.
 #
-# `LICENSE-APACHE` and `LICENSE-MIT` are on the list for the same reason
-# the prose is: no step reads them. They are named rather than left to a
-# glob so that the list stays a list of files somebody decided about.
+# The licence texts and `FFMPEG-NOTICE.md` are on the list for the same
+# reason the prose is: no step reads them. They are named rather than
+# left to a glob so that the list stays a list of files somebody decided
+# about — which is also why a fourth one arriving is a decision rather
+# than a pattern quietly widening. `LICENSE-LGPL-2.1` and the notice
+# beside it ship inside the bundle; nothing here looks at either, and
+# the recipe that does look, `dogfood-build`, runs on the release path
+# rather than this one.
 #
 # Two costs, both of which matter later rather than now.
 #
@@ -112,7 +117,9 @@ on:
       - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
+      - 'FFMPEG-NOTICE.md'
       - 'LICENSE-APACHE'
+      - 'LICENSE-LGPL-2.1'
       - 'LICENSE-MIT'
       - 'PUBLIC_DEVELOPMENT.md'
       - 'README.md'
@@ -125,7 +132,9 @@ on:
       - 'AGENTS.md'
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
+      - 'FFMPEG-NOTICE.md'
       - 'LICENSE-APACHE'
+      - 'LICENSE-LGPL-2.1'
       - 'LICENSE-MIT'
       - 'PUBLIC_DEVELOPMENT.md'
       - 'README.md'
