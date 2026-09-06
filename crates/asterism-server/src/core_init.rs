@@ -1182,6 +1182,53 @@ pub async fn init_core_with(
                 "could not enqueue the startup series derivation walk"
             );
         }
+        // The perceptual walk rides the same trigger for the reason the
+        // hash walk does, and V105 is what makes it necessary rather
+        // than merely useful: every image already in the library was
+        // left `pending` by that migration, deliberately, so that this
+        // walk would answer it. The ingest fan-out only fires for files
+        // arriving from now on, so without a pass over the rest the
+        // near-duplicate edges would only ever see newly-imported
+        // files — an empty answer that looks like a library with no
+        // copies in it.
+        //
+        // Not gated on a bound model, unlike the two visual walks the
+        // model install seeds: a perceptual fingerprint needs none, and
+        // a profile that binds nothing still has its copies recognised.
+        // That is also why it is seeded here rather than there.
+        //
+        // It stops the way the dimension walk stops rather than the way
+        // the hash walk does: the status column is written whatever the
+        // answer, a material that is not an image included, so a row is
+        // offered once and a start on an already-measured library costs
+        // one query.
+        //
+        // Same dedupe against the durable queue, for the same reason: a
+        // page chained by the previous run survives the restart as a
+        // Pending row, and a fresh walk on top of it would decode every
+        // unmeasured image twice.
+        let perceptual_walk_already_queued = job_queue_arc
+            .has_pending_batch(JobKind::PerceptualHash)
+            .await
+            .unwrap_or(false);
+        if perceptual_walk_already_queued {
+            tracing::info!(
+                event = "diag.perceptual_hash.startup_skipped",
+                "perceptual backfill walk already queued; not starting a second one"
+            );
+        } else if let Err(err) = job_queue_arc
+            .enqueue(
+                JobKind::PerceptualHash,
+                serde_json::json!({ "batch": true }),
+            )
+            .await
+        {
+            tracing::warn!(
+                event = "diag.perceptual_hash.enqueue_failed",
+                error = %err,
+                "could not enqueue the startup perceptual backfill"
+            );
+        }
     }
 
     let snapshot_service = Arc::new(SnapshotService::new(
