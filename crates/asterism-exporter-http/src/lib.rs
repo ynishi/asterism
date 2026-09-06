@@ -77,6 +77,12 @@
 //!       "source_url":    "{{item.url}}",
 //!       "cover_hint":    "{{item.caption?}}",
 //!       "labels_static": ["batch:{{dispatch_id}}"]
+//!     },
+//!     "record": {
+//!       "paths":    { "seed": "$.response.seed",
+//!                     "prompt": "$.params.extras.prompt" },
+//!       "absences": { "guidance_scale": "not_returned",
+//!                     "sampler": "not_supported" }
 //!     }
 //!   },
 //!
@@ -166,8 +172,24 @@
 //! into a URL or a body: the adapter was never told it was a
 //! credential. That is the same trade the paragraph above describes,
 //! one surface further along.
+//!
+//! ## The profile declares its absences up front
+//!
+//! Keeping the response whole answers "what did the platform say". It
+//! does not answer "why is the seed not in it", and there are three
+//! reasons behind that one absence: we did not capture it, the platform
+//! does not report it, the parameter does not exist on this model. Only
+//! the first is a gap on our side, and a `null` reports all three
+//! identically — so the record sits beside the note rather than inside
+//! it, and the profile states the two that are properties of the
+//! platform before any call is made.
+//! [`RecordSchema::paths`] says where a value is read from and
+//! [`RecordSchema::absences`] says why there is none to read. See
+//! [`record`] for the shape, and for why the status is beside the value
+//! rather than written into it.
 
 pub mod custody;
+pub mod record;
 pub mod secret;
 
 use std::collections::BTreeMap;
@@ -184,6 +206,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use custody::CustodyPaths;
+pub use record::{Absence, FieldRecord, Record, RecordSchema};
 pub use secret::SecretGrammar;
 
 /// Slug the registry uses for this exporter.
@@ -352,6 +375,11 @@ pub struct HarvestSchema {
     pub items_path: String,
     /// Per-item mapping. Every field is optional except `source_url`.
     pub map: HarvestMap,
+    /// What the record should say the platform reported, and what it
+    /// declines to report. Absent in a profile written before this
+    /// existed, which records nothing and is the old behaviour.
+    #[serde(default)]
+    pub record: RecordSchema,
 }
 
 /// How the harvest phase turns each response item into a
@@ -795,6 +823,12 @@ impl Exporter for HttpExporter {
         };
         let items = grammar.select(&resp, &params.harvest.items_path);
         let now = Utc::now();
+        // The record's document needs the response once per item and
+        // `call_note` consumes it, so it is kept here rather than
+        // reached for out of the note — which would tie this to that
+        // note's shape. Skipped when the profile declares nothing,
+        // which is every profile written before records existed.
+        let recorded = (!params.harvest.record.is_empty()).then(|| resp.clone());
         // Built once and cloned per item: every artefact of one job came
         // out of the same call, and re-deriving it inside the loop would
         // invite the two copies to drift.
@@ -866,6 +900,29 @@ impl Exporter for HttpExporter {
                     }
                 }
             }
+            // Per artefact rather than per call, even for a field like
+            // the model that is the same across a batch. A generated
+            // asset outlives the dispatch that produced it in every way
+            // that matters here — it is the thing a person opens months
+            // later — and a record that only exists one join away is a
+            // record that will be read as absent.
+            //
+            // What a per-call home would have bought is already bought:
+            // the call note is written to the dispatch row whether or
+            // not the job produced anything, so a submit that minted
+            // nothing still has one. What that row cannot carry is a
+            // value read per item, which is the other half of this.
+            let record = match recorded.as_ref() {
+                Some(response) => params.harvest.record.evaluate(
+                    &grammar,
+                    &serde_json::json!({
+                        "response": response,
+                        "item": item,
+                        "params": ctx.params,
+                    }),
+                ),
+                None => Record::new(),
+            };
             out.push(Derived {
                 modality,
                 locator,
@@ -885,12 +942,21 @@ impl Exporter for HttpExporter {
                         // persisted on the asset.
                         "source_url": grammar.scrub_text(&source_url),
                         // How this artefact was asked for, travelling
-                        // with the artefact. The same record is on the
+                        // with the artefact. The same call is on the
                         // dispatch row; it is repeated here because an
                         // asset that has to resolve an id to say what
                         // made it is one whose answer can go missing
-                        // separately from it.
+                        // separately from it. (The record below is not
+                        // on that row — it exists per artefact only.)
                         "call": call.clone(),
+                        // The same call, read the way a query needs it.
+                        // The note above holds what the platform sent,
+                        // which is a blob; this says which fields the
+                        // profile asked for, what was there, and — for
+                        // the ones that were not — whether that is a
+                        // gap on our side or the platform declining to
+                        // say. `{}` when the profile declares nothing.
+                        "record": record,
                     }
                 }),
                 batch_hint: None,
@@ -905,8 +971,14 @@ impl Exporter for HttpExporter {
 // ---------------------------------------------------------------------------
 
 fn parse_params(ctx: &DispatchContext<'_>) -> Result<HttpDispatchParams, ExporterError> {
-    serde_json::from_value(ctx.params.clone())
-        .map_err(|e| ExporterError::BackendRejected(format!("invalid http params: {e}")))
+    let params: HttpDispatchParams = serde_json::from_value(ctx.params.clone())
+        .map_err(|e| ExporterError::BackendRejected(format!("invalid http params: {e}")))?;
+    // Checked on every phase rather than at harvest alone: a profile
+    // that contradicts itself about what the platform reports is wrong
+    // before the submit, and that is the moment nothing has happened
+    // yet.
+    params.harvest.record.validate()?;
+    Ok(params)
 }
 
 fn parse_handle_payload(handle: &Handle) -> Result<HttpHandlePayload, ExporterError> {
@@ -1354,6 +1426,30 @@ mod tests {
         assert_eq!(params.harvest.map.source_url, "{{item.url}}");
     }
 
+    /// The example is the profile every author copies, so it has to
+    /// teach the distinction rather than only leave room for it: a field
+    /// read out of the response, a field read out of what we sent, one
+    /// the platform runs with and does not report, and one that does not
+    /// exist on the model at all.
+    #[test]
+    fn params_example_declares_both_captures_and_absences() {
+        let params: HttpDispatchParams = serde_json::from_str(params_example_json()).unwrap();
+        let record = params.harvest.record;
+        record
+            .validate()
+            .expect("the shipped example is consistent");
+
+        assert_eq!(record.paths["seed"], "$.response.seed");
+        assert_eq!(
+            record.paths["prompt"], "$.params.extras.prompt",
+            "what was sent is recorded from the params, because a \
+             backend that enhances a prompt does not echo the one it \
+             was given"
+        );
+        assert_eq!(record.absences["guidance_scale"], Absence::NotReturned);
+        assert_eq!(record.absences["sampler"], Absence::NotSupported);
+    }
+
     /// Deserialising the example only proves its *field names* are
     /// current — every template is an opaque `String` to serde. The
     /// other half of the same drift lived inside those strings
@@ -1450,6 +1546,7 @@ mod tests {
             "status": "succeeded",
             "error": "upstream refused the workflow",
             "progress_message": "step 12/30",
+            "seed": 913_224,
             "outputs": [
                 { "url": "https://renders.test/a.png" },
                 { "url": "https://renders.test/b.png" }
@@ -1518,6 +1615,32 @@ mod tests {
                 "https://renders.test/a.png".to_string(),
                 "https://renders.test/b.png".to_string(),
             ]
+        );
+
+        // harvest.record — the same family, and the one whose typo is
+        // hardest to see. A record path that does not resolve writes
+        // `not_captured`, which reads as a gap on our side rather than
+        // as the misspelling it is, on every artefact of every profile
+        // copied from this file.
+        let document = serde_json::json!({
+            "response": &resp,
+            "item": items[0],
+            "params": ctx.params,
+        });
+        let record = params.harvest.record.evaluate(&g, &document);
+        assert_eq!(
+            record["seed"],
+            FieldRecord::Captured {
+                value: serde_json::json!(913_224)
+            },
+            "the example's seed path has to reach the response"
+        );
+        assert_eq!(
+            record["prompt"],
+            FieldRecord::Captured {
+                value: serde_json::json!("photo studio portrait")
+            },
+            "and its prompt path has to reach the params it shipped"
         );
     }
 

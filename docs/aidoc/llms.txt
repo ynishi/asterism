@@ -171,6 +171,7 @@
 
 - [asterism-exporter-http overview](asterism_exporter_http/index.md): # asterism-exporter-http
 - [asterism-exporter-http::custody](asterism_exporter_http/custody.md): Where a produced file lands once we hold it.
+- [asterism-exporter-http::record](asterism_exporter_http/record.md): What the platform said, and — when it said nothing — why.
 - [asterism-exporter-http::secret](asterism_exporter_http/secret.md): The profile grammar this adapter uses: the shared one, plus
 
 ## asterism-importer 0.1.1

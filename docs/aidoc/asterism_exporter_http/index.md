@@ -79,6 +79,12 @@ machine without re-reading params on every tick.
       "source_url":    "{{item.url}}",
       "cover_hint":    "{{item.caption?}}",
       "labels_static": ["batch:{{dispatch_id}}"]
+    },
+    "record": {
+      "paths":    { "seed": "$.response.seed",
+                    "prompt": "$.params.extras.prompt" },
+      "absences": { "guidance_scale": "not_returned",
+                    "sampler": "not_supported" }
     }
   },
 
@@ -169,8 +175,24 @@ into a URL or a body: the adapter was never told it was a
 credential. That is the same trade the paragraph above describes,
 one surface further along.
 
+## The profile declares its absences up front
+
+Keeping the response whole answers "what did the platform say". It
+does not answer "why is the seed not in it", and there are three
+reasons behind that one absence: we did not capture it, the platform
+does not report it, the parameter does not exist on this model. Only
+the first is a gap on our side, and a `null` reports all three
+identically — so the record sits beside the note rather than inside
+it, and the profile states the two that are properties of the
+platform before any call is made.
+[`RecordSchema::paths`] says where a value is read from and
+[`RecordSchema::absences`] says why there is none to read. See
+[`record`] for the shape, and for why the status is beside the value
+rather than written into it.
+
 ## Modules
 
 - [`custody`](custody.md): Where a produced file lands once we hold it.
+- [`record`](record.md): What the platform said, and — when it said nothing — why.
 - [`secret`](secret.md): The profile grammar this adapter uses: the shared one, plus
 

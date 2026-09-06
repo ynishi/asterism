@@ -31,6 +31,16 @@
       "source_url": "{{item.url}}",
       "cover_hint": "{{item.caption?}}",
       "labels_static": ["batch:{{dispatch_id}}"]
+    },
+    "record": {
+      "paths": {
+        "seed": "$.response.seed",
+        "prompt": "$.params.extras.prompt"
+      },
+      "absences": {
+        "guidance_scale": "not_returned",
+        "sampler": "not_supported"
+      }
     }
   },
 

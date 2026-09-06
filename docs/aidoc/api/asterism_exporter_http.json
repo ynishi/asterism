@@ -108,6 +108,31 @@
       "docs": "Canonical example JSON for [`HttpDispatchParams`] — streamed by\n`asterism-server schema print exporter:http:params`."
     },
     {
+      "path": "asterism_exporter_http::record",
+      "kind": "module",
+      "docs": "What the platform said, and — when it said nothing — why.\n\nA record with no seed in it does not say why on its own, and there\nare three different reasons behind that one absence. A field carries\none of four states, and the first of them is the field being there:\n\n- **captured** — the profile said where to look and the value was\n  there. Not one of the three; it is what they are the absence of.\n- **not captured** — the profile said where to look and nothing was\n  there. This is the only one that is a gap on our side, and the only\n  one worth acting on.\n- **not returned** / **not supported** — the platform ran with a seed\n  and does not tell you which, or the parameter does not exist on\n  this model at all. Both are properties of the platform, fixed\n  before any call is made, and the profile author is the person who\n  read the documentation that says so.\n\nA `null` reports all three absences identically, which is why the\nstatus sits beside the value rather than as a marker written into\nthe value's own slot. [#17] argues the same from `getxattr(2)` (which\nseparates \"the filesystem does not support this\" from \"the attribute\nis not there\" from a value) against `statx(2)` (which collapses them\nand fills in a plausible-looking dummy).\n\n[#17]: https://github.com/ynishi/asterism/issues/17\n\n# Why the profile is the place to say it\n\nCaptured and not-captured are decided per artefact, out of what the\nresponse held. The other two are not: which of them applies is fixed\nper platform, before any call. This adapter already treats a\nplatform as a profile rather than as an adapter of its own — the\ncrate doc argues that and lists what a profile may declare — so a\ndeclared absence is one more thing the profile author knows from\nreading the platform's documentation, stated once, in the same\nplace as the rest.\n\nPer profile and not per action, because the declaration travels in\nthe params blob and that blob is written per dispatch. A family\nwhere one model reports a seed and another does not is two profiles\n— which is what the endpoint, the paths and the deadline beside it\nalready are.\n\n# Declaring one is not the same as failing to capture it\n\nA profile may not both name a path for a field and declare it absent.\nThat is a profile contradicting itself — it says the platform does\nnot return a value and then says where the value is — and it is\nrefused when the params are parsed, on every phase, so the dispatch\nfails before the backend is touched.\n\n[`RecordSchema::evaluate`] does write absences after paths and would\noverwrite one with the other, which is a rule of sorts. It is not\nthe one this design rests on: nothing in the shipped path reaches\nthat function with a field in both, because the refusal comes first.\nRanking them instead of refusing would let the contradiction survive\ninto the record it was meant to describe.\n\n# Where a path points\n\nPaths are evaluated against a document assembled per artefact:\n\n```text\n{ \"response\": <the harvest response>,\n  \"item\":     <this artefact's element of it>,\n  \"params\":   <the dispatch params> }\n```\n\nOne document because the fields a record wants do not all come from\none place. A platform may return the seed once for the whole response\nand the URL per image; another generating a batch with one seed each\nreturns it per item. `$.response.seed` and `$.item.seed` are both\nsayable, in the grammar the profile already uses for `items_path`,\nand neither needs a root that only exists here."
+    },
+    {
+      "path": "asterism_exporter_http::record::Absence",
+      "kind": "enum",
+      "docs": "Why a value is not in the record, as declared by the profile.\n\nBoth are statements about the platform rather than about this call,\nwhich is why they are declared once in the profile instead of being\ndiscovered per response."
+    },
+    {
+      "path": "asterism_exporter_http::record::FieldRecord",
+      "kind": "enum",
+      "docs": "One field of the record."
+    },
+    {
+      "path": "asterism_exporter_http::record::Record",
+      "kind": "type_alias",
+      "docs": "One artefact's record, field by field."
+    },
+    {
+      "path": "asterism_exporter_http::record::RecordSchema",
+      "kind": "struct",
+      "docs": "What the profile says the record should contain."
+    },
+    {
       "path": "asterism_exporter_http::secret",
       "kind": "module",
       "docs": "The profile grammar this adapter uses: the shared one, plus\n`{{secret}}` when the profile names a credential.\n\nThe root is bound per call, from the environment variable an `auth`\nblock names, and the value is never written into the params blob —\nwhich matters because that blob is persisted unedited and handed back\non every read of the dispatch. A profile that instead interpolates a\ntoken it stored in its own params (`{{params.extras.api_key}}`, the\npattern this adapter shipped with before it had an `auth` block) is\nstill allowed and still works; what it loses is exactly this: nothing\ncan scrub a value the adapter was never told was a credential.\n\nA profile with no `auth` block binds no secret. `{{secret}}` is then\nan error rather than an empty string: rendering it away would send an\nunauthenticated request that looks like an authenticated one, and the\nbackend's 401 is a worse place to learn it than the dispatch that\nrefuses to start.\n\nOnly [`TemplateAdapter::render`] is overridden. The JSON-leaf and\nheader traversals are the trait's default methods, written in terms\nof `render`, so `{{secret}}` means the same thing in a header, in a\nbody field and in a query string without three implementations\nagreeing to."

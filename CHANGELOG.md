@@ -10,6 +10,23 @@ and this project adheres to
 
 ### Added
 
+- **A profile says which absences are the platform's** (#40). A record with no
+  seed in it does not say why, and there are three reasons behind that one
+  absence: we did not capture it, the platform does not report it, the parameter
+  does not exist on this model. Only the first is a gap on our side, and a
+  `null` reports all three the same way — so every reader had to know the
+  platform to read the field, which is knowledge the profile already has. It
+  writes it down now: `harvest.record.paths` says where a value is read from and
+  `harvest.record.absences` says why there is none to read, and what lands on
+  each artefact is a status beside the value rather than a marker in the value's
+  own slot, the shape #17 argues for from `getxattr(2)` against `statx(2)`. A
+  profile that both names a path for a field and declares it absent is refused
+  when the params are parsed, before the backend is touched, rather than settled
+  by a precedence rule that would let the contradiction survive into the record
+  it was meant to describe. Keeping the response whole, which the adapter
+  already did, answers what the platform said; this answers why something is
+  missing from it, in a form a query can reach.
+
 - **A resized copy stops reading as an unrelated file** (#250). The three exact
   axes are SHA-256 and say so, which leaves a resized or recompressed copy
   sharing no bytes with its original. `content_hash` reserved the tag space for
